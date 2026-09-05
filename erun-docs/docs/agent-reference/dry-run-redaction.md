@@ -24,6 +24,7 @@ Redaction runs against every line emitted to the audit / trace stream. Each patt
 | 6 | `ghp_[A-Za-z0-9]{36,}` | GitHub personal-access tokens. | `<redacted-github-token>` |
 | 7 | `ghs_[A-Za-z0-9]{36,}` | GitHub server tokens. | `<redacted-github-token>` |
 | 8 | File-contents loader on `~/.docker/config.json`, `~/.kube/config` (`users[].user.token` field), `~/.ssh/id_*` private-key files | Any contents the loader emits from these files. | `<redacted>` |
+| 9 | Argv flag name matching `(?i)^-*(password\|passwd\|secret\|token\|apikey\|api-key\|access-key\|private-key)$` (dashes trimmed before matching) | The next argv element after the flag (`--token X` → `X` redacted), or the value half of a `--flag=value` pair. Applies to any traced or self-echoed command argv — `erun exec raw`, `erun cloud init cloudflare`'s `--api-token`/`--token-name`, and `erun cloud context`'s `kubectl config set-credentials <ctx> --token <adminToken>`. | `<redacted>` |
 
 Patterns 1, 2, and 8 fire on the **source** of the value (env-var name, field tag, file path); patterns 3–7 fire on the **content** of the value itself.
 

@@ -1,0 +1,15 @@
+audit: erun deploy --components [team-backend-api] --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[team-backend-api] force=false current=false
+deploy: configured repo path /nonexistent-remote/team is not present on this machine; no k8s.deployments plan could be read
+deploy: component selection source --components flag; components team-backend-api
+deploy: deploying tenant artifacts; verifying charts published at <VERSION> in registry.example/test: team-backend-api
+deploy: no local chart for team-backend-api; using published chart oci://registry.example/test/charts/team-backend-api version <VERSION>
+deploy: resolved 1 spec(s)
+kubectl --context test-context get namespace team-dev -o name
+deploy: namespace team-dev is created if the check above reports it missing
+helm pull oci://registry.example/test/charts/team-backend-api --version <VERSION> --untar --untardir <TMP>
+helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 5m0s --namespace team-dev --debug --kube-context test-context -f <TMP> --set-string erun-backend-api.tenant=team --set-string erun-backend-api.environment=dev --set-string erun-backend-api.worktreeStorage=pvc --set-string erun-backend-api.worktreeRepoName=team --set-string erun-backend-api.worktreeHostPath=/nonexistent-remote/team --set erun-backend-api.sshdEnabled=false --set erun-backend-api.mcpPort=17000 --set erun-backend-api.apiPort=17033 --set erun-backend-api.sshPort=17022 --set erun-backend-api.managedCloud=false --set-string erun-backend-api.cloudContext.name= --set-string erun-backend-api.cloudContext.provider= --set-string erun-backend-api.cloudContext.providerAlias= --set-string erun-backend-api.cloudContext.instanceId= --set erun-backend-api.cloudContext.useHostCredentials=false --set-string erun-backend-api.api.oidcAllowedIssuers=https://oidc.example/shared --set erun-backend-api.api.postgres.reset=false --set-string erun-backend-api.containerRegistry=registry.example/test --set-json 'erun-backend-api.containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set erun-backend-api.disableBuildScript=false --set-string erun-backend-api.idle.timeout=5m0s --set-string erun-backend-api.idle.workingHours=08:00-20:00 --set-string erun-backend-api.idle.timezone= --set erun-backend-api.idle.trafficBytes=0 --set-string erun-backend-api.runtime.resources.limits.cpu=4 --set-string erun-backend-api.runtime.resources.limits.memory=8916Mi --set-string erun-backend-api.runtime.dind.resources.limits.cpu=4 --set-string erun-backend-api.runtime.dind.resources.limits.memory=20Gi --set-string erun-backend-api.claude.useMantle=0 --set-string erun-backend-api.claude.useBedrock=0 team-backend-api oci://registry.example/test/charts/team-backend-api --version <VERSION>
+deploy: watching pods in team-dev on context test-context for early container failure (release team-backend-api)
+kubectl --context test-context --namespace team-dev get pods -o json
+dedup: ready (release=test-context-team-dev-team-backend-api, hash=<HASH>)

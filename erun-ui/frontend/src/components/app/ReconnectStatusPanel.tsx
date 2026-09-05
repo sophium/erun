@@ -1,11 +1,11 @@
+import { Button } from 'erun-kit';
 import { AlertCircle, LoaderCircle, RefreshCw, X } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { reconnectCopy } from '@/app/reconnectCopy';
+import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
 import { confirmReconnect, dismissReconnect } from '@/app/reviewThunks';
 import { setSelected } from '@/app/slices/selectionSlice';
-import { Button } from '@/components/ui/button';
 
 // Fudge factor so a layout that settles a pixel or two short of perfect
 // alignment still counts as "at the bottom" for auto-scroll.
@@ -17,6 +17,7 @@ export function ReconnectStatusPanel(): React.ReactElement | null {
   const status = useAppSelector((state) => state.review.reconnect.status);
   const tenant = useAppSelector((state) => state.review.reconnect.tenant);
   const environment = useAppSelector((state) => state.review.reconnect.environment);
+  const kind = useAppSelector((state) => state.review.reconnect.kind);
   const lines = useAppSelector((state) => state.review.reconnect.lines);
   const error = useAppSelector((state) => state.review.reconnect.error);
 
@@ -25,6 +26,7 @@ export function ReconnectStatusPanel(): React.ReactElement | null {
   }
 
   const failed = status === 'error';
+  const copy = reachabilityCopy[kind];
   const targetLabel = formatEnvLabel(tenant, environment);
 
   return (
@@ -32,14 +34,12 @@ export function ReconnectStatusPanel(): React.ReactElement | null {
       role="status"
       aria-live="polite"
       aria-label={
-        failed
-          ? `${reconnectCopy.errorStatusTitle} ${targetLabel}`
-          : `${reconnectCopy.runningStatus} ${targetLabel}`
+        failed ? `${copy.errorStatusTitle} ${targetLabel}` : `${copy.runningStatus} ${targetLabel}`
       }
       data-reconnect-status={status}
       className="fixed bottom-4 right-4 z-50 flex w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-md border bg-background shadow-lg"
     >
-      <ReconnectStatusHeader failed={failed} targetLabel={targetLabel} />
+      <ReconnectStatusHeader failed={failed} kind={kind} targetLabel={targetLabel} />
       <ReconnectStatusLines lines={lines} />
       {failed && (
         <ReconnectStatusErrorFooter error={error} tenant={tenant} environment={environment} />
@@ -50,12 +50,15 @@ export function ReconnectStatusPanel(): React.ReactElement | null {
 
 function ReconnectStatusHeader({
   failed,
+  kind,
   targetLabel,
 }: {
   failed: boolean;
+  kind: ReachabilityKind;
   targetLabel: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
+  const copy = reachabilityCopy[kind];
   return (
     <header className="flex items-center gap-2 border-b px-3 py-2">
       {failed ? (
@@ -68,7 +71,7 @@ function ReconnectStatusHeader({
       )}
       <div className="min-w-0 flex-1">
         <div className={failed ? 'text-sm font-medium text-destructive' : 'text-sm font-medium'}>
-          {failed ? reconnectCopy.errorStatusTitle : reconnectCopy.runningStatus}
+          {failed ? copy.errorStatusTitle : copy.runningStatus}
         </div>
         {targetLabel && (
           <div className="truncate text-xs text-muted-foreground" title={targetLabel}>

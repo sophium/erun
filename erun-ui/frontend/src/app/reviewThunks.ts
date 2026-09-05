@@ -1,29 +1,37 @@
-import type { DiffResult } from '@/types';
+import type { DiffResult, UISelection } from '@/types';
 
 import { reviewApi } from './api/reviewApi';
 import { sessionApi } from './api/sessionApi';
+import { pruneStaleDiffReviewStatuses } from './diffReviewStatusThunks';
 import { chooseSelectedDiffPath } from './diffUtils';
 import { readError } from './errors';
 import { showNotification } from './notificationThunks';
-import { isMcpUnreachableMessage, stripMcpUnreachableMarker } from './reconnectCopy';
+import {
+  mcpUnreachableKind,
+  type ReachabilityKind,
+  stripMcpUnreachableMarker,
+} from './reconnectCopy';
 import { scrollSelectedDiffIntoView } from './reviewDiffNavigation';
+import { selectReviewEnvTargets } from './selectors';
 import { setChangedFilesOpen } from './slices/layoutSlice';
 import { bumpReviewDiff } from './slices/requestCountersSlice';
-import type { ReviewState } from './slices/reviewSlice';
+import type { ReviewScope } from './slices/reviewSlice';
 import {
-  setDiff,
-  setDiffError,
+  diffPathKey,
+  emptyEnvDiffState,
+  pruneEnvDiffs,
   setDiffFilter as setDiffFilterAction,
-  setDiffLoading,
+  setEnvDiff,
+  setEnvDiffError,
+  setEnvDiffLoading,
+  setEnvReviewCommit,
+  setEnvReviewScope,
   setReconnect,
   setSelectedDiffPath,
-  setSelectedReviewCommit,
-  setSelectedReviewScope,
   toggleDiffDirCollapsed,
 } from './slices/reviewSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
-import { selectionKey } from './versionSuggestions';
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
@@ -53,52 +61,122 @@ export const selectDiffPath =
     }, 0);
   };
 
+// selectReviewRange is per-environment: each linked env has its own commit
+// list, so a scope or commit chosen in one section means nothing in another.
 export const selectReviewRange =
-  (scope: ReviewState['selectedReviewScope'], hash = ''): AppThunk =>
+  (envKey: string, scope: ReviewScope, hash = ''): AppThunk =>
   (dispatch, getState) => {
-    const review = getState().review;
+    const slot = getState().review.diffByEnv[envKey] ?? emptyEnvDiffState;
     const selected = hash.trim();
-    if (
-      (scope === review.selectedReviewScope && selected === review.selectedReviewCommit) ||
-      review.diffLoading
-    ) {
+    if ((scope === slot.scope && selected === slot.commit) || slot.loading) {
       return;
     }
-    dispatch(setSelectedReviewScope(scope));
-    dispatch(setSelectedReviewCommit(selected));
+    dispatch(setEnvReviewScope({ envKey, scope }));
+    dispatch(setEnvReviewCommit({ envKey, commit: selected }));
     void dispatch(loadReviewDiff());
   };
 
 function applyReviewDiffSuccess(
   dispatch: Parameters<AppThunk>[0],
   getState: () => ReturnType<typeof import('./store').store.getState>,
+  envKey: string,
   diff: DiffResult,
 ): void {
-  dispatch(setDiff(diff));
-  dispatch(setDiffError({ error: '', reconnectable: false }));
-  dispatch(setSelectedReviewScope(diff.scope ?? 'current'));
-  dispatch(setSelectedReviewCommit(diff.selectedCommit ?? ''));
-  dispatch(setSelectedDiffPath(chooseSelectedDiffPath(diff, getState().review.selectedDiffPath)));
+  dispatch(setEnvDiff({ envKey, diff }));
+  dispatch(setEnvDiffError({ envKey, error: '', reconnectable: false }));
+  dispatch(setEnvReviewScope({ envKey, scope: diff.scope ?? 'current' }));
+  dispatch(setEnvReviewCommit({ envKey, commit: diff.selectedCommit ?? '' }));
+  const chosen = chooseSelectedDiffPath(diff, getState().review.selectedDiffPath);
+  if (chosen) {
+    dispatch(setSelectedDiffPath(diffPathKey(envKey, chosen)));
+  }
 }
 
+// applyReviewDiffFailure writes only THIS environment's slot. The single-slot
+// version cleared the one shared diff, so one stopped environment blanked every
+// other linked env's diff -- and an orchestrator's environments are rarely all
+// running at once, so that was the everyday case (#1178).
 function applyReviewDiffFailure(
   dispatch: Parameters<AppThunk>[0],
   getState: () => ReturnType<typeof import('./store').store.getState>,
+  envKey: string,
   error: unknown,
   silent: boolean,
 ): void {
-  const currentDiff = getState().review.diff;
+  const currentDiff = getState().review.diffByEnv[envKey]?.diff ?? null;
   if (silent && currentDiff) {
     return;
   }
   if (!silent || !currentDiff) {
-    dispatch(setDiff(null));
+    dispatch(setEnvDiff({ envKey, diff: null }));
   }
   const message = readError(error);
-  if (isMcpUnreachableMessage(message)) {
-    dispatch(setDiffError({ error: stripMcpUnreachableMarker(message), reconnectable: true }));
+  const kind = mcpUnreachableKind(message);
+  if (kind) {
+    dispatch(
+      setEnvDiffError({
+        envKey,
+        error: stripMcpUnreachableMarker(message),
+        reconnectable: true,
+        kind,
+      }),
+    );
   } else {
-    dispatch(setDiffError({ error: message, reconnectable: false }));
+    dispatch(setEnvDiffError({ envKey, error: message, reconnectable: false }));
+  }
+}
+
+// reviewEnvTargets is selectReviewEnvTargets shaped for the fetch: the same
+// resolution, plus the UISelection each LoadDiff call needs.
+function reviewEnvTargets(
+  state: ReturnType<typeof import('./store').store.getState>,
+): { envKey: string; selection: UISelection }[] {
+  return selectReviewEnvTargets(state).map((target) => ({
+    envKey: target.envKey,
+    selection: { tenant: target.tenant, environment: target.environment },
+  }));
+}
+
+// loadOneReviewDiff fetches and applies one environment's diff. Every failure is
+// contained here, so allSettled below cannot let one environment's error stop
+// another's fetch from being applied.
+async function loadOneReviewDiff(
+  dispatch: Parameters<AppThunk>[0],
+  getState: () => ReturnType<typeof import('./store').store.getState>,
+  target: { envKey: string; selection: UISelection },
+  options: { silent?: boolean },
+): Promise<void> {
+  const { envKey, selection } = target;
+  const slot = getState().review.diffByEnv[envKey] ?? emptyEnvDiffState;
+  const contributeTarget = getState().contribute.diffSourceByEnv[envKey] ?? 'env';
+  if (!options.silent) {
+    dispatch(setEnvDiffLoading({ envKey, loading: true }));
+    dispatch(setEnvDiffError({ envKey, error: '', reconnectable: slot.errorReconnectable }));
+  }
+  const diffArgs = {
+    selection,
+    options: { scope: slot.scope, selectedCommit: slot.commit, target: contributeTarget },
+  };
+  try {
+    // The periodic silent refresh (scheduleReviewDiffRefresh) and a manual
+    // "Refresh diff" click both land here for the same env with identical
+    // args, and the timer's own re-arm only guards against stacking a second
+    // tick on itself -- not against a manual click arriving mid-tick. RTK
+    // Query's condition() bails a forced refetch out from under a pending
+    // request for the same query before ever looking at forceRefetch (see
+    // erun#1953's getInitialState fix), so without this wait the click would
+    // silently inherit the in-flight tick's result instead of its own.
+    await dispatch(reviewApi.util.getRunningQueryThunk('getDiff', diffArgs));
+    const diff = await dispatch(
+      reviewApi.endpoints.getDiff.initiate(diffArgs, { forceRefetch: true }),
+    ).unwrap();
+    applyReviewDiffSuccess(dispatch, getState, envKey, diff);
+  } catch (error: unknown) {
+    applyReviewDiffFailure(dispatch, getState, envKey, error, Boolean(options.silent));
+  } finally {
+    if (!options.silent) {
+      dispatch(setEnvDiffLoading({ envKey, loading: false }));
+    }
   }
 }
 
@@ -106,56 +184,40 @@ export const loadReviewDiff =
   (options: { silent?: boolean } = {}): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    const state = getState();
-    const selection = state.selection.selected;
-    if (!selection) {
+    const targets = reviewEnvTargets(getState());
+    if (targets.length === 0) {
       return;
     }
+    // Drop sections for environments no longer in scope, so switching from a
+    // two-env orchestrator to a single env tab does not leave stale ones.
+    dispatch(pruneEnvDiffs(targets.map((target) => target.envKey)));
+    dispatch(pruneStaleDiffReviewStatuses());
     dispatch(bumpReviewDiff());
     const request = getState().requestCounters.reviewDiff;
-    const selectedKey = selectionKey(selection);
-    const scope = state.review.selectedReviewScope;
-    const selectedCommit = state.review.selectedReviewCommit;
-    const contributeKey = `${selection.tenant}/${selection.environment}`;
-    const target = state.contribute.diffSourceByEnv[contributeKey] ?? 'env';
-    if (!options.silent) {
-      dispatch(setDiffLoading(true));
-      dispatch(
-        setDiffError({ error: '', reconnectable: getState().review.diffErrorReconnectable }),
-      );
+    const scopeKey = targets.map((target) => target.envKey).join(',');
+
+    // One fetch per environment, each over that env's own MCP. allSettled, not
+    // all: a stopped environment must not cancel the others, and every failure
+    // is already contained inside loadOneReviewDiff.
+    await Promise.allSettled(
+      targets.map((target) => loadOneReviewDiff(dispatch, getState, target, options)),
+    );
+
+    if (!isCurrentReviewDiffRequest(getState, request, scopeKey)) {
+      return;
     }
-    try {
-      const diff = await dispatch(
-        reviewApi.endpoints.getDiff.initiate(
-          { selection, options: { scope, selectedCommit, target } },
-          { forceRefetch: true },
-        ),
-      ).unwrap();
-      if (!isCurrentReviewDiffRequest(getState, request, selectedKey)) {
-        return;
-      }
-      applyReviewDiffSuccess(dispatch, getState, diff);
-    } catch (error: unknown) {
-      if (!isCurrentReviewDiffRequest(getState, request, selectedKey)) {
-        return;
-      }
-      applyReviewDiffFailure(dispatch, getState, error, Boolean(options.silent));
-    } finally {
-      if (request === getState().requestCounters.reviewDiff) {
-        if (!options.silent) {
-          dispatch(setDiffLoading(false));
-        }
-        scheduleReviewDiffRefresh(dispatch, getState, controller);
-      }
-    }
+    scheduleReviewDiffRefresh(dispatch, getState, controller);
   };
 
 export const refreshReviewDiff = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
-  if (!getState().selection.selected) {
+  if (reviewEnvTargets(getState()).length === 0) {
     return;
   }
   await dispatch(loadReviewDiff());
-  if (!getState().review.diffError) {
+  const anyError = Object.values(getState().review.diffByEnv).some(
+    (slot) => (slot?.error ?? '') !== '',
+  );
+  if (!anyError) {
     dispatch(showNotification('success', 'Diff refreshed.'));
   }
 };
@@ -163,13 +225,13 @@ export const refreshReviewDiff = (): AppThunk<Promise<void>> => async (dispatch,
 function isCurrentReviewDiffRequest(
   getState: () => ReturnType<typeof import('./store').store.getState>,
   request: number,
-  selectedKey: string,
+  scopeKey: string,
 ): boolean {
   const state = getState();
-  return (
-    request === state.requestCounters.reviewDiff &&
-    selectedKey === selectionKey(state.selection.selected ?? { tenant: '', environment: '' })
-  );
+  const currentScopeKey = reviewEnvTargets(state)
+    .map((target) => target.envKey)
+    .join(',');
+  return request === state.requestCounters.reviewDiff && scopeKey === currentScopeKey;
 }
 
 function scheduleReviewDiffRefresh(
@@ -180,16 +242,24 @@ function scheduleReviewDiffRefresh(
 ): void {
   controller.cancelReviewDiffRefresh();
   const state = getState();
-  if (!state.layout.reviewOpen || !state.selection.selected) {
+  // An orchestrator session has linked environments but no sidebar selection
+  // of its own, so this arms off the resolved env set rather than
+  // state.selection.selected -- which would have stopped the refresh outright
+  // for exactly the cross-env case (#1178). Keep this guard identical to the
+  // timer callback's own below; a mismatch here left periodic review-diff
+  // refresh permanently dead for every orchestrator session.
+  if (!state.layout.reviewOpen || reviewEnvTargets(state).length === 0) {
     return;
   }
   controller.scheduleReviewDiffRefreshTimer(() => {
     const next = getState();
-    if (!next.layout.reviewOpen || !next.selection.selected) {
+    if (!next.layout.reviewOpen || reviewEnvTargets(next).length === 0) {
       controller.stopReviewDiffRefresh();
       return;
     }
-    if (next.review.diffLoading) {
+    // Skip a tick while any section is still fetching, so a slow environment
+    // does not get a second in-flight request stacked on the first.
+    if (Object.values(next.review.diffByEnv).some((slot) => slot?.loading)) {
       scheduleReviewDiffRefresh(dispatch, getState, controller);
       return;
     }
@@ -201,25 +271,31 @@ const idleReconnect = () => ({
   status: 'idle' as const,
   tenant: '',
   environment: '',
+  kind: 'stale-forward' as const,
   lines: [] as string[],
   error: '',
 });
 
-export const requestReconnect = (): AppThunk => (dispatch, getState) => {
-  const selection = getState().selection.selected;
-  if (!selection) {
-    return;
-  }
-  dispatch(
-    setReconnect({
-      status: 'confirm',
-      tenant: selection.tenant,
-      environment: selection.environment,
-      lines: [],
-      error: '',
-    }),
-  );
-};
+// requestReconnect takes its target explicitly from the caller (the specific
+// linked environment whose card was clicked) rather than the sidebar's
+// globally-selected environment. An orchestrator session shows one card per
+// linked environment, and the selected env is rarely the one that failed, so
+// deriving the target from selection.selected reconnected the wrong
+// environment.
+export const requestReconnect =
+  (tenant: string, environment: string, kind: ReachabilityKind): AppThunk =>
+  (dispatch) => {
+    dispatch(
+      setReconnect({
+        status: 'confirm',
+        tenant,
+        environment,
+        kind,
+        lines: [],
+        error: '',
+      }),
+    );
+  };
 
 export const cancelReconnect = (): AppThunk => (dispatch, getState) => {
   if (getState().review.reconnect.status === 'running') {
@@ -229,22 +305,22 @@ export const cancelReconnect = (): AppThunk => (dispatch, getState) => {
 };
 
 export const confirmReconnect = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
-  const state = getState();
-  const selection = state.selection.selected;
-  if (!selection || state.review.reconnect.status === 'running') {
+  const { tenant, environment, kind, status } = getState().review.reconnect;
+  if (!tenant || !environment || status === 'running') {
     return;
   }
   dispatch(
     setReconnect({
       status: 'running',
-      tenant: selection.tenant,
-      environment: selection.environment,
+      tenant,
+      environment,
+      kind,
       lines: [],
       error: '',
     }),
   );
   try {
-    await dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
+    await dispatch(sessionApi.endpoints.reconnectMCP.initiate({ tenant, environment })).unwrap();
     dispatch(setReconnect(idleReconnect()));
     await dispatch(loadReviewDiff());
   } catch (error: unknown) {
@@ -256,6 +332,7 @@ export const confirmReconnect = (): AppThunk<Promise<void>> => async (dispatch, 
         status: 'error',
         tenant: reconnect.tenant,
         environment: reconnect.environment,
+        kind: reconnect.kind,
         lines: reconnect.lines,
         error: readError(error),
       }),

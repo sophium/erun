@@ -2,10 +2,10 @@ import type { UISelection } from '@/types';
 
 import { CloseEnvironmentSessions } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import { setAIBusyForEnv } from './slices/aiActivitySlice';
 import { setSelected } from './slices/selectionSlice';
-import { clearEnvOpening } from './slices/sessionsSlice';
+import { clearEnvClosing, clearEnvOpening, markEnvClosing } from './slices/sessionsSlice';
 import { clearSelectedSessionForEnv, clearTabsForEnv, setSessionId } from './slices/terminalSlice';
 import type { AppThunk } from './store';
 import { selectionKey } from './versionSuggestions';
@@ -24,14 +24,23 @@ export const closeEnvironment =
     if (!tenant || !environment) {
       return;
     }
+    const key = selectionKey({ tenant, environment });
+    // Marked before the RPC even starts, so it is in place before any of this
+    // close's own terminal-exit events can possibly arrive. Those events land
+    // asynchronously over the SSE stream and race clearTabsForEnv below — an
+    // ERun-tab exit processed first (while the AI tab is still nominally
+    // present) would otherwise read the tear-down as an unexpected death and
+    // respawn a sibling default tab moments after the user closed it.
+    dispatch(markEnvClosing(key));
     try {
       await CloseEnvironmentSessions({ tenant, environment });
     } catch (error: unknown) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(clearEnvClosing(key));
+      dispatch(showTerminalError(readError(error)));
       return;
     }
-    const key = selectionKey({ tenant, environment });
     dispatch(clearTabsForEnv(key));
+    dispatch(clearEnvClosing(key));
     // Close is a definitive teardown of the desktop view; clear the AI-busy
     // latch so the sidebar row stops spinning even if the backend's busy=false
     // event is delayed or missed. The pod AI session keeps repainting after

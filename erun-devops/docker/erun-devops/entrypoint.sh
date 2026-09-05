@@ -90,6 +90,61 @@ ensure_outputs_dir() {
     mkdir -p "$(runtime_outputs_dir)" 2>/dev/null || true
 }
 
+# sync_registry_credential merges the docker config `erun init` mints into a
+# Secret into ~/.docker/config.json, seeding only host entries the pod
+# doesn't already carry -- the same "seed what's missing, never overwrite"
+# rule initialize_erun_config's config injection follows, because the pod's
+# own docker login (or gh-driven push-recovery) is more current than what
+# erun resolved on the operator's host at init time. A no-op when the chart
+# mounted nothing (older chart, or init found no host credential to give).
+# ERUN_REGISTRY_CREDENTIAL_SRC_OVERRIDE is a test seam only -- the mount path
+# is a fixed contract with the chart's registry-credential volume, never an
+# operator-facing knob.
+sync_registry_credential() {
+    src="${ERUN_REGISTRY_CREDENTIAL_SRC_OVERRIDE:-/etc/erun/registry-credential/.dockerconfigjson}"
+    [ -r "${src}" ] || return 0
+    command -v node >/dev/null 2>&1 || return 0
+
+    dest="${HOME}/.docker/config.json"
+    mkdir -p "$(dirname "${dest}")"
+    touch "${dest}"
+
+    ERUN_REGISTRY_CREDENTIAL_SRC="${src}" ERUN_REGISTRY_CREDENTIAL_DEST="${dest}" node <<'NODE' 2>/dev/null || true
+const fs = require('fs');
+
+const srcPath = process.env.ERUN_REGISTRY_CREDENTIAL_SRC;
+const destPath = process.env.ERUN_REGISTRY_CREDENTIAL_DEST;
+
+function readJSON(path) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (_) {
+  }
+  return {};
+}
+
+const provisioned = readJSON(srcPath);
+const existing = readJSON(destPath);
+existing.auths = existing.auths || {};
+
+let changed = false;
+for (const [host, entry] of Object.entries(provisioned.auths || {})) {
+  if (existing.auths[host]) {
+    continue;
+  }
+  existing.auths[host] = entry;
+  changed = true;
+}
+
+if (changed) {
+  fs.writeFileSync(destPath, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 });
+}
+NODE
+}
+
 # ensure_git_safe_directory lets git operate on the worktree even when it is a
 # host mount owned by a foreign uid. A local-agent env on Windows shares the repo
 # into the WSL2 node, where the files surface as root:root; git's dubious-owner
@@ -371,7 +426,7 @@ initialize_erun_config() {
         env_managed_cloud_line="managedcloud: true"
     fi
 
-    # In-pod config injection (#548): the build/deploy-relevant fields the pod
+    # In-pod config injection: the build/deploy-relevant fields the pod
     # acts on, written only when the chart injected them so an older chart
     # produces a valid (thinner) config.
     env_runtime_registry_line=""
@@ -606,6 +661,10 @@ claude_md_tmp="${claude_md}.tmp.$$"
 # Install baked skills, refreshing an unmodified one when the image's copy
 # changed; in-pod edits are preserved (see /usr/local/bin/erun-install-skills).
 erun-install-skills /etc/erun/skills "${claude_dir}/skills"
+# Same install/refresh/preserve policy for reusable agents (single files
+# instead of directories; see /usr/local/bin/erun-install-agents). Codex has
+# no reusable-agent equivalent yet, so this only runs for Claude.
+erun-install-agents /etc/erun/agents "${claude_dir}/agents"
 
 CLAUDE_SETTINGS_PATH="${claude_settings}" \
 CLAUDE_STATE_PATH="${claude_state}" \
@@ -693,7 +752,7 @@ if (configureBedrock) {
   setBoolEnv(settings, 'CLAUDE_CODE_USE_MANTLE');
   setEnv(settings, 'AWS_REGION', region);
   setEnv(settings, 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', envValue('ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', region));
-  setEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '4096'));
+  setEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '32000'));
   setEnv(settings, 'MAX_THINKING_TOKENS', envValue('MAX_THINKING_TOKENS', '1024'));
 
   for (const name of [
@@ -816,11 +875,12 @@ EOF
 normalize_ssh_key_permissions() {
     ssh_dir="${HOME}/.ssh"
     [ -d "${ssh_dir}" ] || return 0
-    # Kubernetes' fsGroup recursively ORs g+rw into every PVC file on each
-    # pod start, so a private key that init left at 0600 comes back as 0660
-    # (and any file that ever picked up the user-x bit becomes 0760). ssh
-    # refuses to use a private key file whose perms are looser than 0600,
-    # so re-apply the canonical modes before anything tries to read them.
+    # The runtime pod no longer carries a fsGroup, but every environment that
+    # ran with one still holds the g+rw the kubelet ORed into each PVC file on
+    # pod start: a private key that init left at 0600 is on disk as 0660 (and
+    # any file that ever picked up the user-x bit as 0760). ssh refuses to use
+    # a private key whose perms are looser than 0600, so re-apply the canonical
+    # modes before anything tries to read them.
     # *.pub files stay world-readable; everything else in ~/.ssh is treated
     # as private — private keys, config, known_hosts, authorized_keys.
     chmod 700 "${ssh_dir}" 2>/dev/null || true
@@ -1003,6 +1063,9 @@ exec_runtime_mcp() {
         --host "${ERUN_MCP_HOST:-0.0.0.0}" \
         --port "${ERUN_MCP_PORT:-17000}" \
         --path "${ERUN_MCP_PATH:-/mcp}" \
+        --metrics-host "${ERUN_METRICS_HOST:-0.0.0.0}" \
+        --metrics-port "${ERUN_METRICS_PORT:-9100}" \
+        --metrics-enabled="${ERUN_METRICS_ENABLED:-true}" \
         --tenant "${ERUN_TENANT:-}" \
         --environment "${ERUN_ENVIRONMENT:-}" \
         --repo-path "$(runtime_repo_dir)" \
@@ -1013,7 +1076,7 @@ exec_runtime_mcp() {
         set -- "$@" --namespace "${namespace}"
     fi
 
-    echo "starting erun MCP on ${ERUN_MCP_HOST:-0.0.0.0}:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
+    echo "starting erun MCP on ${ERUN_MCP_HOST:-0.0.0.0}:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}, metrics on ${ERUN_METRICS_HOST:-0.0.0.0}:${ERUN_METRICS_PORT:-9100} (enabled=${ERUN_METRICS_ENABLED:-true})"
     exec "$@"
 }
 
@@ -1055,6 +1118,7 @@ run_shell() {
 write_kubeconfig
 normalize_ssh_key_permissions
 ensure_outputs_dir
+sync_registry_credential
 ensure_git_safe_directory
 start_sshd
 start_environment_monitor

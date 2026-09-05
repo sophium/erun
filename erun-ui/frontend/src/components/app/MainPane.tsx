@@ -1,10 +1,10 @@
+import { cn } from 'erun-kit';
 import * as React from 'react';
 
 import { useAppSelector } from '@/app/hooks';
 import { DebugPanel } from '@/components/app/DebugPanel';
 import { TenantDashboardView } from '@/components/app/TenantDashboardView';
 import { TerminalPane } from '@/components/app/TerminalPane';
-import { cn } from '@/lib/utils';
 
 export function MainPane({
   terminalPaneRef,
@@ -28,7 +28,12 @@ export function MainPane({
     <main
       ref={terminalPaneRef}
       className={cn(
-        'grid h-full min-h-0 min-w-0 overflow-hidden bg-terminal',
+        // grid-cols-[minmax(0,1fr)] pins the single implicit column to the
+        // element's own width. Without it, a grid's column defaults to
+        // "auto" sizing, which grows to fit a wide descendant (e.g. the
+        // tenant dashboard's data tables) instead of letting that descendant
+        // scroll within the width the shell actually gave <main>.
+        'grid h-full min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] overflow-hidden bg-terminal',
         dashboardOpen
           ? 'grid-rows-[minmax(0,1fr)] bg-background'
           : debugOpen
@@ -36,7 +41,16 @@ export function MainPane({
             : 'grid-rows-[minmax(0,1fr)_34px]',
       )}
     >
-      {dashboardOpen && <TenantDashboardView />}
+      {dashboardOpen && (
+        // TenantDashboardView's own root does not shrink below its content's
+        // natural width (a wide data table can widen it past what a narrow
+        // <main> has to give). Contain that here with a scrollbar rather than
+        // <main>'s own overflow-hidden silently clipping it: a control the
+        // shell can't yet lay out within the viewport must still be reachable.
+        <div className="min-h-0 min-w-0 overflow-x-auto">
+          <TenantDashboardView />
+        </div>
+      )}
       <TerminalPane
         hidden={dashboardOpen}
         terminalRootRef={terminalRootRef}

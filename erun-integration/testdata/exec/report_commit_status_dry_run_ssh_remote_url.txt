@@ -1,0 +1,10 @@
+audit: erun exec report-commit-status --description gate build running --dry-run --remote-url ssh://git@github.com/sophium/erun.git --state pending deadbeefcafe
+report-commit-status: resolving commit
+report-commit-status: commit = <SHORTSHA>
+report-commit-status: resolving state
+report-commit-status: state = pending
+report-commit-status: resolving description
+report-commit-status: resolving owner/repo from remote-url
+report-commit-status: owner = sophium, repo = erun
+report-commit-status: context not given, defaulting to erun/merge-gate
+github: POST https://api.github.com/repos/sophium/erun/statuses/deadbeefcafe (state=pending, context=erun/merge-gate, description="gate build running")

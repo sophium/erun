@@ -1,0 +1,2 @@
+audit: erun resize --apply-recommendation --cpu 6 --dry-run --environment dev --tenant team
+resize: pass either apply-recommendation or explicit cpu/memory values, not both

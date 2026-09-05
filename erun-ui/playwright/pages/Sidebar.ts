@@ -15,12 +15,20 @@ export class Sidebar {
     await this.page.getByRole('button', { name: 'Upgrade all environments' }).click();
   }
 
+  runDoctorButton(): Locator {
+    return this.page.getByRole('button', { name: 'Run doctor' });
+  }
+
+  documentationButton(): Locator {
+    return this.page.getByRole('button', { name: 'Open documentation' });
+  }
+
   upgradeAllDialog(): Locator {
     return this.page.getByRole('dialog', { name: 'Upgrade all environments' });
   }
 
   async openInitDialog(): Promise<void> {
-    const button = this.page.getByRole('button', { name: 'Initialize new remote environment' });
+    const button = this.page.getByRole('button', { name: 'Initialize new environment' });
     if (await button.isVisible().catch(() => false)) {
       await button.click();
       return;
@@ -96,8 +104,26 @@ export class Sidebar {
     return this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first();
   }
 
+  // hoverEnvironmentRow raises the row's hover card and hands back only once
+  // the card is actually up.
+  //
+  // A bare hover() proves nothing. The card's open state lives in the hovered
+  // row's own React state, so anything that re-renders that row drops it --
+  // most reliably the boot-time auto-open of the default environment landing
+  // while a spec is already hovering, since reboot() deliberately returns
+  // before that has happened. Nothing reopens it either: the pointer never
+  // left the row, so no fresh mouseenter fires. That is why a card lost this
+  // way does not fail the spec quickly but stalls it until its own timeout.
+  //
+  // Moving the pointer away first and re-hovering until the card is visible
+  // converges on the observable condition instead. A row that genuinely raises
+  // no card still never converges, so the step still fails.
   async hoverEnvironmentRow(tenant: string, env: string): Promise<void> {
-    await this.envRowButton(tenant, env).hover();
+    await expect(async () => {
+      await this.page.mouse.move(0, 0);
+      await this.envRowButton(tenant, env).hover();
+      await this.envHoverCard(tenant, env).waitFor({ state: 'visible', timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
   }
 
   envHoverCard(tenant: string, env: string): Locator {
@@ -108,6 +134,14 @@ export class Sidebar {
   // when several are open; activating the dot closes that env's tabs.
   envOpenDot(tenant: string, env: string): Locator {
     return this.envRowButton(tenant, env).locator('..').getByTestId('env-open-dot');
+  }
+
+  // The row's SECOND indicator: the cloud node behind the environment, not the
+  // environment itself. Scoped the same way envOpenDot is, and deliberately a
+  // separate locator — the two report different objects and must be assertable
+  // apart.
+  envNodeIndicator(tenant: string, env: string): Locator {
+    return this.envRowButton(tenant, env).locator('..').getByTestId('env-node-indicator');
   }
 
   // closeEnvironment activates the row's indicator until the env's tabs are
@@ -149,6 +183,21 @@ export class Sidebar {
   async rowHasLocalSuffix(tenant: string, env: string): Promise<boolean> {
     const label = (await this.envRowButton(tenant, env).getAttribute('aria-label')) ?? '';
     return label.endsWith('(local)');
+  }
+
+  // A host env is also "local" by worktree location, but renders its own
+  // distinct badge instead of the LOCAL pill — see hasLocalBadge/hasHostBadge,
+  // which must never both be true for the same row.
+  async hasHostBadge(tenant: string, env: string): Promise<boolean> {
+    const badge = this.envRowButton(tenant, env).locator(
+      '[aria-label="Host environment — no pod, this machine only"]',
+    );
+    return (await badge.count()) > 0;
+  }
+
+  async rowHasHostSuffix(tenant: string, env: string): Promise<boolean> {
+    const label = (await this.envRowButton(tenant, env).getAttribute('aria-label')) ?? '';
+    return label.endsWith('(host)');
   }
 
   cloudAliasButton(): Locator {
@@ -206,16 +255,138 @@ export class Sidebar {
     return this.erunSection().getByRole('button', { name: 'New orchestrator' });
   }
 
+  // The persistent alert under the orchestrator list: how the operator learns an
+  // orchestrator action failed, or that a restart hand-off was refused and the
+  // reopened session is idle rather than continuing. A 'warning'-kind restore
+  // notice (Sidebar.OrchestratorNotice.tsx) renders through this same role, but
+  // an 'info' or 'unknown'-kind one does not -- see orchestratorRestoreNotices()
+  // and orchestratorRestoreStatusNotices() for those.
+  orchestratorsAlert(): Locator {
+    return this.erunSection().getByRole('alert');
+  }
+
+  // Every notice a restore had to say about how it resolved this launch's
+  // reopened orchestrators, one list item per notice at its own severity.
+  orchestratorRestoreNotices(): Locator {
+    return this.erunSection().getByRole('list', { name: 'Orchestrator restore notices' });
+  }
+
+  // A non-alert restore notice ('info' or 'unknown' kind): role="status" so it
+  // is announced politely rather than interrupting the way orchestratorsAlert()
+  // does.
+  orchestratorRestoreStatusNotices(): Locator {
+    return this.orchestratorRestoreNotices().getByRole('status');
+  }
+
   // A persisted orchestrator's row is identified by its "…" details button,
   // whose aria-label carries the name — mirrors environmentRow().
   orchestratorDetailsButton(name: string): Locator {
     return this.erunSection().getByRole('button', { name: `Edit orchestrator ${name} settings` });
   }
 
+  // The row's main click target — labelled "Open" once running, "Start"
+  // otherwise — carries aria-current so a spec can assert it is (or is not)
+  // the sidebar's single focused row (#1204), mirroring envRowButton().
+  orchestratorRowButton(name: string): Locator {
+    return this.erunSection().getByRole('button', {
+      name: new RegExp(`^(Open|Start) orchestrator ${name}$`),
+    });
+  }
+
+  async openOrchestratorSession(name: string): Promise<void> {
+    await this.orchestratorRowButton(name).click();
+  }
+
+  // The hover card raised by hovering orchestratorRowButton, mirroring envHoverCard().
+  orchestratorHoverCard(name: string): Locator {
+    return this.page.getByRole('dialog', { name: `${name} details` });
+  }
+
+  // hoverOrchestratorRow is the orchestrator-row mirror of
+  // hoverEnvironmentRow, convergent for the same reason: the card's open state
+  // belongs to the row that raised it, and a re-render drops it with no way
+  // back while the pointer still sits there.
+  async hoverOrchestratorRow(name: string): Promise<void> {
+    await expect(async () => {
+      await this.page.mouse.move(0, 0);
+      await this.orchestratorRowButton(name).hover();
+      await this.orchestratorHoverCard(name).waitFor({ state: 'visible', timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
+  }
+
+  // The tenant name button that opens its dashboard, carrying aria-current
+  // when the dashboard is the sidebar's focused row (#1204).
+  tenantDashboardButton(tenant: string): Locator {
+    return this.page.getByRole('button', { name: `Open ${tenant} dashboard` });
+  }
+
+  async openTenantDashboard(tenant: string): Promise<void> {
+    await this.tenantDashboardButton(tenant).click();
+  }
+
+  // The orchestrator's Outputs button, mirroring the env row's. Like the other
+  // row actions it is pointer-events-none until hover/focus and a hover raises
+  // the IconTooltip popper that would swallow a click, so it is driven by
+  // keyboard.
+  orchestratorOutputsButton(name: string): Locator {
+    return this.erunSection().getByRole('button', { name: `Outputs for orchestrator ${name}` });
+  }
+
+  async openOrchestratorOutputs(name: string): Promise<void> {
+    await this.orchestratorOutputsButton(name).press('Enter');
+  }
+
   // The row's shape-encoded status light, labelled by state, is the same
   // StatusDotGlyph env rows use — so status is never colour-only.
   orchestratorStatusDot(name: string, state: 'running' | 'stopped'): Locator {
     return this.erunSection().getByRole('img', { name: `Orchestrator ${name} is ${state}` });
+  }
+
+  // Distinct from a plain running dot (erun#1319): a live session whose
+  // environment scope was edited while it ran still holds its old toolset
+  // until restarted, so the row says so rather than reading as a clean
+  // "running" that the operator has no reason to doubt.
+  orchestratorRestartRequiredDot(name: string): Locator {
+    return this.erunSection().getByRole('img', {
+      name: `Orchestrator ${name} is running but needs a restart to apply its new environments`,
+    });
+  }
+
+  // The row's busy spinner (BusyRowSpinner), rendered whenever the store's
+  // aiBusyBySession has this orchestrator's session flagged — whether that
+  // came from the ai-activity event or from the list snapshot's own busy
+  // field.
+  orchestratorBusySpinner(name: string): Locator {
+    return this.erunSection().getByRole('status', { name: `${name} is working` });
+  }
+
+  // Hovering the busy spinner raises the same IconTooltip popper every other
+  // spinner in the sidebar uses. The trigger is the spinning icon itself
+  // (`animate-spin`), whose continuously-changing bounding box never
+  // satisfies Playwright's hover "stable" actionability check — so the
+  // animation is frozen first. That is a test-only workaround for the
+  // Chromium/Playwright interaction, not a product concern.
+  async hoverOrchestratorBusySpinner(name: string): Promise<void> {
+    const spinner = this.orchestratorBusySpinner(name);
+    await spinner.waitFor({ state: 'visible' });
+    await this.page.addStyleTag({ content: '.animate-spin { animation: none !important; }' });
+    await spinner.hover();
+  }
+
+  orchestratorBusyTooltip(name: string): Locator {
+    return this.page.getByRole('tooltip', { name: `${name} is working` });
+  }
+
+  // The row's background-shell indicator, rendered whenever the store's
+  // orchestratorShellActivity.bySession has this orchestrator's session
+  // flagged running — from the orchestrator-shell-activity event or from the
+  // list snapshot's own shellRunning field, the same treatment
+  // orchestratorBusySpinner gets. Matched by prefix since the label carries a
+  // live elapsed time.
+  orchestratorShellSpinner(name: string): Locator {
+    return this.erunSection().getByRole('status', {
+      name: new RegExp(`^${name} has a shell running`),
+    });
   }
 
   // Open the orchestrator's management dialog via its "…" button. Like the env
@@ -250,6 +421,26 @@ export class Sidebar {
       names.push(name);
     }
     return names;
+  }
+
+  // The tenant row's platform-enrollment status icon -- matched by its
+  // accessible name, which names the state in words (WCAG 1.4.1, never
+  // colour alone). local-only/pending/declined render a popover trigger;
+  // enrolled is a plain button -- both share this one locator.
+  tenantEnrollmentStatus(tenant: string): Locator {
+    return this.page
+      .getByTestId('tenant-enrollment-status')
+      .and(this.page.locator(`[aria-label*="${tenant}"]`));
+  }
+
+  async openTenantEnrollmentStatusPopover(tenant: string): Promise<void> {
+    await this.tenantEnrollmentStatus(tenant).click();
+  }
+
+  // The popover content is portal'd to document.body, mirroring
+  // cloudAliasPopover() above.
+  tenantEnrollmentStatusPopover(): Locator {
+    return this.page.locator('[data-radix-popper-content-wrapper]').first();
   }
 
   async environmentsFor(tenant: string): Promise<string[]> {

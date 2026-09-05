@@ -1,0 +1,5 @@
+audit: erun pin --dry-run --version <VERSION> team dev
+could not read the published versions, so <VERSION> is pinned unverified: Get "http://<LOOPBACK>:1/token?service=ghcr.io&scope=repository:sophium/erun-devops:pull": dial tcp <LOOPBACK>:1: connect: connection refused
+pin team/dev -> <VERSION> (project root <TMP>
+  change runtime-version team/dev: <VERSION> -> <VERSION>
+  change runtime-chart oci://ghcr.io/sophium/charts/erun-devops:<VERSION>: <VERSION> -> <VERSION>

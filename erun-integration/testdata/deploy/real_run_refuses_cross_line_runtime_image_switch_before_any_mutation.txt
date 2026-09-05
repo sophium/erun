@@ -1,0 +1,11 @@
+audit: erun deploy --version <VERSION> frs build
+trace-log: appending the full trace to <TMP>
+deploy: tenant=frs environment=build version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart frs-devops <VERSION> not found in ghcr.io/sophium (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart)
+deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
+deploy: runtime image override ghcr.io/sophium/erun-devops:<VERSION> (imageOverrides.erun-devops)
+deploy: spec resolution failed: deploy: runtime image ghcr.io/sophium/erun-devops:<VERSION> is on the erun release line, but frs/build's last confirmed deploy ran ghcr.io/sophium/frs-devops:<VERSION> (the frs line) -- pass --runtime-image or --runtime-chart to move release lines on purpose; if runtimeimage config just drifted, `erun doctor` explains how to realign it (erun#1754)
+==> Deploy failed frs/build: deploy: runtime image ghcr.io/sophium/erun-devops:<VERSION> is on the erun release line, but frs/build's last confirmed deploy ran ghcr.io/sophium/frs-devops:<VERSION> (the frs line) -- pass --runtime-image or --runtime-chart to move release lines on purpose; if runtimeimage config just drifted, `erun doctor` explains how to realign it (erun#1754)
+deploy: runtime image ghcr.io/sophium/erun-devops:<VERSION> is on the erun release line, but frs/build's last confirmed deploy ran ghcr.io/sophium/frs-devops:<VERSION> (the frs line) -- pass --runtime-image or --runtime-chart to move release lines on purpose; if runtimeimage config just drifted, `erun doctor` explains how to realign it (erun#1754)

@@ -162,15 +162,22 @@ The `docker/` root the algorithm scans is the convention default (`<tenant>-devo
 
 ## Multi-architecture build contract
 
-Every `erun build` produces both `linux/amd64` and `linux/arm64`. The build-graph order:
+`erun build` targets `linux/amd64` + `linux/arm64` by default. Which platforms a given build actually targets is resolved once per image, in this order:
 
-1. Verify the local Docker daemon advertises both target platforms. The check inspects `docker buildx ls` for builders supporting both. On miss → `BINFMT_MISSING` with a hint to run `docker run --privileged --rm tonistiigi/binfmt --install all`.
-2. For each image, invoke `docker buildx build --platform linux/amd64,linux/arm64 …` — BuildKit drives the per-arch builds in parallel, sharing the build cache.
-3. After build completes, two per-arch tags exist locally: `<image>:<version>-<arch>`.
-4. For release-tagged builds (`erun build --release`), additionally push the per-arch tags and create a manifest list with `docker manifest create <image>:<version> --amend <image>:<version>-amd64 --amend <image>:<version>-arm64` followed by `docker manifest push`.
-5. Snapshot builds skip step 4 (no manifest list; the per-arch tags stay local).
+1. **`--release` in effect** (`erun build --release`, or `erun push`/`erun build` as run by `erun release`): always `linux/amd64` + `linux/arm64`, unconditionally. A released artifact is published for anyone and must be deployable on any cluster, so neither `--platform` nor the config below is consulted — combining `--release` with `--platform` is rejected outright.
+2. **`--platform <platform>` given** (repeatable, CLI/MCP): exactly the named platform(s), for that invocation only.
+3. **`environments.<env>.docker.platforms` configured** in the project's `.erun/config.yaml` (see [Configuration spec](/reference/configuration)): exactly the configured platform(s), for every non-release build/push in that environment — the durable pin for a cluster that can only ever run one architecture. `erun build --dry-run` traces the decision: `build: platforms configured as <platforms> (.erun/config.yaml environments.<env>.docker.platforms)`.
+4. **Neither set**: `linux/amd64` + `linux/arm64`.
 
-A partial-arch failure aborts the whole build for that image — there is no single-arch fallback. The contract is that an image either has both architectures or has not been built.
+The build-graph order, for the resolved platform list:
+
+1. Verify the local Docker daemon advertises every resolved platform. The check inspects `docker buildx inspect` for a builder supporting each. On miss → an error naming the missing platform(s) with a hint to run `docker run --privileged --rm tonistiigi/binfmt --install all`.
+2. For each image and each resolved platform, invoke `docker build --platform <platform> …` (one invocation per platform, so BuildKit drives each per-arch build in turn, sharing the build cache).
+3. After build completes, one per-arch tag exists locally per resolved platform: `<image>:<version>-<arch>`.
+4. On push (`erun push`, or the push step `erun release` runs), additionally push each per-arch tag and create a manifest list with `docker manifest create <image>:<version> --amend <image>:<version>-amd64 --amend <image>:<version>-arm64 …` (one `--amend` per resolved platform) followed by `docker manifest push`. A single-platform push still assembles a manifest list — just with one entry.
+5. A build that does not push (no `erun push`/`--release` in this run) skips step 4: no manifest list, the per-arch tag(s) stay local.
+
+A partial-arch failure aborts the whole build for that image — there is no partial-arch fallback within the resolved platform list. The contract is that an image either has every resolved architecture or has not been built.
 
 ## VERSION file walking order
 
@@ -317,8 +324,10 @@ Per container, the consumption charged to its node resolves by precedence:
 | Neither | `0` | **no** — the container is counted in `unmeasuredContainers` |
 
 Charging `0` for a limitless container without saying so is the failure mode this precedence
-exists to prevent: every `erun-dind` sidecar declares no limits, so a limits-only sum reports
-capacity the node does not have.
+exists to prevent: a tenant application container with no declared limit is common, and a
+limits-only sum would report capacity the node does not have. The runtime pod's own two
+containers (`erun-devops`, `erun-dind`) always declare limits — both size independently via
+[`erun resize`](/cli/resize) — so neither ever falls into this arm for a stock deploy.
 
 Free capacity per node and resource:
 
@@ -385,3 +394,57 @@ touches the worktree, a running session, or the Agent's own process.
 
 Both tolerate absence: a pod with no Gradle and no images is a successful no-op, not an error. An
 unknown action name is rejected without running anything.
+
+## Worktree volume adoption {#worktree-adoption}
+
+A `remote-agent` environment's worktree is `worktreeStorage=pvc`: the runtime chart declares a
+`<release>-worktree` claim and mounts it at `/home/erun/git/<repo>` in both the runtime container and
+the dind sidecar. An environment created before that claim existed kept its checkout on the
+`<release>-home` volume, at the same path — so the deploy that introduces the claim mounts an empty
+volume directly over a populated checkout.
+
+The chart prevents that with an `adopt-worktree` init container, rendered only when
+`worktreeStorage=pvc`. It runs the runtime image (no extra image dependency) and stages **both**
+volumes outside `/home/erun`, where the claim cannot shadow the home tree:
+
+| Volume | Staged at |
+|---|---|
+| `<release>-home` | `/mnt/erun-home` — the legacy checkout is at `/mnt/erun-home/git/<repo>` |
+| `<release>-worktree` | `/mnt/erun-worktree` |
+
+The container runs `erun-adopt-worktree <legacy> <claim>` and decides in this order:
+
+1. The claim is not staged as a directory → nothing to adopt; exit 0.
+2. The claim holds anything other than `lost+found` or an abandoned `.erun-worktree-adopt-partial`
+   staging directory → it is already the environment's worktree; leave it untouched; exit 0.
+3. The legacy path is absent, is not a directory, or is a symlink (a sourceless runtime env's baked
+   `/opt/erun/release` link) → the worktree volume starts empty; exit 0.
+4. The legacy path holds no `.git` → it is not a repository; leave it on the home volume and start the
+   worktree volume empty; exit 0.
+5. Otherwise adopt: copy the tree into `<claim>/.erun-worktree-adopt-partial`, verify the copy landed a
+   `.git`, promote its entries into the claim, then move the original aside to
+   `/home/erun/git/<repo>.pre-worktree-volume` and recreate the empty mount point.
+
+The original is **set aside, never deleted**, and it is only touched after the copy is proven — an
+interrupted run leaves the legacy tree intact and the partial copy in the staging directory, which
+step 2 ignores, so the next boot retries. A copy that fails exits non-zero and the pod does not start,
+because starting is what masks the tree.
+
+A runtime image with no `/usr/local/bin/erun-adopt-worktree` (an older image pinned under a newer
+chart) falls back to the same rule: if the legacy path holds a `.git` the init container exits 1 and
+refuses the rollout; otherwise it logs and exits 0.
+
+### What deploy reports
+
+Before the rollout, `erun deploy` reads `kubectl get pvc <release>-worktree -o name` for a
+`worktreeStorage=pvc` runtime release and traces the command. Under `--dry-run` it stops there and
+traces the decision. On a real run:
+
+| Claim read | Output |
+|---|---|
+| Exists | Trace only: `deploy: worktree volume <claim> already exists; <path> stays on it` |
+| `NotFound` | `==> Worktree volume <claim> is not in place yet for <tenant>/<env>` plus the path, the volume it moves onto, and where the pre-move copy is kept |
+| Unreadable | The read's error is traced, then the same notice under `==> Worktree volume <claim> could not be read for <tenant>/<env>; this deploy may be the one that creates it` |
+
+The unreadable case prints the notice deliberately: a claim erun cannot read is unknown, not settled,
+and silence is what made the relocation invisible.

@@ -1,9 +1,10 @@
+import { cn } from 'erun-kit';
 import * as React from 'react';
 
 import type { AppState } from '@/app/state';
 import { ReadonlyField } from '@/components/app/ManageDialog.fields';
 import { portRangeValue } from '@/components/app/ManageDialog.helpers';
-import { cn } from '@/lib/utils';
+import { ExposuresSection } from '@/components/app/ManageDialogPortsExposures';
 import type { UIPortStatus } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
@@ -19,16 +20,33 @@ export function PortsTab({ dialog }: { dialog: ManageDialog }): React.ReactEleme
       />
       <PortStatusTable
         rows={[
-          { service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus },
-          { service: 'api', port: config.localPorts.api, status: config.localPorts.apiStatus },
-          { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus },
           {
-            service: 'contribute-app',
+            key: 'mcp',
+            service: 'AI agent connection',
+            port: config.localPorts.mcp,
+            status: config.localPorts.mcpStatus,
+          },
+          {
+            key: 'api',
+            service: 'Environment API',
+            port: config.localPorts.api,
+            status: config.localPorts.apiStatus,
+          },
+          {
+            key: 'ssh',
+            service: 'SSH access',
+            port: config.localPorts.ssh,
+            status: config.localPorts.sshStatus,
+          },
+          {
+            key: 'contribute-app',
+            service: 'Contribute app preview',
             port: config.localPorts.contributeApp,
             status: config.localPorts.contributeAppStatus,
           },
         ]}
       />
+      <ExposuresSection dialog={dialog} />
     </>
   );
 }
@@ -36,7 +54,7 @@ export function PortsTab({ dialog }: { dialog: ManageDialog }): React.ReactEleme
 function PortStatusTable({
   rows,
 }: {
-  rows: { service: string; port: number; status: UIPortStatus }[];
+  rows: { key: string; service: string; port: number; status: UIPortStatus }[];
 }): React.ReactElement {
   return (
     <div className="grid gap-2">
@@ -49,7 +67,7 @@ function PortStatusTable({
         </div>
         {rows.map((row) => (
           <div
-            key={row.service}
+            key={row.key}
             className="grid min-h-8 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-1 last:border-b-0"
           >
             <div className="font-mono text-xs text-foreground">

@@ -91,14 +91,47 @@ prepare_run enabled
 start_run true devops
 wait_for '[ -s "${run_dir}/emcp-argv" ]' || fail "the devops path should start emcp when the edge is enabled"
 argv=$(head -n 1 "${run_dir}/emcp-argv")
-for flag in "--host 0.0.0.0" "--port 17000" "--path /mcp" "--tenant team" "--environment dev" "--repo-path" "--kubernetes-context in-cluster"; do
+for flag in "--host 0.0.0.0" "--port 17000" "--path /mcp" "--metrics-host 0.0.0.0" "--metrics-port 9100" "--metrics-enabled=true" "--tenant team" "--environment dev" "--repo-path" "--kubernetes-context in-cluster"; do
     case "${argv}" in
         *"${flag}"*) ;;
         *) fail "emcp argv is missing '${flag}': ${argv}" ;;
     esac
 done
-grep -q 'starting erun MCP on 0.0.0.0:17000/mcp' "${log}" ||
-    fail "the edge start should be logged"
+grep -q 'starting erun MCP on 0.0.0.0:17000/mcp, metrics on 0.0.0.0:9100 (enabled=true)' "${log}" ||
+    fail "the edge start and metrics listener should be logged"
+
+# A space-separated bool flag (e.g. `--metrics-enabled true`) sets the bool from
+# its own presence and leaves the bare "true" as the first positional argument,
+# which stops Go's flag.Parse there — every flag after it (including --tenant
+# and --environment) is silently dropped. Walk the captured argv the same way
+# emcp's flag set would and fail if any bare positional token would stop
+# parsing before every flag, including the ones after --metrics-enabled, is
+# consumed.
+assert_argv_parses_through() {
+    _argv="$1"
+    # shellcheck disable=SC2086
+    set -- ${_argv}
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --metrics-enabled)
+                fail "bool flag --metrics-enabled must be written as --metrics-enabled=<value>, not space-separated: ${_argv}"
+                ;;
+            --metrics-enabled=*)
+                shift
+                ;;
+            --host | --port | --path | --metrics-host | --metrics-port | --tenant | --environment | --repo-path | --kubernetes-context | --namespace)
+                shift 2
+                ;;
+            --*)
+                shift
+                ;;
+            *)
+                fail "unparsed positional argument '$1' would stop emcp's flag.Parse before later flags are applied: ${_argv}"
+                ;;
+        esac
+    done
+}
+assert_argv_parses_through "${argv}"
 
 # --- 2. Supervised: killing the server restarts it and logs the restart ---
 first_pid=$(head -n 1 "${run_dir}/emcp-pids")
@@ -173,4 +206,73 @@ wait_for 'grep -q "^activity sample --tenant team --environment dev$" "${run_dir
     fail "the environment monitor should sample resident work at boot: $(cat "${run_dir}/erun-argv" 2>/dev/null)"
 stop_run
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, and activity sampling"
+# --- 7. Registry credential sync merges the mounted Secret into
+# ~/.docker/config.json at boot, seeding a missing host but leaving an
+# unrelated existing host untouched ---
+prepare_run registry_credential_merge
+credential_src="${run_dir}/registry-credential.json"
+cat >"${credential_src}" <<'JSON'
+{"auths":{"ghcr.io":{"auth":"aGVsbG86d29ybGQ="}}}
+JSON
+mkdir -p "${run_dir}/home/.docker"
+cat >"${run_dir}/home/.docker/config.json" <<'JSON'
+{"auths":{"docker.io":{"auth":"ZXhpc3Rpbmc6dG9rZW4="}}}
+JSON
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=true \
+    ERUN_REGISTRY_CREDENTIAL_SRC_OVERRIDE="${credential_src}" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for 'grep -q ghcr.io "${run_dir}/home/.docker/config.json" 2>/dev/null' ||
+    fail "the mounted registry credential should be merged into ~/.docker/config.json"
+config=$(cat "${run_dir}/home/.docker/config.json")
+case "${config}" in
+    *'"docker.io"'*'"ZXhpc3Rpbmc6dG9rZW4="'*) ;;
+    *) fail "an unrelated existing docker config entry must survive the merge: ${config}" ;;
+esac
+case "${config}" in
+    *'"ghcr.io"'*'"aGVsbG86d29ybGQ="'*) ;;
+    *) fail "the provisioned ghcr.io credential should be merged in: ${config}" ;;
+esac
+stop_run
+
+# --- 8. Registry credential sync never overwrites a host entry the pod
+# already has -- an operator's own docker login (or gh-driven push-recovery)
+# is more current than what erun resolved on the host at init time ---
+prepare_run registry_credential_preserve
+credential_src="${run_dir}/registry-credential.json"
+cat >"${credential_src}" <<'JSON'
+{"auths":{"ghcr.io":{"auth":"cHJvdmlzaW9uZWQ6dG9rZW4="}}}
+JSON
+mkdir -p "${run_dir}/home/.docker"
+cat >"${run_dir}/home/.docker/config.json" <<'JSON'
+{"auths":{"ghcr.io":{"auth":"b3BlcmF0b3I6dG9rZW4="}}}
+JSON
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=true \
+    ERUN_REGISTRY_CREDENTIAL_SRC_OVERRIDE="${credential_src}" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+config=$(cat "${run_dir}/home/.docker/config.json")
+case "${config}" in
+    *'"ghcr.io"'*'"b3BlcmF0b3I6dG9rZW4="'*) ;;
+    *) fail "the pod's own existing credential must not be overwritten by the provisioned one: ${config}" ;;
+esac
+case "${config}" in
+    *cHJvdmlzaW9uZWQ6dG9rZW4=*) fail "the provisioned credential must not replace an existing host entry: ${config}" ;;
+    *) ;;
+esac
+stop_run
+
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, and registry credential sync"

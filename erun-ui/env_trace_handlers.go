@@ -33,8 +33,8 @@ type uiEnvTrace struct {
 // the env or hold it awake.
 func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvTrace{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load environment trace", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvTrace{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -85,7 +85,7 @@ func hostEnvTraceTail(result eruncommon.OpenResult) (string, string) {
 // the pane, so the host side still renders.
 func (a *App) podEnvTraceTail(result eruncommon.OpenResult) (string, string) {
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if mcpPort <= 0 || !a.deps.canConnectLocalPort(mcpPort) {
+	if mcpPort <= 0 || !a.deps.canReachMCPEndpoint(mcpPort) {
 		return "", "in-pod trace unavailable — open the environment to include it"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

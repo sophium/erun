@@ -1,0 +1,12 @@
+{
+  "name": "erun-frontend-workspaces",
+  "private": true,
+  "workspaces": [
+    "erun-kit",
+    "erun-ui/frontend",
+    "erun-console"
+  ],
+  "resolutions": {
+    "prettier": "3.8.4"
+  }
+}

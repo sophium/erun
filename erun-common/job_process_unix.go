@@ -3,10 +3,14 @@
 package eruncommon
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
+	"time"
 )
 
 // detachEnvironmentJobSupervisor puts the supervisor in its own session, so it
@@ -63,6 +67,80 @@ func signalEnvironmentJobProcessGroup(pid int, signal string) error {
 		return fmt.Errorf("signal job process group %d: %w", group, err)
 	}
 	return nil
+}
+
+// environmentJobProcessGroupSurvivors reports whether any *live* process
+// remains in the process group named by pgid, after its leader has already
+// been waited on. detachEnvironmentJobChild always gives the work a fresh
+// process group named after its own pid, so this is how a supervisor tells
+// "the work exited clean" from "the work exited but left something it
+// spawned still running".
+//
+// A raw `kill(-pgid, 0)` is not enough on its own: it also answers true for a
+// zombie -- a process that already exited and is only waiting for its parent
+// to reap it, left behind whenever an intermediate wrapper the job's command
+// ran (not the supervisor) dies before it can wait() on its own child, e.g. a
+// cancel's SIGTERM reaching the whole group at once. That shape is completed
+// work nobody has reaped yet, not abandoned background work, so it must not
+// read as a survivor. `ps`'s STAT column tells the two apart; the signal
+// probe is only the fallback for when `ps` itself cannot be consulted.
+//
+// The same SIGTERM that just ended the leader reaches every other group
+// member at once, but the kernel does not process it atomically across
+// processes -- a sibling can still read as alive for a few milliseconds
+// while it finishes dying from that same signal, before it settles into the
+// zombie state above. A reading taken the instant the leader is reaped can
+// catch that transient window, so this gives a genuinely alive member a
+// short settle budget to either exit or become a reapable zombie before it
+// is trusted as a survivor.
+func environmentJobProcessGroupSurvivors(pgid int) bool {
+	if pgid <= 0 {
+		return false
+	}
+	deadline := time.Now().Add(environmentJobProcessGroupSurvivorSettleWindow)
+	for {
+		alive := environmentJobProcessGroupHasLiveMember(pgid)
+		if !alive || !time.Now().Before(deadline) {
+			return alive
+		}
+		time.Sleep(environmentJobProcessGroupSurvivorSettlePoll)
+	}
+}
+
+const (
+	environmentJobProcessGroupSurvivorSettleWindow = 300 * time.Millisecond
+	environmentJobProcessGroupSurvivorSettlePoll   = 20 * time.Millisecond
+)
+
+func environmentJobProcessGroupHasLiveMember(pgid int) bool {
+	if alive, ok := psProcessGroupHasLiveMember(pgid); ok {
+		return alive
+	}
+	err := syscall.Kill(-pgid, 0)
+	return err == nil || err == syscall.EPERM
+}
+
+// psProcessGroupHasLiveMember answers whether pgid still has a non-zombie
+// member, via `ps`'s STAT column. The second return is false when `ps` itself
+// could not be run or its output could not be read, so the caller knows to
+// fall back rather than trusting a default answer.
+func psProcessGroupHasLiveMember(pgid int) (bool, bool) {
+	out, err := exec.Command("ps", "-axo", "pid=,pgid=,stat=").Output()
+	if err != nil {
+		return false, false
+	}
+	target := strconv.Itoa(pgid)
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 3 || fields[1] != target {
+			continue
+		}
+		if !strings.Contains(fields[2], "Z") {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 func environmentJobSignalNumber(signal string) (syscall.Signal, error) {

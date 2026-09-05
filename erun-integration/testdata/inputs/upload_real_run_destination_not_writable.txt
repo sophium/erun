@@ -1,0 +1,3 @@
+audit: erun inputs upload <TMP> /readonly/evidence.bin
+inputs: uploading <TMP> (5 bytes) to /readonly/evidence.bin
+upload runtime input "/readonly/evidence.bin": erun-inputs: destination directory is not writable: /readonly: exit status 3

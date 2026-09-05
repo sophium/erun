@@ -1,0 +1,31 @@
+import { BrowserOpenURL } from '../../wailsjs/runtime/runtime';
+import type { AppThunk } from './store';
+
+// The public product documentation site (erun-docs/docusaurus.config.ts).
+// First run has no in-app route to it otherwise: prose can name a settings
+// path, but only this gives a reader somewhere to click.
+const ERUN_DOCS_URL = 'https://docs.erunpaas.com';
+
+// openDocumentation goes through the Wails runtime binding, not
+// window.open: a plain window.open from the React side stays inside the
+// desktop's WKWebView and never reaches an external browser (see
+// startContributeApp in contribute_mode.go for the same reasoning). The
+// headless Playwright harness shims this same binding to a real
+// window.open, so it is also the one call that is safe there.
+export const openDocumentation = (): AppThunk => () => {
+  BrowserOpenURL(ERUN_DOCS_URL);
+};
+
+// openInstallDocs deep-links the CLI install page — the recovery an
+// orchestrator's "erun executable could not be resolved" notice names, which
+// otherwise has no in-app affordance of its own.
+export const openInstallDocs = (): AppThunk => () => {
+  BrowserOpenURL(`${ERUN_DOCS_URL}/getting-started/install`);
+};
+
+// openPlatformBlockDocs deep-links the `platform:` block reference — the
+// recovery the Ports tab's "not available" empty state names for a
+// cluster-backed environment whose project hasn't declared one yet.
+export const openPlatformBlockDocs = (): AppThunk => () => {
+  BrowserOpenURL(`${ERUN_DOCS_URL}/reference/configuration#platform-block`);
+};

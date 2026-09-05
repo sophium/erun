@@ -1,0 +1,19 @@
+Report a gate run's start and outcome to the erun platform
+
+Usage:
+  erun exec gate-run [command]
+
+Available Commands:
+  report      Report a gate run's outcome
+  start       Record the beginning of one gate attempt
+
+Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+  -h, --help                help for gate-run
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun exec gate-run [command] --help" for more information about a command.

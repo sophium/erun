@@ -1,7 +1,16 @@
-import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
+import {
+  environmentTypeIsHost,
+  environmentTypeIsRemoteWorktree,
+  environmentTypeIsRuntime,
+} from '@/app/environmentType';
 import type { AppState } from '@/app/state';
 import type { StatusDotState } from '@/components/app/Sidebar.StatusDot';
-import type { UIEnvironment, UISelection } from '@/types';
+import { CloudProviderERun, type UIEnvironment, type UISelection } from '@/types';
+import type {
+  UIErunVersion,
+  UIRuntimeImageLineMismatch,
+  UIRuntimeVersionLine,
+} from '@/uiRuntimeVersionLineTypes';
 
 // pendingForTenant returns the optimistic selection for an env being created but
 // not yet present in state, so the sidebar can render a placeholder row that
@@ -25,17 +34,55 @@ export function pendingForTenant(
 }
 
 // environmentIsLocal reports whether the env runs against a worktree mounted from
-// this machine (a local-agent env).
+// this machine (a local-agent env). A host env is also local by this
+// definition (see environmentTypeIsRemoteWorktree), but it renders its own
+// distinct badge (environmentIsHost) rather than the "Local" one, so it is
+// never presented as a pod that failed to start.
 export function environmentIsLocal(environment: UIEnvironment | undefined): boolean {
   return !environmentTypeIsRemoteWorktree(environment?.type);
+}
+
+// environmentIsHost reports whether the env is a host environment — no pod,
+// no cluster, just a directory on this machine.
+export function environmentIsHost(environment: UIEnvironment | undefined): boolean {
+  return environmentTypeIsHost(environment?.type);
+}
+
+// environmentUsesDindSidecar reports whether the env's runtime pod carries the
+// erun-dind sidecar every image build actually runs in (mirrors $dindEnabled
+// in erun-devops/k8s/erun-devops/templates/service.yaml, `ne $envType
+// "runtime"`), narrowed by the one case that chart condition doesn't cover: a
+// host env renders no pod at all. This is the signal the Usage row's caveat
+// gates on (Sidebar.EnvHoverCard.tsx's UsageState) — a runtime env's reading
+// is the whole story, but a build-capable env's reading is never the whole
+// story, because nothing it can read ever sees the sidecar's own activity.
+export function environmentUsesDindSidecar(environment: UIEnvironment | undefined): boolean {
+  return !environmentTypeIsHost(environment?.type) && !environmentTypeIsRuntime(environment?.type);
 }
 
 export interface EnvironmentRowDerived {
   selected: boolean;
   busy: boolean;
   busyLabel: string;
+  // busyFromEnvironment says the label describes the environment's own
+  // condition rather than an operation this desktop is running. A row's spinner
+  // needs the label either way, because a screen reader has no other context;
+  // a surface that already names the environment does not, and repeating
+  // "<env> is busy — X" inside a card headed "<env>" says the same thing twice
+  // while displacing the prose the indicator already owns.
+  busyFromEnvironment: boolean;
   isLocal: boolean;
+  // isHost is mutually exclusive with the "Local" badge: a host env renders
+  // its own badge instead, so a reader never mistakes "no pod" for a pod that
+  // is merely local.
+  isHost: boolean;
+  // usageExcludesBuilds says whether this env has an erun-dind sidecar that
+  // its own Usage reading cannot see — see environmentUsesDindSidecar.
+  usageExcludesBuilds: boolean;
   runtimeVersion: string;
+  runtimeVersionLine: UIRuntimeVersionLine | undefined;
+  erunVersion: UIErunVersion | undefined;
+  runtimeImageLineMismatch: UIRuntimeImageLineMismatch | undefined;
   selection: UISelection;
 }
 
@@ -48,13 +95,38 @@ export function deriveEnvironmentRow(
   runningCommand: string,
   aiBusy: boolean,
   reconnecting: boolean,
+  envBusy: boolean,
+  envBusyDetail: string,
+  envObserved: boolean,
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
   // busy is scoped to this env and independent of which env is selected, so
   // concurrent work on multiple envs shows a spinner on every row that's actually
   // doing something — not just the one in the active terminal.
-  const busy = isOpening || runningCommand !== '' || aiBusy || reconnecting;
+  //
+  // envBusy is what the environment says about itself, and it is the only input
+  // here that is true regardless of who started the work. The other four are
+  // desktop-local: they report what this desktop launched, so an environment
+  // driven by `erun` from a terminal, by an orchestrator over MCP, or by a
+  // detached job was doing real work behind a row that looked idle.
+  const busy = environmentRowIsBusy(
+    isOpening,
+    runningCommand,
+    aiBusy,
+    reconnecting,
+    envBusy,
+    envObserved,
+  );
+  const busyFromEnvironment =
+    envBusy &&
+    environmentRowCommandLabel(
+      tenantName,
+      environmentName,
+      isOpening,
+      runningCommand,
+      reconnecting,
+    ) === '';
   const busyLabel = environmentRowBusyLabel(
     tenantName,
     environmentName,
@@ -62,19 +134,80 @@ export function deriveEnvironmentRow(
     runningCommand,
     aiBusy,
     reconnecting,
+    envBusy,
+    envBusyDetail,
   );
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
   const isLocal = environmentIsLocal(environment);
+  const isHost = environmentIsHost(environment);
+  const usageExcludesBuilds = environmentUsesDindSidecar(environment);
   return {
     selected,
     busy,
     busyLabel,
+    busyFromEnvironment,
     isLocal,
-    runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
+    isHost,
+    usageExcludesBuilds,
+    ...environmentVersionFields(environment),
     selection: { tenant: tenantName, environment: environmentName },
   };
+}
+
+// environmentVersionFields is split out of deriveEnvironmentRow so that
+// function's own optional-chaining branches don't push it over the
+// complexity gate.
+function environmentVersionFields(environment: UIEnvironment | undefined): {
+  runtimeVersion: string;
+  runtimeVersionLine: UIRuntimeVersionLine | undefined;
+  erunVersion: UIErunVersion | undefined;
+  runtimeImageLineMismatch: UIRuntimeImageLineMismatch | undefined;
+} {
+  return {
+    runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
+    runtimeVersionLine: environment?.runtimeVersionLine,
+    erunVersion: environment?.erunVersion,
+    runtimeImageLineMismatch: environment?.runtimeImageLineMismatch,
+  };
+}
+
+// The five reasons a row spins, kept out of deriveEnvironmentRow so that
+// function stays under the complexity gate — and so the set is one named thing
+// rather than a disjunction growing inside a larger function.
+// The environment's own answer both adds and subtracts. Adding was already
+// wired: work started from a terminal or over MCP spins a row the desktop never
+// launched anything on. Subtracting was not, and that is the half that matters
+// for a row nobody can clear — every other input here is desktop-local, set when
+// this desktop starts something and cleared when it sees it end, so any path
+// that loses the ending leaves a latch with nothing to release it. One row span
+// for six hours while `erun idle` reported every marker idle.
+//
+// An observation reporting no work is therefore allowed to clear those latches.
+// It has to be the environment's own answer, not merely a reachable port: an
+// edge that has wedged behind a port that still accepts connections reports no
+// work because nobody asked it, and letting that clear a latch would trade a row
+// that never stops for one that stops while the work is still running.
+//
+// isOpening and reconnecting stay authoritative regardless. They are this
+// desktop's own in-flight operations, begun a moment ago in response to a click,
+// and the environment cannot yet have observed what has not reached it.
+function environmentRowIsBusy(
+  isOpening: boolean,
+  runningCommand: string,
+  aiBusy: boolean,
+  reconnecting: boolean,
+  envBusy: boolean,
+  envObserved: boolean,
+): boolean {
+  if (envBusy || isOpening || reconnecting) {
+    return true;
+  }
+  if (envObserved) {
+    return false;
+  }
+  return runningCommand !== '' || aiBusy;
 }
 
 function environmentRowBusyLabel(
@@ -84,20 +217,74 @@ function environmentRowBusyLabel(
   runningCommand: string,
   aiBusy: boolean,
   reconnecting: boolean,
+  envBusy: boolean,
+  envBusyDetail: string,
+): string {
+  const target = `${tenantName} / ${environmentName}`;
+  const command = environmentRowCommandLabel(
+    tenantName,
+    environmentName,
+    isOpening,
+    runningCommand,
+    reconnecting,
+  );
+  if (command !== '') {
+    return command;
+  }
+  if (envBusy) {
+    return envBusyDetail !== '' ? `${target} is busy — ${envBusyDetail}` : `${target} is busy`;
+  }
+  if (aiBusy) {
+    return `AI tab working on ${target}`;
+  }
+  return '';
+}
+
+// environmentCardActivityLabel decides whether the hover card repeats the
+// row's busy reason or defers to the condition indicator. busyFromEnvironment
+// assumes the indicator will say so on its own — but environmentStatusDot
+// gives a sticky stopped/failed condition priority over busy, and that
+// condition can still be the last one recorded while a fresher observation
+// has already reported real work (the two are set by separate pollers on
+// separate cycles). Blanking the label in that window let the card assert a
+// bare "Stopped" — telling the operator to start something already busy —
+// while the row kept spinning with the true reason right beside it. Blank
+// only when the indicator will actually read 'busy', so the two surfaces can
+// never name different things for the same spinner.
+export function environmentCardActivityLabel(
+  busy: boolean,
+  busyFromEnvironment: boolean,
+  busyLabel: string,
+  dot: StatusDotState,
+): string {
+  if (!busy) {
+    return '';
+  }
+  if (busyFromEnvironment && dot === 'busy') {
+    return '';
+  }
+  return busyLabel;
+}
+
+// The operations this desktop is running itself, in the order that decides
+// which one names the row. Split out from the label so a caller can ask whether
+// there is one at all without re-deriving the precedence.
+function environmentRowCommandLabel(
+  tenantName: string,
+  environmentName: string,
+  isOpening: boolean,
+  runningCommand: string,
+  reconnecting: boolean,
 ): string {
   const target = `${tenantName} / ${environmentName}`;
   if (runningCommand !== '') {
-    const verb = activityCommandLabel(runningCommand);
-    return `${verb} ${target}`;
+    return `${activityCommandLabel(runningCommand)} ${target}`;
   }
   if (isOpening) {
     return `Opening ${target}`;
   }
   if (reconnecting) {
     return `Reconnecting ${target}`;
-  }
-  if (aiBusy) {
-    return `AI tab working on ${target}`;
   }
   return '';
 }
@@ -132,15 +319,36 @@ export interface CloudAliasRowInputs {
 
 // sidebarCloudAliases returns the active tenant's cloud aliases, one per provider
 // type, so an env wired to both an AWS account and a Cloudflare token shows two
-// independent login rows.
+// independent login rows. An erun-hosted-platform alias that no local tenant
+// attaches (the ordinary shape for a hosted platform reached from a machine
+// whose tenants are all local) is otherwise invisible here regardless of
+// which tenant is selected, so it is surfaced independently of the
+// tenant-scoped lookup below.
 export function sidebarCloudAliases(input: CloudAliasRowInputs): string[] {
   const tenantName = input.dashboardTenant || (input.selected?.tenant ?? '');
   const tenant = input.tenants.find((candidate) => candidate.name === tenantName);
-  if (!tenant) {
-    return [];
+  const aliasByType = tenant
+    ? firstAliasPerProviderType(tenantCloudAliases(tenant), input.cloudProviders)
+    : new Map<string, string>();
+  const unattached = firstUnattachedERunAlias(input.tenants, input.cloudProviders);
+  if (unattached && !aliasByType.has(CloudProviderERun)) {
+    aliasByType.set(CloudProviderERun, unattached);
   }
-  const aliasByType = firstAliasPerProviderType(tenantCloudAliases(tenant), input.cloudProviders);
   return orderCloudAliasRows(aliasByType);
+}
+
+// firstUnattachedERunAlias finds an erun-hosted-platform alias that no
+// tenant's config references at all. There is normally at most one hosted
+// platform per machine, so the first is surfaced.
+function firstUnattachedERunAlias(
+  tenants: AppState['tenants'],
+  cloudProviders: AppState['cloudProviders'],
+): string | undefined {
+  const attached = new Set(tenants.flatMap((tenant) => tenantCloudAliases(tenant)));
+  return cloudProviders.find(
+    (provider) =>
+      provider.provider.trim().toLowerCase() === CloudProviderERun && !attached.has(provider.alias),
+  )?.alias;
 }
 
 // The primary alias goes first so its type wins when two aliases share a
@@ -223,8 +431,12 @@ const ENV_STATE_FAILED = 'failed';
 // must never render the failure glyph. A busy environment only reads busy once
 // no sticky condition contradicts it: a stopped env whose last observation was
 // busy is stopped, not busy.
-function environmentStatusDot(envState: string, busy = false): StatusDotState {
-  if (envState === ENV_STATE_FAILED) {
+//
+// A forward outage reads as a failure wherever it appears, including on a row
+// the desktop never opened: the environment is unreachable to every client of
+// it, which is the opposite of the quiet row it would otherwise render as.
+function environmentStatusDot(envState: string, busy = false, outage = false): StatusDotState {
+  if (envState === ENV_STATE_FAILED || outage) {
     return 'failed';
   }
   if (envState === ENV_STATE_STOPPED || envState === ENV_STATE_RUNTIME_STOPPED) {
@@ -259,6 +471,12 @@ export interface EnvironmentIndicatorInputs {
   envState: string;
   isOpen: boolean;
   reachable: boolean;
+  // outage is the environment having lost the port-forward it had, past the
+  // point a repair could bring it back. It is deliberately separate from
+  // reachable: reachable is what the row already believed, and believing it is
+  // what let a dead environment render as a running one — while a dropped
+  // forward is not reachable either, and rendered as one nobody had opened.
+  outage: boolean;
   busy: boolean;
   detail: string;
 }
@@ -267,12 +485,23 @@ export function environmentIndicator(raw: EnvironmentIndicatorInputs): Environme
   // The sticky condition describes a desktop session. Once the desktop holds no
   // tabs for the environment it no longer describes anything current, so it is
   // dropped rather than left to outlive the session that produced it — a closed
-  // row must not keep flying a failure triangle for a session that is gone.
-  const input = raw.isOpen ? raw : { ...raw, envState: '' };
-  const dot = environmentStatusDot(input.envState, input.busy);
+  // row must not keep flying a stale stopped ring for a session that is gone.
+  //
+  // A failed deploy is the one exception: it is not a property of the session
+  // that observed it, it is a property of the environment (its runtime is
+  // broken), and closing the tabs that watched it fail does not fix it. As long
+  // as the environment stays unreachable, the row must keep naming the failure
+  // — the alternative is a closed, failed environment going silently blank,
+  // indistinguishable from one nobody has ever opened. Reachability still wins
+  // once it comes back: an environment that answers again is reported on its
+  // own terms (below), not by a stale flag from before it recovered.
+  const keepFailedWhenClosed = raw.envState === ENV_STATE_FAILED && !raw.reachable;
+  const input = raw.isOpen || keepFailedWhenClosed ? raw : { ...raw, envState: '' };
+  const dot = environmentStatusDot(input.envState, input.busy, input.outage);
   // What keeps a closed row visible is the environment itself: its edge
-  // answering, or work in flight. Otherwise there is nothing to report.
-  const visible = input.isOpen || input.reachable || input.busy;
+  // answering, work in flight, a failure it cannot report any other way once
+  // its session is gone, or an outage.
+  const visible = input.isOpen || input.reachable || input.busy || input.outage || dot === 'failed';
   return {
     visible,
     dot,
@@ -286,6 +515,9 @@ export function environmentIndicator(raw: EnvironmentIndicatorInputs): Environme
 // its heading already says which environment this is, so repeating the name on
 // every row would crowd out the state itself.
 function environmentActivityLabel(input: EnvironmentIndicatorInputs, dot: StatusDotState): string {
+  if (input.outage) {
+    return `Unreachable — ${FORWARD_OUTAGE_RECOVERY}`;
+  }
   if (dot === 'failed') {
     return 'Deploy failed — recover from Activities';
   }
@@ -304,7 +536,16 @@ function environmentActivityLabel(input: EnvironmentIndicatorInputs, dot: Status
   return 'Not open';
 }
 
+// FORWARD_OUTAGE_RECOVERY names the way out of a broken forward, so the state is
+// never shown without it (Nielsen #9). Deploying is the recovery rather than
+// re-opening because the desktop already re-opened it — repeatedly, and it did
+// not help, which is the only reason this state is rendered at all.
+const FORWARD_OUTAGE_RECOVERY = 'its connection is dead; deploy it to bring the runtime back';
+
 function environmentCondition(input: EnvironmentIndicatorInputs, dot: StatusDotState): string {
+  if (input.outage) {
+    return `${input.name} is unreachable — ${FORWARD_OUTAGE_RECOVERY}`;
+  }
   if (dot === 'failed') {
     return `${input.name} deploy failed — ${environmentStateRecovery(input.envState)}`;
   }

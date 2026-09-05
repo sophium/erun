@@ -1,0 +1,47 @@
+Answers running, exited, abandoned, gate-incomplete, or unknown — never a
+partial answer. A job whose supervisor is gone without an outcome reads as
+unknown rather than as success, which is what makes it safe to act on:
+unknown, abandoned, and gate-incomplete are exactly as terminal as exited,
+never a reason to keep waiting and never a success whatever the raw exit
+code says. gate-incomplete means this job's own process ended while a job
+it started had not reached a verdict; abandoned means it left other work it
+started running in its own process group, unsupervised. A job's own
+process exiting is therefore never the verdict on its own -- this job's own
+eventual state is, including for a nested job it started after that process
+already exited: it waits for that job before reporting exited, folding a
+failure into startedJobFailed rather than letting its own clean exit code
+hide it. Finished jobs stay readable for 24 hours so a caller that
+reconnects after the work ended can still learn what happened.
+
+For an agent job, gate-incomplete or startedJobFailed triggers one further
+thing before either is reported as final: a bounded, automatic resumption of
+the same session with the concrete outcome, so the agent gets a real chance
+to act on it. reinvocationCount says how many of those already ran; once the
+bound is reached the reason says so explicitly rather than reading the same
+as a job that never got one.
+
+aliveAgeMs is the milliseconds since the supervisor's last ~1s beat,
+computed in erun's own clock so nothing subtracts a pod timestamp from a
+caller's clock. Once it exceeds 5000, treat the job as failed (an unknown
+outcome, never a success, never a tool error) even if state has not caught
+up yet; a silent-but-healthy command never trips this, since the beat does
+not depend on the work's own output.
+
+Usage:
+  erun job status [flags]
+
+Examples:
+  erun exec job status --tenant team --environment dev
+  erun exec job status --tenant team --environment dev --id suite --output json
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Environment the job runs in
+  -h, --help                 help for status
+      --id string            Job to report; omit for every retained job
+      --tenant string        Tenant whose environment the job belongs to
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

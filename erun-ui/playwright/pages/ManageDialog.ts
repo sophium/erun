@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-export type ManageTab = 'General' | 'Runtime' | 'AI' | 'Ports' | 'SSH' | 'History';
+export type ManageTab = 'General' | 'Runtime' | 'AI' | 'Ports' | 'Access' | 'History';
 
 // ManageDialog POM. The dialog title is "<tenant>-<environment>".
 export class ManageDialog {
@@ -14,10 +14,13 @@ export class ManageDialog {
       return this.page.getByRole('dialog', { name: this.expectedTitle });
     }
     // Disambiguate from other open dialogs (e.g. the activity drawer) by the
-    // General tab that only the manage surface has.
+    // description text unique to the manage surface. The General tab used to
+    // serve this purpose, but it — along with every other tab — is replaced
+    // by the delete-confirmation view while dialog.tab === 'delete', which
+    // made every locator scoped under this one resolve to nothing mid-delete.
     return this.page
       .getByRole('dialog')
-      .filter({ has: this.page.getByRole('tab', { name: /^General/ }) })
+      .filter({ hasText: 'Edit environment configuration' })
       .first();
   }
 
@@ -127,6 +130,44 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-stop-help');
   }
 
+  // "This environment's usage" reports the environment's own CPU, memory and
+  // disk reading against its cgroup limits, directly below the sliders that
+  // set those limits.
+  runtimeUsagePanel(): Locator {
+    return this.locator()
+      .locator('div')
+      .filter({ hasText: /^This environment's usage/ })
+      .first();
+  }
+
+  runtimeUsageRefreshButton(): Locator {
+    return this.locator().locator('#environment-config-usage-refresh');
+  }
+
+  // "Sizing recommendation" turns the environment's own standing
+  // recommendation into a one-click "Resize to this" action, directly under
+  // the usage reading it is derived from.
+  runtimeSizingPanel(): Locator {
+    return this.locator()
+      .locator('div')
+      .filter({ hasText: /^Sizing recommendation/ })
+      .first();
+  }
+
+  runtimeSizingRefreshButton(): Locator {
+    return this.locator().locator('#environment-config-sizing-refresh');
+  }
+
+  runtimeSizingApplyButton(): Locator {
+    return this.locator().locator('#environment-config-sizing-apply');
+  }
+
+  // Shown only after a resize is refused because the environment is held by
+  // another worker; the override is a deliberate second click, never implicit.
+  runtimeSizingOverrideButton(): Locator {
+    return this.locator().locator('#environment-config-sizing-override');
+  }
+
   // "Running in this environment" reports what the pod is actually running —
   // observed sessions and the processes holding memory — beneath the sliders,
   // because that is the next question once the figures read as capped.
@@ -204,6 +245,48 @@ export class ManageDialog {
     return this.page.locator('#environment-config-save-deploy-components');
   }
 
+  // The "Runtime chart" field states the chart coordinate -- which chart the
+  // runtime is installed from -- separately from the version, which names the
+  // image. Empty means "the chart published with the deployed version".
+  runtimeChartInput(): Locator {
+    return this.locator().locator('#environment-config-runtimechart');
+  }
+
+  // The notice under the version row: what a deploy of the picked version would
+  // install for the runtime, or why it cannot be deployed as it stands.
+  // Page-scoped, not dialog-scoped: while the version panel is open it is a modal
+  // popover and the dialog behind it is aria-hidden, so a role-scoped query would
+  // find nothing exactly when this notice matters most.
+  runtimeChartNotice(): Locator {
+    return this.page.locator('#environment-config-runtimechart-notice');
+  }
+
+  // The same statement rendered inside the open version panel.
+  runtimeChartPanelNotice(): Locator {
+    return this.page.locator('#environment-config-runtimechart-notice-panel');
+  }
+
+  // One-click recovery offered by the blocking notice: adopt an ERun chart. Each
+  // notice owns its own button id, so the row and the panel never collide.
+  adoptRuntimeChartButton(): Locator {
+    return this.page.locator('#environment-config-runtimechart-notice-adopt');
+  }
+
+  adoptRuntimeChartButtonInPanel(): Locator {
+    return this.page.locator('#environment-config-runtimechart-notice-panel-adopt');
+  }
+
+  async openRuntimeChartPicker(): Promise<void> {
+    await this.locator().getByRole('button', { name: 'Show runtime chart choices' }).click();
+  }
+
+  // Picks an offered chart. The options carry both the label and the reference,
+  // so either matches.
+  async pickRuntimeChart(text: string): Promise<void> {
+    const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await this.page.getByRole('option', { name: new RegExp(escaped) }).click();
+  }
+
   async selectTab(name: ManageTab): Promise<void> {
     await this.tab(name).click();
   }
@@ -222,7 +305,7 @@ export class ManageDialog {
   }
 
   async cancel(): Promise<void> {
-    const button = this.locator().getByRole('button', { name: 'Cancel' });
+    const button = this.locator().getByRole('button', { name: 'Cancel', exact: true });
     await button.scrollIntoViewIfNeeded();
     await button.click();
   }
@@ -236,11 +319,83 @@ export class ManageDialog {
   async confirmDelete(expected: string): Promise<void> {
     await this.page.locator('#manage-confirmation').fill(expected);
     await this.locator()
-      .getByRole('button', { name: /^Delete/ })
+      .getByRole('button', { name: /^Confirm delete/ })
       .click();
   }
 
   // --- Container-registries editor (General tab) ---
+
+  // --- Jobs tab ---
+
+  jobsTabTrigger(): Locator {
+    return this.locator().getByRole('tab', { name: 'Jobs' });
+  }
+
+  jobsEmptyState(): Locator {
+    return this.locator().getByTestId('manage-jobs-empty');
+  }
+
+  jobsUnreachable(): Locator {
+    return this.locator().getByTestId('manage-jobs-unreachable');
+  }
+
+  jobsUnreachableReconnectButton(): Locator {
+    return this.locator().getByTestId('manage-jobs-unreachable-reconnect');
+  }
+
+  jobRows(): Locator {
+    return this.locator().getByTestId('manage-jobs-row');
+  }
+
+  jobRowName(index: number): Locator {
+    return this.locator().getByTestId('manage-jobs-row-name').nth(index);
+  }
+
+  jobRowDetail(index: number): Locator {
+    return this.locator().getByTestId('manage-jobs-row-detail').nth(index);
+  }
+
+  jobOutcome(index: number): Locator {
+    return this.locator().getByTestId('manage-jobs-row-outcome').nth(index);
+  }
+
+  jobShowOutputButton(name: string): Locator {
+    return this.locator().getByRole('button', { name: `Show output for ${name}` });
+  }
+
+  jobOutput(): Locator {
+    return this.locator().getByTestId('manage-jobs-output');
+  }
+
+  jobOutputEmpty(): Locator {
+    return this.locator().getByTestId('manage-jobs-output-empty');
+  }
+
+  jobCancelButton(name: string): Locator {
+    return this.locator().getByRole('button', { name: `Cancel job ${name}` });
+  }
+
+  jobConfirmCancelButton(name: string): Locator {
+    return this.locator().getByRole('button', { name: `Confirm cancelling ${name}` });
+  }
+
+  addPullSecretButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Add image pull secret' });
+  }
+
+  pullSecretInput(index: number): Locator {
+    return this.locator().getByRole('textbox', { name: `Image pull secret ${String(index + 1)}` });
+  }
+
+  removePullSecretButton(index: number): Locator {
+    return this.locator().getByRole('button', {
+      name: `Remove image pull secret ${String(index + 1)}`,
+    });
+  }
+
+  runtimeRegistryInput(): Locator {
+    return this.locator().getByLabel('Runtime registry');
+  }
 
   addRegistryButton(): Locator {
     return this.locator().getByRole('button', { name: 'Add registry' });

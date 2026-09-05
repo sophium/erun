@@ -1,6 +1,11 @@
 ARG ERUN_VERSION=1.0.0
 
-FROM golang:1.26.0 AS builder
+# Pinned to BUILDPLATFORM: the RUN below cross-compiles via explicit
+# GOOS/GOARCH with CGO disabled, so the compiler runs natively on the build
+# host instead of under qemu emulation for the target arch. Only the
+# resulting binary is copied into the final image, so the stage's own
+# platform does not affect the shipped artifact's arch.
+FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder
 
 WORKDIR /src
 
@@ -14,6 +19,7 @@ WORKDIR /src/erun-backend/erun-backend-api
 
 ARG TARGETOS=linux
 ARG TARGETARCH
+ARG ERUN_VERSION
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -22,10 +28,17 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY erun-common /src/erun-common
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 
+# Bakes the serving build's version into the binary (GET /v1/platform reports
+# it) the same way erun/emcp do, so a client can tell whether a released fix
+# is actually deployed without a write. buildVersion lives in package main
+# (cmd/eapi), and the Go linker only honors -X against a package-main symbol
+# when the target is written as "main.<name>" — the full package import path
+# compiles and links with no warning but silently leaves the variable at its
+# default.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags "-s -w" -o /out/eapi ./cmd/eapi
+    go build -trimpath -ldflags "-s -w -X main.buildVersion=${ERUN_VERSION}" -o /out/eapi ./cmd/eapi
 
 FROM alpine:3.20
 

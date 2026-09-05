@@ -5,24 +5,59 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	sshconfig "github.com/sophium/erun/internal/sshconfig"
 	"github.com/spf13/cobra"
 )
 
 func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
-	return &cobra.Command{
-		Use:           "list",
-		Short:         "List configured tenants and environments",
+	var versionDriftTenant string
+	var gateEnvironment string
+	var controlPlanes bool
+	var failOnDrift bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List configured tenants and environments",
+		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
+			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
+			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
+			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runListCommand(commandContext(cmd), store, findProjectRoot)
+			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, controlPlanes, failOnDrift)
 		},
 	}
+	cmd.Flags().StringVar(&versionDriftTenant, "tenant", "", "Report erun-version drift across this tenant's environments instead of the full listing")
+	cmd.Flags().StringVar(&gateEnvironment, "gate-environment", "", "With --tenant, name the environment driving that tenant's merge-queue gate and flag whether it is behind any environment it gates")
+	cmd.Flags().BoolVar(&controlPlanes, "control-planes", false, "Report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published, instead of the full listing")
+	cmd.Flags().BoolVar(&failOnDrift, "fail-on-drift", false, "With --tenant or --control-planes, exit non-zero when the report finds drift instead of always exiting 0")
+	addDryRunFlag(cmd)
+	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --tenant erun --fail-on-drift\n  erun list --control-planes\n  erun list --control-planes --dry-run\n  erun list --control-planes --fail-on-drift"
+	return cmd
 }
 
-func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc) error {
+func validateListFlags(controlPlanes, failOnDrift bool, versionDriftTenant, gateEnvironment string) error {
+	if gateEnvironment != "" && versionDriftTenant == "" {
+		return fmt.Errorf("--gate-environment requires --tenant")
+	}
+	if controlPlanes && (versionDriftTenant != "" || gateEnvironment != "") {
+		return fmt.Errorf("--control-planes cannot be combined with --tenant/--gate-environment")
+	}
+	if failOnDrift && versionDriftTenant == "" && !controlPlanes {
+		return fmt.Errorf("--fail-on-drift requires --tenant or --control-planes")
+	}
+	return nil
+}
+
+func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment string, controlPlanes, failOnDrift bool) error {
 	ctx.TraceCommand("", "erun", "list")
+	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
+	gateEnvironment = strings.TrimSpace(gateEnvironment)
+	if err := validateListFlags(controlPlanes, failOnDrift, versionDriftTenant, gateEnvironment); err != nil {
+		return err
+	}
+
 	result, err := common.ResolveListResult(store, findProjectRoot, common.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
@@ -30,7 +65,258 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 	if err != nil {
 		return err
 	}
+
+	if controlPlanes {
+		return runListControlPlanes(ctx, result, failOnDrift)
+	}
+
+	if versionDriftTenant != "" {
+		return runListVersionDrift(ctx, result, versionDriftTenant, gateEnvironment, failOnDrift)
+	}
+
 	return writeListResult(ctx, result)
+}
+
+func runListVersionDrift(ctx common.Context, result common.ListResult, versionDriftTenant, gateEnvironment string, failOnDrift bool) error {
+	drift, err := common.ResolveTenantVersionDrift(result, versionDriftTenant, gateEnvironment)
+	if err != nil {
+		return err
+	}
+	if ctx.Output == common.OutputJSON {
+		if err := ctx.WriteResult(drift); err != nil {
+			return err
+		}
+	} else if err := writeVersionDriftReport(ctx, drift); err != nil {
+		return err
+	}
+	if !failOnDrift {
+		return nil
+	}
+	return versionDriftExitError(drift)
+}
+
+func runListControlPlanes(ctx common.Context, result common.ListResult, failOnDrift bool) error {
+	drift := common.ResolveControlPlaneVersionDrift(ctx, result, common.DefaultCloudDependencies(), common.ResolveDefaultRuntimeRegistryVersions)
+	if ctx.Output == common.OutputJSON {
+		if err := ctx.WriteResult(drift); err != nil {
+			return err
+		}
+	} else if err := writeControlPlaneVersionReport(ctx, drift); err != nil {
+		return err
+	}
+	if ctx.DryRun || !failOnDrift {
+		return nil
+	}
+	return controlPlaneVersionDriftExitError(drift)
+}
+
+// versionDriftExitError makes tenant version drift a non-zero exit when
+// --fail-on-drift asks for it, after the full report has already printed:
+// any environment behind the tenant's own max, or a gate environment whose
+// own behind verdict is unresolved or true -- see erun-cli/AGENTS.md §
+// "Exit-Code Contract: Reporting Commands Vs Gating Checks" for why this is
+// opt-in rather than the command's default.
+func versionDriftExitError(drift common.TenantVersionDrift) error {
+	var problems []string
+	var behind []string
+	for _, env := range drift.Environments {
+		if env.BehindMax {
+			behind = append(behind, env.Environment)
+		}
+	}
+	if len(behind) > 0 {
+		problems = append(problems, fmt.Sprintf("%d environment(s) behind the tenant's max version: %s", len(behind), strings.Join(behind, ", ")))
+	}
+	if drift.GateEnvironment != "" {
+		switch {
+		case drift.GateVersionUnresolved:
+			problems = append(problems, fmt.Sprintf("gate environment %s's own erun version could not be resolved", drift.GateEnvironment))
+		case drift.GateBehind:
+			problems = append(problems, fmt.Sprintf("gate environment %s is outdated relative to %s", drift.GateEnvironment, strings.Join(drift.GateOutdatedBy, ", ")))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("version drift for tenant %s: %s", drift.Tenant, strings.Join(problems, "; "))
+}
+
+// controlPlaneVersionDriftExitError makes control-plane version drift a
+// non-zero exit when --fail-on-drift asks for it: any plane behind or ahead
+// of the published version, any plane erun could not reach, or a baseline
+// erun could not even resolve -- none of those confirm a plane is running
+// what erun actually published.
+func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) error {
+	var problems []string
+	if drift.PublishedVersionError != "" {
+		problems = append(problems, "the published version could not be resolved: "+drift.PublishedVersionError)
+	}
+	unreachable, behind, ahead := classifyControlPlaneVersionDrift(drift.Planes)
+	if len(unreachable) > 0 {
+		problems = append(problems, fmt.Sprintf("%d plane(s) unreachable: %s", len(unreachable), strings.Join(unreachable, ", ")))
+	}
+	if len(behind) > 0 {
+		problems = append(problems, fmt.Sprintf("%d plane(s) behind published: %s", len(behind), strings.Join(behind, ", ")))
+	}
+	if len(ahead) > 0 {
+		problems = append(problems, fmt.Sprintf("%d plane(s) ahead of published: %s", len(ahead), strings.Join(ahead, ", ")))
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("control plane version drift: %s", strings.Join(problems, "; "))
+}
+
+// classifyControlPlaneVersionDrift buckets every plane, and its linked
+// console when one was checked, into unreachable/behind/ahead -- a console's
+// own label gets a " (console)" suffix so the two stay distinguishable in the
+// --fail-on-drift summary.
+func classifyControlPlaneVersionDrift(planes []common.ControlPlaneVersionStatus) (unreachable, behind, ahead []string) {
+	for _, plane := range planes {
+		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias, plane.Reachable, plane.Behind, plane.Ahead)
+		if plane.Console == nil {
+			continue
+		}
+		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias+" (console)", plane.Console.Reachable, plane.Console.Behind, plane.Console.Ahead)
+	}
+	return unreachable, behind, ahead
+}
+
+func appendControlPlaneVersionVerdict(unreachable, behind, ahead []string, label string, reachable, isBehind, isAhead bool) ([]string, []string, []string) {
+	switch {
+	case !reachable:
+		unreachable = append(unreachable, label)
+	case isBehind:
+		behind = append(behind, label)
+	case isAhead:
+		ahead = append(ahead, label)
+	}
+	return unreachable, behind, ahead
+}
+
+func writeVersionDriftReport(ctx common.Context, drift common.TenantVersionDrift) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Version drift for tenant %s:\n", drift.Tenant); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "max version", valueOrNone(drift.MaxVersion)); err != nil {
+		return err
+	}
+	if err := writeVersionDriftEnvironments(ctx, drift.Environments); err != nil {
+		return err
+	}
+	if drift.GateEnvironment == "" {
+		return nil
+	}
+	return writeVersionDriftGate(ctx, drift)
+}
+
+func writeVersionDriftEnvironments(ctx common.Context, environments []common.EnvironmentVersionStatus) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, "  environments:"); err != nil {
+		return err
+	}
+	for _, env := range environments {
+		line := "    - " + env.Environment + " version=" + quotedValueOrNone(env.Version)
+		if env.BehindMax {
+			line += " [behind max]"
+		}
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeVersionDriftGate(ctx common.Context, drift common.TenantVersionDrift) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, "  gate:"); err != nil {
+		return err
+	}
+	if err := writeIndentedValue(ctx, 4, "environment", drift.GateEnvironment); err != nil {
+		return err
+	}
+	if err := writeIndentedValue(ctx, 4, "version", valueOrNone(drift.GateVersion)); err != nil {
+		return err
+	}
+	switch {
+	case drift.GateVersionUnresolved:
+		_, err := fmt.Fprintln(ctx.Stdout, "    behind: unknown (gate's own erun version could not be resolved from config)")
+		return err
+	case drift.GateBehind:
+		_, err := fmt.Fprintf(ctx.Stdout, "    behind: yes -- outdated relative to %s\n", strings.Join(drift.GateOutdatedBy, ", "))
+		return err
+	default:
+		_, err := fmt.Fprintln(ctx.Stdout, "    behind: no")
+		return err
+	}
+}
+
+func writeControlPlaneVersionReport(ctx common.Context, drift common.ControlPlaneVersionDrift) error {
+	if ctx.DryRun {
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.")
+		return err
+	}
+	if drift.PublishedVersionError != "" {
+		if err := writeLabeledValue(ctx, "published version", "unresolved ("+drift.PublishedVersionError+")"); err != nil {
+			return err
+		}
+	} else {
+		if err := writeLabeledValue(ctx, "published version", valueOrNone(drift.PublishedVersion)); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "Control planes:"); err != nil {
+		return err
+	}
+	if len(drift.Planes) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "  none")
+		return err
+	}
+	for _, plane := range drift.Planes {
+		if err := writeControlPlaneVersionEntry(ctx, plane); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlaneVersionStatus) error {
+	line := "  - " + plane.Alias + " api-url=" + quotedValueOrNone(plane.APIURL)
+	if !plane.Reachable {
+		line += " reachable=no reason=" + quotedValueOrNone(plane.UnreachableReason)
+		_, err := fmt.Fprintln(ctx.Stdout, line)
+		return err
+	}
+	line += " reachable=yes version=" + quotedValueOrNone(plane.Version)
+	switch {
+	case plane.Behind:
+		line += " [behind published -- roll it]"
+	case plane.Ahead:
+		line += " [ahead of published -- running an unpublished version]"
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
+		return err
+	}
+	if plane.Console == nil {
+		return nil
+	}
+	return writeControlPlaneConsoleEntry(ctx, *plane.Console)
+}
+
+func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVersionStatus) error {
+	line := "    console: url=" + quotedValueOrNone(console.URL)
+	if !console.Reachable {
+		line += " reachable=no reason=" + quotedValueOrNone(console.UnreachableReason)
+		_, err := fmt.Fprintln(ctx.Stdout, line)
+		return err
+	}
+	line += " reachable=yes version=" + quotedValueOrNone(console.Version)
+	switch {
+	case console.Behind:
+		line += " [behind published -- roll it]"
+	case console.Ahead:
+		line += " [ahead of published -- running an unpublished version]"
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, line)
+	return err
 }
 
 func writeListResult(ctx common.Context, result common.ListResult) error {
@@ -40,7 +326,10 @@ func writeListResult(ctx common.Context, result common.ListResult) error {
 	if err := writeCloudProviders(ctx, result.CloudProviders); err != nil {
 		return err
 	}
-	return writeListTenants(ctx, result.Tenants)
+	if err := writeListTenants(ctx, result.Tenants); err != nil {
+		return err
+	}
+	return writeOrchestrators(ctx, result.Orchestrators)
 }
 
 func writeListHeaderSections(ctx common.Context, result common.ListResult) error {
@@ -103,6 +392,61 @@ func writeListTenants(ctx common.Context, tenants []common.ListTenantResult) err
 	return nil
 }
 
+func writeOrchestrators(ctx common.Context, orchestrators []common.ListOrchestratorResult) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, "Orchestrators:"); err != nil {
+		return err
+	}
+	if len(orchestrators) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "  none")
+		return err
+	}
+	for _, orchestrator := range orchestrators {
+		if err := writeOrchestratorEntry(ctx, orchestrator); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeOrchestratorEntry(ctx common.Context, orchestrator common.ListOrchestratorResult) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "  - %s %q\n", orchestrator.ID, orchestrator.Name); err != nil {
+		return err
+	}
+	if len(orchestrator.Environments) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "    environments: none")
+		return err
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "    environments:"); err != nil {
+		return err
+	}
+	for _, env := range orchestrator.Environments {
+		if err := writeOrchestratorEnvEntry(ctx, env); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// orchestratorEnvRoleLabel renders "undeclared" for an empty role rather than
+// guessing a default -- unset means the operator has not stated a purpose for
+// this link, distinct from either known role.
+func orchestratorEnvRoleLabel(role common.OrchestratorEnvRole) string {
+	if role == "" {
+		return "undeclared"
+	}
+	return string(role)
+}
+
+func writeOrchestratorEnvEntry(ctx common.Context, env common.ListOrchestratorEnvResult) error {
+	line := "      - " + env.Tenant + "/" + env.Environment
+	line += " role=" + orchestratorEnvRoleLabel(env.Role)
+	if strings.TrimSpace(env.Directory) != "" {
+		line += " directory=" + env.Directory
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, line)
+	return err
+}
+
 func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryResult) error {
 	if current.Effective == nil {
 		if strings.TrimSpace(current.EffectiveError) != "" {
@@ -114,7 +458,7 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 		return err
 	}
 	if current.Effective.SSH.Enabled {
-		if err := writeEffectiveOpenSSH(ctx, current.Effective.SSH); err != nil {
+		if err := writeEffectiveOpenSSH(ctx, *current.Effective); err != nil {
 			return err
 		}
 	}
@@ -169,11 +513,12 @@ func writeEffectiveTargetPorts(ctx common.Context, effective common.ListEffectiv
 	return writeLabeledValue(ctx, "assigned contribute-app local port", fmt.Sprintf("%d (when contribute mode is active and `erun app --headless` is running)", effective.LocalPorts.ContributeApp))
 }
 
-func writeEffectiveOpenSSH(ctx common.Context, ssh common.ListSSHResult) error {
+func writeEffectiveOpenSSH(ctx common.Context, effective common.ListEffectiveTargetResult) error {
+	ssh := effective.SSH
 	if err := writeLabeledValue(ctx, "sshd", "on"); err != nil {
 		return err
 	}
-	if err := writeLabeledValue(ctx, "ssh host", ssh.HostAlias); err != nil {
+	if err := writeLabeledValue(ctx, "ssh host", sshHostAliasLabel(effective.Tenant, effective.Environment, ssh.HostAlias)); err != nil {
 		return err
 	}
 	if err := writeLabeledValue(ctx, "ssh user", ssh.User); err != nil {
@@ -203,18 +548,18 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 		return err
 	}
 	for _, env := range tenant.Environments {
-		if err := writeEnvironmentEntry(ctx, env); err != nil {
+		if err := writeEnvironmentEntry(ctx, tenant.Name, env); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func writeEnvironmentEntry(ctx common.Context, env common.ListEnvironmentResult) error {
+func writeEnvironmentEntry(ctx common.Context, tenantName string, env common.ListEnvironmentResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, environmentHeaderLine(env)); err != nil {
 		return err
 	}
-	for _, line := range environmentDetailLines(env) {
+	for _, line := range environmentDetailLines(tenantName, env) {
 		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err
 		}
@@ -242,7 +587,7 @@ func environmentHeaderLine(env common.ListEnvironmentResult) string {
 	return envLine
 }
 
-func environmentDetailLines(env common.ListEnvironmentResult) []string {
+func environmentDetailLines(tenantName string, env common.ListEnvironmentResult) []string {
 	const indent = "          "
 	lines := []string{
 		indent + "type: " + valueOrNone(string(env.Type)),
@@ -254,13 +599,16 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 		indent + "ssh-port: " + fmt.Sprintf("%d", env.LocalPorts.SSH),
 		indent + "contribute-app-port: " + fmt.Sprintf("%d", env.LocalPorts.ContributeApp),
 		indent + "container-registries: " + containerRegistriesLabel(env.ContainerRegistries),
-		indent + "runtime-version: " + valueOrNone(env.RuntimeVersion),
+		indent + "runtime-version: " + runtimeVersionLabel(tenantName, env),
 		indent + "runtime-pod: " + runtimePodLabel(env.RuntimePod),
+	}
+	lines = append(lines, runtimeSizingLines(env.Sizing, indent)...)
+	lines = append(lines, []string{
 		indent + "managed-cloud: " + enabledDisabledLabel(env.ManagedCloud),
 		indent + "ai-tool: " + valueOrNone(env.AITool),
 		indent + "claude: " + claudeLabel(env.Claude),
 		indent + "idle: " + idleLabel(env.Idle),
-	}
+	}...)
 	if env.DisableBuildScript {
 		lines = append(lines, indent+"disable-build-script: enabled")
 	}
@@ -268,17 +616,17 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 		lines = append(lines, indent+"platform-account: enabled")
 	}
 	if env.SSH.Enabled {
-		lines = append(lines, environmentSSHDetailLines(env.SSH, indent)...)
+		lines = append(lines, environmentSSHDetailLines(tenantName, env.Name, env.SSH, indent)...)
 	} else {
 		lines = append(lines, indent+"sshd: off")
 	}
 	return lines
 }
 
-func environmentSSHDetailLines(ssh common.ListSSHResult, indent string) []string {
+func environmentSSHDetailLines(tenantName, environmentName string, ssh common.ListSSHResult, indent string) []string {
 	return []string{
 		indent + "sshd: on",
-		indent + "ssh-host: " + valueOrNone(ssh.HostAlias),
+		indent + "ssh-host: " + sshHostAliasLabel(tenantName, environmentName, ssh.HostAlias),
 		indent + "ssh-user: " + valueOrNone(ssh.User),
 		indent + "ssh-local-port: " + fmt.Sprintf("%d", ssh.LocalPort),
 		indent + "ssh-workspace: " + valueOrNone(ssh.WorkspacePath),
@@ -286,6 +634,68 @@ func environmentSSHDetailLines(ssh common.ListSSHResult, indent string) []string
 		indent + "ssh-workspace-sync: " + enabledDisabledLabel(ssh.WorkspaceSyncEnabled),
 		indent + "ssh-workspace-sync-local-path: " + valueOrNone(ssh.WorkspaceSyncLocalPath),
 	}
+}
+
+// sshHostAliasLabel reports the alias `erun list` derives for an env, plus the
+// fix when the alias is only a naming convention: SSHHostAlias is computed
+// from tenant/environment alone, so it prints the same whether or not
+// ~/.ssh/config actually has a matching Host block. Reporting it bare reads as
+// "this alias works" when nothing wrote the block or authorized a key for it.
+// A check that cannot run (home dir unresolvable) reports the alias bare
+// rather than a false alarm.
+func sshHostAliasLabel(tenantName, environmentName, alias string) string {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return valueOrNone(alias)
+	}
+	configured, err := sshconfig.DefaultConfigHasAlias(alias)
+	if err != nil || configured {
+		return alias
+	}
+	return fmt.Sprintf("%s (not in ~/.ssh/config — run `erun sshd init %s %s` to fix)", alias, tenantName, environmentName)
+}
+
+// runtimeSizingLines render the standing recommendation under `runtime-pod:`,
+// which is the setting an operator would change to act on it. Two lines: the
+// verdicts, then the evidence they rest on. The evidence line is not optional
+// detail — a recommendation whose window and counters are invisible cannot be
+// argued with, and this one has to be argued with before anyone shrinks an
+// environment.
+func runtimeSizingLines(sizing *common.RuntimeSizingRecommendation, indent string) []string {
+	if sizing == nil {
+		return nil
+	}
+	verdicts := make([]string, 0, len(sizing.Verdicts))
+	for _, verdict := range sizing.Verdicts {
+		verdicts = append(verdicts, common.FormatRuntimeSizingVerdict(verdict))
+	}
+	return []string{
+		indent + "sizing: " + strings.Join(verdicts, "; "),
+		indent + "sizing-evidence: " + common.FormatRuntimeSizingEvidence(*sizing),
+	}
+}
+
+// runtimeVersionLabel names the release line beside the bare runtime-version
+// number: a number alone reads as an erun version even when it rides a
+// tenant's own devops line, and two environments in the same tenant can ride
+// different lines from each other (erun#1746). An environment that has never
+// deployed still reads "none", unchanged; one that has deployed but recorded
+// no resolved image reads distinctly as "line undetermined" rather than
+// guessing a line from the tenant name.
+func runtimeVersionLabel(tenantName string, env common.ListEnvironmentResult) string {
+	version := valueOrNone(env.RuntimeVersion)
+	if env.RuntimeVersionLine == nil {
+		return version
+	}
+	line := *env.RuntimeVersionLine
+	if line.Undetermined {
+		return version + " (line undetermined — no resolved runtime image recorded; redeploy to record it)"
+	}
+	detail := line.Line + " line, " + line.Image
+	if line.Disagrees {
+		detail += " — release name " + common.RuntimeReleaseName(tenantName) + " disagrees with the image"
+	}
+	return version + " (" + detail + ")"
 }
 
 func runtimePodLabel(pod common.RuntimePodResources) string {

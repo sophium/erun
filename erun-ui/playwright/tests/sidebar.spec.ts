@@ -11,6 +11,15 @@ test.describe('sidebar', () => {
     await app.sidebar.toggleTenant(SEED_TENANT);
   });
 
+  // The tenant row's only prior affordance was the folder-group header
+  // (#1218): nothing indicated the name itself opens a dashboard. It now
+  // carries a visible icon alongside the name.
+  test('tenant row carries a visible affordance for opening the dashboard', async ({ app }) => {
+    const icon = app.sidebar.tenantDashboardButton(SEED_TENANT).locator('svg');
+    await expect(icon).toBeVisible();
+    await expect(icon).toHaveAttribute('aria-hidden', 'true');
+  });
+
   test('opening an environment surfaces status feedback', async ({ app, page }) => {
     // The opening status is inherently transient — it lives only for the open
     // itself (a few hundred ms): the titlebar "Opening …" message clears the

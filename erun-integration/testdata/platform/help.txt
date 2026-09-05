@@ -1,0 +1,25 @@
+Operate a hosted erun platform's control-plane API
+
+Usage:
+  erun platform [command]
+
+Available Commands:
+  context     Manage the erun platform's own cloud contexts (managed clusters)
+  env         Manage hosted environments on the erun platform
+  identity    Administer the erun platform's own identity provider
+  provision   Preview the ordered plan for provisioning a hosted environment
+  tenant      Manage tenants on the erun platform
+  user        Manage users on the erun platform
+  version     Report the erun platform's own version and build
+  whoami      Show the caller's resolved identity on the erun platform
+
+Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+  -h, --help                help for platform
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun platform [command] --help" for more information about a command.

@@ -1,4 +1,18 @@
 Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+
 == Helm release status ==
 NAME: team-devops
 STATUS: pending-install
@@ -15,3 +29,5 @@ Running: Remove stopped Docker containers
 Total reclaimed space: 1GB
 audit: erun doctor --prune-containers team dev
 trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

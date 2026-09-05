@@ -1,0 +1,711 @@
+package integration
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/sophium/erun/erun-integration/internal/env"
+	"github.com/sophium/erun/erun-integration/internal/erun"
+	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/normalize"
+)
+
+// seedCachedERunAccessToken writes a cached, unexpired access token directly
+// (bypassing the OIDC device flow cloud_test.go's real-run scenarios already
+// cover) so a platform scenario can hit the real erun-backend-api stub
+// authenticated from its first request.
+func seedCachedERunAccessToken(t testing.TB, setup env.Setup, alias, token string) {
+	t.Helper()
+	dir := filepath.Join(setup.ConfigHome, "erun", "cloud-secrets")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	sum := sha256.Sum256([]byte("erun/access/" + alias))
+	path := filepath.Join(dir, hex.EncodeToString(sum[:])+".token")
+	body := `{"accessToken":"` + token + `","expiresAt":"2999-01-01T00:00:00Z"}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write cached access token: %v", err)
+	}
+}
+
+// platformAlias seeds a minimal erun-type cloud alias pointed at server, with
+// a cached access token already in place — the alias `erun platform`
+// commands resolve by default when exactly one erun-type alias is configured.
+func platformAlias(t testing.TB, setup env.Setup, server *httptest.Server) string {
+	t.Helper()
+	alias := "erun+test@erun"
+	seedERunCloudProviderAlias(t, setup, alias, server.URL, "cli-test-client")
+	seedCachedERunAccessToken(t, setup, alias, "test-access-token")
+	return alias
+}
+
+// requireBearer answers 401 unless the request carries the seeded test token,
+// so a scenario proves the CLI actually attached the bearer it minted.
+func requireBearer(w http.ResponseWriter, r *http.Request) bool {
+	if r.Header.Get("Authorization") != "Bearer test-access-token" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
+// platformAPIStubServer runs a minimal erun-backend-api double covering every
+// route `erun platform` drives, so real-run scenarios exercise
+// erun-common/platform_client.go's request/response handling end to end
+// rather than only its --dry-run trace branch.
+func platformAPIStubServer(t testing.TB) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	// orgScopedIssuers mirrors the real backend's issuers.org_field_key: once
+	// an issuer is registered org-scoped (the first POST /v1/tenants that
+	// names an orgFieldKey for it), every later tenant on that issuer needs a
+	// real orgFieldValue or it can never resolve. This is what lets the
+	// identity-org-create scenarios below prove the reachable path actually
+	// produces a tenant that would resolve, not merely one that was accepted.
+	var mu sync.Mutex
+	orgScopedIssuers := map[string]string{}
+
+	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tenantId": "tenant-1", "userId": "user-1", "username": "test-user", "issuer": "https://idp.example", "subject": "sub-1",
+		})
+	})
+	mux.HandleFunc("POST /v1/identity/orgs", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "org-" + body["name"], "name": body["name"]})
+	})
+	// GET /v1/platform is unauthenticated on the real API (routes.RegisterPlatformRoute),
+	// so this stub never calls requireBearer -- a scenario proving `platform
+	// version` works even with no/expired credentials would otherwise pass for
+	// the wrong reason if the stub itself demanded a bearer.
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer": "https://idp.example", "apiUrl": "https://api.example.test", "version": "1.2.3",
+		})
+	})
+	mux.HandleFunc("POST /v1/tenants", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+
+		mu.Lock()
+		if body["orgFieldKey"] != "" {
+			if _, seen := orgScopedIssuers[body["issuer"]]; !seen {
+				orgScopedIssuers[body["issuer"]] = body["orgFieldKey"]
+			}
+		}
+		orgFieldKey := orgScopedIssuers[body["issuer"]]
+		mu.Unlock()
+
+		// Mirrors assertResolvableIssuerMapping: an org-scoped issuer with no
+		// org value on this mapping can never resolve any token, so the real
+		// backend refuses it rather than minting a dead tenant.
+		if orgFieldKey != "" && body["orgFieldValue"] == "" {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":    "UNRESOLVABLE_ISSUER_MAPPING",
+				"message": "issuer resolves tenants by an org claim; create one with `erun platform identity org create --name <org-name>` and pass its id as --org-field-value",
+			})
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tenantId": "tenant-2", "name": body["name"], "type": body["type"], "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("GET /v1/tenants", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		// probeco stands in for a tenant whose issuer mapping no token can
+		// resolve through: it exists, it lists, and nobody can ever sign in to
+		// it. The listing has to say so, or the only way to find out is a
+		// sign-in that lands somewhere else.
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"tenantId": "tenant-1", "name": "acme", "type": "COMPANY", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z", "resolvable": true},
+			{"tenantId": "tenant-3", "name": "probeco", "type": "COMPANY", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z", "resolvable": false},
+		})
+	})
+	mux.HandleFunc("POST /v1/users", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"userId": "user-2", "tenantId": "tenant-1", "username": body["username"], "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("GET /v1/users", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"userId": "user-1", "tenantId": "tenant-1", "username": "test-user", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z"},
+		})
+	})
+	mux.HandleFunc("GET /v1/environments", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"environmentId": "env-1", "tenantId": "tenant-1", "name": "prod", "type": "runtime", "status": "running", "runtimeVersion": "1.2.3", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z"},
+		})
+	})
+	mux.HandleFunc("POST /v1/environments", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"environmentId": "env-2", "tenantId": "tenant-1", "name": body["name"], "type": body["type"], "status": "registered", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("GET /v1/environments/{environment_id}", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		if r.PathValue("environment_id") == "missing" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"environmentId": r.PathValue("environment_id"), "tenantId": "tenant-1", "name": "prod", "type": "runtime", "status": "running", "runtimeVersion": "1.2.3", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("POST /v1/environments/{environment_id}/deploy", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"environmentId": r.PathValue("environment_id"), "tenantId": "tenant-1", "name": "prod", "type": "runtime", "status": "provisioning", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("POST /v1/environments/{environment_id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"environmentId": r.PathValue("environment_id"), "tenantId": "tenant-1", "name": "prod", "type": "runtime", "status": "running", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("DELETE /v1/environments/{environment_id}", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"environmentId": r.PathValue("environment_id"), "tenantId": "tenant-1", "name": "prod", "type": "runtime", "status": "deleting", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("GET /v1/contexts", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"contextId": "ctx-1", "tenantId": "tenant-1", "name": "prod-cluster", "provider": "aws", "status": "running", "region": "eu-west-2", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z"},
+		})
+	})
+	mux.HandleFunc("GET /v1/contexts/{context_id}", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"contextId": r.PathValue("context_id"), "tenantId": "tenant-1", "name": "prod-cluster", "provider": "aws", "status": "running", "region": "eu-west-2", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("POST /v1/contexts", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if preview, _ := body["preview"].(bool); preview {
+			_ = json.NewEncoder(w).Encode(map[string]any{"plan": []string{"context: bootstrap cluster prod via alias aws-main in eu-west-2"}})
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"plan": []string{"context: bootstrap cluster prod via alias aws-main in eu-west-2"},
+			"context": map[string]any{
+				"contextId": "ctx-2", "tenantId": "tenant-1", "name": body["name"], "provider": "aws", "status": "provisioning", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+			},
+		})
+	})
+	mux.HandleFunc("POST /v1/provision", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"plan": []string{
+				"provision: tenant acme (resolved from token)",
+				"quota: tenant has 1 of 10 environments — within quota",
+				"namespace: would create acme-prod",
+			},
+			"quotaOk": true,
+		})
+	})
+
+	mux.HandleFunc("PATCH /v1/tenant-issuers", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		if body["orgFieldKey"] != "" {
+			orgScopedIssuers[body["issuer"]] = body["orgFieldKey"]
+		}
+		mu.Unlock()
+		tenantID := body["tenantId"]
+		if tenantID == "" {
+			tenantID = "tenant-1"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tenantId": tenantID, "issuer": body["issuer"], "name": "repaired",
+			"orgFieldKey": body["orgFieldKey"], "orgFieldValue": body["orgFieldValue"],
+		})
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestPlatform(t *testing.T) {
+	t.Parallel()
+	t.Run("help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"platform", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("whoami_no_alias_configured", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit with no erun alias configured, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "platform/whoami_no_alias_configured", normalize.Apply(result.Combined))
+	})
+
+	t.Run("whoami_dry_run_traces_resolved_call", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{"platform", "whoami", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/whoami_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("whoami_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		result := erun.Run(t, []string{"platform", "whoami"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "test-user") || !strings.Contains(result.Combined, "tenant-1") {
+			t.Fatalf("expected whoami output to name the resolved identity, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("version_dry_run_traces_resolved_call", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{"platform", "version", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/version_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_real_run_without_a_working_token", func(t *testing.T) {
+		// GET /v1/platform is unauthenticated (see platformAPIStubServer's own
+		// comment), so this must succeed even though the alias's cached access
+		// token is garbage -- the whole point of exposing this route is that it
+		// answers when a caller's credentials cannot be trusted to resolve
+		// anything else.
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		alias := "erun+test@erun"
+		seedERunCloudProviderAlias(t, setup, alias, server.URL, "cli-test-client")
+		seedCachedERunAccessToken(t, setup, alias, "expired-or-garbage-token")
+		result := erun.Run(t, []string{"platform", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "1.2.3") || !strings.Contains(result.Combined, "https://api.example.test") {
+			t.Fatalf("expected the reported version and api url, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("tenant_create_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"platform", "tenant", "create", "--name", "acme", "--issuer", "https://idp.example", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/tenant_create_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("tenant_create_and_list_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		createResult := erun.Run(t, []string{"platform", "tenant", "create", "--name", "acme", "--issuer", "https://idp.example"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if createResult.ExitCode != 0 {
+			t.Fatalf("create exit %d: %s", createResult.ExitCode, createResult.Combined)
+		}
+		if !strings.Contains(createResult.Combined, "acme") {
+			t.Fatalf("expected created tenant to be named, got:\n%s", createResult.Combined)
+		}
+		listResult := erun.Run(t, []string{"platform", "tenant", "list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if listResult.ExitCode != 0 {
+			t.Fatalf("list exit %d: %s", listResult.ExitCode, listResult.Combined)
+		}
+		if !strings.Contains(listResult.Combined, "acme") {
+			t.Fatalf("expected tenant list to include acme, got:\n%s", listResult.Combined)
+		}
+		// A tenant no token can resolve to must be flagged where it is
+		// listed, and a healthy one must not be.
+		unreachableLine := ""
+		acmeLine := ""
+		for _, line := range strings.Split(listResult.Combined, "\n") {
+			if strings.Contains(line, "probeco") {
+				unreachableLine = line
+			}
+			if strings.Contains(line, "acme") {
+				acmeLine = line
+			}
+		}
+		if !strings.Contains(unreachableLine, "UNREACHABLE") {
+			t.Fatalf("expected the unresolvable tenant to be flagged, got:\n%s", listResult.Combined)
+		}
+		if strings.Contains(acmeLine, "UNREACHABLE") {
+			t.Fatalf("a resolvable tenant must not be flagged unreachable, got:\n%s", acmeLine)
+		}
+	})
+
+	t.Run("identity_org_create_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"platform", "identity", "org", "create", "--name", "acme", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/identity_org_create_dry_run", normalize.Apply(result.Combined))
+	})
+
+	// This is erun#2049's core defect, reproduced end to end: before the org
+	// create command existed, an operator following `platform tenant create
+	// --org-field-key/--org-field-value` had no reachable way to obtain an
+	// org id at all, so an org-scoped tenant could only be created with an
+	// empty org value -- accepted, listed, and permanently unresolvable (see
+	// tenant_create_and_list_real_run's "probeco" fixture above). This proves
+	// the reachable path: create the org, feed its id into tenant create, and
+	// the same org-scoped issuer that refuses an empty value accepts this one.
+	t.Run("identity_org_create_and_tenant_create_reachable_path_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		orgResult := erun.Run(t, []string{"platform", "identity", "org", "create", "--name", "acme-reachable", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if orgResult.ExitCode != 0 {
+			t.Fatalf("org create exit %d: %s", orgResult.ExitCode, orgResult.Combined)
+		}
+		var org struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(orgResult.Stdout), &org); err != nil || org.ID == "" {
+			t.Fatalf("expected a JSON org result with an id, got err=%v combined:\n%s", err, orgResult.Combined)
+		}
+
+		const issuer = "https://auth.reachable-path.example"
+		const orgFieldKey = "urn:zitadel:iam:user:resourceowner:id"
+
+		// Without the org id this reachable path just produced, the same
+		// issuer refuses -- proving the refusal from erun#1832 is still live
+		// and that what follows is a genuine positive case, not a stub that
+		// always says yes.
+		refused := erun.Run(t, []string{
+			"platform", "tenant", "create", "--name", "acme-reachable-dead",
+			"--issuer", issuer, "--org-field-key", orgFieldKey,
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if refused.ExitCode == 0 {
+			t.Fatalf("expected an org-scoped tenant with no org value to be refused, got:\n%s", refused.Combined)
+		}
+		if !strings.Contains(refused.Combined, "erun platform identity org create") {
+			t.Fatalf("refusal must name the org-create command, got:\n%s", refused.Combined)
+		}
+
+		resolvedResult := erun.Run(t, []string{
+			"platform", "tenant", "create", "--name", "acme-reachable",
+			"--issuer", issuer, "--org-field-key", orgFieldKey, "--org-field-value", org.ID,
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if resolvedResult.ExitCode != 0 {
+			t.Fatalf("tenant create with the org id from the reachable path: exit %d: %s", resolvedResult.ExitCode, resolvedResult.Combined)
+		}
+		if !strings.Contains(resolvedResult.Combined, "acme-reachable") {
+			t.Fatalf("expected the created tenant to be named, got:\n%s", resolvedResult.Combined)
+		}
+	})
+
+	t.Run("tenant_repair_org_mapping_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"platform", "tenant", "repair-org-mapping", "--tenant-id", "tenant-probeco",
+			"--issuer", "https://idp.example", "--org-field-key", "urn:zitadel:iam:user:resourceowner:id",
+			"--org-field-value", "42", "--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/tenant_repair_org_mapping_dry_run", normalize.Apply(result.Combined))
+	})
+
+	// The repair path for a tenant already stuck in probeco's state (created
+	// before erun#1832's refusal existed, or left behind when its issuer was
+	// converted to org-scoped afterward): an operations caller repairs a
+	// tenant other than its own by naming --tenant-id explicitly.
+	t.Run("tenant_repair_org_mapping_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		result := erun.Run(t, []string{
+			"platform", "tenant", "repair-org-mapping", "--tenant-id", "tenant-probeco",
+			"--issuer", "https://auth.repair-path.example", "--org-field-key", "urn:zitadel:iam:user:resourceowner:id",
+			"--org-field-value", "org-probeco-repaired",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "org-probeco-repaired") {
+			t.Fatalf("expected the repaired org value to be reported, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("user_enroll_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"platform", "user", "enroll", "--username", "jane", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/user_enroll_dry_run", normalize.Apply(result.Combined))
+	})
+
+	// The cross-tenant recovery shape: an operations caller enrolls another
+	// tenant's administrator directly. Both flags have to reach the request,
+	// since an enrollment that lands as an ordinary member can only be elevated
+	// from inside a tenant that may have nobody able to do it.
+	t.Run("user_enroll_with_roles_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"platform", "user", "enroll", "--username", "jane",
+			"--tenant-id", "tenant-b", "--role-id", "role-admin", "--role-id", "role-reader",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/user_enroll_with_roles_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("user_enroll_and_list_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		enrollResult := erun.Run(t, []string{"platform", "user", "enroll", "--username", "jane"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if enrollResult.ExitCode != 0 {
+			t.Fatalf("enroll exit %d: %s", enrollResult.ExitCode, enrollResult.Combined)
+		}
+		listResult := erun.Run(t, []string{"platform", "user", "list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if listResult.ExitCode != 0 {
+			t.Fatalf("list exit %d: %s", listResult.ExitCode, listResult.Combined)
+		}
+		if !strings.Contains(listResult.Combined, "test-user") {
+			t.Fatalf("expected user list to include test-user, got:\n%s", listResult.Combined)
+		}
+	})
+
+	t.Run("env_register_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"platform", "env", "register", "--name", "prod", "--type", "runtime", "--runtime-version", "1.2.3", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/env_register_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("env_lifecycle_real_run", func(t *testing.T) {
+		// One scenario drives register -> list -> get -> deploy -> stop ->
+		// delete against the real stub server, covering every environment
+		// PlatformClient method's request/response handling in one pass.
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		register := erun.Run(t, []string{"platform", "env", "register", "--name", "prod", "--type", "runtime"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if register.ExitCode != 0 {
+			t.Fatalf("register exit %d: %s", register.ExitCode, register.Combined)
+		}
+
+		list := erun.Run(t, []string{"platform", "env", "list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if list.ExitCode != 0 || !strings.Contains(list.Combined, "prod") {
+			t.Fatalf("list exit %d: %s", list.ExitCode, list.Combined)
+		}
+
+		get := erun.Run(t, []string{"platform", "env", "get", "env-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if get.ExitCode != 0 || !strings.Contains(get.Combined, "env-1") {
+			t.Fatalf("get exit %d: %s", get.ExitCode, get.Combined)
+		}
+
+		deploy := erun.Run(t, []string{"platform", "env", "deploy", "env-1", "--version", "1.3.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if deploy.ExitCode != 0 || !strings.Contains(deploy.Combined, "provisioning") {
+			t.Fatalf("deploy exit %d: %s", deploy.ExitCode, deploy.Combined)
+		}
+
+		stop := erun.Run(t, []string{"platform", "env", "stop", "env-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if stop.ExitCode != 0 {
+			t.Fatalf("stop exit %d: %s", stop.ExitCode, stop.Combined)
+		}
+
+		deleteResult := erun.Run(t, []string{"platform", "env", "delete", "env-1", "-y"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if deleteResult.ExitCode != 0 || !strings.Contains(deleteResult.Combined, "status=deleting") {
+			t.Fatalf("delete exit %d: %s", deleteResult.ExitCode, deleteResult.Combined)
+		}
+	})
+
+	t.Run("env_get_not_found", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		result := erun.Run(t, []string{"platform", "env", "get", "missing"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a missing environment, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "not found") {
+			t.Fatalf("expected a not-found error, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("env_delete_dry_run_skips_confirmation", func(t *testing.T) {
+		// --dry-run must never block on the interactive confirm prompt: the
+		// harness has no TTY to answer it.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{"platform", "env", "delete", "env-1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/env_delete_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("context_create_preview_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		args := []string{"platform", "context", "create", "--name", "prod", "--alias", "aws-main", "--region", "eu-west-2", "--preview"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "bootstrap cluster prod") {
+			t.Fatalf("expected the preview plan in output, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("context_list_and_get_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		list := erun.Run(t, []string{"platform", "context", "list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if list.ExitCode != 0 || !strings.Contains(list.Combined, "prod-cluster") {
+			t.Fatalf("list exit %d: %s", list.ExitCode, list.Combined)
+		}
+		get := erun.Run(t, []string{"platform", "context", "get", "ctx-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if get.ExitCode != 0 || !strings.Contains(get.Combined, "ctx-1") {
+			t.Fatalf("get exit %d: %s", get.ExitCode, get.Combined)
+		}
+	})
+
+	t.Run("provision_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"platform", "provision", "--env-name", "prod", "--env-type", "runtime", "--kubernetes-context", "prod-cluster", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/provision_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("provision_with_context_bootstrap_real_run", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		args := []string{
+			"platform", "provision", "--env-name", "prod", "--env-type", "runtime",
+			"--context-name", "prod", "--context-alias", "aws-main", "--context-region", "eu-west-2",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "quota ok: true") {
+			t.Fatalf("expected the resolved plan and quota line, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("output_json", func(t *testing.T) {
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		result := erun.Run(t, []string{"platform", "whoami", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, `"tenantId": "tenant-1"`) {
+			t.Fatalf("expected structured JSON result on stdout, got:\n%s", result.Combined)
+		}
+	})
+}

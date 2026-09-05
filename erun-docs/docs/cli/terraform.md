@@ -38,13 +38,21 @@ Run `erun terraform init <tenant> <env>` **once** first (and again after you cha
 
 When the env has a Cloudflare alias, its `CLOUDFLARE_API_TOKEN` is forwarded to Terraform as `TF_VAR_cloudflare_api_token` (so the edge module's cert-manager DNS-01 solver can prove control of the zone). The token rides in the environment — it never appears in the command line or the trace.
 
+When the env's `<env>.tfvars` sets `dns01_provider = "powerdns-rfc2136"`, erun reads the cluster-edge module's own RFC2136 TSIG secret back from its Kubernetes Secret and forwards it as `TF_VAR_rfc2136_tsig_secret` — you never export or type it yourself. Before running any `terraform` command, erun checks that the Secret exists and holds a value; if it doesn't, the command aborts up front naming the missing Secret and key, instead of letting Terraform print a partial plan and fail its own precondition mid-run.
+
+## Running against a runtime or remote-agent env from outside it
+
+A [runtime or remote-agent env](/concepts/environment-types)'s Terraform state lives on its own runtime pod's home directory, not on whatever machine invokes `erun terraform`. Run the command against one of these envs from anywhere other than that pod itself — your laptop, a script, a host-side orchestrator — and erun dispatches it non-interactively into the env's own pod instead: it runs the equivalent `erun terraform <operation> --tenant <tenant> --environment <env>` there via `kubectl exec`, so the state resolves against the real pod and you never have to `erun open` a shell first just to run one command.
+
+`init`/`plan` dispatch automatically — they're read-only. `apply`/`destroy` still need `--confirm-environment <env>` on the outer, dispatching invocation: with no TTY inside the pod to answer an interactive prompt, the confirmation has to arrive with the command, and dispatch never treats a missing one as an implicit yes.
+
 ## Flags
 
 | Flag | Description |
 |---|---|
 | `--tenant <name>` | Target a specific tenant (defaults to the current scope). |
 | `--environment <name>` | Target a specific environment (defaults to the tenant's default). |
-| `--confirm-environment <env>` | Restate the environment name to confirm, bypassing the interactive prompt — for non-interactive use. `apply`/`destroy` only. |
+| `--confirm-environment <env>` | Restate the environment name to confirm, bypassing the interactive prompt — for non-interactive use. `apply`/`destroy` only. Required when dispatching an `apply`/`destroy` into a runtime/remote-agent env's own pod from outside it (see above). |
 | `--dry-run` | Resolve and print the full sequence of `terraform` commands without running any of them. |
 
 ## Error behaviour
@@ -54,10 +62,13 @@ When the env has a Cloudflare alias, its `CLOUDFLARE_API_TOKEN` is forwarded to 
 | Not in a project (no git repo found on the host) | Aborts: `cannot find git project`; exit 1. | Run from inside your project checkout. This doesn't occur inside a runtime pod, where erun resolves the project tree automatically even though it has no `.git`. |
 | No Terraform root at either candidate | Aborts: `no Terraform root for <tenant>/<env> — looked under terraform-<tenant>/<env>/ and <tenant>-devops/terraform-<tenant>/<env>/ …`; exit 1. | Scaffold the per-env root with [`erun-blueprint-platform`](/agent-reference/skills-spec#erun-blueprint-platform), or create it at either location with its `main.tf` and `<env>.tfvars`. |
 | Environment not configured | Surfaces the config load error; exit 1. | Create the env (`erun init`) or fix the tenant/env name. |
+| The environment is a [host env](/concepts/environment-types#host) | Aborts before resolving a Terraform root: a host env has no pod and no cluster to run terraform against; exit 1. | Run terraform against an agent or runtime env whose cluster this Terraform targets. |
+| `apply`/`destroy` dispatched into a runtime/remote-agent env's own pod with no `--confirm-environment` | Aborts before anything runs in the pod: the same "type the environment name" prompt reads empty/closed stdin and refuses; exit 1. | Re-run with `--confirm-environment <env>`. |
 | No default tenant/environment and none passed | Aborts: default tenant/environment not configured; exit 1. | Pass `TENANT ENVIRONMENT` (or set a default scope). |
 | Confirmation doesn't match the env name | Aborts before the apply step: `confirmation "…" does not match environment "…"; aborting <operation>`; exit 1. The earlier read-only steps (`plan`, plus `fmt` for `apply`) have already run; only the apply is gated. | Re-run and type the exact environment name (or pass `--confirm-environment <env>`). |
 | Providers not initialized (`init` not run) | A `plan`/`apply`/`destroy` `terraform` step stops with Terraform's *"Module not installed / please run terraform init"* error; exit 1. | Run `erun terraform init <tenant> <env>` first — once per environment, and again after changing providers. |
 | `init` on a read-only tree with no committed lock | `erun terraform init` aborts before running Terraform: the playbook tree is not writable and has no `.terraform.lock.hcl` to init read-only from; exit 1. | Run `erun terraform init` on a writable env (e.g. `<tenant>-local`), commit the generated `.terraform.lock.hcl`, and rebuild/redeploy so it bakes into the image. |
+| `dns01_provider` is `powerdns-rfc2136` but its RFC2136 TSIG Secret is missing or empty | Aborts before any `terraform` command runs, naming the Secret and key it looked for; exit 1. | Apply once with the TSIG secret supplied directly (see [`erun-enable-hosting-edge`](/agent-reference/skills-spec#erun-enable-hosting-edge)) so the module materializes its Secret, then re-run. |
 | A `terraform` step fails (live run) | Surfaces the underlying `terraform` error and stops at that step; exit 1. | Fix the reported Terraform/cloud issue and re-run — `init`/`plan`/`apply` are safe to repeat. |
 
 ## See also

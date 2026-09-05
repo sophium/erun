@@ -9,8 +9,10 @@ import (
 
 // deployComponentBaseOrder is the tenant-agnostic base of each platform
 // component chart, ordered so backend charts precede their dependents: powerdns
-// deploys after backend-postgres (its backend store), and docs — a one-shot Job
-// with no in-cluster dependency — orders last. A component's published chart is
+// and zitadel deploy after backend-postgres (their backend store), oci-registry
+// after backend-api (it trusts a public key the operator copies from the
+// backend-api signer, per erun-devops/AGENTS.md), and docs — a one-shot Job with
+// no in-cluster dependency — orders last. A component's published chart is
 // named <prefix>-<base> where prefix is the tenant's release base (see
 // componentChartPrefix), e.g. erun-backend-postgres or frs-backend-api. Governs
 // ordering only, not which components deploy.
@@ -18,7 +20,9 @@ var deployComponentBaseOrder = []string{
 	"backend-postgres",
 	"backend-db",
 	"backend-api",
+	"oci-registry",
 	"powerdns",
+	"zitadel",
 	"docs",
 }
 
@@ -60,10 +64,11 @@ func componentBaseName(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// selectedPublishableComponents returns the selected non-runtime components in
-// default-rank order (postgres → db → api → powerdns → docs) for the sourceless
-// by-reference deploy path; the runtime is resolved separately.
-func selectedPublishableComponents(selected []string, tenant string) []string {
+// selectedPublishableComponents returns the selected non-runtime components,
+// ordered by plan when one was resolved (see resolvePublishedDeployPlan) or
+// else by the default rank (postgres → db → api → powerdns → docs), for the
+// sourceless by-reference deploy path; the runtime is resolved separately.
+func selectedPublishableComponents(selected []string, tenant string, plan ProjectK8sConfig) []string {
 	runtimeAliases := runtimeComponentNames(tenant)
 	out := make([]string, 0, len(selected))
 	for _, name := range selected {
@@ -72,7 +77,7 @@ func selectedPublishableComponents(selected []string, tenant string) []string {
 		}
 		out = append(out, name)
 	}
-	rank := componentRankByPlan(ProjectK8sConfig{})
+	rank := componentRankByPlan(plan)
 	sort.SliceStable(out, func(i, j int) bool {
 		return rank(out[i]) < rank(out[j])
 	})
@@ -241,12 +246,19 @@ type DeployableComponent struct {
 
 const deployComponentSourcePublished = "published-chart"
 
+// DeployComponentSourcePublished is the Source value of a component installed by
+// reference from the registry rather than from a repo-local chart, for a caller
+// that must tell the two apart -- the desktop, deciding whether a registry has any
+// say in which chart the runtime installs.
+const DeployComponentSourcePublished = deployComponentSourcePublished
+
 // ResolvedRuntimeChartName returns the published chart a by-reference runtime
 // deploy installs: the tenant's own <tenant>-devops chart when it is published at
 // the deploy version (tenantChartPublished), else the canonical erun-devops. The
 // erun product tenant's runtime release name IS erun-devops, so it always resolves
-// there. This is the single source of truth shared by the deploy path
-// (resolvePublishedRuntimeChartReference) and the desktop picker label.
+// there. It labels the desktop picker; the deploy itself walks the candidate
+// ladder (runtimeChartCandidates), which searches the same two charts in order
+// and then widens to the registry erun publishes the platform chart in.
 func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
 	chart := RuntimeReleaseName(tenant)
 	if chart != DevopsComponentName && tenantChartPublished {

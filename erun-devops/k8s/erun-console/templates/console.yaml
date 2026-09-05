@@ -1,0 +1,279 @@
+{{/*
+  erun-console — the hosted web console, served same-origin with
+  erun-backend-api (its production design; see erun-console/vite.config.ts and
+  erun-devops/docker/erun-console/Dockerfile). The API itself has no Ingress
+  (it sets no CORS headers by design and is reached only in-cluster, e.g. by
+  this chart's own nginx proxying /v1), so this is the platform's public HTTPS
+  edge for both the console UI and the API it talks to.
+
+  externalDomain has no PlatformConfig field to default from the way
+  erun-zitadel's does from platform.authHost (no platform.consoleHost exists),
+  so it defaults instead to "console.<platform.baseDomain>" when the platform
+  block is configured, or must be set explicitly via console.externalDomain.
+
+  apex/www redirect: platform.baseDomain and "www.<baseDomain>" otherwise
+  resolve to nothing — only the console host is served. When an apex host is
+  known (platform.baseDomain, or console.apexHost for a tenant with no
+  platform-wide domain but a specific apex to redirect), this chart also
+  renders a second Ingress for the apex and www hosts carrying a Traefik
+  redirect Middleware to the canonical console
+  origin, so a visitor who types the bare domain lands on the console instead
+  of a dead end, while sign-in (Authorization Code + PKCE) still has exactly
+  one origin. The redirect target is platform.consoleUrl when configured
+  (the value GET /v1/platform hands clients), falling back to this chart's own
+  externalDomain — never a literal. console.apexRedirectEnabled overrides the
+  default for a platform whose apex is used for something else.
+
+  An unresolved apex host is not a misconfiguration by itself — most
+  deploys (local, dev, any tenant with no public apex) never set
+  platform.baseDomain or console.apexHost and never want the redirect —
+  so this can't fail loudly the way the required host
+  checks below do without breaking every one of them. Instead, the resolved
+  on/off decision and its reason always render as a ConfigMap (below), so
+  whoever inspects the release (kubectl, helm get manifest, or a --dry-run)
+  can see whether the redirect is on, and why it's off when it isn't, rather
+  than inferring it from an absent resource.
+*/}}
+{{- $tenant := default "erun" .Values.tenant -}}
+{{- $platform := default dict .Values.platform -}}
+{{- $baseDomain := default "" $platform.baseDomain -}}
+{{- $console := default dict .Values.console -}}
+{{- $externalDomain := default (ternary (printf "console.%s" $baseDomain) "" (ne $baseDomain "")) $console.externalDomain -}}
+{{- $externalDomain = required "erun-console: an external domain is required — set console.externalDomain, or ensure platform.baseDomain is set so it defaults to console.<baseDomain>" $externalDomain -}}
+{{- $ingressClass := default "traefik" $console.ingressClass -}}
+{{- $ingressAnnotations := default dict $console.ingressAnnotations -}}
+{{- $certManagerIssuer := default "" $console.certManagerIssuer -}}
+{{- /* hasKey rather than `default`: Helm's default() treats "" as absent, so an
+       explicitly empty secret name silently came back as the default and the
+       Ingress referenced a Secret that does not exist. Kept identical to
+       erun-backend-api's, since #1141's whole point is that an operator who has
+       configured one knows how to configure the other. */ -}}
+{{- $tlsSecretName := printf "%s-console-tls" $tenant -}}
+{{- if hasKey $console "tlsSecretName" -}}
+{{- $tlsSecretName = $console.tlsSecretName -}}
+{{- end -}}
+{{- /* Gate on the resolved apex host, not platform.baseDomain alone: an
+       operator who sets console.apexHost without platform.baseDomain (e.g.
+       a tenant with no platform-wide domain but a specific apex to redirect)
+       has clearly configured the feature, and gating on baseDomain alone
+       both left it off and made the status ConfigMap's "not configured"
+       reason lie about a host that was, in fact, configured. */ -}}
+{{- $apexHost := default $baseDomain $console.apexHost -}}
+{{- /* hasKey rather than `default`: an operator with a marketing site on the
+       apex must be able to set apexRedirectEnabled=false even though
+       baseDomain is set (default() would otherwise treat "false" fine, but
+       keeping the same hasKey idiom as tlsSecretName/adminPasswordChangeRequired
+       above avoids relying on default()'s "" handling here too). */ -}}
+{{- $apexRedirectEnabled := ne $apexHost "" -}}
+{{- $apexRedirectExplicit := hasKey $console "apexRedirectEnabled" -}}
+{{- if $apexRedirectExplicit -}}
+{{- $apexRedirectEnabled = $console.apexRedirectEnabled -}}
+{{- end -}}
+{{- $wwwHost := default (ternary (printf "www.%s" $apexHost) "" (ne $apexHost "")) $console.wwwHost -}}
+{{- if $apexRedirectEnabled -}}
+{{- $apexHost = required "erun-console: console.apexRedirectEnabled is true but no apex host could be resolved — set platform.baseDomain, or console.apexHost, or console.apexRedirectEnabled=false" $apexHost -}}
+{{- $wwwHost = required "erun-console: console.apexRedirectEnabled is true but no www host could be resolved — set platform.baseDomain, or console.wwwHost, or console.apexRedirectEnabled=false" $wwwHost -}}
+{{- end -}}
+{{- /* GET /v1/platform serves platform.consoleUrl to clients as the
+       canonical console address; reuse it here so the apex/www redirect
+       target is the same configured value, never a literal. Absent that
+       (platform.consoleUrl has no auto-default the way authHost does), fall
+       back to this chart's own externalDomain — itself never a literal. */ -}}
+{{- $redirectTarget := default (printf "https://%s" $externalDomain) $platform.consoleUrl -}}
+{{- $apexMiddlewareName := printf "%s-console-apex-redirect" $tenant -}}
+{{- $nginxPort := default 8080 $console.port -}}
+{{- $apiServiceName := default (printf "%s-api" $tenant) $console.apiServiceName -}}
+{{- $apiPort := default 17033 .Values.apiPort -}}
+{{- $apiServicePort := default $apiPort $console.apiServicePort -}}
+{{- $replicas := default 1 $console.replicas -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $consoleImage := default (printf "%s/erun-console:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-console") -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $tenant }}-console
+  labels:
+    app: {{ $tenant }}-console
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ $tenant }}-console
+  ports:
+    - name: http
+      port: {{ $nginxPort }}
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $tenant }}-console
+  labels:
+    app: {{ $tenant }}-console
+  {{- if or $certManagerIssuer $ingressAnnotations }}
+  annotations:
+    {{- if $certManagerIssuer }}
+    cert-manager.io/issuer: {{ $certManagerIssuer | quote }}
+    {{- end }}
+    {{- range $key, $value := $ingressAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if $ingressClass }}
+  ingressClassName: {{ $ingressClass }}
+  {{- end }}
+  {{- if $tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ $externalDomain }}
+        {{- if $apexRedirectEnabled }}
+        - {{ $apexHost }}
+        - {{ $wwwHost }}
+        {{- end }}
+      secretName: {{ $tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ $externalDomain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $tenant }}-console
+                port:
+                  name: http
+{{- if $apexRedirectEnabled }}
+---
+# The apex/www redirect Middleware: a plain 301 to the canonical console
+# origin, preserving path and query. Kept off the primary Ingress above so
+# that Ingress's rule stays the only one that ever reaches the Service — the
+# console's OIDC sign-in (Authorization Code + PKCE) depends on staying a
+# single origin.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ $apexMiddlewareName }}
+  labels:
+    app: {{ $tenant }}-console
+spec:
+  redirectRegex:
+    regex: "^https?://[^/]+(.*)$"
+    replacement: "{{ $redirectTarget }}$1"
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $tenant }}-console-apex-redirect
+  labels:
+    app: {{ $tenant }}-console
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ printf "%s-%s@kubernetescrd" .Release.Namespace $apexMiddlewareName }}
+    {{- range $key, $value := $ingressAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if $ingressClass }}
+  ingressClassName: {{ $ingressClass }}
+  {{- end }}
+  {{- if $tlsSecretName }}
+  tls:
+    - secretName: {{ $tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ $apexHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $tenant }}-console
+                port:
+                  name: http
+    - host: {{ $wwwHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $tenant }}-console
+                port:
+                  name: http
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $tenant }}-console
+  labels:
+    app: {{ $tenant }}-console
+spec:
+  replicas: {{ $replicas }}
+  selector:
+    matchLabels:
+      app: {{ $tenant }}-console
+  template:
+    metadata:
+      labels:
+        app: {{ $tenant }}-console
+    spec:
+      containers:
+        - name: erun-console
+          image: {{ $consoleImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            # In-cluster Service DNS: no CORS, no cross-origin call ever
+            # leaves the pod — nginx proxies /v1 to the API Service directly.
+            - name: API_PROXY_HOST
+              value: {{ $apiServiceName | quote }}
+            - name: API_PROXY_PORT
+              value: {{ $apiServicePort | quote }}
+            - name: NGINX_PORT
+              value: {{ $nginxPort | quote }}
+          ports:
+            - name: http
+              containerPort: {{ $nginxPort }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            limits:
+              cpu: "500m"
+              memory: 256Mi
+            requests:
+              cpu: "50m"
+              memory: 64Mi
+---
+# Always renders, whether the redirect is on or off, so the disabled state is
+# never a silent absence of resources — see the header comment above.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $tenant }}-console-apex-status
+  labels:
+    app: {{ $tenant }}-console
+data:
+  enabled: {{ $apexRedirectEnabled | quote }}
+  {{- if $apexRedirectEnabled }}
+  apexHost: {{ $apexHost | quote }}
+  wwwHost: {{ $wwwHost | quote }}
+  redirectTarget: {{ $redirectTarget | quote }}
+  reason: {{ printf "enabled: %s and %s redirect to %s" $apexHost $wwwHost $redirectTarget | quote }}
+  {{- else if $apexRedirectExplicit }}
+  reason: "disabled: console.apexRedirectEnabled is set to false"
+  {{- else }}
+  reason: "disabled: no platform.baseDomain and no console.apexHost is configured — set one of those to enable the redirect, or set console.apexRedirectEnabled=false to record that this platform's apex is intentionally not redirected"
+  {{- end }}

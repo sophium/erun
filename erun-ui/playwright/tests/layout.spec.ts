@@ -28,7 +28,7 @@ test.describe('layout panels', () => {
   });
 
   test('review panel toggle reveals the diff section', async ({ app, page }) => {
-    const splitter = page.getByRole('button', { name: 'Resize diff panel' });
+    const splitter = page.getByRole('slider', { name: 'Resize diff panel' });
     const initiallyVisible = await splitter.isVisible().catch(() => false);
 
     await app.titlebar.toggleReviewPanel();

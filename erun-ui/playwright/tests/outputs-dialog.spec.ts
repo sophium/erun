@@ -65,6 +65,7 @@ test.describe('agent outputs dialog (#588)', () => {
     await expect(app.outputsDialog.locator()).toBeVisible();
     await expect(app.outputsDialog.entry('results')).toBeVisible();
     await expect(app.outputsDialog.entry('report.pdf')).toBeVisible();
+    await expect(app.outputsDialog.list('Agent outputs')).toBeVisible();
 
     await app.outputsDialog.downloadButton('report.pdf').click();
     await expect

@@ -16,7 +16,7 @@ ERun's other half. The [environment model](/intro) gives you a namespace per tas
 
 The four steps are **pure primitives** — each does exactly one thing, with no environment-type or env-name decision logic inside it. The unit that flows between them is the **version**: a content identity that [`build`](/cli/build) mints and the later steps consume. See [Command primitives](/concepts/command-primitives) for the full model.
 
-- **[`build`](/cli/build)** — compile the project's container images, always multi-arch (`linux/amd64` + `linux/arm64`) and fingerprint-cached, and **mint the version** (a snapshot by default; `--release` pins a bare semver). `build` is the only step that creates a version.
+- **[`build`](/cli/build)** — compile the project's container images, multi-arch (`linux/amd64` + `linux/arm64`) by default and fingerprint-cached, and **mint the version** (a snapshot by default; `--release` pins a bare semver). `build` is the only step that creates a version. A `--release` build always targets both architectures; a non-release build/push may be narrowed to one for an environment whose cluster can only ever run it (see [Multi-architecture](/cli/build#multi-architecture)).
 - **[`release`](/cli/release)** — orchestrate build → push → git-tag for a stable, immutable version: bump the semver, update the version-bearing files, build, push, commit, and tag. It reuses `push` for all publishing. See [Versioning](/versioning).
 - **[`push`](/cli/push)** — publish a version's outputs to the project's container registry: the multi-arch image **and** the runtime helm chart, together at the same version.
 - **[`deploy`](/cli/deploy)** — install a published version into an environment with a Helm upgrade, by reference. It never builds or pushes; a version is required.
@@ -84,7 +84,7 @@ The pipeline is the same whether a person or a machine runs it.
 - **CLI** — `erun build` / `release` / `push` / `deploy`, scriptable and headless. See the [CLI overview](/cli/overview).
 - **Desktop app** — the same commands behind buttons. See the [desktop app](/desktop/overview).
 - **MCP** — an Agent calls the `build` / `push` / `deploy` / `release` [tools](/mcp/overview), which run the identical logic and return structured results instead of stdout.
-- **CI** — a release-tagged commit triggers `erun release`; a later `erun deploy --version` rolls the published version out.
+- **CI** — before a review can be accepted, ERun's own [merge queue](/collaboration/merge-queue) builds the prospective merge of its source onto its *current* target and gates it with a real `erun build`, pushing only on green — the step that catches two reviews that are each green alone but broken together, before the target branch moves. Once a review actually merges this way, it triggers `erun release` through the [release queue](/collaboration/builds#release-queue), which runs it in an agent env with warm caches, one release at a time per tenant; a later `erun deploy --version` rolls the published version out.
 
 ## Promotion: agent env to runtime env
 

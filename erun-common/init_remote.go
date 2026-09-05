@@ -25,37 +25,76 @@ type remoteRepositorySpec struct {
 
 var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$`)
 
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string, registries ContainerRegistries) (ShellLaunchParams, remoteRepositorySpec, error) {
-	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot, params.ResolvedType())
-	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
+// ensureRemoteRepository deploys the env's runtime and wires its remote checkout.
+// The env it takes is the one this run just reconciled, so init's own deploy sees
+// the settings this invocation supplied rather than the params they arrived in —
+// the two diverge whenever a flag was omitted and the stored value stands.
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env EnvConfig) (ShellLaunchParams, remoteRepositorySpec, string, error) {
+	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
+	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(env.RuntimePod)
+	// The runtime registry is the one field that redirects chart resolution, so
+	// init's own deploy must see it. Without it `erun init --runtime-registry`
+	// would only take effect on the next deploy — no use to an env that cannot
+	// complete one.
+	target.EnvConfig.RuntimeRegistry = strings.TrimSpace(env.RuntimeRegistry)
+	// A private runtime image is exactly the case the pull secrets exist for, so
+	// init's own deploy must carry them; otherwise the env init just created
+	// cannot pull, and the flag only takes effect on a redeploy the operator has
+	// to know to run.
+	target.EnvConfig.ImagePullSecrets = env.ImagePullSecrets
 	// Carry the env's configured registries onto the deploy target so the
 	// init-time runtime deploy renders the same container registry (cluster or
 	// --container-registry) the standalone `erun deploy` does; without this the
 	// target's minimal EnvConfig had no registries and the deploy fell back to the
 	// default, so an in-pod build would target the wrong registry until a redeploy.
-	target.EnvConfig.ContainerRegistries = registries
+	target.EnvConfig.ContainerRegistries = env.ContainerRegistries
+
+	// Provision a registry credential from the host BEFORE the runtime deploy, so
+	// the pod it creates can mount it from first boot rather than needing a
+	// redeploy once init's own in-pod check (below) discovers it is still
+	// missing. Resolves to "" when the host has nothing to give.
+	registryCredentialSecretName, err := s.resolveRegistryCredentialSecret(target)
+	if err != nil {
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
+	}
+	target.EnvConfig.RegistryCredentialSecretName = registryCredentialSecretName
+
 	req := ShellLaunchParamsFromResult(target)
 
-	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, err
+	if err := s.ensureRemoteRuntime(target, req, env.RuntimeVersion, env.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
+	}
+	if err := s.ensureRemoteRegistryCredentials(target, req); err != nil {
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
 	}
 	if params.NoGit {
-		return req, remoteRepositorySpec{}, s.ensureRemoteWorktree(req, projectRoot)
+		return req, remoteRepositorySpec{}, registryCredentialSecretName, s.ensureRemoteWorktree(req, projectRoot)
 	}
 
 	state, err := s.remoteRepositoryState(req, projectRoot)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
 	}
 	if state.Exists {
-		return req, remoteRepositorySpec{}, s.pullRemoteRepository(req, projectRoot)
+		return req, remoteRepositorySpec{}, registryCredentialSecretName, s.pullRemoteRepository(req, projectRoot)
 	}
 
 	repository, err := s.remoteRepositorySpecForClone(params, tenant, envName, req, state)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
 	}
-	return req, repository, s.cloneRemoteRepository(req, projectRoot, repository)
+	return req, repository, registryCredentialSecretName, s.cloneRemoteRepository(req, projectRoot, repository)
+}
+
+// resolveRegistryCredentialSecret resolves the ghcr.io registries this env's
+// build/deploy roles require a credential for and, when the host has one to
+// give, mints the dockerconfigjson Secret the runtime chart mounts. It is the
+// host side of ensureRemoteRegistryCredentials' in-pod check: that check can
+// only fail loudly; this is what gives it something to find.
+func (s bootstrapRunner) resolveRegistryCredentialSecret(target OpenResult) (string, error) {
+	registries := ghcrRegistriesRequiringCredential(EffectiveEnvironmentContainerRegistries(target.EnvConfig))
+	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
+	return provisionRegistryCredentialSecret(s.Context, target.Tenant, namespace, target.EnvConfig.KubernetesContext, registries)
 }
 
 func (s bootstrapRunner) writeRemoteInitMarker(req ShellLaunchParams, marker RemoteInitMarker) error {
@@ -153,7 +192,9 @@ func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot
 }
 
 func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage, mcpAuthPublicKeyPath string) error {
-	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" && runtimeImage != DevopsComponentName {
+	runtimeImage = strings.TrimSpace(runtimeImage)
+	runtimeImageStated := runtimeImage != "" && runtimeImage != DevopsComponentName
+	if runtimeImageStated {
 		target.EnvConfig.RuntimeImage = runtimeImage
 	}
 	// Pass the env's registries to the chart as-is: a cluster: entry is expanded
@@ -162,7 +203,7 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 	// localhost port-forward the pod cannot reach, so a later deploy that renders
 	// the correct cluster form rolls the pod. The runtime IMAGE still pulls from
 	// its own registry (publishedDevopsChartRegistry, e.g. ghcr), so create works.
-	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion)
+	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion, "", runtimeImageStated)
 	if err != nil {
 		return err
 	}
@@ -181,6 +222,94 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 		return nil
 	}
 	return s.WaitForRemoteRuntime(req)
+}
+
+// ensureRemoteRegistryCredentials fails init when the pod it just deployed has
+// no way to authenticate to a ghcr.io registry the env is configured to build
+// to or deploy from. Left unchecked, a build-role registry with no credential
+// is only discovered after a full multi-arch release build spends itself at
+// the push (MissingGHCRCredentialError, checked again by release's own
+// preflight), and a deploy-role registry with no credential leaves every
+// registry read this pod makes unable to tell "denied" from "not published"
+// (#1193). This only proves a credential source EXISTS in the pod -- a docker
+// config entry, a gh session, or GH_TOKEN/GITHUB_TOKEN -- not that it is valid
+// or correctly scoped; release's own preflight still confirms that before
+// spending a build.
+func (s bootstrapRunner) ensureRemoteRegistryCredentials(target OpenResult, req ShellLaunchParams) error {
+	registries := ghcrRegistriesRequiringCredential(EffectiveEnvironmentContainerRegistries(target.EnvConfig))
+	for _, registry := range registries {
+		configured, err := s.remoteGHCRCredentialConfigured(req, registry)
+		if err != nil {
+			return fmt.Errorf("check registry credentials for %s: %w", registry, err)
+		}
+		if !configured {
+			return &MissingGHCRCredentialError{Registry: registry}
+		}
+	}
+	return nil
+}
+
+// ghcrRegistriesRequiringCredential returns the distinct ghcr.io registries in
+// list carrying the build or deploy role, in list order. Both roles need this
+// pod to authenticate to ghcr.io itself -- build to push, deploy to read the
+// images and runtime chart it resolves -- so a registry with neither role, a
+// non-ghcr registry (a separate credential story this check does not police),
+// or a cluster: entry (the pod never leaves the cluster to reach it) is not
+// checked.
+func ghcrRegistriesRequiringCredential(list ContainerRegistries) []string {
+	registries := make([]string, 0, len(list))
+	seen := make(map[string]struct{}, len(list))
+	for _, entry := range list {
+		if entry.Cluster != nil {
+			continue
+		}
+		registry := strings.TrimSpace(entry.Registry)
+		if registry == "" || !isGHCRRegistry(registry) {
+			continue
+		}
+		if !entry.hasRole(RegistryRoleBuild) && !entry.hasRole(RegistryRoleDeploy) {
+			continue
+		}
+		if _, ok := seen[registry]; ok {
+			continue
+		}
+		seen[registry] = struct{}{}
+		registries = append(registries, registry)
+	}
+	return registries
+}
+
+// remoteGHCRCredentialConfigured execs into the pod to check for a ghcr.io
+// credential. Dry-run does not exec into a real pod, so it reports configured
+// rather than failing a plan preview over pod state a preview cannot know.
+func (s bootstrapRunner) remoteGHCRCredentialConfigured(req ShellLaunchParams, registry string) (bool, error) {
+	output, err := s.runRemoteScript(req, "registry-credential-check", remoteGHCRCredentialCheckScript(registry))
+	if err != nil {
+		return false, fmt.Errorf("%w%s", err, formatRemoteCommandStderr(output.Stderr))
+	}
+	if s.Context.DryRun {
+		return true, nil
+	}
+	return strings.TrimSpace(output.Stdout) == "1", nil
+}
+
+// remoteGHCRCredentialCheckScript mirrors resolveGHCRBasicAuth's three routes
+// (erun-common/registry_auth.go) in shell: that Go logic runs wherever the
+// pod's own erun binary executes and cannot be invoked remotely, so this
+// checks the same three sources directly -- a docker config entry for the
+// registry host, a gh session, or GH_TOKEN/GITHUB_TOKEN. It reports 1/0 on
+// stdout rather than failing the script itself, so a missing credential is a
+// normal result init can act on rather than a script error.
+func remoteGHCRCredentialCheckScript(registry string) string {
+	host, _, _ := strings.Cut(registry, "/")
+	return strings.Join([]string{
+		"set -eu",
+		"found=0",
+		fmt.Sprintf("if [ -f \"$HOME/.docker/config.json\" ] && grep -q %s \"$HOME/.docker/config.json\" 2>/dev/null; then found=1; fi", shellQuote(host)),
+		"if [ \"$found\" -eq 0 ] && command -v gh >/dev/null 2>&1 && gh auth token -h github.com >/dev/null 2>&1; then found=1; fi",
+		"if [ \"$found\" -eq 0 ] && { [ -n \"${GH_TOKEN:-}\" ] || [ -n \"${GITHUB_TOKEN:-}\" ]; }; then found=1; fi",
+		"printf '%s\\n' \"$found\"",
+	}, "\n")
 }
 
 func (s bootstrapRunner) resolveRemoteRepositoryURL(params BootstrapInitParams, tenant, envName string) (string, error) {

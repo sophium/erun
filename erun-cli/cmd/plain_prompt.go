@@ -13,6 +13,7 @@ import (
 	"text/template"
 
 	"github.com/manifoldco/promptui"
+	"golang.org/x/term"
 )
 
 // A single shared reader is deliberate: each bufio.Reader buffers ahead, so
@@ -23,6 +24,11 @@ var plainPromptInput = sync.OnceValue(func() *bufio.Reader {
 	return bufio.NewReader(os.Stdin)
 })
 
+// writerIsTerminal asks whether w is a real terminal, not merely a character
+// device: os.ModeCharDevice is also set for /dev/null, /dev/zero, and
+// /dev/random, so a stat-based check misreads "command < /dev/null" — the
+// conventional way to run a command non-interactively — as an interactive
+// terminal.
 func writerIsTerminal(w io.Writer) bool {
 	if os.Getenv("ERUN_FORCE_TTY") == "1" {
 		return true
@@ -31,8 +37,7 @@ func writerIsTerminal(w io.Writer) bool {
 	if !ok {
 		return false
 	}
-	info, err := file.Stat()
-	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+	return term.IsTerminal(int(file.Fd()))
 }
 
 // runPlainPrompt is the non-TTY fallback for promptui.Prompt, mirroring its

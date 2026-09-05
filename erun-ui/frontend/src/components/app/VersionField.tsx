@@ -1,3 +1,18 @@
+import {
+  Button,
+  cn,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  Input,
+  Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from 'erun-kit';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import * as React from 'react';
 
@@ -6,19 +21,6 @@ import {
   versionChoiceKind,
   versionChoiceLabel,
 } from '@/app/versionSuggestions';
-import { Button } from '@/components/ui/button';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
 import type { UIVersionSuggestion, UIVersionSuggestionNotice } from '@/types';
 
 import { VersionNotices } from './VersionNotices';
@@ -76,7 +78,7 @@ export function VersionField({
               variant="ghost"
               size="icon"
               aria-label="Show version choices"
-              disabled={disabled}
+              disabled={disabled === true || suggestions.length === 0}
             >
               <ChevronsUpDown />
             </Button>
@@ -98,10 +100,13 @@ export function VersionField({
                 </CommandGroup>
               </CommandList>
             </Command>
-            <VersionNotices notices={notices} />
           </PopoverContent>
         </Popover>
       </div>
+      {/* Rendered outside the popover so a listing failure (zero suggestions,
+          one notice) still surfaces its recovery advice — a popover that only
+          opens when suggestions.length > 0 can never show it otherwise. */}
+      <VersionNotices notices={notices} />
       <p className="min-h-4 text-xs text-muted-foreground">{sourceText}</p>
     </div>
   );

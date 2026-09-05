@@ -17,6 +17,22 @@ Error: failed to perform "FetchReference" on source: response status code 403: d
 ==> Published chart base <VERSION> not readable yet; retrying in 1.5s (attempt 4 of 4)
 Error: failed to perform "FetchReference" on source: response status code 403: denied: denied
 ==> Push failed after <ELAPSED>
+step timing (ordered by duration):
+  push (failed) [<ELAPSED>] — verify published chart base:<VERSION>: exit status 1
+publishing charts at <VERSION> stopped at base, so version <VERSION> is only partially published:
+  published: api
+  failed: base
+  not attempted: zeta
+re-run `erun push --version <VERSION>` to publish the rest; republishing an already-published chart is safe
+    chart base (failed) [<ELAPSED>] — verify published chart base:<VERSION>: exit status 1
+    api (cache hit) [<ELAPSED>]
+      linux/amd64 (cache hit) [<ELAPSED>]
+      linux/arm64 (cache hit) [<ELAPSED>]
+    base (cache hit) [<ELAPSED>]
+      linux/amd64 (cache hit) [<ELAPSED>]
+      linux/arm64 (cache hit) [<ELAPSED>]
+    chart api [<ELAPSED>]
+timing record written to <TMP>
 verify published chart base:<VERSION>: exit status 1
 publishing charts at <VERSION> stopped at base, so version <VERSION> is only partially published:
   published: api

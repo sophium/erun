@@ -1,0 +1,3 @@
+audit: erun exec commit --dry-run not-main
+git -C <TMP> rev-parse --abbrev-ref HEAD
+refusing to commit: working tree is on branch "main", not the declared "not-main"

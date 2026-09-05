@@ -37,8 +37,13 @@ func orchestratorTestEnvs() []eruncommon.OrchestratorEnvConfig {
 	}
 }
 
+// orchestratorTestAlwaysReachable stands in for a.deps.canReachMCPEndpoint in
+// tests that are not themselves about reachability, so every wired env probes
+// as reachable rather than depending on a real port-forward.
+func orchestratorTestAlwaysReachable(int) bool { return true }
+
 func TestBuildOrchestratorMCPConfig(t *testing.T) {
-	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestAlwaysReachable)
 
 	if len(config.MCPServers) != 2 {
 		t.Fatalf("expected 2 servers, got %d: %v", len(config.MCPServers), config.MCPServers)
@@ -68,7 +73,7 @@ func TestBuildOrchestratorMCPConfig(t *testing.T) {
 // place a bearer can leak from: an MCP client cannot refresh a header it was
 // configured with, so the fix for the expiry was to stop writing one at all.
 func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
-	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort)
+	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestAlwaysReachable)
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
@@ -84,7 +89,7 @@ func TestBuildOrchestratorMCPConfigCarriesNoCredential(t *testing.T) {
 // and the caller skips --mcp-config rather than writing entries that fail on
 // first use.
 func TestBuildOrchestratorMCPConfigSkipsEveryEnvWithoutAnExecutable(t *testing.T) {
-	config := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "  ", orchestratorTestPort)
+	config, _, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "  ", orchestratorTestPort, orchestratorTestAlwaysReachable)
 	if len(config.MCPServers) != 0 {
 		t.Fatalf("expected no servers without an executable, got %v", config.MCPServers)
 	}
@@ -92,7 +97,7 @@ func TestBuildOrchestratorMCPConfigSkipsEveryEnvWithoutAnExecutable(t *testing.T
 
 func TestBuildOrchestratorLaunchInjectsMCPConfig(t *testing.T) {
 	_, withMCP := buildOrchestratorLaunch("linux", "", false, "", "", "/cfg/orchestrator-mcp-petios3.json")
-	if joined := strings.Join(withMCP, " "); !strings.Contains(joined, `--mcp-config "/cfg/orchestrator-mcp-petios3.json"`) {
+	if joined := strings.Join(withMCP, " "); !strings.Contains(joined, `--mcp-config '/cfg/orchestrator-mcp-petios3.json'`) {
 		t.Fatalf("expected --mcp-config in launch, got: %s", joined)
 	}
 
@@ -153,7 +158,7 @@ func writeBundledDesktopMCPConfig(t *testing.T, output string) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	path, err := app.writeOrchestratorMCPConfig("petios", []eruncommon.OrchestratorEnvConfig{
+	path, _, _, err := app.writeOrchestratorMCPConfig("petios", []eruncommon.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "dev"},
 	})
 	if err != nil {
@@ -247,7 +252,8 @@ func TestSpawnOrchestratorSignalsUnwiredEnvironments(t *testing.T) {
 			emits := newCapturedEmits()
 			app.emitFn = emits.fn()
 
-			if _, err := app.spawnOrchestratorSession("petios", "Petios", testCase.envs, "", "", false, 80, 24); err != nil {
+			spawn := orchestratorSpawn{id: "petios", name: "Petios", envs: testCase.envs, cols: 80, rows: 24}
+			if _, err := app.spawnOrchestratorSession(spawn); err != nil {
 				t.Fatalf("spawnOrchestratorSession: %v", err)
 			}
 			assertUnwiredNotice(t, emits.events(appNotificationEvent), testCase.wantNote)
@@ -294,6 +300,20 @@ func TestOrchestratorMCPUnwiredNoticeNamesTheCause(t *testing.T) {
 	}
 }
 
+// TestOrchestratorMCPUnwiredActionNamesTheControl is the red-then-green
+// regression for the "Install the erun command line tool, then restart the
+// orchestrator" dead end: neither half was ever something the desktop could
+// perform, so the action a caller attaches to the notice must let the
+// frontend link the install docs and drive the restart directly.
+func TestOrchestratorMCPUnwiredActionNamesTheControl(t *testing.T) {
+	if got := orchestratorMCPUnwiredAction(errors.Join(errOrchestratorMCPExecutable, errors.New("not on PATH"))); got != notificationActionInstallAndRestartOrchestrator {
+		t.Fatalf("executable-missing action = %q, want %q", got, notificationActionInstallAndRestartOrchestrator)
+	}
+	if got := orchestratorMCPUnwiredAction(errOrchestratorMCPNoPort); got != notificationActionRestartOrchestrator {
+		t.Fatalf("no-port action = %q, want %q", got, notificationActionRestartOrchestrator)
+	}
+}
+
 func TestSanitizeOrchestratorFileID(t *testing.T) {
 	for in, want := range map[string]string{
 		"petios3":     "petios3",
@@ -304,6 +324,245 @@ func TestSanitizeOrchestratorFileID(t *testing.T) {
 	} {
 		if got := sanitizeOrchestratorFileID(in); got != want {
 			t.Fatalf("sanitizeOrchestratorFileID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestBuildOrchestratorMCPConfigReportsEverySkip is the regression test for
+// #1185. The builder skipped an environment whose MCP port did not resolve and
+// dropped the fact on the floor, so a PARTIAL skip was silent on every channel:
+// no notification, no log line, and nothing the session itself could see. An
+// orchestrator is told by its own contract to know which environments are its
+// own, and an absent tool reads as "not linked" rather than "failed to wire" --
+// so it cannot detect this from the inside.
+//
+// The pre-existing test above asserted the skip happened and said nothing about
+// it being reported, which is exactly why nothing caught this.
+func TestBuildOrchestratorMCPConfigReportsEverySkip(t *testing.T) {
+	config, skipped, _ := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestAlwaysReachable)
+
+	if len(config.MCPServers) != 2 {
+		t.Fatalf("wired %d servers, want 2", len(config.MCPServers))
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("reported %d skips, want 2 (the unresolved port and the blank entry): %+v", len(skipped), skipped)
+	}
+
+	byLabel := map[string]string{}
+	for _, skip := range skipped {
+		byLabel[skip.Label] = skip.Reason
+	}
+	reason, ok := byLabel["noport/x"]
+	if !ok {
+		t.Fatalf("no skip reported for the environment that resolved no port: %+v", skipped)
+	}
+	if !strings.Contains(reason, "MCP port") {
+		t.Errorf("skip reason %q does not name the cause", reason)
+	}
+	// The fixture's malformed entry names an environment but no tenant, so it
+	// labels as "?/z" -- the placeholder marks which half is missing rather than
+	// hiding the entry entirely.
+	if reason, ok := byLabel["?/z"]; !ok {
+		t.Errorf("a malformed linked entry must still be reported, not silently dropped: %+v", skipped)
+	} else if !strings.Contains(reason, "no tenant or environment") {
+		t.Errorf("skip reason %q does not name the cause", reason)
+	}
+}
+
+// TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge is the regression
+// test for the corrected scope of a retracted design. The originally filed issue would have
+// counted a dead port-forward as unwired and dropped the environment for the
+// whole session -- retracted after reading erun-common/mcp_proxy.go, which
+// already recovers a transient edge outage per call. The corrected behaviour:
+// an env whose edge does not answer a probe at launch is wired anyway, and
+// reported as unreachable, never as skipped.
+func TestBuildOrchestratorMCPConfigStillWiresAnUnreachableEdge(t *testing.T) {
+	unreachableAlways := func(int) bool { return false }
+	config, skipped, unreachable := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, unreachableAlways)
+
+	if len(config.MCPServers) != 2 {
+		t.Fatalf("expected both resolvable envs still wired despite an unreachable edge, got %d: %v", len(config.MCPServers), config.MCPServers)
+	}
+	if _, ok := config.MCPServers["erun-main"]; !ok {
+		t.Fatalf("expected erun-main still wired even though its edge is unreachable: %v", config.MCPServers)
+	}
+	if _, ok := config.MCPServers["petios-rihards-win-develop"]; !ok {
+		t.Fatalf("expected petios still wired even though its edge is unreachable: %v", config.MCPServers)
+	}
+	// The pre-existing skip count (unresolved port, blank tenant) must be
+	// unaffected by reachability -- those two never had a port to probe.
+	if len(skipped) != 2 {
+		t.Fatalf("expected the pre-existing skip count unaffected by reachability, got %d: %+v", len(skipped), skipped)
+	}
+	if len(unreachable) != 2 {
+		t.Fatalf("expected both wired envs reported unreachable, got %d: %+v", len(unreachable), unreachable)
+	}
+}
+
+// A reachable edge must not be reported as unreachable -- otherwise every
+// orchestrator launch would carry a spurious warning.
+func TestBuildOrchestratorMCPConfigReportsNoUnreachableEdgeWhenAllAnswer(t *testing.T) {
+	_, _, unreachable := buildOrchestratorMCPConfig(orchestratorTestEnvs(), "/opt/erun/bin/erun", orchestratorTestPort, orchestratorTestAlwaysReachable)
+	if len(unreachable) != 0 {
+		t.Fatalf("expected no unreachable envs when every edge answers, got %+v", unreachable)
+	}
+}
+
+func TestSingleOrchestratorMCPUnreachableEnv(t *testing.T) {
+	if _, _, ok := singleOrchestratorMCPUnreachableEnv(nil); ok {
+		t.Fatal("expected no match for zero unreachable envs")
+	}
+	if _, _, ok := singleOrchestratorMCPUnreachableEnv([]orchestratorMCPUnreachable{
+		{Label: "frs/dev"}, {Label: "frs/staging"},
+	}); ok {
+		t.Fatal("expected no match for more than one unreachable env")
+	}
+	tenant, environment, ok := singleOrchestratorMCPUnreachableEnv([]orchestratorMCPUnreachable{{Label: "frs/dev"}})
+	if !ok || tenant != "frs" || environment != "dev" {
+		t.Fatalf("got tenant=%q environment=%q ok=%v, want frs/dev/true", tenant, environment, ok)
+	}
+}
+
+func TestOrchestratorMCPUnreachableNoticeNamesTheEnvironments(t *testing.T) {
+	if got := orchestratorMCPUnreachableNotice("Petios", nil); got != "" {
+		t.Fatalf("expected no notice when nothing is unreachable, got %q", got)
+	}
+	notice := orchestratorMCPUnreachableNotice("Petios", []orchestratorMCPUnreachable{{Label: "frs/dev"}})
+	for _, want := range []string{"Petios", "frs/dev", "not answering"} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("notice does not mention %q: %q", want, notice)
+		}
+	}
+}
+
+// TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo exercises the full
+// wiring path: the written config still carries the unreachable env, and the
+// operator gets a notice distinct from the partial-skip one.
+func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+	app, _ := orchestratorTestAppWithReachability(t, func(int) bool { return false })
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.emitFn = emits.fn()
+
+	path := app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}})
+	if strings.TrimSpace(path) == "" {
+		t.Fatal("expected an MCP config path even though the edge is unreachable")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written config: %v", err)
+	}
+	if !strings.Contains(string(data), "frs-dev") {
+		t.Fatalf("expected the unreachable env still wired into the config:\n%s", data)
+	}
+
+	events := emits.events(appNotificationEvent)
+	if len(events) != 1 {
+		t.Fatalf("expected exactly one notice about the unreachable edge, got %+v", events)
+	}
+	payload, ok := events[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", events[0])
+	}
+	if !strings.Contains(payload.Message, "frs/dev") || !strings.Contains(payload.Message, "not answering") {
+		t.Fatalf("notice does not name the environment and the reason: %q", payload.Message)
+	}
+	// Exactly one unreachable env is the unambiguous case: the notice can only
+	// mean this env, so it carries the deploy action and is tagged with it
+	// (#1390) rather than leaving the "deploy or reopen" remedy unreachable.
+	wantTag := [4]string{"frs", "dev", notificationSourceOrchestratorEdgeUnreachable, notificationActionDeploy}
+	gotTag := [4]string{payload.Tenant, payload.Environment, payload.Source, payload.Action}
+	if gotTag != wantTag {
+		t.Fatalf("notice tenant/environment/source/action = %+v, want %+v", gotTag, wantTag)
+	}
+}
+
+// TestWireOrchestratorMCPMultipleUnreachableEnvsCarryNoAction locks the
+// ambiguous case: when more than one linked env's edge is unreachable, no
+// single env can own the notice's action, so it falls back to the plain
+// app-level notice with no action rather than guessing which env to deploy.
+func TestWireOrchestratorMCPMultipleUnreachableEnvsCarryNoAction(t *testing.T) {
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+	app, _ := orchestratorTestAppWithReachability(t, func(int) bool { return false })
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.emitFn = emits.fn()
+
+	app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{
+		{Tenant: "frs", Environment: "dev"},
+		{Tenant: "frs", Environment: "laptop"},
+	})
+
+	events := emits.events(appNotificationEvent)
+	if len(events) != 1 {
+		t.Fatalf("expected exactly one notice about the unreachable edges, got %+v", events)
+	}
+	payload, ok := events[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", events[0])
+	}
+	if payload.Tenant != "" || payload.Environment != "" || payload.Action != "" {
+		t.Fatalf("notice = %+v, want no tenant/environment/action tag when several envs are unreachable", payload)
+	}
+}
+
+// TestOrchestratorMCPPartialNoticeNamesWhatIsMissing: the notice is the only
+// thing that tells an operator a usable-looking session is missing an
+// environment, so it has to name which one and why -- "some tools are missing"
+// is not actionable.
+func TestOrchestratorMCPPartialNoticeNamesWhatIsMissing(t *testing.T) {
+	notice := orchestratorMCPPartialNotice("erun-issues", 1, []orchestratorMCPSkip{
+		{Label: "petios/rihards-review", Reason: "it resolved no MCP port"},
+	})
+
+	for _, want := range []string{"erun-issues", "1 of 2", "petios/rihards-review", "resolved no MCP port", "restart"} {
+		if !strings.Contains(notice, want) {
+			t.Errorf("notice does not mention %q:\n%s", want, notice)
+		}
+	}
+}
+
+// TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired: the total
+// failure already had a signal (errOrchestratorMCPNoPort), but it could not say
+// WHICH environments failed or why. Returning the skips alongside the error
+// means the unwired notice can name them too, not just the partial one.
+//
+// Deterministic on purpose: a test app's store resolves no ports, so every
+// environment is skipped. Asserting the partial case at this level would depend
+// on ambient store state and be flaky, which is worse than not testing it here
+// -- the builder tests above cover the partial split with an injected resolver.
+func TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired(t *testing.T) {
+	// Pin the executable seam. Without it this test only passes where an erun
+	// binary happens to sit on PATH: writeOrchestratorMCPConfig resolves the
+	// executable BEFORE it reaches the no-port path, so on a host without one it
+	// returns errOrchestratorMCPExecutable and the assertion below never sees the
+	// skips it exists to check. The build's own test stage has no erun on PATH,
+	// which is where that surfaced.
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	path, skipped, _, err := app.writeOrchestratorMCPConfig("nothing-wirable", []eruncommon.OrchestratorEnvConfig{
+		{Tenant: "ghost", Environment: "one"},
+		{Tenant: "ghost", Environment: "two"},
+	})
+	if !errors.Is(err, errOrchestratorMCPNoPort) {
+		t.Fatalf("err = %v, want errOrchestratorMCPNoPort", err)
+	}
+	if strings.TrimSpace(path) != "" {
+		t.Errorf("path = %q, want empty when nothing wired", path)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("reported %d skips, want 2 so the notice can name them: %+v", len(skipped), skipped)
+	}
+	for _, skip := range skipped {
+		if !strings.HasPrefix(skip.Label, "ghost/") {
+			t.Errorf("skip label %q does not name the environment", skip.Label)
+		}
+		if strings.TrimSpace(skip.Reason) == "" {
+			t.Errorf("skip for %s carries no reason", skip.Label)
 		}
 	}
 }

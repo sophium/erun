@@ -1,0 +1,17 @@
+Set what a host-side orchestrator uses a linked environment for: a code environment writes code and iterates fast; a build environment checks out pushed branches, runs the gates, and cuts releases; the runtime role means the orchestrator operates the environment directly -- deploy, pin, observe -- with no worktree to review and no in-pod agent to delegate to, which is the only role -- including undeclared -- a runtime-type environment may take. Pass "none" to declare it undeclared again; refused for a runtime-type environment, the same way code or build is. The role is re-checked against the linked environment's type every time, so this refuses the same pairings the desktop's link dialog would. The environment must already be linked to the orchestrator -- see `erun list`.
+
+Usage:
+  erun orchestrator set-role ORCHESTRATOR_ID TENANT ENVIRONMENT [flags]
+
+Examples:
+  erun orchestrator set-role my-orchestrator my-tenant prod --role build
+
+Flags:
+      --dry-run       Resolve and trace mutating actions without executing them.
+  -h, --help          help for set-role
+      --role string   Role to set: "code", "build", "runtime", or "none" for undeclared
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

@@ -15,7 +15,7 @@ write-yaml <TMP>
 Loaded tenant configuration
 Loading environment configuration
 kubectl --context ctx-two get namespace team-local -o name
-kubectl --context ctx-two create namespace team-local
+deploy: namespace team-local is created if the check above reports it missing
 mkdir -p <TMP>
 write-yaml <TMP>
 Adding new environment

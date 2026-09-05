@@ -146,6 +146,54 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 	})
 }
 
+// TestResolveEnvUpgradeItemSnapshotChannel pins how the snapshot channel picks a
+// target when the registry carries stable releases, snapshots, or only one of
+// the two.
+func TestResolveEnvUpgradeItemSnapshotChannel(t *testing.T) {
+	noTrace := func(string) {}
+
+	t.Run("a snapshot-channel env adopts stable when the registry has no snapshots (#928)", func(t *testing.T) {
+		// The canonical registry publishes stable releases only. Before #928 the
+		// snapshot channel returned LatestSnapshot unconditionally once the
+		// supersede check declined, so an empty snapshot side resolved to "" and
+		// the env stayed unresolved forever against a perfectly good stable.
+		snapshotEnv := EnvConfig{Name: "ux", RuntimeVersion: "1.0.110", UpgradeChannel: UpgradeChannelSnapshot}
+		resolver := func(_ Context, _ string, _ EnvConfig) ([]SourcedRuntimeVersions, error) {
+			return []SourcedRuntimeVersions{{Registry: DefaultContainerRegistry, Versions: RuntimeRegistryVersions{LatestStable: "1.0.173"}}}, nil
+		}
+		item := resolveEnvUpgradeItem("erun", snapshotEnv, "", resolver, noTrace)
+		if item.UnresolvedReason != "" {
+			t.Fatalf("a stable-only registry must resolve for the snapshot channel, got %+v", item)
+		}
+		assertLaggingSingleTarget(t, item, "1.0.173", "expected the stable release as the snapshot-channel target, got %+v")
+	})
+
+	t.Run("a snapshot-channel env already at the stable release is up to date (#928)", func(t *testing.T) {
+		snapshotEnv := EnvConfig{Name: "ux", RuntimeVersion: "1.0.173", UpgradeChannel: UpgradeChannelSnapshot}
+		resolver := func(_ Context, _ string, _ EnvConfig) ([]SourcedRuntimeVersions, error) {
+			return []SourcedRuntimeVersions{{Registry: DefaultContainerRegistry, Versions: RuntimeRegistryVersions{LatestStable: "1.0.173"}}}, nil
+		}
+		item := resolveEnvUpgradeItem("erun", snapshotEnv, "", resolver, noTrace)
+		if item.Lagging || item.Target != "1.0.173" || item.UnresolvedReason != "" {
+			t.Fatalf("expected up to date, not unresolved, got %+v", item)
+		}
+	})
+
+	t.Run("a newer snapshot stream still wins for the snapshot channel", func(t *testing.T) {
+		// The #524 behaviour must survive #928: a snapshot whose base outranks the
+		// stable belongs to the next stream and stays the target.
+		snapshotEnv := EnvConfig{Name: "ux", RuntimeVersion: "1.0.100", UpgradeChannel: UpgradeChannelSnapshot}
+		resolver := func(_ Context, _ string, _ EnvConfig) ([]SourcedRuntimeVersions, error) {
+			return []SourcedRuntimeVersions{{Registry: DefaultContainerRegistry, Versions: RuntimeRegistryVersions{
+				LatestStable:   "1.0.173",
+				LatestSnapshot: "1.0.174-snapshot-20260808110000",
+			}}}, nil
+		}
+		item := resolveEnvUpgradeItem("erun", snapshotEnv, "", resolver, noTrace)
+		assertLaggingSingleTarget(t, item, "1.0.174-snapshot-20260808110000", "expected the newer snapshot stream to stay the target, got %+v")
+	})
+}
+
 func assertLaggingSingleTarget(t *testing.T, item UpgradePlanItem, wantTarget, failMsg string) {
 	t.Helper()
 	if !item.Lagging || item.Target != wantTarget || len(item.Candidates) != 1 {

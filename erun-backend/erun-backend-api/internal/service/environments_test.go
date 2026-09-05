@@ -3,33 +3,66 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 )
+
+type recordingUsageRecorder struct {
+	events []model.UsageEvent
+	err    error
+}
+
+func (r *recordingUsageRecorder) Record(_ context.Context, event model.UsageEvent) error {
+	r.events = append(r.events, event)
+	return r.err
+}
 
 type recordingStatusWriter struct {
 	transitions []string // "status:error" per call
+	updates     []repository.EnvironmentStatusUpdate
 	err         error
+	// failFirst makes the first n calls fail, exercising the bounded retry.
+	failFirst int
+	calls     int
 }
 
-func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _, status, provisionError string) error {
-	w.transitions = append(w.transitions, status+":"+provisionError)
+func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ string, update repository.EnvironmentStatusUpdate) error {
+	w.calls++
+	if w.calls <= w.failFirst {
+		return errors.New("database unavailable")
+	}
+	w.transitions = append(w.transitions, update.Status+":"+update.ProvisionError)
+	w.updates = append(w.updates, update)
 	return w.err
 }
 
 type fakeRunner struct {
 	outcome deployexec.Outcome
+	failure string
+	output  string
 	err     error
 }
 
-func (r fakeRunner) Run(context.Context, deployexec.DeployJobParams) (deployexec.Outcome, error) {
-	return r.outcome, r.err
+func (r fakeRunner) Run(context.Context, deployexec.DeployJobParams) (deployexec.Result, error) {
+	return deployexec.Result{Outcome: r.outcome, Failure: r.failure, Output: r.output}, r.err
 }
 
 func provision(t *testing.T, runner DeployRunner, status *recordingStatusWriter) error {
 	t.Helper()
-	return NewEnvironmentProvisioner(runner, status).Provision(context.Background(), "env-1", deployexec.DeployJobParams{})
+	return provisionVersion(t, runner, status, "")
+}
+
+// provisionVersion drives one deploy with the retry backoff removed, so the
+// bounded-retry path costs no wall-clock in tests.
+func provisionVersion(t *testing.T, runner DeployRunner, status *recordingStatusWriter, version string) error {
+	t.Helper()
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
+	provisioner.backoff = 0
+	return provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: version})
 }
 
 func TestProvisionMarksRunningOnSuccess(t *testing.T) {
@@ -64,6 +97,310 @@ func TestProvisionMarksFailedOnRunError(t *testing.T) {
 	if status.transitions[len(status.transitions)-1] != "failed:cluster unreachable" {
 		t.Fatalf("last transition = %q, want failed:cluster unreachable", status.transitions[len(status.transitions)-1])
 	}
+}
+
+// TestProvisionRecordsTheDeploysOwnFailure: the whole point of reading the Job's
+// output back is that the environment's recorded error names what an operator
+// must change — here the version and every registry the chart pull probed — so
+// the reason must carry that text, not just the fact that a Job exited.
+func TestProvisionRecordsTheDeploysOwnFailure(t *testing.T) {
+	const chartFailure = "runtime chart oci://ghcr.io/acme/charts/erun-devops version 1.2.3 could not be pulled from ghcr.io/acme: " +
+		"no chart is published at 1.2.3 at any coordinate the deploy probed — ghcr.io/acme/charts/acme-devops (the tenant's own umbrella), ghcr.io/acme/charts/erun-devops (the shared platform chart)"
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeFailed, failure: chartFailure}
+	if err := provisionVersion(t, runner, status, "1.2.3"); err == nil {
+		t.Fatal("expected an error when the deploy job fails")
+	}
+	recorded := status.updates[len(status.updates)-1].ProvisionError
+	if !strings.Contains(recorded, chartFailure) {
+		t.Fatalf("provisionError = %q, want it to carry the deploy's own failure", recorded)
+	}
+	if !strings.Contains(recorded, "1.2.3") {
+		t.Fatalf("provisionError = %q, want it to name the version", recorded)
+	}
+}
+
+// TestProvisionSaysWhereToLookWhenTheJobLeftNothing: a reason of last resort must
+// still be actionable, so it names the Job an operator can read for themselves.
+func TestProvisionSaysWhereToLookWhenTheJobLeftNothing(t *testing.T) {
+	status := &recordingStatusWriter{}
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, nil, nil)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{Tenant: "acme", Environment: "prod", Version: "1.2.3", Namespace: "acme-platform"}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err == nil {
+		t.Fatal("expected an error when the deploy job fails")
+	}
+	recorded := status.updates[len(status.updates)-1].ProvisionError
+	for _, want := range []string{"1.2.3", "acme-platform", deployexec.DeployJobName("acme", "prod", "1.2.3", "")} {
+		if !strings.Contains(recorded, want) {
+			t.Fatalf("provisionError = %q, want it to mention %q", recorded, want)
+		}
+	}
+}
+
+// TestProvisionRecordsDeployedVersionOnSuccess: reaching running is what makes
+// the version live, so that is where the env records what it is running.
+func TestProvisionRecordsDeployedVersionOnSuccess(t *testing.T) {
+	status := &recordingStatusWriter{}
+	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if got := status.updates[0].DeployedVersion; got != "" {
+		t.Fatalf("deployed version recorded while still provisioning: %q", got)
+	}
+	if got := status.updates[1].DeployedVersion; got != "1.2.3" {
+		t.Fatalf("running update deployedVersion = %q, want 1.2.3", got)
+	}
+}
+
+// TestProvisionLeavesDeployedVersionOnFailure: a failed deploy does not change
+// what the cluster is running, so it must not claim a new deployed version.
+func TestProvisionLeavesDeployedVersionOnFailure(t *testing.T) {
+	status := &recordingStatusWriter{}
+	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeFailed}, status, "1.2.3"); err == nil {
+		t.Fatal("expected an error when the deploy job fails")
+	}
+	for i, update := range status.updates {
+		if update.DeployedVersion != "" {
+			t.Fatalf("update[%d] recorded deployedVersion %q on a failed deploy", i, update.DeployedVersion)
+		}
+	}
+}
+
+// TestProvisionRecordsExposeErrorButStaysRunning: a deploy Job that succeeds
+// overall (deployexec's chained expose never fails the Job itself — #1086)
+// must still land the environment in `running`, with the chained expose
+// step's own failure recorded distinctly rather than as a provision failure.
+func TestProvisionRecordsExposeErrorButStaysRunning(t *testing.T) {
+	status := &recordingStatusWriter{}
+	output := "audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
+		"ERUN_EXPOSE_FAILED: cannot find git project\n"
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: output}
+	if err := provisionVersion(t, runner, status, "1.2.3"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	assertTransitions(t, status.transitions, []string{"provisioning:", "running:"})
+	last := status.updates[len(status.updates)-1]
+	if last.ExposeError != "cannot find git project" {
+		t.Fatalf("exposeError = %q, want the chained expose step's own failure", last.ExposeError)
+	}
+	if last.DeployedVersion != "1.2.3" {
+		t.Fatalf("deployedVersion = %q, want 1.2.3 despite the expose failure", last.DeployedVersion)
+	}
+}
+
+// TestProvisionLeavesExposeErrorEmptyOnCleanSuccess: no expose marker in the
+// Job's output means exposure was never attempted or fully succeeded, so
+// nothing should be recorded against it.
+func TestProvisionLeavesExposeErrorEmptyOnCleanSuccess(t *testing.T) {
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
+	if err := provisionVersion(t, runner, status, "1.2.3"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	last := status.updates[len(status.updates)-1]
+	if last.ExposeError != "" {
+		t.Fatalf("exposeError = %q, want empty on a clean success", last.ExposeError)
+	}
+}
+
+// TestProvisionRecordsExposedHostnameOnSuccessfulExpose: once the chained
+// expose step actually runs (all three platform coordinates present) and
+// leaves no failure marker, the environment records the same hostname `erun
+// expose` itself resolves — computed, not scraped from the Job's output.
+func TestProvisionRecordsExposedHostnameOnSuccessfulExpose(t *testing.T) {
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{
+		Tenant:                  "acme",
+		Environment:             "prod",
+		Version:                 "1.2.3",
+		ExposeTargetIP:          "203.0.113.10",
+		ExposeServicesZone:      "services.example.com",
+		ExposePlatformNamespace: "acme-platform",
+	}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	last := status.updates[len(status.updates)-1]
+	if want := "mcp.acme-prod.services.example.com"; last.ExposedHostname != want {
+		t.Fatalf("exposedHostname = %q, want %q", last.ExposedHostname, want)
+	}
+}
+
+// TestProvisionLeavesExposedHostnameEmptyOnExposeFailure: a failed chained
+// expose has no hostname to report, distinct from ExposeError naming why.
+func TestProvisionLeavesExposedHostnameEmptyOnExposeFailure(t *testing.T) {
+	status := &recordingStatusWriter{}
+	output := "audit: erun expose --ip 203.0.113.10 --skip-if-unconfigured acme prod mcp\n" +
+		"ERUN_EXPOSE_FAILED: ingress controller unavailable\n"
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: output}
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{
+		Tenant:                  "acme",
+		Environment:             "prod",
+		Version:                 "1.2.3",
+		ExposeTargetIP:          "203.0.113.10",
+		ExposeServicesZone:      "services.example.com",
+		ExposePlatformNamespace: "acme-platform",
+	}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	last := status.updates[len(status.updates)-1]
+	if last.ExposedHostname != "" {
+		t.Fatalf("exposedHostname = %q, want empty when the chained expose failed", last.ExposedHostname)
+	}
+	if last.ExposeError != "ingress controller unavailable" {
+		t.Fatalf("exposeError = %q, want the chained expose step's own failure", last.ExposeError)
+	}
+}
+
+// TestProvisionLeavesExposedHostnameEmptyWhenNeverConfigured: no platform
+// ingress IP means the deploy Job never chains an expose at all, so there is
+// no hostname to report and none should be invented.
+func TestProvisionLeavesExposedHostnameEmptyWhenNeverConfigured(t *testing.T) {
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded, output: "==> Deployed acme/prod 1.2.3 in 4s\n"}
+	if err := provisionVersion(t, runner, status, "1.2.3"); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	last := status.updates[len(status.updates)-1]
+	if last.ExposedHostname != "" {
+		t.Fatalf("exposedHostname = %q, want empty when exposure was never configured", last.ExposedHostname)
+	}
+}
+
+// TestProvisionRetriesTransientStatusWrite: a lost lifecycle write strands the
+// env in provisioning under an already-terminal workflow, so the write retries.
+func TestProvisionRetriesTransientStatusWrite(t *testing.T) {
+	status := &recordingStatusWriter{failFirst: 2}
+	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err != nil {
+		t.Fatalf("provision should survive a transient status-write failure: %v", err)
+	}
+	assertTransitions(t, status.transitions, []string{"provisioning:", "running:"})
+}
+
+// TestProvisionFailsWhenStatusWriteNeverSucceeds: retries are bounded, so a
+// database that stays down surfaces the error rather than looping.
+func TestProvisionFailsWhenStatusWriteNeverSucceeds(t *testing.T) {
+	status := &recordingStatusWriter{failFirst: statusWriteAttempts}
+	if err := provisionVersion(t, fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, "1.2.3"); err == nil {
+		t.Fatal("expected the exhausted status write to surface an error")
+	}
+	if status.calls != statusWriteAttempts {
+		t.Fatalf("status write attempted %d times, want %d", status.calls, statusWriteAttempts)
+	}
+}
+
+// TestProvisionRecordsUsageEventOnSuccess: a successful deploy records the
+// namespace resource caps that were applied, the metering hook for #605.
+func TestProvisionRecordsUsageEventOnSuccess(t *testing.T) {
+	status := &recordingStatusWriter{}
+	usage := &recordingUsageRecorder{}
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, usage, nil)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{Version: "1.2.3", MaxCPUMillicores: 4000, MaxMemoryMB: 9216, MaxStorageGB: 80}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if len(usage.events) != 1 {
+		t.Fatalf("usage events recorded = %d, want 1", len(usage.events))
+	}
+	got := usage.events[0]
+	if got.EnvironmentID != "env-1" || got.EventType != string(model.UsageEventEnvironmentProvisioned) ||
+		got.CPUMillicores != 4000 || got.MemoryMB != 9216 || got.StorageGB != 80 {
+		t.Fatalf("usage event = %+v", got)
+	}
+}
+
+// TestProvisionRecordsNoUsageEventOnFailure: only a successful deploy is
+// metered — a failed one never ran the environment.
+func TestProvisionRecordsNoUsageEventOnFailure(t *testing.T) {
+	status := &recordingStatusWriter{}
+	usage := &recordingUsageRecorder{}
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeFailed}, status, usage, nil)
+	provisioner.backoff = 0
+	if err := provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: "1.2.3"}); err == nil {
+		t.Fatal("expected an error when the deploy job fails")
+	}
+	if len(usage.events) != 0 {
+		t.Fatalf("usage events recorded = %d, want 0 on a failed deploy", len(usage.events))
+	}
+}
+
+// TestProvisionSurvivesUsageRecordFailure: a metering write failing must never
+// turn a successful deploy into a reported failure.
+func TestProvisionSurvivesUsageRecordFailure(t *testing.T) {
+	status := &recordingStatusWriter{}
+	usage := &recordingUsageRecorder{err: errors.New("usage store unavailable")}
+	provisioner := NewEnvironmentProvisioner(fakeRunner{outcome: deployexec.OutcomeSucceeded}, status, usage, nil)
+	provisioner.backoff = 0
+	if err := provisioner.Provision(context.Background(), "env-1", deployexec.DeployJobParams{Version: "1.2.3"}); err != nil {
+		t.Fatalf("provision should survive a usage-record failure: %v", err)
+	}
+}
+
+// TestProvisionRefusesWhenPlacementCredentialUnavailable: an environment
+// naming a context but no resolver configured (e.g. no cipher) must fail
+// clearly rather than silently running the deploy Job unauthenticated
+// against a cluster it cannot reach (#1112).
+func TestProvisionRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
+	status := &recordingStatusWriter{}
+	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded}
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{Version: "1.2.3", Placement: deployexec.PlacementParams{ContextID: "ctx-1"}}
+	err := provisioner.Provision(context.Background(), "env-1", params)
+	if err == nil {
+		t.Fatal("expected an error when no placement credential resolver is configured")
+	}
+	if status.transitions[len(status.transitions)-1][:7] != "failed:" {
+		t.Fatalf("last transition = %q, want failed:*", status.transitions[len(status.transitions)-1])
+	}
+}
+
+// TestProvisionResolvesThePlacementTokenFreshOnEveryRun: the admin token is
+// resolved from the credential resolver and threaded onto the Job params —
+// never carried in the caller's params — so a rotated token reaches the very
+// next deploy with no separate sync step.
+func TestProvisionResolvesThePlacementTokenFreshOnEveryRun(t *testing.T) {
+	status := &recordingStatusWriter{}
+	var seenToken string
+	runner := recordingPlacementRunner{fn: func(p deployexec.DeployJobParams) {
+		seenToken = p.Placement.AdminToken
+	}}
+	credentials := stubPlacementCredentials{token: "live-token"}
+	provisioner := NewEnvironmentProvisioner(runner, status, nil, credentials)
+	provisioner.backoff = 0
+	params := deployexec.DeployJobParams{Version: "1.2.3", Placement: deployexec.PlacementParams{ContextID: "ctx-1"}}
+	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if seenToken != "live-token" {
+		t.Fatalf("token seen by the runner = %q, want live-token", seenToken)
+	}
+}
+
+type stubPlacementCredentials struct {
+	token string
+	err   error
+}
+
+func (s stubPlacementCredentials) Get(context.Context, string) (string, error) {
+	return s.token, s.err
+}
+
+type recordingPlacementRunner struct {
+	fn func(deployexec.DeployJobParams)
+}
+
+func (r recordingPlacementRunner) Run(_ context.Context, params deployexec.DeployJobParams) (deployexec.Result, error) {
+	r.fn(params)
+	return deployexec.Result{Outcome: deployexec.OutcomeSucceeded}, nil
 }
 
 func assertTransitions(t *testing.T, got, want []string) {

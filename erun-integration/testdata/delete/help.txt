@@ -7,6 +7,7 @@ Usage:
 
 Examples:
   erun delete team dev
+  erun delete team dev -y --output json
 
 Flags:
       --dry-run   Resolve and trace mutating actions without executing them.

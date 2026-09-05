@@ -12,7 +12,7 @@ What can you see when something goes wrong (or right). ERun doesn't ship a built
 |---|---|---|
 | **In-pod** | Stdout/stderr of every container, plus files under `/var/log/erun/` (CLI audit traces). | `kubectl logs`, `erun open` + shell, MCP `raw`. |
 | **Cluster** | Aggregated logs / metrics / traces across all envs on the cluster. | Whatever stack you've installed — Prometheus + Grafana + Loki, OpenTelemetry Collector, Datadog, …. |
-| **Durable** | Reviews, comments, builds, audit events — anything posted to the erun API. | erun API endpoints (admin-only for audit events; see [Audit log · Security events](/agent-reference/audit-log#security-events)). |
+| **Durable** | Reviews, comments, builds, audit events — anything posted to the erun API. | erun API endpoints (`GET /v1/audit-events` for the audit trail; see [Audit log · Query API](/agent-reference/audit-log#query-api)). |
 
 The first layer is always there. The other two are admin-opt-in.
 
@@ -65,6 +65,8 @@ For the full schema and the expiry / liveness rules, see [Agent reference · Idl
 
 ERun's runtime pod exposes a single Prometheus-format metrics endpoint on port `9100`. The series cover idle-eligibility, terminal-input freshness, the network-traffic window, MCP tool-call counts, and audit-event counts — labelled by tenant + environment.
 
+The endpoint carries no authentication, so reachability is scoped by a `NetworkPolicy` instead: always open within the env's own namespace, and open to another namespace only once that namespace is labelled `network-policy/erun-metrics-scraper=true` — label your cluster's Prometheus namespace once (`kubectl label namespace <prometheus-namespace> network-policy/erun-metrics-scraper=true`) to let it scrape every env.
+
 For the full schema (every metric name, every label, type, source, cardinality envelope), see [Agent reference · Metrics spec](/agent-reference/metrics-spec).
 
 Application services use the metrics conventions of their own framework. ERun has no opinion — scrape with the cluster's normal Prometheus setup.
@@ -74,6 +76,24 @@ Application services use the metrics conventions of their own framework. ERun ha
 For distributed traces across the env's services, deploy an OpenTelemetry Collector as a sidecar to your services (or run one as a DaemonSet). ERun has no built-in trace pipeline; the env's namespace is just a Kubernetes namespace, so any standard tracing setup works inside it.
 
 The runtime pod itself does not emit traces. The audit log + MCP tool counts are the closest equivalent — they capture every Operator and Agent action with timestamps.
+
+## Step timing
+
+`erun build`, `release`, `push`, and `deploy` each print a duration-ordered table on completion — success or failure — breaking their single elapsed time down into every image build (per architecture), chart publish, release stage, and deploy target, so a slow or failed run points at what actually took the time instead of leaving you to guess:
+
+```
+==> Pushed in 6m54s
+step timing (ordered by duration):
+  push [6m54s]
+    frs-docs (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [6m20s]
+      linux/amd64 [3m20s]
+      linux/arm64 [3m0s]
+    chart frs-docs [30s]
+```
+
+Each command also writes the same breakdown as a JSON file under `~/.erun/timing/`, so a slow run and a normal one can be diffed instead of compared by eye across terminal scrollback.
+
+For the full JSON shape and the cache-hit/miss annotations, see [Agent reference · Step timing](/reference/config-locations#step-timing).
 
 ## The audit trail
 
@@ -97,6 +117,7 @@ When a service incident needs an "actor and intent" reconstruction, the audit tr
 | A merge happened — who advanced the queue | Security events: `mergequeue.advance` |
 | The runtime pod restarted | `kubectl describe pod -n <tenant>-<env> <pod>` (Kubernetes events) |
 | Trace request across services | OpenTelemetry collector you installed; ERun adds nothing here |
+| A build/release/push/deploy took too long | The step-timing table it prints on completion, or its JSON record under `~/.erun/timing/` |
 
 ## What ERun doesn't ship
 

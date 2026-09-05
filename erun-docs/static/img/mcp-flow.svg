@@ -1,5 +1,5 @@
 <svg viewBox="0 0 1100 510" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="mcpFlowTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
-  <title id="mcpFlowTitle">How MCP works. An Agent box on the left exchanges typed JSON-RPC calls with the MCP server in the env's runtime pod. The MCP server box is divided into three category rows — INSPECTION (idle, doctor, list, version, logs), ACTION (build, push, deploy, release, open, init, delete), and ESCAPE (raw). Below the MCP server, an audit-trail strip captures every call. An Operator pill below the strip is connected by a dashed cyan arrow showing the Operator can replay any session.</title>
+  <title id="mcpFlowTitle">How MCP works. An Agent box on the left exchanges typed JSON-RPC calls with the MCP server in the env's runtime pod. The MCP server box is divided into three category rows — INSPECTION (idle, doctor, list, version, observe), ACTION (build, push, deploy, release, expose, init, delete), and ESCAPE (raw). Below the MCP server, an audit-trail strip captures every call. An Operator pill below the strip is connected by a dashed cyan arrow showing the Operator can replay any session.</title>
 
   <defs>
     <linearGradient id="mcCharcoal" x1="0" y1="0" x2="0" y2="1">
@@ -69,7 +69,7 @@
     </g>
     <g>
       <rect x="676" y="198" width="86" height="24" rx="12" fill="url(#mcCharcoal)"/>
-      <text x="719" y="214" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">logs</text>
+      <text x="719" y="214" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">observe</text>
     </g>
 
     <!-- Row 2: ACTION (7 chips) -->
@@ -92,7 +92,7 @@
     </g>
     <g>
       <rect x="652" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
-      <text x="692" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">open</text>
+      <text x="692" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">expose</text>
     </g>
     <g>
       <rect x="740" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>

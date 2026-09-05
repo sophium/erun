@@ -1,0 +1,4 @@
+audit: erun outputs download erun-darwin-universal
+outputs: downloading <HOME>/.erun/outputs/erun-darwin-universal
+Downloaded erun-darwin-universal (18B, sha256 <HEX>) to erun-darwin-universal
+Ad-hoc signed erun-darwin-universal so macOS will run it

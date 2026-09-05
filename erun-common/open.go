@@ -27,6 +27,15 @@ var (
 	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
 	ErrShellPodReplaced                = errors.New("remote shell pod was replaced; reattach")
 	ErrShellSessionTakenOver           = errors.New("remote session was re-attached in another ERun window")
+	// ErrOpenTenantNotProvided is open's tenant-resolution failure for a call
+	// path that is not allowed to infer one (UseDefaultTenant is false) —
+	// distinct from ErrDefaultTenantNotConfigured, where inference was
+	// permitted but resolved to nothing, because the two have different
+	// recoveries (root AGENTS.md "Distinguish causes before writing copy").
+	ErrOpenTenantNotProvided = errors.New("no tenant given for open")
+	// ErrOpenEnvironmentNotProvided mirrors ErrOpenTenantNotProvided for the
+	// environment half of open's target resolution.
+	ErrOpenEnvironmentNotProvided = errors.New("no environment given for open")
 
 	openUserHomeDir = os.UserHomeDir
 )
@@ -43,6 +52,60 @@ const (
 // matches this exact line to stop its reconnect loop instead of stealing the
 // session back, so treat the wording as a public contract.
 const ShellSessionTakenOverNotice = "open: session re-attached in another ERun window"
+
+// AISessionAttachOutcome is why an attach to a persistent session ended, from
+// the attaching client's point of view — not merely that the underlying
+// process exited, but which of the reattach contract's outcomes
+// (RemoteAppSessionAttachLines) it exited for, or that no exit signal could be
+// read at all. A WSS gateway bridging this contract to a remote client must
+// report one of these explicitly rather than letting every non-success case
+// read as a plain disconnect.
+type AISessionAttachOutcome string
+
+const (
+	// AISessionAttachOutcomeTakenOver: a different attach claimed session
+	// ownership while this one was connected (the owner-id check
+	// RemoteAppSessionAttachLines writes). The session itself is still
+	// running; only this viewer was evicted, and it must be told so plainly
+	// — see ShellSessionTakenOverNotice — rather than reading as a network
+	// drop.
+	AISessionAttachOutcomeTakenOver AISessionAttachOutcome = "taken-over"
+	// AISessionAttachOutcomeDeployReattach: the shell asked for a deploy
+	// handoff (ErrShellReattachDeploy's exit code); the caller should
+	// reattach once the new pod is ready.
+	AISessionAttachOutcomeDeployReattach AISessionAttachOutcome = "deploy-reattach"
+	// AISessionAttachOutcomeEnded: the session's own program exited on its
+	// own (any exit code other than the two above) — there is nothing left
+	// to reattach to.
+	AISessionAttachOutcomeEnded AISessionAttachOutcome = "ended"
+	// AISessionAttachOutcomeUnknown: the connection closed with no
+	// interpretable exit status — a network drop, a proxy timeout, a killed
+	// pod. Never collapse this into Ended or TakenOver: the caller genuinely
+	// does not know which happened, and reporting a guess as fact is the
+	// exact failure root AGENTS.md's "an unknown must not render as a
+	// definite value" forbids.
+	AISessionAttachOutcomeUnknown AISessionAttachOutcome = "unknown"
+)
+
+// ResolveAISessionAttachOutcome classifies an attach's own exit status — the
+// underlying dtach-wrapping shell script's exit code, however the caller ran
+// it (ssh, kubectl exec, or client-go's remotecommand) — into the outcome a
+// client must show. exitCodeKnown distinguishes "the process exited with code
+// 0" from "no exit status was observed at all"; a false exitCodeKnown always
+// resolves to Unknown, never Ended, regardless of exitCode's value.
+func ResolveAISessionAttachOutcome(exitCode int, exitCodeKnown bool) AISessionAttachOutcome {
+	if !exitCodeKnown {
+		return AISessionAttachOutcomeUnknown
+	}
+	switch exitCode {
+	case remoteShellTakenOverExitCode:
+		return AISessionAttachOutcomeTakenOver
+	case remoteShellReattachDeployExitCode:
+		return AISessionAttachOutcomeDeployReattach
+	default:
+		return AISessionAttachOutcomeEnded
+	}
+}
 
 // RemoteAppSessionSocketDir holds persistent desktop session sockets in the
 // runtime pod. Pod-ephemeral on purpose: a dtach server is a process in the
@@ -141,6 +204,11 @@ type ShellLaunchParams struct {
 	// RuntimeImage lets the AI session prelude advise on the erun-build-env
 	// skill only when the env still runs the default published runtime image.
 	RuntimeImage string
+	// RuntimeVersion and RuntimePod are the env config's recorded runtime
+	// deploy intent, threaded through so observe can diff them against what
+	// the live helm release and running pods actually hold.
+	RuntimeVersion string
+	RuntimePod     RuntimePodResources
 }
 
 type ShellLaunchPreview struct {
@@ -349,10 +417,17 @@ func resolveOpenTenant(store OpenStore, findProjectRoot ProjectFinderFunc, param
 		}
 	}
 	if tenant == "" && params.UseDefaultTenant {
-		return loadOpenDefaultTenant(store)
+		resolved, err := loadOpenDefaultTenant(store)
+		if err != nil {
+			if errors.Is(err, ErrDefaultTenantNotConfigured) {
+				return "", fmt.Errorf("%w, and open could not infer one from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default", err)
+			}
+			return "", err
+		}
+		return resolved, nil
 	}
 	if tenant == "" {
-		return "", fmt.Errorf("tenant is required")
+		return "", fmt.Errorf("%w: this call path does not fall back to the working directory or a configured default tenant — pass a tenant explicitly", ErrOpenTenantNotProvided)
 	}
 	return tenant, nil
 }
@@ -376,11 +451,11 @@ func resolveOpenEnvironment(params OpenParams, tenantConfig TenantConfig) (strin
 	if environment == "" && params.UseDefaultEnvironment {
 		environment = tenantConfig.DefaultEnvironment
 		if environment == "" {
-			return "", ErrDefaultEnvironmentNotConfigured
+			return "", fmt.Errorf("%w for %s, and open has no environment to fall back to — pass an environment explicitly, or run `erun init --tenant %s --environment <name>` to set one", ErrDefaultEnvironmentNotConfigured, tenantConfig.Name, tenantConfig.Name)
 		}
 	}
 	if environment == "" {
-		return "", fmt.Errorf("environment is required")
+		return "", fmt.Errorf("%w: this call path does not fall back to %s's default environment — pass an environment explicitly", ErrOpenEnvironmentNotProvided, tenantConfig.Name)
 	}
 	return environment, nil
 }
@@ -405,6 +480,14 @@ func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, 
 func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
 	repoPath := envConfig.EffectiveLocalRepoPath()
 	if repoPath == "" {
+		// A runtime env with no mounted source worktree genuinely has no repo path
+		// (RemoteWorktree's doc: "none for runtime") — a control-plane-provisioned
+		// tenant with no project never has one to configure. Every other type has a
+		// real worktree (hostPath for local-agent, a PVC for remote-agent, or a
+		// runtime env's own opted-in mutable-source clone), so those still require it.
+		if envConfig.Type == EnvironmentTypeRuntime && !envConfig.MountsRuntimeSource() {
+			return "", nil
+		}
 		return "", ErrRepoPathNotConfigured
 	}
 	// A remote/PVC-worktree env's repo path is a POSIX path inside the pod, not a
@@ -427,6 +510,14 @@ func validateOpenTarget(tenant, environment, repoPath string, envConfig EnvConfi
 		if !info.IsDir() {
 			return fmt.Errorf("%q is not a directory", repoPath)
 		}
+	}
+	// A host env has no pod and no cluster at all, so it has no kubernetes
+	// context to require — every other type deploys into one. Checked against
+	// ResolvedType rather than the broader !HasPod() so a legacy env with an
+	// unresolved type keeps requiring a context exactly as it did before host
+	// existed.
+	if envConfig.ResolvedType() == EnvironmentTypeHost {
+		return nil
 	}
 	if strings.TrimSpace(envConfig.KubernetesContext) == "" {
 		return fmt.Errorf("%w: %s/%s", ErrKubernetesContextNotConfigured, tenant, environment)
@@ -557,6 +648,8 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		AITool:             strings.TrimSpace(result.EnvConfig.AITool),
 		Claude:             result.EnvConfig.Claude,
 		RuntimeImage:       strings.TrimSpace(result.EnvConfig.RuntimeImage),
+		RuntimeVersion:     strings.TrimSpace(result.EnvConfig.RuntimeVersion),
+		RuntimePod:         result.EnvConfig.RuntimePod,
 	}
 }
 
@@ -570,6 +663,12 @@ func LocalShellSetupScript(result OpenResult) string {
 }
 
 func WaitForShellDeployment(req ShellLaunchParams) error {
+	if currentExecutionMode(kubectlDeploymentWaitExecutionOperation) == ExecutionModeLibrary {
+		if err := libraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
+			return enrichShellDeploymentError(req, err, runOpenKubectl)
+		}
+		return nil
+	}
 	if err := runOpenKubectl(kubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
 		return enrichShellDeploymentError(req, err, runOpenKubectl)
 	}
@@ -670,6 +769,16 @@ func TenantResourcePrefix(tenant string) string {
 	return strings.TrimSuffix(RuntimeReleaseName(tenant), "-devops")
 }
 
+// APIDeploymentName is the erun-backend-api chart's Deployment/Service resource
+// name (<prefix>-api, per TenantResourcePrefix). It is templated from
+// `.Values.tenant`, not from the chart's Helm release name
+// (publishedComponentReleaseName's `<tenant>-backend-api`), so callers that
+// need to address the running pod or service must derive it from here rather
+// than from the release name.
+func APIDeploymentName(tenant string) string {
+	return TenantResourcePrefix(tenant) + "-api"
+}
+
 func kubectlDeploymentWaitArgs(req ShellLaunchParams) []string {
 	args := kubectlTargetArgs(req)
 	args = append(args, "wait", "--for=condition=Available", "--timeout", defaultShellLaunchWaitTimeout, "deployment/"+RuntimeReleaseName(req.Tenant))
@@ -755,6 +864,17 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 	}, nil
 }
 
+// seedRemoteConfigLines writes a config file in the pod only when it is not
+// already there. The runtime pod builds its own config from the chart-injected
+// ERUN_* values, which carry fields this host-side snapshot has no source for —
+// the marked registries, the runtime registry, and the build-script policy the
+// in-pod build reads. Overwriting it would silently narrow the pod's config to
+// the host's subset, so opening a shell seeds only what is missing, which is
+// what a pod whose chart injected nothing still needs.
+func seedRemoteConfigLines(quotedPath, content string) string {
+	return fmt.Sprintf("if [ ! -f %s ]; then\n  mkdir -p \"$(dirname %s)\"\n  cat > %s <<'EOF'\n%s\nEOF\nfi", quotedPath, quotedPath, quotedPath, content)
+}
+
 func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
 	markerDir := fmt.Sprintf("$HOME/.erun/%s/%s", req.Tenant, req.Environment)
 	bashrcPath := markerDir + "/bashrc"
@@ -766,12 +886,9 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",
-		"mkdir -p \"$config_home/erun\"",
-		fmt.Sprintf("cat > \"$config_home/erun/config.yaml\" <<'EOF'\n%s\nEOF", config.ToolYAML),
-		fmt.Sprintf("mkdir -p \"$config_home/erun/%s\"", req.Tenant),
-		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, config.TenantYAML),
-		fmt.Sprintf("mkdir -p \"$config_home/erun/%s/%s\"", req.Tenant, req.Environment),
-		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, config.EnvYAML),
+		seedRemoteConfigLines("\"$config_home/erun/config.yaml\"", config.ToolYAML),
+		seedRemoteConfigLines(fmt.Sprintf("\"$config_home/erun/%s/config.yaml\"", req.Tenant), config.TenantYAML),
+		seedRemoteConfigLines(fmt.Sprintf("\"$config_home/erun/%s/%s/config.yaml\"", req.Tenant, req.Environment), config.EnvYAML),
 		fmt.Sprintf("mkdir -p \"%s\"", markerDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\nEOF", bashrcPath, title),
 		fmt.Sprintf("printf '\\033]0;%s\\007'", title),
@@ -797,13 +914,39 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		return []string{fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath)}
 	}
 	id := sanitizeForFilename(req.AppSession)
-	socket := remoteAppSessionSocketPath(req.Tenant, req.Environment, id)
-	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
+	socket := RemoteAppSessionSocketPath(req.Tenant, req.Environment, id)
 	launchScript := fmt.Sprintf("%s/launch-%s.sh", markerDir, id)
 	body := strings.Join(remoteSessionLauncherBody(req, bashrcPath), "\n")
+	redraw := "ctrl_l"
+	if req.AI {
+		redraw = "winch"
+	}
 	lines := []string{
 		fmt.Sprintf("mkdir -p \"%s\"", RemoteAppSessionSocketDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
+	}
+	return append(lines, RemoteAppSessionAttachLines(socket, redraw, fmt.Sprintf("/bin/bash \"%s\"", launchScript))...)
+}
+
+// RemoteAppSessionAttachLines returns the sh lines that attach-or-create
+// (dtach -A) a persistent session at socket and take ownership of it from any
+// other viewer, evicting them rather than sharing the pty. This is the
+// takeover half of the reattach contract erun-cli's own shell tabs already
+// run under (screen -d -r semantics: the session keeps running, an evicted
+// viewer only loses its own view) — exported so a caller outside
+// erun-cli/erun-common (the WSS session-attach gateway erun#1106 adds) can
+// reuse it instead of reimplementing the owner-id handoff. launchCommand runs
+// only the first time the session is created; a reattach connects to
+// whatever it is already running.
+//
+// redraw selects dtach's -r repaint trigger: "winch" forces a full repaint on
+// attach (needed for a main-screen TUI like Claude that ignores a bare ^L),
+// "ctrl_l" is quieter and right for an ordinary shell — see
+// remoteShellLaunchLines's own comment for why the two tab kinds need
+// different triggers.
+func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string {
+	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
+	lines := []string{
 		// Take over the session from any other ERun window (screen-style
 		// detach-elsewhere-and-reattach-here): claim ownership, then detach
 		// other viewers by killing their dtach clients. The master — which
@@ -815,31 +958,19 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
 	}
 	lines = append(lines, remoteAppSessionMasterScanLines(socket)...)
-	// Redraw method on reattach. dtach keeps no screen buffer, so a reattach
-	// shows nothing until the program itself repaints. The two tab kinds need
-	// different triggers:
-	//   - bash shell tabs (Local/ERun): readline repaints on the ^L byte dtach
-	//     injects, so -r ctrl_l works and is quieter than a resize.
-	//   - the AI tab's Claude: a main-screen TUI (no alternate screen) that does
-	//     NOT repaint on a bare ^L — it consumes the 0x0c as a keystroke (and can
-	//     nudge its exit/confirm footer). It only re-renders on a real SIGWINCH,
-	//     so the AI session uses -r winch: dtach raises WINCH on attach, forcing
-	//     a full repaint even when the reattached pane is the same size and the
-	//     pty would otherwise emit no WINCH of its own. Switching bash to ^L
-	//     silently regressed the AI tab once ultracode/opus became the default
-	//     and changed Claude's idle key handling.
-	redraw := "ctrl_l"
-	if req.AI {
-		redraw = "winch"
-	}
 	return append(lines,
 		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
-		fmt.Sprintf("dtach -A \"%s\" -r %s /bin/bash \"%s\" || shell_status=$?", socket, redraw, launchScript),
+		fmt.Sprintf("dtach -A \"%s\" -r %s %s || shell_status=$?", socket, redraw, launchCommand),
 		fmt.Sprintf("if [ \"$(cat \"%s\" 2>/dev/null)\" != \"$attach_id\" ]; then exit %d; fi", owner, remoteShellTakenOverExitCode),
 	)
 }
 
-func remoteAppSessionSocketPath(tenant, environment, id string) string {
+// RemoteAppSessionSocketPath returns the dtach socket path for a given
+// tenant/environment/session id -- exported so a caller running inside the
+// pod (the erun-mcp WSS attach edge) can address the same socket
+// RemoteAppSessionAttachLines' own script builds, without reimplementing the
+// naming.
+func RemoteAppSessionSocketPath(tenant, environment, id string) string {
 	return fmt.Sprintf("%s/%s-%s-%s.dtach", RemoteAppSessionSocketDir, sanitizeForFilename(tenant), sanitizeForFilename(environment), sanitizeForFilename(id))
 }
 
@@ -864,7 +995,7 @@ func remoteAppSessionMasterScanLines(socket string) []string {
 // explicitly closes a terminal tab; closing the env or quitting the app merely
 // detach and leave the session running for the next attach.
 func RemoteAppSessionEndScript(tenant, environment, id string) string {
-	socket := remoteAppSessionSocketPath(tenant, environment, id)
+	socket := RemoteAppSessionSocketPath(tenant, environment, id)
 	lines := remoteAppSessionMasterScanLines(socket)
 	lines = append(lines,
 		"if [ -n \"$master_pid\" ]; then kill \"$master_pid\" 2>/dev/null || true; fi",
@@ -883,7 +1014,6 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 		// Match the desktop's former contribute prelude.
 		body = append(body,
 			"export PATH=\"$HOME/.erun/contribute/bin:$PATH\"",
-			"export ERUN_SKIP_LINT=1",
 			"cd \"$HOME/git/erun\"",
 		)
 	}

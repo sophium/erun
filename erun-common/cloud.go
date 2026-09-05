@@ -16,6 +16,7 @@ import (
 const (
 	CloudProviderAWS        = "aws"
 	CloudProviderCloudflare = "cloudflare"
+	CloudProviderERun       = "erun"
 
 	CloudProviderBearerAudience = "erun-api"
 
@@ -58,6 +59,10 @@ type CloudProviderConfig struct {
 	// scoped API token is never stored inline, only a reference to the secret
 	// store.
 	Cloudflare *CloudflareProviderConfig `json:"cloudflare,omitempty" yaml:"cloudflare,omitempty"`
+
+	// ERun is set only when Provider == CloudProviderERun; the refresh token is
+	// never stored inline, only a reference to the secret store.
+	ERun *ERunProviderConfig `json:"erun,omitempty" yaml:"erun,omitempty"`
 }
 
 // CloudflareProviderConfig is the Cloudflare-specific identity for a cloud
@@ -96,6 +101,43 @@ type InitAWSCloudProviderParams struct {
 type CloudLoginParams struct {
 	Alias string
 	Force bool
+	// Scopes are extra OAuth scopes to request on top of the baseline
+	// "openid offline_access". A provider's reserved scopes are often not
+	// advertised in discovery, so they can only be asked for by name — e.g.
+	// urn:zitadel:iam:user:resourceowner, which is what makes a Zitadel token
+	// carry the org claim an org-scoped issuer resolves tenants by.
+	Scopes []string
+	// Flow selects the OIDC grant used for an erun-hosted alias:
+	// ERunLoginFlowDevice, ERunLoginFlowAuthCode, or empty/ERunLoginFlowAuto.
+	// Ignored by every other provider, which has only one login path.
+	Flow string
+}
+
+// The OIDC grants an erun-hosted alias can sign in with. Auto is the default:
+// it prefers the device grant when the issuer advertises one, and falls back to
+// authorization code + PKCE when that grant cannot complete — a single
+// unusable authentication method must not lock the CLI out when a second,
+// working flow exists.
+const (
+	ERunLoginFlowAuto     = "auto"
+	ERunLoginFlowDevice   = "device"
+	ERunLoginFlowAuthCode = "authcode"
+)
+
+// NormalizeERunLoginFlow validates a requested flow and resolves the empty
+// value to auto. The error names the accepted values, since this is operator
+// input from a flag or a tool argument.
+func NormalizeERunLoginFlow(flow string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(flow)) {
+	case "", ERunLoginFlowAuto:
+		return ERunLoginFlowAuto, nil
+	case ERunLoginFlowDevice:
+		return ERunLoginFlowDevice, nil
+	case ERunLoginFlowAuthCode:
+		return ERunLoginFlowAuthCode, nil
+	default:
+		return "", fmt.Errorf("unsupported login flow %q: expected %q, %q or %q", strings.TrimSpace(flow), ERunLoginFlowAuto, ERunLoginFlowDevice, ERunLoginFlowAuthCode)
+	}
 }
 
 type CloudBearerParams struct {
@@ -126,11 +168,42 @@ type CloudDependencies struct {
 	ResolveAWSIdentity      func(Context, string) (AWSIdentity, error)
 	CheckAWSStatus          func(Context, CloudProviderConfig) CloudProviderStatus
 
-	// CloudSecretStore is nil unless a transport wires one; Cloudflare operations
-	// that need it fail clearly when it is absent.
+	// CloudSecretStore is nil unless a transport wires one; Cloudflare and erun
+	// operations that need it fail clearly when it is absent.
 	VerifyCloudflareToken  func(Context, string) (CloudflareTokenInfo, error)
 	ListCloudflareAccounts func(Context, string) ([]CloudflareAccount, error)
 	CloudSecretStore       CloudSecretStore
+
+	// erun cloud provider: platform/OIDC discovery, the device authorization
+	// grant, the Authorization Code + PKCE fallback, and the refresh_token
+	// grant. See cloud_erun.go / cloud_erun_oidc.go.
+	FetchPlatformInfo            func(Context, string) (PlatformInfo, error)
+	FetchOIDCDiscovery           func(Context, string) (OIDCDiscovery, error)
+	StartERunDeviceAuthorization func(Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error)
+	PollERunDeviceToken          func(Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error)
+	RunERunAuthCodeLogin         func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
+	RefreshERunTokens            func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
+
+	// FetchConsoleVersion resolves a deployed console's own build version
+	// (GET <consoleURL>/version.json, unauthenticated) -- see
+	// control_plane_version_drift.go.
+	FetchConsoleVersion func(Context, string) (string, error)
+}
+
+// DefaultCloudDependencies returns a CloudDependencies with CloudSecretStore
+// set to the default file-backed store when one can be constructed there,
+// left nil otherwise. Every transport needs this same tolerant-nil
+// construction (the store's directory may not exist, or may be otherwise
+// unavailable) — call this from each rather than open-coding it again, which
+// is how the listing path went a full release without it.
+// Cloudflare/erun operations that need the store fail clearly downstream when
+// it stays nil, rather than here.
+func DefaultCloudDependencies() CloudDependencies {
+	deps := CloudDependencies{}
+	if store, err := DefaultCloudSecretStore(); err == nil {
+		deps.CloudSecretStore = store
+	}
+	return deps
 }
 
 // CloudProviderCredentials is a snapshot of temporary AWS credentials derived
@@ -167,6 +240,11 @@ func NormalizeCloudProviderConfig(config CloudProviderConfig) CloudProviderConfi
 		config.Cloudflare.AccountID = strings.TrimSpace(config.Cloudflare.AccountID)
 		config.Cloudflare.TokenName = strings.TrimSpace(config.Cloudflare.TokenName)
 		config.Cloudflare.TokenRef = strings.TrimSpace(config.Cloudflare.TokenRef)
+	}
+	if config.ERun != nil {
+		config.ERun.APIURL = strings.TrimRight(strings.TrimSpace(config.ERun.APIURL), "/")
+		config.ERun.ClientID = strings.TrimSpace(config.ERun.ClientID)
+		config.ERun.RefreshTokenRef = strings.TrimSpace(config.ERun.RefreshTokenRef)
 	}
 	if config.Alias == "" && config.Provider != "" && config.Username != "" && config.AccountID != "" {
 		config.Alias = CloudProviderAlias(config.Username, config.AccountID, config.Provider)
@@ -330,7 +408,7 @@ func hasAWSProfileConfig(params InitAWSCloudProviderParams) bool {
 }
 
 func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginParams, deps CloudDependencies) (CloudProviderStatus, error) {
-	ctx.Trace(fmt.Sprintf("cloud login: alias=%s force=%v", strings.TrimSpace(params.Alias), params.Force))
+	ctx.Trace(fmt.Sprintf("cloud login: alias=%s force=%v flow=%s", strings.TrimSpace(params.Alias), params.Force, strings.TrimSpace(params.Flow)))
 	provider, err := ResolveCloudProvider(store, params.Alias)
 	if err != nil {
 		ctx.Trace("cloud login: provider lookup failed: " + err.Error())
@@ -353,6 +431,11 @@ func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPar
 	case CloudProviderCloudflare:
 		// Cloudflare has no interactive login; fall through to the token
 		// status re-check.
+	case CloudProviderERun:
+		// erunCloudProviderLogin resolves its own final status (it may have
+		// just persisted a new refresh token ref onto provider), so it returns
+		// directly rather than falling through to the stale pre-login value.
+		return erunCloudProviderLogin(ctx, store, provider, params.Flow, params.Scopes, deps)
 	default:
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
@@ -375,6 +458,10 @@ func LogoutCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPa
 		// Cloudflare has no SSO session; "logout" removes the stored token so
 		// the alias keeps its identity but loses its credential.
 		if err := deleteCloudflareToken(ctx, provider, deps); err != nil {
+			return status, err
+		}
+	case CloudProviderERun:
+		if err := erunCloudProviderLogout(ctx, provider, deps); err != nil {
 			return status, err
 		}
 	default:
@@ -421,6 +508,8 @@ func CloudProviderBearerToken(ctx Context, store CloudReadStore, params CloudBea
 		return awsCloudProviderBearerToken(ctx, provider, params, deps)
 	case CloudProviderCloudflare:
 		return CloudBearerToken{}, ErrCloudProviderNoOIDC
+	case CloudProviderERun:
+		return erunCloudProviderBearerToken(ctx, provider, deps)
 	default:
 		return CloudBearerToken{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
@@ -459,12 +548,16 @@ func awsCloudProviderBearerToken(ctx Context, provider CloudProviderConfig, para
 
 func awsBearerTokenWithOIDCRetry(ctx Context, provider CloudProviderConfig, audience string, deps CloudDependencies) (string, error) {
 	rawToken, err := deps.RunAWSBearerToken(ctx, provider.Profile, audience)
-	if err == nil {
-		return rawToken, nil
-	}
-	if !isAWSOutboundWebIdentityFederationDisabled(err) {
+	if err != nil && !isAWSOutboundWebIdentityFederationDisabled(err) {
 		return "", err
 	}
+	if err == nil && !ctx.DryRun {
+		return rawToken, nil
+	}
+	// Either federation was reported disabled on a real run, or this is a dry
+	// run: RunAWSBearerToken always reports success without ever invoking AWS,
+	// so the only way to preview the recovery this command would perform is to
+	// trace it unconditionally here too.
 	if _, enableErr := deps.RunAWSEnableOIDC(ctx, provider.Profile); enableErr != nil {
 		return "", enableErr
 	}
@@ -538,11 +631,11 @@ func normalizeEnvironmentCloudProviderAliasParams(params SetEnvironmentCloudAlia
 	alias := strings.TrimSpace(params.Alias)
 	switch {
 	case tenant == "":
-		return "", "", "", fmt.Errorf("tenant is required")
+		return "", "", "", fmt.Errorf("set cloud provider alias: no tenant given — pass one explicitly (`erun cloud set <tenant> <environment> --alias <alias>`, or the cloud_set tool's tenant field)")
 	case environment == "":
-		return "", "", "", fmt.Errorf("environment is required")
+		return "", "", "", fmt.Errorf("set cloud provider alias for %s: no environment given — pass one explicitly (`erun cloud set %s <environment> --alias <alias>`, or the cloud_set tool's environment field)", tenant, tenant)
 	case alias == "":
-		return "", "", "", fmt.Errorf("cloud provider alias is required")
+		return "", "", "", fmt.Errorf("set cloud provider alias for %s/%s: no alias given — pass one explicitly (`erun cloud set %s %s --alias <alias>`, or the cloud_set tool's alias field)", tenant, environment, tenant, environment)
 	default:
 		return tenant, environment, alias, nil
 	}
@@ -705,6 +798,9 @@ func CloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDependenci
 	if provider.Provider == CloudProviderCloudflare {
 		return cloudflareCloudProviderTokenStatus(provider, deps)
 	}
+	if provider.Provider == CloudProviderERun {
+		return erunCloudProviderTokenStatus(provider, deps)
+	}
 	if provider.Provider != CloudProviderAWS {
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusUnknown, Message: "unsupported provider"}
 	}
@@ -832,6 +928,35 @@ func issuerFromJWT(token string) (string, error) {
 func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	deps = normalizeAWSCloudDependencies(deps)
 	deps = normalizeCloudflareCloudDependencies(deps)
+	deps = normalizeERunCloudDependencies(deps)
+	return deps
+}
+
+// normalizeERunCloudDependencies leaves CloudSecretStore nil on purpose: only
+// a transport wires one, and erun operations that need it fail clearly when
+// it is absent (same convention as Cloudflare).
+func normalizeERunCloudDependencies(deps CloudDependencies) CloudDependencies {
+	if deps.FetchPlatformInfo == nil {
+		deps.FetchPlatformInfo = defaultFetchPlatformInfo
+	}
+	if deps.FetchOIDCDiscovery == nil {
+		deps.FetchOIDCDiscovery = defaultFetchOIDCDiscovery
+	}
+	if deps.StartERunDeviceAuthorization == nil {
+		deps.StartERunDeviceAuthorization = defaultStartERunDeviceAuthorization
+	}
+	if deps.PollERunDeviceToken == nil {
+		deps.PollERunDeviceToken = pollERunDeviceToken
+	}
+	if deps.RunERunAuthCodeLogin == nil {
+		deps.RunERunAuthCodeLogin = runERunAuthorizationCodeLogin
+	}
+	if deps.RefreshERunTokens == nil {
+		deps.RefreshERunTokens = defaultRefreshERunTokens
+	}
+	if deps.FetchConsoleVersion == nil {
+		deps.FetchConsoleVersion = defaultFetchConsoleVersion
+	}
 	return deps
 }
 
@@ -846,21 +971,53 @@ func normalizeAWSCloudDependencies(deps CloudDependencies) CloudDependencies {
 		deps.RunAWSLogout = defaultRunAWSLogout
 	}
 	if deps.RunAWSBearerToken == nil {
-		deps.RunAWSBearerToken = defaultRunAWSBearerToken
+		deps.RunAWSBearerToken = runAWSBearerTokenForExecutionMode()
 	}
 	if deps.RunAWSEnableOIDC == nil {
 		deps.RunAWSEnableOIDC = defaultRunAWSEnableOIDC
 	}
 	if deps.RunAWSExportCredentials == nil {
-		deps.RunAWSExportCredentials = defaultRunAWSExportCredentials
+		deps.RunAWSExportCredentials = runAWSExportCredentialsForExecutionMode()
 	}
 	if deps.ResolveAWSIdentity == nil {
-		deps.ResolveAWSIdentity = defaultResolveAWSIdentity
+		deps.ResolveAWSIdentity = resolveAWSIdentityForExecutionMode()
 	}
 	if deps.CheckAWSStatus == nil {
-		deps.CheckAWSStatus = defaultCheckAWSStatus
+		deps.CheckAWSStatus = checkAWSStatusForExecutionMode()
 	}
 	return deps
+}
+
+// resolveAWSIdentityForExecutionMode and checkAWSStatusForExecutionMode pick
+// the subprocess or library implementation per the aws-sts execution mode
+// (see execution_mode.go), split out of normalizeAWSCloudDependencies to keep
+// its own branching within the cyclomatic complexity budget.
+func resolveAWSIdentityForExecutionMode() func(Context, string) (AWSIdentity, error) {
+	if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
+		return libraryResolveAWSIdentity
+	}
+	return defaultResolveAWSIdentity
+}
+
+func runAWSBearerTokenForExecutionMode() func(Context, string, string) (string, error) {
+	if currentExecutionMode(awsSTSWebIdentityTokenExecutionOperation) == ExecutionModeLibrary {
+		return libraryRunAWSBearerToken
+	}
+	return defaultRunAWSBearerToken
+}
+
+func runAWSExportCredentialsForExecutionMode() func(Context, string) (CloudProviderCredentials, error) {
+	if currentExecutionMode(awsExportCredentialsExecutionOperation) == ExecutionModeLibrary {
+		return libraryRunAWSExportCredentials
+	}
+	return defaultRunAWSExportCredentials
+}
+
+func checkAWSStatusForExecutionMode() func(Context, CloudProviderConfig) CloudProviderStatus {
+	if currentExecutionMode(awsSTSIdentityExecutionOperation) == ExecutionModeLibrary {
+		return libraryCheckAWSStatus
+	}
+	return defaultCheckAWSStatus
 }
 
 // normalizeCloudflareCloudDependencies leaves CloudSecretStore nil on purpose:
@@ -975,17 +1132,7 @@ func defaultRunAWSLogout(ctx Context, profile string) error {
 
 func defaultRunAWSBearerToken(ctx Context, profile, audience string) (string, error) {
 	audience = normalizeCloudBearerAudience(audience)
-	args := []string{
-		"sts", "get-web-identity-token",
-		"--audience", audience,
-		"--signing-algorithm", "RS256",
-		"--duration-seconds", "900",
-		"--query", "WebIdentityToken",
-		"--output", "text",
-	}
-	if strings.TrimSpace(profile) != "" {
-		args = append(args, "--profile", strings.TrimSpace(profile))
-	}
+	args := awsGetWebIdentityTokenArgs(profile, audience)
 	ctx.TraceCommand("", "aws", args...)
 	if ctx.DryRun {
 		return "", nil
@@ -1007,10 +1154,7 @@ func defaultRunAWSBearerToken(ctx Context, profile, audience string) (string, er
 }
 
 func defaultRunAWSExportCredentials(ctx Context, profile string) (CloudProviderCredentials, error) {
-	args := []string{"configure", "export-credentials", "--format", "process"}
-	if strings.TrimSpace(profile) != "" {
-		args = append(args, "--profile", strings.TrimSpace(profile))
-	}
+	args := awsConfigureExportCredentialsArgs(profile)
 	ctx.TraceCommand("", "aws", args...)
 	if ctx.DryRun {
 		return CloudProviderCredentials{}, nil
@@ -1078,9 +1222,20 @@ func defaultRunAWSEnableOIDC(ctx Context, profile string) (string, error) {
 		if isAWSOutboundWebIdentityFederationAlreadyEnabledMessage(message) {
 			return "", nil
 		}
+		if isAWSAccessDeniedMessage(message) {
+			return "", fmt.Errorf("enable AWS outbound web identity federation requires the iam:EnableOutboundWebIdentityFederation permission: %s", message)
+		}
 		return "", fmt.Errorf("enable AWS outbound web identity federation: %s", message)
 	}
 	return normalizeOIDCIssuerURL(stdout.String()), nil
+}
+
+func isAWSAccessDeniedMessage(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "accessdenied") ||
+		strings.Contains(message, "access denied") ||
+		strings.Contains(message, "unauthorizedaccess") ||
+		strings.Contains(message, "not authorized to perform")
 }
 
 func isAWSOutboundWebIdentityFederationDisabled(err error) bool {
@@ -1105,10 +1260,7 @@ func generatedAWSProfileName() string {
 }
 
 func defaultResolveAWSIdentity(ctx Context, profile string) (AWSIdentity, error) {
-	args := []string{"sts", "get-caller-identity", "--output", "json"}
-	if strings.TrimSpace(profile) != "" {
-		args = append(args, "--profile", strings.TrimSpace(profile))
-	}
+	args := awsGetCallerIdentityArgs(profile)
 	ctx.TraceCommand("", "aws", args...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

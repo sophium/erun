@@ -1,0 +1,3 @@
+audit: erun exec gate-merge --dry-run --source [feature/add-widget] --target main
+git -C <TMP> status --porcelain --untracked-files=no
+refusing to gate-merge: the working tree has uncommitted changes

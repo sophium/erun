@@ -103,11 +103,19 @@ func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueE
 	return activityQueueEntry{}
 }
 
+// finishActivityTracking finalizes the active "deploy" entry for the
+// selection. Both callers observe a deploy-failure trace line that carries no
+// tenant/env (a bare "==> Deploy failed after <elapsed>", or a
+// "==> Deployed"/"==> Deploy failed" line finishDeployByTenantEnv could not
+// parse tenant/env out of), so the command is always "deploy" here — keyed by
+// command, like finishCommandBySelection, rather than plain findActive, whose
+// Go map iteration order picks an arbitrary entry when a build and a deploy
+// are both active for the same tenant/env — the wrong card finalizing.
 func (a *App) finishActivityTracking(selection uiSelection, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
 	}
-	entry, ok := a.activityQueue.findActive(strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	entry, ok := a.activityQueue.findActiveByCommand("deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 	if !ok {
 		return
 	}
@@ -195,6 +203,22 @@ func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 		// A late-joining session locked onto an in-flight deploy — the runtime is
 		// being (re)deployed, so clear any env-scoped warning for it.
 		a.emitClearEnvNotification(entry.Tenant, entry.Environment, "")
+	}
+}
+
+// lockNewlyJoinedSessionIfDeployInFlight locks a session the instant it joins,
+// rather than leaving it unlocked until the deploy's poller or completion
+// handler next touches the queue: a session created after a deploy has
+// already started otherwise shows no lock overlay at all, since
+// lockTerminalsForActivity only locks the sessions that existed at deploy
+// start. Callers are runOpenSession/runAISession, the only two kinds
+// sessionMatchesActivity locks for a deploy.
+func (a *App) lockNewlyJoinedSessionIfDeployInFlight(selection uiSelection, sessionID int) {
+	if a.activityQueue == nil {
+		return
+	}
+	if entry, ok := a.activityQueue.findActiveByCommand("deploy", selection.Tenant, selection.Environment); ok {
+		a.lockTerminalForActivity(sessionID, entry)
 	}
 }
 
@@ -311,6 +335,34 @@ var activityInitializedLineRe = regexp.MustCompile(`^==> Initialized ([^/\s]+)/(
 // tenant/env` trace emitted when a step after Initializing errors.
 var activityInitFailedLineRe = regexp.MustCompile(`^==> Initialization failed ([^/\s]+)/([^/\s]+)\b`)
 
+// activityDoctorLineRe matches the `==> Doctor tenant/env` trace emitted at
+// the start of a target-scoped `erun doctor` run.
+var activityDoctorLineRe = regexp.MustCompile(`^==> Doctor ([^/\s]+)/([^/\s]+)\s*$`)
+
+// activityDoctorDoneLineRe matches the `==> Doctor done tenant/env` trace.
+// This line, not PTY exit, is doctor's completion signal: like `erun init`,
+// `erun doctor` runs piped into the shared Local shell (see erun-ui/AGENTS.md
+// § "Command Completion And State-Refresh Wiring").
+var activityDoctorDoneLineRe = regexp.MustCompile(`^==> Doctor done ([^/\s]+)/([^/\s]+)\b`)
+
+// activityDoctorFailedLineRe matches the `==> Doctor failed tenant/env:
+// reason` trace emitted when any step of the target-scoped run errors.
+var activityDoctorFailedLineRe = regexp.MustCompile(`^==> Doctor failed ([^/\s]+)/([^/\s]+)(?::\s*(.*))?$`)
+
+// activitySSHDInitLineRe matches the `==> SSHD init tenant/env` trace emitted
+// at the start of `erun sshd init`.
+var activitySSHDInitLineRe = regexp.MustCompile(`^==> SSHD init ([^/\s]+)/([^/\s]+)\s*$`)
+
+// activitySSHDInitDoneLineRe matches the `==> SSHD init done tenant/env`
+// trace. This line, not PTY exit, is sshd init's completion signal: like
+// `erun doctor`, `erun sshd init` runs piped into the shared Local shell (see
+// erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring").
+var activitySSHDInitDoneLineRe = regexp.MustCompile(`^==> SSHD init done ([^/\s]+)/([^/\s]+)\b`)
+
+// activitySSHDInitFailedLineRe matches the `==> SSHD init failed tenant/env:
+// reason` trace emitted when any step of the run errors.
+var activitySSHDInitFailedLineRe = regexp.MustCompile(`^==> SSHD init failed ([^/\s]+)/([^/\s]+)(?::\s*(.*))?$`)
+
 // activityBuildingLineRe matches the umbrella `==> Building` trace
 // emitted by RunBuildExecution at the top of the build pipeline.
 // Unlike deploy/init the line carries no tenant/env — build has no
@@ -350,6 +402,22 @@ var (
 	activityPushFailedLineRe = regexp.MustCompile(`^==> Push failed\b`)
 )
 
+// activityFailureElapsedClauseRe strips the trailing " after <duration>"
+// clause the build/push/release/deploy failure traces carry (e.g. "after
+// 3m12s"). It is timing information for the log, not part of what failed.
+var activityFailureElapsedClauseRe = regexp.MustCompile(`\s+after\s+\S+\s*$`)
+
+// cleanActivityFailureLine turns a raw `==> ... failed [after <elapsed>]`
+// trace line into a short human label for entry.Error — e.g. "==> Build
+// failed after 3m12s" becomes "Build failed". The raw marker is still fully
+// captured in entry.Detail via recordOutputLine; this only cleans the
+// one-line summary the activity card headlines.
+func cleanActivityFailureLine(line string) string {
+	cleaned := strings.TrimPrefix(strings.TrimSpace(line), "==> ")
+	cleaned = activityFailureElapsedClauseRe.ReplaceAllString(cleaned, "")
+	return strings.TrimSpace(cleaned)
+}
+
 // newActivityTraceLineHandler scans PTY output for trace lines emitted by
 // erun deploy and updates the activity queue accordingly.
 //
@@ -387,12 +455,25 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 	initTraceHonored := kind == sessionKindLocal
 	return func(line string) {
 		line = strings.TrimSpace(line)
+		// Buffer every line for the active entry before dispatching it, so the
+		// "==> Deploy failed"/"==> Build failed" line that finalizes the entry
+		// (and the tool output preceding it) is already captured when finish()
+		// snapshots the buffer into entry.Detail. This must run for every caller
+		// of this handler, not just the PTY reader — a subprocess-captured
+		// orchestration (no PTY involved) has no other path into Detail, and
+		// without it the failed card shows only the raw "==> Build failed after
+		// 3m12s" marker with the actual compiler/tool error nowhere to be found.
+		if app.activityQueue != nil {
+			app.activityQueue.recordOutputLine(selection.Tenant, selection.Environment, line)
+		}
 		switch {
 		case app.handleDeployTraceLine(selection, line):
 		case initTraceHonored && app.handleInitTraceLine(selection, line):
 		case app.handleCommandTraceLine(selection, line):
+		case app.handleDoctorTraceLine(selection, line):
+		case app.handleSSHDInitTraceLine(selection, line):
 		case failedRe.MatchString(line):
-			app.finishActivityTracking(selection, activityQueueStatusFailed, line)
+			app.finishActivityTracking(selection, activityQueueStatusFailed, cleanActivityFailureLine(line))
 		case errorRe.MatchString(line):
 			app.captureActivityErrorIfRunning(selection, line)
 		}
@@ -442,7 +523,43 @@ func (a *App) surfaceDeployFailure(tenant, environment, reason string) {
 	if reason != "" {
 		message = fmt.Sprintf("Deploy of %s/%s failed: %s", tenant, environment, reason)
 	}
-	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message)
+	a.emitEnvNotification("error", tenant, environment, notificationSourceDeployFailed, message, "")
+}
+
+// handleDoctorTraceLine dispatches the `erun doctor` lifecycle trace lines,
+// returning true on a match so the caller stops.
+func (a *App) handleDoctorTraceLine(selection uiSelection, line string) bool {
+	if match := activityDoctorLineRe.FindStringSubmatch(line); match != nil {
+		a.startDoctorFromTrace(selection, match[1], match[2])
+		return true
+	}
+	if match := activityDoctorDoneLineRe.FindStringSubmatch(line); match != nil {
+		a.finishDoctorByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
+		return true
+	}
+	if match := activityDoctorFailedLineRe.FindStringSubmatch(line); match != nil {
+		a.finishDoctorByTenantEnv(match[1], match[2], activityQueueStatusFailed, strings.TrimSpace(match[3]))
+		return true
+	}
+	return false
+}
+
+// handleSSHDInitTraceLine dispatches the `erun sshd init` lifecycle trace
+// lines, returning true on a match so the caller stops.
+func (a *App) handleSSHDInitTraceLine(selection uiSelection, line string) bool {
+	if match := activitySSHDInitLineRe.FindStringSubmatch(line); match != nil {
+		a.startSSHDInitFromTrace(selection, match[1], match[2])
+		return true
+	}
+	if match := activitySSHDInitDoneLineRe.FindStringSubmatch(line); match != nil {
+		a.finishSSHDInitByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
+		return true
+	}
+	if match := activitySSHDInitFailedLineRe.FindStringSubmatch(line); match != nil {
+		a.finishSSHDInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, strings.TrimSpace(match[3]))
+		return true
+	}
+	return false
 }
 
 func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
@@ -456,7 +573,7 @@ func (a *App) handleInitTraceLine(selection uiSelection, line string) bool {
 		return true
 	}
 	if match := activityInitFailedLineRe.FindStringSubmatch(line); match != nil {
-		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, line)
+		a.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, cleanActivityFailureLine(line))
 		a.emitEnvironmentInitFailed(match[1], match[2])
 		return true
 	}
@@ -476,7 +593,7 @@ func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
 		return true
 	}
 	if activityBuildFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "build", activityQueueStatusFailed, line)
+		a.finishCommandBySelection(selection, "build", activityQueueStatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	if activityReleasingLineRe.MatchString(line) {
@@ -488,7 +605,7 @@ func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
 		return true
 	}
 	if activityReleaseFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "release", activityQueueStatusFailed, line)
+		a.finishCommandBySelection(selection, "release", activityQueueStatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	if activityPushingLineRe.MatchString(line) {
@@ -500,7 +617,7 @@ func (a *App) handleCommandTraceLine(selection uiSelection, line string) bool {
 		return true
 	}
 	if activityPushFailedLineRe.MatchString(line) {
-		a.finishCommandBySelection(selection, "push", activityQueueStatusFailed, line)
+		a.finishCommandBySelection(selection, "push", activityQueueStatusFailed, cleanActivityFailureLine(line))
 		return true
 	}
 	return false
@@ -596,6 +713,110 @@ func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQ
 	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
 		a.unlockTerminalsForActivity(final)
 	}
+}
+
+// startDoctorFromTrace registers an activity entry for `erun doctor`, giving
+// it a persistent, glanceable presence in the activity drawer/sidebar spinner
+// regardless of which surface started it (sidebar, Manage dialog, or a failed
+// deploy card's "Run doctor" recovery button). Unlike deploy/init it never
+// locks terminals: doctor's recovery actions prompt interactively in the very
+// terminal it runs in, and locking that terminal would block the prompt.
+func (a *App) startDoctorFromTrace(selection uiSelection, tenant, environment string) {
+	if a.activityQueue == nil {
+		return
+	}
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if _, ok := a.activityQueue.findActiveByCommand("doctor", tenant, environment); ok {
+		return
+	}
+	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
+	if _, fresh := a.activityQueue.start(activityQueueEntry{
+		Command:           "doctor",
+		Tenant:            tenant,
+		Environment:       environment,
+		KubernetesContext: kubeContext,
+		Source:            "trace",
+		Summary:           "doctor " + tenant + "/" + environment,
+	}); !fresh {
+		return
+	}
+	a.rememberKubeContextForActivity(kubeContext)
+}
+
+// finishDoctorByTenantEnv finalizes the activity entry and records the
+// persisted last-run outcome the Manage dialog's SSH tab reads
+// (state.doctor.lastDoctorBySelection) — the answer "is this healthy?" that
+// otherwise vanished the moment the terminal scrolled past it.
+func (a *App) finishDoctorByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if a.activityQueue != nil {
+		if entry, ok := a.activityQueue.findActiveByCommand("doctor", tenant, environment); ok {
+			a.activityQueue.finish(entry.ID, status, errMsg)
+		}
+	}
+	a.emitDoctorCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
+}
+
+// startSSHDInitFromTrace registers an activity entry for `erun sshd init`,
+// giving it a persistent, glanceable presence in the activity drawer/sidebar
+// spinner regardless of which surface started it. Unlike doctor, sshd init
+// runs no interactive recovery prompts of its own — it is a one-shot
+// provisioning action like init/deploy — so it locks terminals the same way
+// those do.
+func (a *App) startSSHDInitFromTrace(selection uiSelection, tenant, environment string) {
+	if a.activityQueue == nil {
+		return
+	}
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if _, ok := a.activityQueue.findActiveByCommand("sshd-init", tenant, environment); ok {
+		return
+	}
+	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
+	entry, fresh := a.activityQueue.start(activityQueueEntry{
+		Command:           "sshd-init",
+		Tenant:            tenant,
+		Environment:       environment,
+		KubernetesContext: kubeContext,
+		Source:            "trace",
+		Summary:           "sshd init " + tenant + "/" + environment,
+	})
+	if !fresh {
+		return
+	}
+	a.rememberKubeContextForActivity(kubeContext)
+	a.lockTerminalsForActivity(entry)
+}
+
+// finishSSHDInitByTenantEnv finalizes the activity entry and records the
+// persisted last-run outcome the Manage dialog's SSH access section reads —
+// the answer "did enabling SSHD work?" that otherwise vanished the moment the
+// terminal scrolled past it.
+func (a *App) finishSSHDInitByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if a.activityQueue != nil {
+		if entry, ok := a.activityQueue.findActiveByCommand("sshd-init", tenant, environment); ok {
+			if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
+				a.unlockTerminalsForActivity(final)
+			}
+		}
+	}
+	a.emitSSHDInitCompleted(tenant, environment, status == activityQueueStatusSucceeded, errMsg)
 }
 
 // startDeployFromTrace registers a deploy entry from a `==> Deploying` trace.
@@ -735,12 +956,33 @@ func (a *App) resolveActivityKubeContext(selection uiSelection, tenant, environm
 	return strings.TrimSpace(envConfig.KubernetesContext)
 }
 
+// activityCommandErrorPriority orders the commands captureActivityErrorIfRunning
+// tries when attaching a bare "Error: ..." line to the entry it belongs to. A
+// generic error line carries no command of its own, so when more than one
+// entry is active for the same tenant/env (e.g. a lingering build entry
+// beside a just-started deploy) the choice must be deterministic — not
+// plain findActive's Go map iteration order, which let a helm failure land on
+// the build card instead of the deploy card roughly half the time. Deploy is
+// checked first because it is the longest-running step and the one most
+// likely still active when a generic tool error line (e.g. "Error: UPGRADE
+// FAILED: ...") appears.
+var activityCommandErrorPriority = []string{"deploy", "push", "build", "release", "init"}
+
 func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) {
 	if a.activityQueue == nil {
 		return
 	}
-	entry, ok := a.activityQueue.findActive(strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
-	if !ok {
+	tenant := strings.TrimSpace(selection.Tenant)
+	environment := strings.TrimSpace(selection.Environment)
+	var entry activityQueueEntry
+	found := false
+	for _, command := range activityCommandErrorPriority {
+		if e, ok := a.activityQueue.findActiveByCommand(command, tenant, environment); ok {
+			entry, found = e, true
+			break
+		}
+	}
+	if !found {
 		return
 	}
 	if strings.TrimSpace(entry.Error) != "" {
@@ -943,11 +1185,9 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	}
 	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
 	for _, line := range lines {
-		// Buffer the line for the active entry before dispatching it, so the
-		// "==> Deploy failed" line that finalizes the entry (and the error
-		// output preceding it) is already captured when finish() snapshots
-		// the buffer into entry.Detail.
-		a.activityQueue.recordOutputLine(managed.selection.Tenant, managed.selection.Environment, line)
+		// newActivityTraceLineHandler itself buffers the line into entry.Detail
+		// before dispatching, so every caller (this PTY reader and the
+		// subprocess-captured orchestration path) gets the same Detail capture.
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
 		// The CLI's taken-over notice is a public contract line (see

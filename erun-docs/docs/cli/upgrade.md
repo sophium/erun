@@ -28,7 +28,39 @@ For each opted-in environment, `erun upgrade` resolves the latest version for it
 | `--tenant <tenant>` | Restrict the upgrade to one tenant. |
 | `--environment <env>` | Restrict the upgrade to one environment (requires `--tenant`). |
 | `--force` | Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected. |
-| `--dry-run` | Resolve and print the plan — each member, its channel, current → target — and the deploy actions, without executing. |
+| `--fleet` | Include every environment in `--tenant` regardless of its own **Upgrade all** opt-in (requires `--tenant`). See [Fleet-wide remediation](#fleet). |
+| `--gate-environment <name>` | Name the environment driving `--tenant`'s merge-queue gate; always included and always rolled first (requires `--tenant`). See [Fleet-wide remediation](#fleet). |
+| `--override-lease` | Roll an environment even though it is currently held by another worker. See [Held environments are refused, not overridden](#leases). |
+| `--orchestrator <id>` | The calling orchestrator's own id, recorded on each deploy's activity lease and on any `--override-lease` use. |
+| `--dry-run` | Resolve and print the plan — each member, its channel, current → target, in the exact order it will deploy — and the deploy actions, without executing. |
+
+## Fleet-wide remediation {#fleet}
+
+The routine "Upgrade all" cadence above only ever touches environments that opted in. That is the wrong shape for remediating **version drift**: a tenant whose environments have quietly diverged (`erun list --tenant <tenant>` reports this — see [`erun list`](/cli/list)) needs every one of its environments rolled to the same version once, whether or not each one ever turned on the routine opt-in.
+
+`--fleet` does that: with `--tenant` set, it includes every non-host environment in that tenant regardless of `autoupgrade`, and `--version` pins the exact target so no channel/registry resolution is needed. Combine it with `--gate-environment <name>` to name the environment driving that tenant's merge-queue gate — the same flag `erun list --gate-environment` uses for drift detection. The named environment is always included, even when `--fleet` is not passed, and its plan item is always moved to the **front** of the resolved order, so it rolls before any environment it gates. This is the release-cadence policy's rule that the gate environment's redeploy is "immediate, unconditional" — never the last thing rolled, and never left to arrive whenever it happens to sort. A typo'd `--gate-environment` fails the whole plan (`gate environment "<name>" not found in tenant "<tenant>"`) rather than silently resolving with no gate at the front.
+
+```bash
+# Preview: every environment in "acme", the gate environment first
+erun upgrade acme --fleet --version 1.2.3 --gate-environment build --dry-run
+
+# Roll it for real, one environment at a time if you prefer
+erun upgrade acme build --version 1.2.3
+erun upgrade acme dev --version 1.2.3
+erun upgrade acme staging --version 1.2.3
+```
+
+Scoping to `TENANT ENVIRONMENT` (or `--tenant`/`--environment`) always narrows to one environment — `--fleet`'s inclusion and the gate's front-of-order placement both still apply within that narrower scope, so an operator or an orchestrator can drive the fleet one environment at a time, watching each roll finish before starting the next, rather than firing every deploy from one command.
+
+## Held environments are refused, not overridden {#leases}
+
+A roll restarts the runtime pod, exactly like [`erun resize`](/cli/resize). Before deploying any environment, `erun upgrade` checks that environment's activity leases (the same signal a running build, deploy, or agent session holds) and refuses — naming the holder — rather than deploying underneath it:
+
+```
+team/dev is held by orchestrator eng-42 (lease "exec_job_attach") -- an upgrade restarts the runtime pod and would interrupt that work; pass --override-lease to roll it anyway, or wait until it finishes
+```
+
+This check runs even under `--dry-run`, so the plan shows the refusal before anything ships. Pass `--override-lease` to roll the environment anyway — the override is traced (`overriding N held lease(s): ...`), never silent. The refused environment is reported as failed and the run continues to the rest of the plan; it does not abort the whole roll.
 
 ## High blast radius
 
@@ -60,6 +92,13 @@ Pin one environment to an exact version:
 erun upgrade team prod --version 1.2.3
 ```
 
+Remediate version drift across a whole tenant, gate environment first:
+
+```bash
+erun upgrade acme --fleet --version 1.2.3 --gate-environment build --dry-run
+erun upgrade acme --fleet --version 1.2.3 --gate-environment build
+```
+
 ## Error behaviour
 
 | Failure | Behaviour |
@@ -69,6 +108,10 @@ erun upgrade team prod --version 1.2.3
 | More than one listed registry offers a different newer version for the channel. | The environment is reported as **target unresolved** (`multiple newer versions across registries; pick one or pass --version`) and skipped — `erun upgrade` never guesses between them. Pass `--version` to choose, or use the desktop's per-version picker (each candidate is labelled with its source registry). |
 | Channel latest can't be resolved anywhere (every listed registry and the canonical image lookup failed, or no matching tags). | The environment is reported as **target unresolved** with the reason, in the plan line, the skip trace, and the completion accounting (`==> Upgrade complete: N upgraded, N up to date, N unresolved, N failed`) — never as "up to date", and `erun upgrade` never deploys an unknown version. |
 | `--environment` without `--tenant`. | Errors before any work; exit code 1. |
+| `--fleet` without `--tenant`. | Errors `--fleet requires --tenant` before any work; exit code 1. |
+| `--gate-environment` without `--tenant`. | Errors `--gate-environment requires --tenant` before any work; exit code 1. |
+| `--gate-environment` names an environment not in `--tenant`. | Errors `gate environment "<name>" not found in tenant "<tenant>"` before any work; exit code 1. |
+| An in-scope environment is held by another worker (a running build, deploy, or agent session). | That environment is refused and reported as **failed**, naming the holder — even under `--dry-run`. The run **continues** to the rest of the plan. Pass `--override-lease` to roll it anyway, or wait until the holder finishes. |
 | One member's deploy fails. | The run **continues** to the remaining members; the failed environment is reported in a summary and the command exits non-zero. Already-upgraded members stay deployed. |
 | Cluster unreachable / stopped cloud context for a member. | Surfaces per the underlying `erun deploy` behaviour for that member (see [`erun deploy` · Error behaviour](/cli/deploy#error-behaviour)). |
 

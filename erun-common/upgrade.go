@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 // UpgradeVersionsOverrideEnv is a test-only seam that forces the upgrade
@@ -134,6 +135,22 @@ type UpgradeTarget struct {
 	Environment     string
 	VersionOverride string
 	Force           bool
+	// GateEnvironment names the environment driving this tenant's
+	// merge-queue gate -- erun has no stored concept of which environment
+	// that is (root AGENTS.md's release-cadence policy design, erun#1985),
+	// so the caller states it, the same way `erun list --gate-environment`
+	// already does for drift detection. When set, that environment's item is
+	// always included regardless of its own Upgrade-all opt-in, and moved to
+	// the front of the plan so it rolls before any environment it gates --
+	// the cadence policy's "immediate, unconditional" gate redeploy is never
+	// left to arrive last. Requires Tenant, and the named environment must
+	// exist in it.
+	GateEnvironment string
+	// Fleet includes every non-host environment in Tenant's scope regardless
+	// of its own Upgrade-all opt-in -- an explicit whole-tenant roll (e.g.
+	// remediating version drift found by `erun list --tenant`) rather than
+	// the routine autoupgrade cadence. Requires Tenant.
+	Fleet bool
 }
 
 // ResolveUpgradePlanForStore resolves the "Upgrade all" plan and traces every
@@ -156,40 +173,145 @@ func buildUpgradePlan(store DeployStore, target UpgradeTarget, resolveVersions E
 			trace(msg)
 		}
 	}
+	scope, err := normalizeUpgradeScope(target)
+	if err != nil {
+		return UpgradePlan{}, err
+	}
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
 		return UpgradePlan{}, err
 	}
-	scopeTenant := strings.TrimSpace(target.Tenant)
-	scopeEnv := strings.TrimSpace(target.Environment)
-	override := strings.TrimSpace(target.VersionOverride)
+	items, gateFound, err := collectUpgradePlanItems(store, tenants, scope, resolveVersions, traceln)
+	if err != nil {
+		return UpgradePlan{}, err
+	}
+	if scope.gateEnvironment != "" {
+		if !gateFound {
+			return UpgradePlan{}, fmt.Errorf("gate environment %q not found in tenant %q", scope.gateEnvironment, scope.tenant)
+		}
+		items = prioritizeGateUpgradeItem(items, scope.tenant, scope.gateEnvironment)
+	}
+	return UpgradePlan{Items: items}, nil
+}
 
-	plan := UpgradePlan{Items: make([]UpgradePlanItem, 0)}
+// upgradeScope is UpgradeTarget's fields, trimmed and validated once so the
+// rest of plan resolution can trust them.
+type upgradeScope struct {
+	tenant          string
+	environment     string
+	override        string
+	gateEnvironment string
+	fleet           bool
+}
+
+func normalizeUpgradeScope(target UpgradeTarget) (upgradeScope, error) {
+	scope := upgradeScope{
+		tenant:          strings.TrimSpace(target.Tenant),
+		environment:     strings.TrimSpace(target.Environment),
+		override:        strings.TrimSpace(target.VersionOverride),
+		gateEnvironment: strings.TrimSpace(target.GateEnvironment),
+		fleet:           target.Fleet,
+	}
+	if scope.gateEnvironment != "" && scope.tenant == "" {
+		return upgradeScope{}, fmt.Errorf("--gate-environment requires --tenant")
+	}
+	if scope.fleet && scope.tenant == "" {
+		return upgradeScope{}, fmt.Errorf("--fleet requires --tenant")
+	}
+	return scope, nil
+}
+
+// collectUpgradePlanItems walks every in-scope tenant's environments into
+// plan items, and reports whether scope.gateEnvironment (when named) was
+// actually found among them -- a typo must fail the whole plan, not resolve
+// silently with no gate verdict.
+func collectUpgradePlanItems(store DeployStore, tenants []TenantConfig, scope upgradeScope, resolveVersions EnvVersionsResolver, traceln func(string)) ([]UpgradePlanItem, bool, error) {
+	items := make([]UpgradePlanItem, 0)
+	gateFound := scope.gateEnvironment == ""
 	for _, tenant := range tenants {
-		if scopeTenant != "" && tenant.Name != scopeTenant {
+		if scope.tenant != "" && tenant.Name != scope.tenant {
 			continue
 		}
 		envs, err := store.ListEnvConfigs(tenant.Name)
 		if err != nil {
-			return UpgradePlan{}, err
+			return nil, false, err
 		}
-		plan.Items = appendTenantUpgradeItems(plan.Items, tenant.Name, envs, scopeEnv, override, resolveVersions, traceln)
+		if scope.gateEnvironment != "" && envConfigsContain(envs, scope.gateEnvironment) {
+			gateFound = true
+		}
+		items = appendTenantUpgradeItems(items, tenant.Name, envs, scope.environment, scope.override, scope.gateEnvironment, scope.fleet, resolveVersions, traceln)
 	}
-
-	return plan, nil
+	return items, gateFound, nil
 }
 
-func appendTenantUpgradeItems(items []UpgradePlanItem, tenant string, envs []EnvConfig, scopeEnv, override string, resolveVersions EnvVersionsResolver, traceln func(string)) []UpgradePlanItem {
+func envConfigsContain(envs []EnvConfig, name string) bool {
+	for _, env := range envs {
+		if env.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func appendTenantUpgradeItems(items []UpgradePlanItem, tenant string, envs []EnvConfig, scopeEnv, override, gateEnvironment string, fleet bool, resolveVersions EnvVersionsResolver, traceln func(string)) []UpgradePlanItem {
 	for _, env := range envs {
 		if scopeEnv != "" && env.Name != scopeEnv {
 			continue
 		}
-		if !env.AutoUpgrade {
+		isGate := gateEnvironment != "" && env.Name == gateEnvironment
+		if !env.AutoUpgrade && !fleet && !isGate {
 			traceln(fmt.Sprintf("upgrade: %s/%s not opted in (autoupgrade=false), skipping", tenant, env.Name))
 			continue
 		}
-		traceln(fmt.Sprintf("upgrade: %s/%s opted in, channel=%s current=%s", tenant, env.Name, env.ResolvedUpgradeChannel(), strings.TrimSpace(env.RuntimeVersion)))
-		items = append(items, resolveEnvUpgradeItem(tenant, env, override, resolveVersions, traceln))
+		// Checked against ResolvedType rather than the broader !HasPod() so a
+		// legacy env with an unresolved type (ResolvedType == "") keeps
+		// upgrading exactly as it did before host existed.
+		if env.ResolvedType() == EnvironmentTypeHost {
+			traceln(fmt.Sprintf("upgrade: %s/%s is a host environment (no runtime pod to upgrade), skipping", tenant, env.Name))
+			continue
+		}
+		traceln(upgradeInclusionTrace(tenant, env, fleet, isGate))
+		item := resolveEnvUpgradeItem(tenant, env, override, resolveVersions, traceln)
+		item.IsGate = isGate
+		items = append(items, item)
+	}
+	return items
+}
+
+// upgradeInclusionTrace names why an environment made the plan. The ordinary
+// "opted in" wording is unchanged from before --fleet/--gate-environment
+// existed; a fleet or gate-forced inclusion (env.AutoUpgrade false) gets its
+// own wording so it never reads as an opt-in it never had.
+func upgradeInclusionTrace(tenant string, env EnvConfig, fleet, isGate bool) string {
+	channel, current := env.ResolvedUpgradeChannel(), strings.TrimSpace(env.RuntimeVersion)
+	switch {
+	case env.AutoUpgrade:
+		return fmt.Sprintf("upgrade: %s/%s opted in, channel=%s current=%s", tenant, env.Name, channel, current)
+	case isGate:
+		return fmt.Sprintf("upgrade: %s/%s included as the gate environment (autoupgrade=false), channel=%s current=%s", tenant, env.Name, channel, current)
+	default: // fleet
+		return fmt.Sprintf("upgrade: %s/%s included via --fleet (autoupgrade=false), channel=%s current=%s", tenant, env.Name, channel, current)
+	}
+}
+
+// prioritizeGateUpgradeItem moves the gate environment's item to the front of
+// items when present, so RunUpgradePlan's sequential deploy loop rolls the
+// merge-queue gate before any environment it gates -- the release-cadence
+// policy's "immediate, unconditional" gate redeploy (root AGENTS.md, erun#1985),
+// never left to per-environment discretion or to wherever it happened to sort.
+func prioritizeGateUpgradeItem(items []UpgradePlanItem, tenant, gateEnvironment string) []UpgradePlanItem {
+	for i, item := range items {
+		if item.Tenant != tenant || item.Environment != gateEnvironment {
+			continue
+		}
+		if i == 0 {
+			return items
+		}
+		reordered := make([]UpgradePlanItem, 0, len(items))
+		reordered = append(reordered, item)
+		reordered = append(reordered, items[:i]...)
+		reordered = append(reordered, items[i+1:]...)
+		return reordered
 	}
 	return items
 }
@@ -289,6 +411,83 @@ func candidateSummary(candidates []UpgradeVersionCandidate) string {
 // UpgradeItemDeployer redeploys one lagging env to its target version.
 type UpgradeItemDeployer func(ctx Context, item UpgradePlanItem) error
 
+// UpgradeOccupancyError explains why a lagging member was refused instead of
+// deployed: the environment is currently held by another worker, and an
+// upgrade rolls the runtime pod exactly as `erun resize` does (Recreate
+// strategy), so deploying over that hold would yank the environment out from
+// under whoever holds it -- the same refusal runtime_resize.go's
+// RuntimeResizeOccupancyError already makes for a resize.
+type UpgradeOccupancyError struct {
+	Tenant      string
+	Environment string
+	Holders     []EnvironmentActivityLease
+}
+
+func (e *UpgradeOccupancyError) Error() string {
+	names := make([]string, 0, len(e.Holders))
+	for _, lease := range e.Holders {
+		names = append(names, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
+	}
+	return fmt.Sprintf("%s/%s is held by %s -- an upgrade restarts the runtime pod and would interrupt that work; pass --override-lease to roll it anyway, or wait until it finishes",
+		e.Tenant, e.Environment, strings.Join(names, "; "))
+}
+
+// LeaseGuardedUpgradeDeployer wraps deploy so a held environment refuses
+// rather than deploys -- an operator or orchestrator driving a fleet-wide
+// roll is working from a plan resolved minutes earlier and is far more likely
+// than a single-environment `erun deploy` to hit an environment nobody at the
+// keyboard remembers is mid-job. override bypasses the refusal and is traced
+// so it is never silent; holder is recorded on the exclusive lease taken for
+// the deploy's own duration, which also guards the roll itself against a
+// second, concurrent upgrade racing the same environment -- the same
+// exclusive-claim shape runtime_resize.go's RunRuntimeResize already uses.
+func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, holder EnvironmentActivityLeaseHolder, now func() time.Time) UpgradeItemDeployer {
+	if now == nil {
+		now = time.Now
+	}
+	return func(ctx Context, item UpgradePlanItem) error {
+		nowValue := now()
+		leases, err := LoadEnvironmentActivityLeases(item.Tenant, item.Environment, nowValue)
+		if err != nil {
+			return fmt.Errorf("upgrade: %s/%s: reading activity leases: %w", item.Tenant, item.Environment, err)
+		}
+		if len(leases) > 0 {
+			if !override {
+				return &UpgradeOccupancyError{Tenant: item.Tenant, Environment: item.Environment, Holders: leases}
+			}
+			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), leaseHolderSummary(leases)))
+		}
+		// A dry run must show this refusal (or override) exactly as a real run
+		// would, but must not itself claim the exclusive lease -- that would be
+		// a side effect dry-run's own contract forbids, matching
+		// runtime_resize.go's RunRuntimeResize returning before its own
+		// TakeEnvironmentActivityLease call under ctx.DryRun.
+		if ctx.DryRun {
+			return deploy(ctx, item)
+		}
+
+		lease, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+			Tenant: item.Tenant, Environment: item.Environment, Name: "upgrade", Exclusive: true, Holder: holder, Now: nowValue,
+		})
+		if err != nil {
+			return fmt.Errorf("upgrade: %s/%s: %w", item.Tenant, item.Environment, err)
+		}
+		defer func() {
+			_ = ReleaseExclusiveEnvironmentActivityLease(item.Tenant, item.Environment, lease.Scope, lease.ID)
+		}()
+
+		return deploy(ctx, item)
+	}
+}
+
+func leaseHolderSummary(leases []EnvironmentActivityLease) string {
+	names := make([]string, 0, len(leases))
+	for _, lease := range leases {
+		names = append(names, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
+	}
+	return strings.Join(names, "; ")
+}
+
 // UpgradeItemFailure records a member whose deploy returned an error.
 type UpgradeItemFailure struct {
 	Item  UpgradePlanItem `json:"item"`
@@ -375,6 +574,11 @@ type UpgradePlanItem struct {
 	// UnresolvedReason says why Target is empty so the run reports the cause
 	// rather than a bare "(unset)".
 	UnresolvedReason string `json:"unresolvedReason,omitempty"`
+	// IsGate marks the environment named by UpgradeTarget.GateEnvironment.
+	// prioritizeGateUpgradeItem uses it only implicitly (by tenant+name); it
+	// is carried on the item so a rendered plan can point out which member is
+	// the gate without the caller re-deriving it from the request.
+	IsGate bool `json:"isGate,omitempty"`
 }
 
 // UpgradePlan is the resolved "Upgrade all" plan: every opted-in environment,
@@ -397,7 +601,13 @@ func (p UpgradePlan) Lagging() []UpgradePlanItem {
 
 func channelTarget(versions RuntimeRegistryVersions, channel string) string {
 	if strings.TrimSpace(channel) == UpgradeChannelSnapshot {
-		if stable, _, superseded := stableSupersedesSnapshot(versions); superseded {
+		// An absent snapshot side is not "nothing newer exists" — it means the
+		// registry publishes no snapshots at all, and the stable release is then
+		// the only, and newest, candidate. Falling through to LatestSnapshot in
+		// that case resolves to "", which leaves a snapshot-channel env
+		// permanently unresolvable against a stable-only registry — the canonical
+		// one included, so every env pointed at it silently never upgraded.
+		if stable, snapshot, superseded := stableSupersedesSnapshot(versions); superseded || snapshot == "" {
 			return stable
 		}
 		return strings.TrimSpace(versions.LatestSnapshot)

@@ -57,7 +57,13 @@
        lookup-persisted like the api-key. Algorithm string is PowerDNS's form
        (hmac-sha256); cert-manager uses its own uppercase form (HMACSHA256), wired
        separately in terraform-erun-cluster-edge. */ -}}
-{{- $dnsUpdateEnabled := default true $powerdns.dnsUpdateEnabled -}}
+{{- /* Resolved through hasKey because `default true` cannot express an explicit
+       false — it silently re-enabled dynamic updates for an env that turned
+       them off. */ -}}
+{{- $dnsUpdateEnabled := true -}}
+{{- if hasKey $powerdns "dnsUpdateEnabled" -}}
+{{- $dnsUpdateEnabled = $powerdns.dnsUpdateEnabled -}}
+{{- end -}}
 {{- /* The generated config deliberately omits gpgsql-dnssec. The services zone
        is an INSECURE delegation (the parent writes NS + glue but no DS), so it
        is unsigned. Enabling dnssec makes PowerDNS take the NSEC negative-answer

@@ -1,0 +1,5 @@
+Dry run: erun cloud provider initialization planned.
+audit: erun cloud init erun --api-url https://api.example.test --dry-run
+cloud init erun: api-url=https://api.example.test
+cloud init erun: would resolve issuer, cli client id, and oidc discovery from https://api.example.test
+write cloud provider erun+api.example.test@erun

@@ -1,17 +1,14 @@
+import { Button, cn, EmptyState, IconTooltip } from 'erun-kit';
 import { ArrowUp, Plus } from 'lucide-react';
 import * as React from 'react';
 
 import { openInitializeDialog } from '@/app/environmentDialogThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openUpgradeAll } from '@/app/upgradeThunks';
-import { EmptyState } from '@/components/app/EmptyState';
-import { IconTooltip } from '@/components/app/IconTooltip';
 import { ErunSection } from '@/components/app/Sidebar.ErunSection';
 import { pendingForTenant } from '@/components/app/Sidebar.helpers';
 import { PrimaryCloudAliasControl } from '@/components/app/Sidebar.PrimaryCloudAliasControl';
 import { TenantGroup } from '@/components/app/Sidebar.TenantGroup';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 export function Sidebar(): React.ReactElement {
   const dispatch = useAppDispatch();
@@ -46,13 +43,13 @@ export function Sidebar(): React.ReactElement {
                 <ArrowUp />
               </Button>
             </IconTooltip>
-            <IconTooltip label="Initialize new remote environment">
+            <IconTooltip label="Initialize new environment">
               <Button
                 className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                aria-label="Initialize new remote environment"
+                aria-label="Initialize new environment"
                 onClick={() => {
                   dispatch(openInitializeDialog());
                 }}
@@ -67,7 +64,7 @@ export function Sidebar(): React.ReactElement {
             <EmptyState
               icon={<Plus />}
               heading="No environments yet"
-              body="Initialize a remote environment to start working. You can also import an existing one from your kubeconfig."
+              body="Initialize an environment to start working — local-agent, remote-agent, or runtime."
               action={
                 <Button
                   type="button"

@@ -19,8 +19,9 @@ Every actor — Agent or Operator — talks to the same API and signs in the sam
 | [Reviews](/collaboration/reviews) | A unit of work-to-be-merged. Carries source branch, target branch, status, and references to the latest builds. |
 | [Comments](/collaboration/comments) | Threaded, per-commit-and-line comments on a review. Agents and humans use the same shape. |
 | [Builds](/collaboration/builds) | Per-review build results: commit, version, success/failure. Drives review status transitions. |
-| Merge queue | A shared queue of `READY` reviews targeting the same branch. `POST /v1/reviews/merge-queue/advance` promotes the next one. |
+| [Merge queue](/collaboration/merge-queue) | A shared queue of `READY` reviews targeting the same branch. `POST /v1/reviews/merge-queue/advance` promotes the next one. |
 | Whoami | `GET /v1/whoami` returns the resolved identity for the calling token. |
+| [Identity administration](/collaboration/identity-administration) | Enroll, list, deactivate, and reactivate identities in the platform's own IdP, and read/update its login and password policy. Restricted to an `OPERATIONS` tenant. |
 
 All paths sit under `/v1/`.
 
@@ -34,6 +35,8 @@ Every request signs in the same way — Operators and Agents alike. ERun uses st
 </figure>
 
 For Agents specifically, the usual pattern is a service-account credential. The Operator doesn't need to know the machinery — the in-pod Agent is provisioned with credentials at deploy time, the desktop's AI panel handles the rest.
+
+**One account, one tenant.** Because the tenant comes out of the token, and the claim it comes out of is the organization that owns your account, signing in again with the same account always lands you in the same tenant. Working in a second tenant means a second account, owned by that tenant's organization — not a second sign-in. That is why the console's tenant switcher offers only the tenants your current account can actually reach, and names the rest, with the reason, instead of sending you through a sign-in that cannot succeed. The full rules are in [Agent reference · erun API protocol](/agent-reference/api-protocol#get-v1tenantsreachable).
 
 For the full protocol spec — tenant-issuer schema, PATCH endpoint, service-account flow, error codes, rate limits, pagination — see **[Agent reference · erun API protocol](/agent-reference/api-protocol)**.
 

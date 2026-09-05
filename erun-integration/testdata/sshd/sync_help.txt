@@ -1,0 +1,15 @@
+Mirror a remote environment's workspace onto this host
+
+Usage:
+  erun sshd sync [TENANT] [ENVIRONMENT] [flags]
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Sync a specific environment
+  -h, --help                 help for sync
+      --tenant string        Sync a specific tenant
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

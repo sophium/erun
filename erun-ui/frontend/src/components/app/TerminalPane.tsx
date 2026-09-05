@@ -1,15 +1,19 @@
+import { cn, ResizeHandle } from 'erun-kit';
 import * as React from 'react';
 
 import { useTerminalActivityLockState } from '@/app/activityQueueState';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { startReviewResize } from '@/app/layoutThunks';
+import { startReviewResize, stepReviewResize } from '@/app/layoutThunks';
+import { openManageDialog, setManageTab } from '@/app/manageDialogThunks';
+import { selectActiveTabIsAI } from '@/app/selectors';
 import { clearHiddenLockOverlay, hideLockOverlay } from '@/app/slices/terminalStatusSlice';
+import { computeMaxReviewWidth, MIN_REVIEW_WIDTH } from '@/app/state';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
-import { ResizeHandle } from '@/components/app/ResizeHandle';
+import { AIOccupancyBanner } from '@/components/app/AIOccupancyBanner';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { TerminalBusyOverlay } from '@/components/app/TerminalBusyOverlay';
 import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
-import { cn } from '@/lib/utils';
+import type { UIEnvironmentLease, UISelection } from '@/types';
 
 const reviewSplitterClassName =
   'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-review_&]:before:bg-border';
@@ -32,6 +36,10 @@ export function TerminalPane({
   const dispatch = useAppDispatch();
   const sessionId = useAppSelector((state) => state.terminal.sessionId);
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
+  const reviewWidth = useAppSelector((state) => state.layout.reviewWidth);
+  const effectiveSidebarWidth = useAppSelector((state) =>
+    state.layout.sidebarHidden ? 0 : state.layout.sidebarWidth,
+  );
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
   const terminalMessage = useAppSelector((state) => state.terminalStatus.terminalMessage);
   const locks = useTerminalActivityLockState();
@@ -39,6 +47,11 @@ export function TerminalPane({
     (state) => state.terminalStatus.hiddenLockSessions[sessionId],
   );
   const liveLock = locks.get(sessionId) ?? null;
+  const activeTabIsAI = useAppSelector(selectActiveTabIsAI);
+  const occupancyLeases = useAppSelector((state) => state.idle.idleStatus?.leases ?? []);
+  // The same selection the leases were loaded for, so the banner acts on the
+  // environment it is describing rather than whatever tab happens to be active.
+  const occupancySelection = useAppSelector((state) => state.selection.selected);
   // The user can dismiss the overlay locally for a session if it's
   // covering output they need to read or input they need to provide
   // (e.g. the in-pod CLI's helm-recovery prompt). Backend keeps the
@@ -74,16 +87,23 @@ export function TerminalPane({
         {/* Padding lives on the wrapper, not on the FitAddon parent: xterm's FitAddon reads the parent's computed height but does not subtract its padding, so any padding on terminalRoot would over-count rows and clip the bottom line. */}
         <div
           id="erun-terminal-pane"
+          role="group"
+          aria-label="Terminal"
           className="relative h-full min-h-0 min-w-0 overflow-hidden box-border px-4 pt-3.5"
         >
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full" />
           <TerminalBusyOverlay message={terminalBusy ? terminalMessage : ''} />
-          {activeLock && (
+          {activeLock ? (
             <ActivityLockOverlay
               lock={activeLock}
               onOpenQueue={onOpenActivityQueue}
               onProceedAnyway={hideActiveLock}
             />
+          ) : (
+            activeTabIsAI &&
+            occupancyLeases.length > 0 && (
+              <OccupancyBanner leases={occupancyLeases} selection={occupancySelection} />
+            )
           )}
         </div>
       </div>
@@ -95,6 +115,14 @@ export function TerminalPane({
         onMouseDown={(event) => {
           dispatch(startReviewResize(event));
         }}
+        value={{
+          now: reviewWidth,
+          min: MIN_REVIEW_WIDTH,
+          max: computeMaxReviewWidth(window.innerWidth, effectiveSidebarWidth),
+        }}
+        onStep={(delta) => {
+          dispatch(stepReviewResize(delta));
+        }}
       />
       <ReviewPanel
         reviewViewRef={reviewViewRef}
@@ -102,5 +130,31 @@ export function TerminalPane({
         diffListRef={diffListRef}
       />
     </div>
+  );
+}
+
+// The banner needs its own dispatch to route to the jobs surface, and keeping
+// it out of TerminalPane keeps that component within its line budget.
+function OccupancyBanner({
+  leases,
+  selection,
+}: {
+  leases: UIEnvironmentLease[];
+  selection: UISelection | null;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <AIOccupancyBanner
+      leases={leases}
+      selection={selection}
+      onShowJobs={
+        selection
+          ? () => {
+              dispatch(openManageDialog(selection));
+              dispatch(setManageTab('jobs'));
+            }
+          : undefined
+      }
+    />
   );
 }

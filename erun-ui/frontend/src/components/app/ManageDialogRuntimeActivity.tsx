@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import { RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
@@ -6,7 +7,6 @@ import {
   useReclaimRuntimeResourcesMutation,
 } from '@/app/api/environmentApi';
 import { readError } from '@/app/errors';
-import { Button } from '@/components/ui/button';
 import type { UISelection } from '@/types';
 import type { UIRuntimeProcessGroup } from '@/uiRuntimeTypes';
 
@@ -135,7 +135,7 @@ function RuntimeActivitySummary({
       className={
         available
           ? 'text-xs leading-[1.35] text-muted-foreground'
-          : 'text-xs leading-[1.35] text-amber-600 dark:text-amber-400'
+          : 'text-xs leading-[1.35] text-amber-700 dark:text-amber-400'
       }
       role="status"
     >

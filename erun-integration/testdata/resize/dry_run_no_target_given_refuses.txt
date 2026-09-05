@@ -1,0 +1,2 @@
+audit: erun resize --dry-run --environment dev --tenant team
+resize: pass cpu/memory and/or dind-cpu/dind-memory, or apply-recommendation to size the runtime pod from the environment's standing recommendation

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 )
 
 func TestPush(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		// The root `erun push` shorthand only registers when a Dockerfile is
 		// present in cwd; without the seed, `push --help` falls through to root
@@ -46,6 +48,35 @@ func TestPush(t *testing.T) {
 		golden.Equal(t, "push/missing_version_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_refuses_before_build_when_no_registry_credential_configured", func(t *testing.T) {
+		// #1201: a pod that has never authenticated to ghcr.io (no docker config,
+		// no gh session, no GH_TOKEN) used to discover that only at the real push,
+		// after a full multi-arch build. `docker image inspect` is stubbed only
+		// because fingerprint resolution needs an answer before the push plan can
+		// even be built; every other docker verb (build/push/manifest/login) is
+		// deliberately left to print a loud marker and fail, so a regression that
+		// let the flow reach an actual build or push shows up unmistakably in the
+		// golden instead of silently succeeding.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *)`,
+			`    echo "UNEXPECTED DOCKER CALL: $*" >&2`,
+			`    exit 1 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when no ghcr.io credential is configured, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "push/real_run_refuses_before_build_when_no_registry_credential_configured", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_auth_failure_retries_after_login_via_auto_login_env", func(t *testing.T) {
 		// push builds from source, so the build's image push is what hits the
 		// auth failure. ERUN_AUTO_LOGIN_ON_PUSH bypasses the interactive login
@@ -73,7 +104,10 @@ func TestPush(t *testing.T) {
 		}, "\n"))
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
-		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		// #1201: the registry-credential preflight refuses up front when no
+		// ghcr.io credential resolves at all; GH_TOKEN gives it one so this
+		// scenario still reaches the auth-failure-at-push it is about.
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1", "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -134,6 +168,77 @@ func TestPush(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "push/dry_run_single_image_from_dockerfile_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_insecure_cluster_registry_passes_insecure_to_manifest_commands", func(t *testing.T) {
+		// `docker manifest` never consults the daemon's --insecure-registry
+		// list — it talks to the registry directly and defaults to HTTPS — so a
+		// BUILD-role cluster registry marked `insecure: true` must still see
+		// `--insecure` on every manifest subcommand that hits the network
+		// (create/push), or assembly fails "no such manifest" against a plain
+		// HTTP in-cluster registry even though both per-arch pushes succeeded.
+		// `manifest rm` never leaves the local store, so it must stay bare.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		fixture.SeedProjectK8sConfig(t, setup, "containerregistries:\n    - cluster: {insecure: true}\n      roles:\n        - build\n        - deploy\n")
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/dry_run_insecure_cluster_registry_passes_insecure_to_manifest_commands", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_configured_platforms_narrows_push", func(t *testing.T) {
+		// environments.<env>.docker.platforms in .erun/config.yaml applies to
+		// push exactly like build: an environment pinned to one architecture
+		// stops paying to promote or rebuild the other's fingerprint tag when
+		// publishing to its own cluster's registry.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  dev:\n"+
+				"    docker:\n"+
+				"      platforms: [linux/amd64]\n",
+		)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected configured docker.platforms to exclude arm64 from the push plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "push/dry_run_configured_platforms_narrows_push", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_build_shortcut_builds_then_pushes_minted_version", func(t *testing.T) {
@@ -257,7 +362,10 @@ func TestPush(t *testing.T) {
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 0})
 		fixture.StubBinary(t, stubs, "helm", "")
+		// #1201: the registry-credential preflight needs a resolvable credential
+		// to let this scenario reach the manifest-assembly behavior it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -292,7 +400,10 @@ func TestPush(t *testing.T) {
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the chart-verify-read retry it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -334,7 +445,10 @@ func TestPush(t *testing.T) {
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the partial-publish report it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for a chart that never verifies, got 0:\n%s", result.Combined)
@@ -370,7 +484,10 @@ func TestPush(t *testing.T) {
 			`esac`,
 		}, "\n"))
 		fixture.StubBinary(t, stubs, "helm", "")
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the interactive login-retry it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{
 			Cwd:   setup.Cwd,
 			Env:   envVars,
@@ -407,6 +524,10 @@ func TestPush(t *testing.T) {
 		// uses LookPath directly, not the ERUN_<NAME>_BIN override).
 		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
 		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		// #1201: GH_TOKEN gives the registry-credential preflight a resolvable
+		// credential without changing the failing gh stub the login-retry
+		// behavior above still depends on.
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when create_package is denied, got 0:\n%s", result.Combined)
@@ -554,4 +675,149 @@ func TestPush(t *testing.T) {
 		}
 		golden.Equal(t, "push/real_run_scope_denied_in_pod_fails_clearly", normalize.Apply(result.Combined))
 	})
+
+	// The two scenarios below cover step timing: a push reports where its time
+	// went, per component and per architecture, on success and on failure,
+	// plus a JSON record alongside the trace. Before that change, `push`
+	// reported only a single `==> Pushed in <ELAPSED>` (or `Push failed after
+	// <ELAPSED>`) line — no per-component/per-architecture breakdown, no
+	// cache-hit/miss duration, and no machine-readable record at all — so a
+	// slow or failed push could never be attributed to a cause. The table's
+	// per-step durations are real, sub-second wall-clock measurements even
+	// under an instant stub, so they cannot be locked into a byte-exact golden
+	// the way the rounded `<ELAPSED>` marker in the existing `==> ...` lines
+	// can (erun-integration/AGENTS.md § "Whole-output snapshots vs targeted
+	// substring assertions", case 3); these scenarios assert on structure and
+	// presence instead.
+	t.Run("real_run_reports_step_timing_table_and_json_record", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the step-timing behavior it is about.
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "step timing (ordered by duration):") {
+			t.Fatalf("expected a step-timing table in the output, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "api (cache miss") || !strings.Contains(result.Combined, "base (cache miss") {
+			t.Fatalf("expected per-component timing rows for api and base, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "linux/amd64 (cache miss") || !strings.Contains(result.Combined, "linux/arm64 (cache miss") {
+			t.Fatalf("expected per-architecture timing rows, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "cache miss:") {
+			t.Fatalf("expected a cache-miss annotation on the rebuilt images, got:\n%s", result.Combined)
+		}
+
+		record := readTimingRecord(t, setup.Home, "push")
+		if record.Command != "push" || record.Failed {
+			t.Fatalf("unexpected timing record: %+v", record)
+		}
+		for _, name := range []string{"api", "base"} {
+			step := findTimingRecordStep(t, record.Steps, name)
+			if step.CacheHit == nil || *step.CacheHit {
+				t.Fatalf("expected component %s to record a cache miss, got %+v", name, step)
+			}
+			if len(step.Steps) < 2 {
+				t.Fatalf("expected per-architecture children for %s, got %+v", name, step)
+			}
+		}
+	})
+
+	t.Run("real_run_failure_still_reports_step_timing", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  build) exit 7 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit when the docker build fails, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "step timing (ordered by duration):") {
+			t.Fatalf("a failed push must still report where its time went, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "(failed)") {
+			t.Fatalf("expected a (failed) marker in the timing table, got:\n%s", result.Combined)
+		}
+
+		record := readTimingRecord(t, setup.Home, "push")
+		if !record.Failed || record.Error == "" {
+			t.Fatalf("expected the timing record to carry the failure, got %+v", record)
+		}
+	})
+}
+
+// timingRecordStep/timingRecord mirror the shape of eruncommon.TimingStepJSON/
+// TimingRecord (timing.go) closely enough for these tests to assert on
+// structure without importing erun-common's internal types.
+type timingRecordStep struct {
+	Name     string             `json:"name"`
+	Failed   bool               `json:"failed"`
+	CacheHit *bool              `json:"cacheHit"`
+	Steps    []timingRecordStep `json:"steps"`
+}
+
+type timingRecord struct {
+	Command string             `json:"command"`
+	Failed  bool               `json:"failed"`
+	Error   string             `json:"error"`
+	Steps   []timingRecordStep `json:"steps"`
+}
+
+// findTimingRecordStep locates a named step among a record's direct children,
+// failing the test if it is missing (rather than returning a zero value that
+// would let a nil-CacheHit assertion pass for the wrong reason).
+func findTimingRecordStep(t testing.TB, steps []timingRecordStep, name string) timingRecordStep {
+	t.Helper()
+	for _, step := range steps {
+		if step.Name == name {
+			return step
+		}
+	}
+	t.Fatalf("expected a %q step in the timing record, got %+v", name, steps)
+	return timingRecordStep{}
+}
+
+// readTimingRecord finds the single `<command>-*.json` file the run just
+// wrote under the scenario's isolated $HOME/.erun/timing (timing.go's
+// timingRecordDir) and decodes it.
+func readTimingRecord(t testing.TB, home, command string) timingRecord {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(home, ".erun", "timing", command+"-*.json"))
+	if err != nil {
+		t.Fatalf("glob timing records: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly one %s timing record under %s, got %v", command, home, matches)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read timing record %s: %v", matches[0], err)
+	}
+	var record timingRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatalf("unmarshal timing record %s: %v", matches[0], err)
+	}
+	return record
 }

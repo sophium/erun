@@ -30,6 +30,12 @@ const MaxRuntimeOutputBytes = 100 * 1024 * 1024
 const outputDownloadArchiveFormat = "tar.gz"
 
 // OutputEntry is one file or directory in the agent outputs directory.
+// RuntimeOutputsDirEnvVar names the directory an agent writes its deliverables
+// to. It is the one convention shared by both kinds of agent: in a pod it points
+// at the runtime outputs dir, and for a host-side orchestrator at that
+// orchestrator's own host directory.
+const RuntimeOutputsDirEnvVar = "ERUN_OUTPUTS_DIR"
+
 type OutputEntry struct {
 	Name    string    `json:"name"`
 	Path    string    `json:"path"`
@@ -58,6 +64,10 @@ type RuntimeOutputResult struct {
 	Size          int64  `json:"size"`
 	SHA256        string `json:"sha256"`
 	Bytes         []byte `json:"-"`
+	// Signing is set only when host-side ad-hoc code signing had something to
+	// report — see SignHostArtifact. It is nil on the common paths (a non-darwin
+	// host, a payload that is not a Mach-O, an artifact already signed).
+	Signing *HostArtifactSigning `json:"signing,omitempty"`
 }
 
 // RuntimeOutputsParams selects which directory `outputs list` reads.
@@ -86,12 +96,19 @@ func resolveOutputsDir(dir string) (string, error) {
 	if dir == "" {
 		return DefaultRuntimeOutputsDir, nil
 	}
-	if !strings.HasPrefix(dir, "/") {
-		return "", fmt.Errorf("outputs path must be absolute: %q", dir)
+	return validateAbsolutePodPath(dir, "outputs path")
+}
+
+// validateAbsolutePodPath is shared by outputs and inputs: both name a path
+// inside the runtime pod's filesystem and must be absolute with no `..`
+// traversal segment.
+func validateAbsolutePodPath(value, label string) (string, error) {
+	if !strings.HasPrefix(value, "/") {
+		return "", fmt.Errorf("%s must be absolute: %q", label, value)
 	}
-	cleaned := path.Clean(dir)
+	cleaned := path.Clean(value)
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains(cleaned, "/../") {
-		return "", fmt.Errorf("outputs path must not contain '..': %q", dir)
+		return "", fmt.Errorf("%s must not contain '..': %q", label, value)
 	}
 	return cleaned, nil
 }
@@ -366,11 +383,19 @@ func DownloadLocalOutput(params RuntimeOutputDownloadParams) (RuntimeOutputResul
 	if info.Size() > MaxRuntimeOutputBytes {
 		return RuntimeOutputResult{}, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, info.Size(), MaxRuntimeOutputBytes)
 	}
+	// Sign before reading so the bytes the caller receives are the runnable ones:
+	// an ad-hoc signature lives inside the Mach-O, so every copy made from here
+	// inherits it.
+	signing := SignHostArtifact(target)
 	data, err := os.ReadFile(target)
 	if err != nil {
 		return RuntimeOutputResult{}, err
 	}
-	return newRuntimeOutputResult(name, false, data), nil
+	result := newRuntimeOutputResult(name, false, data)
+	if signing.Describe() != "" {
+		result.Signing = &signing
+	}
+	return result, nil
 }
 
 func resolveLocalOutputTarget(params RuntimeOutputDownloadParams) (dir, name, target string, err error) {

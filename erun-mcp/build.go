@@ -3,6 +3,7 @@ package erunmcp
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -10,12 +11,15 @@ import (
 )
 
 type BuildInput struct {
-	Component     string `json:"component,omitempty" jsonschema:"optional component name to build from the runtime repo root; when empty, build all Docker component images"`
-	Version       string `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
-	Release       bool   `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
-	NoIncremental bool   `json:"noIncremental,omitempty" jsonschema:"when true, disable fingerprint-based build caching and rebuild every image from scratch"`
-	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
-	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Component     string   `json:"component,omitempty" jsonschema:"optional component name to build from the runtime repo root; when empty, build all Docker component images"`
+	Version       string   `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
+	Release       bool     `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
+	NoIncremental bool     `json:"noIncremental,omitempty" jsonschema:"when true, disable fingerprint-based build caching and rebuild every image from scratch"`
+	Platforms     []string `json:"platforms,omitempty" jsonschema:"optional docker --platform overrides (e.g. [\"linux/amd64\"]) for an environment that can only ever run one architecture; takes precedence over the project's configured environments.<env>.docker.platforms. Mutually exclusive with release, which always publishes every platform erun supports"`
+	Preview       bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Jobs          int      `json:"jobs,omitempty" jsonschema:"build this many images at once; 0 resolves from the machine and 1 is sequential. Independent images build concurrently; an image that FROMs a sibling still waits for it"`
+	Verbosity     int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	JobEnvelopeInput
 }
 
 type PushInput struct {
@@ -23,55 +27,63 @@ type PushInput struct {
 	Version   string `json:"version" jsonschema:"required version to publish (produced by the build tool); push publishes this version's images and chart and never mints one"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	JobEnvelopeInput
 }
 
 var errMissingPushVersion = fmt.Errorf("push requires a version: it publishes a built version's images and chart (capture the version from the build tool's result) and never mints one — set the version input")
 
-func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
-		var result *eruncommon.BuildResult
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
-			component := strings.TrimSpace(input.Component)
-			version := strings.TrimSpace(input.Version)
-			execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, component, version, input.Release, input.NoIncremental)
-			if err != nil {
-				return err
+func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
+			var result *eruncommon.BuildResult
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
+				runCtx.BuildJobs = input.Jobs
+				runCtx.MCPTool = "build"
+				component := strings.TrimSpace(input.Component)
+				version := strings.TrimSpace(input.Version)
+				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, component, version, input.Release, input.NoIncremental, input.Platforms)
+				if err != nil {
+					return err
+				}
+				// build is a pure primitive that only builds and mints the version;
+				// MCP composes primitives itself rather than exposing a deploy switch.
+				if err := eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime), runtime.Store, cloudDependencies()); err != nil {
+					return err
+				}
+				built := eruncommon.NewBuildResult(execution)
+				result = &built
+				return nil
+			})
+			if err == nil {
+				output.Build = result
 			}
-			// build is a pure primitive that only builds and mints the version;
-			// MCP composes primitives itself rather than exposing a deploy switch.
-			if err := eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime)); err != nil {
-				return err
-			}
-			built := eruncommon.NewBuildResult(execution)
-			result = &built
-			return nil
-		})
-		if err == nil {
-			output.Build = result
+			return output, err
 		}
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "build", input.JobEnvelopeInput, input.Preview, execute)
+		return nil, envelope, err
 	}
 }
 
-func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PushInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input PushInput) (*mcp.CallToolResult, CommandOutput, error) {
+func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PushInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PushInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		if strings.TrimSpace(input.Version) == "" {
-			return nil, CommandOutput{}, errMissingPushVersion
+			return nil, JobEnvelopeOutput{}, errMissingPushVersion
 		}
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
 			execution, err := resolveRuntimePushExecution(runCtx, runtime, workDir, strings.TrimSpace(input.Component), strings.TrimSpace(input.Version))
 			if err != nil {
 				return err
 			}
-			return eruncommon.RunPushCommand(runCtx, func() error {
+			return eruncommon.RunPushCommand(runCtx, func(runCtx eruncommon.Context) error {
 				return eruncommon.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime))
 			})
 		})
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "push", input.JobEnvelopeInput, input.Preview, execute)
+		return nil, envelope, err
 	}
 }
 
-func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool) (eruncommon.BuildExecutionSpec, error) {
+func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (eruncommon.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	target := eruncommon.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
@@ -79,6 +91,7 @@ func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig,
 		VersionOverride: versionOverride,
 		Release:         release,
 		NoIncremental:   noIncremental,
+		Platforms:       platforms,
 	}
 	findProjectRoot := func() (string, string, error) {
 		return runtimeFindProjectRoot(runtime.Context, projectRoot)
@@ -93,26 +106,14 @@ func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig,
 			return eruncommon.BuildExecutionSpec{}, err
 		}
 
-		buildContext, ok, err := eruncommon.FindComponentDockerBuildContext(projectRoot, component)
+		build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride, target.Platforms)
 		if err != nil {
 			return eruncommon.BuildExecutionSpec{}, err
 		}
-		if !ok {
+		if build == nil {
 			return eruncommon.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		imageRef, err := eruncommon.ResolveDockerImageReference(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, target)
-		if err != nil {
-			return eruncommon.BuildExecutionSpec{}, err
-		}
-		contextDir, err := eruncommon.ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot)
-		if err != nil {
-			return eruncommon.BuildExecutionSpec{}, err
-		}
-		execution := eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{{
-			ContextDir:     contextDir,
-			DockerfilePath: buildContext.DockerfilePath,
-			Image:          imageRef,
-		}})
+		execution := eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{*build})
 		if releaseSpec != nil {
 			execution = eruncommon.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
@@ -147,7 +148,7 @@ func resolveRuntimePushExecution(ctx eruncommon.Context, runtime RuntimeConfig, 
 		return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{pushInput}), nil
 	}
 
-	build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride))
+	build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
 	if err != nil {
 		return eruncommon.DockerPushExecutionSpec{}, err
 	}

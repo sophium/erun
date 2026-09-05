@@ -1,3 +1,4 @@
+import { Button } from 'erun-kit';
 import * as React from 'react';
 
 import {
@@ -10,10 +11,9 @@ import {
   saveManageDeployComponents,
   toggleManageDeployComponent,
 } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { CheckboxField } from '@/components/app/ManageDialog.fields';
-import { Button } from '@/components/ui/button';
 
 type ManageDialog = AppState['manageDialog'];
 
@@ -72,7 +72,7 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
           }
           onClick={() =>
             void dispatch(saveManageDeployComponents()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             })
           }
         >

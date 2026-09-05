@@ -141,6 +141,13 @@ type RunOptions struct {
 	Env     []string
 	Stdin   string
 	Timeout time.Duration
+	// StdinFromDevNull binds the subprocess's stdin directly to the OS null
+	// device instead of the default in-memory pipe. A piped Stdin buffer is
+	// never a character device, so it cannot exercise a stat-based TTY check
+	// the same way the null device does — the null device is a character
+	// device but not a terminal, which is exactly the input a stat-based
+	// check confuses for one. Mutually exclusive with Stdin.
+	StdinFromDevNull bool
 }
 
 // requireIsolatedEnv guards the harness boundary: a scenario that runs the
@@ -198,11 +205,21 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	cmd.Env = env
 	// Always feed stdin from a buffer (empty when the scenario passes no
 	// Stdin) so the subprocess never inherits the developer's terminal. This
-	// keeps stdin a non-terminal pipe locally, matching CI's /dev/null stdin,
-	// so stdin-TTY-gated branches (e.g. the interactive-gh-auth gate)
-	// behave the same everywhere. Scenarios that need the interactive branch
-	// opt in explicitly via the ERUN_FORCE_TTY seam.
-	cmd.Stdin = bytes.NewBufferString(opts.Stdin)
+	// keeps stdin a non-terminal pipe locally, so stdin-TTY-gated branches
+	// (e.g. the interactive-gh-auth gate) behave the same everywhere.
+	// Scenarios that need the interactive branch opt in explicitly via the
+	// ERUN_FORCE_TTY seam. A scenario that needs stdin bound to the real null
+	// device (StdinFromDevNull) gets that instead — see the field doc.
+	if opts.StdinFromDevNull {
+		devNull, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Fatalf("open %s: %v", os.DevNull, err)
+		}
+		defer func() { _ = devNull.Close() }()
+		cmd.Stdin = devNull
+	} else {
+		cmd.Stdin = bytes.NewBufferString(opts.Stdin)
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

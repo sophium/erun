@@ -134,6 +134,7 @@ A non-trivial concept gets a *pair* of pages: an Operator-facing summary and an 
 | OIDC sign-in | `collaboration/overview` (one-paragraph summary + diagram) | `agent-reference/api-protocol` (tenant-issuer schema, errors, rate limits) |
 | Idle stop | `concepts/cloud-contexts` (one paragraph) | `agent-reference/idle-policy` (predicate, working-hours semantics) |
 | Conventions | `concepts/conventions` (the layout + diagrams) | `agent-reference/conventions-spec` (resolution algorithms) |
+| Hosted registry | `deployment/registries#hosted-registry` (how to use it) + `deployment/deploy-platform#hosted-registry-admin` (how to stand it up) | `agent-reference/api-protocol#registry-token-endpoint` (the token endpoint's request/response shape, scope-clamping rule, errors) |
 
 The Operator page is short and links out; the Agent reference is comprehensive. Don't merge them.
 
@@ -160,6 +161,10 @@ JSON literal values (e.g., `"kind": "operator"` in audit events) keep their casi
 ## Spec discipline
 
 The docs are the spec. Behaviour that isn't documented isn't part of the contract.
+
+### Some claims are mechanically checked — nothing checks the rest
+
+A handful of pages are cross-checked against real code or chart state by a gate outside this module, so drift on those specific claims fails a build instead of waiting for the next human sweep: `mcp/overview.md`'s "Full tool index" against the registered MCP tools (`erun-mcp/mcp_overview_doc_test.go`), `deployment/data-retention.md`'s chart-value keys and stale-workaround absence against the `erun-backend-db` chart's rendered output (`erun-devops/k8s/erun-backend-db-chart_test.sh`), and `agent-reference/skills-spec.md`'s gate-run classifier spec against the real signature list (`erun-integration/docs_drift_test.go`'s `TestGateRunInfrastructureSignaturesAreDocumented`; see `erun-integration/AGENTS.md` § "Doc-drift gate"). Everything else in `erun-docs` is checked only by `yarn build` (links, markdown syntax) and by a human doc-drift sweep (root `AGENTS.md` § "Integration Test Gate" background, issue #2039) — a green `make check` says nothing about whether the other pages' prose still matches the code it describes. When you add a check for a new claim, wire it beside the source of truth it reads (a chart test, a doc test in the owning module) rather than building a second generic prose-checker.
 
 ### Treat vagueness as a bug
 
@@ -190,6 +195,7 @@ Each piece of detail lives in exactly one page. Other pages reference it.
 - Fingerprint cache: in `agent-reference/conventions-spec`. Referenced from `release-flow`, `cli/build`.
 - Idle-stop predicate: in `agent-reference/idle-policy`. Referenced from `cloud-contexts`, `concepts/cloud-contexts`.
 - OIDC error codes: in `agent-reference/api-protocol`. Referenced from `collaboration/overview`.
+- Step timing (the `build`/`release`/`push`/`deploy` table + JSON record): in `reference/config-locations#step-timing`. Referenced from `concepts/observability`.
 
 When you find duplication, pick the canonical home and turn the others into pointers.
 

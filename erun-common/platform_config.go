@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 )
 
@@ -50,19 +51,48 @@ type PlatformConfig struct {
 	// no CAA (any CA may issue). Opt-in because the value must match the CA the
 	// cluster edge's ACME server actually uses — a mismatched CAA blocks issuance.
 	CAAIssuer string `yaml:"caaissuer,omitempty"`
+	// APIURL is this deployment's own API base URL, e.g.
+	// "https://api.frs-prod.services.erunpaas.com". Served unauthenticated at
+	// GET /v1/platform so a client can discover it. Optional: an empty value
+	// renders as an empty string in that response, never an error.
+	APIURL string `yaml:"apiurl,omitempty"`
+	// ConsoleURL is this deployment's hosted web console URL. Same discovery
+	// contract as APIURL.
+	ConsoleURL string `yaml:"consoleurl,omitempty"`
+	// Brand is this deployment's display name, if the operator set one. Same
+	// discovery contract as APIURL.
+	Brand string `yaml:"brand,omitempty"`
+	// DocsURL is the documentation site this deployment's front door links to.
+	// Defaults to "https://docs.<BaseDomain>" so an instance points at its own
+	// docs rather than the vendor's. Same discovery contract as APIURL.
+	DocsURL string `yaml:"docsurl,omitempty"`
+	// Tagline is the one-line pitch this deployment's landing page leads with.
+	// Empty keeps the client's bundled product default. Same discovery contract
+	// as APIURL.
+	Tagline string `yaml:"tagline,omitempty"`
+	// LogoURL is an absolute URL to this deployment's logo. It is a URL rather
+	// than a path the console serves because a brand asset does not live in the
+	// console image — one built image serves every instance. Empty keeps the
+	// client's generic mark. Same discovery contract as APIURL.
+	LogoURL string `yaml:"logourl,omitempty"`
 }
 
 // IsZero reports whether no platform configuration is set, i.e. the project
 // does not run a platform deployment.
 func (c PlatformConfig) IsZero() bool {
-	return strings.TrimSpace(c.BaseDomain) == "" &&
-		strings.TrimSpace(c.Env) == "" &&
-		strings.TrimSpace(c.ServicesZone) == "" &&
-		strings.TrimSpace(c.AuthoritativeIP) == "" &&
-		len(c.Nameservers) == 0 &&
-		strings.TrimSpace(c.AuthHost) == "" &&
-		strings.TrimSpace(c.ACMEEmail) == "" &&
-		strings.TrimSpace(c.CAAIssuer) == ""
+	if len(c.Nameservers) != 0 {
+		return false
+	}
+	for _, field := range []string{
+		c.BaseDomain, c.Env, c.ServicesZone, c.AuthoritativeIP,
+		c.AuthHost, c.ACMEEmail, c.CAAIssuer, c.APIURL, c.ConsoleURL, c.Brand,
+		c.DocsURL, c.Tagline, c.LogoURL,
+	} {
+		if strings.TrimSpace(field) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Resolve returns a copy with defaults derived from BaseDomain. It never invents
@@ -76,6 +106,15 @@ func (c PlatformConfig) Resolve() PlatformConfig {
 	resolved.AuthHost = strings.TrimSpace(c.AuthHost)
 	resolved.ACMEEmail = strings.TrimSpace(c.ACMEEmail)
 	resolved.CAAIssuer = strings.TrimSpace(c.CAAIssuer)
+	resolved.APIURL = strings.TrimSpace(c.APIURL)
+	resolved.ConsoleURL = strings.TrimSpace(c.ConsoleURL)
+	resolved.Brand = strings.TrimSpace(c.Brand)
+	// A trailing slash survives into the client's own docs deep links
+	// (<docsUrl><path>), so it is normalized away here rather than left to every
+	// consumer to strip.
+	resolved.DocsURL = strings.TrimRight(strings.TrimSpace(c.DocsURL), "/")
+	resolved.Tagline = strings.TrimSpace(c.Tagline)
+	resolved.LogoURL = strings.TrimSpace(c.LogoURL)
 	if resolved.BaseDomain == "" {
 		return resolved
 	}
@@ -87,6 +126,9 @@ func (c PlatformConfig) Resolve() PlatformConfig {
 	}
 	if len(resolved.Nameservers) == 0 {
 		resolved.Nameservers = []string{"ns1." + resolved.BaseDomain, "ns2." + resolved.BaseDomain}
+	}
+	if resolved.DocsURL == "" {
+		resolved.DocsURL = "https://docs." + resolved.BaseDomain
 	}
 	return resolved
 }
@@ -104,10 +146,7 @@ func (c PlatformConfig) Validate() error {
 	if !isDNSName(resolved.BaseDomain) {
 		return fmt.Errorf("platform config: basedomain %q is not a valid domain name", resolved.BaseDomain)
 	}
-	if err := validatePlatformHost("serviceszone", resolved.ServicesZone, resolved.BaseDomain); err != nil {
-		return err
-	}
-	if err := validatePlatformHost("authhost", resolved.AuthHost, resolved.BaseDomain); err != nil {
+	if err := validatePlatformAddresses(resolved); err != nil {
 		return err
 	}
 	if resolved.AuthoritativeIP != "" && net.ParseIP(resolved.AuthoritativeIP) == nil {
@@ -115,6 +154,39 @@ func (c PlatformConfig) Validate() error {
 	}
 	if resolved.Env != "" && normalizeNamespaceName(resolved.Env) != resolved.Env {
 		return fmt.Errorf("platform config: env %q must be a DNS-safe namespace label (lowercase letters, digits, and hyphens)", resolved.Env)
+	}
+	return nil
+}
+
+// validatePlatformAddresses checks every field that names somewhere reachable:
+// the two derived hosts, which must stay under the deployment's own base
+// domain, and the two browser-facing discovery URLs, which may point anywhere
+// but must be absolute.
+func validatePlatformAddresses(resolved PlatformConfig) error {
+	if err := validatePlatformHost("serviceszone", resolved.ServicesZone, resolved.BaseDomain); err != nil {
+		return err
+	}
+	if err := validatePlatformHost("authhost", resolved.AuthHost, resolved.BaseDomain); err != nil {
+		return err
+	}
+	if err := validatePlatformURL("docsurl", resolved.DocsURL, "https://docs."+resolved.BaseDomain); err != nil {
+		return err
+	}
+	return validatePlatformURL("logourl", resolved.LogoURL, "https://"+resolved.BaseDomain+"/logo.svg")
+}
+
+// validatePlatformURL keeps a browser-facing discovery URL an absolute http(s)
+// address. These values are handed to a client verbatim and rendered as a link
+// or an image, so a bare host or a relative path becomes a dead link the page
+// itself cannot explain — the rejection names the shape expected and an example
+// under this deployment's own domain, so the fix needs no doc lookup.
+func validatePlatformURL(field, value, example string) error {
+	if value == "" {
+		return nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("platform config: %s %q must be an absolute URL including the scheme and host, for example %q", field, value, example)
 	}
 	return nil
 }

@@ -10,6 +10,12 @@ export interface AppNotificationPayload {
   tenant?: string;
   environment?: string;
   source?: string;
+  // Orchestrator-scoped analogue of tenant/environment — see AppNotification.
+  orchestratorId?: string;
+  // Action names a control the titlebar can render that performs the
+  // message's own remedy directly, e.g. "deploy" opens the tagged env's
+  // deploy dialog. Undefined means the message carries no action.
+  action?: AppNotification['action'];
 }
 
 // AppNotificationClearPayload dismisses an env-tagged notification only when all

@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -96,9 +97,10 @@ func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, 
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
-	// A configured paths.docker override means the project has a build
-	// environment at a non-conventional location, so the advisory would be wrong.
-	if paths, err := loadProjectPaths(projectRoot); err == nil && strings.TrimSpace(paths.Docker) != "" {
+	// A configured paths.docker override (or a selected components: entry) means
+	// the project has a build environment at a non-conventional location, so the
+	// advisory would be wrong.
+	if projectDeclaresDockerRoot(projectRoot, target.Component) {
 		return
 	}
 	hasDevops, err := projectHasDevopsFolder(projectRoot)
@@ -108,27 +110,63 @@ func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, 
 	ctx.Info(`build: this project has no <tenant>-devops build environment — ask Claude to "init erun build environment" to set one up with the erun-build-env skill`)
 }
 
-// traceConfiguredBuildPaths surfaces configured paths.docker/paths.dockercontext/
-// paths.version overrides as dry-run decision lines so the build plan shows the
-// docker build root, build context, and version file were resolved from config
-// rather than convention.
+// projectDeclaresDockerRoot reports whether the project already declares a
+// non-conventional docker build root — via the selected components: entry, or
+// via the project-global paths.docker override when no component selection
+// applies. Best-effort: an ambiguous/unknown component selection is not this
+// advisory's concern — the real build resolution reports that loudly on its
+// own, so this simply falls through to the unchanged paths.docker check.
+func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
+	_, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	if err == nil && ok {
+		return strings.TrimSpace(paths.Docker) != ""
+	}
+	if ok {
+		return false
+	}
+	paths, err = loadProjectPaths(projectRoot)
+	return err == nil && strings.TrimSpace(paths.Docker) != ""
+}
+
+// traceConfiguredBuildPaths surfaces the effective paths.docker/paths.dockercontext/
+// paths.version overrides (or, when the project declares a components: map, the
+// selected component and its docker/dockercontext/version) as dry-run decision
+// lines so the build plan shows the docker build root, build context, and
+// version file were resolved from config rather than convention. A bailout —
+// an unknown or ambiguous --component selection — traces what was attempted
+// before the resolution that follows fails loudly on it. It also warns when
+// the project config itself is gitignored, since that silently voids the very
+// overrides it just traced.
 func traceConfiguredBuildPaths(ctx Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
-	paths, err := loadProjectPaths(projectRoot)
+	WarnIfProjectConfigGitIgnored(ctx, projectRoot)
+
+	name, paths, ok, err := resolveProjectComponent(projectRoot, target.Component)
 	if err != nil {
+		ctx.Trace("build: component selection failed: " + err.Error())
 		return
 	}
+	keyPrefix := "paths"
+	if ok {
+		ctx.Trace("build: component " + name + " selected (.erun/config.yaml components)")
+		keyPrefix = "components." + name
+	} else {
+		paths, err = loadProjectPaths(projectRoot)
+		if err != nil {
+			return
+		}
+	}
 	if v := strings.TrimSpace(paths.Docker); v != "" {
-		ctx.Trace("build: docker build root configured as " + v + " (.erun/config.yaml paths.docker)")
+		ctx.Trace("build: docker build root configured as " + v + " (.erun/config.yaml " + keyPrefix + ".docker)")
 	}
 	if v := strings.TrimSpace(paths.DockerContext); v != "" {
-		ctx.Trace("build: docker build context configured as " + v + " (.erun/config.yaml paths.dockercontext)")
+		ctx.Trace("build: docker build context configured as " + v + " (.erun/config.yaml " + keyPrefix + ".dockercontext)")
 	}
 	if v := strings.TrimSpace(paths.Version); v != "" {
-		ctx.Trace("build: version file configured as " + v + " (.erun/config.yaml paths.version)")
+		ctx.Trace("build: version file configured as " + v + " (.erun/config.yaml " + keyPrefix + ".version)")
 	}
 }
 
@@ -185,17 +223,10 @@ func BuildExecutionSpecFromDockerBuilds(builds []DockerBuildSpec) BuildExecution
 func BuildExecutionSpecWithRelease(execution BuildExecutionSpec, release ReleaseSpec) BuildExecutionSpec {
 	execution.release = &release
 	if len(execution.dockerBuilds) > 0 && len(execution.dockerPushes) == 0 {
-		execution.dockerPushes = releaseDockerPushSpecs(execution.dockerBuilds, release.DockerImages)
+		execution.dockerPushes = releaseDockerPushSpecs(execution.dockerBuilds)
 	}
 	if len(execution.dockerBuilds) > 0 && len(execution.dockerPushes) > 0 {
-		releaseTags := make(map[string]struct{}, len(execution.dockerPushes))
-		for _, pushInput := range execution.dockerPushes {
-			releaseTags[strings.TrimSpace(pushInput.Image.Tag)] = struct{}{}
-		}
 		for i := range execution.dockerBuilds {
-			if _, ok := releaseTags[strings.TrimSpace(execution.dockerBuilds[i].Image.Tag)]; !ok {
-				continue
-			}
 			execution.dockerBuilds[i].Push = true
 		}
 	}
@@ -206,60 +237,26 @@ func BuildExecutionUsesBuildScript(execution BuildExecutionSpec) bool {
 	return execution.script != nil
 }
 
-func releaseDockerPushSpecs(builds []DockerBuildSpec, images []ReleaseDockerImageSpec) []DockerPushSpec {
+// releaseDockerPushSpecs publishes every image a release builds, not only the
+// images stamped with the release's own version. A version-pinned wrapper
+// (erun-backend-postgres, erun-powerdns, erun-zitadel, erun-oci-registry — see
+// erun-devops/AGENTS.md § "Wrapping And Pinning Third-Party Service Images")
+// keeps its own VERSION file and is therefore never in release.DockerImages,
+// but it is still a real release build whose chart is published and whose
+// image must exist for that chart's deploy to work. Fingerprint promote-and-skip
+// already makes a re-push of an unchanged pinned image a cheap no-op, so
+// pushing everything costs nothing for the common case and closes the gap for
+// the uncommon one: a wrapper published for the first time.
+func releaseDockerPushSpecs(builds []DockerBuildSpec) []DockerPushSpec {
 	if len(builds) == 0 {
 		return nil
 	}
 
-	releaseTags := make(map[string]struct{}, len(images))
-	for _, image := range images {
-		releaseTags[strings.TrimSpace(image.Tag)] = struct{}{}
-	}
-	releaseTags = expandLocalReleaseImageDependencies(builds, releaseTags)
-
-	pushes := make([]DockerPushSpec, 0, len(releaseTags))
+	pushes := make([]DockerPushSpec, 0, len(builds))
 	for _, build := range builds {
-		if _, ok := releaseTags[strings.TrimSpace(build.Image.Tag)]; !ok {
-			continue
-		}
 		pushes = append(pushes, NewDockerPushSpec(build.ContextDir, build.Image))
 	}
 	return pushes
-}
-
-func expandLocalReleaseImageDependencies(builds []DockerBuildSpec, releaseTags map[string]struct{}) map[string]struct{} {
-	if len(builds) == 0 || len(releaseTags) == 0 {
-		return releaseTags
-	}
-
-	buildsByTag := dockerBuildsByTag(builds)
-	expanded, queue := queuedReleaseTags(releaseTags)
-
-	for len(queue) > 0 {
-		tag := queue[0]
-		queue = queue[1:]
-
-		build, ok := buildsByTag[tag]
-		if !ok {
-			continue
-		}
-		for _, dependencyTag := range dockerfileLocalBaseImageTags(build.DockerfilePath, buildsByTag) {
-			if _, exists := expanded[dependencyTag]; exists {
-				continue
-			}
-			expanded[dependencyTag] = struct{}{}
-			queue = append(queue, dependencyTag)
-		}
-	}
-
-	for _, build := range builds {
-		if !strings.Contains(strings.TrimSpace(build.Image.ImageName), "dind") {
-			continue
-		}
-		expanded[strings.TrimSpace(build.Image.Tag)] = struct{}{}
-	}
-
-	return expanded
 }
 
 func dockerBuildsByTag(builds []DockerBuildSpec) map[string]DockerBuildSpec {
@@ -270,16 +267,6 @@ func dockerBuildsByTag(builds []DockerBuildSpec) map[string]DockerBuildSpec {
 	return buildsByTag
 }
 
-func queuedReleaseTags(releaseTags map[string]struct{}) (map[string]struct{}, []string) {
-	expanded := make(map[string]struct{}, len(releaseTags))
-	queue := make([]string, 0, len(releaseTags))
-	for tag := range releaseTags {
-		expanded[tag] = struct{}{}
-		queue = append(queue, tag)
-	}
-	return expanded, queue
-}
-
 func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, error) {
 	target.VersionOverride = strings.TrimSpace(target.VersionOverride)
 	if !target.Release {
@@ -287,6 +274,9 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 	}
 	if target.VersionOverride != "" {
 		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
+	}
+	if len(target.Platforms) > 0 {
+		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports")
 	}
 
 	// Build callers don't surface a Context; the zero value is safe here because
@@ -298,5 +288,8 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 
 	target.Release = false
 	target.VersionOverride = releaseSpec.Version
+	// A release publishes to any cluster, so it always builds every platform
+	// erun supports, regardless of any per-environment docker.platforms pin.
+	target.Platforms = slices.Clone(multiPlatformDockerBuilds)
 	return target, &releaseSpec, nil
 }

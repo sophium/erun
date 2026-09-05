@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const fingerprintTagPrefix = "fp-"
@@ -24,57 +25,154 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	if err := verifyDockerBuildPlatforms(buildInput.Platforms); err != nil {
 		return err
 	}
+	warnAboutBridgeMTUMismatch(stderr)
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
+		started := time.Now()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		args := dockerBuildArgs(buildInput, platform)
-		if err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, stdout, stderr); err != nil {
-			return err
+		err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
+		if buildInput.PlatformObserver != nil {
+			buildInput.PlatformObserver(platform, time.Since(started), err)
 		}
-		if err := tagFingerprintAfterBuild(buildInput, platform, stdout, stderr); err != nil {
-			return err
-		}
-		if err := tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr); err != nil {
+		if err != nil {
 			return err
 		}
 	}
 	if !buildInput.Push {
 		return nil
 	}
-	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
+	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Image.Insecure, buildInput.Verbosity, stdout, stderr)
+}
+
+// buildPlatformImageFromSource runs one platform's real docker build, tags
+// its fingerprint and stable-base aliases, and pushes it. It is also the
+// fallback promotePlatformImage reaches for when the registry rejects a
+// promoted tag, so a cache-hit decision that turns out to be wrong at push
+// time still ends in a real, correctly-tagged image rather than a failure.
+func buildPlatformImageFromSource(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+	args := dockerBuildArgs(buildInput, platform)
+	err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
+	if err == nil {
+		err = tagFingerprintAfterBuild(buildInput, platform, stdout, stderr)
+	}
+	if err == nil {
+		err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
+	}
+	if err == nil {
+		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
+	}
+	return err
 }
 
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
-		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+		started := time.Now()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		if err := runDockerTag(fpTag, platformTag, stdout, stderr); err != nil {
-			return err
+		err := promotePlatformImage(buildInput, platform, stdout, stderr)
+		if buildInput.PlatformObserver != nil {
+			buildInput.PlatformObserver(platform, time.Since(started), err)
 		}
-		if err := tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr); err != nil {
+		if err != nil {
 			return err
 		}
 	}
 	if !buildInput.Push {
 		return nil
 	}
-	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
+	return assembleMultiPlatformManifest(buildInput.Image.Tag, perPlatformTags, buildInput.Image.Insecure, buildInput.Verbosity, stdout, stderr)
 }
 
-func pushMultiPlatformImage(tag string, perPlatformTags []string, verbosity int, stdout, stderr io.Writer) error {
-	for _, platformTag := range perPlatformTags {
-		if err := DockerImagePusher(platformTag, verbosity, stdout, stderr); err != nil {
-			return err
-		}
+// promotePlatformImage re-tags one platform's cached fingerprint image and
+// pushes it under the real version tag. The fingerprint check that chose this
+// path only proves the image exists in the local daemon; it says nothing
+// about whether the registry still holds every blob that image references.
+// A push the registry rejects for a blob it doesn't have — surfacing as
+// "unknown blob" — means the cache hit cannot be trusted for this run, so
+// promotion is only ever an optimization over building from source: a
+// rejection here falls back to building and pushing this platform for real,
+// rather than failing the whole release over a check that was wrong.
+//
+// Any other failure (a real auth or network error, for instance) is not
+// retried, since rebuilding could not change its outcome; it is returned with
+// the promoted tag and its cached source named, so the failure says which
+// image and which operation it belongs to instead of a bare daemon message.
+func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+	fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+	err := runDockerTag(fpTag, platformTag, stdout, stderr)
+	if err == nil {
+		err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
 	}
-	createArgs := append([]string{"manifest", "create", "--amend", tag}, perPlatformTags...)
+	if err == nil {
+		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
+	}
+	if err == nil {
+		return nil
+	}
+	if !IsDockerUnknownBlobError(err.Error()) {
+		return fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, err)
+	}
+	_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
+	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
+}
+
+// pushPlatformImage publishes one platform the moment it is built, instead of
+// leaving every platform for a push pass that runs after the last build.
+//
+// A daemon backed by the containerd image store is free to collect content that
+// only a tag points at, and does. With build-all-then-push the first platform's
+// manifest was routinely gone by the time its push ran, and the release failed
+// with "content digest ... not found" — after paying for every build. Publishing
+// each platform immediately means no artifact ever has to survive another build,
+// which is the property that was missing rather than anything about the content.
+//
+// The manifest list is unaffected: `docker manifest create` reads its inputs
+// back from the registry, so it does not care whether they are still local.
+func pushPlatformImage(buildInput DockerBuildSpec, platformTag string, stdout, stderr io.Writer) error {
+	if !buildInput.Push {
+		return nil
+	}
+	return DockerImagePusher(platformTag, buildInput.Verbosity, stdout, stderr)
+}
+
+// assembleMultiPlatformManifest publishes the arch-less tag that points at the
+// per-arch images just pushed.
+//
+// The local manifest list is discarded first. docker keeps manifest lists in its
+// own store, so re-publishing a version that was pushed before would otherwise
+// merge into the cached list and republish the digests it already held: the
+// per-arch tags advance, the arch-less tag does not, and a deploy of that version
+// runs the previous image while every step reports success. Removing the cached
+// list makes the published tag a function of this run alone. It is absent on a
+// first publish, so its failure is not one.
+func assembleMultiPlatformManifest(tag string, perPlatformTags []string, insecure bool, verbosity int, stdout, stderr io.Writer) error {
+	// `docker manifest rm` only touches the local manifest-list store, never the
+	// registry, so it needs no --insecure of its own.
+	_ = runDockerSimpleCommandWithVerbosity([]string{"manifest", "rm", tag}, verbosity, io.Discard, io.Discard)
+	createArgs := append(dockerManifestArgs("create", insecure), tag)
+	createArgs = append(createArgs, perPlatformTags...)
 	if err := runDockerSimpleCommandWithVerbosity(createArgs, verbosity, stdout, stderr); err != nil {
 		return err
 	}
-	return runDockerSimpleCommandWithVerbosity([]string{"manifest", "push", tag}, verbosity, stdout, stderr)
+	pushArgs := append(dockerManifestArgs("push", insecure), tag)
+	return runDockerSimpleCommandWithVerbosity(pushArgs, verbosity, stdout, stderr)
+}
+
+// dockerManifestArgs builds a `docker manifest <sub>` argv, appending
+// --insecure when the registry is plain HTTP. Unlike the daemon (which reads
+// its own insecure-registry list), `docker manifest create/push/inspect` talk
+// to the registry directly over HTTPS by default and need the flag spelled
+// out on every invocation that touches an insecure registry.
+func dockerManifestArgs(sub string, insecure bool) []string {
+	args := []string{"manifest", sub}
+	if insecure {
+		args = append(args, "--insecure")
+	}
+	return args
 }
 
 func tagFingerprintAfterBuild(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
@@ -156,18 +254,35 @@ func platformShortSuffix(platform string) string {
 	return strings.ReplaceAll(platform, "/", "-")
 }
 
-func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, stdout, stderr io.Writer) error {
+// runDockerBuildOnce always builds with --progress=plain (see
+// dockerVerbosityBuildFlags) so BuildKit emits every step's own output,
+// including a failing RUN's — the in-Dockerfile `make check` test stage is
+// exactly such a step. Below debug verbosity that output is captured rather
+// than streamed live, so a successful build stays as quiet as --quiet used to
+// make it; on failure the capture is flushed to stderr before the error
+// returns, so "exit code: N" is never the whole story for a step that just
+// spent minutes running. At debug verbosity the caller already wants
+// everything live, so it streams as it always has.
+func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) error {
 	cmd := Command("docker", args...)
 	cmd.Dir = dir
-	output := new(bytes.Buffer)
-	cmd.Stdout = commandOutputWriter(stdout, output)
-	cmd.Stderr = commandOutputWriter(stderr, output)
+	capture := &commandOutputCapture{}
+	if verbosity >= VerbosityDebug {
+		cmd.Stdout = teeWriter(stdout, &capture.stdout)
+		cmd.Stderr = teeWriter(stderr, &capture.stderr)
+	} else {
+		cmd.Stdout = &capture.stdout
+		cmd.Stderr = &capture.stderr
+	}
 	err := cmd.Run()
 	if err == nil {
 		return nil
 	}
 
-	message := output.String()
+	message := capture.combined()
+	if verbosity < VerbosityDebug && stderr != nil {
+		_, _ = io.WriteString(stderr, message)
+	}
 	if push && IsDockerPushAuthorizationError(message) {
 		return DockerRegistryAuthError{
 			Tag:      authContextTag,
@@ -175,6 +290,18 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, st
 			Message:  strings.TrimSpace(message),
 			Err:      err,
 		}
+	}
+	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message); ok {
+		return DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
+	}
+	// Keep the step's own last words whatever else is known: they are all the
+	// durable timing record will ever have (see build_failure_reason.go).
+	reason := dockerBuildFailureReason(message)
+	if diagnosis, ok := dockerBuildNetworkDiagnosis(message); ok {
+		reason = joinFailureReason(reason, diagnosis)
+	}
+	if reason != "" {
+		return DockerBuildStepError{Reason: reason, Err: err}
 	}
 	return err
 }
@@ -229,7 +356,7 @@ func tryDockerTag(source, target string, stdout, stderr io.Writer) error {
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}
-	cmd.Stderr = commandOutputWriter(stderr, capture)
+	cmd.Stderr = teeWriter(stderr, capture)
 	if err := cmd.Run(); err != nil {
 		return dockerTagError{err: err, message: capture.String()}
 	}
@@ -291,12 +418,13 @@ func DockerImageExists(tag string) (bool, error) {
 	return false, err
 }
 
-func DockerManifestExists(tag string) (bool, error) {
+func DockerManifestExists(tag string, insecure bool) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
 	}
-	cmd := Command("docker", "manifest", "inspect", tag)
+	args := append(dockerManifestArgs("inspect", insecure), tag)
+	cmd := Command("docker", args...)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -308,23 +436,6 @@ func DockerManifestExists(tag string) (bool, error) {
 	return false, err
 }
 
-func commandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
-	writers := make([]io.Writer, 0, 2)
-	if primary != nil {
-		writers = append(writers, primary)
-	}
-	if capture != nil {
-		writers = append(writers, capture)
-	}
-	if len(writers) == 0 {
-		return io.Discard
-	}
-	if len(writers) == 1 {
-		return writers[0]
-	}
-	return io.MultiWriter(writers...)
-}
-
 func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	tag := platformSuffixedTag(strings.TrimSpace(buildInput.Image.Tag), platform)
 	// --provenance=false: BuildKit's default provenance attestation turns each
@@ -332,7 +443,12 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	// ("<tag> is a manifest list"). Off, each tag stays a plain image manifest
 	// the assembly step can consume.
 	args := []string{"build", "--platform", platform, "--provenance=false"}
-	args = append(args, dockerVerbosityBuildFlags(buildInput.Verbosity)...)
+	// Always plain progress, never --quiet: --quiet suppresses a failing step's
+	// own output at the source (BuildKit, not erun), so no amount of
+	// capture-and-replay in runDockerBuildOnce could recover what --quiet never
+	// produced. runDockerBuildOnce is what keeps a successful build quiet below
+	// debug verbosity; this flag only has to make the output exist to capture.
+	args = append(args, "--progress=plain")
 	args = append(args, "-t", tag)
 	buildArgVersion := dockerBuildArgVersion(buildInput)
 	// A base this run keeps local — a snapshot base, or a pinned-version base built
@@ -348,6 +464,12 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	if buildArgVersion != "" {
 		args = append(args, "--build-arg", "ERUN_VERSION="+buildArgVersion)
 	}
+	if buildInput.DindCPULimit != "" {
+		args = append(args, "--build-arg", "DIND_CPU_LIMIT="+buildInput.DindCPULimit)
+	}
+	if buildInput.DindMemoryLimitMiB != "" {
+		args = append(args, "--build-arg", "DIND_MEMORY_LIMIT_MIB="+buildInput.DindMemoryLimitMiB)
+	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
 }
@@ -362,13 +484,6 @@ func dockerBuildArgVersion(buildInput DockerBuildSpec) string {
 		return base
 	}
 	return dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
-}
-
-func dockerVerbosityBuildFlags(verbosity int) []string {
-	if verbosity >= VerbosityDebug {
-		return []string{"--progress=plain"}
-	}
-	return []string{"--quiet"}
 }
 
 func dockerPushArgs(tag string, verbosity int) []string {
@@ -423,15 +538,15 @@ func DockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer) erro
 func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) error {
 	args := dockerPushArgs(tag, verbosity)
 	pushCmd := Command("docker", args...)
-	output := new(bytes.Buffer)
-	pushCmd.Stdout = commandOutputWriter(stdout, output)
-	pushCmd.Stderr = commandOutputWriter(stderr, output)
+	capture := &commandOutputCapture{}
+	pushCmd.Stdout = teeWriter(stdout, &capture.stdout)
+	pushCmd.Stderr = teeWriter(stderr, &capture.stderr)
 	err := pushCmd.Run()
 	if err == nil {
 		return nil
 	}
 
-	message := output.String()
+	message := capture.combined()
 	if IsDockerPushAuthorizationError(message) {
 		return DockerRegistryAuthError{
 			Tag:      tag,
@@ -440,7 +555,29 @@ func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) erro
 			Err:      err,
 		}
 	}
-	return err
+	return dockerPushError{tag: tag, err: err, message: message}
+}
+
+// dockerPushError names the tag a push was attempting when the daemon or
+// registry rejected it, so a bare registry response like "unknown blob" does
+// not surface with nothing to say which image, or which command, it belongs
+// to.
+type dockerPushError struct {
+	tag     string
+	err     error
+	message string
+}
+
+func (e dockerPushError) Error() string {
+	msg := strings.TrimSpace(e.message)
+	if msg == "" {
+		return fmt.Sprintf("docker push %s: %s", e.tag, e.err.Error())
+	}
+	return fmt.Sprintf("docker push %s: %s: %s", e.tag, e.err.Error(), msg)
+}
+
+func (e dockerPushError) Unwrap() error {
+	return e.err
 }
 
 func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -469,6 +606,48 @@ func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Wri
 func isGHCRRegistry(registry string) bool {
 	registry = strings.ToLower(strings.TrimSpace(registry))
 	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
+}
+
+func isHostedRegistry(registry string) bool {
+	return strings.EqualFold(strings.TrimSpace(registry), HostedRegistryHost)
+}
+
+// DockerRegistryLoginWithHostedRegistry wraps DockerRegistryLogin with the one
+// branch it cannot resolve on its own: the hosted registry's password is the
+// operator's own erun-api bearer token (see the registry token endpoint in
+// api-protocol.md), minted from their configured erun cloud provider alias —
+// never a secret an operator could type by hand. Every other registry falls
+// through to DockerRegistryLogin unchanged.
+func DockerRegistryLoginWithHostedRegistry(store CloudReadStore, deps CloudDependencies) DockerRegistryLoginFunc {
+	return func(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
+		if isHostedRegistry(registry) {
+			return hostedRegistryDockerLogin(store, deps, stdout, stderr)
+		}
+		return DockerRegistryLogin(registry, stdin, stdout, stderr)
+	}
+}
+
+// hostedRegistryDockerLogin resolves the operator's sole configured erun
+// platform cloud provider alias, mints a fresh bearer token from it, and feeds
+// that token to `docker login` as the password over stdin — never argv, so it
+// never appears in a process listing.
+func hostedRegistryDockerLogin(store CloudReadStore, deps CloudDependencies, stdout, stderr io.Writer) error {
+	provider, err := ResolveERunPlatformAlias(store, "")
+	if err != nil {
+		return fmt.Errorf("erun's hosted registry authenticates with the tenant's own erun-api bearer token, minted from a configured erun cloud provider alias: %w", err)
+	}
+	token, err := CloudProviderBearerToken(Context{}, store, CloudBearerParams{Alias: provider.Alias}, deps)
+	if err != nil {
+		return fmt.Errorf("mint erun-api bearer token for hosted registry login: %w", err)
+	}
+	if strings.TrimSpace(token.Token) == "" {
+		return fmt.Errorf("erun cloud provider alias %q returned an empty bearer token", provider.Alias)
+	}
+	loginCmd := Command("docker", "login", HostedRegistryHost, "-u", HostedRegistryLoginUsername, "--password-stdin")
+	loginCmd.Stdin = strings.NewReader(token.Token)
+	loginCmd.Stdout = stdout
+	loginCmd.Stderr = stderr
+	return loginCmd.Run()
 }
 
 func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) {

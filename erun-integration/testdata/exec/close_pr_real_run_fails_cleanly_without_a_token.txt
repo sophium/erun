@@ -1,0 +1,8 @@
+audit: erun exec close-pr --gated-commit sourcesha0000000000000000000000000000000 --landing-commit landedsha0000000000000000000000000000000 --remote-url https://github.com/sophium/erun.git --target main feature/add-widget
+close-pr: resolving inputs
+close-pr: resolving owner/repo from remote-url
+close-pr: owner = sophium, repo = erun
+github: GET https://api.github.com/repos/sophium/erun/pulls?base=main&head=sophium%3Afeature%2Fadd-widget&state=open
+close-pr: resolving a github token
+close-pr: token resolution failed: no gh CLI session or GITHUB_TOKEN/GH_TOKEN set
+no GitHub token available to close a pull request; run 'gh auth login' or set GITHUB_TOKEN

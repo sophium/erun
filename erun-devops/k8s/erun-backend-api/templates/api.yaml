@@ -2,6 +2,40 @@
 {{- $apiPort := default 17033 .Values.apiPort -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- /* Which token audiences the API accepts on its OIDC path — the boundary
+       between clients of one shared IdP, which the issuer allow-list above
+       cannot draw. Empty by default and deliberately so: the client ids a
+       deployment's IdP actually mints are an infrastructure fact, and guessing
+       them here would lock out every caller. Set it per env once those ids are
+       established; the API's startup log reports whether it is enforcing. */ -}}
+{{- $oidcAllowedAudiences := default "" $api.oidcAllowedAudiences -}}
+{{- /* GET /v1/platform discovery: served unauthenticated so a client can
+       discover this instance before it has a token. issuer derives from the
+       env's platform.authHost (the hosted IdP host every platform deploy
+       already threads in) rather than a separate value to keep in sync.
+       consoleClientId/cliClientId/mobileClientId come from the erun-zitadel
+       chart's OIDC bootstrap, which publishes them to a ConfigMap in this
+       namespace; that chart may not have run yet (or at all, for a
+       non-platform env), so the ConfigMap read is optional and absent values
+       render as empty strings. */ -}}
+{{- $platform := default dict .Values.platform -}}
+{{- $platformAuthHost := default "" $platform.authHost -}}
+{{- $platformIssuer := "" -}}
+{{- if $platformAuthHost -}}
+{{- $platformIssuer = printf "https://%s" $platformAuthHost -}}
+{{- end -}}
+{{- $platformAPIURL := default "" $platform.apiUrl -}}
+{{- $platformConsoleURL := default "" $platform.consoleUrl -}}
+{{- $platformBrand := default "" $platform.brand -}}
+{{- /* The white-label trio a client's front door renders: its own docs link,
+       tagline, and logo. docsUrl arrives pre-defaulted to docs.<baseDomain> by
+       the env's platform config; all three stay empty strings when unset, which
+       is what keeps a client falling back to its bundled product defaults
+       rather than rendering a blank hero or a broken image. */ -}}
+{{- $platformDocsURL := default "" $platform.docsUrl -}}
+{{- $platformTagline := default "" $platform.tagline -}}
+{{- $platformLogoURL := default "" $platform.logoUrl -}}
+{{- $zitadelOIDCClientsConfigMap := default (printf "%s-zitadel-oidc-clients" $tenant) $api.zitadelOIDCClientsConfigMap -}}
 {{- $awsIdentityStoreID := default "" $api.awsIdentityStoreID -}}
 {{- $awsIdentityStoreRegion := default "" $api.awsIdentityStoreRegion -}}
 {{- $postgres := default dict $api.postgres -}}
@@ -11,10 +45,59 @@
 {{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
 {{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@%s-postgres:%v/%s?sslmode=disable" $postgresUser $tenant $postgresPort $postgresDatabase) $api.databaseURL -}}
+{{- /* DBOS (durable workflows) needs its own database, separate from
+       ERUN_DATABASE_URL -- DBOS owns and migrates its own system tables there.
+       It creates the database itself on first connect if missing, using the
+       same superuser credentials core already uses to create its own "zitadel"
+       database, so no separate bootstrap step is required. Rendered only when
+       a feature that actually needs DBOSContext is enabled (server.go's
+       newEnvironmentProvisioner/newReleaseQueue both require it); an env with
+       neither enabled stays byte-for-byte unchanged. */ -}}
+{{- $dbos := default dict $api.dbos -}}
+{{- $dbosDatabase := default (printf "%s_dbos_sys" $postgresDatabase) $dbos.database -}}
+{{- $dbosDatabaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@%s-postgres:%v/%s?sslmode=disable" $postgresUser $tenant $postgresPort $dbosDatabase) $dbos.databaseURL -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $backendAPIImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
-{{- /* Opt-in backend MCP-signing identity (#686/#818): a mounted Ed25519 key the
+{{- /* Opt-in public HTTPS edge for the API itself, mirroring erun-console's
+       and erun-zitadel's own Ingresses in shape and value naming (#1141). Every
+       other externally-reachable component of a platform declares its own
+       endpoint; the API could not, so the one component a tenant must reach in
+       order to use the platform at all was the only one the platform could not
+       publish. The result was an Ingress nothing declared, which cannot be
+       reviewed, reproduced on a second instance, or recovered if deleted --
+       while CLI login records are keyed to that hostname.
+
+       Off unless api.externalDomain is set, so no existing deployment gains a
+       public endpoint on upgrade. Unlike erun-console's, this one has no
+       default derived from platform.baseDomain: the API's public address is a
+       deployment decision (an instance may deliberately keep it in-cluster
+       only), and silently publishing it on a version bump is exactly what the
+       opt-in exists to prevent.
+
+       This does not make the API browser-callable from another origin -- it
+       still sets no CORS headers by design, and erun-console still reaches it
+       same-origin through its own nginx proxy. What it publishes is the
+       endpoint non-browser clients already use: the CLI, orchestrators, CI. */ -}}
+{{- $externalDomain := default "" $api.externalDomain -}}
+{{- $ingressClass := default "traefik" $api.ingressClass -}}
+{{- $ingressAnnotations := default dict $api.ingressAnnotations -}}
+{{- $certManagerIssuer := default "" $api.certManagerIssuer -}}
+{{- /* Defaults to its own per-host secret, like the console's. Point it at an
+       existing wildcard secret (e.g. <tenant>-<env>-wildcard-tls) to reuse a
+       certificate the edge already issued instead of minting a second one, or
+       set it explicitly empty to render no tls block at all -- which is what an
+       edge terminating TLS ahead of the ingress wants.
+
+       hasKey rather than `default`: Helm's default() treats "" as absent and
+       substitutes, so an explicitly empty secret name would silently come back
+       as the default and the Ingress would reference a Secret that does not
+       exist. Same shape as Terraform's coalesce() skipping empty strings. */ -}}
+{{- $tlsSecretName := printf "%s-api-tls" $tenant -}}
+{{- if hasKey $api "tlsSecretName" -}}
+{{- $tlsSecretName = $api.tlsSecretName -}}
+{{- end -}}
+{{- /* Opt-in backend MCP-signing identity: a mounted Ed25519 key the
        API signs per-env MCP and DNS-01 broker tokens with. Off by default — the
        mint endpoints report 501 and the DNS-01 broker is unregistered — so
        existing deploys are byte-for-byte unchanged. */ -}}
@@ -22,7 +105,30 @@
 {{- $mcpSigningSecretName := default "" $mcpSigning.secretName -}}
 {{- $mcpSigningSecretKey := default "signing.key" $mcpSigning.secretKey -}}
 {{- $mcpSigningMountDir := "/etc/erun/mcp-signing" -}}
-{{- /* Opt-in DNS-01 broker write path (#818): the services zone + the PowerDNS
+{{- /* Identity administration (issue #1209): the org-owner Zitadel
+       Management API PAT the erun-zitadel chart already provisions and
+       persists to <tenant>-zitadel-pats. Defaults follow that chart's own
+       naming so a platform deploying both components needs no extra
+       wiring beyond having platform.authHost set. The volume is mounted
+       `optional: true` -- an env with no zitadel component, or one that
+       hasn't finished first-instance bootstrap yet, still renders and
+       starts; server.go's optionalIdentityAdmin treats an absent or empty
+       PAT file the same as unconfigured and simply does not register the
+       /v1/identity/* routes. externalDomain defaults to the same
+       platform.authHost the OIDC issuer above already uses, because
+       Zitadel resolves which instance a Management API call targets from
+       that same externally-reachable host (see erun-zitadel chart
+       header) -- not from the cluster-internal address the call is
+       actually addressed to. */ -}}
+{{- $identity := default dict $api.identity -}}
+{{- $identityZitadel := default dict $identity.zitadel -}}
+{{- $identityZitadelManagementAPIURL := default (printf "http://%s-zitadel:8080" $tenant) $identityZitadel.managementApiUrl -}}
+{{- $identityZitadelExternalDomain := default $platformAuthHost $identityZitadel.externalDomain -}}
+{{- $identityZitadelPatSecretName := default (printf "%s-zitadel-pats" $tenant) $identityZitadel.patSecretName -}}
+{{- $identityZitadelPatSecretKey := default "admin-sa.pat" $identityZitadel.patSecretKey -}}
+{{- $identityZitadelMountDir := "/etc/erun/zitadel-management" -}}
+{{- $identityZitadelEnabled := ne $identityZitadelExternalDomain "" -}}
+{{- /* Opt-in DNS-01 broker write path: the services zone + the PowerDNS
        :53 endpoint and its TSIG key. TSIG defaults match the erun-powerdns
        chart, so enabling the broker only needs enabled + servicesZone. */ -}}
 {{- $dns01 := default dict $api.dns01 -}}
@@ -34,7 +140,14 @@
 {{- $dns01TsigSecretKey := default "tsig-secret" $dns01Tsig.secretKey -}}
 {{- $dns01TsigKeyName := default (printf "%s-dnsupdate" $tenant) $dns01Tsig.keyName -}}
 {{- $dns01TsigAlgorithm := default "hmac-sha256" $dns01Tsig.algorithm -}}
-{{- /* Opt-in server-side env-deploy executor (#605): the API launches an
+{{- /* Opt-in per-env TLS certificate provisioning: riding the same
+       DNS-01 broker, so it only needs the ACME account email on top of the
+       broker config above. acmeServer/webhookGroupName default to Let's
+       Encrypt production and the webhook shim's own default group name. */ -}}
+{{- $acmeEmail := default "" $dns01.acmeEmail -}}
+{{- $acmeServer := default "" $dns01.acmeServer -}}
+{{- $dns01WebhookGroupName := default "" $dns01.webhookGroupName -}}
+{{- /* Opt-in server-side env-deploy executor: the API launches an
        `erun deploy` Job per hosted env. Off by default — the API pod keeps the
        namespace `default` SA and env creation only registers the row, so
        existing deploys are byte-for-byte unchanged. Enabling it grants the API
@@ -47,6 +160,32 @@
 {{- $envDeployerEnabled := default false $envDeployer.enabled -}}
 {{- $apiServiceAccount := printf "%s-api" $tenant -}}
 {{- $envDeployerSA := default (printf "%s-env-deployer" $tenant) $envDeployer.serviceAccountName -}}
+{{- /* Opt-in automatic exposure: the platform's ingress IP, threaded to every
+       env-deploy Job so it chains `erun expose` (the env's MCP edge) after a
+       successful deploy. Empty (the default) leaves deploys exactly as they
+       were before this existed -- no attempt to expose, independent of
+       whether the executor above is enabled. */ -}}
+{{- $envDeployerExposeTargetIP := default "" $envDeployer.exposeTargetIp -}}
+{{- /* The names of the env's image-pull secrets, threaded to the API so its
+       published-image precondition can probe the registry with the same
+       credential the deploy Job pulls with. A private registry namespace
+       answers an anonymous probe identically whether the tenant's own
+       <tenant>-devops image is absent or merely invisible, which is what made
+       the bootstrap path unreachable there; with the credential the two
+       separate. Empty leaves the probe unauthenticated and inconclusive, so no
+       deploy is diverted. */ -}}
+{{- $pullSecretNames := list -}}
+{{- range default (list) .Values.imagePullSecrets -}}
+{{- if .name -}}
+{{- $pullSecretNames = append $pullSecretNames .name -}}
+{{- end -}}
+{{- end -}}
+{{- /* The merge queue's gate and the release queue's run are environment-
+       driven now, not a Job this API launches -- there is no
+       api.releaseQueue/api.mergeQueue config or per-namespace Job RBAC left
+       to render. */ -}}
+{{- $apiServiceAccountNeeded := $envDeployerEnabled -}}
+{{- $dbosNeeded := $envDeployerEnabled -}}
 {{- if $envDeployerEnabled }}
 apiVersion: v1
 kind: ServiceAccount
@@ -54,6 +193,10 @@ metadata:
   name: {{ $apiServiceAccount }}
   labels:
     app: {{ $tenant }}-api
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -61,6 +204,10 @@ metadata:
   name: {{ $envDeployerSA }}
   labels:
     app: {{ $tenant }}-api
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -75,6 +222,29 @@ rules:
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]
+  {{- if $pullSecretNames }}
+  {{- /* Read access to the env's pull secrets by name only -- the credential
+         the published-image probe needs, and nothing else in the namespace. */}}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      {{- range $pullSecretNames }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["get"]
+  {{- end }}
+  {{- /* Placement credential secrets (#1112): deployexec.ensurePlacementSecret,
+         called by this SA's own process (the launcher that creates the deploy/
+         stop/delete Jobs above, not the Job itself) upserts one erun-ctx-cred-<id>
+         Secret per remote-context deploy so the Job can read its target
+         cluster's admin token via secretKeyRef. The name is a per-context UUID
+         minted at context-provisioning time, not knowable at chart render, so
+         this cannot be scoped by resourceNames the way the pull-secret grant
+         above is; create/update/get is kept off list/watch/delete so this SA
+         still cannot enumerate what other secrets exist in the namespace. */}}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -90,6 +260,114 @@ roleRef:
   kind: Role
   name: {{ $tenant }}-api-env-deployer
 ---
+{{/* The env-deployer used to run as cluster-admin; this is the curated,
+     isolated, audited provisioner role carrying exactly the
+     verbs provisioning needs. Its Job runs one thing — erun deploy/stop/
+     delete for one tenant's runtime chart — never a component chart, so the
+     verb list is scoped to what that install actually touches: namespace
+     lifecycle, the ResourceQuota/LimitRange a provisioned namespace gets
+     (tenant_quotas), the runtime chart's own resources (Deployment,
+     PVCs, ServiceAccount, Service, its Secrets/ConfigMaps, and Helm's own
+     release-state Secrets), RoleBindings, scaling the runtime Deployment to
+     0/1 (erun stop/erun platform env wake -- RBAC treats
+     deployments/scale as a distinct resource from deployments, so patch on
+     the parent does not carry it), and reading pods/events so erun deploy's
+     early-failure pod watch and erun stop's desktop-session listing are not
+     silently inert. Binding the runtime SA to the built-in admin
+     ClusterRole is what the chart renders for every env (see
+     erun-devops/AGENTS.md "Runtime SA RBAC is namespaced by default");
+     granting only bind on that one named ClusterRole (not the verbs admin
+     itself carries) is the RBAC escalation-check's documented way to let a
+     granter hand out a ClusterRole it does not hold outright, keeping this
+     role's own footprint far short of admin-equivalent. It does not cover
+     platformAccount's cluster-admin ClusterRoleBinding — that opt-in stays
+     gated on an admin-capable context, unchanged.
+
+     apps/replicasets read is granted separately from apps/deployments: helm's
+     own readiness wait for a Deployment does not stop at the Deployment
+     object -- it walks Deployment -> the Deployment's current ReplicaSet ->
+     that ReplicaSet's ready count, because a Deployment has no direct
+     pod/ready signal of its own. Without list/watch on ReplicaSets, `helm
+     --wait` can never observe a rollout finishing and rides out its full
+     timeout on an otherwise healthy release. This is what the
+     deployments/pods/events grants above missed: they cover the parent object,
+     the failure-diagnostics pods/events, and the scale subresource, but not
+     the one object in the middle of helm's own walk.
+
+     networking.k8s.io/ingresses is granted here, not narrowed further: the
+     deploy Job's post-deploy `erun expose` applies the Host-routing Ingress
+     into the provisioned env's own namespace (erun-common/expose.go), which
+     is genuinely a per-env action like everything else on this ClusterRole.
+     update/patch ride alongside create because re-exposing an already-
+     exposed env must be idempotent. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $tenant }}-env-provisioner
+  labels:
+    app: {{ $tenant }}-api
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["resourcequotas", "limitranges"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "serviceaccounts", "services", "secrets", "configmaps"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "get", "update", "patch"]
+  {{- /* The deploy Job's post-deploy `erun expose` also provisions the env's own
+         namespaced cert-manager Issuer + Certificate through the DNS-01 broker
+         so the Ingress's wildcard TLS secretName actually gets
+         populated. Namespaced resources in the provisioned env's own namespace,
+         like everything else on this ClusterRole; update/patch ride alongside
+         create for the same idempotent-reapply reason as the Ingress above. */}}
+  - apiGroups: ["cert-manager.io"]
+    resources: ["issuers", "certificates"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  {{- /* list + delete on certificates, and read on the ACME chain, are what the
+         delete Job's pre-teardown challenge retraction needs (#1174/#1183).
+         Namespace teardown removes the env's DNS-01 token Secret as ordinary
+         content, but a still-pending Challenge's cleanup authenticates to the
+         broker with exactly that Secret -- so if the Certificate is not deleted
+         and its Challenges not waited out first, the finalizer never clears and
+         the namespace sits in Terminating for its full timeout.
+
+         Without these verbs the retraction's own reads are Forbidden and it
+         does nothing at all, which is how #1174 shipped inert: `kubectl get
+         challenges` returned Forbidden, that was read as "no challenges here",
+         and the whole step was skipped. Orders and Challenges are read-only --
+         deleting the Certificate is what cascades to them; the reads only exist
+         to wait for the cascade to finish. */}}
+  - apiGroups: ["acme.cert-manager.io"]
+    resources: ["challenges", "orders"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["admin"]
+    verbs: ["bind"]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -103,7 +381,48 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: {{ $tenant }}-env-provisioner
+---
+{{/* pods/exec is deliberately not on the ClusterRole above: the deploy Job's
+     post-deploy `erun expose` also runs `kubectl exec deploy/<powerdns> --
+     pdnsutil replace-rrset` (erun-common/expose_exec.go's
+     upsertPowerDNSRecord) to write the wildcard DNS record, but that exec
+     always targets the platform's own PowerDNS singleton in this release's
+     namespace -- never a tenant's provisioned env namespace. A cluster-wide
+     grant would hand the deployer exec into every pod in every namespace,
+     undoing much of the point of curating this role away from cluster-admin,
+     so it is a namespaced Role bound only in this namespace instead.
+     resourceNames cannot narrow it further: the PowerDNS pod's name carries
+     its ReplicaSet's generated hash and is not known at grant time, so this
+     stays a namespace-wide exec grant rather than a resourceNames list that
+     would only look tighter. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $tenant }}-env-provisioner-platform
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $tenant }}-api
+rules:
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $tenant }}-env-provisioner-platform
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ $tenant }}-api
+subjects:
+  - kind: ServiceAccount
+    name: {{ $envDeployerSA }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $tenant }}-env-provisioner-platform
 ---
 {{- end }}
 apiVersion: v1
@@ -121,6 +440,45 @@ spec:
       port: {{ $apiPort }}
       targetPort: api
 ---
+{{- if $externalDomain }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $tenant }}-api
+  labels:
+    app: {{ $tenant }}-api
+  {{- if or $certManagerIssuer $ingressAnnotations }}
+  annotations:
+    {{- if $certManagerIssuer }}
+    cert-manager.io/issuer: {{ $certManagerIssuer | quote }}
+    {{- end }}
+    {{- range $key, $value := $ingressAnnotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if $ingressClass }}
+  ingressClassName: {{ $ingressClass }}
+  {{- end }}
+  {{- if $tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ $externalDomain }}
+      secretName: {{ $tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ $externalDomain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $tenant }}-api
+                port:
+                  name: api
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -139,7 +497,7 @@ spec:
       labels:
         app: {{ $tenant }}-api
     spec:
-      {{- if $envDeployerEnabled }}
+      {{- if $apiServiceAccountNeeded }}
       serviceAccountName: {{ $apiServiceAccount }}
       {{- end }}
       containers:
@@ -160,8 +518,46 @@ spec:
                   key: {{ $postgresPasswordSecretKey }}
             - name: ERUN_DATABASE_URL
               value: {{ $databaseURL | quote }}
+            {{- if $dbosNeeded }}
+            - name: DBOS_SYSTEM_DATABASE_URL
+              value: {{ $dbosDatabaseURL | quote }}
+            {{- end }}
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
+            - name: ERUN_OIDC_ALLOWED_AUDIENCES
+              value: {{ $oidcAllowedAudiences | quote }}
+            - name: ERUN_PLATFORM_ISSUER
+              value: {{ $platformIssuer | quote }}
+            - name: ERUN_PLATFORM_API_URL
+              value: {{ $platformAPIURL | quote }}
+            - name: ERUN_PLATFORM_CONSOLE_URL
+              value: {{ $platformConsoleURL | quote }}
+            - name: ERUN_PLATFORM_BRAND
+              value: {{ $platformBrand | quote }}
+            - name: ERUN_PLATFORM_DOCS_URL
+              value: {{ $platformDocsURL | quote }}
+            - name: ERUN_PLATFORM_TAGLINE
+              value: {{ $platformTagline | quote }}
+            - name: ERUN_PLATFORM_LOGO_URL
+              value: {{ $platformLogoURL | quote }}
+            - name: ERUN_PLATFORM_CONSOLE_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $zitadelOIDCClientsConfigMap }}
+                  key: consoleClientId
+                  optional: true
+            - name: ERUN_PLATFORM_CLI_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $zitadelOIDCClientsConfigMap }}
+                  key: cliClientId
+                  optional: true
+            - name: ERUN_PLATFORM_MOBILE_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $zitadelOIDCClientsConfigMap }}
+                  key: mobileClientId
+                  optional: true
             - name: ERUN_AWS_IDENTITY_STORE_ID
               value: {{ $awsIdentityStoreID | quote }}
             - name: ERUN_AWS_IDENTITY_STORE_REGION
@@ -179,10 +575,26 @@ spec:
                   fieldPath: metadata.namespace
             - name: ERUN_ENV_DEPLOY_REGISTRY
               value: {{ $containerRegistry | quote }}
+            {{- if $pullSecretNames }}
+            - name: ERUN_ENV_DEPLOY_IMAGE_PULL_SECRETS
+              value: {{ join "," $pullSecretNames | quote }}
+            {{- end }}
+            {{- if $envDeployerExposeTargetIP }}
+            - name: ERUN_ENV_EXPOSE_TARGET_IP
+              value: {{ $envDeployerExposeTargetIP | quote }}
+            {{- end }}
             {{- end }}
             {{- if $mcpSigningSecretName }}
             - name: ERUN_API_MCP_SIGNING_KEY_PATH
               value: {{ printf "%s/%s" $mcpSigningMountDir $mcpSigningSecretKey | quote }}
+            {{- end }}
+            {{- if $identityZitadelEnabled }}
+            - name: ERUN_ZITADEL_MANAGEMENT_API_URL
+              value: {{ $identityZitadelManagementAPIURL | quote }}
+            - name: ERUN_ZITADEL_EXTERNAL_DOMAIN
+              value: {{ $identityZitadelExternalDomain | quote }}
+            - name: ERUN_ZITADEL_MANAGEMENT_PAT_PATH
+              value: {{ printf "%s/%s" $identityZitadelMountDir $identityZitadelPatSecretKey | quote }}
             {{- end }}
             {{- if $dns01Enabled }}
             - name: ERUN_DNS01_SERVICES_ZONE
@@ -198,19 +610,46 @@ spec:
                 secretKeyRef:
                   name: {{ $dns01TsigSecretName }}
                   key: {{ $dns01TsigSecretKey }}
+            {{- if $acmeEmail }}
+            - name: ERUN_ACME_EMAIL
+              value: {{ $acmeEmail | quote }}
             {{- end }}
-          {{- if $mcpSigningSecretName }}
+            {{- if $acmeServer }}
+            - name: ERUN_ACME_SERVER
+              value: {{ $acmeServer | quote }}
+            {{- end }}
+            {{- if $dns01WebhookGroupName }}
+            - name: ERUN_DNS01_WEBHOOK_GROUP_NAME
+              value: {{ $dns01WebhookGroupName | quote }}
+            {{- end }}
+            {{- end }}
+          {{- if or $mcpSigningSecretName $identityZitadelEnabled }}
           volumeMounts:
+            {{- if $mcpSigningSecretName }}
             - name: mcp-signing-key
               mountPath: {{ $mcpSigningMountDir | quote }}
               readOnly: true
+            {{- end }}
+            {{- if $identityZitadelEnabled }}
+            - name: zitadel-management-pat
+              mountPath: {{ $identityZitadelMountDir | quote }}
+              readOnly: true
+            {{- end }}
           {{- end }}
           ports:
             - containerPort: {{ $apiPort }}
               name: api
-      {{- if $mcpSigningSecretName }}
+      {{- if or $mcpSigningSecretName $identityZitadelEnabled }}
       volumes:
+        {{- if $mcpSigningSecretName }}
         - name: mcp-signing-key
           secret:
             secretName: {{ $mcpSigningSecretName }}
+        {{- end }}
+        {{- if $identityZitadelEnabled }}
+        - name: zitadel-management-pat
+          secret:
+            secretName: {{ $identityZitadelPatSecretName }}
+            optional: true
+        {{- end }}
       {{- end }}

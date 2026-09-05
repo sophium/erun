@@ -1,0 +1,108 @@
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+release: branch = main, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = stable
+release: develop branch "develop" exists = false
+<VERSION>
+audit: erun release --dry-run
+release: branch=main mode=stable version=<VERSION>
+next version: <VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
+publishing image: ghcr.io/sophium/erun-webhook:<VERSION>
+git -C <TMP> status --porcelain --untracked-files=no
+release: worktree clean = true
+stage: sync-remote
+cd <TMP> && git fetch origin
+cd <TMP> && git rebase origin/main
+stage: release
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: api
+  version: <VERSION>
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: base
+  version: <VERSION>
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.yaml
+cd <TMP> && git commit -m '[skip ci] release <VERSION>'
+git -C <TMP> rev-parse '<VERSION>^{}'
+cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
+cd <TMP> && git fetch origin main
+cd <TMP> && git rev-list --count HEAD..FETCH_HEAD
+release: a base branch that moved since sync-remote refuses the release here, before the build spends anything
+docker builder prune -f
+docker manifest inspect ghcr.io/sophium/api:<VERSION>
+docker manifest inspect ghcr.io/sophium/base:<VERSION>
+docker manifest inspect ghcr.io/sophium/erun-webhook:<VERSION>
+stage: publish
+docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:fp-<HEX16>-amd64
+cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:fp-<HEX16>-arm64
+cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker manifest rm ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker manifest create ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker manifest push ghcr.io/sophium/api:<VERSION>
+docker image inspect ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+docker image inspect ghcr.io/sophium/base:fp-<HEX16>-arm64
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64
+cd <TMP> && docker push ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-arm64
+cd <TMP> && docker push ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest rm ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest create ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest push ghcr.io/sophium/base:<VERSION>
+docker image inspect ghcr.io/sophium/erun-webhook:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/erun-webhook:fp-<HEX16>-amd64
+docker image inspect ghcr.io/sophium/erun-webhook:fp-<HEX16>-arm64
+fingerprint image not found locally: ghcr.io/sophium/erun-webhook:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/erun-webhook:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/erun-webhook:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/erun-webhook:<VERSION> ghcr.io/sophium/erun-webhook:fp-<HEX16>-amd64
+cd <TMP> && docker push ghcr.io/sophium/erun-webhook:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/erun-webhook:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/erun-webhook:<VERSION> ghcr.io/sophium/erun-webhook:fp-<HEX16>-arm64
+cd <TMP> && docker push ghcr.io/sophium/erun-webhook:<VERSION>
+cd <TMP> && docker manifest rm ghcr.io/sophium/erun-webhook:<VERSION>
+cd <TMP> && docker manifest create ghcr.io/sophium/erun-webhook:<VERSION> ghcr.io/sophium/erun-webhook:<VERSION> ghcr.io/sophium/erun-webhook:<VERSION>
+cd <TMP> && docker manifest push ghcr.io/sophium/erun-webhook:<VERSION>
+cd <TMP> && helm package api --version <VERSION> --app-version <VERSION>
+cd <TMP> && helm push api-<VERSION>.tgz oci://ghcr.io/sophium/charts
+helm pull oci://ghcr.io/sophium/charts/api --version <VERSION> --destination <TMP>
+cd <TMP> && helm package base --version <VERSION> --app-version <VERSION>
+cd <TMP> && helm push base-<VERSION>.tgz oci://ghcr.io/sophium/charts
+helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <TMP>
+stage: verify-publication
+docker manifest inspect ghcr.io/sophium/api:<VERSION>
+docker manifest inspect ghcr.io/sophium/base:<VERSION>
+docker manifest inspect ghcr.io/sophium/erun-webhook:<VERSION>
+release: anonymous-pullability probing ghcr.io/sophium/erun-webhook:<VERSION> with a fresh, credential-free token
+stage: post-release-version-bump
+write <TMP>
+  <VERSION>
+cd <TMP> && git add erun-devops/VERSION
+cd <TMP> && git commit -m '[skip ci] prepare <VERSION>'
+stage: push
+release: a push rejected by a branch that moved during the release is rebased onto origin/main and retried (up to 2 attempts)
+cd <TMP> && git push --follow-tags origin main
+release version: <VERSION>

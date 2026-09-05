@@ -1,0 +1,20 @@
+Inspect and advance a target branch's merge queue
+
+Usage:
+  erun review queue [command]
+
+Available Commands:
+  advance          Advance a target branch's merge queue head to MERGE
+  list             List a target branch's merge queue, in queue order
+  override-advance Bypass the unresolved-thread gate and advance the merge queue anyway
+
+Flags:
+  -h, --help   help for queue
+
+Global Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+      --output string       Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time                Print the elapsed runtime after the command finishes.
+  -v, --verbose count       Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun review queue [command] --help" for more information about a command.

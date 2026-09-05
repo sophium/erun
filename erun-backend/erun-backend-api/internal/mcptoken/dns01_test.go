@@ -78,7 +78,7 @@ func TestVerifyDNS01RejectsForeignKey(t *testing.T) {
 func TestVerifyDNS01RejectsMCPToken(t *testing.T) {
 	signer := newTestSigner(t)
 	now := time.Unix(1_700_000_000, 0)
-	mcpToken, _, err := signer.Sign("acme", "prod", "user-1", now)
+	mcpToken, _, err := signer.Sign("acme", "prod", "user-1", string(eruncommon.MCPCapabilityAdmin), now)
 	if err != nil {
 		t.Fatalf("sign mcp: %v", err)
 	}

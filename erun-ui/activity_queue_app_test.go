@@ -142,6 +142,59 @@ func TestLockTerminalsForActivityWithoutMatchClearsNothing(t *testing.T) {
 	}
 }
 
+// TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately: a session that
+// joins after a deploy has already started must lock as soon as it joins,
+// not whenever the deploy's poller or completion handler next touches the
+// queue -- lockTerminalForActivity existed but nothing called it from the
+// session-start paths, so a late-joining ERun/AI tab never locked.
+func TestLockNewlyJoinedSessionIfDeployInFlightLocksImmediately(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops",
+	})
+
+	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 7, kind: sessionKindAI}
+	app.mu.Lock()
+	app.sessions[joinSession.key] = joinSession
+	app.mu.Unlock()
+
+	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.serial)
+
+	if joinSession.lockedByActivity != entry.ID {
+		t.Fatalf("joinSession.lockedByActivity = %q, want %q", joinSession.lockedByActivity, entry.ID)
+	}
+	if got := len(emits.events(activityQueueLockEvent)); got != 1 {
+		t.Fatalf("lock events emitted = %d, want 1", got)
+	}
+}
+
+// TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy: a session
+// joining an env with no active deploy must not be touched.
+func TestLockNewlyJoinedSessionIfDeployInFlightNoOpWithoutADeploy(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 7, kind: sessionKindAI}
+	app.mu.Lock()
+	app.sessions[joinSession.key] = joinSession
+	app.mu.Unlock()
+
+	app.lockNewlyJoinedSessionIfDeployInFlight(selection, joinSession.serial)
+
+	if joinSession.lockedByActivity != "" {
+		t.Fatalf("joinSession.lockedByActivity = %q, want empty", joinSession.lockedByActivity)
+	}
+	if got := len(emits.events(activityQueueLockEvent)); got != 0 {
+		t.Fatalf("lock events emitted = %d, want 0", got)
+	}
+}
+
 // TestLockTerminalEventsAlwaysCarryReason: the ActivityLockOverlay carries no
 // fallback string, so every Locked=true event must populate Reason or the
 // overlay header renders blank.
@@ -397,6 +450,77 @@ func TestActivityTraceLineHandlerFinalizesBuildOnFailure(t *testing.T) {
 	}
 }
 
+// TestActivityTraceLineHandlerRecordsDetailWithoutAPTY locks down that
+// recordOutputLine's only caller used to be the PTY reader
+// (feedActivityTraceFromTerminal), so the desktop's subprocess-captured
+// build/push/deploy orchestration (deploy_orchestration.go, which has no PTY
+// and calls the trace handler directly) never populated entry.Detail. The
+// handler itself must record every line it sees, regardless of caller.
+func TestActivityTraceLineHandlerRecordsDetailWithoutAPTY(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	// Call the handler directly, exactly as runErunCaptured's onLine callback
+	// does for the desktop's orchestrated build — no managedTerminal, no PTY.
+	handler("==> Building")
+	handler("./main.go:12:2: undefined: fmt.Sprintfff")
+	handler("==> Build failed after 3m12s")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if !strings.Contains(all[0].Detail, "undefined: fmt.Sprintfff") {
+		t.Fatalf("Detail missing the actual compiler error, got %q", all[0].Detail)
+	}
+	if strings.Contains(all[0].Error, "==>") || strings.Contains(all[0].Error, "after 3m12s") {
+		t.Fatalf("Error should be cleaned of the trace marker and elapsed clause, got %q", all[0].Error)
+	}
+}
+
+// TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActive
+// locks down that the wrong card cannot fail: a bare deploy-failure line (no
+// tenant/env, e.g. "==> Deploy failed after 4s") must finalize the deploy
+// entry specifically, never a same-tenant/env build entry that is still
+// running. Before the fix this used findActive, whose plain map iteration
+// picks an arbitrary entry when both are active — this test is deterministic
+// under the fix (findActiveByCommand) regardless of Go's map iteration order.
+func TestActivityTraceLineHandlerFinalizesCorrectCardWhenBuildAndDeployBothActive(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Building")
+	if _, ok := app.activityQueue.findActiveByCommand("build", "erun", "local"); !ok {
+		t.Fatal("expected an active build entry")
+	}
+	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "erun", Environment: "local"})
+
+	handler("Error: UPGRADE FAILED: timeout")
+	handler("==> Deploy failed after 4s")
+
+	if _, ok := app.activityQueue.findActiveByCommand("build", "erun", "local"); !ok {
+		t.Fatal("the still-running build entry must not have been finalized by the deploy failure")
+	}
+	if _, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local"); ok {
+		t.Fatal("the deploy entry should have been finalized")
+	}
+	all := app.activityQueue.list()
+	var deployEntry *activityQueueEntry
+	for i := range all {
+		if all[i].Command == "deploy" {
+			deployEntry = &all[i]
+		}
+	}
+	if deployEntry == nil || deployEntry.Status != activityQueueStatusFailed {
+		t.Fatalf("expected a failed deploy entry in history, got %+v", all)
+	}
+	if !strings.Contains(deployEntry.Error, "UPGRADE FAILED") && !strings.Contains(deployEntry.Detail, "UPGRADE FAILED") {
+		t.Fatalf("expected the captured tool error on the deploy entry, got %+v", deployEntry)
+	}
+}
+
 func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 	// A generic Local shell at the repo root has no tenant/env bound to
 	// it. Build traces observed there must NOT register an entry — a
@@ -407,6 +531,192 @@ func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 	handler("==> Building")
 	if len(app.activityQueue.list()) != 0 {
 		t.Fatalf("expected no entries registered without a selection, got %+v", app.activityQueue.list())
+	}
+}
+
+// TestActivityTraceLineHandlerStartsAndFinishesDoctor: `erun doctor` runs
+// piped into the shared Local shell, which never produces a PTY exit, so the
+// `==> Doctor ...` trace lines are its only completion signal — mirroring
+// init/build, not a bespoke mechanism.
+func TestActivityTraceLineHandlerStartsAndFinishesDoctor(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Doctor team/dev")
+	entry, ok := app.activityQueue.findActiveByCommand("doctor", "team", "dev")
+	if !ok {
+		t.Fatal("expected doctor entry to be active after ==> Doctor")
+	}
+	if entry.Source != "trace" {
+		t.Fatalf("expected source=trace, got %q", entry.Source)
+	}
+
+	handler("==> Doctor done team/dev")
+	if _, ok := app.activityQueue.findActiveByCommand("doctor", "team", "dev"); ok {
+		t.Fatal("expected doctor entry to be finished after ==> Doctor done")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesDoctorOnFailure(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Doctor team/dev")
+	handler("==> Doctor failed team/dev: kubectl not reachable")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if all[0].Error != "kubectl not reachable" {
+		t.Fatalf("expected parsed reason, got %q", all[0].Error)
+	}
+}
+
+// TestStartDoctorFromTraceDoesNotLockTerminal: doctor's recovery actions
+// prompt interactively in the very terminal it runs in, so unlike deploy/init
+// it must not lock terminals — locking would block the prompt it is waiting on.
+func TestStartDoctorFromTraceDoesNotLockTerminal(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 1, kind: sessionKindLocal}
+	app.sessions[localSession.key] = localSession
+	app.startDoctorFromTrace(selection, "team", "dev")
+	if localSession.lockedByActivity != "" {
+		t.Fatalf("expected doctor to not lock terminal, got %q", localSession.lockedByActivity)
+	}
+}
+
+// TestDoctorCompletedEventRecordsLastRunOutcome: doctor's outcome must reach
+// the frontend even though it runs piped into the shared Local shell (no PTY
+// exit) — this is what the Manage dialog's SSH tab renders as the persisted
+// last-run result.
+func TestDoctorCompletedEventRecordsLastRunOutcome(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Doctor team/dev")
+	handler("==> Doctor failed team/dev: kubectl not reachable")
+
+	events := emits.events(doctorCompletedEvent)
+	if len(events) != 1 {
+		t.Fatalf("doctor-completed emitted %d times, want exactly 1", len(events))
+	}
+	payload, ok := events[0].(uiDoctorCompletedPayload)
+	if !ok {
+		t.Fatalf("doctor-completed payload has unexpected type %T", events[0])
+	}
+	if payload.Tenant != "team" || payload.Environment != "dev" {
+		t.Fatalf("payload selection = %+v, want team/dev", payload)
+	}
+	if payload.Success {
+		t.Fatalf("expected success=false, got %+v", payload)
+	}
+	if payload.Message != "kubectl not reachable" {
+		t.Fatalf("expected parsed message, got %q", payload.Message)
+	}
+}
+
+// TestActivityTraceLineHandlerStartsAndFinishesSSHDInit: `erun sshd init` runs
+// piped into the shared Local shell, which never produces a PTY exit, so the
+// `==> SSHD init ...` trace lines are its only completion signal — the same
+// structural defect erun#1268 fixed for doctor.
+func TestActivityTraceLineHandlerStartsAndFinishesSSHDInit(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> SSHD init team/dev")
+	entry, ok := app.activityQueue.findActiveByCommand("sshd-init", "team", "dev")
+	if !ok {
+		t.Fatal("expected sshd-init entry to be active after ==> SSHD init")
+	}
+	if entry.Source != "trace" {
+		t.Fatalf("expected source=trace, got %q", entry.Source)
+	}
+
+	handler("==> SSHD init done team/dev")
+	if _, ok := app.activityQueue.findActiveByCommand("sshd-init", "team", "dev"); ok {
+		t.Fatal("expected sshd-init entry to be finished after ==> SSHD init done")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesSSHDInitOnFailure(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> SSHD init team/dev")
+	handler("==> SSHD init failed team/dev: sync remote authorized_keys from key.pub: exit status 1")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if all[0].Error != "sync remote authorized_keys from key.pub: exit status 1" {
+		t.Fatalf("expected parsed reason, got %q", all[0].Error)
+	}
+}
+
+// TestStartSSHDInitFromTraceLocksTerminals: sshd init runs no interactive
+// recovery prompts of its own — unlike doctor, it is a one-shot provisioning
+// action like init/deploy — so it takes the same lockTerminalsForActivity
+// path those do (today a no-op for non-deploy commands per
+// sessionMatchesActivity, but consistent with init's own call).
+func TestStartSSHDInitFromTraceLocksTerminals(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 1, kind: sessionKindLocal}
+	app.sessions[localSession.key] = localSession
+	app.startSSHDInitFromTrace(selection, "team", "dev")
+	if _, ok := app.activityQueue.findActiveByCommand("sshd-init", "team", "dev"); !ok {
+		t.Fatal("expected sshd-init entry to be active")
+	}
+}
+
+// TestSSHDInitCompletedEventRecordsLastRunOutcome: sshd init's outcome must
+// reach the frontend even though it runs piped into the shared Local shell (no
+// PTY exit) — this is what the Manage dialog's SSH access section renders as
+// the persisted last-run result.
+func TestSSHDInitCompletedEventRecordsLastRunOutcome(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	selection := uiSelection{Tenant: "team", Environment: "dev"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> SSHD init team/dev")
+	handler("==> SSHD init failed team/dev: kubectl not reachable")
+
+	events := emits.events(sshdInitCompletedEvent)
+	if len(events) != 1 {
+		t.Fatalf("sshd-init-completed emitted %d times, want exactly 1", len(events))
+	}
+	payload, ok := events[0].(uiSSHDInitCompletedPayload)
+	if !ok {
+		t.Fatalf("sshd-init-completed payload has unexpected type %T", events[0])
+	}
+	if payload.Tenant != "team" || payload.Environment != "dev" {
+		t.Fatalf("payload selection = %+v, want team/dev", payload)
+	}
+	if payload.Success {
+		t.Fatalf("expected success=false, got %+v", payload)
+	}
+	if payload.Message != "kubectl not reachable" {
+		t.Fatalf("expected parsed message, got %q", payload.Message)
 	}
 }
 
@@ -941,5 +1251,41 @@ func TestFeedActivityTraceCapturesFailureDetail(t *testing.T) {
 		if !strings.Contains(failed.Detail, want) {
 			t.Fatalf("Detail missing %q, got %q", want, failed.Detail)
 		}
+	}
+}
+
+// An env that states its chart separately runs an image versioned on its own
+// line, so the release's appVersion is the chart's number, not the environment's.
+// The desktop must label the environment with what it runs -- reporting the chart
+// version is the "it shows 1.0.178" confusion that made the two coordinates
+// separate in the first place.
+func TestObservedRuntimeVersionPrefersTheRecordedVersionWhenTheChartIsStated(t *testing.T) {
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{"petios": {Name: "petios"}},
+		envs: map[string]eruncommon.EnvConfig{
+			"petios/develop": {
+				Name:           "develop",
+				RuntimeVersion: "1.0.322-snapshot-20260813072257",
+				RuntimeChart:   "oci://ghcr.io/sophium/charts/erun-devops:1.0.178",
+			},
+			"petios/paired": {
+				Name:           "paired",
+				RuntimeVersion: "1.0.178",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+	release := helmReleaseSnapshot{Name: "petios-devops", AppVersion: "1.0.178"}
+
+	if got := app.observedRuntimeVersion("petios", "develop", release); got != "1.0.322-snapshot-20260813072257" {
+		t.Fatalf("expected the recorded runtime version, got %q", got)
+	}
+	// An env whose chart and image ride one line is unchanged: the chart's
+	// appVersion is the environment's version, and it is the live reading.
+	if got := app.observedRuntimeVersion("petios", "paired", release); got != "1.0.178" {
+		t.Fatalf("expected the release appVersion for a paired env, got %q", got)
+	}
+	if got := app.observedRuntimeVersion("petios", "unknown", release); got != "1.0.178" {
+		t.Fatalf("expected the release appVersion when the env is unknown, got %q", got)
 	}
 }

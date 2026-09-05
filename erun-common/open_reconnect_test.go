@@ -38,8 +38,8 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req.AppSession = "open-0"
 		script := preview(t, req)
 		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-open-0.dtach" -r ctrl_l /bin/bash`, "ERun tab missing dtach wrap")
-		if strings.Contains(script, "claude") || strings.Contains(script, "ERUN_SKIP_LINT") {
-			t.Fatalf("plain ERun shell must not launch claude or set contribute env:\n%s", script)
+		if strings.Contains(script, "claude") {
+			t.Fatalf("plain ERun shell must not launch claude:\n%s", script)
 		}
 		assertScriptHas(t, script, "exec "+bashrc, "launcher must exec the interactive shell")
 	})
@@ -94,7 +94,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		if clone < 0 || claude < 0 || clone > claude {
 			t.Fatalf("contribute-AI must cd to the clone before launching claude:\n%s", script)
 		}
-		assertScriptHas(t, script, "ERUN_SKIP_LINT", "contribute env missing")
+		assertScriptHas(t, script, `export PATH="$HOME/.erun/contribute/bin:$PATH"`, "contribute env missing")
 	})
 }
 
@@ -107,8 +107,8 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	paths := []string{
 		RemoteAppSessionSocketDir,
-		remoteAppSessionSocketPath("erun", "local", "open-0"),
-		remoteAppSessionSocketPath("erun", "local", "ai"),
+		RemoteAppSessionSocketPath("erun", "local", "open-0"),
+		RemoteAppSessionSocketPath("erun", "local", "ai"),
 	}
 	for _, path := range paths {
 		if strings.Contains(path, DesktopAppName) {

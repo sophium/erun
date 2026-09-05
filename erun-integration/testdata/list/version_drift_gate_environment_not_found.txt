@@ -1,0 +1,2 @@
+audit: erun list --gate-environment missing --tenant erun
+gate environment "missing" not found in tenant "erun"

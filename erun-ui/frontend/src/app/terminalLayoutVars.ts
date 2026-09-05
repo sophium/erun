@@ -1,5 +1,6 @@
 import {
   computeMaxReviewWidth,
+  effectiveSidebarWidth,
   MAX_DEBUG_HEIGHT,
   MAX_FILES_WIDTH,
   MIN_DEBUG_HEIGHT,
@@ -19,7 +20,11 @@ export interface LayoutVarElements {
 export function applyTerminalLayoutVars(elements: LayoutVarElements): void {
   const root = document.documentElement;
   const layout = store.getState().layout;
-  const sidebarPx = layout.sidebarHidden ? 0 : layout.sidebarWidth;
+  const sidebarPx = effectiveSidebarWidth(
+    layout.sidebarHidden,
+    layout.sidebarWidth,
+    window.innerWidth,
+  );
   root.style.setProperty('--sidebar-width', `${String(sidebarPx)}px`);
   root.style.setProperty('--review-width', `${String(clampedReviewWidth())}px`);
   root.style.setProperty('--files-width', `${String(clampedFilesWidth(elements.reviewView))}px`);
@@ -31,7 +36,11 @@ export function applyTerminalLayoutVars(elements: LayoutVarElements): void {
 
 function clampedReviewWidth(): number {
   const layout = store.getState().layout;
-  const effectiveSidebar = layout.sidebarHidden ? 0 : layout.sidebarWidth;
+  const effectiveSidebar = effectiveSidebarWidth(
+    layout.sidebarHidden,
+    layout.sidebarWidth,
+    window.innerWidth,
+  );
   const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
   return clamp(layout.reviewWidth, MIN_REVIEW_WIDTH, maxWidth);
 }

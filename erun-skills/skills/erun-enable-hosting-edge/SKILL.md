@@ -92,6 +92,31 @@ Let's Encrypt production rate limits, then re-apply without it for real certs. O
 cluster that already runs Traefik or cert-manager, add
 `-var install_ingress_controller=false` and/or `-var install_cert_manager=false`.
 
+**In-cluster resolution of the platform's own names.** k3s's bundled CoreDNS ends
+its default Corefile in `forward . /etc/resolv.conf`, so every name outside
+`cluster.local` — including the platform's own published hostnames — resolves
+through whatever DNS the node happens to use. If that resolver ever serves a stale
+or wrong answer for one of those names, cert-manager's HTTP-01 self-check fails the
+same way at issuance and at every unattended renewal, with the cause buried in a
+Challenge's status. Add `-var install_coredns_forward=true -var
+"base_domain_name=<base-domain>"` (the platform config's `basedomain`, e.g.
+`example.com`) to declare a CoreDNS custom server block that forwards it to public
+resolvers directly, independent of the node. This is opt-in and defaults to false
+so an existing cluster's DNS behavior does not change on a module upgrade; add
+`-var 'coredns_forward_upstreams=["<resolver>", ...]'` on an air-gapped or
+policy-constrained cluster that must not reach public resolvers.
+
+Three things are refused at plan time rather than allowed to fail later. A
+malformed upstream (a typo'd address, a stray comma, a hostname where an IP was
+meant) would write a syntactically invalid server block that CoreDNS only chokes
+on at its next restart — a node drain or an upgrade, by which point the cluster
+has no DNS and the cause is an apply from days earlier. A cluster-internal
+`base_domain_name` such as `cluster.local` would shadow CoreDNS's own kubernetes
+plugin and kill `.svc.cluster.local` resolution outright. And a Corefile that
+does not `import /etc/coredns/custom/*.server` means the entry would be written
+and never read, so the apply would report success while in-cluster resolution
+stayed exactly as broken as before.
+
 **Delegated services zone (PowerDNS DNS-01).** Once the services zone is delegated
 off Cloudflare to the platform's own PowerDNS, the Cloudflare DNS-01 solver can no
 longer prove control of it — switch the solver to RFC2136 (DNS UPDATE + TSIG) and
@@ -116,13 +141,49 @@ terraform apply -input=false -auto-approve \
 **Brokered DNS-01 (multi-tenant clusters).** RFC2136 above hands the cluster one
 zone-wide TSIG key — safe only on the single-tenant platform cluster. On a cluster
 shared by multiple tenants that key is an impersonation hole (any namespace could
-issue any tenant's cert). Use `powerdns-broker` instead: a per-tenant namespaced
-Issuer whose challenges route through a per-cluster cert-manager webhook shim to the
-DNS-01 broker (`erun-backend-api`), which authorizes each challenge against the
-caller's own subzone. The env presents a scoped token, not a DNS credential.
+issue any tenant's cert). Per-tenant Issuers instead need a namespaced Issuer whose
+challenges route through a per-cluster cert-manager webhook shim to the DNS-01
+broker (`erun-backend-api`), which authorizes each challenge against the caller's
+own subzone — the env presents a scoped token, not a DNS credential. `erun expose`
+provisions those per-tenant Issuers itself (not this module), but they can only ever
+reach `Ready` once the webhook shim is installed, so this module needs to install it
+even when the *platform's own* wildcard stays on `cloudflare` or `powerdns-rfc2136`.
 
-Per env (tenant), mint the env's DNS-01 token from the backend and land it as the
-Secret the Issuer's webhook solver reads, then apply in broker mode:
+**`dns01_provider` and `install_dns01_webhook` are independent switches.**
+`dns01_provider` picks the solver for the platform's *own* wildcard Issuer only.
+`install_dns01_webhook` (unset by default) installs the per-cluster webhook shim;
+left unset it defaults to `true` exactly when `dns01_provider = "powerdns-broker"`
+(back-compat with the module's original single-switch behavior). Set it explicitly
+to decouple the two — the shape a multi-tenant platform on RFC2136 needs:
+
+```sh
+terraform apply -input=false -auto-approve \
+  -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
+  -var dns01_provider=powerdns-rfc2136 \
+  -var "powerdns_nameserver=$NS.$TNS.svc.cluster.local:53" \
+  -var "rfc2136_tsig_key_name=$KEYNAME" \
+  -var install_dns01_webhook=true \
+  -var "broker_url=https://api.<platform-tenant>-<platform-env>.services.<services-zone>/v1/dns01" \
+  -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>"
+```
+
+`dns01_webhook_image` is left unset above on purpose: the module defaults it to
+`ghcr.io/sophium/erun-dns01-webhook` at the version its own bundled
+`chart-dns01-webhook/Chart.yaml` is released at, so the shim can never disagree
+with the module — no pin required. Pass `-var "dns01_webhook_image=..."` only to
+override that (e.g. to test a build ahead of a release).
+
+This keeps the platform's own wildcard on the proven RFC2136 path (see the TSIG
+setup above) while making the webhook shim available for every tenant's own
+brokered Issuer. Setting `dns01_provider=powerdns-broker` *without*
+`install_dns01_webhook=true` is refused at apply time (a precondition) — it would
+render the platform's own Issuer against a solver group nothing serves, which is
+what leaves a namespace undeletable when its Challenge can never be presented or
+cleaned up.
+
+To route the platform's own wildcard through the broker too, apply in full broker
+mode instead. Per env (tenant), mint the env's DNS-01 token from the backend and
+land it as the Secret the Issuer's webhook solver reads, then apply:
 
 ```sh
 # Mint the per-env DNS-01 token (caller must hold a token for <tenant>/<env>).
@@ -131,19 +192,20 @@ TOKEN=$(curl -fsS -X POST -H "Authorization: Bearer $ERUN_API_TOKEN" \
 kubectl -n "<tenant>-<env>" create secret generic "<tenant>-<env>-dns01-token" \
   --from-literal=token="$TOKEN" --dry-run=client -o yaml | kubectl apply -f -
 
-version=$(erun version --no-registry 2>/dev/null | head -n1 | awk '{print $2}')
 terraform apply -input=false -auto-approve \
   -var "services_zone=<services-zone>" -var "acme_email=<acme-email>" \
   -var dns01_provider=powerdns-broker \
   -var "broker_url=https://api.<platform-tenant>-<platform-env>.services.<services-zone>/v1/dns01" \
-  -var "dns01_webhook_image=ghcr.io/sophium/erun-dns01-webhook:${version:-latest}" \
   -var "dns01_token_secret_name=<tenant>-<env>-dns01-token" \
   -var per_env_certificate_enabled=true -var "env_label=<tenant>-<env>" \
   -var "env_namespace=<tenant>-<env>"
 ```
 
+As above, `dns01_webhook_image` is left to the module's own default.
+
 The webhook shim installs once per cluster; each tenant adds only its own Issuer +
-token Secret. Neither `cloudflare_api_token` nor the TSIG key is needed here.
+token Secret. Neither `cloudflare_api_token` nor the TSIG key is needed in either
+broker-adjacent mode above.
 
 ## Verify
 
@@ -160,6 +222,36 @@ kubectl wait --for=condition=Ready issuer/erun-cloudflare -n "$NS" --timeout=120
 kubectl get certificate -n "$NS"
 kubectl wait --for=condition=Ready certificate/erun-cloudflare-wildcard -n "$NS" --timeout=600s
 ```
+
+When `install_coredns_forward` is set, confirm the cluster can actually resolve the
+base domain before trusting issuance to it — this is exactly the check that catches
+a resolver problem before a Certificate sits pending with the cause buried in a
+Challenge's status. Terraform has no reliable way to run this from inside the
+module itself (it would need to schedule a Job/Pod as a side effect of `apply`,
+adding image-pull and RBAC requirements to a declarative-only module for what is
+fundamentally a smoke test), so it's a manual step here instead:
+
+```sh
+# Look up a name the platform actually publishes under the base domain, NOT the
+# bare apex: an apex commonly has no A record at all, so `nslookup <base-domain>`
+# returns NXDOMAIN on a perfectly healthy forward and reads as a failure.
+kubectl run coredns-forward-check --rm -i --restart=Never --image=busybox:1.36 \
+  -- nslookup "api.<base-domain>"
+```
+
+If nothing is published under the base domain yet, ask for a record type the zone
+always has instead of an address that may not exist:
+
+```sh
+kubectl run coredns-forward-check --rm -i --restart=Never --image=busybox:1.36 \
+  -- nslookup -type=soa "<base-domain>"
+```
+
+A timeout, or an answer that does not come from the configured upstreams, means
+the forward zone isn't resolving yet — CoreDNS reloads `coredns-custom`
+automatically, but allow ~80 seconds after the apply before treating a failure
+here as real. An `NXDOMAIN` for a name that genuinely has no record is not a
+failure of the forward; that is the trap this wording exists to avoid.
 
 A `Ready` Issuer + a `Ready` wildcard Certificate means the edge can
 terminate TLS. Route an env's service through it with `erun expose` — it writes the
@@ -201,3 +293,12 @@ re-running *is* the maintenance path, not an error.
 e.g. frs-prod) show the ACME order/challenge state. The usual causes: the Cloudflare
 token lacks `Zone:Read` + `DNS:Edit` on the zone, or the services zone isn't actually
 delegated to Cloudflare yet (`dig NS <services-zone>` should return Cloudflare name servers).
+
+A self-check failure specifically (`describe challenge` in the issuer namespace shows
+`failed to perform self check GET request ... dial tcp: lookup <host> ... no such
+host`) while the same name resolves fine from outside the cluster points at the
+node's resolver, not Cloudflare or the zone: confirm with
+`kubectl run dns-check --rm -i --restart=Never --image=busybox:1.36 -- nslookup
+<host>` from inside the cluster, and if that fails while a public resolver succeeds,
+apply `install_coredns_forward=true` (see **Apply** above) rather than waiting for
+the node's resolver to recover on its own.

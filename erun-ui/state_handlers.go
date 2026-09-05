@@ -17,19 +17,49 @@ func (a *App) LoadState() (uiState, error) {
 	})
 	if err != nil {
 		if errors.Is(err, eruncommon.ErrNotInitialized) {
+			// A fresh install with no tool config at all is not a distinct
+			// state from "initialized but zero tenants configured" — both
+			// recover the same way, from the sidebar's own "Initialize
+			// environment" affordance, so this returns the identical shape
+			// stateFromListResult uses for that case (non-nil empty Tenants,
+			// no Message) rather than a separate CLI-only instruction the
+			// desktop cannot carry out. Tenants must be non-nil: the frontend
+			// range-iterates it unconditionally on boot, and a nil slice
+			// marshals to JSON `null`, which throws there.
 			info := a.deps.resolveBuildInfo()
 			suggestions, notices := a.runtimeVersionSuggestions(info, "", "")
 			return uiState{
-				Message:                  "ERun is not initialized yet. Run `erun init` first.",
+				Tenants:                  []uiTenant{},
 				Build:                    buildDetailsFrom(info),
 				VersionSuggestions:       suggestions,
 				VersionSuggestionNotices: notices,
+			}, nil
+		}
+		if errors.Is(err, eruncommon.ErrConfigCorrupted) {
+			// A torn or genuinely corrupt config file is not "zero
+			// environments configured" -- rendering it that way tells the
+			// operator their tenants are gone when they are merely unread,
+			// and the underlying yaml error is an implementation detail that
+			// must not reach the browser (it crosses the headless HTTP
+			// bridge as a raw response/console message otherwise). Return a
+			// successful, degraded state instead of propagating err, so the
+			// sidebar can render a distinct "could not read configuration"
+			// notice rather than the empty-state affordance above.
+			info := a.deps.resolveBuildInfo()
+			return uiState{
+				Tenants:          []uiTenant{},
+				Build:            buildDetailsFrom(info),
+				ConfigUnreadable: true,
+				Message:          "Some configuration could not be read. Run `erun doctor` to inspect and repair it, then reload.",
 			}, nil
 		}
 		return uiState{}, err
 	}
 	info := a.deps.resolveBuildInfo()
 	state := stateFromListResult(result, info)
+	a.seedEnvironmentActivitySnapshots(&state)
+	a.seedEnvironmentUsageSnapshots(&state)
+	a.seedEnvironmentNodeSnapshots(&state, result)
 	suggestionTenant := ""
 	suggestionEnv := ""
 	if state.Selected != nil {
@@ -239,15 +269,18 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 		}
 		for _, environment := range tenant.Environments {
 			item.Environments = append(item.Environments, uiEnvironment{
-				Name:              strings.TrimSpace(environment.Name),
-				Type:              strings.TrimSpace(string(environment.Type)),
-				MCPURL:            mcpEndpointForListEnvironment(environment),
-				APIURL:            strings.TrimSpace(environment.APIURL),
-				RuntimeVersion:    strings.TrimSpace(environment.RuntimeVersion),
-				KubernetesContext: strings.TrimSpace(environment.KubernetesContext),
-				IsActive:          environment.IsActive,
-				SSHDEnabled:       environment.SSH.Enabled,
-				AutoStart:         copyBoolPtr(environment.AutoStart),
+				Name:                     strings.TrimSpace(environment.Name),
+				Type:                     strings.TrimSpace(string(environment.Type)),
+				MCPURL:                   mcpEndpointForListEnvironment(environment),
+				APIURL:                   strings.TrimSpace(environment.APIURL),
+				RuntimeVersion:           strings.TrimSpace(environment.RuntimeVersion),
+				RuntimeVersionLine:       environment.RuntimeVersionLine,
+				ErunVersion:              environment.ErunVersion,
+				RuntimeImageLineMismatch: environment.RuntimeImageLineMismatch,
+				KubernetesContext:        strings.TrimSpace(environment.KubernetesContext),
+				IsActive:                 environment.IsActive,
+				SSHDEnabled:              environment.SSH.Enabled,
+				AutoStart:                copyBoolPtr(environment.AutoStart),
 			})
 		}
 		state.Tenants = append(state.Tenants, item)
@@ -345,6 +378,29 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 		result = append(result, context)
 	}
 	return result
+}
+
+// errMissingTenantOrEnvironment names which of tenant/environment a Wails
+// binding needed but was called with empty, the operation, and the fix.
+// Every binding here acts on the environment the frontend currently has
+// selected, so a blank value means it was invoked with no selection --
+// select an environment in the sidebar before retrying. Returns nil when
+// both are set, so callers can use it as their whole guard clause.
+func errMissingTenantOrEnvironment(operation, tenant, environment string) error {
+	var missing []string
+	if strings.TrimSpace(tenant) == "" {
+		missing = append(missing, "tenant")
+	}
+	if strings.TrimSpace(environment) == "" {
+		missing = append(missing, "environment")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%s: %s not set -- select an environment in the sidebar before retrying this action",
+		operation, strings.Join(missing, " and "),
+	)
 }
 
 func normalizeSelection(selection uiSelection) uiSelection {

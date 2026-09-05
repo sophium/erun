@@ -1,0 +1,2 @@
+audit: erun exec write --dry-run foo.txt
+cannot find git project

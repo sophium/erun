@@ -16,10 +16,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.12.0",
+    "erun-kit": "*",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "react-redux": "^9.3.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.4",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
@@ -35,6 +39,7 @@
     "globals": "^17.6.0",
     "jsdom": "^28.0.0",
     "prettier": "^3.8.3",
+    "tailwindcss": "^4.2.4",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.59.1",
     "vite": "^8.0.0",

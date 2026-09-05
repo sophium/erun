@@ -1,0 +1,484 @@
+import type { ReviewDetailState, TenantDashboardState } from '@/app/state';
+
+import { reviewDetailApi } from './api/reviewDetailApi';
+import { readError } from './errors';
+import { showNotification } from './notificationThunks';
+import { patchReviewDetail } from './slices/reviewDetailSlice';
+import type { AppThunk } from './store';
+
+// ReviewCallerContext is what every write against a review needs: which
+// tenant to resolve the platform for (the platform read/bearer is resolved
+// server-side from that alone), plus the platform alias to sign into if the
+// write reports a stale identity.
+interface ReviewCallerContext {
+  tenant: string;
+  platformAlias: string;
+}
+
+// reviewCallerContext resolves the caller context a write against reviewId
+// needs. Once the review has loaded once, its own stored caller fields win —
+// they survive closing the (modal) dialog to browse the diff panel, which the
+// operator may do after navigating away from the tenant dashboard entirely,
+// long past the point state.tenantDashboard still describes this review.
+function reviewCallerContext(
+  state: { reviewDetail: ReviewDetailState; tenantDashboard: TenantDashboardState },
+  reviewId: string,
+): ReviewCallerContext | null {
+  const detail = state.reviewDetail;
+  if (detail.reviewId === reviewId && detail.callerTenant) {
+    return { tenant: detail.callerTenant, platformAlias: detail.callerPlatformAlias };
+  }
+  const tenant = state.tenantDashboard.tenant.trim();
+  if (!tenant) {
+    return null;
+  }
+  return { tenant, platformAlias: state.tenantDashboard.data?.platformAlias ?? '' };
+}
+
+// callerTenant carries the tenant this review was opened for when the
+// caller cannot rely on the tenant dashboard having ever loaded — the diff
+// panel's "Start a review" affordance reaches this after creating a review
+// without the operator ever opening the Reviews tab this session, so
+// reviewCallerContext's tenantDashboard.tenant fallback would find nothing.
+export const openReviewDetail =
+  (reviewId: string, callerTenant = ''): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    dispatch(
+      patchReviewDetail({
+        open: true,
+        reviewId,
+        loading: true,
+        error: '',
+        data: null,
+        callerTenant,
+        callerPlatformAlias: '',
+        replyingTo: '',
+        draftBody: '',
+        submitError: '',
+      }),
+    );
+    await dispatch(loadReviewDetail(reviewId));
+  };
+
+// closeReviewDetail hides the dialog but keeps the review as the diff
+// panel's active commenting context (reviewId/data/caller fields), so
+// closing it to browse the diff and start a new thread from a line does not
+// lose which review that thread belongs to. Only the dialog's own transient
+// UI state resets.
+export const closeReviewDetail = (): AppThunk => (dispatch) => {
+  dispatch(
+    patchReviewDetail({
+      open: false,
+      replyingTo: '',
+      draftBody: '',
+      submitError: '',
+      closeConfirming: false,
+      closeError: '',
+      newCommentAnchor: null,
+      newCommentDraft: '',
+      newCommentSubmitError: '',
+    }),
+  );
+};
+
+export const loadReviewDetail =
+  (reviewId: string): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const context = reviewCallerContext(getState(), reviewId);
+    if (!context) {
+      dispatch(patchReviewDetail({ loading: false, error: 'No tenant is open.' }));
+      return;
+    }
+    dispatch(patchReviewDetail({ loading: true, error: '' }));
+    const request = dispatch(
+      reviewDetailApi.endpoints.getReviewDetail.initiate(
+        { tenant: context.tenant, reviewId },
+        { forceRefetch: true },
+      ),
+    );
+    try {
+      const data = await request.unwrap();
+      if (getState().reviewDetail.reviewId !== reviewId) {
+        return;
+      }
+      dispatch(
+        patchReviewDetail({
+          loading: false,
+          error: '',
+          data,
+          callerTenant: context.tenant,
+          callerPlatformAlias: context.platformAlias,
+        }),
+      );
+    } catch (error) {
+      if (getState().reviewDetail.reviewId !== reviewId) {
+        return;
+      }
+      dispatch(patchReviewDetail({ loading: false, error: readError(error), data: null }));
+    } finally {
+      request.unsubscribe();
+    }
+  };
+
+export const setReviewReplyTarget =
+  (commentId: string): AppThunk =>
+  (dispatch) => {
+    dispatch(patchReviewDetail({ replyingTo: commentId, draftBody: '', submitError: '' }));
+  };
+
+export const cancelReviewReply = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ replyingTo: '', draftBody: '', submitError: '' }));
+};
+
+export const setReviewReplyDraft =
+  (body: string): AppThunk =>
+  (dispatch) => {
+    dispatch(patchReviewDetail({ draftBody: body }));
+  };
+
+// clearReviewReplyError mirrors clearCloseReviewError for the reply
+// composer's own write error (#1392).
+export const clearReviewReplyError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ submitError: '' }));
+};
+
+export const submitReviewReply = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const { reviewId, replyingTo, draftBody, data } = state.reviewDetail;
+  const body = draftBody.trim();
+  const parent = data?.comments?.find((comment) => comment.commentId === replyingTo);
+  if (!body || !parent) {
+    return;
+  }
+  const context = reviewCallerContext(state, reviewId);
+  if (!context) {
+    dispatch(patchReviewDetail({ submitError: 'No tenant is open.' }));
+    return;
+  }
+  dispatch(patchReviewDetail({ submitting: true, submitError: '' }));
+  try {
+    await dispatch(
+      reviewDetailApi.endpoints.createReviewReply.initiate({
+        tenant: context.tenant,
+        reviewId,
+        parentCommentId: parent.commentId,
+        commitId: parent.commitId,
+        filePath: parent.filePath,
+        line: parent.line,
+        body,
+      }),
+    ).unwrap();
+    // Clear the draft only once the reply is durably saved — a failed submit
+    // must keep it so the operator never loses what they typed.
+    dispatch(
+      patchReviewDetail({ submitting: false, replyingTo: '', draftBody: '', submitError: '' }),
+    );
+    await dispatch(loadReviewDetail(reviewId));
+  } catch (error) {
+    dispatch(patchReviewDetail({ submitting: false, submitError: readError(error) }));
+  }
+};
+
+// confirmCloseReview/cancelCloseReview give Close a visible commitment
+// boundary: the operator sees the confirm step before the write fires and can
+// back out of it, matching every other side-effecting dashboard action.
+export const confirmCloseReview = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ closeConfirming: true, closeError: '' }));
+};
+
+export const cancelCloseReview = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ closeConfirming: false, closeError: '' }));
+};
+
+// clearCloseReviewError drops a stale close-review write error once a
+// sign-in it prompted has succeeded, so the operator sees the panel recover
+// rather than the identical error and button (#1392) — they retry Close
+// themselves from there.
+export const clearCloseReviewError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ closeError: '' }));
+};
+
+export const submitCloseReview = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const { reviewId } = state.reviewDetail;
+  const context = reviewCallerContext(state, reviewId);
+  if (!context) {
+    dispatch(patchReviewDetail({ closeError: 'No tenant is open.' }));
+    return;
+  }
+  dispatch(patchReviewDetail({ closing: true, closeError: '' }));
+  try {
+    const review = await dispatch(
+      reviewDetailApi.endpoints.closeReview.initiate({ tenant: context.tenant, reviewId }),
+    ).unwrap();
+    dispatch(patchReviewDetail({ closing: false, closeConfirming: false, closeError: '' }));
+    dispatch(showNotification('success', `Closed ${review.name || review.reviewId}.`));
+    await dispatch(loadReviewDetail(reviewId));
+  } catch (error) {
+    dispatch(patchReviewDetail({ closing: false, closeError: readError(error) }));
+  }
+};
+
+// submitResolveComment/submitUnresolveComment resolve or reopen a thread by
+// its root comment id. The dialog only ever offers this on a root — never a
+// reply — so there is no reply-rejection error to translate here, unlike the
+// CLI/MCP paths that accept any comment id.
+export const submitResolveComment = (commentId: string): AppThunk<Promise<void>> =>
+  submitCommentStatus(commentId, 'resolveReviewComment');
+
+export const submitUnresolveComment = (commentId: string): AppThunk<Promise<void>> =>
+  submitCommentStatus(commentId, 'unresolveReviewComment');
+
+// clearResolveCommentError mirrors clearCloseReviewError for a thread's own
+// resolve/unresolve write error (#1392).
+export const clearResolveCommentError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ resolveError: '', resolveErrorCommentId: '' }));
+};
+
+function submitCommentStatus(
+  commentId: string,
+  endpoint: 'resolveReviewComment' | 'unresolveReviewComment',
+): AppThunk<Promise<void>> {
+  return async (dispatch, getState) => {
+    const state = getState();
+    const { reviewId } = state.reviewDetail;
+    const context = reviewCallerContext(state, reviewId);
+    if (!context) {
+      dispatch(
+        patchReviewDetail({ resolveError: 'No tenant is open.', resolveErrorCommentId: commentId }),
+      );
+      return;
+    }
+    dispatch(
+      patchReviewDetail({
+        resolvingCommentId: commentId,
+        resolveError: '',
+        resolveErrorCommentId: '',
+      }),
+    );
+    try {
+      await dispatch(
+        reviewDetailApi.endpoints[endpoint].initiate({
+          tenant: context.tenant,
+          reviewId,
+          commentId,
+        }),
+      ).unwrap();
+      dispatch(
+        patchReviewDetail({ resolvingCommentId: '', resolveError: '', resolveErrorCommentId: '' }),
+      );
+      await dispatch(loadReviewDetail(reviewId));
+    } catch (error) {
+      dispatch(
+        patchReviewDetail({
+          resolvingCommentId: '',
+          resolveError: readError(error),
+          resolveErrorCommentId: commentId,
+        }),
+      );
+    }
+  };
+}
+
+// startAddReviewer/cancelAddReviewer/setAddReviewerUserId/clearAddReviewerError/
+// submitAddReviewer back the Add reviewers picker. Not destructive, so unlike
+// Close/Remove it opens straight into the picker with no confirm step.
+export const startAddReviewer = (): AppThunk => (dispatch) => {
+  dispatch(
+    patchReviewDetail({ addReviewerOpen: true, addReviewerUserId: '', addReviewerError: '' }),
+  );
+};
+
+export const cancelAddReviewer = (): AppThunk => (dispatch) => {
+  dispatch(
+    patchReviewDetail({ addReviewerOpen: false, addReviewerUserId: '', addReviewerError: '' }),
+  );
+};
+
+export const setAddReviewerUserId =
+  (userId: string): AppThunk =>
+  (dispatch) => {
+    dispatch(patchReviewDetail({ addReviewerUserId: userId }));
+  };
+
+// clearAddReviewerError mirrors clearCloseReviewError for the Add reviewers
+// picker's own write error.
+export const clearAddReviewerError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ addReviewerError: '' }));
+};
+
+export const submitAddReviewer = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const { reviewId, addReviewerUserId } = state.reviewDetail;
+  const userId = addReviewerUserId.trim();
+  if (!userId) {
+    return;
+  }
+  const context = reviewCallerContext(state, reviewId);
+  if (!context) {
+    dispatch(patchReviewDetail({ addReviewerError: 'No tenant is open.' }));
+    return;
+  }
+  dispatch(patchReviewDetail({ addReviewerSubmitting: true, addReviewerError: '' }));
+  try {
+    await dispatch(
+      reviewDetailApi.endpoints.addReviewer.initiate({ tenant: context.tenant, reviewId, userId }),
+    ).unwrap();
+    dispatch(
+      patchReviewDetail({
+        addReviewerSubmitting: false,
+        addReviewerOpen: false,
+        addReviewerUserId: '',
+        addReviewerError: '',
+      }),
+    );
+    await dispatch(loadReviewDetail(reviewId));
+  } catch (error) {
+    dispatch(
+      patchReviewDetail({ addReviewerSubmitting: false, addReviewerError: readError(error) }),
+    );
+  }
+};
+
+// confirmRemoveReviewer/cancelRemoveReviewer give Remove the same
+// cancel-before-commitment boundary Close gets — it revokes access, not just
+// a passive read.
+export const confirmRemoveReviewer =
+  (userId: string): AppThunk =>
+  (dispatch) => {
+    dispatch(
+      patchReviewDetail({ removeReviewerConfirmingUserId: userId, removeReviewerError: '' }),
+    );
+  };
+
+export const cancelRemoveReviewer = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ removeReviewerConfirmingUserId: '', removeReviewerError: '' }));
+};
+
+export const clearRemoveReviewerError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ removeReviewerError: '', removeReviewerErrorUserId: '' }));
+};
+
+export const submitRemoveReviewer =
+  (userId: string): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const state = getState();
+    const { reviewId } = state.reviewDetail;
+    const context = reviewCallerContext(state, reviewId);
+    if (!context) {
+      dispatch(
+        patchReviewDetail({
+          removeReviewerError: 'No tenant is open.',
+          removeReviewerErrorUserId: userId,
+        }),
+      );
+      return;
+    }
+    dispatch(
+      patchReviewDetail({
+        removingReviewerId: userId,
+        removeReviewerConfirmingUserId: '',
+        removeReviewerError: '',
+        removeReviewerErrorUserId: '',
+      }),
+    );
+    try {
+      await dispatch(
+        reviewDetailApi.endpoints.removeReviewer.initiate({
+          tenant: context.tenant,
+          reviewId,
+          userId,
+        }),
+      ).unwrap();
+      dispatch(
+        patchReviewDetail({
+          removingReviewerId: '',
+          removeReviewerError: '',
+          removeReviewerErrorUserId: '',
+        }),
+      );
+      await dispatch(loadReviewDetail(reviewId));
+    } catch (error) {
+      dispatch(
+        patchReviewDetail({
+          removingReviewerId: '',
+          removeReviewerError: readError(error),
+          removeReviewerErrorUserId: userId,
+        }),
+      );
+    }
+  };
+
+// startReviewComment/cancelReviewComment/setReviewCommentDraft/
+// submitReviewComment mirror the reply flow above, but for opening a brand
+// new top-level thread anchored to a diff line the operator clicked — the
+// gap ReviewDetailDialog.Comments.tsx used to call out as deferred.
+export const startReviewComment =
+  (anchor: { commitId: string; filePath: string; line: number }): AppThunk =>
+  (dispatch) => {
+    dispatch(
+      patchReviewDetail({
+        newCommentAnchor: anchor,
+        newCommentDraft: '',
+        newCommentSubmitError: '',
+      }),
+    );
+  };
+
+export const cancelReviewComment = (): AppThunk => (dispatch) => {
+  dispatch(
+    patchReviewDetail({ newCommentAnchor: null, newCommentDraft: '', newCommentSubmitError: '' }),
+  );
+};
+
+export const setReviewCommentDraft =
+  (body: string): AppThunk =>
+  (dispatch) => {
+    dispatch(patchReviewDetail({ newCommentDraft: body }));
+  };
+
+// clearReviewCommentError mirrors clearCloseReviewError for the new-thread
+// composer's own write error (#1392).
+export const clearReviewCommentError = (): AppThunk => (dispatch) => {
+  dispatch(patchReviewDetail({ newCommentSubmitError: '' }));
+};
+
+export const submitReviewComment = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const { reviewId, newCommentAnchor, newCommentDraft } = state.reviewDetail;
+  const body = newCommentDraft.trim();
+  if (!body || !newCommentAnchor) {
+    return;
+  }
+  const context = reviewCallerContext(state, reviewId);
+  if (!context) {
+    dispatch(patchReviewDetail({ newCommentSubmitError: 'No tenant is open.' }));
+    return;
+  }
+  dispatch(patchReviewDetail({ newCommentSubmitting: true, newCommentSubmitError: '' }));
+  try {
+    await dispatch(
+      reviewDetailApi.endpoints.createReviewComment.initiate({
+        tenant: context.tenant,
+        reviewId,
+        commitId: newCommentAnchor.commitId,
+        filePath: newCommentAnchor.filePath,
+        line: newCommentAnchor.line,
+        body,
+      }),
+    ).unwrap();
+    dispatch(
+      patchReviewDetail({
+        newCommentSubmitting: false,
+        newCommentAnchor: null,
+        newCommentDraft: '',
+        newCommentSubmitError: '',
+      }),
+    );
+    await dispatch(loadReviewDetail(reviewId));
+  } catch (error) {
+    dispatch(
+      patchReviewDetail({ newCommentSubmitting: false, newCommentSubmitError: readError(error) }),
+    );
+  }
+};

@@ -1,15 +1,16 @@
 package eruncommon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 )
 
@@ -69,15 +70,40 @@ type BootstrapInitParams struct {
 	ProjectRoot              string
 	Environment              string
 	RuntimeVersion           string
-	RuntimeImage             string
-	RuntimePod               RuntimePodResources
-	NoGit                    bool
-	KubernetesContext        string
-	ContainerRegistry        string
+	// RuntimeVersionDefault is the version an env gets when it has none of its
+	// own — the transport's own build version. It is kept apart from
+	// RuntimeVersion because a transport-supplied fallback is not an operator
+	// asking for a version: folding the two together would repin an existing env
+	// to whatever erun the operator happened to run, on an invocation about
+	// something else entirely.
+	RuntimeVersionDefault string
+	RuntimeImage          string
+	// RuntimeRegistry redirects the environment's runtime chart and its in-pod
+	// platform image resolution to the registry erun publishes them in, for an
+	// env whose deploy registry holds only its own app images. It is the
+	// supported way in: resolution honours the field first, but every other
+	// writer of it is a side effect of a deploy that already succeeded, which an
+	// env in that state cannot get.
+	RuntimeRegistry string
+	// ImagePullSecrets names the dockerconfigjson secrets the runtime pod pulls
+	// its image with, which a private runtime image cannot start without.
+	ImagePullSecrets []string
+	RuntimePod       RuntimePodResources
+	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
+	// independent of RuntimePod which only sizes the runtime container itself.
+	RuntimeDindPod    RuntimePodResources
+	NoGit             bool
+	KubernetesContext string
+	ContainerRegistry string
 	// ClusterRegistry, when set, seeds the new env with a resolvable cluster:
 	// registry entry (addresses resolved from the env's kube-context) instead of
 	// the static ContainerRegistry string. Set by `erun init --cluster-registry`.
 	ClusterRegistry *ClusterRegistry
+	// ErunRegistry, when true, seeds the new env with erun's hosted registry
+	// (HostedRegistryReference(tenant)) instead of the static ContainerRegistry
+	// string. Set by `erun init --erun-registry`; mutually exclusive with
+	// ContainerRegistry and ClusterRegistry.
+	ErunRegistry bool
 	// MCPAuthPublicKeyPath, when set, points at a PEM public key the init-time
 	// runtime deploy trusts so the env's erun-mcp edge requires a bearer signed by
 	// it — mirrors `erun deploy --mcp-auth-public-key`. The desktop sets it so
@@ -100,11 +126,22 @@ type BootstrapInitParams struct {
 	ResolveTenant           bool
 	DisableBuildScript      bool
 	PlatformAccount         bool
+	// Components sets the env's saved deploy.components default selection —
+	// what `erun deploy` rolls out when no --components flag is passed. nil
+	// means the invocation named nothing and the saved selection (if any) is
+	// left untouched; a non-nil, empty slice is the explicit way to clear a
+	// saved selection and return the env to its repo k8s.deployments plan —
+	// the ambiguity plain-string flags have between "omitted" and
+	// "explicitly emptied" does not apply here because the pointer itself
+	// carries that distinction.
+	Components *[]string
 }
 
-// ResolvedType returns the new env's type: an explicit Type wins, otherwise it
-// is derived from Remote to preserve the pre-type behavior of `erun init
-// [--remote]`.
+// ResolvedType returns the type a *new* env is created with: an explicit Type
+// wins, otherwise it is derived from Remote to preserve the pre-type behavior of
+// `erun init [--remote]`, and an invocation that names neither falls back to
+// local-agent. It answers "what kind of env is this run creating", never "what
+// kind is the env on disk" — for an existing env see RequestedType.
 func (p BootstrapInitParams) ResolvedType() EnvironmentType {
 	if p.Type.IsValid() {
 		return p.Type
@@ -115,10 +152,42 @@ func (p BootstrapInitParams) ResolvedType() EnvironmentType {
 	return EnvironmentTypeLocalAgent
 }
 
+// RequestedType reports the type the operator actually named, and whether they
+// named one at all. The fallback ResolvedType applies is a default, not a
+// request: retyping an existing env because a flag was omitted would be a worse
+// silent write than the dropped settings it would be repairing.
+func (p BootstrapInitParams) RequestedType() (EnvironmentType, bool) {
+	if p.Type.IsValid() {
+		return p.Type, true
+	}
+	if p.Remote {
+		return EnvironmentTypeRemoteAgent, true
+	}
+	return "", false
+}
+
+// resolvedRuntimeVersion is the version a new env is pinned to: the operator's
+// --version, or the transport's own build version when they named none.
+func (p BootstrapInitParams) resolvedRuntimeVersion() string {
+	if version := strings.TrimSpace(p.RuntimeVersion); version != "" {
+		return version
+	}
+	return strings.TrimSpace(p.RuntimeVersionDefault)
+}
+
 // RemoteWorktree reports whether the new env's worktree will live outside the
-// local machine.
+// local machine. Mirrors EnvConfig.RemoteWorktree's explicit-by-type
+// enumeration: local-agent and host both use the local machine's own
+// filesystem, so both answer false.
 func (p BootstrapInitParams) RemoteWorktree() bool {
-	return p.ResolvedType() != EnvironmentTypeLocalAgent
+	switch p.ResolvedType() {
+	case EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
+		return true
+	case EnvironmentTypeLocalAgent, EnvironmentTypeHost:
+		return false
+	default:
+		panic(fmt.Sprintf("RemoteWorktree: unhandled EnvironmentType %q", p.ResolvedType()))
+	}
 }
 
 type BootstrapInitInteractionType string
@@ -185,8 +254,16 @@ type BootstrapInitDependencies struct {
 	RunRemoteCommand          RemoteCommandRunnerFunc
 	DeployHelmChart           HelmChartDeployerFunc
 	Sleep                     SleepFunc
-	Context                   Context
+	// ProbeHostedRegistry answers whether erun's hosted registry can be pushed
+	// to. Unset defaults to a real probe, so a caller that wires nothing still
+	// refuses an unreachable registry instead of writing config whose pushes
+	// fail later, far from the choice that caused it.
+	ProbeHostedRegistry HostedRegistryProbeFunc
+	Context             Context
 }
+
+// HostedRegistryProbeFunc reports the hosted registry's current availability.
+type HostedRegistryProbeFunc func(context.Context) HostedRegistryStatus
 
 type bootstrapRunner struct {
 	BootstrapInitDependencies
@@ -276,7 +353,7 @@ type tracedBootstrapStore struct {
 }
 
 func (s tracedBootstrapStore) SaveERunConfig(config ERunConfig) error {
-	configPath, err := xdg.ConfigFile(filepath.Join("erun", "config.yaml"))
+	configPath, err := resolveConfigFilePath(filepath.Join("erun", "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -290,7 +367,7 @@ func (s tracedBootstrapStore) SaveERunConfig(config ERunConfig) error {
 }
 
 func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
-	configPath, err := xdg.ConfigFile(filepath.Join("erun", config.Name, "config.yaml"))
+	configPath, err := resolveConfigFilePath(filepath.Join("erun", config.Name, "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -304,7 +381,7 @@ func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
 }
 
 func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config EnvConfig) error {
-	configPath, err := xdg.ConfigFile(filepath.Join("erun", tenant, config.Name, "config.yaml"))
+	configPath, err := resolveConfigFilePath(filepath.Join("erun", tenant, config.Name, "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -341,6 +418,9 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 
 func (s *bootstrapRunState) run() error {
 	if err := ValidateRuntimePodResources(s.params.RuntimePod); err != nil {
+		return err
+	}
+	if err := ValidateRuntimeDindPodResources(s.params.RuntimeDindPod); err != nil {
 		return err
 	}
 	if err := s.validateRemoteParams(); err != nil {
@@ -749,6 +829,9 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	if err != nil {
 		return err
 	}
+	if s.params.ResolvedType() == EnvironmentTypeHost {
+		return s.createHostEnvConfig(envProjectRoot)
+	}
 	kubernetesContext, cloudProviderAlias, managedCloud, err := s.resolveNewEnvCloudConfig()
 	if err != nil {
 		return err
@@ -773,14 +856,20 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
 		ManagedCloud:       managedCloud,
-		RuntimeVersion:     strings.TrimSpace(s.params.RuntimeVersion),
-		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
+		RuntimeVersion:     s.params.resolvedRuntimeVersion(),
+		RuntimeImage:       stripRuntimeImageTag(s.params.RuntimeImage),
+		RuntimeRegistry:    strings.TrimSpace(s.params.RuntimeRegistry),
 		// Record the key init's runtime deploy trusted, so the next redeploy
 		// rethreads it instead of dropping the env's MCP edge to unauthenticated.
 		MCPAuthPublicKeyPath: strings.TrimSpace(s.params.MCPAuthPublicKeyPath),
-		RuntimePod:           NormalizeRuntimePodResources(s.params.RuntimePod),
-		DisableBuildScript:   s.params.DisableBuildScript,
-		PlatformAccount:      s.params.PlatformAccount,
+		// The pod cannot start on a private runtime image without these, so a new
+		// env records them from the start rather than on a second init.
+		ImagePullSecrets:   normalizeImagePullSecrets(s.params.ImagePullSecrets),
+		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
+		RuntimeDindPod:     NormalizeRuntimeDindPodResources(s.params.RuntimeDindPod),
+		DisableBuildScript: s.params.DisableBuildScript,
+		PlatformAccount:    s.params.PlatformAccount,
+		Deploy:             initDeployConfig(s.params),
 		// Seed the registries into the FIRST persisted config. The init-time deploy
 		// (ensureDevopsAssets) reads the env config from disk before
 		// saveEnvConfigIfChanged runs, so registries set only in-memory here were
@@ -794,6 +883,72 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	}
 	s.result.CreatedEnvConfig = true
 	return nil
+}
+
+// createHostEnvConfig creates a host env: a worktree directory on this
+// machine with no pod and no cluster at all. None of the runtime/cloud/
+// registry fields below apply to it, so it records only what a host env
+// actually has — a name, its type, and the directory it names — and never
+// resolves a kubernetes context, a cloud provider alias, or a container
+// registry. A host environment must not contact a cluster during init any
+// more than it does at any other time.
+func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
+	envProjectRoot = strings.TrimSpace(envProjectRoot)
+	if envProjectRoot == "" {
+		return fmt.Errorf("cannot create %s/%s as type %s: %s", s.tenant, s.envName, EnvironmentTypeHost, hostRepoPathRequirement(EnvironmentTypeHost))
+	}
+	// Skipping the cluster/cloud/registry resolution below is what "no cluster
+	// contact" means for host, but creating a new environment still asks for
+	// the same confirmation every other type does — that step is local and
+	// interactive, not cluster-touching.
+	if err := s.runner.confirmEnvironment(s.params, s.tenant, s.envName); err != nil {
+		return err
+	}
+	s.runner.Context.Trace("Adding new environment")
+	s.envConfig = EnvConfig{
+		Name:          s.envName,
+		Type:          EnvironmentTypeHost,
+		LocalRepoPath: envProjectRoot,
+	}
+	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
+		return err
+	}
+	s.result.CreatedEnvConfig = true
+	return nil
+}
+
+// initDeployConfig resolves the Deploy block a new env is created with: a
+// saved components selection when --components named one, else the zero value
+// (no saved selection, so deploy falls back to the repo plan).
+func initDeployConfig(params BootstrapInitParams) EnvironmentDeployConfig {
+	components, given := initComponentsOverride(params)
+	if !given {
+		return EnvironmentDeployConfig{}
+	}
+	return EnvironmentDeployConfig{Components: components}
+}
+
+// initComponentsOverride resolves the deploy.components override an init
+// invocation named via --components, and whether one was named at all. A nil
+// Components pointer means the invocation named nothing; a non-nil pointer
+// (even to an empty slice) is an explicit request. That distinction is what
+// lets an explicitly empty --components clear a saved selection instead of
+// being indistinguishable from not passing the flag at all.
+func initComponentsOverride(params BootstrapInitParams) ([]string, bool) {
+	if params.Components == nil {
+		return nil, false
+	}
+	return normalizeComponentNames(*params.Components), true
+}
+
+// describeComponentsSetting renders a resolved components list for a trace
+// line, naming explicitly when the list is an intentional clear rather than
+// looking like nothing happened.
+func describeComponentsSetting(components []string) string {
+	if len(components) == 0 {
+		return "(cleared — deploy now follows the repo k8s.deployments plan)"
+	}
+	return strings.Join(components, ",")
 }
 
 // seedInitContainerRegistries returns the marked list a new env is created with:
@@ -846,7 +1001,16 @@ func (s *bootstrapRunState) resolveNewEnvCloudConfig() (string, string, bool, er
 }
 
 func (s *bootstrapRunState) updateEnvConfig() error {
-	s.updateRemoteEnvConfig()
+	if err := s.updateExistingEnvSettings(); err != nil {
+		return err
+	}
+	// A host env (whether it already was one, or this run just retyped it via
+	// --type host) has no pod and no cluster to reconcile against — skip the
+	// kubernetes-context/cloud-provider/registry steps below entirely rather
+	// than let them resolve a context or ensure a namespace no host env has.
+	if s.envConfig.ResolvedType() == EnvironmentTypeHost {
+		return nil
+	}
 	kubernetesContext, err := s.updateEnvKubernetesContext()
 	if err != nil {
 		return err
@@ -857,29 +1021,232 @@ func (s *bootstrapRunState) updateEnvConfig() error {
 	return s.updateEnvContainerRegistry()
 }
 
-func (s *bootstrapRunState) updateRemoteEnvConfig() {
-	if !s.params.RemoteWorktree() {
+// updateExistingEnvSettings reconciles an already-initialized env against the
+// settings this invocation supplied. Every setting here describes the runtime
+// pod, which an env of any type has, so it is applied on the strength of having
+// been supplied — not on the type the invocation happens to resolve to. A
+// setting the invocation left out is left alone rather than reset to a default,
+// so re-running init to change one thing never rewrites the rest.
+//
+// A freshly created env needs none of this: createEnvConfig wrote it from these
+// same params moments ago, so there is nothing to reconcile and nothing to keep.
+func (s *bootstrapRunState) updateExistingEnvSettings() error {
+	if s.result.CreatedEnvConfig {
+		return nil
+	}
+	s.applyEnvRuntimeVersion()
+	s.applyEnvSetting("runtime image", stripRuntimeImageTag(s.params.RuntimeImage), &s.envConfig.RuntimeImage)
+	// Re-running init is how an env deadlocked on chart resolution gets out: the
+	// registry lands on the config before this run's own deploy resolves a chart.
+	s.applyEnvSetting("runtime registry", s.params.RuntimeRegistry, &s.envConfig.RuntimeRegistry)
+	s.applyEnvImagePullSecrets()
+	s.applyEnvRuntimePod()
+	s.applyEnvRuntimeDindPod()
+	s.applyEnvDeployComponents()
+	return s.applyEnvType()
+}
+
+// applyEnvSetting records a supplied value for one string setting, tracing the
+// decision either way so a dry run shows what a re-init would touch and what it
+// would deliberately leave as it found it.
+func (s *bootstrapRunState) applyEnvSetting(name, param string, recorded *string) {
+	value := strings.TrimSpace(param)
+	if value == "" {
+		s.traceEnvSettingKept(name, *recorded)
 		return
 	}
-	// A remote env persists no host repo path: LocalRepoPath is laptop-only and
-	// the worktree lives in-pod, so the project root is resolved from
-	// params/tenant rather than threaded through env config here.
-	if runtimeVersion := strings.TrimSpace(s.params.RuntimeVersion); runtimeVersion != "" && s.envConfig.RuntimeVersion != runtimeVersion {
-		s.envConfig.RuntimeVersion = runtimeVersion
-		s.envConfigChanged = true
+	if *recorded == value {
+		s.runner.Context.Trace("init: " + name + " already " + value)
+		return
 	}
-	if runtimeImage := strings.TrimSpace(s.params.RuntimeImage); runtimeImage != "" && s.envConfig.RuntimeImage != runtimeImage {
-		s.envConfig.RuntimeImage = runtimeImage
-		s.envConfigChanged = true
+	*recorded = value
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: " + name + " set to " + value)
+}
+
+// traceEnvSettingKept records that a stored setting survived this run untouched
+// because the invocation never named it. It is the line that tells an operator
+// reading a dry run the difference between "unchanged" and "silently dropped".
+func (s *bootstrapRunState) traceEnvSettingKept(name, recorded string) {
+	if strings.TrimSpace(recorded) == "" {
+		return
 	}
-	if runtimePod := NormalizeRuntimePodResources(s.params.RuntimePod); runtimePod != NormalizeRuntimePodResources(s.envConfig.RuntimePod) {
-		s.envConfig.RuntimePod = runtimePod
-		s.envConfigChanged = true
+	s.runner.Context.Trace("init: " + name + " not given; keeping " + recorded)
+}
+
+// applyEnvRuntimeVersion honours --version, and otherwise leaves the env on the
+// version it is running: an env is upgraded by deploying a version, not by an
+// init that was about something else. The transport's fallback fills in only for
+// an env carrying no version at all, which has nothing to deploy without one.
+func (s *bootstrapRunState) applyEnvRuntimeVersion() {
+	s.applyEnvSetting("runtime version", s.params.RuntimeVersion, &s.envConfig.RuntimeVersion)
+	if strings.TrimSpace(s.envConfig.RuntimeVersion) != "" {
+		return
 	}
-	if !s.envConfig.RemoteWorktree() {
-		s.envConfig.Type = s.params.ResolvedType()
-		s.envConfigChanged = true
+	fallback := strings.TrimSpace(s.params.RuntimeVersionDefault)
+	if fallback == "" {
+		return
 	}
+	s.envConfig.RuntimeVersion = fallback
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: env records no runtime version; adopting " + fallback)
+}
+
+func (s *bootstrapRunState) applyEnvImagePullSecrets() {
+	pullSecrets := normalizeImagePullSecrets(s.params.ImagePullSecrets)
+	if len(pullSecrets) == 0 {
+		s.traceEnvSettingKept("image pull secrets", strings.Join(s.envConfig.ImagePullSecrets, ","))
+		return
+	}
+	if slices.Equal(pullSecrets, s.envConfig.ImagePullSecrets) {
+		s.runner.Context.Trace("init: image pull secrets already " + strings.Join(pullSecrets, ","))
+		return
+	}
+	s.envConfig.ImagePullSecrets = pullSecrets
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: image pull secrets set to " + strings.Join(pullSecrets, ","))
+}
+
+// applyEnvRuntimePod merges the supplied limits onto the recorded ones so
+// naming only the CPU leaves the env's memory where it was. Params carry the
+// raw flags here, unnormalized, because normalized defaults are indistinguishable
+// from an operator asking for the defaults — and that is how a re-init meant to
+// add a pull secret used to reset an env's pod resources.
+func (s *bootstrapRunState) applyEnvRuntimePod() {
+	desired := s.envConfig.RuntimePod
+	if cpu := strings.TrimSpace(s.params.RuntimePod.CPU); cpu != "" {
+		desired.CPU = cpu
+	}
+	if memory := strings.TrimSpace(s.params.RuntimePod.Memory); memory != "" {
+		desired.Memory = memory
+	}
+	if desired == s.envConfig.RuntimePod {
+		s.traceEnvSettingKept("runtime pod resources", formatRuntimePodResources(s.envConfig.RuntimePod))
+		return
+	}
+	s.envConfig.RuntimePod = NormalizeRuntimePodResources(desired)
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: runtime pod resources set to " + formatRuntimePodResources(s.envConfig.RuntimePod))
+}
+
+// applyEnvRuntimeDindPod mirrors applyEnvRuntimePod for the erun-dind sidecar:
+// merge the supplied limits onto the recorded ones, using the raw
+// (unnormalized) flag values so a re-init that only touches an unrelated
+// setting cannot reset the sidecar's resources to their defaults.
+func (s *bootstrapRunState) applyEnvRuntimeDindPod() {
+	desired := s.envConfig.RuntimeDindPod
+	if cpu := strings.TrimSpace(s.params.RuntimeDindPod.CPU); cpu != "" {
+		desired.CPU = cpu
+	}
+	if memory := strings.TrimSpace(s.params.RuntimeDindPod.Memory); memory != "" {
+		desired.Memory = memory
+	}
+	if desired == s.envConfig.RuntimeDindPod {
+		s.traceEnvSettingKept("erun-dind sidecar resources", formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
+		return
+	}
+	s.envConfig.RuntimeDindPod = NormalizeRuntimeDindPodResources(desired)
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: erun-dind sidecar resources set to " + formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
+}
+
+// applyEnvDeployComponents honours --components on an existing env: given, it
+// overwrites the saved selection outright — including with an empty list,
+// which clears it and returns the env to its repo k8s.deployments plan;
+// not given, the saved selection (if any) is left exactly as it was.
+func (s *bootstrapRunState) applyEnvDeployComponents() {
+	components, given := initComponentsOverride(s.params)
+	if !given {
+		s.traceEnvSettingKept("deploy components", strings.Join(s.envConfig.Deploy.Components, ","))
+		return
+	}
+	if slices.Equal(components, s.envConfig.Deploy.Components) {
+		s.runner.Context.Trace("init: deploy components already " + describeComponentsSetting(components))
+		return
+	}
+	s.envConfig.Deploy.Components = components
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: deploy components set to " + describeComponentsSetting(components))
+}
+
+// applyEnvType moves an existing env between types, in either direction and
+// between any two of them — an env that cannot be retyped can only be deleted
+// and rebuilt. It moves only when the operator named a type: the default an
+// omitted --type resolves to is not a request, and acting on it would retype an
+// env for saying nothing about it.
+func (s *bootstrapRunState) applyEnvType() error {
+	requested, explicit := s.params.RequestedType()
+	current := s.envConfig.ResolvedType()
+	if !explicit {
+		s.runner.Context.Trace("init: --type not given; keeping env type " + describeEnvType(current))
+		return nil
+	}
+	if current == requested {
+		s.runner.Context.Trace("init: env type already " + describeEnvType(requested))
+		return nil
+	}
+	if err := s.adoptLocalRepoPathForType(requested); err != nil {
+		return err
+	}
+	s.envConfig.Type = requested
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: env type " + describeEnvType(current) + " -> " + describeEnvType(requested))
+	return nil
+}
+
+// adoptLocalRepoPathForType re-resolves the host repo path when an env becomes
+// a local-agent (whose worktree is hostPath-mounted from it) or a host env
+// (whose worktree IS it, with no pod to mount it into). The path a remote env
+// carries names an in-pod directory that does not exist on this machine, so
+// without one to adopt the retype is refused rather than written: an env
+// recorded as local-agent or host with nothing to use would fail later with a
+// message about the missing path rather than about the flag that caused it.
+func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType) error {
+	if requested != EnvironmentTypeLocalAgent && requested != EnvironmentTypeHost {
+		return nil
+	}
+	projectRoot, err := s.envProjectRoot()
+	if err != nil {
+		return err
+	}
+	if projectRoot = strings.TrimSpace(projectRoot); projectRoot == "" {
+		return fmt.Errorf("cannot change %s/%s to type %s: %s", s.tenant, s.envName, requested, hostRepoPathRequirement(requested))
+	}
+	if s.envConfig.LocalRepoPath == projectRoot {
+		return nil
+	}
+	s.envConfig.LocalRepoPath = projectRoot
+	s.envConfigChanged = true
+	s.runner.Context.Trace("init: local repo path set to " + projectRoot)
+	return nil
+}
+
+// hostRepoPathRequirement names why a type needs a host-machine directory,
+// worded for what that type actually does with it: local-agent hostPath-mounts
+// it into a pod, while a host env has no pod at all and simply is that
+// directory.
+func hostRepoPathRequirement(requested EnvironmentType) string {
+	if requested == EnvironmentTypeHost {
+		return "it needs a host directory to use — run init from the project directory or pass --project-root"
+	}
+	return "it needs a host repo path to mount — run init from the project directory or pass --project-root"
+}
+
+func describeEnvType(envType EnvironmentType) string {
+	if !envType.IsValid() {
+		return "unset"
+	}
+	return `"` + string(envType) + `"`
+}
+
+func formatRuntimePodResources(resources RuntimePodResources) string {
+	resources = NormalizeRuntimePodResources(resources)
+	return "cpu=" + resources.CPU + " memory=" + resources.Memory
+}
+
+func formatRuntimeDindPodResources(resources RuntimePodResources) string {
+	resources = NormalizeRuntimeDindPodResources(resources)
+	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
 
 func (s *bootstrapRunState) updateEnvKubernetesContext() (string, error) {
@@ -959,6 +1326,10 @@ func (s *bootstrapRunState) projectRoot() string {
 // Tenants with an existing scaffolded module keep working — deploy prefers a
 // local chart when one exists.
 func (s *bootstrapRunState) ensureDevopsAssets() error {
+	if s.envConfig.ResolvedType() == EnvironmentTypeHost {
+		s.runner.Context.Trace("init: host environment has no pod; no devops scaffold is written")
+		return nil
+	}
 	projectRoot := s.projectRoot()
 	if s.params.RemoteWorktree() {
 		return s.ensureRemoteDevopsAssets(projectRoot)
@@ -968,9 +1339,15 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
-	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot, s.envConfig.ContainerRegistries)
+	req, repository, registryCredentialSecretName, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, projectRoot, s.envConfig)
 	if err != nil {
 		return err
+	}
+	// Persist what this run resolved so a later `erun deploy` carries the same
+	// secret name forward instead of losing it on the next helm upgrade.
+	if registryCredentialSecretName != s.envConfig.RegistryCredentialSecretName {
+		s.envConfig.RegistryCredentialSecretName = registryCredentialSecretName
+		s.envConfigChanged = true
 	}
 	if s.params.Bootstrap {
 		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + DevopsComponentName + " chart")
@@ -1092,8 +1469,14 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	params.ProjectRoot = strings.TrimSpace(params.ProjectRoot)
 	params.Environment = strings.TrimSpace(params.Environment)
 	params.RuntimeVersion = strings.TrimSpace(params.RuntimeVersion)
+	params.RuntimeVersionDefault = strings.TrimSpace(params.RuntimeVersionDefault)
 	params.RuntimeImage = strings.TrimSpace(params.RuntimeImage)
-	params.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
+	params.RuntimeRegistry = strings.TrimSpace(params.RuntimeRegistry)
+	// Trimmed, not normalized: a defaulted limit here would be indistinguishable
+	// from an operator asking for that limit, and the reconcile needs to tell an
+	// omitted flag from a supplied one.
+	params.RuntimePod = RuntimePodResources{CPU: strings.TrimSpace(params.RuntimePod.CPU), Memory: strings.TrimSpace(params.RuntimePod.Memory)}
+	params.RuntimeDindPod = RuntimePodResources{CPU: strings.TrimSpace(params.RuntimeDindPod.CPU), Memory: strings.TrimSpace(params.RuntimeDindPod.Memory)}
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
 	params.RemoteRepositoryURL = strings.TrimSpace(params.RemoteRepositoryURL)
@@ -1230,6 +1613,9 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 	if params.ClusterRegistry != nil {
 		return "", nil
 	}
+	if params.ErunRegistry {
+		return s.resolveHostedRegistry(tenant)
+	}
 	if params.ContainerRegistry != "" {
 		return params.ContainerRegistry, nil
 	}
@@ -1250,6 +1636,26 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 		return DefaultContainerRegistry, nil
 	}
 	return s.promptContainerRegistry(tenant, envName)
+}
+
+// resolveHostedRegistry resolves erun's hosted container registry reference,
+// probing its reachability so a choice nothing can push to is refused at
+// selection time rather than surfacing at the first build far from the flag
+// that chose it.
+func (s bootstrapRunner) resolveHostedRegistry(tenant string) (string, error) {
+	reference := HostedRegistryReference(tenant)
+	// A dry-run resolves and traces without touching the world, so it does
+	// not probe. Saying so is the point: a dry-run that printed the resolved
+	// reference alone would read as "this choice works", which is the very
+	// impression the probe exists to stop the real run from giving.
+	if s.Context.DryRun {
+		s.Context.Trace("init: --erun-registry resolves to " + reference + "; the real run probes " + HostedRegistryHost + " and refuses the choice if it is not reachable")
+		return reference, nil
+	}
+	if status := s.probeHostedRegistry(); !status.Available {
+		return "", status.Err()
+	}
+	return reference, nil
 }
 
 func (s bootstrapRunner) projectContainerRegistry(projectRoot, envName string) (string, error) {
@@ -1492,4 +1898,28 @@ type projectContext struct {
 	tenant string
 	root   string
 	loaded bool
+}
+
+// normalizeImagePullSecrets trims and de-duplicates the requested secret names,
+// keeping the order the operator gave so the chart renders them predictably.
+func normalizeImagePullSecrets(names []string) []string {
+	normalized := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || slices.Contains(normalized, name) {
+			continue
+		}
+		normalized = append(normalized, name)
+	}
+	return normalized
+}
+
+// probeHostedRegistry runs the availability probe the hosted-registry choice is
+// gated on, defaulting to the real one when no dependency was injected.
+func (s bootstrapRunner) probeHostedRegistry() HostedRegistryStatus {
+	probe := s.ProbeHostedRegistry
+	if probe == nil {
+		probe = func(ctx context.Context) HostedRegistryStatus { return ProbeHostedRegistry(ctx, nil) }
+	}
+	return probe(context.Background())
 }

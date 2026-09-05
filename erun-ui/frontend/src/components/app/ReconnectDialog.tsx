@@ -1,24 +1,26 @@
-import { RefreshCw } from 'lucide-react';
-import * as React from 'react';
-
-import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { reconnectCopy } from '@/app/reconnectCopy';
-import { cancelReconnect, confirmReconnect } from '@/app/reviewThunks';
-import { Button } from '@/components/ui/button';
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
+} from 'erun-kit';
+import { Play, RefreshCw } from 'lucide-react';
+import * as React from 'react';
+
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { reachabilityCopy, reconnectCopy } from '@/app/reconnectCopy';
+import { cancelReconnect, confirmReconnect } from '@/app/reviewThunks';
 
 // Confirmation only; in-flight and failure states live in the non-modal
 // ReconnectStatusPanel so other environments stay interactive while one reconnects.
 export function ReconnectDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
   const status = useAppSelector((state) => state.review.reconnect.status);
+  const kind = useAppSelector((state) => state.review.reconnect.kind);
+  const copy = reachabilityCopy[kind];
   const open = status === 'confirm';
   return (
     <Dialog
@@ -31,8 +33,8 @@ export function ReconnectDialog(): React.ReactElement {
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{reconnectCopy.dialogTitle}</DialogTitle>
-          <DialogDescription>{reconnectCopy.dialogBody}</DialogDescription>
+          <DialogTitle>{copy.dialogTitle}</DialogTitle>
+          <DialogDescription>{copy.dialogBody}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button
@@ -50,8 +52,8 @@ export function ReconnectDialog(): React.ReactElement {
               void dispatch(confirmReconnect());
             }}
           >
-            <RefreshCw aria-hidden="true" />
-            {reconnectCopy.dialogConfirm}
+            {kind === 'not-open' ? <Play aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+            {copy.dialogConfirm}
           </Button>
         </DialogFooter>
       </DialogContent>

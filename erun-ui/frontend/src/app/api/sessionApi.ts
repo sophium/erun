@@ -79,7 +79,7 @@ export const sessionApi = wailsApi.injectEndpoints({
     }),
     startAISession: builder.mutation<StartSessionResult, StartSessionArgs>({
       queryFn: wailsQueryFn<StartSessionArgs, StartSessionResult>(
-        ({ selection, slot, cols, rows }) => StartAISession(selection, slot, cols, rows),
+        ({ selection, slot, cols, rows }) => StartAISession(selection, slot, cols, rows, false),
       ),
     }),
     startInitSession: builder.mutation<StartSessionResult, StartUnslottedArgs>({

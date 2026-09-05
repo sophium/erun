@@ -64,6 +64,12 @@ cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/base/Chart.ya
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
+cd <TMP> && git fetch origin main
+cd <TMP> && git rev-list --count HEAD..FETCH_HEAD
+release: a base branch that moved since sync-remote refuses the release here, before the build spends anything
+docker builder prune -f
+docker manifest inspect ghcr.io/sophium/api:<VERSION>
+docker manifest inspect ghcr.io/sophium/base:<VERSION>
 stage: publish
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
@@ -72,11 +78,12 @@ fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:fp-<HEX16>-amd64
+cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:fp-<HEX16>-arm64
 cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
-cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
-cd <TMP> && docker manifest create --amend ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker manifest rm ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker manifest create ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
 cd <TMP> && docker manifest push ghcr.io/sophium/api:<VERSION>
 docker image inspect ghcr.io/sophium/base:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
@@ -85,8 +92,13 @@ fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64
+cd <TMP> && docker push ghcr.io/sophium/base:<VERSION>
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-arm64
+cd <TMP> && docker push ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest rm ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest create ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:<VERSION>
+cd <TMP> && docker manifest push ghcr.io/sophium/base:<VERSION>
 cd <TMP> && helm package api --version <VERSION> --app-version <VERSION>
 cd <TMP> && helm push api-<VERSION>.tgz oci://ghcr.io/sophium/charts
 helm pull oci://ghcr.io/sophium/charts/api --version <VERSION> --destination <TMP>
@@ -95,6 +107,7 @@ cd <TMP> && helm push base-<VERSION>.tgz oci://ghcr.io/sophium/charts
 helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <TMP>
 stage: verify-publication
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
+docker manifest inspect ghcr.io/sophium/base:<VERSION>
 stage: push-release-tag
 cd <TMP> && git push origin <VERSION>
 stage: sync-packaging-checksums
@@ -108,5 +121,6 @@ write <TMP>
 cd <TMP> && git add erun-devops/VERSION
 cd <TMP> && git commit -m '[skip ci] prepare <VERSION>'
 stage: push
+release: a push rejected by a branch that moved during the release is rebased onto origin/main and retried (up to 2 attempts)
 cd <TMP> && git push --follow-tags origin main
 release version: <VERSION>

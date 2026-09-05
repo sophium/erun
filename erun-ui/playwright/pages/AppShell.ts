@@ -1,20 +1,33 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { ActivityQueueDrawer } from './ActivityQueueDrawer';
+import { AIOccupancyPromptDialog } from './AIOccupancyPromptDialog';
 import { AutoStartPromptDialog } from './AutoStartPromptDialog';
+import { CloseConfirmDialog } from './CloseConfirmDialog';
+import { CreateReviewDialog } from './CreateReviewDialog';
 import { DebugPanel } from './DebugPanel';
 import { EnvironmentInitDialog } from './EnvironmentInitDialog';
 import { GlobalConfigDialog } from './GlobalConfigDialog';
 import { ManageDialog } from './ManageDialog';
 import { OrchestratorDialog } from './OrchestratorDialog';
 import { OutputsDialog } from './OutputsDialog';
+import { ReviewDetailDialog } from './ReviewDetailDialog';
 import { ReviewPanel } from './ReviewPanel';
 import { Sidebar } from './Sidebar';
+import { TenantDashboard } from './TenantDashboard';
 import { TenantDialog } from './TenantDialog';
+import { TerminalPane } from './TerminalPane';
+import { TerminalTabStrip } from './TerminalTabStrip';
 import { Titlebar } from './Titlebar';
 
 // AppShell is the tests' entry point into the rendered app.
 export class AppShell {
   constructor(public readonly page: Page) {}
+
+  // The theme's gating class lives on <html>, not any component the other
+  // POMs render, so it is exposed here rather than on Titlebar.
+  documentElement(): Locator {
+    return this.page.locator('html');
+  }
 
   async open(): Promise<void> {
     await this.page.goto('/');
@@ -36,6 +49,17 @@ export class AppShell {
       )
       .first()
       .waitFor({ state: 'visible' });
+  }
+
+  // reboot re-runs the boot sequence and hands control back as soon as the app
+  // chrome is up, for callers that assert on a specific surface boot produces
+  // (which session ends up owning the terminal pane). Waiting on that surface is
+  // both stricter and faster than open()'s generic settle, whose overlay wait
+  // clears only once the pane's session streams its first output.
+  async reboot(): Promise<void> {
+    await this.page.goto('/');
+    await this.page.waitForLoadState('domcontentloaded');
+    await this.titlebar.toggleButton().waitFor({ state: 'visible' });
   }
 
   // reloadEnvironments surfaces a freshly-seeded env deterministically instead
@@ -73,12 +97,24 @@ export class AppShell {
     return new TenantDialog(this.page);
   }
 
+  get tenantDashboard(): TenantDashboard {
+    return new TenantDashboard(this.page);
+  }
+
   get debugPanel(): DebugPanel {
     return new DebugPanel(this.page);
   }
 
   get reviewPanel(): ReviewPanel {
     return new ReviewPanel(this.page);
+  }
+
+  get reviewDetailDialog(): ReviewDetailDialog {
+    return new ReviewDetailDialog(this.page);
+  }
+
+  get createReviewDialog(): CreateReviewDialog {
+    return new CreateReviewDialog(this.page);
   }
 
   get activityDrawer(): ActivityQueueDrawer {
@@ -89,11 +125,42 @@ export class AppShell {
     return new AutoStartPromptDialog(this.page);
   }
 
+  get closeConfirmDialog(): CloseConfirmDialog {
+    return new CloseConfirmDialog(this.page);
+  }
+
+  get aiOccupancyPromptDialog(): AIOccupancyPromptDialog {
+    return new AIOccupancyPromptDialog(this.page);
+  }
+
   get orchestratorDialog(): OrchestratorDialog {
     return new OrchestratorDialog(this.page);
   }
 
   get outputsDialog(): OutputsDialog {
     return new OutputsDialog(this.page);
+  }
+
+  get tabStrip(): TerminalTabStrip {
+    return new TerminalTabStrip(this.page);
+  }
+
+  get terminalPane(): TerminalPane {
+    return new TerminalPane(this.page);
+  }
+
+  // openEnvironmentTerminal opens an env and settles on its Local session,
+  // returning the session id that owns the terminal pane. The env also spawns
+  // ERun and AI tabs and each spawn reassigns pane ownership, so all three must
+  // be up before a spec reads the id or writes into the pane.
+  async openEnvironmentTerminal(tenant: string, environment: string): Promise<number> {
+    await this.sidebar.openEnvironment(tenant, environment);
+    for (const name of ['Local', 'ERun', 'AI']) {
+      await this.page
+        .getByRole('tab', { name, exact: true })
+        .waitFor({ state: 'visible', timeout: 15_000 });
+    }
+    await this.page.getByRole('tab', { name: 'Local', exact: true }).click();
+    return this.terminalPane.selectedSessionId();
   }
 }

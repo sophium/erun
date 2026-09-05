@@ -4,7 +4,9 @@ import './api/environmentApi';
 import './api/tenantApi';
 import './api/kubernetesApi';
 import './api/cloudApi';
+import './api/execApi';
 import './api/reviewApi';
+import './api/reviewDetailApi';
 import './api/idleApi';
 import './api/sessionApi';
 import './api/deployApi';
@@ -20,8 +22,12 @@ import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddlewar
 import { uiTraceMiddleware } from './middleware/uiTraceMiddleware';
 import activityReducer from './slices/activitySlice';
 import aiActivityReducer from './slices/aiActivitySlice';
+import aiOccupancyPromptReducer from './slices/aiOccupancyPromptSlice';
 import autoStartPromptReducer from './slices/autoStartPromptSlice';
+import closeGateReducer from './slices/closeGateSlice';
 import contributeReducer from './slices/contributeSlice';
+import createReviewDialogReducer from './slices/createReviewDialogSlice';
+import diffReviewStatusReducer from './slices/diffReviewStatusSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
 import envStatusReducer from './slices/envStatusSlice';
@@ -29,14 +35,19 @@ import globalConfigDialogReducer from './slices/globalConfigDialogSlice';
 import idleReducer from './slices/idleSlice';
 import layoutReducer from './slices/layoutSlice';
 import manageDialogReducer from './slices/manageDialogSlice';
+import mergeQueueActionReducer from './slices/mergeQueueActionSlice';
 import notificationReducer from './slices/notificationSlice';
+import orchestratorShellActivityReducer from './slices/orchestratorShellActivitySlice';
 import orchestratorsReducer from './slices/orchestratorsSlice';
 import outputsDialogReducer from './slices/outputsDialogSlice';
+import pinVersionReducer from './slices/pinVersionSlice';
 import requestCountersReducer from './slices/requestCountersSlice';
+import reviewDetailReducer from './slices/reviewDetailSlice';
 import reviewReducer from './slices/reviewSlice';
 import selectionReducer from './slices/selectionSlice';
 import sessionsReducer from './slices/sessionsSlice';
 import sidebarReducer from './slices/sidebarSlice';
+import sshdInitReducer from './slices/sshdInitSlice';
 import tenantDashboardReducer from './slices/tenantDashboardSlice';
 import tenantDialogReducer from './slices/tenantDialogSlice';
 import tenantsReducer from './slices/tenantsSlice';
@@ -53,10 +64,12 @@ export const store = configureStore({
     terminal: terminalReducer,
     terminalStatus: terminalStatusReducer,
     review: reviewReducer,
+    reviewDetail: reviewDetailReducer,
     notification: notificationReducer,
     requestCounters: requestCountersReducer,
     sessions: sessionsReducer,
     doctor: doctorReducer,
+    sshdInit: sshdInitReducer,
     idle: idleReducer,
     activity: activityReducer,
     aiActivity: aiActivityReducer,
@@ -68,10 +81,17 @@ export const store = configureStore({
     tenantDashboard: tenantDashboardReducer,
     globalConfigDialog: globalConfigDialogReducer,
     autoStartPrompt: autoStartPromptReducer,
+    closeGate: closeGateReducer,
+    aiOccupancyPrompt: aiOccupancyPromptReducer,
     contribute: contributeReducer,
     upgradeAll: upgradeAllReducer,
     outputsDialog: outputsDialogReducer,
+    pinVersion: pinVersionReducer,
     orchestrators: orchestratorsReducer,
+    orchestratorShellActivity: orchestratorShellActivityReducer,
+    mergeQueueAction: mergeQueueActionReducer,
+    createReviewDialog: createReviewDialogReducer,
+    diffReviewStatus: diffReviewStatusReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>

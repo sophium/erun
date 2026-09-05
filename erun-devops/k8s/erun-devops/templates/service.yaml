@@ -7,6 +7,15 @@
 {{- if hasKey .Values "mcpEnabled" -}}
   {{- $mcpEnabled = toString .Values.mcpEnabled -}}
 {{- end -}}
+{{- /* The Prometheus exposition listener (erun-docs/docs/agent-reference/
+       metrics-spec.md). On by default, same hasKey resolution as mcpEnabled
+       above; the NetworkPolicy below is what actually restricts who can reach
+       it, since the port itself carries no authentication. */ -}}
+{{- $metricsPort := default 9100 .Values.metricsPort -}}
+{{- $metricsEnabled := "true" -}}
+{{- if hasKey .Values "metricsEnabled" -}}
+  {{- $metricsEnabled = toString .Values.metricsEnabled -}}
+{{- end -}}
 {{- $sshPort := default 17022 .Values.sshPort -}}
 {{- /*
 worktreeStorage selects how the runtime pod sources its worktree.
@@ -45,6 +54,19 @@ project root there. worktreePath stays gated on a mounted worktree (host/pvc).
   {{- $worktreePath = required "worktreeRepoName is required when worktreeStorage is set" $repoPath -}}
 {{- end -}}
 {{- /*
+Staging mounts for the init containers that prepare the volumes. An environment
+created before the worktree claim existed kept its checkout on the home volume,
+at the very path the claim mounts at — so the claim must not be able to shadow
+it while the adoption reads it. Both volumes are therefore staged outside
+/home/erun, at paths that are never the live worktree path.
+*/ -}}
+{{- $homeStagePath := "/mnt/erun-home" -}}
+{{- $worktreeStagePath := "/mnt/erun-worktree" -}}
+{{- $legacyWorktreePath := "" -}}
+{{- if ne $worktreeRepoName "" -}}
+  {{- $legacyWorktreePath = printf "%s/git/%s" $homeStagePath $worktreeRepoName -}}
+{{- end -}}
+{{- /*
 envType is the canonical environment type written into the in-pod erun config
 (EnvConfig.Type). It is the inverse of the worktreeStorage→type mapping that
 erun-common/deploy.go:resolveWorktreeStorage applies, so the pod records the
@@ -57,6 +79,10 @@ emitted; type is the single source of truth.
 {{- else if eq $worktreeStorage "pvc" -}}
   {{- $envType = "remote-agent" -}}
 {{- end -}}
+{{- /* A `runtime` env installs published versions by reference and never
+       builds, so the docker daemon sidecar (and its state PVC) has nothing to
+       do there; only the env types that build get it. */ -}}
+{{- $dindEnabled := ne $envType "runtime" -}}
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
 {{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
@@ -70,11 +96,48 @@ emitted; type is the single source of truth.
 {{- $runtimeMemory := default "8916Mi" $runtimeLimits.memory -}}
 {{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
 {{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
+{{- /* The erun-dind sidecar declares its own resources rather than relying on
+       the namespace LimitRange's default: an unsized container in a quota'd
+       namespace is defaulted to the *entire* configured quota width, so an
+       unsized dind silently doubled the pod's real ResourceQuota consumption
+       Defaults mirror eruncommon.DefaultRuntimeDindCPU/Memory in
+       erun-common/runtime_resources.go — keep the two in sync. */ -}}
+{{- $dind := default dict $runtime.dind -}}
+{{- $dindResources := default dict $dind.resources -}}
+{{- $dindLimits := default dict $dindResources.limits -}}
+{{- $dindRequests := default dict $dindResources.requests -}}
+{{- $dindCPU := default "4" $dindLimits.cpu -}}
+{{- $dindMemory := default "20480Mi" $dindLimits.memory -}}
+{{- $dindRequestCPU := default "0.25" $dindRequests.cpu -}}
+{{- $dindRequestMemory := default "1024Mi" $dindRequests.memory -}}
+{{- /* Every init container below (prepare-volumes, adopt-worktree,
+       install-binfmt) declares the same small explicit resources rather than
+       relying on the namespace LimitRange's default: Kubernetes admits a pod
+       on max(max(init container requests), sum(container requests)), so one
+       unsized init container's inherited request can become the pod's entire
+       effective request (this is the same shape already fixed for the
+       dind sidecar above). Each does a few seconds of chown, file copy, or
+       qemu binary registration, so one shared budget covers all three.
+       Defaults mirror eruncommon.DefaultRuntimeInitContainerCPU/Memory in
+       erun-common/runtime_resources.go — keep the two in sync. */ -}}
+{{- $initContainers := default dict $runtime.initContainers -}}
+{{- $initContainerResources := default dict $initContainers.resources -}}
+{{- $initContainerLimits := default dict $initContainerResources.limits -}}
+{{- $initContainerRequests := default dict $initContainerResources.requests -}}
+{{- $initContainerCPU := default "0.5" $initContainerLimits.cpu -}}
+{{- $initContainerMemory := default "256Mi" $initContainerLimits.memory -}}
+{{- $initContainerRequestCPU := default "0.1" $initContainerRequests.cpu -}}
+{{- $initContainerRequestMemory := default "64Mi" $initContainerRequests.memory -}}
 {{- $managedCloud := default false .Values.managedCloud -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $devopsImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
 {{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1-1" (index $imageOverrides "erun-dind") -}}
+{{- /* The gid of the `docker` group baked into the docker:<ver>-dind base, which
+       owns the daemon socket. Surfaced as a value so an env can follow the base
+       if that group ever moves, rather than losing the daemon on the next
+       socket the daemon creates. */ -}}
+{{- $dindDockerGid := default 2375 .Values.dindDockerGid -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
 {{- $cloudProvider := default "" $cloudContext.provider -}}
@@ -86,7 +149,7 @@ emitted; type is the single source of truth.
 {{- $cloudflareEnabled := default false $cloudflare.enabled -}}
 {{- $cloudflareAccountId := default "" $cloudflare.accountId -}}
 {{- $cloudflareSecretName := default "" $cloudflare.secretName -}}
-{{- /* MCP auth edge (#655): when enabled, mount the desktop public key and
+{{- /* MCP auth edge: when enabled, mount the desktop public key and
        configure the per-env MCP server to require a bearer token signed by it.
        Absent/disabled renders byte-for-byte unchanged (legacy loopback-only). */ -}}
 {{- $mcpAuth := default dict .Values.mcpAuth -}}
@@ -99,6 +162,16 @@ emitted; type is the single source of truth.
        references and the MCP server loads the trusted key from. */ -}}
 {{- $mcpAuthMountDir := "/etc/erun/mcp-auth" -}}
 {{- $mcpAuthKeyFile := "desktopid.pub" -}}
+{{- /* Registry credential: `erun init` mints this Secret from the operator's
+       own resolved ghcr.io credential so a pod that has never authenticated
+       to its registry on its own still can. Mounted read-only;
+       the entrypoint merges it into ~/.docker/config.json at boot, seeding
+       only host entries the pod doesn't already carry. Absent (no secret
+       minted) renders byte-for-byte unchanged. `optional: true` so a deploy
+       that races ahead of the secret's own apply still starts. */ -}}
+{{- $registryCredentialSecretName := default "" .Values.registryCredentialSecretName -}}
+{{- $registryCredentialMountDir := "/etc/erun/registry-credential" -}}
+{{- $registryCredentialKeyFile := ".dockerconfigjson" -}}
 {{- $claude := default dict .Values.claude -}}
 {{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
 {{- $claudeUseMantle := default "0" $claude.useMantle -}}
@@ -114,7 +187,8 @@ emitted; type is the single source of truth.
 {{- $claudeSkipMantleAuth := default "" $claude.skipMantleAuth -}}
 {{- $claudeDisablePromptCaching := default "" $claude.disablePromptCaching -}}
 {{- $claudeEnablePromptCaching1H := default "" $claude.enablePromptCaching1H -}}
-{{- $claudeMaxOutputTokens := default "4096" $claude.maxOutputTokens -}}
+{{- /* Mirrors eruncommon.DefaultClaudeMaxOutputTokens (erun-common/claude.go); move both together. */ -}}
+{{- $claudeMaxOutputTokens := default "32000" $claude.maxOutputTokens -}}
 {{- $claudeMaxThinkingTokens := default "1024" $claude.maxThinkingTokens -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -128,6 +202,7 @@ spec:
   resources:
     requests:
       storage: 2Gi
+{{- if $dindEnabled }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -141,6 +216,7 @@ spec:
   resources:
     requests:
       storage: 50Gi
+{{- end }}
 {{- if eq $worktreeStorage "pvc" }}
 ---
 apiVersion: v1
@@ -163,6 +239,10 @@ metadata:
   name: {{ .Release.Name }}
   labels:
     app: {{ .Release.Name }}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -353,10 +433,10 @@ spec:
   selector:
     matchLabels:
       app: {{ .Release.Name }}
-  {{/* A stopped environment returns the runtime container's limits and the
-       unlimited dind sidecar's real usage to the node. Declared here rather
-       than left as a scale patch so a helm upgrade reconciles the operator's
-       stop instead of silently restarting the pod. */}}
+  {{/* A stopped environment returns the runtime container's limits and (for
+       build-capable env types) the dind sidecar's limits to the node. Declared
+       here rather than left as a scale patch so a helm upgrade reconciles the
+       operator's stop instead of silently restarting the pod. */}}
   replicas: {{ if .Values.stopped }}0{{ else }}1{{ end }}
   template:
     metadata:
@@ -369,9 +449,108 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /* The runtime container reaches the daemon by owning the socket's
+             group, not by the sidecar relaxing its mode: dockerd recreates the
+             socket 0660 root:docker every time it starts, so any one-shot
+             widening only covers the socket that existed when it ran. Applies
+             pod-wide; the sidecar runs as root and is unaffected.
+
+             Deliberately no fsGroup: it cannot be scoped to a subset of the
+             pod's volumes, so it also reached the docker state claim and had
+             the kubelet rewrite every image layer under it group-writable on
+             each start — corrupting the permissions that containerised sshd,
+             postgres and any baked 0600 secret depend on. The volumes the
+             runtime user actually writes are handed to it by prepare-volumes
+             below. fsGroupChangePolicy: OnRootMismatch is not the fix: dockerd
+             resets its own root to 0710 root:root at every start, so the root
+             permanently mismatches the fsGroup and the full sweep re-runs
+             anyway. */}}
+      {{- if $dindEnabled }}
       securityContext:
-        fsGroup: 1000
+        supplementalGroups:
+          - {{ $dindDockerGid }}
+      {{- end }}
       initContainers:
+        {{- /* Ownership of the claims the runtime user writes, established
+               where fsGroup used to. Only the mount points are chowned: a
+               freshly provisioned claim arrives empty and root-owned, which is
+               the whole of what fsGroup was buying, while an existing claim's
+               contents already belong to uid 1000. Recursing a populated home
+               volume on every pod start would trade this bug for a slow one.
+               Runs first so the adoption below sees a writable claim. A host
+               worktree is the operator's own directory on the node and is
+               never touched. */}}
+        - image: {{ $devopsImage }}
+          name: prepare-volumes
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          resources:
+            limits:
+              cpu: {{ $initContainerCPU | quote }}
+              memory: {{ $initContainerMemory | quote }}
+            requests:
+              cpu: {{ $initContainerRequestCPU | quote }}
+              memory: {{ $initContainerRequestMemory | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              chown 1000:1000 {{ $homeStagePath | quote }}
+              {{- if eq $worktreeStorage "pvc" }}
+              chown 1000:1000 {{ $worktreeStagePath | quote }}
+              {{- end }}
+          volumeMounts:
+            - name: erun-home
+              mountPath: {{ $homeStagePath | quote }}
+            {{- if eq $worktreeStorage "pvc" }}
+            - name: repo-worktree
+              mountPath: {{ $worktreeStagePath | quote }}
+            {{- end }}
+        {{- if eq $worktreeStorage "pvc" }}
+        # Adopt before mounting: a deploy that introduces the worktree claim to
+        # an environment whose checkout still lives on the home volume would
+        # otherwise mount an empty volume straight over that checkout, leaving it
+        # unreachable through erun and letting the one-way workspace sync
+        # propagate the empty tree over the operator's only other copy. Runs the
+        # runtime image so no new image dependency is introduced; falls back to
+        # refusing the rollout when an older image carries no adoption helper,
+        # because starting is exactly what loses the tree.
+        - image: {{ $devopsImage }}
+          name: adopt-worktree
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            limits:
+              cpu: {{ $initContainerCPU | quote }}
+              memory: {{ $initContainerMemory | quote }}
+            requests:
+              cpu: {{ $initContainerRequestCPU | quote }}
+              memory: {{ $initContainerRequestMemory | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              if [ -x /usr/local/bin/erun-adopt-worktree ]; then
+                exec /usr/local/bin/erun-adopt-worktree {{ $legacyWorktreePath | quote }} {{ $worktreeStagePath | quote }}
+              fi
+              if [ -e {{ printf "%s/.git" $legacyWorktreePath | quote }} ]; then
+                echo "worktree-adopt: this runtime image has no adoption helper; refusing to mount an empty worktree volume over the repository at {{ $worktreePath }}" >&2
+                exit 1
+              fi
+              echo "worktree-adopt: this runtime image has no adoption helper; nothing to adopt at {{ $worktreePath }}"
+          volumeMounts:
+            - name: erun-home
+              mountPath: {{ $homeStagePath | quote }}
+            - name: repo-worktree
+              mountPath: {{ $worktreeStagePath | quote }}
+        {{- end }}
+        {{- if $dindEnabled }}
         - image: tonistiigi/binfmt:qemu-v10.0.4-56
           name: install-binfmt
           imagePullPolicy: IfNotPresent
@@ -380,6 +559,14 @@ spec:
             - amd64,arm64
           securityContext:
             privileged: true
+          resources:
+            limits:
+              cpu: {{ $initContainerCPU | quote }}
+              memory: {{ $initContainerMemory | quote }}
+            requests:
+              cpu: {{ $initContainerRequestCPU | quote }}
+              memory: {{ $initContainerRequestMemory | quote }}
+        {{- end }}
       containers:
         - image: {{ $devopsImage }}
           name: erun-devops
@@ -389,10 +576,12 @@ spec:
               value: /home/erun
             - name: KUBECONFIG
               value: /home/erun/.kube/config
+            {{- if $dindEnabled }}
             - name: DOCKER_HOST
               value: unix:///var/run/docker.sock
             - name: DOCKER_BUILDKIT
               value: "1"
+            {{- end }}
             - name: ERUN_REPO_PATH
               value: {{ $repoPath | quote }}
             - name: ERUN_OUTPUTS_DIR
@@ -429,6 +618,13 @@ spec:
             {{- end }}
             - name: ERUN_DISABLE_BUILD_SCRIPT
               value: {{ default false .Values.disableBuildScript | quote }}
+            {{- /* These two are plain Claude Code tuning knobs, not AWS/Bedrock/Mantle
+                   routing, so they render for every env regardless of cloud provider
+                   unlike the block below them, which is genuinely AWS-only. */}}
+            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS
+              value: {{ $claudeMaxOutputTokens | quote }}
+            - name: MAX_THINKING_TOKENS
+              value: {{ $claudeMaxThinkingTokens | quote }}
             {{ if eq $cloudProvider "aws" }}
             {{ if $useHostCredentials }}
             - name: AWS_PROFILE
@@ -457,10 +653,6 @@ spec:
             {{- end }}
             - name: ERUN_CLAUDE_AVAILABLE_MODELS
               value: {{ $claudeAvailableModels | quote }}
-            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS
-              value: {{ $claudeMaxOutputTokens | quote }}
-            - name: MAX_THINKING_TOKENS
-              value: {{ $claudeMaxThinkingTokens | quote }}
             {{ if $claudeModel }}
             - name: ANTHROPIC_MODEL
               value: {{ $claudeModel | quote }}
@@ -524,6 +716,10 @@ spec:
               value: {{ $mcpPort | quote }}
             - name: ERUN_MCP_ENABLED
               value: {{ $mcpEnabled | quote }}
+            - name: ERUN_METRICS_PORT
+              value: {{ $metricsPort | quote }}
+            - name: ERUN_METRICS_ENABLED
+              value: {{ $metricsEnabled | quote }}
             - name: ERUN_SSHD_PORT
               value: {{ $sshPort | quote }}
             - name: ERUN_IDLE_TIMEOUT
@@ -557,6 +753,10 @@ spec:
             - containerPort: {{ $mcpPort }}
               name: mcp
             {{- end }}
+            {{- if eq $metricsEnabled "true" }}
+            - containerPort: {{ $metricsPort }}
+              name: metrics
+            {{- end }}
           resources:
             limits:
               cpu: {{ $runtimeCPU | quote }}
@@ -571,8 +771,10 @@ spec:
             - name: repo-worktree
               mountPath: {{ $worktreePath | quote }}
             {{- end }}
+            {{- if $dindEnabled }}
             - name: docker-socket
               mountPath: /var/run
+            {{- end }}
             {{- /* Mount the desktop key only when there is one (file:// issuer).
                    The OIDC-issuer path (hosted) sets issuer+audience but no
                    secret, so gate the mount on secretName, not mcpAuthEnabled. */ -}}
@@ -581,12 +783,51 @@ spec:
               mountPath: {{ $mcpAuthMountDir | quote }}
               readOnly: true
             {{- end }}
+            {{- if $registryCredentialSecretName }}
+            - name: registry-credential
+              mountPath: {{ $registryCredentialMountDir | quote }}
+              readOnly: true
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+        {{- if $dindEnabled }}
         - image: {{ $dindImage }}
           name: erun-dind
           imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              cpu: {{ $dindCPU | quote }}
+              memory: {{ $dindMemory | quote }}
+            requests:
+              cpu: {{ $dindRequestCPU | quote }}
+              memory: {{ $dindRequestMemory | quote }}
+          {{- /* Wraps the stock docker:dind entrypoint to pin the daemon's
+                 bridge MTU to the pod network's own, which the sidecar can read
+                 because it shares that namespace.
+
+                 Why this is not cosmetic: docker bridges containers at 1500,
+                 but a CNI that encapsulates gives the pod less (a VXLAN overlay
+                 costs 50 bytes, leaving 1450). Every BuildKit step then
+                 advertises an MSS the path cannot deliver, and the oversized
+                 replies are dropped with DF set. The ICMP "fragmentation
+                 needed" that would let path-MTU discovery recover does not
+                 survive the overlay, so nothing recovers -- small packets pass
+                 and the first full-size one vanishes. A TLS handshake gets
+                 through ClientHello and ServerHello and then stalls forever on
+                 the server's certificate flight, surfacing minutes into a build
+                 as an unrelated-looking curl error against whichever
+                 third-party host that build reached first.
+
+                 The trailing element is $0 for `sh -c`, so the args below still
+                 arrive as $1.. exactly as they did when they were the
+                 entrypoint's own. */}}
+          command:
+            - sh
+            - -c
+            - |
+{{ .Files.Get "files/dind-entrypoint.sh" | indent 14 }}
+            - erun-dind
           {{- /* A context-resolved local cluster registry is plain HTTP at a
                  non-loopback ClusterIP; the docker:dind entrypoint forwards these
                  args to dockerd so an in-pod build can push to it. Empty for
@@ -610,13 +851,20 @@ spec:
             periodSeconds: 2
             timeoutSeconds: 2
             failureThreshold: 30
+          {{- /* Waits for a daemon that answers, not for a socket file: a
+                 SIGKILLed dockerd leaves its socket behind on the shared
+                 emptyDir, so a file-existence wait returns instantly and widens
+                 the inode the restarting daemon is about to replace. Bounded,
+                 because kubernetes never times a postStart hook out; the chmod
+                 is a courtesy for anything outside the socket's group, so its
+                 failure must not hold the container back. */}}
           lifecycle:
             postStart:
               exec:
                 command:
                   - sh
                   - -lc
-                  - while [ ! -S /var/run/docker.sock ]; do sleep 1; done; chmod 0666 /var/run/docker.sock
+                  - 'i=0; until docker -H unix:///var/run/docker.sock info >/dev/null 2>&1 || [ "$i" -ge 300 ]; do i=$((i+1)); sleep 1; done; chmod 0666 /var/run/docker.sock 2>/dev/null || true'
           # The dind sidecar is the docker daemon that resolves a tenant's
           # docker-compose bind-mount sources on its own filesystem, so it must
           # see the same home + repo tree as the erun-devops container: without
@@ -634,6 +882,7 @@ spec:
               mountPath: /var/run
             - name: docker-state
               mountPath: /var/lib/docker
+        {{- end }}
         {{- with .Values.extraContainers }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -651,8 +900,10 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-worktree
         {{- end }}
+        {{- if $dindEnabled }}
         - name: docker-socket
           emptyDir: {}
+        {{- end }}
         {{- if $mcpAuthSecretName }}
         - name: mcp-auth
           secret:
@@ -661,10 +912,89 @@ spec:
               - key: {{ $mcpAuthKeyFile | quote }}
                 path: {{ $mcpAuthKeyFile | quote }}
         {{- end }}
+        {{- if $registryCredentialSecretName }}
+        - name: registry-credential
+          secret:
+            secretName: {{ $registryCredentialSecretName | quote }}
+            optional: true
+            items:
+              - key: {{ $registryCredentialKeyFile | quote }}
+                path: {{ $registryCredentialKeyFile | quote }}
+        {{- end }}
+        {{- if $dindEnabled }}
         - name: docker-state
           persistentVolumeClaim:
             claimName: {{ .Release.Name }}-docker
+        {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
       restartPolicy: Always
+{{- if eq $mcpEnabled "true" }}
+---
+# Fronts the runtime container's MCP port so `erun expose <tenant> <env> mcp`
+# has a real Service to route to (TenantResourcePrefix(tenant)+"-mcp", the
+# BackendService name the expose primitive derives from tenant + service name
+# alone, independent of this chart's own release naming). Port 80 keeps the
+# public hostname's default port (no --port needed) mapped onto the named
+# "mcp" containerPort declared above.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ printf "%s-mcp" (required "tenant is required" .Values.tenant) }}
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  selector:
+    app: {{ .Release.Name }}
+  ports:
+    - name: mcp
+      port: 80
+      targetPort: mcp
+{{- end }}
+{{- if eq $metricsEnabled "true" }}
+---
+# Restricts the Prometheus exposition listener (metrics-spec.md) added for
+# erun_idle_eligibility/erun_terminal_input_seconds_since_last/
+# erun_traffic_window_bytes/erun_mcp_calls_total/erun_audit_events_total: the
+# listener carries no authentication of its own (matching Prometheus scrape
+# convention), and every series it exposes is labelled by tenant+environment,
+# so leaving it reachable from every namespace would let any other tenant's
+# pod on the cluster read this one's idle/audit/MCP-call activity. Selecting
+# this pod with a NetworkPolicy makes every other port on it default-deny
+# unless a rule says otherwise, so the ssh/mcp rules below exist purely to
+# preserve their current unrestricted reachability (no NetworkPolicy governed
+# them before this one existed) -- only the new metrics port is actually
+# restricted. A cluster Prometheus living outside this namespace needs its own
+# namespace labelled network-policy/erun-metrics-scraper=true to reach it;
+# same-namespace traffic (e.g. `erun open` + a manual curl) is always allowed.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-metrics
+  labels:
+    app: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: {{ $sshPort }}
+          protocol: TCP
+    {{- if eq $mcpEnabled "true" }}
+    - ports:
+        - port: {{ $mcpPort }}
+          protocol: TCP
+    {{- end }}
+    - ports:
+        - port: {{ $metricsPort }}
+          protocol: TCP
+      from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              network-policy/erun-metrics-scraper: "true"
+{{- end }}

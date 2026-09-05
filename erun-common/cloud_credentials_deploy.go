@@ -9,17 +9,6 @@ func cloudflareSecretName(releaseName string) string {
 	return strings.TrimSpace(releaseName) + "-cloudflare"
 }
 
-// Applying via -f - keeps the credential manifest on stdin, so the token never
-// lands in argv or the trace.
-func cloudflareSecretApplyArgs(namespace, kubernetesContext string) []string {
-	args := []string{}
-	if ctxName := strings.TrimSpace(kubernetesContext); ctxName != "" {
-		args = append(args, "--context", ctxName)
-	}
-	args = append(args, "-n", strings.TrimSpace(namespace), "apply", "-f", "-")
-	return args
-}
-
 // Only the token belongs in the Secret; the account id rides as a plain helm
 // value. %q renders it as valid YAML (a JSON superset) so punctuation can't
 // break the manifest.
@@ -44,7 +33,7 @@ func applyCloudflareCredentialsSecret(ctx Context, deployInput HelmDeploySpec) e
 	if !deployInput.CloudflareEnabled || strings.TrimSpace(deployInput.CloudflareSecretName) == "" {
 		return nil
 	}
-	args := cloudflareSecretApplyArgs(deployInput.Namespace, deployInput.KubernetesContext)
+	args := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	ctx.Trace("apply cloudflare credentials secret " + deployInput.CloudflareSecretName + " (token redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
@@ -66,12 +55,7 @@ func applyCloudflareCredentialsSecret(ctx Context, deployInput HelmDeploySpec) e
 		deployInput.Namespace,
 		token,
 	)
-	cmd := Command("kubectl", args...)
-	cmd.Stdin = strings.NewReader(manifest)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("kubectl apply cloudflare credentials secret: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "cloudflare credentials secret", manifest, args)
 }
 
 // applyCloudflareDeployMetadata populates the Cloudflare deploy fields from the

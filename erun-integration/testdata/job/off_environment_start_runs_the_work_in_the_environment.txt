@@ -1,0 +1,4 @@
+job started: suite (id suite), output at <HOME>/.cache/erun/activity/team/dev/jobs/suite.log
+audit: erun job start --environment dev --name suite --tenant team work
+mcp: team/dev edge resolved to http://<LOOPBACK>:26300/mcp
+mcp: team/dev edge resolved to http://<LOOPBACK>:26300/mcp

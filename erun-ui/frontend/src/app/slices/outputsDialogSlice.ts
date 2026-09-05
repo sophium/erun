@@ -2,15 +2,23 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { AgentOutputEntry, UISelection } from '@/types';
 
-// State for the per-env Outputs dialog: the deliverables an agent produced in
-// the runtime pod. Read + download only; nothing mutates the pod.
+// Which producer's deliverables the dialog is showing. An environment's agent
+// writes them in a runtime pod; an orchestrator has no pod and writes them on
+// this host. Modelled as a union rather than two nullable fields so a target
+// cannot be half-set.
+export type OutputsTarget =
+  | { kind: 'environment'; selection: UISelection }
+  | { kind: 'orchestrator'; orchestratorId: string; name: string };
+
+// State for the Outputs dialog: the deliverables an agent produced. Read +
+// download (+ run on host) only; nothing mutates the producer.
 export interface OutputsDialogState {
   open: boolean;
   loading: boolean;
   error: string;
   dir: string;
   entries: AgentOutputEntry[];
-  selection: UISelection | null;
+  target: OutputsTarget | null;
   downloadingName: string;
   runningName: string;
   status: string;
@@ -23,7 +31,7 @@ const initialState: OutputsDialogState = {
   error: '',
   dir: '',
   entries: [],
-  selection: null,
+  target: null,
   downloadingName: '',
   runningName: '',
   status: '',
@@ -34,13 +42,13 @@ export const outputsDialogSlice = createSlice({
   name: 'outputsDialog',
   initialState,
   reducers: {
-    openOutputsDialog(state, action: PayloadAction<UISelection>) {
+    openOutputsDialog(state, action: PayloadAction<OutputsTarget>) {
       state.open = true;
       state.loading = true;
       state.error = '';
       state.entries = [];
       state.dir = '';
-      state.selection = action.payload;
+      state.target = action.payload;
       state.downloadingName = '';
       state.runningName = '';
       state.status = '';

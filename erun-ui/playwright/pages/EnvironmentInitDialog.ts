@@ -32,6 +32,14 @@ export class EnvironmentInitDialog {
     return this.page.locator('#environment-container-registry');
   }
 
+  versionChoicesButton(): Locator {
+    return this.page.getByRole('button', { name: 'Show version choices' });
+  }
+
+  versionNotices(): Locator {
+    return this.page.getByRole('list', { name: 'Version source notices' });
+  }
+
   kubernetesContextTrigger(): Locator {
     return this.page.locator('#environment-kubernetes-context');
   }
@@ -50,6 +58,10 @@ export class EnvironmentInitDialog {
 
   async fillContainerRegistry(value: string): Promise<void> {
     await this.containerRegistryInput().fill(value);
+  }
+
+  hostedRegistryCheckbox(): Locator {
+    return this.page.locator('#environment-use-erun-registry');
   }
 
   // selectKubernetesContext opens the context dropdown and picks an option by

@@ -15,5 +15,5 @@ aws ec2 run-instances --image-id 'ami-<latest-ubuntu-arm64>' --instance-type c8g
 aws ec2 wait instance-running --instance-ids 'i-<new-instance>' --region eu-west-2 --profile dev
 aws ec2 describe-instances --instance-ids 'i-<new-instance>' --query 'Reservations[0].Instances[0].PublicIpAddress' --output text --region eu-west-2 --profile dev
 kubectl config set-cluster erun-001-ops-eu-west-2 --server https://<VERSION>.10:6443 --insecure-skip-tls-verify=true
-kubectl config set-credentials erun-001-ops-eu-west-2 --token <TOKEN>
+kubectl config set-credentials erun-001-ops-eu-west-2 --token '<redacted>'
 kubectl config set-context erun-001-ops-eu-west-2 --cluster erun-001-ops-eu-west-2 --user erun-001-ops-eu-west-2

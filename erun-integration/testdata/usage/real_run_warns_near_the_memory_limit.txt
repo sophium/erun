@@ -1,0 +1,32 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "cpu": {
+    "quotaCores": 1,
+    "intervalSeconds": 1
+  },
+  "memory": {
+    "currentBytes": 1932735283,
+    "peakBytes": 2100000000,
+    "peakObserved": true,
+    "limitBytes": 2147483648,
+    "percentOfLimit": 89.99999999068677,
+    "oomKills": 1,
+    "oomKillsObserved": true
+  },
+  "disk": [
+    {
+      "mount": "<HOME>",
+      "totalBytes": 202991730688,
+      "usedBytes": 102399998976,
+      "percentUsed": 50.44540416938937
+    }
+  ],
+  "warnings": [
+    "memory is at 90% of its 2048Mi limit (warns at 85%)",
+    "memory.peak reached 98% of the limit (warns at 95%) -- this environment came close to an OOM kill",
+    "the cgroup recorded 1 OOM kill(s)"
+  ],
+  "excludesBuilds": true
+}
+audit: erun usage --output json

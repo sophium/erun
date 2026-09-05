@@ -99,6 +99,12 @@ Reference files for the canonical blueprint ship alongside this
 `SKILL.md` under `templates/`. Substitute placeholders, then expand for
 the user's domain entities.
 
+This tree is the service's source only. Step 6 below composes
+`erun-blueprint-service` to add the missing
+`<tenant>-devops/docker/<module>/Dockerfile` and
+`<tenant>-devops/k8s/<module>/` chart — without them `erun build`/
+`erun deploy` have nothing to find.
+
 ## Conventions (binding)
 
 These come from `erun-backend/erun-backend-api/AGENTS.md`. Apply every
@@ -287,7 +293,20 @@ Edit the produced `server.go` `NewHandler` to construct the entity
 repository and register its routes — follow the pattern of
 `RegisterWhoamiRoute` already present.
 
-### Step 6 — validate
+### Step 6 — deploy artifacts
+
+This skill produces the service's source only; it stops one step short of
+something `erun deploy` can install. Apply the `erun-blueprint-service`
+skill against the module produced above to add the missing
+`<tenant>-devops/docker/<module>/Dockerfile` and
+`<tenant>-devops/k8s/<module>/` chart — that skill's Dockerfile builder
+stage is a Go skeleton already, so point it at `cmd/<module>` and
+`ERUN_API_PORT`'s default (`17033`, `server.go`) as the container port and
+health-check path (`GET /healthz`, already implemented). Do this before
+declaring the API "done": a scaffold that stops at `go build ./...` looks
+finished but has nothing `erun build`/`erun deploy` can find.
+
+### Step 7 — validate
 
 ```sh
 cd "${target_dir}/${module}"
@@ -336,6 +355,10 @@ content.
   logic — restore the missing plumbing around them.
 - Add missing scaffolding files (`.gitignore` entries, module
   metadata) without rewriting project content.
+- A module with source but no `<tenant>-devops/docker/<module>/Dockerfile` or
+  `<tenant>-devops/k8s/<module>/` chart is a gap too — apply
+  `erun-blueprint-service` (Step 6) to close it during the same maintenance
+  pass rather than leaving the service undeployable.
 
 ### Upgrade (refresh to the current blueprint)
 
@@ -375,6 +398,9 @@ content.
 - Give the repo root agent guidance. If the repository root has no
   `AGENTS.md`/`CLAUDE.md`, also apply the `erun-blueprint-agents` skill so any
   agent — or human — landing in the repo gets erun-environment orientation.
+- This skill's own output is not deployable by itself. Always follow Step 6
+  and apply `erun-blueprint-service` for the Dockerfile and chart, or
+  confirm with the user that equivalent deploy artifacts already exist.
 - Do not let CLI/MCP modules import this API directly. Shared
   contracts go in a separate transport-neutral library, not in the API
   module.

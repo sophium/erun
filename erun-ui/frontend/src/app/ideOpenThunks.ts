@@ -4,7 +4,6 @@ import { sessionApi } from './api/sessionApi';
 import { readError } from './errors';
 import type { IDEKind } from './model';
 import {
-  dismissNotification,
   dismissTerminalStatus,
   showNotification,
   showTerminalFailure,
@@ -34,7 +33,6 @@ export const openIDE =
       await dispatch(sessionApi.endpoints.openIDE.initiate({ selection, ide })).unwrap();
     } catch (error: unknown) {
       const failure = ideOpenFailure(selection, label, readError(error));
-      dispatch(dismissNotification());
       dispatch(showTerminalFailure(failure.message, failure.detail, failure.copyOutput, '', null));
       return;
     }

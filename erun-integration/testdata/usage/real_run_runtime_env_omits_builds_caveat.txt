@@ -1,0 +1,29 @@
+{
+  "tenant": "team",
+  "environment": "prod",
+  "cpu": {
+    "quotaCores": 1,
+    "utilizationPercent": 10,
+    "intervalSeconds": 1,
+    "usageUsec": 581611501,
+    "periods": 376556,
+    "throttledPeriods": 425
+  },
+  "memory": {
+    "currentBytes": 413589504,
+    "peakBytes": 1027301376,
+    "peakObserved": true,
+    "limitBytes": 2147483648,
+    "percentOfLimit": 19.259262084960938,
+    "oomKillsObserved": true
+  },
+  "disk": [
+    {
+      "mount": "<HOME>",
+      "totalBytes": 202991730688,
+      "usedBytes": 91142750208,
+      "percentUsed": 44.899735520796746
+    }
+  ]
+}
+audit: erun usage --output json

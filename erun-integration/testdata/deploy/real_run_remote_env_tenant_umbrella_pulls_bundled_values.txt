@@ -1,6 +1,7 @@
 audit: erun deploy --components [team-backend-api] --version <VERSION> team dev
 trace-log: appending the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> components=[team-backend-api] force=false current=false
+deploy: configured repo path /nonexistent-remote/team is not present on this machine; no k8s.deployments plan could be read
 deploy: component selection source --components flag; components team-backend-api
 deploy: deploying tenant artifacts; verifying charts published at <VERSION> in registry.example/test: team-backend-api
 deploy: no local chart for team-backend-api; using published chart oci://registry.example/test/charts/team-backend-api version <VERSION>
@@ -12,3 +13,7 @@ dedup: claim (release=test-context-team-dev-team-backend-api, hash=<HASH>, pid=<
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 5m0s)...
 ==> Deployed team/dev · team-backend-api <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  deploy [<ELAPSED>]
+    team/dev · team-backend-api <VERSION> [<ELAPSED>]
+timing record written to <TMP>

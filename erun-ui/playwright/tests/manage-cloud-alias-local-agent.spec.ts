@@ -1,4 +1,4 @@
-import { test, expect } from '../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../fixtures/erunApp.js';
 import {
   SEED_CLOUD_ALIAS,
   SEED_TENANT,
@@ -28,10 +28,7 @@ test.describe('manage dialog AWS alias on a local-agent env', () => {
     // an unrelated listener on the developer's machine.
     seedEnvironment(SEED_TENANT, environment, 'localportrangestart: 46500\n');
     try {
-      await app.reloadEnvironments();
-      await app.sidebar
-        .envRowButton(SEED_TENANT, environment)
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await waitForSeededRow(app, SEED_TENANT, environment);
 
       await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, environment);
       await app.manageDialog.waitForOpen();

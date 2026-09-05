@@ -1,0 +1,19 @@
+Set up a hosted erun platform cloud provider alias.
+
+Discovers the platform's own config (OIDC issuer, CLI client id) from its unauthenticated GET /v1/platform endpoint and saves the alias — no instance's name is hardcoded. Run `erun cloud login --alias <alias>` afterward to sign in: the Device Authorization Grant (the only flow that works with no browser), falling back to Authorization Code + PKCE on a loopback listener when the issuer advertises no device endpoint.
+
+Usage:
+  erun cloud init erun [flags]
+
+Examples:
+  erun cloud init erun --api-url https://api.erunpaas.com
+
+Flags:
+      --api-url string   Base URL of the hosted erun platform's API
+      --dry-run          Resolve and trace mutating actions without executing them.
+  -h, --help             help for erun
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

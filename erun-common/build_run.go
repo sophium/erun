@@ -1,24 +1,56 @@
 package eruncommon
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
 
 func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
-	if build == nil {
-		build = DockerImageBuilder
+	traceDockerBuild(ctx, buildInput)
+	if ctx.DryRun {
+		return nil
 	}
+	return executeDockerBuild(ctx, buildInput, build, ctx.Stdout, ctx.Stderr)
+}
+
+// traceDockerBuild emits everything one build would announce, and does nothing
+// else. It is separate from execution because the trace is a public contract —
+// the dry-run goldens — and must stay in dependency order no matter how the
+// builds themselves are scheduled.
+func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 	buildInput.Verbosity = ctx.Verbosity
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
 		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	}
-	if ctx.DryRun {
-		return nil
+}
+
+// executeDockerBuild runs one build against the given streams. The streams are
+// a parameter rather than ctx's own so a concurrent wave can buffer each image
+// separately and replay them in a fixed order.
+//
+// It also starts this image's step-timing child (a no-op when no timing root
+// is active — see startTimingStep) and wires PlatformObserver so the builder
+// reports each architecture's duration into it, tagged with the same cache
+// decision the trace already names.
+func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
+	if build == nil {
+		build = DockerImageBuilder
 	}
-	return build(buildInput, ctx.Stdout, ctx.Stderr)
+	buildInput.Verbosity = ctx.Verbosity
+	stepCtx, finish := ctx.startTimingStep(dockerBuildStepName(buildInput))
+	var cache *cacheDecision
+	if hit, applicable, reason := incrementalCacheDecision(buildInput); applicable {
+		cache = &cacheDecision{hit: hit, missReason: reason}
+		stepCtx.recordTimingCache(hit, reason)
+	}
+	buildInput.PlatformObserver = stepCtx.timingPlatformObserver(cache)
+	err := build(buildInput, stdout, stderr)
+	finish(err)
+	return err
 }
 
 // traceIncrementalDecision re-emits the fingerprint inspect already run during
@@ -79,43 +111,144 @@ func describeMissingPlatforms(platforms []string) string {
 	return "platforms [" + strings.Join(labels, ", ") + "]"
 }
 
+// RunDockerBuilds builds every discovered image, running independent ones
+// concurrently. Most images in a multi-image project have no edge between them,
+// so the sequential loop this replaced spent most of its wall-clock waiting.
+//
+// Two phases, and the split is the point: every trace line is emitted first, in
+// dependency order, before anything builds. That keeps dry-run output and the
+// decision lines identical whatever the scheduling, so only timing changes.
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
-	for _, buildInput := range markLocalBaseImageBuilds(orderedDockerBuildSpecs(builds)) {
-		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
-			return err
-		}
+	ordered := markLocalBaseImageBuilds(orderedDockerBuildSpecs(builds))
+	waves, err := resolveBuildWaves(ordered)
+	if err != nil {
+		return err
 	}
-	return nil
+	jobs := resolveBuildJobs(ctx, len(ordered))
+	if jobs <= 1 {
+		// Sequential keeps each image's decision lines next to its own build
+		// output. Hoisting the traces here would separate a failure from the
+		// image that produced it, which is a real loss and buys nothing when only
+		// one thing runs at a time.
+		for _, buildInput := range ordered {
+			if err := RunDockerBuild(ctx, buildInput, build); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	// Concurrent: the traces are hoisted ahead of every build, in dependency
+	// order, because interleaved output from images racing each other would be
+	// neither readable nor reproducible.
+	traceBuildWavePlan(ctx, waves)
+	for _, buildInput := range ordered {
+		traceDockerBuild(ctx, buildInput)
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	return runBuildWaves(ctx, waves, build, jobs)
+}
+
+// runDockerBuildsSequentially is the same two phases with the schedule pinned to
+// one at a time. The push and deploy paths use it: those builds push images and
+// assemble multi-arch manifests as they go, and the release path shares a single
+// in-pod docker daemon, so their concurrency is a separate question from this
+// one and is deliberately not answered here.
+func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
+	ctx.BuildJobs = 1
+	return RunDockerBuilds(ctx, builds, build)
 }
 
 // traceBuildUmbrella brackets a build with the `==> Building` / `==> Built`
-// markers the desktop's activity-queue parser keys off to drive its spinner.
-// Skipped in dry-run, which does no work and must keep the integration goldens
-// stable.
-func traceBuildUmbrella(ctx Context) func(*error) {
+// markers the desktop's activity-queue parser keys off to drive its spinner,
+// and starts the step-timing root reported (as a duration-ordered table plus
+// a JSON record) when the bracket closes. Skipped in dry-run, which does no
+// work and must keep the integration goldens stable.
+func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
 	if ctx.DryRun {
-		return func(*error) {}
+		return ctx, func(*error) {}
 	}
 	started := time.Now()
 	ctx.Info("==> Building")
-	return func(errp *error) {
-		elapsed := time.Since(started).Round(time.Second)
-		if errp != nil && *errp != nil {
-			ctx.Info("==> Build failed after " + elapsed.String())
-			return
+	root := newStepTiming("build", nil)
+	ctx.timing = root
+	return ctx, func(errp *error) {
+		var err error
+		if errp != nil {
+			err = *errp
 		}
-		ctx.Info("==> Built in " + elapsed.String())
+		root.finish(err)
+		elapsed := time.Since(started).Round(time.Second)
+		if err != nil {
+			ctx.Info("==> Build failed after " + elapsed.String())
+		} else {
+			ctx.Info("==> Built in " + elapsed.String())
+		}
+		reportStepTiming(ctx, "build", root)
 	}
 }
 
-func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
-	defer traceBuildUmbrella(ctx)(&err)
+// RunBuildExecution runs a plain `erun build`. store/deps are the cloud
+// alias reader and dependencies ReportBuildOutcome uses to self-report this
+// run to the erun platform, best-effort, once it finishes (erun#1954) --
+// pass a nil store from a caller that has none (build never fails or
+// changes its own output because reporting is unavailable).
+func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
+	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
+	ctx, finish := traceBuildUmbrella(ctx)
+	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, nil, runScript, build, push, nil)
 }
 
-func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) (err error) {
-	defer traceBuildUmbrella(ctx)(&err)
+// RunBuildExecutionAndDeploy is RunBuildExecution's `--deploy` counterpart;
+// see its doc comment for store/deps.
+func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
+	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
+	ctx, finish := traceBuildUmbrella(ctx)
+	defer finish(&err)
 	return runBuildExecution(ctx, execution, deploySpecs, nil, runScript, build, push, deploy)
+}
+
+// reportBuildExecutionOutcome self-reports one `erun build` run's outcome to
+// the erun platform, best-effort -- see ReportBuildOutcome. RunReleaseExecution
+// (the standalone `erun release` command) does not call this: a release
+// records itself against a review through the release queue instead (see
+// erun-docs/docs/collaboration/builds.md's "Release queue" section), so an
+// automatic unattached report here would duplicate that record for no
+// benefit. `erun build --release` (a snapshot vs. stable version choice, not
+// a different command) still goes through RunBuildExecution above and does
+// get reported, same as any other build.
+func reportBuildExecutionOutcome(ctx Context, execution BuildExecutionSpec, store CloudReadStore, deps CloudDependencies, err error) {
+	if store == nil {
+		return
+	}
+	projectRoot, environment := buildExecutionProjectRootAndEnvironment(execution)
+	failureDetail := ""
+	if err != nil {
+		failureDetail = err.Error()
+	}
+	ReportBuildOutcome(ctx, store, deps, ReportBuildOutcomeParams{
+		ProjectRoot:   projectRoot,
+		Environment:   environment,
+		Version:       NewBuildResult(execution).Version,
+		Successful:    err == nil,
+		FailureDetail: failureDetail,
+	})
+}
+
+// buildExecutionProjectRootAndEnvironment reads the project root and
+// environment name build already resolved off the first image in the
+// execution -- every image in one execution shares both, since they are
+// resolved once for the whole build. Both are empty for a project build
+// script execution, which builds no docker images at all.
+func buildExecutionProjectRootAndEnvironment(execution BuildExecutionSpec) (string, string) {
+	for _, build := range execution.dockerBuilds {
+		if build.Image.ProjectRoot != "" || build.Image.Environment != "" {
+			return build.Image.ProjectRoot, build.Image.Environment
+		}
+	}
+	return "", ""
 }
 
 // RunReleaseExecution is a standalone `erun release`: the same build → publish →
@@ -124,7 +257,8 @@ func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deplo
 // `==> Building` one. Both entrypoints share one execution so the flow cannot
 // drift between them.
 func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
-	defer traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))(&err)
+	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
+	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
 }
 
@@ -221,7 +355,7 @@ func recordDockerPushTags(tags map[string]struct{}, pushes []DockerPushSpec) map
 }
 
 func buildAndPushDeployDockerImages(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) error {
-	if err := RunDockerBuilds(ctx, builds, build); err != nil {
+	if err := runDockerBuildsSequentially(ctx, builds, build); err != nil {
 		return err
 	}
 	for _, buildInput := range builds {
@@ -253,26 +387,33 @@ func deployedVersionForSpecs(specs []DeploySpec) string {
 }
 
 // RunPushCommand brackets a standalone `erun push` with the `==> Pushing` /
-// `==> Pushed` markers the desktop's activity-queue parser keys off. Only the
+// `==> Pushed` markers the desktop's activity-queue parser keys off, and
+// starts the step-timing root reported when the bracket closes. Only the
 // standalone push entrypoints route through here: pushes inside `erun build`
 // already sit under the `==> Building` umbrella, and the per-image push
 // executors would fire a marker per image and double-count if bracketed here.
-// Dry-run does no work.
-func RunPushCommand(ctx Context, op func() error) (err error) {
+// op receives the timing-scoped context so the images and charts it pushes
+// attach their own step-timing children; dry-run does no work and skips
+// timing, same as the other three umbrellas.
+func RunPushCommand(ctx Context, op func(Context) error) (err error) {
 	if ctx.DryRun {
-		return op()
+		return op(ctx)
 	}
 	started := time.Now()
 	ctx.Info("==> Pushing")
+	root := newStepTiming("push", nil)
+	ctx.timing = root
 	defer func() {
+		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
 		if err != nil {
 			ctx.Info("==> Push failed after " + elapsed.String())
-			return
+		} else {
+			ctx.Info("==> Pushed in " + elapsed.String())
 		}
-		ctx.Info("==> Pushed in " + elapsed.String())
+		reportStepTiming(ctx, "push", root)
 	}()
-	return op()
+	return op(ctx)
 }
 
 func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusherFunc) error {
@@ -311,7 +452,10 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 }
 
 func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
-	if err := RunDockerBuilds(ctx, execution.builds, build); err != nil {
+	if err := preflightRegistryPushAccess(ctx, execution); err != nil {
+		return err
+	}
+	if err := runDockerBuildsSequentially(ctx, execution.builds, build); err != nil {
 		return err
 	}
 	builtAndPushedTags := make(map[string]struct{}, len(execution.builds))
@@ -334,20 +478,125 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 	return publishComponentCharts(ctx, execution.componentCharts)
 }
 
+// preflightRegistryPushAccess refuses a publish that is already known to be
+// impossible, before it spends the build.
+//
+// A release that cannot push otherwise discovers it at the push, after every
+// image has been built for every architecture, and then offers an interactive
+// login that a detached job or an agent run can never answer. The registry
+// credential is knowable up front, so it is checked up front — the same class of
+// upfront refusal as a release whose images are not covered by a build it will
+// publish.
+//
+// Three checks run here, cheapest and most certain first: VerifyGHCRCredentialConfigured
+// answers whether any credential resolves at all -- an environment that has
+// never authenticated to ghcr.io is certain to fail at push, never merely
+// inconclusive (#1201). VerifyGHCRPushScope is a per-registry check of a
+// resolved credential's own write:packages scope (cheap, one request per
+// registry). VerifyGHCRCanPushImage/VerifyGHCRCanPushChart is a per-artifact
+// check of whether the registry would actually grant push for that specific
+// repository, including creating it for the first time — a token can have
+// write:packages and still be denied create_package by org policy on a
+// component nothing has ever published before, which the scope check alone
+// cannot see.
+//
+// Skipped in dry-run, which does no work and must keep the integration traces
+// stable.
+func preflightRegistryPushAccess(ctx Context, execution DockerPushExecutionSpec) error {
+	if ctx.DryRun {
+		return nil
+	}
+	checker := &registryPushAccessChecker{
+		checkedRegistries: make(map[string]struct{}, 2),
+		checkedTags:       make(map[string]struct{}, len(execution.builds)+len(execution.pushes)),
+	}
+	// A build that pushes inline (buildInput.Push) and a promoted fingerprint
+	// push (execution.pushes) are both real pushes this run will make — the
+	// same union RunDockerPushExecution treats as "will be pushed" just below
+	// this preflight, so both need the same check.
+	for _, buildInput := range execution.builds {
+		if !buildInput.Push {
+			continue
+		}
+		if err := checker.checkImageTag(buildInput.Image.Tag); err != nil {
+			return err
+		}
+	}
+	for _, pushInput := range execution.pushes {
+		if err := checker.checkImageTag(pushInput.Image.Tag); err != nil {
+			return err
+		}
+	}
+	for _, chart := range execution.componentCharts {
+		if err := VerifyGHCRChartCredentialConfigured(chart.OCIRepo); err != nil {
+			return err
+		}
+		if err := VerifyGHCRCanPushChart(context.Background(), nil, chart.OCIRepo, chart.ChartName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// registryPushAccessChecker dedups the two per-image checks preflightRegistryPushAccess
+// runs, so a version with the same tag built for multiple platforms is only
+// checked once.
+type registryPushAccessChecker struct {
+	checkedRegistries map[string]struct{}
+	checkedTags       map[string]struct{}
+}
+
+func (c *registryPushAccessChecker) checkImageTag(tag string) error {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil
+	}
+	if _, seen := c.checkedTags[tag]; seen {
+		return nil
+	}
+	c.checkedTags[tag] = struct{}{}
+	if err := c.checkRegistryScopeOnce(tag); err != nil {
+		return err
+	}
+	return VerifyGHCRCanPushImage(context.Background(), nil, tag)
+}
+
+func (c *registryPushAccessChecker) checkRegistryScopeOnce(tag string) error {
+	registry := dockerRegistryFromImageTag(tag)
+	if registry == "" {
+		return nil
+	}
+	if _, seen := c.checkedRegistries[registry]; seen {
+		return nil
+	}
+	c.checkedRegistries[registry] = struct{}{}
+	if err := VerifyGHCRCredentialConfigured(tag); err != nil {
+		return err
+	}
+	return VerifyGHCRPushScope(context.Background(), nil, tag)
+}
+
 // publishComponentCharts packages+pushes then verifies each resolved chart.
 func publishComponentCharts(ctx Context, specs []HelmChartPublishSpec) error {
 	published := make([]string, 0, len(specs))
 	for i, spec := range specs {
 		spec.Verbosity = ctx.Verbosity
-		if err := RunHelmChartPublish(ctx, spec); err != nil {
-			return newPartialChartPublishError(spec, published, specs[i+1:], err)
-		}
-		if err := VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version); err != nil {
+		stepCtx, finish := ctx.startTimingStep("chart " + spec.ChartName)
+		err := publishAndVerifyHelmChart(stepCtx, spec)
+		finish(err)
+		if err != nil {
 			return newPartialChartPublishError(spec, published, specs[i+1:], err)
 		}
 		published = append(published, spec.ChartName)
 	}
 	return nil
+}
+
+func publishAndVerifyHelmChart(ctx Context, spec HelmChartPublishSpec) error {
+	if err := RunHelmChartPublish(ctx, spec); err != nil {
+		return err
+	}
+	return VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version)
 }
 
 // newPartialChartPublishError reports a chart publish that stopped mid-set. By

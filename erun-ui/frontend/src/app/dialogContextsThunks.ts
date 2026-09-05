@@ -95,11 +95,53 @@ export const refreshDialogClusterRegistry =
           useClusterRegistry: deployed,
         }),
       );
-    } catch {
+    } catch (error) {
       if (!getState().environmentDialog.open) {
         return;
       }
-      dispatch(patchEnvironmentDialog({ clusterRegistry: null, useClusterRegistry: false }));
+      dispatch(
+        patchEnvironmentDialog({
+          clusterRegistry: null,
+          useClusterRegistry: false,
+          error: readError(error),
+        }),
+      );
+    }
+  };
+
+// refreshDialogHostedRegistry probes erun's hosted registry once when the
+// dialog opens (the host is fixed, not resolved per Kubernetes context like
+// the in-cluster registry, so there is nothing to re-probe on context change).
+// A probe failure — including one the Go side could not even classify — still
+// resolves to "not available" rather than throwing, so this always lands a
+// definite status the "Use erun's hosted registry" checkbox can gate on.
+export const refreshDialogHostedRegistry =
+  (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+    if (!getState().environmentDialog.open) {
+      return;
+    }
+    try {
+      const status = await dispatch(
+        environmentApi.endpoints.getHostedRegistry.initiate(undefined, { forceRefetch: true }),
+      ).unwrap();
+      if (!getState().environmentDialog.open) {
+        return;
+      }
+      dispatch(patchEnvironmentDialog({ hostedRegistry: status }));
+    } catch (error) {
+      if (!getState().environmentDialog.open) {
+        return;
+      }
+      dispatch(
+        patchEnvironmentDialog({
+          hostedRegistry: {
+            host: 'registry.erunpaas.com',
+            available: false,
+            reason: 'could not be checked',
+            recovery: readError(error),
+          },
+        }),
+      );
     }
   };
 

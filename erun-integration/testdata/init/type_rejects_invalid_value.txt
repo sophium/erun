@@ -1,2 +1,2 @@
 audit: erun init --dry-run --type invalid team dev
-invalid --type "invalid": must be local-agent, remote-agent, or runtime
+invalid --type "invalid": must be local-agent, remote-agent, runtime, or host

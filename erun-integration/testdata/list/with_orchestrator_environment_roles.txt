@@ -1,0 +1,23 @@
+Configuration:
+  directory: <TMP>
+Defaults:
+  tenant: none
+  environment: none
+Current Directory:
+  path: none
+  repo: none
+  configured tenant: none
+  effective target: unavailable (default tenant is not configured, and open could not infer one from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default)
+Cloud Providers:
+  none
+Tenants:
+  none
+Orchestrators:
+  - eng-1 "Eng One"
+    environments:
+      - team/dev role=code directory=/repo/team-dev
+      - team/staging role=undeclared directory=/repo/team-staging
+  - eng-2 "Eng Two"
+    environments:
+      - other/build role=build directory=/repo/other-build
+audit: erun list

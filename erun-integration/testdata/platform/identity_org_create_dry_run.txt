@@ -1,0 +1,3 @@
+Dry run: erun platform identity org creation planned.
+audit: erun platform identity org create --dry-run --name acme
+platform: POST https://api.example.test/v1/identity/orgs (name=acme)

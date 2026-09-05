@@ -5,8 +5,12 @@ SSHD enabled for team/dev
   local port: 64022
   workspace: <HOME>/git/team
 audit: erun sshd init --local-port 64022 --public-key <TMP> team dev
+==> SSHD init team/dev
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
+deploy: worktree volume team-devops-worktree already exists; <HOME>/git/team stays on it
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
 ==> Deploying team/dev <VERSION>
@@ -14,3 +18,4 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
     waiting for helm rollout (timeout 5m0s)...
 ==> Deployed team/dev <VERSION> in <ELAPSED>
 runtime pod/container was not ready while syncing SSH authorized_keys; waiting for deployment and retrying
+==> SSHD init done team/dev

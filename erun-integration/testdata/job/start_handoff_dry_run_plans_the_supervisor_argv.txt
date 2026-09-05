@@ -1,0 +1,4 @@
+audit: erun job start --dry-run --environment dev --handoff --name release --tenant team work
+job: detaching "release" as job release, output at <TMP>
+job: holding activity lease job-release for the job's lifetime
+<TMP> exec job supervise --tenant team --environment dev --id release --name release --max-output-bytes 16777216 --lease-ttl 15m0s --handoff -- work

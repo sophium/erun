@@ -41,7 +41,10 @@ type createContextRequest struct {
 	InstanceType       string `json:"instanceType"`
 	DiskType           string `json:"diskType"`
 	DiskSizeGB         int    `json:"diskSizeGb"`
-	Preview            bool   `json:"preview"`
+	// MaxEnvironments is this context's placement capacity (#1112); zero uses
+	// repository.DefaultContextMaxEnvironments.
+	MaxEnvironments int  `json:"maxEnvironments"`
+	Preview         bool `json:"preview"`
 }
 
 type createContextResponse struct {
@@ -52,12 +55,13 @@ type createContextResponse struct {
 // contextBootstrapParams are the trimmed cluster-bootstrap inputs. Both the
 // context-create route and the provision preview plan from the same shape.
 type contextBootstrapParams struct {
-	name         string
-	alias        string
-	region       string
-	instanceType string
-	diskType     string
-	diskSizeGB   int
+	name            string
+	alias           string
+	region          string
+	instanceType    string
+	diskType        string
+	diskSizeGB      int
+	maxEnvironments int
 }
 
 // createContextInput is a validated registration request.
@@ -75,17 +79,28 @@ func decodeCreateContextInput(req *http.Request) (createContextInput, error) {
 	}
 	input := createContextInput{
 		contextBootstrapParams: contextBootstrapParams{
-			name:         strings.TrimSpace(body.Name),
-			alias:        strings.TrimSpace(body.CloudProviderAlias),
-			region:       strings.TrimSpace(body.Region),
-			instanceType: strings.TrimSpace(body.InstanceType),
-			diskType:     strings.TrimSpace(body.DiskType),
-			diskSizeGB:   body.DiskSizeGB,
+			name:            strings.TrimSpace(body.Name),
+			alias:           strings.TrimSpace(body.CloudProviderAlias),
+			region:          strings.TrimSpace(body.Region),
+			instanceType:    strings.TrimSpace(body.InstanceType),
+			diskType:        strings.TrimSpace(body.DiskType),
+			diskSizeGB:      body.DiskSizeGB,
+			maxEnvironments: body.MaxEnvironments,
 		},
 		preview: body.Preview,
 	}
 	if input.name == "" || input.alias == "" || input.region == "" {
 		return createContextInput{}, errors.New("name, cloudProviderAlias, and region are required")
+	}
+	// The name becomes the kubeconfig context label a deploy/stop/delete Job
+	// interpolates into a shell-quoted kubectl argv (deployexec.PlacementParams)
+	// and a Kubernetes label value; a DNS-1123 label keeps both safe, the same
+	// constraint environment names already carry.
+	if !validNamespaceLabel(input.name) {
+		return createContextInput{}, errors.New("name must be a DNS-1123 label: lowercase letters, digits, and internal hyphens, not starting or ending with a hyphen, at most 63 characters")
+	}
+	if input.maxEnvironments < 0 {
+		return createContextInput{}, errors.New("maxEnvironments must not be negative")
 	}
 	return input, nil
 }
@@ -100,7 +115,7 @@ func RegisterContextRoutes(register ProtectedRouteRegistrar, contexts ContextRep
 func (r ContextRoutes) listContexts(w http.ResponseWriter, req *http.Request) {
 	contexts, err := r.contexts.List(req.Context())
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, contexts)
@@ -109,7 +124,7 @@ func (r ContextRoutes) listContexts(w http.ResponseWriter, req *http.Request) {
 func (r ContextRoutes) getContext(w http.ResponseWriter, req *http.Request) {
 	cloudContext, err := r.contexts.Get(req.Context(), req.PathValue("context_id"))
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, cloudContext)
@@ -144,9 +159,10 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		DiskType:           input.diskType,
 		DiskSizeGB:         input.diskSizeGB,
 		KubernetesContext:  input.name,
+		MaxEnvironments:    input.maxEnvironments,
 	})
 	if err != nil {
-		writeRepositoryError(w, err)
+		writeRepositoryError(w, req, err)
 		return
 	}
 
@@ -160,7 +176,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 
 	securityContext, ok := security.FromContext(req.Context())
 	if !ok {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
 		return
 	}
 	if err := r.provisioner.Start(provision.ProvisionInput{
@@ -175,7 +191,7 @@ func (r ContextRoutes) createContext(w http.ResponseWriter, req *http.Request) {
 		DiskType:           input.diskType,
 		DiskSizeGB:         input.diskSizeGB,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start provisioning")
+		writeInternalError(w, req, "failed to start provisioning", err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, createContextResponse{Context: &created, Plan: plan})

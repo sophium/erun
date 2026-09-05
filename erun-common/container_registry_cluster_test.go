@@ -93,6 +93,34 @@ func TestContainerRegistriesConcreteExpandsClusterEntry(t *testing.T) {
 	}
 }
 
+// TestContainerRegistriesConcretePreservesInsecure locks the fix for a cluster
+// registry marked `insecure: true`: expandClusterEntry must carry that marker
+// onto the concretized BUILD entry, since `docker manifest` (unlike the
+// daemon) never reads --insecure-registry and needs the flag passed
+// explicitly by anything that resolves a build registry.
+func TestContainerRegistriesConcretePreservesInsecure(t *testing.T) {
+	list := ContainerRegistries{
+		{Cluster: &ClusterRegistry{Insecure: true}, Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}},
+	}
+	resolve := func(c ClusterRegistry) (ClusterRegistryAddresses, error) {
+		return ClusterRegistryAddresses{Push: "localhost:41000", Pull: "10.43.0.50:5000"}, nil
+	}
+	concrete, err := list.Concrete(resolve)
+	if err != nil {
+		t.Fatalf("Concrete: %v", err)
+	}
+	if !concrete.BuildRegistryInsecure() {
+		t.Error("BuildRegistryInsecure() = false, want true for an insecure cluster registry")
+	}
+}
+
+func TestContainerRegistriesBuildRegistryInsecureFalseForPlainRegistry(t *testing.T) {
+	list := DefaultContainerRegistries()
+	if list.BuildRegistryInsecure() {
+		t.Error("BuildRegistryInsecure() = true for a plain registry, want false")
+	}
+}
+
 func TestContainerRegistriesConcreteRequiresResolver(t *testing.T) {
 	list := ContainerRegistries{{Cluster: &ClusterRegistry{}, Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}}}
 	if _, err := list.Concrete(nil); err == nil {

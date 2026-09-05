@@ -38,6 +38,22 @@ export function aiSessionLaunchSignature(config: UIEnvironmentConfig): string {
   );
 }
 
+// versionSourceSignature captures what decides which registries the version
+// picker lists from, mirroring the backend's discovery: the env's own marked
+// registries, and — for an env that marks none — the local repo path whose
+// project config supplies them instead. Roles stay out because discovery reads
+// the hosts, not what each one is for, and a cluster entry names no host at all.
+// A save that changes this must re-query the picker, or a registry the operator
+// just added contributes neither versions nor a notice.
+export function versionSourceSignature(config: UIEnvironmentConfig): string {
+  return JSON.stringify({
+    registries: config.containerRegistries
+      .map((entry) => entry.registry.trim())
+      .filter((registry) => registry !== ''),
+    localRepoPath: config.localRepoPath,
+  });
+}
+
 // nextPendingRedeploy reports whether the pending-redeploy banner should be
 // up after a save: it stays up once raised (a later metadata-only save must
 // not clear a redeploy the user still owes the pod), and a save raises it
@@ -69,6 +85,9 @@ function deployRelevantSignature(config: UIEnvironmentConfig): string {
     localRepoPath: config.localRepoPath,
     containerRegistries: config.containerRegistries,
     disableBuildScript: config.disableBuildScript,
+    // The chart the runtime is installed from is one of the deploy's coordinates,
+    // so changing it changes what a redeploy installs.
+    runtimeChart: config.runtimeChart,
     // Platform account flips the runtime SA's cluster RBAC (a <release>-platform
     // ClusterRoleBinding to cluster-admin), which the next deploy renders/prunes.
     platformAccount: config.platformAccount,
@@ -102,43 +121,48 @@ export function manageDialogTabHasUnsavedChanges(
   }
   const compare = (...keys: (keyof UIEnvironmentConfig)[]): boolean =>
     keys.some((key) => JSON.stringify(config[key]) !== JSON.stringify(initial[key]));
-  switch (tab) {
-    case 'general':
-      return compare(
-        'localRepoPath',
-        'containerRegistries',
-        'cloudProviderAlias',
-        'cloudAliasSlots',
-        'remoteHostCredentials',
-        'type',
-      );
-    case 'runtime':
-      return compare(
-        'runtimePod',
-        'idle',
-        'autoStart',
-        'autoUpgrade',
-        'upgradeChannel',
-        'disableBuildScript',
-        'platformAccount',
-        'mountSource',
-        'repoURL',
-      );
-    case 'ai':
-      return compare('claude');
-    case 'ports':
-      return false;
-    case 'ssh':
-      return (
-        JSON.stringify(config.sshd.workspaceSyncEnabled) !==
-          JSON.stringify(initial.sshd.workspaceSyncEnabled) ||
-        JSON.stringify(config.sshd.workspaceSyncLocalPath) !==
-          JSON.stringify(initial.sshd.workspaceSyncLocalPath)
-      );
-    case 'history':
-      // History is read-only — no edits, no save, never dirty.
-      return false;
-    case 'delete':
-      return false;
+  // A table rather than a switch: every tab that edits config names the keys it
+  // owns, and a tab absent from the table is read-only by construction. Adding a
+  // tab is then a data change, not another branch.
+  const editedKeys: Partial<Record<ManageTab, (keyof UIEnvironmentConfig)[]>> = {
+    general: [
+      'localRepoPath',
+      'containerRegistries',
+      'runtimeRegistry',
+      'imagePullSecrets',
+      'cloudProviderAlias',
+      'cloudAliasSlots',
+      'remoteHostCredentials',
+      'type',
+    ],
+    runtime: [
+      'runtimePod',
+      'idle',
+      'autoStart',
+      'autoUpgrade',
+      'upgradeChannel',
+      'disableBuildScript',
+      'runtimeChart',
+      'platformAccount',
+      'mountSource',
+      'repoURL',
+    ],
+    ai: ['claude'],
+    // Only the two workspace-sync values are editable here; the rest of the SSH
+    // section is applied by its own actions rather than the dialog's Save.
+    ssh: ['sshd'],
+  };
+  const keys = editedKeys[tab];
+  if (!keys) {
+    return false;
   }
+  if (tab === 'ssh') {
+    return (
+      JSON.stringify(config.sshd.workspaceSyncEnabled) !==
+        JSON.stringify(initial.sshd.workspaceSyncEnabled) ||
+      JSON.stringify(config.sshd.workspaceSyncLocalPath) !==
+        JSON.stringify(initial.sshd.workspaceSyncLocalPath)
+    );
+  }
+  return compare(...keys);
 }

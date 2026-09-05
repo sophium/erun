@@ -1,0 +1,5 @@
+exited 0: lane, agent claude, no events yet, working tree was dirty; checkpointed as <SHORTSHA> and pushed to origin, 0 bytes of output
+audit: erun job status --environment dev --id lane --tenant team
+exited 0: lane, agent claude, no events yet, working tree was dirty; checkpointed as <SHORTSHA> and pushed to origin, 0 bytes of output
+audit: erun job await --environment dev --id lane --tenant team --timeout 1s
+job "lane" ended with an uncommitted working tree: working tree was dirty; checkpointed as <SHORTSHA> and pushed to origin

@@ -10,8 +10,54 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
+
+// mcpChannelUnreachableExitCode marks a channel that stayed unreachable even
+// after one transparent reattach — distinct from a normal error so a caller
+// looping on this command cannot misread "the channel is down" as "the job
+// finished" or "the tool failed", which is exactly the misread a naive
+// treat-anything-not-running-as-terminal watcher falls into.
+const mcpChannelUnreachableExitCode = 126
+
+// callMCPToolWithReattach is the shared choke point for every host-side call
+// into an environment's MCP edge (mcp call and the job/idle/activity verbs
+// via callEnvironmentTool): a channel that has dropped or gone stale gets
+// exactly one transparent reattach via `erun open --reconnect` before the
+// failure is surfaced, so a caller doesn't have to rediscover the two traps a
+// hand-rolled retry loop falls into — probing the port binding is worthless
+// (a stale forward still accepts the connection), and a bare `erun open`
+// would silently start an environment the operator deliberately stopped.
+func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, target mcpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (common.MCPToolCallResult, error) {
+	call := func() (common.MCPToolCallResult, error) {
+		return common.CallMCPTool(ctx, common.MCPToolCallParams{
+			Endpoint:      target.endpoint,
+			MintToken:     mcpEdgeTokenMinter(target),
+			ClientVersion: currentBuildInfo().Version,
+			Tool:          tool,
+			Arguments:     arguments,
+			IdleProbe:     idleProbe,
+		})
+	}
+	result, err := call()
+	if err != nil && errors.Is(err, common.ErrMCPEndpointUnreachable) {
+		if reattachErr := reattachEnvironmentMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
+			result, err = call()
+		}
+	}
+	return result, err
+}
+
+// mcpEdgeErrorWithExitCode is mcpEdgeError plus the exit code an unrecovered
+// channel-unreachable failure must carry (see mcpChannelUnreachableExitCode).
+func mcpEdgeErrorWithExitCode(target mcpEdgeTarget, err error) error {
+	wrapped := mcpEdgeError(target, err)
+	if errors.Is(err, common.ErrMCPEndpointUnreachable) {
+		return internal.WithExitCode(wrapped, mcpChannelUnreachableExitCode)
+	}
+	return wrapped
+}
 
 // mcpEdgeTarget is one environment's resolved MCP edge: where it answers and
 // which audience a bearer for it must carry.
@@ -128,15 +174,16 @@ func runMCPCallCommand(ctx context.Context, commandCtx common.Context, resolveOp
 		return nil
 	}
 
-	result, err := common.CallMCPTool(ctx, common.MCPToolCallParams{
-		Endpoint:      target.endpoint,
-		MintToken:     mcpEdgeTokenMinter(target),
-		ClientVersion: currentBuildInfo().Version,
-		Tool:          tool,
-		Arguments:     toolArguments,
-	})
+	// Not an idle probe: this command calls a caller-named tool, and whether that
+	// tool is read-only is not something the CLI can know generically — its own
+	// help text says as much ("A tool can change the environment").
+	result, err := callMCPToolWithReattach(ctx, commandCtx, target, tool, toolArguments, false)
 	if err != nil {
-		return mcpEdgeError(target, err)
+		if tool == "activity_lease_take" {
+			exclusive, _ := toolArguments["exclusive"].(bool)
+			err = common.DescribeExclusiveActivityLeaseVersionSkew(target.tenant, target.environment, exclusive, err)
+		}
+		return mcpEdgeErrorWithExitCode(target, err)
 	}
 	if commandCtx.Output == common.OutputJSON {
 		return commandCtx.WriteResult(result)
@@ -155,18 +202,35 @@ func runMCPToolsCommand(ctx context.Context, commandCtx common.Context, resolveO
 		return nil
 	}
 
-	list, err := common.ListMCPTools(ctx, common.MCPToolListParams{
-		Endpoint:      target.endpoint,
-		MintToken:     mcpEdgeTokenMinter(target),
-		ClientVersion: currentBuildInfo().Version,
-	})
+	list, err := listMCPToolsWithReattach(ctx, commandCtx, target)
 	if err != nil {
-		return mcpEdgeError(target, err)
+		return mcpEdgeErrorWithExitCode(target, err)
 	}
 	if commandCtx.Output == common.OutputJSON {
 		return commandCtx.WriteResult(list)
 	}
 	return writeMCPToolsText(commandCtx, target, list)
+}
+
+// listMCPToolsWithReattach is listMCPTools's counterpart to
+// callMCPToolWithReattach: the same one-shot reattach-then-retry for a
+// dropped or stale channel.
+func listMCPToolsWithReattach(ctx context.Context, commandCtx common.Context, target mcpEdgeTarget) (common.MCPToolListResult, error) {
+	list := func() (common.MCPToolListResult, error) {
+		return common.ListMCPTools(ctx, common.MCPToolListParams{
+			Endpoint:      target.endpoint,
+			MintToken:     mcpEdgeTokenMinter(target),
+			ClientVersion: currentBuildInfo().Version,
+			IdleProbe:     true,
+		})
+	}
+	result, err := list()
+	if err != nil && errors.Is(err, common.ErrMCPEndpointUnreachable) {
+		if reattachErr := reattachEnvironmentMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
+			result, err = list()
+		}
+	}
+	return result, err
 }
 
 func runMCPTokenCommand(commandCtx common.Context, resolveOpen OpenResolver, params common.OpenParams) error {

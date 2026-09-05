@@ -1,6 +1,9 @@
 package integration
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +17,44 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/golden"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
+
+// buildReportAPIStubServer runs a minimal erun-backend-api double covering
+// GET /v1/environments and POST /v1/builds -- the two calls ReportBuildOutcome
+// makes to self-report an ordinary `erun build` run (erun#1954). buildStatus
+// lets a scenario force the report itself to fail (500) while still proving
+// the build's own exit code is untouched.
+func buildReportAPIStubServer(t testing.TB, buildStatus int) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/environments", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"environmentId": "env-1", "tenantId": "tenant-1", "name": "dev", "type": "local-agent", "status": "running"},
+		})
+	})
+	mux.HandleFunc("POST /v1/builds", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		if buildStatus != http.StatusCreated {
+			http.Error(w, "platform unavailable", buildStatus)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"buildId": "build-1", "tenantId": "tenant-1", "environmentId": body["environmentId"],
+			"successful": body["successful"], "commitId": body["commitId"], "version": body["version"],
+			"createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
 
 // imageFingerprint reads the fingerprint-cache tag an image resolved to from the
 // raw trace, which output normalization would otherwise collapse to <HEX16>.
@@ -40,6 +81,7 @@ func chartPackageVersion(t testing.TB, out, chart string) string {
 }
 
 func TestBuild(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -55,6 +97,23 @@ func TestBuild(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "build/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_gitignored_project_config_warns", func(t *testing.T) {
+		// A project config that resolves from disk but is excluded by .gitignore
+		// silently works on this machine only, since git never sees it. The
+		// build trace must surface that as a warning instead of staying silent.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedGitignoredProjectConfig(t, setup, "paths:\n    docker: build/docker\n    version: build/VERSION\n")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_gitignored_project_config_warns", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_cluster_registry_resolves_host_port_forward", func(t *testing.T) {
@@ -94,6 +153,104 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_configured_docker_and_version_paths", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_component_auto_selects_lone_entry", func(t *testing.T) {
+		// A single components: entry auto-selects with no --component flag,
+		// exactly like today's implicit single-paths behavior. Each harness's
+		// docker/version root lives outside the shared paths: block (erun#1840's
+		// monorepo-of-independent-deployables shape), so without selection this
+		// harness's build would be unreachable at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectComponentsConfig(t, setup, fixture.ComponentPathsConfig{
+			Name:    "platform-validator",
+			Docker:  "harnesses/platform-validator/docker",
+			Version: "harnesses/platform-validator/VERSION",
+		})
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "docker"), "platform-validator")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_component_auto_selects_lone_entry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_component_flag_selects_entry", func(t *testing.T) {
+		// Two components: entries declared (two independent harnesses in one
+		// monorepo); --component selects one by name, without editing the
+		// committed config — the "two operators, two harnesses, no local edit"
+		// requirement from erun#1840.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectComponentsConfig(t, setup,
+			fixture.ComponentPathsConfig{
+				Name:    "platform-validator",
+				Docker:  "harnesses/platform-validator/docker",
+				Version: "harnesses/platform-validator/VERSION",
+			},
+			fixture.ComponentPathsConfig{
+				Name:    "ingest-worker",
+				Docker:  "harnesses/ingest-worker/docker",
+				Version: "harnesses/ingest-worker/VERSION",
+			},
+		)
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "docker"), "platform-validator")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "VERSION"), "2.3.4\n")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "ingest-worker", "docker"), "ingest-worker")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "harnesses", "ingest-worker", "VERSION"), "9.9.9\n")
+		result := erun.Run(t, []string{"build", "--component", "ingest-worker", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "platform-validator") {
+			t.Errorf("expected only the selected ingest-worker harness in the plan, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_component_flag_selects_entry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("component_selection_ambiguous_errors", func(t *testing.T) {
+		// More than one components: entry with no --component flag fails naming
+		// the choices, rather than silently building whichever one convention
+		// discovery happens to land on (erun#1840's acceptance criterion).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectComponentsConfig(t, setup,
+			fixture.ComponentPathsConfig{Name: "ingest-worker", Docker: "harnesses/ingest-worker/docker"},
+			fixture.ComponentPathsConfig{Name: "platform-validator", Docker: "harnesses/platform-validator/docker"},
+		)
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "docker"), "platform-validator")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "ingest-worker", "docker"), "ingest-worker")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an ambiguous component selection, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "ingest-worker") || !strings.Contains(result.Combined, "platform-validator") {
+			t.Errorf("expected the ambiguity error to name both declared components:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/component_selection_ambiguous_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("component_flag_unknown_name_errors", func(t *testing.T) {
+		// --component naming a component that .erun/config.yaml does not declare
+		// fails loudly rather than silently falling back to convention discovery.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectComponentsConfig(t, setup, fixture.ComponentPathsConfig{
+			Name:   "platform-validator",
+			Docker: "harnesses/platform-validator/docker",
+		})
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "harnesses", "platform-validator", "docker"), "platform-validator")
+		result := erun.Run(t, []string{"build", "--component", "nope", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unknown --component name, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/component_flag_unknown_name_errors", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_paths_version_keeps_pinned_base", func(t *testing.T) {
@@ -377,13 +534,14 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("real_run_fails_when_daemon_cannot_build_required_platform", func(t *testing.T) {
-		// The multi-arch daemon-capability preflight: erun always builds
-		// linux/amd64 + linux/arm64, so before shelling `docker build` per platform
-		// it runs `docker buildx inspect` and fails fast with a direct, actionable
-		// error when the daemon has no emulator for a required platform — instead
-		// of the opaque per-platform `docker build` failure. The stub reports only
-		// linux/amd64, so linux/arm64 is unbuildable regardless of host arch.
-		// Real-run, not dry-run, because the preflight guards the real executor.
+		// The multi-arch daemon-capability preflight: by default this build
+		// targets linux/amd64 + linux/arm64, so before shelling `docker build`
+		// per platform it runs `docker buildx inspect` and fails fast with a
+		// direct, actionable error when the daemon has no emulator for a
+		// required platform — instead of the opaque per-platform `docker build`
+		// failure. The stub reports only linux/amd64, so linux/arm64 is
+		// unbuildable regardless of host arch. Real-run, not dry-run, because the
+		// preflight guards the real executor.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		stubs := setup.Cwd + "/stubs"
@@ -403,6 +561,140 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("expected build to fail when the daemon cannot build a required platform; got exit 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "build/real_run_fails_when_daemon_cannot_build_required_platform", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_platform_flag_narrows_build_to_one_architecture", func(t *testing.T) {
+		// --platform overrides the default multi-arch build to only the named
+		// platform(s), so an environment whose cluster can only ever run one
+		// architecture stops paying for an emulated build of the other.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		result := erun.Run(t, []string{"build", "--dry-run", "--platform", "linux/amd64"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected --platform linux/amd64 to exclude arm64 from the build plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_platform_flag_narrows_build_to_one_architecture", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_configured_platforms_narrows_build_to_one_architecture", func(t *testing.T) {
+		// environments.<env>.docker.platforms in .erun/config.yaml pins a build
+		// to one architecture permanently, without a --platform flag on every
+		// invocation — for an environment whose cluster can only ever run it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      platforms: [linux/amd64]\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected configured docker.platforms to exclude arm64 from the build plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_configured_platforms_narrows_build_to_one_architecture", normalize.Apply(result.Combined))
+	})
+
+	t.Run("release_platform_flag_conflict_errors", func(t *testing.T) {
+		// --release always publishes every platform erun supports, so combining
+		// it with an explicit --platform override is refused rather than
+		// silently narrowing a released artifact.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		result := erun.Run(t, []string{"build", "--release", "--dry-run", "--platform", "linux/amd64"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --release combined with --platform, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/release_platform_flag_conflict_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_release_ignores_configured_platforms", func(t *testing.T) {
+		// Regression: a release build must publish every platform erun supports
+		// regardless of the environment's configured docker.platforms pin — a
+		// released artifact has to be deployable on any cluster, not just the
+		// one that happened to build it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      platforms: [linux/amd64]\n",
+		)
+		result := erun.Run(t, []string{"build", "--release", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "linux/amd64") || !strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected a release build to still target both platforms despite the configured single-arch pin:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_release_ignores_configured_platforms", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_default_verbosity_stays_quiet_when_the_build_succeeds", func(t *testing.T) {
+		// docker build always runs with --progress=plain now (never
+		// --quiet, which suppressed a failing step's own output at the source),
+		// so quiet-on-success below debug verbosity has to come from erun
+		// capturing the output itself rather than replaying it. This is the
+		// success half of that contract: BuildKit's plain-progress chatter must
+		// not leak into a plain `erun build` even though docker produced it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) echo "#1 [internal] load build definition" ; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "internal] load build definition") {
+			t.Fatalf("a successful build at default verbosity must stay quiet, got docker's own output leaked:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("real_run_default_verbosity_surfaces_docker_builds_own_output_on_failure", func(t *testing.T) {
+		// The release path builds quietly, so when the in-build `make
+		// check` test stage failed, all that survived was
+		// `process "/bin/sh -c make check ..." did not complete successfully:
+		// exit code: 2` — no lint finding, no failing test name. docker build's
+		// own output (what BuildKit's plain progress captured, including a
+		// failing RUN step's stdout/stderr) must now reach the user even at
+		// default verbosity, since a failed build is the one time quiet is the
+		// wrong default.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) echo "make check: FAIL erun-cli/cmd TestSomething" >&2 ; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build failure to fail the command, got exit 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "make check: FAIL erun-cli/cmd TestSomething") {
+			t.Fatalf("a failed build at default verbosity must surface docker's own output, got:\n%s", result.Combined)
+		}
 	})
 
 	t.Run("dry_run_no_incremental_skips_fingerprint_short_circuit", func(t *testing.T) {
@@ -679,6 +971,19 @@ func TestBuild(t *testing.T) {
 			// platforms so `docker buildx inspect` passes.
 			`  buildx)`,
 			`    case "$2" in inspect) echo "Platforms: linux/amd64, linux/arm64" ;; *) exit 0 ;; esac ;;`,
+			// manifest inspect backs both the pre-publish probe and the
+			// post-publish verify; marker-file-tracked so this scenario (a
+			// first-ever release, per "fingerprint image not found locally"
+			// below) does not falsely report the image as already published
+			// before manifest push has run.
+			`  manifest)`,
+			`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
+			`    case "$2" in`,
+			`      inspect) [ -f "$marker" ] && exit 0 || exit 1 ;;`,
+			`      push) touch "$marker" ; exit 0 ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
@@ -691,6 +996,9 @@ func TestBuild(t *testing.T) {
 		// erun's own release git operations (tag/push).
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars = append(envVars, fixture.StubEnv(stubs, "git", "helm")...)
+		// #1201: give the registry-credential preflight a resolvable credential
+		// so this scenario still reaches the manifest-push behavior it is about.
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"build", "--release", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -714,6 +1022,98 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_build_deploy_resolves_docker_target_deploy_specs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_build_deploy_erun_devops_component_resolves_runtime_image_memo", func(t *testing.T) {
+		// erun#1746: when the docker component being built --deploy'd IS the
+		// runtime chart's own erun-devops (true for the "erun" tenant, whose
+		// own devops component is literally named erun-devops), the resolved
+		// spec's image doubles as the runtime-line memo a real deploy would
+		// heal into EnvConfig.RuntimeRunningImage. This locks that resolution
+		// for a non-"team" tenant so the tenant-name-collision case is
+		// exercised too.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "erun", "dev")
+		fixture.SeedDevopsRepo(t, setup, "erun", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "erun")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		dockerDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "erun-devops")
+		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_build_deploy_erun_devops_component_resolves_runtime_image_memo", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_dind_args_resolve_configured_runtime_dind_pod", func(t *testing.T) {
+		// erun#2081: a Dockerfile that declares ARG DIND_CPU_LIMIT / ARG
+		// DIND_MEMORY_LIMIT_MIB (the erun-devops Dockerfile's own in-build gate
+		// sizing) must have those ARGs fed from the *building* environment's
+		// actual configured erun-dind sidecar resources
+		// (EnvConfig.RuntimeDindPod), not the Dockerfile's own hardcoded
+		// defaults and never the host's raw node capacity. team/dev's config
+		// sets a non-default runtimedindpod (6 CPU / 24Gi) so the golden can't
+		// be satisfied by accident from the 4-core/20Gi fallback default.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		appendEnvConfigForTest(t, setup, "team", "dev", "runtimedindpod:\n  cpu: \"6\"\n  memory: 24Gi\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"),
+			"FROM alpine:3.22\nARG DIND_CPU_LIMIT=4\nARG DIND_MEMORY_LIMIT_MIB=20480\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--build-arg DIND_CPU_LIMIT=6 --build-arg DIND_MEMORY_LIMIT_MIB=24576") {
+			t.Errorf("expected the docker build to carry the configured runtimedindpod values:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_dind_args_resolve_configured_runtime_dind_pod", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", func(t *testing.T) {
+		// erun#2081: an environment with no configured runtimedindpod must not
+		// fall back to the host node's real CPU/memory capacity (the bug this
+		// issue is about) -- it must fall back to the same small, fixed
+		// constant the sidecar's own chart default and the Dockerfile's own
+		// ARG default use (4 CPU / 20480Mi), regardless of how large the
+		// machine actually running this test is.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"),
+			"FROM alpine:3.22\nARG DIND_CPU_LIMIT=4\nARG DIND_MEMORY_LIMIT_MIB=20480\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--build-arg DIND_CPU_LIMIT=4 --build-arg DIND_MEMORY_LIMIT_MIB=20480") {
+			t.Errorf("expected the docker build to fall back to the conservative constant, not the host's real capacity:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_without_dind_args_is_unaffected", func(t *testing.T) {
+		// erun#2081: a Dockerfile that declares neither ARG must not get either
+		// build-arg, even when the building environment has a configured
+		// runtimedindpod -- the regex-gated detection in
+		// dockerfileConsumesDindCPULimit/dockerfileConsumesDindMemoryLimit
+		// must not fire for an unrelated Dockerfile.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		appendEnvConfigForTest(t, setup, "team", "dev", "runtimedindpod:\n  cpu: \"6\"\n  memory: 24Gi\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"), "FROM alpine:3.22\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "DIND_CPU_LIMIT") || strings.Contains(result.Combined, "DIND_MEMORY_LIMIT_MIB") {
+			t.Errorf("expected no DIND build-args for a Dockerfile that declares neither ARG:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_without_dind_args_is_unaffected", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_linux_package_from_component_dir", func(t *testing.T) {
@@ -960,6 +1360,67 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	// Independent images build concurrently, and the schedule that allows it is
+	// a pure function of the Dockerfiles — so it is auditable up front, and the
+	// same on any machine. The degree is pinned here rather than resolved from
+	// the host, or the assertion would depend on the runner's core count.
+	t.Run("dry_run_reports_the_dependency_waves_it_would_build_in", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "wrapper", "Dockerfile"),
+			"FROM ghcr.io/sophium/api:${ERUN_VERSION}\nCMD [\"true\"]\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops/docker/wrapper/Dockerfile")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add ${ERUN_VERSION} wrapper over api")
+		result := erun.Run(t, []string{"build", "--jobs", "2", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The wrapper FROMs api, so it cannot share api's wave.
+		for _, want := range []string{
+			"3 images in 2 waves",
+			"wave 2 (1): ghcr.io/sophium/wrapper",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the wave plan:\n%s", want, result.Combined)
+			}
+		}
+	})
+
+	// --jobs 1 is the escape hatch back to the old behaviour, so it must not
+	// merely be slower — it must produce what it always produced, including
+	// keeping each image's decision lines beside its own build output.
+	t.Run("dry_run_single_job_announces_no_schedule", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		result := erun.Run(t, []string{"build", "--jobs", "1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "waves") {
+			t.Fatalf("a sequential build has no schedule to announce:\n%s", result.Combined)
+		}
+	})
+
+	// A FROM cycle is the one input a wave scheduler cannot make progress on, so
+	// it has to be named rather than waited on forever.
+	t.Run("a_from_cycle_fails_instead_of_hanging", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "api", "Dockerfile"),
+			"FROM ghcr.io/sophium/base:${ERUN_VERSION}\nCMD [\"true\"]\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "base", "Dockerfile"),
+			"FROM ghcr.io/sophium/api:${ERUN_VERSION}\nCMD [\"true\"]\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops/docker")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "make api and base FROM each other")
+		result := erun.Run(t, []string{"build", "--jobs", "2", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a cycle to fail the build:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "cycle") {
+			t.Fatalf("the failure must name the cycle:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("dry_run_pinned_version_wrapper_resolves_local_base", func(t *testing.T) {
 		// `erun build --version <v>` is the pre-release gate: validate the release
 		// build locally before any git ref moves. It used to be impossible for a
@@ -1055,6 +1516,18 @@ func TestBuild(t *testing.T) {
 			`    exit 0 ;;`,
 			`  image)`,
 			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			// manifest inspect backs both the pre-publish probe and the
+			// post-publish verify; marker-file-tracked so this scenario does
+			// not falsely report the image as already published before
+			// manifest push has run.
+			`  manifest)`,
+			`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
+			`    case "$2" in`,
+			`      inspect) [ -f "$marker" ] && exit 0 || exit 1 ;;`,
+			`      push) touch "$marker" ; exit 0 ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
@@ -1100,14 +1573,115 @@ func TestBuild(t *testing.T) {
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
 		// --release dry-run must trace the per-platform docker build + docker push
 		// for the release-tagged image, plus the local tag for downstream
-		// dependencies.
+		// dependencies. "base" (fixture.SeedReleaseRepo) is a version-pinned
+		// wrapper carrying its own VERSION rather than the release's: a release
+		// must still publish it, not only build and locally tag it, or a
+		// component whose chart is published never gets an image the registry
+		// actually has (erun-oci-registry's own defect, see erun-devops/AGENTS.md
+		// "Wrapping And Pinning Third-Party Service Images").
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
+		if !strings.Contains(result.Combined, "docker manifest push ghcr.io/sophium/base:") {
+			t.Fatalf("expected the version-pinned wrapper image \"base\" to be pushed and assembled into a manifest, not only built and locally tagged: %s", result.Combined)
+		}
 		golden.Equal(t, "build/dry_run_release_pushes_release_tagged_docker_builds", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_with_platform_alias_traces_the_build_report", func(t *testing.T) {
+		// erun#1954: with an erun platform alias configured, build traces the
+		// self-report it would make, never touching the network under
+		// --dry-run -- so a fixed, unresolvable API URL (no real server
+		// behind it) is fine here, the same choice review record-build's own
+		// dry-run scenario makes, and keeps the golden free of a real
+		// httptest server's randomly-assigned port. The commit resolved from
+		// the seeded git repo is content-derived and differs per run;
+		// normalize.Apply's existing <HEX> rule masks it the same way it
+		// already masks other long hex digests.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
+		result := erun.Run(t, []string{"build", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_with_platform_alias_traces_the_build_report", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_with_platform_alias_reports_a_successful_build", func(t *testing.T) {
+		// erun#1954: a real (non-dry-run) build with a platform alias
+		// configured self-reports its outcome after it finishes. A real git
+		// repository is seeded so the report resolves and includes a real
+		// commit; the exact hash is masked by output normalization not
+		// applying to it, so this asserts shape (commitId= present) rather
+		// than the golden's exact bytes.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		server := buildReportAPIStubServer(t, http.StatusCreated)
+		platformAlias(t, setup, server)
+		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build", "--version", "1.0.0"}, erun.RunOptions{Cwd: dockerDir, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "platform: POST "+server.URL+"/v1/builds (environment=dev, successful=true, commitId=") {
+			t.Fatalf("expected a traced build-report call with a resolved commitId, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "build reported to erun platform: build-1") {
+			t.Fatalf("expected a successful build-report confirmation, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("real_run_build_report_failure_does_not_fail_the_build", func(t *testing.T) {
+		// erun#1954: a build must never fail -- or report itself as failed --
+		// because self-reporting to the platform is unavailable.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		server := buildReportAPIStubServer(t, http.StatusInternalServerError)
+		platformAlias(t, setup, server)
+		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build", "--version", "1.0.0"}, erun.RunOptions{Cwd: dockerDir, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("a failed build report must not fail the build itself, got exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "build report to erun platform skipped:") {
+			t.Fatalf("expected a recorded skip for the failed report, got:\n%s", result.Combined)
+		}
 	})
 }
 

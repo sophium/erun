@@ -9,10 +9,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -24,6 +27,29 @@ import (
 // the real-run open scenarios) so the fake edge never collides with a
 // developer's live erun session on the default 17000 range.
 const mcpEdgeLocalPort = 26100
+
+// startSilentPortForward binds port and holds every connection open without
+// ever answering it — a stale kubectl port-forward, as opposed to nothing
+// listening at all (dial refused) or an edge that answers with an error. Every
+// held connection is closed together on cleanup, once the listener itself
+// closes and the accept loop's deferred closes run.
+func startSilentPortForward(t *testing.T, port int) {
+	t.Helper()
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("listen on 127.0.0.1:%d: %v", port, err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+		}
+	}()
+}
 
 // fakeMCPEdge stands in for the per-env erun-mcp server: it speaks the
 // streamable-HTTP handshake (initialize, then a 202 for the initialized
@@ -42,6 +68,12 @@ type fakeMCPEdge struct {
 	AcceptEverything bool
 	// Results maps a JSON-RPC method to the raw JSON result it answers with.
 	Results map[string]string
+	// ToolResults maps a tools/call tool name to the raw JSON result it answers
+	// with, taking precedence over Results["tools/call"] for that tool. Use it
+	// when one scenario's command makes more than one tools/call round trip to
+	// different tools and each needs its own canned answer (e.g. starting a
+	// background job, then reading its status back).
+	ToolResults map[string]string
 	// RPCErrors maps a JSON-RPC method to a raw JSON-RPC error object, the
 	// protocol-level failure a tool-level isError does not cover.
 	RPCErrors map[string]string
@@ -52,17 +84,36 @@ type fakeMCPEdge struct {
 	// ForgetSessionAlways never accepts a session id, so a client that keeps
 	// re-handshaking would loop forever.
 	ForgetSessionAlways bool
+	// DropFirstRequest, when set, closes the raw connection for the very first
+	// request without answering it at all — a connection that was accepted and
+	// then cut, the shape a flapping local port-forward leaves an in-flight
+	// request in (as opposed to AcceptEverything, which answers but with an
+	// empty envelope).
+	DropFirstRequest bool
 
 	mu         sync.Mutex
 	requests   []fakeMCPRequest
 	handshakes int
 	forgot     bool
+	dropped    bool
 }
 
 type fakeMCPRequest struct {
 	Method     string
 	Authbearer string
 	SessionID  string
+	// Tool is the tool a tools/call named, which is what proves a caller reached
+	// the intended surface rather than some other one.
+	Tool string
+	// Arguments is the tools/call arguments object the caller actually sent, so
+	// a scenario can assert what a host-side command forwarded into the payload
+	// (e.g. that it restated the tenant/environment it already resolved) rather
+	// than only that a call reached the edge at all.
+	Arguments map[string]any
+	// IdleProbe reports whether the request carried the header that exempts it
+	// from the environment's activity accounting — set by a diagnostic read, and
+	// never by a call that can mutate the environment.
+	IdleProbe bool
 }
 
 func (e *fakeMCPEdge) start(t *testing.T, port int) {
@@ -79,10 +130,22 @@ func (e *fakeMCPEdge) start(t *testing.T, port int) {
 }
 
 func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if e.DropFirstRequest && e.dropOnce() {
+		if hijacker, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hijacker.Hijack(); err == nil {
+				_ = conn.Close()
+			}
+		}
+		return
+	}
 	body, _ := io.ReadAll(r.Body)
 	var request struct {
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
+		Params struct {
+			Name      string         `json:"name"`
+			Arguments map[string]any `json:"arguments"`
+		} `json:"params"`
 	}
 	_ = json.Unmarshal(body, &request)
 
@@ -91,6 +154,9 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Method:     request.Method,
 		Authbearer: strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "),
 		SessionID:  r.Header.Get("Mcp-Session-Id"),
+		Tool:       request.Params.Name,
+		Arguments:  request.Params.Arguments,
+		IdleProbe:  r.Header.Get(common.MCPIdleProbeHeader) == "true",
 	})
 	e.mu.Unlock()
 
@@ -115,7 +181,13 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rpcError, ok := e.RPCErrors[request.Method]; ok {
 		reply = fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"error":%s}`, request.ID, rpcError)
 	} else {
-		result, ok := e.Results[request.Method]
+		result, ok := "", false
+		if request.Method == "tools/call" {
+			result, ok = e.ToolResults[request.Params.Name]
+		}
+		if !ok {
+			result, ok = e.Results[request.Method]
+		}
 		if !ok {
 			result = "{}"
 		}
@@ -131,6 +203,16 @@ func (e *fakeMCPEdge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = fmt.Fprintln(w, reply)
+}
+
+func (e *fakeMCPEdge) dropOnce() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.dropped {
+		return false
+	}
+	e.dropped = true
+	return true
 }
 
 func (e *fakeMCPEdge) forgetSession() bool {
@@ -194,6 +276,21 @@ func (e *fakeMCPEdge) requestFor(t *testing.T, method string) fakeMCPRequest {
 	}
 	t.Fatalf("edge never received %s; got %+v", method, e.recorded())
 	return fakeMCPRequest{}
+}
+
+// assertToolArgumentsNameTarget asserts a tools/call request restated the
+// tenant/environment the host already resolved to reach this edge, rather
+// than leaving the tool to infer them from the server's own bound context
+// (erun#1709). Every off-environment idle/job/activity-lease call must carry
+// its own tenant/environment on the wire.
+func assertToolArgumentsNameTarget(t *testing.T, request fakeMCPRequest, tenant, environment string) {
+	t.Helper()
+	if got, _ := request.Arguments["tenant"].(string); got != tenant {
+		t.Errorf("%s call: got tenant argument %q, want %q -- arguments: %+v", request.Tool, got, tenant, request.Arguments)
+	}
+	if got, _ := request.Arguments["environment"].(string); got != environment {
+		t.Errorf("%s call: got environment argument %q, want %q -- arguments: %+v", request.Tool, got, environment, request.Arguments)
+	}
 }
 
 type mcpTokenClaims struct {
@@ -291,6 +388,7 @@ func decodeJWTSegment(t *testing.T, segment string, into any) {
 
 func TestMCP(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -300,6 +398,7 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("dry_run_traces_emcp_launch", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		args := []string{
@@ -316,6 +415,7 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("dry_run_uses_environment_local_port_by_default", func(t *testing.T) {
+		t.Parallel()
 		// Seeding alpha first pushes "team" to index 1, so the default port
 		// resolves to 17100 (17000 + 100), not the index-0 17000 — the seed
 		// order proves the port is environment-scoped.
@@ -330,6 +430,7 @@ func TestMCP(t *testing.T) {
 	})
 
 	t.Run("real_run_launches_emcp_stub", func(t *testing.T) {
+		t.Parallel()
 		// Real-run: the launcher body only executes past the dry-run gate,
 		// so a stub is the only way to reach the bare-name emcp resolution
 		// and lock the argv it launches.
@@ -347,6 +448,7 @@ exit 0`)
 	})
 
 	t.Run("real_run_errors_when_emcp_missing", func(t *testing.T) {
+		t.Parallel()
 		// A missing emcp must surface the friendly "build or install it
 		// first" message, not a raw exec error. The scenario's scrubbed PATH is
 		// what makes emcp absent, on every host.
@@ -360,6 +462,7 @@ exit 0`)
 	})
 
 	t.Run("real_run_propagates_emcp_exit_failure", func(t *testing.T) {
+		t.Parallel()
 		// A launched emcp that exits non-zero must propagate its raw exit
 		// error and the tool's stderr (not the friendly missing-binary
 		// message).
@@ -377,6 +480,7 @@ exit 3`)
 	})
 
 	t.Run("call_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "call", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -386,6 +490,7 @@ exit 3`)
 	})
 
 	t.Run("tools_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "tools", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -395,6 +500,7 @@ exit 3`)
 	})
 
 	t.Run("proxy_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "proxy", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -404,6 +510,7 @@ exit 3`)
 	})
 
 	t.Run("token_help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"mcp", "token", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -413,6 +520,7 @@ exit 3`)
 	})
 
 	t.Run("call_dry_run_traces_the_resolved_tool_call", func(t *testing.T) {
+		t.Parallel()
 		// The plan must name the endpoint the call would reach, the tool, and the
 		// arguments, and must not touch the network.
 		setup := env.New(t)
@@ -426,6 +534,7 @@ exit 3`)
 	})
 
 	t.Run("call_without_a_tool_fails_informatively", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"mcp", "call", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -436,6 +545,7 @@ exit 3`)
 	})
 
 	t.Run("call_with_malformed_args_fails_before_resolving", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		args := []string{"mcp", "call", "--tool", "raw", "--args", "not-json", "--dry-run"}
@@ -447,6 +557,7 @@ exit 3`)
 	})
 
 	t.Run("token_dry_run_traces_the_audience", func(t *testing.T) {
+		t.Parallel()
 		// The audience is the whole point of the token, so the plan names it; no
 		// identity is read in dry-run.
 		setup := env.New(t)
@@ -459,6 +570,7 @@ exit 3`)
 	})
 
 	t.Run("token_without_a_desktop_identity_says_where_it_comes_from", func(t *testing.T) {
+		t.Parallel()
 		// No identity on this machine: the error must point at the desktop app
 		// rather than mint a key no deployed environment would trust.
 		setup := env.New(t)
@@ -471,6 +583,7 @@ exit 3`)
 	})
 
 	t.Run("token_real_run_mints_a_verifiable_bearer", func(t *testing.T) {
+		t.Parallel()
 		// Real-run: the mint only happens past the dry-run gate. The token is a
 		// fresh signature over a live timestamp, so the golden locks the result
 		// shape (with the token normalized away) and the claims are asserted from
@@ -649,20 +762,53 @@ exit 3`)
 	t.Run("call_real_run_unreachable_edge_points_at_open", func(t *testing.T) {
 		// Nothing listening on the env's local MCP port means the port-forward is
 		// missing; the fix is `erun open`, and the error must say that instead of
-		// leaking a raw dial error.
+		// leaking a raw dial error. A one-shot reattach is attempted first (there
+		// is no kubectl on this scrubbed PATH, so it fails fast rather than
+		// hanging); the unreachable channel must still exit on the exit code
+		// distinct from a plain error (mcpChannelUnreachableExitCode, 126 —
+		// erun-cli/cmd/environment_call.go), never a job/tool outcome's own code,
+		// so a caller looping on this command cannot misread "channel down" as
+		// "finished".
 		skipIfPortsBusy(t, mcpEdgeLocalPort)
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
 		fixture.SeedDesktopIdentity(t, setup)
 
 		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for an unreachable edge, got 0:\n%s", result.Combined)
+		if result.ExitCode != 126 {
+			t.Fatalf("expected exit 126 (channel unreachable) for an unreachable edge, got %d:\n%s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "mcp/call_real_run_unreachable_edge_points_at_open", normalize.Apply(result.Combined))
 	})
 
+	t.Run("call_real_run_stale_forward_fails_fast_instead_of_hanging", func(t *testing.T) {
+		// A stale kubectl port-forward keeps the local port bound and accepts
+		// every connection, but never answers — the exact shape a dial-based
+		// check cannot see, and the one that used to hang a call for its full
+		// timeout (or forever, with none) instead of failing. The listener here
+		// holds every connection open and never writes to it, so the only way
+		// this scenario passes is if the client's own reachability probe — not
+		// the caller's timeout — is what ends the wait.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		startSilentPortForward(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 126 {
+			t.Fatalf("expected exit 126 (channel unreachable) for a stale port-forward, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "held but the edge never answers") {
+			t.Fatalf("expected the stale forward to be named as such, distinct from a missing one, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "erun open team dev") {
+			t.Fatalf("expected the same recovery guidance a missing forward gets, got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("proxy_dry_run_traces_the_resolved_edge", func(t *testing.T) {
+		t.Parallel()
 		// The plan must name the edge the relay would reach, and must neither read
 		// stdin nor touch the network.
 		setup := env.New(t)
@@ -867,6 +1013,34 @@ exit 3`)
 		}
 	})
 
+	t.Run("call_real_run_recovers_when_the_local_forward_drops_mid_request", func(t *testing.T) {
+		// A flapping kubectl port-forward ("lost connection to pod", then a fresh
+		// forward) drops a request that was already in flight. The remote MCP
+		// server process itself never restarted — only the local tunnel blipped —
+		// so the retry needs no re-handshake, just one resend once the tunnel
+		// answers again, which is exactly what the still-live edge below proves.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{DropFirstRequest: true, Results: map[string]string{
+			"initialize": `{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected the dropped first request to recover, got exit %d:\n%s", result.ExitCode, result.Combined)
+		}
+		// The dropped connection carries no readable request (it was hijacked and
+		// closed before any body was parsed), so exactly one *readable* initialize
+		// reaching the edge is what proves this succeeded via a plain retry, not
+		// by the edge happening to answer the doomed connection after all.
+		if handshakes := edge.requestsFor("initialize"); len(handshakes) != 1 {
+			t.Fatalf("edge saw %d readable initialize requests, want exactly one (the retry): %+v", len(handshakes), edge.recorded())
+		}
+	})
+
 	t.Run("proxy_real_run_surfaces_a_session_the_edge_never_accepts", func(t *testing.T) {
 		// The recovery is bounded: an edge that rejects every session must produce
 		// one JSON-RPC error against the request the client is waiting on, not an
@@ -921,6 +1095,98 @@ exit 3`)
 		replies := requireJSONRPCLines(t, result.Stdout, 1)
 		if message := jsonRPCErrorMessage(t, replies[0]); !strings.Contains(message, "returned no reply") {
 			t.Fatalf("reply does not say the edge answered without one: %q", message)
+		}
+	})
+
+	t.Run("proxy_real_run_serves_inputs_upload_locally", func(t *testing.T) {
+		t.Parallel()
+		// inputs_upload is host-served like workspace_sync: it must never touch
+		// the edge at all, which is why no fake edge is started here — a message
+		// reaching the network would fail this scenario outright.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		local := filepath.Join(setup.Cwd, "evidence.bin")
+		if err := os.WriteFile(local, []byte("hello"), 0o644); err != nil {
+			t.Fatalf("seed local file: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		stubKubectlUploadAccepts(t, stubs, 5, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+
+		localJSON, err := json.Marshal(local)
+		if err != nil {
+			t.Fatalf("marshal local path: %v", err)
+		}
+		stdin := proxyStdin(fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"inputs_upload","arguments":{"localPath":%s,"remotePath":"/home/erun/.erun/outputs/evidence.bin"}}}`,
+			string(localJSON)))
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		replies := requireJSONRPCLines(t, result.Stdout, 1)
+		resultField, ok := replies[0]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("reply carries no result: %v", replies[0])
+		}
+		content, ok := resultField["content"].([]any)
+		if !ok || len(content) == 0 {
+			t.Fatalf("reply result carries no content: %v", resultField)
+		}
+		first, ok := content[0].(map[string]any)
+		if !ok {
+			t.Fatalf("reply content[0] is not an object: %v", content[0])
+		}
+		text, _ := first["text"].(string)
+		if !strings.Contains(text, "sha256 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824") {
+			t.Fatalf("reply text does not report the verified checksum: %q", text)
+		}
+		if !strings.Contains(text, "/home/erun/.erun/outputs/evidence.bin") {
+			t.Fatalf("reply text does not name the remote destination: %q", text)
+		}
+	})
+
+	t.Run("proxy_real_run_previews_inputs_upload_without_sending", func(t *testing.T) {
+		t.Parallel()
+		// preview must resolve and describe the transfer without ever invoking
+		// kubectl — no stub is declared, so a real call here would fail on a
+		// missing binary rather than silently pass.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		local := filepath.Join(setup.Cwd, "evidence.bin")
+		if err := os.WriteFile(local, []byte("hello"), 0o644); err != nil {
+			t.Fatalf("seed local file: %v", err)
+		}
+
+		localJSON, err := json.Marshal(local)
+		if err != nil {
+			t.Fatalf("marshal local path: %v", err)
+		}
+		stdin := proxyStdin(fmt.Sprintf(
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"inputs_upload","arguments":{"localPath":%s,"remotePath":"/home/erun/.erun/outputs/evidence.bin","preview":true}}}`,
+			string(localJSON)))
+		result := erun.Run(t, []string{"mcp", "proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: stdin})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		replies := requireJSONRPCLines(t, result.Stdout, 1)
+		resultField, ok := replies[0]["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("reply carries no result: %v", replies[0])
+		}
+		content, _ := resultField["content"].([]any)
+		if len(content) == 0 {
+			t.Fatalf("reply result carries no content: %v", resultField)
+		}
+		first, _ := content[0].(map[string]any)
+		text, _ := first["text"].(string)
+		if !strings.Contains(text, "inputs: uploading") {
+			t.Fatalf("preview text does not describe the resolved transfer: %q", text)
+		}
+		if !strings.Contains(text, "kubectl") {
+			t.Fatalf("preview text does not trace the kubectl command that would run: %q", text)
 		}
 	})
 

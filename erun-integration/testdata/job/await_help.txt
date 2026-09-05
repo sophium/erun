@@ -1,24 +1,54 @@
 The wait is bounded and the call returns either an outcome or "still
 running" — it never holds a connection open for the work's lifetime, which
 is what drops under load and leaves a caller unable to tell a dead stream
-from a dead job.
+from a dead job. A job whose supervisor died reads back as unknown with
+timedOut false, its own third case distinct from both success and "still
+running" — never re-await it expecting a different answer.
+
+The reported job's aliveAgeMs is the faster of the two signals: it crosses
+the 5000ms caller threshold before state necessarily catches up, so a
+caller in a hurry can act on it directly instead of waiting for the next
+reconcile (see `erun exec job status --help`).
+
+--timeout is capped at 10m: a wait bounded well past the length of a single
+call is the same held-connection failure mode this command exists to avoid,
+just at a larger size. A job that runs longer than 10m (the full test suite
+gate routinely does) is not a case this command refuses to cover -- call it
+again each time it reports the job still running (exit 124) rather than
+asking for a single longer wait; a timeout past the cap is refused outright,
+naming the 10m ceiling in the refusal.
 
 Exit codes are the contract: 0 when the job exited 0, 124 when the timeout
 elapsed with the job still running, 125 when the outcome is unknown, and 1
-when the job exited non-zero (its real code is in the reported result).
+when the job exited non-zero (its real code is in the reported result). 124
+is never a verdict on the job -- it means only that this one call's own
+bounded wait elapsed, and the documented response is to call await again,
+not to treat the silence as an answer.
+
+An agent job's own process exiting is not this command's cue to stop
+either: if that process started another job through its own Bash tool and
+left it running, this job keeps reporting 124 (not 0) until that started
+job reaches a verdict too. Keep awaiting this job's own id -- never trust
+the underlying tool's transcript ending as the answer, since nothing wakes
+a one-shot run back up to report one.
 
 Usage:
   erun job await [flags]
 
 Examples:
-  erun job await --tenant team --environment dev --id suite --timeout 2m
+  erun exec job await --tenant team --environment dev --id suite --timeout 2m
+
+  # A gate that can run longer than the 10m ceiling: keep awaiting at the
+  # ceiling until it stops reporting 124.
+  erun exec job await --tenant team --environment dev --id suite --timeout 10m
 
 Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Environment the job runs in
   -h, --help                 help for await
       --id string            Job to wait for
       --tenant string        Tenant whose environment the job belongs to
-      --timeout duration     How long to wait before reporting the job as still running (default 30s)
+      --timeout duration     How long to wait before reporting the job as still running (capped at 10m0s; call await again to keep waiting past it) (default 30s)
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

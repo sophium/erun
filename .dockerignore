@@ -12,6 +12,11 @@
 .claude
 .codex
 .erun
+# Root .gitignore excludes this unanchored (any depth); computeBuildFingerprint
+# (erun-common/build_incremental.go) honours nested .gitignores too, so a
+# macOS checkout that leaves one of these under a COPYd module would enter the
+# real build context without moving the fingerprint unless mirrored here.
+**/.DS_Store
 
 # Go build artifacts and test output
 *.exe
@@ -37,11 +42,44 @@ __debug_bin*
 /erun-devops/linux/*/dist
 /erun-cli/bin
 
-# Desktop UI build outputs (not consumed by service Dockerfiles)
+# Desktop UI build outputs. /erun-ui/frontend/wailsjs is the one exception
+# to "not consumed by service Dockerfiles": the erun-devops test stage's
+# `make check` (test-frontend) regenerates it in-image via
+# erun-ui/generate-wailsjs.sh before typechecking/building erun-ui/frontend,
+# so a possibly-stale host copy must never leak into the build context.
 /erun-ui/bin
+/erun-ui/build/bin
 /erun-ui/frontend/node_modules
 /erun-ui/frontend/dist
 /erun-ui/frontend/wailsjs
+/erun-ui/frontend/*.tsbuildinfo
+/erun-ui/frontend/package.json.md5
+/erun-ui/playwright/node_modules
+/erun-ui/playwright/test-results
+/erun-ui/playwright/playwright-report
+/erun-ui/playwright/playwright/.cache
+/erun-ui/.golangci-cache
+
+# Root yarn workspace (erun-kit, erun-console, erun-ui/frontend): the
+# erun-devops test stage runs `yarn install` + the kit/console gates
+# in-image, so hoisted deps and build outputs are regenerated there and must
+# never enter the build context — the workspace root node_modules alone is
+# hundreds of MB, and its presence would diverge the context from the
+# fingerprint the same way /erun-docs/node_modules would.
+/node_modules
+/erun-kit/node_modules
+/erun-kit/dist
+/erun-kit/.vite
+/erun-kit/**/*.local
+/erun-console/node_modules
+/erun-console/dist
+/erun-console/.vite
+/erun-console/**/*.local
+/erun-console/playwright/node_modules
+/erun-console/playwright/test-results
+/erun-console/playwright/playwright-report
+/erun-console/playwright/.cache
+/erun-console/playwright/.e2e-oidc.env
 
 # Docs site dependencies and build outputs. The erun-docs image runs
 # `yarn install` + `yarn build` inside its Dockerfile, so these are

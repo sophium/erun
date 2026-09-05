@@ -1,14 +1,13 @@
-import { Folder, FolderOpen, MoreHorizontal } from 'lucide-react';
+import { Button, cn, IconTooltip, Tooltip, TooltipContent, TooltipTrigger } from 'erun-kit';
+import { Folder, FolderOpen, LayoutDashboard, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { selectSidebarFocus } from '@/app/selectors';
 import { toggleTenantCollapsed } from '@/app/slices/sidebarSlice';
 import { openTenantDashboard, openTenantDialog } from '@/app/tenantDialogThunks';
-import { IconTooltip } from '@/components/app/IconTooltip';
 import { EnvironmentRow, PendingEnvironmentRow } from '@/components/app/Sidebar.EnvironmentRow';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import { TenantEnrollmentStatusButton } from '@/components/app/Sidebar.TenantEnrollmentStatus';
 import type { UISelection, UITenant } from '@/types';
 
 export function TenantGroup({
@@ -21,11 +20,10 @@ export function TenantGroup({
   pending: UISelection | null;
 }): React.ReactElement {
   const collapsedTenants = useAppSelector((state) => state.sidebar.collapsedTenants);
-  const dashboardTenant = useAppSelector((state) => state.tenantDashboard.tenant);
-  const selected = useAppSelector((state) => state.selection.selected);
+  const focus = useAppSelector(selectSidebarFocus);
   const collapsed = collapsedTenants.includes(tenant.name);
-  const active = dashboardTenant === tenant.name;
-  const related = active || selected?.tenant === tenant.name;
+  const active = focus.kind === 'dashboard' && focus.tenant === tenant.name;
+  const related = active || (focus.kind === 'environment' && focus.tenant === tenant.name);
 
   return (
     <div className={cn('flex flex-col', spaced && 'mt-2.5')}>
@@ -38,6 +36,12 @@ export function TenantGroup({
       >
         <TenantToggleButton tenantName={tenant.name} collapsed={collapsed} active={active} />
         <TenantSelectButton tenantName={tenant.name} active={active} related={related} />
+        {/* Only once a tenant has at least one local environment -- a tenant
+            with none has nothing to host yet, so the icon would have no
+            local work to describe. */}
+        {tenant.environments.length > 0 && (
+          <TenantEnrollmentStatusButton tenantName={tenant.name} />
+        )}
         <TenantManageButton tenantName={tenant.name} active={active} />
       </div>
       {!collapsed && (
@@ -117,6 +121,7 @@ function TenantSelectButton({
             dispatch(openTenantDashboard(tenantName));
           }}
         >
+          <LayoutDashboard aria-hidden="true" className="mr-1.5 size-3.5 shrink-0 opacity-70" />
           <span className="truncate">{tenantName}</span>
         </button>
       </TooltipTrigger>

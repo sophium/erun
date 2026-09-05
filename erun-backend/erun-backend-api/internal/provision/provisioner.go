@@ -5,11 +5,8 @@ package provision
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 
@@ -131,6 +128,10 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 		return bootstrapResult{}, fmt.Errorf("resolve cloud provider alias %q: %w", input.CloudProviderAlias, err)
 	}
 	store := aliasStore{alias: alias.Alias, provider: alias.Provider}
+	runner, err := newAWSSDKRunner(alias.Credentials, p.awsEndpoint)
+	if err != nil {
+		return bootstrapResult{}, fmt.Errorf("cloud provider alias %q: %w", input.CloudProviderAlias, err)
+	}
 	ectx := eruncommon.Context{
 		Logger: eruncommon.NewLoggerWithWriters(eruncommon.VerbosityInfo, io.Discard, io.Discard),
 		DryRun: false,
@@ -146,7 +147,7 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 		DiskSizeGB:         input.DiskSizeGB,
 	}
 	status, err := eruncommon.InitCloudContext(ectx, store, params, eruncommon.CloudContextDependencies{
-		RunAWS:     p.awsRunner(c, alias.Credentials),
+		RunAWS:     runner.runAWS(c),
 		RunKubectl: func(eruncommon.Context, []string) error { return nil },
 		// Deterministic token from the context id: a crash-resumed re-run (reusing
 		// the existing tagged instance) re-derives the SAME token the instance
@@ -179,47 +180,6 @@ func (p *Provisioner) scoped(c context.Context, input ProvisionInput) context.Co
 		TenantType: input.TenantType,
 		ErunUserID: input.ErunUserID,
 	})
-}
-
-func (p *Provisioner) awsRunner(ctx context.Context, credentialsJSON string) func(eruncommon.Context, eruncommon.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, region string, args []string) (string, error) {
-		argv := []string{"--region", region}
-		if p.awsEndpoint != "" {
-			argv = append(argv, "--endpoint-url", p.awsEndpoint)
-		}
-		argv = append(argv, args...)
-		cmd := exec.CommandContext(ctx, "aws", argv...)
-		cmd.Env = awsEnv(credentialsJSON)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return string(out), fmt.Errorf("aws %v: %w: %s", args, err, string(out))
-		}
-		return string(out), nil
-	}
-}
-
-type awsCredentials struct {
-	AccessKeyID     string `json:"accessKeyId"`
-	SecretAccessKey string `json:"secretAccessKey"`
-	SessionToken    string `json:"sessionToken,omitempty"`
-}
-
-func awsEnv(credentialsJSON string) []string {
-	env := os.Environ()
-	var creds awsCredentials
-	if err := json.Unmarshal([]byte(credentialsJSON), &creds); err != nil {
-		return env
-	}
-	if creds.AccessKeyID != "" {
-		env = append(env, "AWS_ACCESS_KEY_ID="+creds.AccessKeyID)
-	}
-	if creds.SecretAccessKey != "" {
-		env = append(env, "AWS_SECRET_ACCESS_KEY="+creds.SecretAccessKey)
-	}
-	if creds.SessionToken != "" {
-		env = append(env, "AWS_SESSION_TOKEN="+creds.SessionToken)
-	}
-	return env
 }
 
 // aliasStore is the minimal CloudContextStore InitCloudContext needs to resolve

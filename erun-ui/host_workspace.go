@@ -26,7 +26,7 @@ func hostWorkspacePath(result eruncommon.OpenResult, findProjectRoot eruncommon.
 		return strings.TrimSpace(result.RepoPath)
 	}
 	if result.EnvConfig.SSHD.Enabled && result.EnvConfig.SSHD.WorkspaceSync.Enabled {
-		return workspaceSyncLocalPath(result, findProjectRoot)
+		return eruncommon.WorkspaceSyncLocalPath(result, findProjectRoot)
 	}
 	return ""
 }
@@ -53,8 +53,8 @@ func (a *App) resolveHostWorkspace(selection uiSelection) (eruncommon.OpenResult
 // mirror directly.
 func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (eruncommon.DiffResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return eruncommon.DiffResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load host diff", selection.Tenant, selection.Environment); err != nil {
+		return eruncommon.DiffResult{}, err
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
 	if err != nil {
@@ -75,8 +75,8 @@ func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (erunco
 func (a *App) OpenHostIDE(selection uiSelection, ide string) error {
 	selection = normalizeSelection(selection)
 	ide = strings.TrimSpace(ide)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("open host IDE", selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
 	if ide != "vscode" && ide != "intellij" {
 		return fmt.Errorf("unsupported IDE %q", ide)
@@ -117,15 +117,15 @@ type hostArtifact struct {
 // $ERUN_OUTPUTS_DIR into the host workspace (e.g. a cross-built Windows .exe).
 func (a *App) ListHostArtifacts(selection uiSelection) ([]hostArtifact, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("list host artifacts", selection.Tenant, selection.Environment); err != nil {
+		return nil, err
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(path, workspaceSyncArtifactsSubdir)
-	rels, err := listLocalArtifactFiles(dir)
+	dir := filepath.Join(path, eruncommon.WorkspaceSyncArtifactsSubdir)
+	rels, err := eruncommon.ListLocalArtifactFiles(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -150,17 +150,17 @@ func (a *App) ListHostArtifacts(selection uiSelection) ([]hostArtifact, error) {
 func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
 	selection = normalizeSelection(selection)
 	relPath = strings.TrimSpace(relPath)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("run host artifact", selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
-	if !safeWorkspaceSyncPath(relPath) {
+	if !eruncommon.SafeWorkspaceSyncPath(relPath) {
 		return fmt.Errorf("invalid artifact path %q", relPath)
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(path, workspaceSyncArtifactsSubdir)
+	dir := filepath.Join(path, eruncommon.WorkspaceSyncArtifactsSubdir)
 	exePath := filepath.Join(dir, filepath.FromSlash(relPath))
 	rel, relErr := filepath.Rel(dir, exePath)
 	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -173,5 +173,8 @@ func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
 	if info.IsDir() {
 		return fmt.Errorf("artifact %q is a directory", relPath)
 	}
+	// Sync signs what it mirrors, but an artifact can also predate that pass, so
+	// the launch re-checks rather than trusting the mirror to have done it.
+	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(exePath))
 	return a.deps.launchHostArtifact(exePath, dir)
 }

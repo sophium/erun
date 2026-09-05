@@ -1,0 +1,4 @@
+exited 0: lane, agent claude, no events yet, clone reclaimed, 0 bytes of output
+audit: erun job status --environment dev --id lane --tenant team
+exited 0: lane, agent claude, no events yet, clone reclaimed, 0 bytes of output
+audit: erun job await --environment dev --id lane --tenant team --timeout 1s

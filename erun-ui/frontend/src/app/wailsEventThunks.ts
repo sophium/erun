@@ -7,14 +7,20 @@ import type {
   AIActivityPayload,
   AppNotificationPayload,
   AppStatusPayload,
+  DoctorCompletedPayload,
   EnvActivityPayload,
   EnvironmentInitializedPayload,
+  EnvNodePayload,
   EnvStatusPayload,
+  EnvUsagePayload,
+  OrchestratorShellActivityPayload,
+  SSHDInitCompletedPayload,
   TerminalExitSelections,
 } from './model';
 import {
   hideTerminalMessage,
   showNotification,
+  showTerminalError,
   showTerminalFailure,
   showTerminalMessage,
 } from './notificationThunks';
@@ -25,9 +31,19 @@ import {
   selectSelectedIsPendingFor,
 } from './selectors';
 import { openSelection, selectTerminalTab, startInitialDeploySelection } from './sessionThunks';
-import { setAIBusyForEnv } from './slices/aiActivitySlice';
-import { setDoctorAll } from './slices/doctorSlice';
-import { setEnvActivityForEnv, setEnvStatusForEnv } from './slices/envStatusSlice';
+import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
+import { recordDoctorOutcome } from './slices/doctorSlice';
+import {
+  setEnvActivityForEnv,
+  setEnvNodeForEnv,
+  setEnvStatusForEnv,
+  setEnvUsageForEnv,
+} from './slices/envStatusSlice';
+import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
+import {
+  setEnvActivityForOrchestratorEnvs,
+  setEnvUsageForOrchestratorEnvs,
+} from './slices/orchestratorsSlice';
 import { appendReconnectLine } from './slices/reviewSlice';
 import {
   clearPendingOpenAfterDeploy,
@@ -35,6 +51,7 @@ import {
   setSelected,
 } from './slices/selectionSlice';
 import { recordExitOutput, recordExitReason } from './slices/sessionsSlice';
+import { recordSSHDInitOutcome } from './slices/sshdInitSlice';
 import type { AppDispatch, AppThunk } from './store';
 import { removeTab } from './tabsThunks';
 import { failedTerminalOutput } from './terminalBuffers';
@@ -61,10 +78,37 @@ export const handleAIActivity =
     const tenant = payload.tenant.trim();
     const environment = payload.environment.trim();
     if (!tenant || !environment) {
+      // An orchestrator session carries no env to key by. Dropping the event
+      // here is why the orchestrator row never spun while it was working.
+      if (payload.sessionId > 0) {
+        dispatch(setAIBusyForSession({ sessionId: payload.sessionId, busy: payload.busy }));
+      }
       return;
     }
     const key = selectionKey({ tenant, environment });
     dispatch(setAIBusyForEnv({ key, busy: payload.busy }));
+  };
+
+// handleOrchestratorShellActivity surfaces that an orchestrator has a
+// background shell running even after its own turn has gone idle — the case a
+// plain busy spinner cannot show, since backgrounding a shell is what lets the
+// turn end without waiting for it.
+export const handleOrchestratorShellActivity =
+  (payload: OrchestratorShellActivityPayload): AppThunk =>
+  (dispatch) => {
+    if (payload.sessionId <= 0) {
+      return;
+    }
+    dispatch(
+      setShellActivityForSession({
+        sessionId: payload.sessionId,
+        activity: {
+          running: payload.running,
+          command: payload.command,
+          startedAtUnix: payload.startedAtUnix,
+        },
+      }),
+    );
   };
 
 // handleEnvStatus keeps the sidebar's open dot reflecting the env's real
@@ -86,6 +130,13 @@ export const handleEnvStatus =
 // answering, and whether work is in flight — so a row driven from the CLI or by
 // an in-pod agent shows its condition instead of rendering blank (Nielsen #1,
 // visibility of system status).
+//
+// It also patches every orchestrator env ref for this tenant/environment, not
+// just the sidebar row's own copy: an orchestrator card joins the same
+// activity onto its linked envs at read-model build time, and nothing kept
+// that joined copy current between builds — so a card could keep reporting an
+// outage the row had already recovered from. Driving both off this one event
+// is what keeps the two surfaces from disagreeing about one environment.
 export const handleEnvActivity =
   (payload: EnvActivityPayload): AppThunk =>
   (dispatch) => {
@@ -94,17 +145,56 @@ export const handleEnvActivity =
     if (!tenant || !environment) {
       return;
     }
+    const activity = {
+      reachable: payload.reachable,
+      observed: payload.observed,
+      outage: payload.outage === true,
+      checkFailed: payload.checkFailed === true,
+      busy: payload.busy,
+      detail: (payload.detail ?? '').trim(),
+    };
     const key = selectionKey({ tenant, environment });
-    dispatch(
-      setEnvActivityForEnv({
-        key,
-        activity: {
-          reachable: payload.reachable,
-          busy: payload.busy,
-          detail: (payload.detail ?? '').trim(),
-        },
-      }),
-    );
+    dispatch(setEnvActivityForEnv({ key, activity }));
+    dispatch(setEnvActivityForOrchestratorEnvs({ tenant, environment, activity }));
+  };
+
+// handleEnvUsage records the usage sweep's cached reading for one environment
+// (environment_usage.go), driving both the sidebar hover card and every
+// orchestrator card that links this environment off the one event — the same
+// join handleEnvActivity performs, so the two surfaces can never disagree
+// about what this environment is using or how stale that reading is.
+export const handleEnvUsage =
+  (payload: EnvUsagePayload): AppThunk =>
+  (dispatch) => {
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    const usage = {
+      usage: payload.usage,
+      observedAtUnix: payload.observedAtUnix,
+      staleAfterSeconds: payload.staleAfterSeconds,
+    };
+    const key = selectionKey({ tenant, environment });
+    dispatch(setEnvUsageForEnv({ key, usage }));
+    dispatch(setEnvUsageForOrchestratorEnvs({ tenant, environment, usage }));
+  };
+
+// handleEnvNode records which cloud node backs one environment and what power
+// state it was last observed in (environment_node.go). It is what lets a row
+// whose own state cannot be determined still name the node behind it, instead
+// of rendering the blank that reads as "nothing to say".
+export const handleEnvNode =
+  (payload: EnvNodePayload): AppThunk =>
+  (dispatch) => {
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    const key = selectionKey({ tenant, environment });
+    dispatch(setEnvNodeForEnv({ key, node: payload.node }));
   };
 
 // handleAppStatus surfaces a backend status line to the user.
@@ -133,8 +223,33 @@ export const handleAppNotification =
         tenant: payload.tenant,
         environment: payload.environment,
         source: payload.source,
+        orchestratorId: payload.orchestratorId,
+        action: payload.action,
       }),
     );
+  };
+
+// erun:events-dropped is the headless HTTP+SSE bridge's reserved gap marker
+// (headlessserver.eventsDroppedName): a full per-tab event buffer replaces
+// its oldest queued event with this one instead of discarding a real event
+// silently, so the tab can tell "I missed something" apart from "nothing
+// happened". Reacting to it is what makes that distinction worth drawing —
+// warn visibly (this can mean any of the events this tab reacts to went
+// missing) and resync the sidebar/env baseline from the backend rather than
+// continuing to render whatever the last-received event left behind.
+export const handleEventsDropped =
+  (missed: number): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    console.error(
+      `erun headless: missed ${missed.toString()} event(s) before this marker; resyncing`,
+    );
+    dispatch(
+      showNotification(
+        'warning',
+        `Lost ${missed.toString()} update${missed === 1 ? '' : 's'} from the app — refreshing to catch up.`,
+      ),
+    );
+    await dispatch(reloadStateAfterEnvironmentChange());
   };
 
 // Bounded retry budget for surfacing a just-initialized env. A single reload
@@ -143,7 +258,7 @@ export const handleAppNotification =
 // with no other recovery. Retrying self-heals the missed refresh instead of
 // silently dropping the new environment (erun-ui/AGENTS.md § "Command
 // Completion And State-Refresh Wiring").
-const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 3;
+const ENVIRONMENT_INIT_RELOAD_ATTEMPTS = 8;
 const ENVIRONMENT_INIT_RELOAD_DELAY_MS = 400;
 
 const delayMs = (ms: number): Promise<void> =>
@@ -202,7 +317,7 @@ export const handleEnvironmentInitialized =
       try {
         await dispatch(openSelection({ tenant, environment }));
       } catch (error) {
-        dispatch(showTerminalMessage(readError(error)));
+        dispatch(showTerminalError(readError(error)));
       }
       return;
     }
@@ -213,7 +328,7 @@ export const handleEnvironmentInitialized =
       await dispatch(startInitialDeploySelection({ tenant, environment }));
     } catch (error) {
       dispatch(clearPendingOpenAfterDeploy());
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
     }
   };
 
@@ -237,7 +352,7 @@ export const handleEnvironmentDeployed =
     try {
       await dispatch(openSelection({ tenant, environment }));
     } catch (error) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
     }
   };
 
@@ -310,25 +425,44 @@ export const hideTerminalMessageIfActive =
     }
   };
 
-const recordDoctorOutcome =
-  (payload: TerminalExitPayload, selections: TerminalExitSelections): AppThunk =>
-  (dispatch, getState) => {
-    const selection = selections.doctorSelection;
-    if (!selection) {
-      return;
-    }
-    const key = selectionKey(selection);
-    const reason = (payload.reason ?? '').trim();
-    const lastDoctorBySelection = getState().doctor.lastDoctorBySelection;
+// handleDoctorCompleted records `erun doctor`'s last-run outcome for the
+// Manage dialog's SSH tab. This is doctor's only completion signal — it runs
+// piped into the shared Local shell, which never produces a PTY exit (see
+// erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring") — so a
+// handler keyed on terminal exit can never fire; the `doctor-completed` Wails
+// event fires from the CLI's `==> Doctor done` / `==> Doctor failed` trace
+// lines instead (see handleDoctorTraceLine in erun-ui/activity_queue_app.go).
+export const handleDoctorCompleted =
+  (payload: DoctorCompletedPayload): AppThunk =>
+  (dispatch) => {
     dispatch(
-      setDoctorAll({
-        lastDoctorBySelection: {
-          ...lastDoctorBySelection,
-          [key]: {
-            ranAt: Date.now(),
-            success: !reason,
-            message: reason,
-          },
+      recordDoctorOutcome({
+        key: selectionKey({ tenant: payload.tenant, environment: payload.environment }),
+        outcome: {
+          ranAt: Date.now(),
+          success: payload.success,
+          message: (payload.message ?? '').trim(),
+        },
+      }),
+    );
+  };
+
+// handleSSHDInitCompleted records `erun sshd init`'s last-run outcome for the
+// Manage dialog's SSH access section. Like doctor, sshd init runs piped into
+// the shared Local shell and never produces a PTY exit, so the
+// `sshd-init-completed` Wails event — fired from the CLI's `==> SSHD init
+// done` / `==> SSHD init failed` trace lines (see handleSSHDInitTraceLine in
+// erun-ui/activity_queue_app.go) — is its only completion signal.
+export const handleSSHDInitCompleted =
+  (payload: SSHDInitCompletedPayload): AppThunk =>
+  (dispatch) => {
+    dispatch(
+      recordSSHDInitOutcome({
+        key: selectionKey({ tenant: payload.tenant, environment: payload.environment }),
+        outcome: {
+          ranAt: Date.now(),
+          success: payload.success,
+          message: (payload.message ?? '').trim(),
         },
       }),
     );
@@ -343,6 +477,13 @@ const dropExitedSessionFromTabs =
     const key = selectionKey(openExitSelection);
     const remaining = dispatch(removeTab(key, sessionId));
     if (getState().terminal.sessionId !== sessionId) {
+      return;
+    }
+    if (getState().sessions.closingEnvs[key]) {
+      // closeEnvironment is tearing this env's tabs down; its own default
+      // tabs exit asynchronously and race clearTabsForEnv, so a sibling tab
+      // (e.g. the AI tab) can still look "exiting" here. Auto-selecting it
+      // would respawn a tab the user just deliberately closed.
       return;
     }
     const next = remaining[remaining.length - 1];
@@ -362,8 +503,8 @@ const computeTerminalExitReason = (
 };
 
 export const handleTerminalExit =
-  (payload: TerminalExitPayload): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
+  (payload: TerminalExitPayload): AppThunk =>
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
     // takeExitSelections both reads the per-session metadata AND clears it
     // in one atomic dispatch — pull the values out first.
@@ -372,11 +513,7 @@ export const handleTerminalExit =
     const failedOutput = recordTerminalExit(dispatch, controller, payload, selections, reason);
 
     dispatch(dropExitedSessionFromTabs(payload.sessionId, selections.openSelection));
-    dispatch(recordDoctorOutcome(payload, selections));
 
-    if (selections.sshdInitSelection) {
-      await dispatch(reloadStateAfterEnvironmentChange());
-    }
     if (payload.sessionId !== getState().terminal.sessionId) {
       return;
     }
@@ -408,10 +545,6 @@ function dispatchTerminalExitFeedback(
   reason: string,
   failedOutput: string,
 ): void {
-  if (!payload.reason && selections.sshdInitSelection) {
-    dispatch(showTerminalMessage(reason));
-    return;
-  }
   if (payload.reason && terminalExitHasTrackedSelection(selections)) {
     const failure = classifiedTerminalFailure(
       payload.reason,

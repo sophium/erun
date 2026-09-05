@@ -18,8 +18,8 @@ const (
 // operator's local erun clone where `erun` runs the locally-built CLI.
 func (a *App) StartContributeSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start contribute ERun session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 	return a.enqueueGatedSession(selection, "contribute-erun", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, false)
@@ -30,8 +30,8 @@ func (a *App) StartContributeSession(selection uiSelection, slot, cols, rows int
 // ERun tab, but boots the env's AI assistant inside the clone.
 func (a *App) StartContributeAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start contribute AI session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 	return a.enqueueGatedSession(selection, "contribute-ai", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, true)

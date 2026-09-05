@@ -16,7 +16,14 @@ import (
 // dtach to attach in a unit test and is locked at the consumer instead
 // (erun-ui TestSessionRunningFollowsHeartbeatNotStreamSilence).
 func TestRemoteAppSessionHeartbeatScriptReportsSocketsWithNoLiveMaster(t *testing.T) {
-	dir := t.TempDir()
+	// Not t.TempDir(): it embeds the test name, and a unix socket path is capped
+	// near 104 bytes, so binding under it fails with "invalid argument" on a host
+	// whose temp root is already long (macOS /var/folders/...).
+	dir, err := os.MkdirTemp("", "erun-sock")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	for _, name := range []string{"team-dev-open-0.dtach", "team-dev-ai.dtach", "other-env-open-0.dtach"} {
 		listener, err := net.Listen("unix", filepath.Join(dir, name))
 		if err != nil {

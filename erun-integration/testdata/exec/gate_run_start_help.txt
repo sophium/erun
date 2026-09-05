@@ -1,0 +1,32 @@
+Record the beginning of one attempt to gate a prospective merge -- the branch, the prospective squash-merge commit, and the target -- so `erun gate list` can show it as currently gating, independent of whether an erun review exists for the change. Prints the new gate run's id; pass it to `erun exec gate-run report` once the gate finishes.
+
+A run with no trackable running phase at all -- a squash conflict before any build ever starts -- may set --status directly to failed or inconclusive and omit --merge-commit.
+
+--status failed is reported as inconclusive instead when --failing-step, --log-ref, or a local file --log-ref points at names a known erun infrastructure failure (a registry or the network giving up, e.g. a ghcr.io TLS handshake timeout) rather than a real verdict about the change.
+
+--dry-run traces the request without sending it.
+
+Usage:
+  erun exec gate-run start [flags]
+
+Examples:
+  erun exec gate-run start --source-branch feature/x --target-branch main \
+    --source-commit $(git rev-parse feature/x) --merge-commit $(git rev-parse HEAD)
+
+Flags:
+      --dry-run                Resolve and trace mutating actions without executing them.
+      --failing-step string    Which gate step failed (required when --status is failed)
+  -h, --help                   help for start
+      --log-ref string         Where to read this run's own output (a job id, URL, or path)
+      --merge-commit string    Prospective squash-merge commit this run tested (required unless --status is failed or inconclusive)
+      --review-id string       erun review this run gates, if one exists
+      --source-branch string   Branch being gated (required)
+      --source-commit string   Source branch tip commit this run tested (required)
+      --status string          Status to start at: running (default), failed, or inconclusive
+      --target-branch string   Branch the prospective merge lands onto (required)
+
+Global Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+      --output string       Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time                Print the elapsed runtime after the command finishes.
+  -v, --verbose count       Increase verbosity: -v streams external tool output, -vv adds erun command traces.

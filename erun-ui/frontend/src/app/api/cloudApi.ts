@@ -21,6 +21,7 @@ import {
   SetupCloudProviderOIDC,
   StartCloudContext,
   StopCloudContext,
+  SwitchCloudProviderIdentity,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
@@ -94,6 +95,12 @@ export const cloudApi = wailsApi.injectEndpoints({
       queryFn: wailsQueryFn<string, UICloudProviderStatus>((alias) => LogoutCloudProvider(alias)),
       invalidatesTags: ['CloudProviders'],
     }),
+    switchCloudProviderIdentity: builder.mutation<UICloudProviderStatus, string>({
+      queryFn: wailsQueryFn<string, UICloudProviderStatus>((alias) =>
+        SwitchCloudProviderIdentity(alias),
+      ),
+      invalidatesTags: ['CloudProviders'],
+    }),
     getCloudProviderBearerToken: builder.mutation<UICloudProviderBearerToken, string>({
       queryFn: wailsQueryFn<string, UICloudProviderBearerToken>((alias) =>
         GetCloudProviderBearerToken(alias),
@@ -131,6 +138,7 @@ export const {
   useEnableCloudContextApiStopMutation,
   useLoginCloudProviderMutation,
   useLogoutCloudProviderMutation,
+  useSwitchCloudProviderIdentityMutation,
   useGetCloudProviderBearerTokenMutation,
   useSetupCloudProviderOIDCMutation,
   useInitAWSCloudProviderMutation,

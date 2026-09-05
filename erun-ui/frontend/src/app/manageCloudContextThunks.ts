@@ -3,7 +3,7 @@ import type { UICloudContextStatus } from '@/types';
 import { cloudApi } from './api/cloudApi';
 import { refreshKubernetesContexts } from './dialogContextsThunks';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError, showTerminalMessage } from './notificationThunks';
 import { patchManageDialog } from './slices/manageDialogSlice';
 import type { AppThunk } from './store';
 import { normalizeDialogValue } from './versionSuggestions';
@@ -78,6 +78,6 @@ const updateManageCloudContextPower =
           error: message,
         }),
       );
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -18,12 +17,12 @@ import (
 // component charts actually published at the deploy version are offered, since
 // deploying an unpublished chart would fail. The version is the selection's
 // version-to-deploy when set, else the env's current runtime version.
-func (a *App) LoadDeployComponents(selection uiSelection) ([]eruncommon.DeployableComponent, error) {
+func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, error) {
 	selection = normalizeSelection(selection)
 	tenant := strings.TrimSpace(selection.Tenant)
 	environment := strings.TrimSpace(selection.Environment)
-	if tenant == "" || environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load deploy components", tenant, environment); err != nil {
+		return uiDeployComponents{}, err
 	}
 	components, err := eruncommon.ResolveDeployableComponents(
 		a.deps.store,
@@ -34,9 +33,33 @@ func (a *App) LoadDeployComponents(selection uiSelection) ([]eruncommon.Deployab
 		eruncommon.DeployTarget{Tenant: tenant, Environment: environment},
 	)
 	if err != nil {
-		return nil, err
+		return uiDeployComponents{}, err
 	}
-	return a.filterDeployComponentsByChartAvailability(tenant, environment, selection.Version, components), nil
+	filtered := a.filterDeployComponentsByChartAvailability(tenant, environment, selection.Version, components)
+	// The chart is resolved alongside the checklist rather than at deploy time,
+	// because a version with no chart is something the operator must be told before
+	// committing to a rollout, not after it fails.
+	version := strings.TrimSpace(selection.Version)
+	if version == "" {
+		if env, _, envErr := a.deps.store.LoadEnvConfig(tenant, environment); envErr == nil {
+			version = strings.TrimSpace(env.RuntimeVersion)
+		}
+	}
+	return uiDeployComponents{
+		Components:   filtered,
+		RuntimeChart: a.resolveRuntimeChartPlan(tenant, environment, version, runtimeIsLocalChart(filtered)),
+	}, nil
+}
+
+// runtimeIsLocalChart reports whether the runtime item is backed by a chart in the
+// worktree, in which case no registry has a say in what installs.
+func runtimeIsLocalChart(components []eruncommon.DeployableComponent) bool {
+	for _, component := range components {
+		if component.Runtime {
+			return component.Source != eruncommon.DeployComponentSourcePublished
+		}
+	}
+	return false
 }
 
 // filterDeployComponentsByChartAvailability drops published component charts the

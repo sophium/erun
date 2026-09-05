@@ -5,6 +5,7 @@ Usage:
 
 Available Commands:
   init        Enable SSH access for a remote environment
+  sync        Mirror a remote environment's workspace onto this host
 
 Flags:
   -h, --help   help for sshd

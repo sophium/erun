@@ -1,3 +1,4 @@
+import { Button, EmptyState, Label, SelectField, uniqueSuggestions } from 'erun-kit';
 import { Cog, LoaderCircle, Play, Power, Server } from 'lucide-react';
 import * as React from 'react';
 
@@ -12,15 +13,12 @@ import {
 } from '@/app/manageEnvironmentThunks';
 import { loadSavedPastContainerRegistries } from '@/app/storage';
 import { ContainerRegistriesField } from '@/components/app/ContainerRegistriesField';
-import { uniqueSuggestions } from '@/components/app/EditableComboField.helpers';
-import { EmptyState } from '@/components/app/EmptyState';
 import { EnvironmentHealthSection } from '@/components/app/EnvironmentHealthSection';
 import { cloudProviderTypeLabel } from '@/components/app/GlobalConfigDialog.helpers';
+import { CloudStatusBadge } from '@/components/app/GlobalConfigDialog.shared';
 import { LocalRepoPathInput } from '@/components/app/LocalRepoPathInput';
-import { ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
-import { SelectField } from '@/components/app/SelectField';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+import { ReadonlyField } from '@/components/app/ManageDialog.fields';
+import { PullCoordinatesFields } from '@/components/app/ManageDialogPullCoordinates';
 import {
   EnvironmentTypeValues,
   type UICloudContextStatus,
@@ -46,19 +44,29 @@ export function GeneralTab(): React.ReactElement {
   // Fall back to the effective path so the field is never blank for an env
   // whose repo path is derived rather than explicitly set.
   const repoPathValue = config.localRepoPath?.trim() ? config.localRepoPath : config.repoPath;
+
+  // One statement of "the editor is not accepting input right now", so each
+  // field does not restate it.
+  const fieldsDisabled = dialog.busy || dialog.configLoading;
+
   return (
     <>
-      {config.type === 'local-agent' ? (
-        // Only a local-agent env mounts its worktree from a host path, so only
-        // it gets an editable field — letting an operator repoint a moved repo
-        // without hand-editing config.yaml. Remote-agent (PVC) and runtime (no
-        // worktree) repos are not local paths, so they stay read-only.
+      {config.type === 'local-agent' || config.type === 'host' ? (
+        // A local-agent or host env's worktree is a directory on this
+        // machine, so only these get an editable field — letting an operator
+        // repoint a moved repo without hand-editing config.yaml. Remote-agent
+        // (PVC) and runtime (no worktree) repos are not local paths, so they
+        // stay read-only.
         <LocalRepoPathInput
           id="environment-config-repopath"
           label="Repository path"
-          helper="Absolute path on this machine, mounted into the agent pod as the worktree. Applied on Save; takes effect on the next deploy."
+          helper={
+            config.type === 'host'
+              ? 'Absolute path on this machine. This env has no pod — it IS this directory. Applied on Save.'
+              : 'Absolute path on this machine, mounted into the agent pod as the worktree. Applied on Save; takes effect on the next deploy.'
+          }
           value={repoPathValue}
-          disabled={dialog.busy || dialog.configLoading}
+          disabled={fieldsDisabled}
           onChange={(localRepoPath) => {
             dispatch(updateManageConfig({ localRepoPath }));
           }}
@@ -79,16 +87,23 @@ export function GeneralTab(): React.ReactElement {
         entries={config.containerRegistries}
         inherited={config.containerRegistriesInherited}
         suggestions={containerRegistrySuggestions}
-        disabled={dialog.busy || dialog.configLoading}
+        disabled={fieldsDisabled}
         onChange={(containerRegistries) => {
           dispatch(updateManageConfig({ containerRegistries }));
+        }}
+      />
+      <PullCoordinatesFields
+        config={config}
+        disabled={fieldsDisabled}
+        onChange={(patch) => {
+          dispatch(updateManageConfig(patch));
         }}
       />
       <CloudAliasSlots config={config} disabled={dialog.busy} />
       <CloudContextField
         context={config.cloudContext}
         cloudProviderAlias={config.cloudProviderAlias}
-        disabled={dialog.busy || dialog.configLoading}
+        disabled={fieldsDisabled}
         loading={
           dialog.busyAction === 'cloud-context-power' &&
           dialog.busyTarget === config.cloudContext?.name
@@ -98,7 +113,7 @@ export function GeneralTab(): React.ReactElement {
       />
       <EnvironmentTypeField
         value={config.type}
-        disabled={dialog.busy || dialog.configLoading}
+        disabled={fieldsDisabled}
         onChange={(type) => {
           dispatch(updateManageConfig({ type }));
         }}
@@ -116,6 +131,8 @@ function environmentTypeLabel(type: string | undefined): string {
       return 'Remote agent (worktree cloned to PVC)';
     case 'runtime':
       return 'Runtime (no worktree; receives deploys)';
+    case 'host':
+      return 'Host (no pod, no cluster — this machine only)';
     default:
       return 'Unknown';
   }
@@ -310,7 +327,7 @@ function CloudContextField({
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <Server className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span className="truncate">{context.kubernetesContext || context.name}</span>
-            <StatusBadge status={context.status} />
+            <CloudStatusBadge status={context.status} />
           </div>
           <div className="truncate text-xs text-muted-foreground">
             {[context.cloudProviderAlias, context.region, context.instanceType, context.instanceId]

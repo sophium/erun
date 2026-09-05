@@ -50,11 +50,26 @@ export const SEED_CLOUDFLARE_ALIAS = 'pw-token+0123456789abcdef@cloudflare';
 // type — so it links the alpha env and renders stopped on boot.
 export const SEED_ORCHESTRATOR = 'pw-orch';
 
-// isolatedRoot resolves the suite-owned root. When run.sh has not exported
-// ERUN_PLAYWRIGHT_HOME (a direct `playwright test`), the fresh temp root is
-// cached back into the env so every worker shares one root instead of minting
-// its own.
+// workerRootOverride pins every helper below onto a single Playwright
+// worker's own root (see fixtures/workerBackend.ts). Each worker is a
+// separate OS process, so this module-level variable never crosses workers —
+// it only ever overrides isolatedRoot() within the one process that called
+// setWorkerRoot.
+let workerRootOverride: string | undefined;
+
+export function setWorkerRoot(root: string): void {
+  workerRootOverride = root;
+}
+
+// isolatedRoot resolves the suite-owned root. A worker-scoped override (set by
+// fixtures/workerBackend.ts) wins first. Otherwise, when run.sh has not
+// exported ERUN_PLAYWRIGHT_HOME (a direct `playwright test`, or the opt-in
+// e2e-k3d mode's single shared backend), the fresh temp root is cached back
+// into the env so the whole process agrees on one root.
 export function isolatedRoot(): string {
+  if (workerRootOverride) {
+    return workerRootOverride;
+  }
   const configured = process.env.ERUN_PLAYWRIGHT_HOME?.trim();
   if (configured) {
     return configured;
@@ -101,6 +116,28 @@ function winStubBinary(): string {
 
 function repoDir(): string {
   return path.join(isolatedRoot(), 'repo');
+}
+
+// atomicWriteCounter disambiguates temp names when writeConfigFile is called
+// more than once in the same millisecond (seedBaseline seeds several files
+// back to back).
+let atomicWriteCounter = 0;
+
+// writeConfigFile mirrors erun-common's writeFileAtomic (erun-common/config.go):
+// write a sibling temp file in the same directory, then rename over the
+// destination. A plain fs.writeFileSync truncates before writing, so the
+// backend's fsnotify-triggered config reader can observe an empty or
+// half-written file mid-seed — a torn read that no reader-side retry budget
+// can fully absorb under enough concurrent write pressure. Same-directory
+// rename is atomic on both POSIX and Windows NTFS.
+function writeConfigFile(filePath: string, content: string): void {
+  const dir = path.dirname(filePath);
+  const tmp = path.join(
+    dir,
+    `.${path.basename(filePath)}.tmp-${process.pid}-${atomicWriteCounter++}`,
+  );
+  fs.writeFileSync(tmp, content);
+  fs.renameSync(tmp, filePath);
 }
 
 function erunConfigDir(): string {
@@ -164,11 +201,51 @@ export function backendEnv(): Record<string, string> {
     // tenant-prefixed (the pw seed tenant publishes pw-* charts), matching
     // ResolveDeployableComponents. See erun-ui/deploy_components.go
     // chartAvailabilityOverride.
+    // erun-devops is listed wherever the runtime chart should exist: the Runtime
+    // tab now resolves which chart a version would install, and a version with no
+    // chart at all is a blocked deploy (1.0.50, deliberately empty).
     ERUN_CHART_AVAILABILITY_OVERRIDE:
-      '1.0.0=pw-backend-postgres,pw-backend-db,pw-backend-api,pw-powerdns,pw-docs;' +
-      '1.0.90=pw-backend-postgres,pw-backend-db;1.0.50=',
+      '1.0.0=erun-devops,pw-backend-postgres,pw-backend-db,pw-backend-api,pw-powerdns,pw-docs;' +
+      '1.0.90=erun-devops,pw-backend-postgres,pw-backend-db;1.0.50=;' +
+      // ERun-line versions the picker specs deploy: a real ERun version publishes
+      // its chart, so the seam has to say so or the Runtime tab would (correctly)
+      // refuse to deploy them.
+      '1.0.134=erun-devops;1.0.16=erun-devops',
+    // The seeded local-agent envs are always inert and never deployed, so no
+    // local port they compute should ever be treated as reachable. Unpinned,
+    // the port range is a plain host-wide TCP port number outside HOME/XDG
+    // isolation: a seeded env can land on the same range a real environment
+    // on the same host has genuinely bound (this host's own MCP/SSH
+    // forwards), and the occupancy/idle-status checks then read that real
+    // environment's live state as the seeded env's own. See erun-ui/app.go
+    // withDefaultReachabilityDeps.
+    ERUN_LOCAL_PORT_REACHABILITY_OVERRIDE: '0',
+    // The new-environment dialog probes erun's hosted registry
+    // (registry.erunpaas.com) over a real outbound HTTP call the moment it
+    // opens — page.route can stub the Wails method that wraps it, but has no
+    // way to intercept that underlying network call itself, so an unstubbed
+    // spec would depend on real DNS/network behavior. This pins the default
+    // (unstubbed) answer to "unavailable", which also happens to match this
+    // host's real current production state. See erun-ui/app.go
+    // hostedRegistryReachabilityOverride.
+    ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE: '0',
+    // The Local tab otherwise launches the operator's own $SHELL: a
+    // terminal-content spec that selects text by screen position then
+    // inherits that shell's dotfile-configured prompt and startup timing,
+    // both host-dependent. This pins a real, rc-free POSIX shell with the
+    // fixed prompt LOCAL_SHELL_PROMPT below (kept in lockstep with
+    // erun-ui/session.go's localShellDeterministicPrompt) so terminal specs
+    // can wait for a known prompt instead of guessing which row it lands on.
+    ERUN_LOCAL_SHELL_OVERRIDE: '1',
   };
 }
+
+// LOCAL_SHELL_PROMPT is erun-ui/session.go's localShellDeterministicPrompt —
+// the fixed prompt the Local tab's shell renders once ready, when
+// ERUN_LOCAL_SHELL_OVERRIDE is set above. Specs that select terminal text by
+// screen position must wait for this to appear first, so the shell's own
+// startup output can never race a spec's synthetic printOnlyLine write.
+export const LOCAL_SHELL_PROMPT = 'erun-test$ ';
 
 // createIsolatedLayout refuses to run against anything that could be a real
 // home directory.
@@ -206,7 +283,7 @@ export function seedEnvironmentForK3d(
 ): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -226,7 +303,7 @@ export function seedEnvironmentForK3d(
 export function seedRuntimeForK3d(tenant: string, environment: string, context: string): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -249,7 +326,7 @@ export function seedRuntimeForK3d(tenant: string, environment: string, context: 
 export function seedRemoteAgentForK3d(tenant: string, environment: string, context: string): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -276,7 +353,7 @@ export function seedGitRemoteAgentForK3d(
 ): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       'type: remote-agent\n' +
@@ -364,7 +441,7 @@ function writeStubBinary(name: string): void {
 export function seedBaseline(): void {
   const root = erunConfigDir();
   fs.mkdirSync(path.join(root, SEED_TENANT), { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(root, 'config.yaml'),
     `defaulttenant: ${SEED_TENANT}\n` +
       'cloudproviders:\n' +
@@ -387,7 +464,7 @@ export function seedBaseline(): void {
       `        environment: ${SEED_ENV_ALPHA}\n` +
       `        directory: ${repoDir()}\n`,
   );
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(root, SEED_TENANT, 'config.yaml'),
     `projectroot: ${repoDir()}\n` +
       `name: ${SEED_TENANT}\n` +
@@ -419,8 +496,8 @@ export function seedBaseline(): void {
 export function seedBaselineForK3d(): void {
   const root = erunConfigDir();
   fs.mkdirSync(path.join(root, SEED_TENANT), { recursive: true });
-  fs.writeFileSync(path.join(root, 'config.yaml'), `defaulttenant: ${SEED_TENANT}\n`);
-  fs.writeFileSync(
+  writeConfigFile(path.join(root, 'config.yaml'), `defaulttenant: ${SEED_TENANT}\n`);
+  writeConfigFile(
     path.join(root, SEED_TENANT, 'config.yaml'),
     `projectroot: ${repoDir()}\n` + `name: ${SEED_TENANT}\n`,
   );
@@ -432,7 +509,7 @@ export function seedBaselineForK3d(): void {
 export function seedEnvironment(tenant: string, environment: string, extraYaml = ''): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: ${repoDir()}\n` +
@@ -445,6 +522,46 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
   );
 }
 
+// seedEnvironmentWithRuntimeVersions writes an inert local-agent env like
+// seedEnvironment, but with the caller's own runtime-version fields instead
+// of the fixed 1.0.0 default -- for specs exercising the env hover card's
+// version rows (release-line attribution, the erun-version row, a
+// recorded/observed line mismatch), which need
+// runtimeversion/runtimerunningimage/runtimeimage/runtimechart values
+// seedEnvironment's fixed default cannot express.
+export function seedEnvironmentWithRuntimeVersions(
+  tenant: string,
+  environment: string,
+  versions: {
+    runtimeVersion?: string;
+    runtimeRunningImage?: string;
+    runtimeImage?: string;
+    runtimeChart?: string;
+  },
+): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  const lines = [
+    `name: ${environment}`,
+    `repopath: ${repoDir()}`,
+    'kubernetescontext: test-context',
+    'containerregistry: registry.example/test',
+    `runtimeversion: ${versions.runtimeVersion ?? '1.0.0'}`,
+    'type: local-agent',
+    'aitool: sh',
+  ];
+  if (versions.runtimeRunningImage) {
+    lines.push(`runtimerunningimage: ${versions.runtimeRunningImage}`);
+  }
+  if (versions.runtimeImage) {
+    lines.push(`runtimeimage: ${versions.runtimeImage}`);
+  }
+  if (versions.runtimeChart) {
+    lines.push(`runtimechart: ${versions.runtimeChart}`);
+  }
+  writeConfigFile(path.join(envDir, 'config.yaml'), lines.join('\n') + '\n');
+}
+
 // seedRuntimeEnvironment writes an inert runtime-type env config. A runtime env
 // is RemoteRepo (its worktree lives outside the local filesystem), so
 // ResolveDeployableComponents offers the publishable platform components by
@@ -452,7 +569,7 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
 export function seedRuntimeEnvironment(tenant: string, environment: string, extraYaml = ''): void {
   const envDir = path.join(erunConfigDir(), tenant, environment);
   fs.mkdirSync(envDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(envDir, 'config.yaml'),
     `name: ${environment}\n` +
       `repopath: /home/erun/git/${tenant}\n` +
@@ -465,6 +582,23 @@ export function seedRuntimeEnvironment(tenant: string, environment: string, extr
   );
 }
 
+// seedHostEnvironment writes an inert host-type env config: a worktree with no
+// pod and no cluster at all, so unlike seedEnvironment it carries no
+// kubernetescontext, containerregistry, or runtimeversion — none of those
+// apply to a type with no pod.
+export function seedHostEnvironment(tenant: string, environment: string, extraYaml = ''): void {
+  const envDir = path.join(erunConfigDir(), tenant, environment);
+  fs.mkdirSync(envDir, { recursive: true });
+  writeConfigFile(
+    path.join(envDir, 'config.yaml'),
+    `name: ${environment}\n` +
+      `repopath: ${repoDir()}\n` +
+      'type: host\n' +
+      'aitool: sh\n' +
+      extraYaml,
+  );
+}
+
 // removeEnvironment deletes a previously seeded env config dir. The
 // backend's fsnotify config watcher picks the deletion up and drops the
 // sidebar row.
@@ -472,16 +606,45 @@ export function removeEnvironment(tenant: string, environment: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant, environment), { recursive: true, force: true });
 }
 
+// activityLeaseDir is where eruncommon.TakeEnvironmentActivityLease persists
+// leases: XDG_CACHE_HOME/erun/activity/<tenant>/<environment>/leases.
+function activityLeaseDir(tenant: string, environment: string): string {
+  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment, 'leases');
+}
+
+// writeHeldLease stages a real activity lease file — the same on-disk shape
+// eruncommon.TakeEnvironmentActivityLease writes — so a headless spec can
+// drive the AI-tab occupancy check (erun#1221) without a live orchestrator job.
+export function writeHeldLease(tenant: string, environment: string, name: string): void {
+  const dir = activityLeaseDir(tenant, environment);
+  fs.mkdirSync(dir, { recursive: true });
+  const startedAt = new Date();
+  const expiresAt = new Date(startedAt.getTime() + 15 * 60 * 1000);
+  fs.writeFileSync(
+    path.join(dir, `${name}.json`),
+    JSON.stringify({
+      id: name,
+      name,
+      startedAt: startedAt.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    }),
+  );
+}
+
+export function removeHeldLease(tenant: string, environment: string, name: string): void {
+  fs.rmSync(path.join(activityLeaseDir(tenant, environment), `${name}.json`), { force: true });
+}
+
 // seedTenant writes the minimal tenant config.yaml ListTenantConfigs needs to
 // surface a tenant at all — a tenant dir with no config.yaml is skipped as
 // uninitialized. Mirrors what `erun init` writes (createTenantConfig in
 // erun-common/init.go).
-export function seedTenant(tenant: string, defaultEnvironment: string): void {
+export function seedTenant(tenant: string, defaultEnvironment: string, extraYaml = ''): void {
   const tenantDir = path.join(erunConfigDir(), tenant);
   fs.mkdirSync(tenantDir, { recursive: true });
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(tenantDir, 'config.yaml'),
-    `name: ${tenant}\n` + `defaultenvironment: ${defaultEnvironment}\n`,
+    `name: ${tenant}\n` + `defaultenvironment: ${defaultEnvironment}\n` + extraYaml,
   );
 }
 
@@ -492,6 +655,199 @@ export function removeTenant(tenant: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant), { recursive: true, force: true });
 }
 
+const ORCHESTRATORS_KEY = 'orchestrators:';
+
+// orchestratorEntries renders sequence items at whatever indentation the file
+// already uses for them. Only the base indent varies between writers; the
+// structure relative to it does not -- the item dash sits at `indent`, the
+// item's own keys two further in, and its nested sequence two beyond that.
+function orchestratorEntries(
+  ids: string[],
+  tenant: string,
+  environment: string,
+  indent: number,
+): string[] {
+  const item = ' '.repeat(indent);
+  const key = ' '.repeat(indent + 2);
+  const nested = ' '.repeat(indent + 4);
+  return ids.flatMap((id) => [
+    `${item}- id: ${id}`,
+    `${key}name: ${id}`,
+    `${key}environments:`,
+    `${nested}- tenant: ${tenant}`,
+    `${nested}  environment: ${environment}`,
+    `${nested}  directory: ${repoDir()}`,
+  ]);
+}
+
+// withOrchestrators returns `source` with `ids` added to its top-level
+// `orchestrators:` sequence.
+//
+// Appending the entries at end-of-file at a fixed indentation, as this used
+// to, is wrong in two ways that only show up once the desktop has written the
+// file itself. seedBaseline hand-writes it with two-space sequence indentation
+// and `orchestrators:` last, but the desktop re-emits the whole file through
+// its own YAML marshaller the moment any spec creates an orchestrator through
+// the dialog -- and that writer indents sequences by four and is free to place
+// further top-level keys below `orchestrators:`. Entries appended at the wrong
+// indent, or after a following top-level key, make the file unparseable.
+//
+// That is not a torn write a reader can wait out: it is stable corruption, so
+// every later read reports it, the desktop renders zero tenants behind a
+// "could not be read" banner, and every subsequent spec on that worker that
+// waits for a row it seeded runs out its own timeout instead. Reading the
+// file's own indentation and splicing into the block it belongs to keeps both
+// writers' shapes valid.
+function withOrchestrators(
+  source: string,
+  ids: string[],
+  tenant: string,
+  environment: string,
+): string {
+  const lines = source.split('\n');
+  const keyIndex = lines.findIndex((line) => line.trimEnd() === ORCHESTRATORS_KEY);
+  if (keyIndex < 0) {
+    // Nothing to extend. A brand-new top-level key at end-of-file is valid
+    // whatever precedes it, so this is the one safe place to append.
+    const base = source === '' || source.endsWith('\n') ? source : `${source}\n`;
+    return `${base}${ORCHESTRATORS_KEY}\n${orchestratorEntries(ids, tenant, environment, 2).join('\n')}\n`;
+  }
+  let end = keyIndex + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end] ?? '')) {
+    end += 1;
+  }
+  const existingItem = lines.slice(keyIndex + 1, end).find((line) => /^\s+- /.test(line));
+  const indent = existingItem ? existingItem.length - existingItem.trimStart().length : 2;
+  lines.splice(end, 0, ...orchestratorEntries(ids, tenant, environment, indent));
+  return lines.join('\n');
+}
+
+// addOrchestrators stages throwaway orchestrator entries in the top-level user
+// config.yaml -- the same shape seedBaseline() writes for SEED_ORCHESTRATOR --
+// so a spec can stage a realistic population (the field report behind the whip
+// panel's layout was 7 orchestrators and 9+ environments) without depending on
+// whatever another spec in this worker happened to leave behind. WhipTargets
+// reads this file fresh on every call, so no reload/wait is needed after
+// writing it. Returns a restore function that puts the file back exactly as
+// found.
+export function addOrchestrators(ids: string[], tenant: string, environment: string): () => void {
+  const configPath = path.join(erunConfigDir(), 'config.yaml');
+  const before = fs.readFileSync(configPath, 'utf8');
+  writeConfigFile(configPath, withOrchestrators(before, ids, tenant, environment));
+  return () => {
+    writeConfigFile(configPath, before);
+  };
+}
+
+// removeOrchestrator deletes one entry from the root config.yaml's
+// `orchestrators:` sequence by id. There is no dialog affordance for this
+// (the orchestrator dialog only creates/edits/cancels), and a spec that
+// drives a real Create/UpdateOrchestrator round trip through the UI leaves
+// that entry in the shared root config for every later spec in the same
+// worker to see, indefinitely -- the same worker-persistent-backend leak the
+// suite already guards against for env rows via removeEnvironment. Finds the
+// entry's own indentation the same way withOrchestrators does (the desktop's
+// YAML marshaller and this suite's hand-written seed disagree on it) rather
+// than assuming a fixed one, and removes the whole entry through whichever
+// line starts the next sibling item or leaves the block.
+export function removeOrchestrator(id: string): void {
+  const configPath = path.join(erunConfigDir(), 'config.yaml');
+  const lines = fs.readFileSync(configPath, 'utf8').split('\n');
+  const keyIndex = lines.findIndex((line) => line.trimEnd() === ORCHESTRATORS_KEY);
+  if (keyIndex < 0) {
+    return;
+  }
+  let blockEnd = keyIndex + 1;
+  while (blockEnd < lines.length && /^\s+\S/.test(lines[blockEnd] ?? '')) {
+    blockEnd += 1;
+  }
+  let itemStart = -1;
+  let itemIndent = 0;
+  for (let i = keyIndex + 1; i < blockEnd; i += 1) {
+    const line = lines[i] ?? '';
+    const trimmed = line.trimStart();
+    if (trimmed === `- id: ${id}`) {
+      itemStart = i;
+      itemIndent = line.length - trimmed.length;
+      break;
+    }
+  }
+  if (itemStart < 0) {
+    return;
+  }
+  let itemEnd = itemStart + 1;
+  while (itemEnd < blockEnd) {
+    const line = lines[itemEnd] ?? '';
+    const trimmed = line.trimStart();
+    const indent = line.length - trimmed.length;
+    if (trimmed.startsWith('- ') && indent <= itemIndent) {
+      break;
+    }
+    itemEnd += 1;
+  }
+  lines.splice(itemStart, itemEnd - itemStart);
+  writeConfigFile(configPath, lines.join('\n'));
+}
+
+const CLOUD_PROVIDERS_KEY = 'cloudproviders:';
+
+// erunCloudProviderEntry renders one erun-type cloud provider alias's
+// sequence item at whatever indentation the file already uses (see
+// withOrchestrators above for why the indentation cannot be assumed fixed).
+// No secret store entry is written -- a spec staging this only needs the
+// alias to exist and classify as erun-type, never to actually mint a bearer.
+function erunCloudProviderEntry(alias: string, apiURL: string, indent: number): string[] {
+  const item = ' '.repeat(indent);
+  const key = ' '.repeat(indent + 2);
+  const nested = ' '.repeat(indent + 4);
+  return [
+    `${item}- alias: ${alias}`,
+    `${key}provider: erun`,
+    `${key}erun:`,
+    `${nested}apiurl: ${apiURL}`,
+    `${nested}clientid: pw-erun-client`,
+  ];
+}
+
+// withERunCloudProviderAlias returns `source` with one erun-type alias added
+// to the top-level `cloudproviders:` sequence. seedBaseline always writes
+// that key (for the seeded aws/cloudflare aliases), so unlike
+// withOrchestrators this never needs the key-missing fallback, but keeps it
+// for the same reason withOrchestrators does: a re-emitted config the
+// desktop's own YAML marshaller wrote may have reordered top-level keys.
+function withERunCloudProviderAlias(source: string, alias: string, apiURL: string): string {
+  const lines = source.split('\n');
+  const keyIndex = lines.findIndex((line) => line.trimEnd() === CLOUD_PROVIDERS_KEY);
+  if (keyIndex < 0) {
+    const base = source === '' || source.endsWith('\n') ? source : `${source}\n`;
+    return `${base}${CLOUD_PROVIDERS_KEY}\n${erunCloudProviderEntry(alias, apiURL, 2).join('\n')}\n`;
+  }
+  let end = keyIndex + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end] ?? '')) {
+    end += 1;
+  }
+  const existingItem = lines.slice(keyIndex + 1, end).find((line) => /^\s+- /.test(line));
+  const indent = existingItem ? existingItem.length - existingItem.trimStart().length : 2;
+  lines.splice(end, 0, ...erunCloudProviderEntry(alias, apiURL, indent));
+  return lines.join('\n');
+}
+
+// addERunCloudProviderAlias stages a throwaway erun-type cloud provider
+// alias in the shared root config.yaml, the way seedBaseline's aws/cloudflare
+// aliases are staged -- for specs that need a real, resolvable erun platform
+// alias to exist on the machine without ever signing in to one (erun#1955's
+// tenant-scoped-alias-selection regression needs the alias to exist globally
+// while the tenant under test never selected it). Returns a restore function
+// that puts the root config back exactly as found, mirroring addOrchestrators.
+export function addERunCloudProviderAlias(alias: string, apiURL: string): () => void {
+  const configPath = path.join(erunConfigDir(), 'config.yaml');
+  const before = fs.readFileSync(configPath, 'utf8');
+  writeConfigFile(configPath, withERunCloudProviderAlias(before, alias, apiURL));
+  return () => {
+    writeConfigFile(configPath, before);
+  };
+}
+
 // removeIsolatedRoot deletes the whole suite-owned root. Only roots the
 // suite recognizably created are removed, so a caller-provided custom path
 // is never destroyed by accident.
@@ -500,6 +856,18 @@ export function removeIsolatedRoot(): void {
   if (!root || !path.basename(root).startsWith('erun-playwright-home')) {
     return;
   }
+  removeRootDir(root);
+}
+
+// removeWorkerRoot deletes a single worker's own root (see
+// fixtures/workerBackend.ts). Unlike removeIsolatedRoot, no basename check is
+// needed: the caller just minted this exact directory with mkdtempSync, so
+// there is no risk of it being an arbitrary caller-supplied path.
+export function removeWorkerRoot(root: string): void {
+  removeRootDir(root);
+}
+
+function removeRootDir(root: string): void {
   if (isWindows) {
     // A ConPTY stub/shell child spawned with its cwd inside the root (or a
     // still-blocking erun.exe stub from a session the app has not torn down yet)

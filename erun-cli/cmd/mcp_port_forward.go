@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +29,7 @@ func newMCPForwarder() MCPForwarder {
 
 func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, error) {
 	localPort := common.MCPPortForResult(result)
-	statePath, err := mcpPortForwardStatePath(result.Tenant, result.Environment)
+	statePath, err := mcpPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return 0, err
 	}
@@ -45,18 +44,20 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 	if ctx.DryRun {
 		args := kubectlMCPPortForwardArgs(result, localPort)
-		if previewed, port := previewAdoptOrConflict(ctx, "mcp", localPort, args); previewed {
+		if previewed, port := previewAdoptOrConflict(ctx, "mcp", localPort, args, canReachLocalMCPEndpoint); previewed {
 			return port, nil
 		}
+		previewClearRecordedPortForward(ctx, "mcp", stateMatchesMCPTarget(state, expectedState), state.ProcessID, localPort)
+		previewSweepDeadPortForwardsMatching(ctx, "mcp", args, localPort)
 		ctx.TraceCommand("", "kubectl", args...)
 		return localPort, nil
 	}
 
-	if stateMatchesMCPTarget(state, expectedState) && canReachLocalMCPEndpoint(localPort) {
+	if reusableRecordedPortForward(ctx, "mcp", state, expectedState, localPort, canReachLocalMCPEndpoint) {
 		return localPort, nil
 	}
-	stopStaleMCPPortForward(state, expectedState, localPort)
 	args := kubectlMCPPortForwardArgs(result, localPort)
+	sweepDeadPortForwardsMatching(ctx, "mcp", args, localPort)
 	if canConnectLocalPort(localPort) {
 		adopted, err := adoptForeignMCPPortForward(ctx, statePath, expectedState, args, localPort)
 		if err != nil {
@@ -69,12 +70,15 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 	ctx.TraceCommand("", "kubectl", args...)
 
-	return startMCPPortForward(statePath, expectedState, args, localPort)
+	return startMCPPortForward(ctx, statePath, expectedState, args, localPort)
 }
 
 // adoptForeignMCPPortForward reuses a pre-existing kubectl port-forward already
 // targeting this env so repeated opens share one forward; a port held by any
-// other process is a hard error rather than an adoption.
+// other process is a hard error rather than an adoption. A holder of erun's own
+// shape that no longer carries traffic is neither: it is the forward that
+// outlived its pod, so it is stopped and (false, nil) sends the caller on to
+// start a replacement.
 func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
 	pid, argv, ok := findLocalPortHolder(localPort)
 	if !ok {
@@ -82,6 +86,12 @@ func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected m
 	}
 	if !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
 		return false, fmt.Errorf("local MCP port %d is already in use by %s", localPort, formatHolderForError(pid, argv))
+	}
+	if !canReachLocalMCPEndpoint(localPort) {
+		if replaceStalePortForwardHolder(ctx, "mcp", pid, localPort) {
+			return false, nil
+		}
+		return false, fmt.Errorf("local MCP port %d is held by a stale kubectl port-forward that could not be stopped: %s", localPort, formatHolderForError(pid, argv))
 	}
 	adopted := expected
 	adopted.ProcessID = pid
@@ -93,15 +103,31 @@ func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected m
 	return true, nil
 }
 
-func stopStaleMCPPortForward(state, expectedState mcpPortForwardState, localPort int) {
-	if !stateMatchesMCPTarget(state, expectedState) || state.ProcessID <= 0 || !canConnectLocalPort(localPort) {
-		return
+// reusableRecordedPortForward decides whether the forward already recorded for
+// this environment can be reused, and stops it when it cannot. The listener and
+// the tunnel behind it are separate facts: a forward whose pod was replaced
+// keeps holding the local port and answers nothing through it, so reusing it on
+// the strength of the recorded state alone leaves the environment unreachable
+// with nothing left to notice.
+func reusableRecordedPortForward(ctx common.Context, kind string, state, expected mcpPortForwardState, localPort int, carriesTraffic func(int) bool) bool {
+	bound := canConnectLocalPort(localPort)
+	matches := stateMatchesMCPTarget(state, expected)
+	health := common.ClassifyPortForward(matches, bound, bound && carriesTraffic(localPort))
+	switch health {
+	case common.PortForwardServing:
+		return true
+	case common.PortForwardStale:
+		ctx.Trace(fmt.Sprintf("%s: the port-forward on 127.0.0.1:%d holds the local port but its edge does not answer; re-establishing it", kind, localPort))
+		reapRecordedPortForwardProcess(matches, state.ProcessID, localPort)
+	case common.PortForwardDropped:
+		if reapRecordedPortForwardProcess(matches, state.ProcessID, localPort) {
+			ctx.Trace(fmt.Sprintf("%s: the recorded port-forward for 127.0.0.1:%d never bound its port; clearing it (PID %d) before starting a fresh one", kind, localPort, state.ProcessID))
+		}
 	}
-	_ = stopPortForwardProcess(state.ProcessID)
-	waitForLocalPortToClose(localPort)
+	return false
 }
 
-func startMCPPortForward(statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
+func startMCPPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return 0, err
@@ -129,9 +155,24 @@ func startMCPPortForward(statePath string, expectedState mcpPortForwardState, ar
 	}
 
 	if err := waitForMCPPortForward(localPort, logPath); err != nil {
+		releaseUnreachablePortForward(ctx, "mcp", cmd.Process, localPort, err)
 		return 0, err
 	}
 	return localPort, nil
+}
+
+// releaseUnreachablePortForward stops a forward that was just started but
+// never became reachable within its startup wait, so a slow or failed
+// kubectl port-forward does not sit bound to the port claiming to be there —
+// the "held but the edge never answers" shape that looks identical to a
+// genuinely stale forward to the next caller. Best-effort: the process may
+// already be gone, and the caller's own error already reports the failure.
+func releaseUnreachablePortForward(ctx common.Context, kind string, process *os.Process, localPort int, cause error) {
+	ctx.Trace(fmt.Sprintf("%s: releasing port-forward for 127.0.0.1:%d — it never became reachable: %s", kind, localPort, strings.TrimSpace(cause.Error())))
+	if process != nil {
+		_ = process.Kill()
+	}
+	waitForLocalPortToClose(localPort)
 }
 
 func waitForMCPPortForward(localPort int, logPath string) error {
@@ -167,8 +208,8 @@ func kubectlMCPPortForwardArgs(result common.OpenResult, localPort int) []string
 	return args
 }
 
-func mcpPortForwardStatePath(tenant, environment string) (string, error) {
-	return portForwardStatePath("mcp", tenant, environment)
+func mcpPortForwardStatePath(tenant, environment string, dryRun bool) (string, error) {
+	return portForwardStatePath("mcp", tenant, environment, dryRun)
 }
 
 func mcpPortForwardLogPath(statePath string) string {
@@ -216,16 +257,7 @@ func canConnectLocalPort(port int) bool {
 }
 
 func canReachLocalMCPEndpoint(port int) bool {
-	if port <= 0 {
-		return false
-	}
-	client := http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/mcp", port))
-	if err != nil {
-		return false
-	}
-	_ = resp.Body.Close()
-	return true
+	return common.CanReachLocalMCPEndpoint(port)
 }
 
 func mcpPortForwardTimeoutDetail(logPath string) string {
@@ -248,18 +280,24 @@ func mcpPortForwardTimeoutDetail(logPath string) string {
 	}
 }
 
-func stopPortForwardProcess(pid int) error {
+// stopPortForwardProcess kills pid if, and only if, it is still identifiable
+// as a live kubectl port-forward — isPortForwardProcess re-checks the live
+// process table rather than trusting the caller's record, so a PID the OS
+// has since reused for something else is never touched. found reports
+// whether that identification succeeded (i.e. there was something alive to
+// kill), independent of whether the kill itself errored.
+func stopPortForwardProcess(pid int) (found bool, err error) {
 	if pid <= 0 {
-		return nil
+		return false, nil
 	}
 	if !isPortForwardProcess(pid) {
-		return nil
+		return false, nil
 	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return err
+		return true, err
 	}
-	return process.Kill()
+	return true, process.Kill()
 }
 
 func waitForLocalPortToClose(port int) {

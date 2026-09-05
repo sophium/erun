@@ -1,4 +1,10 @@
-import type { ManageTab, UIEnvironmentConfig, UISelection, UIVersionSuggestion } from '@/types';
+import type {
+  ManageTab,
+  UIEnvironmentConfig,
+  UISelection,
+  UIVersionSuggestion,
+  UIVersionSuggestions,
+} from '@/types';
 
 import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
@@ -12,8 +18,10 @@ import {
   cloneEnvironmentConfig,
   compactClaudeDraft,
   nextPendingRedeploy,
+  versionSourceSignature,
 } from './manageDialogHelpers';
-import { showTerminalMessage } from './notificationThunks';
+import { refreshManageExposures } from './manageExposureThunks';
+import { showTerminalError } from './notificationThunks';
 import {
   runtimePodConfigToDisplay,
   runtimePodConfigToKubernetes,
@@ -59,13 +67,24 @@ export const openManageDialog =
         deployComponents: [],
         deployComponentSelection: [],
         deployComponentsLoading: true,
+        runtimeChartPlan: null,
         health: null,
         healthLoading: false,
+        exposures: { configured: false, restricted: false, services: [] },
+        exposuresLoading: true,
+        exposeForm: { service: '', backendService: '', targetIP: '', port: '' },
+        exposeBusy: false,
+        exposeError: '',
+        environmentServices: { configured: false, restricted: false, services: [] },
+        unexposeConfirming: false,
+        unexposeBusy: false,
+        unexposeError: '',
       }),
     );
     void dispatch(refreshManageVersionSuggestions(false));
     void dispatch(loadManageConfig());
     void dispatch(refreshManageDeployComponents());
+    void dispatch(refreshManageExposures());
   };
 
 export const closeManageDialog = (): AppThunk => (dispatch, getState, extra) => {
@@ -370,16 +389,7 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         pendingRedeploy: nextPendingRedeploy(dialog.pendingRedeploy, priorConfig, displayConfig),
       }),
     );
-    // A changed Claude launch flag only applies when the AI session's
-    // create-time program runs, so reopen the env's open AI tabs now rather
-    // than leaving a live claude on the stale flags. A save that did not
-    // change the launch signature must not churn tabs.
-    if (
-      priorConfig &&
-      aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(displayConfig)
-    ) {
-      void dispatch(relaunchAISessionsForLaunchChange(selection));
-    }
+    dispatch(applyManageSaveConsequences(selection, priorConfig, displayConfig));
   } catch (error) {
     const message = readError(error);
     dispatch(
@@ -390,9 +400,52 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         error: message,
       }),
     );
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
+
+// applyManageSaveConsequences re-runs what a save invalidates beyond the config
+// it persisted — the version picker, the chart probe, and the AI tabs are all
+// computed from the pre-save values, and nothing else re-reads them while the
+// dialog stays open. Each is gated on the values it actually depends on, so an
+// unrelated save costs no registry round-trip, no re-probe, and no tab churn.
+const applyManageSaveConsequences =
+  (
+    selection: UISelection,
+    priorConfig: UIEnvironmentConfig | null,
+    savedConfig: UIEnvironmentConfig,
+  ): AppThunk =>
+  (dispatch) => {
+    // The picker lists versions from the registries the environment resolves to,
+    // and is otherwise loaded only when the dialog opens. A save that changed
+    // those registries must re-query, or the one the operator just added is
+    // absent from the list AND from the notices — indistinguishable from a
+    // registry erun cannot use, in the one place its effect is read. A missing
+    // prior config cannot be diffed, so re-query: a redundant listing is cheaper
+    // than a silently stale one.
+    if (
+      !priorConfig ||
+      versionSourceSignature(priorConfig) !== versionSourceSignature(savedConfig)
+    ) {
+      void dispatch(refreshManageVersionSuggestions(false));
+    }
+    // Stating (or clearing) the runtime chart changes which chart a deploy would
+    // install, so the probe behind the panel is re-run rather than left
+    // describing the chart the environment used to ride.
+    if ((priorConfig?.runtimeChart ?? '') !== (savedConfig.runtimeChart ?? '')) {
+      void dispatch(refreshManageDeployComponents());
+    }
+    // A changed Claude launch flag only applies when the AI session's
+    // create-time program runs, so reopen the env's open AI tabs now rather
+    // than leaving a live claude on the stale flags. A save that did not
+    // change the launch signature must not churn tabs.
+    if (
+      priorConfig &&
+      aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(savedConfig)
+    ) {
+      void dispatch(relaunchAISessionsForLaunchChange(selection));
+    }
+  };
 
 const refreshManageVersionSuggestions =
   (selectDefault: boolean): AppThunk<Promise<void>> =>
@@ -403,15 +456,25 @@ const refreshManageVersionSuggestions =
     }
     dispatch(bumpManageDialogVersion());
     const request = getState().requestCounters.manageDialogVersion;
-    const raw = await dispatch(
-      environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
-    ).unwrap();
+    const stale = (): boolean =>
+      request !== getState().requestCounters.manageDialogVersion || !getState().manageDialog.open;
+    let raw: UIVersionSuggestions;
+    try {
+      raw = await dispatch(
+        environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
+      ).unwrap();
+    } catch (error) {
+      // A listing the transport could not complete leaves the picker empty, so
+      // say why here rather than letting the rejection escape unhandled and the
+      // empty list read as "this environment has no versions".
+      if (!stale()) {
+        dispatch(patchManageDialog({ error: readError(error) }));
+      }
+      return;
+    }
     const suggestions = normalizeVersionSuggestions(raw.suggestions);
     const notices = normalizeVersionSuggestionNotices(raw.notices ?? []);
-    if (
-      request !== getState().requestCounters.manageDialogVersion ||
-      !getState().manageDialog.open
-    ) {
+    if (stale()) {
       return;
     }
     dispatch(

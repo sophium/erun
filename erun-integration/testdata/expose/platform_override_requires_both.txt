@@ -1,0 +1,2 @@
+audit: erun expose --dry-run --ip <VERSION>.10 --services-zone services.erunpaas.com team dev api
+a services zone and a platform namespace override are both required when either is set

@@ -1,7 +1,13 @@
 package integration
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +41,151 @@ func stubAWSCallerIdentityAndJWT(t testing.TB, setup env.Setup) (envVars []strin
 	return envVars, issuer
 }
 
+// erunPlatformStubServer runs a minimal hosted erun platform + OIDC provider
+// for real-run `cloud init erun`/`cloud login` scenarios: the unauthenticated
+// GET /v1/platform discovery endpoint, OIDC discovery, the device
+// authorization grant, and the token endpoint's device_code grant. The
+// device flow's interval is 1s so the real-run scenario stays fast.
+func erunPlatformStubServer(t testing.TB) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	var issuer string
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer, "cliClientId": "cli-test-client"})
+	})
+	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"issuer":                        issuer,
+			"authorization_endpoint":        issuer + "/authorize",
+			"token_endpoint":                issuer + "/token",
+			"device_authorization_endpoint": issuer + "/device",
+		})
+	})
+	mux.HandleFunc("POST /device", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_code":               "test-device-code",
+			"user_code":                 "TEST-CODE",
+			"verification_uri":          issuer + "/device",
+			"verification_uri_complete": issuer + "/device?user_code=TEST-CODE",
+			"expires_in":                600,
+			"interval":                  1,
+		})
+	})
+	// The first device-token poll answers authorization_pending — the poll
+	// loop's ordinary steady state — and only the second succeeds, so the
+	// scenario exercises pollERunDeviceToken's retry branch for free instead
+	// of only ever reaching the loop on its first iteration.
+	deviceTokenPolls := 0
+	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
+		if r.FormValue("refresh_token") != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "test-access-token",
+				"expires_in":   3600,
+			})
+			return
+		}
+		deviceTokenPolls++
+		if deviceTokenPolls == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "authorization_pending"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "test-access-token",
+			"refresh_token": "test-refresh-token",
+			"expires_in":    3600,
+		})
+	})
+	mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-access-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"tenantId": "test-tenant-id",
+			"userId":   "test-user-id",
+			"username": "test-user",
+		})
+	})
+	mux.HandleFunc("GET /v1/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-access-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tenant":       map[string]string{"tenantId": "test-tenant-id", "name": "test-tenant"},
+			"environments": []any{map[string]string{"environmentId": "env-1", "name": "prod"}},
+			"contexts":     []any{},
+		})
+	})
+	server := httptest.NewServer(mux)
+	issuer = server.URL
+	t.Cleanup(server.Close)
+	return server
+}
+
+func seedERunCloudProviderAlias(t testing.TB, setup env.Setup, alias, issuer, clientID string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	body := "cloudproviders:\n" +
+		"  - alias: " + alias + "\n" +
+		"    provider: erun\n" +
+		"    oidcissuerurl: " + issuer + "\n" +
+		"    erun:\n" +
+		"      apiurl: " + issuer + "\n" +
+		"      clientid: " + clientID + "\n"
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write erun config: %v", err)
+	}
+}
+
+// seedTwoERunCloudProviderAliases writes two erun-type aliases in one
+// config.yaml, for scenarios asserting the ambiguous-alias refusal
+// (ResolveERunPlatformAlias refuses to guess between them without an
+// explicit --erun-alias).
+func seedTwoERunCloudProviderAliases(t testing.TB, setup env.Setup) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	body := "cloudproviders:\n" +
+		"  - alias: erun+one@erun\n" +
+		"    provider: erun\n" +
+		"    oidcissuerurl: https://api.example.test\n" +
+		"    erun:\n" +
+		"      apiurl: https://api.example.test\n" +
+		"      clientid: cli-test-client\n" +
+		"  - alias: erun+two@erun\n" +
+		"    provider: erun\n" +
+		"    oidcissuerurl: https://api2.example.test\n" +
+		"    erun:\n" +
+		"      apiurl: https://api2.example.test\n" +
+		"      clientid: cli-test-client\n"
+	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write erun config: %v", err)
+	}
+}
+
+// eraseCachedERunAccessToken deletes the cached access token file for alias
+// (ref "erun/access/<alias>", hashed the same way erun-common's file-backed
+// CloudSecretStore names it) without touching the refresh token, forcing the
+// next status check or bearer-token resolution through the refresh_token
+// grant.
+func eraseCachedERunAccessToken(t testing.TB, setup env.Setup, alias string) {
+	t.Helper()
+	sum := sha256.Sum256([]byte("erun/access/" + alias))
+	path := filepath.Join(setup.ConfigHome, "erun", "cloud-secrets", hex.EncodeToString(sum[:])+".token")
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("erase cached access token %s: %v", path, err)
+	}
+}
+
 func TestCloud(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"cloud", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -173,6 +323,313 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/init_cloudflare_dry_run_api_base_url_seam", normalize.Apply(result.Combined))
 	})
 
+	t.Run("init_cloudflare_real_run_verifies_token_and_resolves_account_via_accounts_api", func(t *testing.T) {
+		// Real run (no --dry-run) against a stub Cloudflare API reached through
+		// the ERUN_CLOUDFLARE_API_BASE_URL seam: exercises the actual HTTP round
+		// trips (verifyCloudflareTokenAt, listCloudflareAccountsAt) rather than
+		// dry-run's traced-but-unexecuted plan. --account-id is omitted so the
+		// non-interactive account resolution (a single account) also runs.
+		setup := env.New(t)
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /client/v4/user/tokens/verify", func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer real-cf-token" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"result":  map[string]string{"id": "tok-1", "status": "active"},
+			})
+		})
+		mux.HandleFunc("GET /client/v4/accounts", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"result":  []map[string]string{{"id": "cf-acct-real", "name": "Real Account"}},
+			})
+		})
+		server := httptest.NewServer(mux)
+		t.Cleanup(server.Close)
+
+		envVars := append(setup.Env(), "ERUN_CLOUDFLARE_API_BASE_URL="+server.URL)
+		result := erun.Run(t, []string{
+			"cloud", "init", "cloudflare",
+			"--token-name", "ci-token",
+			"--api-token", "real-cf-token",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		alias := "ci-token+cf-acct-real@cloudflare"
+		if !strings.Contains(result.Combined, "cloud init cloudflare: resolved account cf-acct-real") {
+			t.Fatalf("expected the resolved account to be traced, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Saved cloud provider alias "+alias) {
+			t.Fatalf("expected init to save alias %s, got:\n%s", alias, result.Combined)
+		}
+
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		if !strings.Contains(string(raw), "alias: "+alias) {
+			t.Errorf("expected persisted config to contain alias %s, got:\n%s", alias, raw)
+		}
+		if _, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "cloud-secrets")); err == nil {
+			t.Errorf("cloud-secrets should be a directory, not a file")
+		}
+
+		// `erun list` must report this healthy, just-signed-in alias as
+		// active — not "expired"/"unknown" with "cloud secret store is not
+		// configured", which is what ListCloudProviderStatuses reported before
+		// it was given a real CloudDependencies (DefaultCloudDependencies).
+		listResult := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if listResult.ExitCode != 0 {
+			t.Fatalf("list exit %d: %s", listResult.ExitCode, listResult.Combined)
+		}
+		if !strings.Contains(listResult.Combined, alias+" provider=cloudflare account=cf-acct-real status=active") {
+			t.Fatalf("expected erun list to report %s as active, got:\n%s", alias, listResult.Combined)
+		}
+	})
+
+	t.Run("init_cloudflare_real_run_resolves_account_via_zones_fallback", func(t *testing.T) {
+		// A least-privilege Zone-only token cannot read /accounts (Cloudflare
+		// returns success with an empty result for such a token), so
+		// defaultListCloudflareAccounts falls back to deriving the account from
+		// the token's zones. This is the only path that exercises
+		// resolveCloudflareAccountsViaZones/distinctCloudflareZoneAccounts.
+		setup := env.New(t)
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /client/v4/user/tokens/verify", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"result":  map[string]string{"id": "tok-2", "status": "active"},
+			})
+		})
+		mux.HandleFunc("GET /client/v4/accounts", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "result": []map[string]string{}})
+		})
+		mux.HandleFunc("GET /client/v4/zones", func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"result": []map[string]any{
+					{"account": map[string]string{"id": "cf-acct-via-zone", "name": "Zone Account"}},
+					// A second zone under the same account must not duplicate it.
+					{"account": map[string]string{"id": "cf-acct-via-zone", "name": "Zone Account"}},
+				},
+			})
+		})
+		server := httptest.NewServer(mux)
+		t.Cleanup(server.Close)
+
+		envVars := append(setup.Env(), "ERUN_CLOUDFLARE_API_BASE_URL="+server.URL)
+		result := erun.Run(t, []string{
+			"cloud", "init", "cloudflare",
+			"--token-name", "zone-token",
+			"--api-token", "zone-scoped-token",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		alias := "zone-token+cf-acct-via-zone@cloudflare"
+		if !strings.Contains(result.Combined, "Saved cloud provider alias "+alias) {
+			t.Fatalf("expected init to save alias %s resolved via the zones fallback, got:\n%s", alias, result.Combined)
+		}
+	})
+
+	t.Run("init_erun_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"cloud", "init", "erun", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_erun_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_erun_dry_run_traces_discovery_plan", func(t *testing.T) {
+		// No server is started: a dry run must never depend on the platform
+		// being reachable, unlike AWS/Cloudflare init whose identity/verify
+		// calls always run for real regardless of --dry-run.
+		setup := env.New(t)
+		args := []string{"cloud", "init", "erun", "--api-url", "https://api.example.test", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_erun_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("init_erun_real_run_and_login_completes_device_flow", func(t *testing.T) {
+		// A real hosted-platform + OIDC provider stub, reached over real
+		// loopback HTTP (erun's design takes the API URL as an explicit
+		// input, so no ERUN_*_BASE_URL seam or stub binary is needed): init
+		// discovers the platform and persists the alias, then login runs the
+		// device authorization grant end to end and persists the resulting
+		// refresh token.
+		setup := env.New(t)
+		server := erunPlatformStubServer(t)
+
+		initResult := erun.Run(t, []string{"cloud", "init", "erun", "--api-url", server.URL}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if initResult.ExitCode != 0 {
+			t.Fatalf("init exit %d: %s", initResult.ExitCode, initResult.Combined)
+		}
+		alias := "erun+" + strings.TrimPrefix(server.URL, "http://") + "@erun"
+		if !strings.Contains(initResult.Combined, "Saved cloud provider alias "+alias) {
+			t.Fatalf("expected init to save alias %s, got:\n%s", alias, initResult.Combined)
+		}
+
+		loginResult := erun.Run(t, []string{"cloud", "login", "--alias", alias}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   setup.Env(),
+			Stdin: "y\n",
+		})
+		if loginResult.ExitCode != 0 {
+			t.Fatalf("login exit %d: %s", loginResult.ExitCode, loginResult.Combined)
+		}
+		if !strings.Contains(loginResult.Combined, alias+": active") {
+			t.Fatalf("expected login to report active status, got:\n%s", loginResult.Combined)
+		}
+		// The end-to-end proof: login also calls GET /v1/whoami against the
+		// real platform stub, so a token that merely decodes but doesn't
+		// authenticate would fail here.
+		if !strings.Contains(loginResult.Combined, "Signed in to "+alias+" as test-user (tenant test-tenant-id)") {
+			t.Fatalf("expected login to confirm sign-in via whoami, got:\n%s", loginResult.Combined)
+		}
+		// Same proof, one step further: GET /v1/config also round-trips
+		// against the real platform stub.
+		if !strings.Contains(loginResult.Combined, "Tenant test-tenant: 1 environment(s), 0 cloud context(s)") {
+			t.Fatalf("expected login to confirm config readback, got:\n%s", loginResult.Combined)
+		}
+
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		body := string(raw)
+		for _, want := range []string{
+			"alias: " + alias,
+			"clientid: cli-test-client",
+			"refreshtokenref: erun/refresh/" + alias,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("expected persisted config to contain %q, got:\n%s", want, body)
+			}
+		}
+
+		// Erase only the cached access token (not the refresh token config
+		// just persisted above) so the next `cloud login` is forced through
+		// the refresh_token grant instead of finding an already-active
+		// cache — exercising the token-refresh path end to end, including
+		// the whoami/config re-verification with the freshly refreshed
+		// token. No confirm prompt is expected: a successful refresh reports
+		// "active" before the command ever reaches that prompt.
+		eraseCachedERunAccessToken(t, setup, alias)
+		refreshLoginResult := erun.Run(t, []string{"cloud", "login", "--alias", alias}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if refreshLoginResult.ExitCode != 0 {
+			t.Fatalf("refresh login exit %d: %s", refreshLoginResult.ExitCode, refreshLoginResult.Combined)
+		}
+		if !strings.Contains(refreshLoginResult.Combined, alias+": active") {
+			t.Fatalf("expected refreshed login to report active status, got:\n%s", refreshLoginResult.Combined)
+		}
+
+		// `erun list` must agree with `cloud login` about this alias —
+		// before ListCloudProviderStatuses was given a real CloudDependencies,
+		// this row read "expired" with "cloud secret store is not configured"
+		// even though the platform login above is demonstrably working.
+		listResult := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if listResult.ExitCode != 0 {
+			t.Fatalf("list exit %d: %s", listResult.ExitCode, listResult.Combined)
+		}
+		if !strings.Contains(listResult.Combined, alias+" provider=erun account="+strings.TrimPrefix(server.URL, "http://")+" status=active") {
+			t.Fatalf("expected erun list to report %s as active, got:\n%s", alias, listResult.Combined)
+		}
+	})
+
+	t.Run("login_erun_dry_run_traces_discovery_and_device_flow_plan", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "test+host@erun", "https://auth.example.test", "cli-test")
+		result := erun.Run(t, []string{"cloud", "login", "--alias", "test+host@erun", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/login_erun_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("oidc_erun_alias_fails", func(t *testing.T) {
+		// `cloud oidc` is AWS-only web-identity federation setup; an erun
+		// alias's issuer is already set at `cloud init erun` and never uses
+		// this path.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "test+host@erun", "https://auth.example.test", "cli-test")
+		result := erun.Run(t, []string{"cloud", "oidc", "--alias", "test+host@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/oidc_erun_alias_fails", normalize.Apply(result.Combined))
+	})
+
+	// The device flow's token round-trip can succeed while the platform still
+	// rejects the resulting bearer at the actual API (e.g. a backend-side
+	// authorization mismatch, a not-yet-provisioned tenant, a conflicting
+	// concurrent request, or an unconfigured executor) — platformStatusError's
+	// mapping, distinct from the token endpoint's own error mapping
+	// (oauthTokenError), which a passing token exchange never reaches here.
+	for _, statusCase := range []struct {
+		name   string
+		status int
+	}{
+		{"unauthorized", http.StatusUnauthorized},
+		{"forbidden", http.StatusForbidden},
+		{"not_found", http.StatusNotFound},
+		{"conflict", http.StatusConflict},
+		{"not_implemented", http.StatusNotImplemented},
+		// Unmapped status: platformStatusError's default branch, a generic
+		// error carrying the server's message with no sentinel to match.
+		{"internal_server_error", http.StatusInternalServerError},
+	} {
+		t.Run("login_erun_real_run_whoami_verification_maps_platform_error_"+statusCase.name, func(t *testing.T) {
+			setup := env.New(t)
+			mux := http.NewServeMux()
+			var issuer string
+			mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer, "cliClientId": "cli-test-client"})
+			})
+			mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"issuer":                        issuer,
+					"token_endpoint":                issuer + "/token",
+					"device_authorization_endpoint": issuer + "/device",
+				})
+			})
+			mux.HandleFunc("POST /device", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"device_code": "dc", "user_code": "UC", "expires_in": 600, "interval": 1})
+			})
+			mux.HandleFunc("POST /token", func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "refresh_token": "rtok", "expires_in": 3600})
+			})
+			mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, http.StatusText(statusCase.status), statusCase.status)
+			})
+			server := httptest.NewServer(mux)
+			t.Cleanup(server.Close)
+			issuer = server.URL
+
+			initResult := erun.Run(t, []string{"cloud", "init", "erun", "--api-url", server.URL}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+			if initResult.ExitCode != 0 {
+				t.Fatalf("init exit %d: %s", initResult.ExitCode, initResult.Combined)
+			}
+			alias := "erun+" + strings.TrimPrefix(server.URL, "http://") + "@erun"
+
+			loginResult := erun.Run(t, []string{"cloud", "login", "--alias", alias}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "y\n"})
+			if loginResult.ExitCode == 0 {
+				t.Fatalf("expected a non-zero exit when whoami verification fails, got 0:\n%s", loginResult.Combined)
+			}
+			wantStatus := fmt.Sprintf("%d", statusCase.status)
+			if !strings.Contains(loginResult.Combined, "verify erun platform sign-in") || !strings.Contains(loginResult.Combined, wantStatus) {
+				t.Fatalf("expected the platform's %s to surface, got:\n%s", wantStatus, loginResult.Combined)
+			}
+		})
+	}
+
 	t.Run("init_aws_dry_run_traces_sso_setup_and_oidc_persistence", func(t *testing.T) {
 		setup := env.New(t)
 		args := []string{
@@ -255,6 +712,48 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/login_real_run_invokes_aws_sso_login_via_stub", normalize.Apply(result.Combined))
 	})
 
+	t.Run("init_aws_dry_run_unaffected_by_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract: the `aws sts get-caller-identity`
+		// trace line the CLI hand-renders under --dry-run must stay
+		// byte-identical to the subprocess-mode golden even when
+		// execution.modes.aws-sts opts into the library path, because
+		// ResolveAWSIdentity/CheckAWSStatus are never invoked during this
+		// command's dry-run path at all (see init_aws_dry_run.txt).
+		setup := env.New(t)
+		seedExecutionMode(t, setup, "aws-sts", "library")
+		args := []string{
+			"cloud", "init", "aws",
+			"--account-id", "123456789012",
+			"--role-name", "Admin",
+			"--region", "eu-west-2",
+			"--sso-start-url", "https://example.awsapps.com/start",
+			"--sso-region", "eu-west-1",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "cloud/init_aws_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("login_real_run_library_execution_mode_needs_no_aws_binary", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path: with execution.modes.aws-sts=library and a real
+		// static-credential AWS profile on disk, CheckAWSStatus resolves via
+		// aws-sdk-go-v2 against a fake STS endpoint (AWS_ENDPOINT_URL) instead
+		// of shelling out, so the scenario declares no "aws" stub at all —
+		// the PATH scrub in internal/env would fail the run with "executable
+		// file not found" if production code fell through to a subprocess.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		seedExecutionMode(t, setup, "aws-sts", "library")
+		seedAWSStaticCredentialProfile(t, setup, "test-profile")
+		envVars := append(setup.Env(), "AWS_ENDPOINT_URL="+stsCallerIdentityStubServer(t).URL)
+		result := erun.Run(t, []string{"cloud", "login", "--alias", "test-user@aws"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/login_real_run_library_execution_mode_needs_no_aws_binary", normalize.Apply(result.Combined))
+	})
+
 	t.Run("login_dry_run_traces_aws_sso_login", func(t *testing.T) {
 		setup := env.New(t)
 		seedCloudProviderAlias(t, setup, "rihards+123456789012@aws", "test-profile")
@@ -274,6 +773,60 @@ func TestCloud(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "cloud/oidc_dry_run_traces_bearer_token_command", normalize.Apply(result.Combined))
+	})
+
+	t.Run("oidc_dry_run_unaffected_by_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for the second aws-sts operation:
+		// awsCloudProviderBearerToken's status check + bearer-token trace must
+		// stay byte-identical to the subprocess-mode golden even when
+		// execution.modes.aws-sts-web-identity-token opts into the library
+		// path, since both defaultRunAWSBearerToken and libraryRunAWSBearerToken
+		// trace through the same awsGetWebIdentityTokenArgs and return before
+		// ever calling AWS on a dry run.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "rihards+123456789012@aws", "test-profile")
+		seedExecutionMode(t, setup, "aws-sts-web-identity-token", "library")
+		args := []string{"cloud", "oidc", "--alias", "rihards+123456789012@aws", "--audience", "https://api.example", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/oidc_dry_run_traces_bearer_token_command", normalize.Apply(result.Combined))
+	})
+
+	t.Run("oidc_real_run_library_execution_mode_needs_no_aws_binary", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path: with both execution.modes.aws-sts and
+		// execution.modes.aws-sts-web-identity-token set to "library", and a
+		// real static-credential AWS profile on disk, both the status check
+		// (CheckAWSStatus) and the bearer-token mint (RunAWSBearerToken)
+		// resolve via aws-sdk-go-v2 against a fake STS endpoint
+		// (AWS_ENDPOINT_URL) instead of shelling out, so the scenario declares
+		// no "aws" stub at all — the PATH scrub in internal/env would fail the
+		// run with "executable file not found" if production code fell
+		// through to a subprocess for either call.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		seedExecutionMode(t, setup, "aws-sts", "library")
+		seedExecutionMode(t, setup, "aws-sts-web-identity-token", "library")
+		seedAWSStaticCredentialProfile(t, setup, "test-profile")
+		issuer := "https://oidc.eu-west-2.amazonaws.com/test-issuer"
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `"}`))
+		jwt := header + "." + payload + ".sig"
+		envVars := append(setup.Env(), "AWS_ENDPOINT_URL="+awsSTSActionStubServer(t, jwt).URL)
+		result := erun.Run(t, []string{"cloud", "oidc", "--alias", "test-user@aws"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/oidc_real_run_library_execution_mode_needs_no_aws_binary", normalize.Apply(result.Combined))
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		if !strings.Contains(string(raw), "oidcissuerurl: "+issuer) {
+			t.Errorf("expected persisted OIDC issuer %q, got:\n%s", issuer, raw)
+		}
 	})
 
 	t.Run("login_select_prompt_resolves_active_alias", func(t *testing.T) {
@@ -831,6 +1384,28 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/set_empty_alias_fails", normalize.Apply(result.Combined))
 	})
 
+	t.Run("set_empty_tenant_fails", func(t *testing.T) {
+		// TENANT/ENVIRONMENT are cobra-positional (ExactArgs(2)), so an
+		// explicitly empty value still satisfies the arg-count check and must
+		// be rejected by normalizeEnvironmentCloudProviderAliasParams before
+		// any env lookup runs.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"cloud", "set", "", "dev", "--alias", "team-cloud"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an empty tenant, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/set_empty_tenant_fails", normalize.Apply(result.Combined))
+	})
+
+	t.Run("set_empty_environment_fails", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"cloud", "set", "team", "", "--alias", "team-cloud"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an empty environment, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "cloud/set_empty_environment_fails", normalize.Apply(result.Combined))
+	})
+
 	t.Run("refresh_help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"cloud", "refresh", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -960,6 +1535,65 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/refresh_real_run_keeps_credentials_out_of_output", normalize.Apply(result.Combined))
 	})
 
+	t.Run("refresh_dry_run_unaffected_by_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for aws-export-credentials: the plan
+		// must stay byte-identical to the subprocess-mode golden even with
+		// execution.modes.aws-export-credentials=library, because
+		// RefreshHostAWSCredentials returns before ever calling
+		// ExportCloudProviderCredentials on a dry run (see
+		// refresh_dry_run_traces_pod_write_and_resolved_region.txt).
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		seedExecutionMode(t, setup, "aws-export-credentials", "library")
+		result := erun.Run(t, []string{"cloud", "refresh", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/refresh_dry_run_traces_pod_write_and_resolved_region", normalize.Apply(result.Combined))
+	})
+
+	t.Run("refresh_real_run_library_execution_mode_needs_no_aws_binary", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path: with execution.modes.aws-export-credentials=library
+		// and a real static-credential AWS profile on disk, ExportCloudProviderCredentials
+		// resolves via aws-sdk-go-v2's shared-config credential chain instead of
+		// shelling out, so the scenario declares no "aws" stub at all — only
+		// "kubectl", for the pod write this command always performs. The PATH
+		// scrub in internal/env would fail the run with "executable file not
+		// found" if production code fell through to a subprocess.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		seedExecutionMode(t, setup, "aws-export-credentials", "library")
+		seedAWSStaticCredentialProfile(t, setup, "erun-sso-test")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		argvLog := filepath.Join(stubs, "kubectl-argv.log")
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`printf '%s\n' "$*" >> '` + argvLog + `'`,
+			`cat >/dev/null 2>&1 || true`,
+			`exit 0`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"cloud", "refresh", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, leak := range []string{"AKIAFAKE", "fakesecret"} {
+			if strings.Contains(result.Combined, leak) {
+				t.Fatalf("credential value %q leaked into command output:\n%s", leak, result.Combined)
+			}
+		}
+		recorded, err := os.ReadFile(argvLog)
+		if err != nil {
+			t.Fatalf("read recorded kubectl argv: %v", err)
+		}
+		for _, leak := range []string{"AKIAFAKE", "fakesecret"} {
+			if strings.Contains(string(recorded), leak) {
+				t.Fatalf("credential value %q leaked into a kubectl argument:\n%s", leak, recorded)
+			}
+		}
+		golden.Equal(t, "cloud/refresh_real_run_library_execution_mode_needs_no_aws_binary", normalize.Apply(result.Combined))
+	})
+
 	t.Run("set_dry_run_traces_env_alias_write", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -984,4 +1618,117 @@ func seedCloudProviderAlias(t testing.TB, setup env.Setup, alias, profile string
 	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write erun config: %v", err)
 	}
+}
+
+// seedExecutionMode appends an execution.modes override to the root
+// config.yaml, preserving whatever seedCloudProviderAlias or another fixture
+// already wrote — config.yaml is plain YAML, so appending a distinct
+// top-level key is enough, without needing to parse and re-merge the existing
+// document. A second call (a scenario opting two operations into library mode
+// at once) inserts its line into the existing "modes:" map instead of adding
+// a second "execution:" top-level key, which yaml.Unmarshal rejects as a
+// duplicate key.
+func seedExecutionMode(t testing.TB, setup env.Setup, operation, mode string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	path := filepath.Join(root, "config.yaml")
+	existing, _ := os.ReadFile(path)
+	body := string(existing)
+	line := "    " + operation + ": " + mode + "\n"
+	const modesHeader = "execution:\n  modes:\n"
+	if idx := strings.Index(body, modesHeader); idx >= 0 {
+		insertAt := idx + len(modesHeader)
+		body = body[:insertAt] + line + body[insertAt:]
+	} else {
+		body += modesHeader + line
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write erun config: %v", err)
+	}
+}
+
+// seedAWSStaticCredentialProfile writes a real ~/.aws/config + credentials
+// profile with static keys, standing in for a completed `aws configure sso`
+// so the aws-sdk-go-v2 library path (which reads the real shared config files
+// rather than trusting a stubbed CLI's exit code) has a profile to resolve.
+func seedAWSStaticCredentialProfile(t testing.TB, setup env.Setup, profile string) {
+	t.Helper()
+	dir := filepath.Join(setup.Home, ".aws")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	config := "[profile " + profile + "]\nregion = eu-west-2\n"
+	if err := os.WriteFile(filepath.Join(dir, "config"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write aws config: %v", err)
+	}
+	credentials := "[" + profile + "]\naws_access_key_id = AKIAFAKE\naws_secret_access_key = fakesecret\n"
+	if err := os.WriteFile(filepath.Join(dir, "credentials"), []byte(credentials), 0o644); err != nil {
+		t.Fatalf("write aws credentials: %v", err)
+	}
+}
+
+// stsCallerIdentityStubServer fakes the STS GetCallerIdentity endpoint the
+// aws-sdk-go-v2 library path calls, honored via the SDK's own
+// AWS_ENDPOINT_URL env var — no daemon, no real AWS account, no "aws" stub
+// binary needed on PATH.
+func stsCallerIdentityStubServer(t testing.TB) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/xml")
+		_, _ = fmt.Fprint(w, `<?xml version="1.0"?>
+<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <GetCallerIdentityResult>
+    <Arn>arn:aws:iam::123456789012:user/test-user</Arn>
+    <UserId>AIDAEXAMPLE</UserId>
+    <Account>123456789012</Account>
+  </GetCallerIdentityResult>
+  <ResponseMetadata><RequestId>test-request-id</RequestId></ResponseMetadata>
+</GetCallerIdentityResponse>`)
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// awsSTSActionStubServer discriminates by the AWS Query protocol's Action
+// form field, so one fake STS endpoint can back both GetCallerIdentity
+// (CheckAWSStatus) and GetWebIdentityToken (RunAWSBearerToken) in the same
+// real-run scenario — a scenario that flips both operations to library mode
+// exercises both against a single AWS_ENDPOINT_URL.
+func awsSTSActionStubServer(t testing.TB, webIdentityToken string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/xml")
+		switch r.PostForm.Get("Action") {
+		case "GetCallerIdentity":
+			_, _ = fmt.Fprint(w, `<?xml version="1.0"?>
+<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <GetCallerIdentityResult>
+    <Arn>arn:aws:iam::123456789012:user/test-user</Arn>
+    <UserId>AIDAEXAMPLE</UserId>
+    <Account>123456789012</Account>
+  </GetCallerIdentityResult>
+  <ResponseMetadata><RequestId>test-request-id</RequestId></ResponseMetadata>
+</GetCallerIdentityResponse>`)
+		case "GetWebIdentityToken":
+			_, _ = fmt.Fprintf(w, `<?xml version="1.0"?>
+<GetWebIdentityTokenResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <GetWebIdentityTokenResult>
+    <WebIdentityToken>%s</WebIdentityToken>
+    <Expiration>2026-01-01T00:00:00Z</Expiration>
+  </GetWebIdentityTokenResult>
+  <ResponseMetadata><RequestId>test-request-id</RequestId></ResponseMetadata>
+</GetWebIdentityTokenResponse>`, webIdentityToken)
+		default:
+			http.Error(w, "unexpected STS action "+r.PostForm.Get("Action"), http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
 }

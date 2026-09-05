@@ -20,3 +20,80 @@ export async function boundingBoxOf(locator: Locator, label: string): Promise<El
   }
   return box;
 }
+
+// Guards the dialog-card overflow regression (erun-kit's DialogContent):
+// with no explicit grid-template-columns, the browser sizes the implicit
+// single column to the max-content width of its widest descendant — an
+// unbroken string with no min-w-0 anywhere above it forces that column, and
+// therefore every sibling grid item, wider than the card's own box. The
+// card's background/border still paint at the correct (clamped) width, so the
+// break is visible only by measuring descendants against it, never by
+// measuring the card alone.
+export interface OverflowingDescendant {
+  tag: string;
+  dataSlot: string | null;
+  overflowRight: number;
+  rectWidth: number;
+  cardWidth: number;
+}
+
+async function overflowingDescendants(card: Locator): Promise<OverflowingDescendant[]> {
+  return card.evaluate((cardEl) => {
+    const cardRect = cardEl.getBoundingClientRect();
+    const entries: OverflowingDescendant[] = [];
+    // An element inside a scroll container is clipped by it, so it cannot paint
+    // over what is behind the dialog however far its box extends -- scrolled
+    // content legitimately reaches past the card. Only unclipped descendants
+    // can produce the defect this guards, so anything under a scroller is not
+    // a finding. (The settings dialog has two such containers, which is why
+    // this matters and not only in theory.)
+    const isClipped = (el: Element): boolean => {
+      for (let a = el.parentElement; a && a !== cardEl; a = a.parentElement) {
+        const style = getComputedStyle(a);
+        if (style.overflowX !== 'visible' || style.overflowY !== 'visible') return true;
+      }
+      return false;
+    };
+    const walker = document.createTreeWalker(cardEl, NodeFilter.SHOW_ELEMENT);
+    let node: Node | null = walker.currentNode;
+    while (node) {
+      const el = node as Element;
+      const rect = el.getBoundingClientRect();
+      // 1px tolerance absorbs sub-pixel layout rounding, not the regression.
+      if (rect.width > 0 && rect.height > 0 && rect.right - cardRect.right > 1 && !isClipped(el)) {
+        entries.push({
+          tag: el.tagName,
+          dataSlot: el.getAttribute('data-slot'),
+          overflowRight: rect.right - cardRect.right,
+          rectWidth: rect.width,
+          cardWidth: cardRect.width,
+        });
+      }
+      node = walker.nextNode();
+    }
+    return entries;
+  });
+}
+
+export async function expectDialogContentStaysWithinCard(
+  card: Locator,
+  label: string,
+): Promise<void> {
+  const entries = await overflowingDescendants(card);
+  // One blown-out grid track drags every descendant with it, so a raw dump is
+  // hundreds of near-identical entries and the actual culprit is invisible.
+  // Name the widest few, which are the ones sizing the track.
+  const worst = [...entries]
+    .sort((a, b) => b.rectWidth - a.rectWidth)
+    .slice(0, 5)
+    .map(
+      (e) =>
+        `${e.tag}${e.dataSlot ? `[${e.dataSlot}]` : ''} ${e.rectWidth.toFixed(0)}px ` +
+        `in a ${e.cardWidth.toFixed(0)}px card (${e.overflowRight.toFixed(0)}px past its right edge)`,
+    );
+  expect(
+    entries,
+    `${label}: ${entries.length} descendant(s) render wider than the card. Widest:\n  ` +
+      worst.join('\n  '),
+  ).toEqual([]);
+}

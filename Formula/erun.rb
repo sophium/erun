@@ -1,8 +1,8 @@
 class Erun < Formula
   desc "Multi-tenant multi-environment deployment and management tool"
   homepage "https://github.com/sophium/erun"
-  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.174.tar.gz"
-  sha256 "56c6937b90c841117d00e7eef5c5eea6257956bd44c65c47e60d3b55e517996d"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.250.tar.gz"
+  sha256 "1d91fc21c560b50025adb7c9aaafbe08996eec6d7366307366af11b754a4b3ab"
   license "MIT"
 
   depends_on "go" => :build
@@ -58,7 +58,10 @@ class Erun < Formula
       system "go", "build",
              "-trimpath",
              "-tags", "desktop,production",
-             "-ldflags", "-s -w -X github.com/sophium/erun/erun-ui.buildVersion=#{version}",
+             # `main.`, not the module path: erun-app's build vars are declared
+             # in package main, and -X against a path no package declares is
+             # dropped in silence, leaving the binary reporting "dev".
+             "-ldflags", "-s -w -X main.buildVersion=#{version}",
              "-o", bin/"erun-app",
              "."
     end

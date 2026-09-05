@@ -19,7 +19,7 @@ func newDeleteCmd(store common.DeleteStore, promptRunner PromptRunner, deleteNam
 			"Removes the environment's remote namespace and its data, then removes the local " +
 			"config entry. The namespace data is not recoverable. Asks you to type " +
 			"<tenant>-<environment> to confirm; -y skips the prompt for non-interactive callers.",
-		Example:      "  erun delete team dev",
+		Example:      "  erun delete team dev\n  erun delete team dev -y --output json",
 		Args:         cobra.ExactArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -36,7 +36,7 @@ func runDeleteCommand(ctx common.Context, store common.DeleteStore, promptRunner
 	environment = strings.TrimSpace(environment)
 	expected := common.DeleteEnvironmentConfirmation(tenant, environment)
 	if expected == "" {
-		return fmt.Errorf("tenant and environment are required")
+		return fmt.Errorf("tenant and environment must not be empty: run `erun delete TENANT ENVIRONMENT` with both positional arguments set")
 	}
 
 	if !ctx.DryRun && !yes {
@@ -53,13 +53,15 @@ func runDeleteCommand(ctx common.Context, store common.DeleteStore, promptRunner
 		return err
 	}
 
-	if result.NamespaceDeleteError != "" {
-		_, _ = fmt.Fprintf(ctx.Stderr, "warning: failed to delete namespace %q in context %q: %s\n", result.Namespace, result.KubernetesContext, result.NamespaceDeleteError)
+	if ctx.Output != common.OutputJSON {
+		if result.NamespaceDeleteError != "" {
+			_, _ = fmt.Fprintf(ctx.Stderr, "warning: failed to delete namespace %q in context %q: %s\n", result.Namespace, result.KubernetesContext, result.NamespaceDeleteError)
+		}
+		if !ctx.DryRun {
+			_, _ = fmt.Fprintf(ctx.Stdout, "deleted environment: %s/%s\n", result.Tenant, result.Environment)
+		}
 	}
-	if !ctx.DryRun {
-		_, _ = fmt.Fprintf(ctx.Stdout, "deleted environment: %s/%s\n", result.Tenant, result.Environment)
-	}
-	return nil
+	return ctx.WriteResult(result)
 }
 
 func confirmDeleteCommand(promptRunner PromptRunner, expected string) error {

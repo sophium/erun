@@ -8,10 +8,23 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 // Record<string, true> to keep the slice state serializable.
 export interface AIActivityState {
   aiBusyByEnv: Record<string, true>;
+  // Orchestrator sessions have no tenant/environment to key by, so their latch
+  // is keyed by session id. Same event, same debounce policy — only the address
+  // differs, because an orchestrator row is not an env row.
+  //
+  // Two writers feed this map, deliberately kept as one field so they cannot
+  // disagree (#1087): the ai-activity event (handleAIActivity) and
+  // loadOrchestrators seeding it from each orchestrator's own `busy` snapshot
+  // field (planOrchestratorBusySeed). The event is the fast path while a
+  // session runs; the snapshot is what makes a fetch that lands after a
+  // transition — boot, a reload, a reconnect — render the true state without
+  // having witnessed that transition.
+  aiBusyBySession: Record<number, true>;
 }
 
 const initialState: AIActivityState = {
   aiBusyByEnv: {},
+  aiBusyBySession: {},
 };
 
 export const aiActivitySlice = createSlice({
@@ -25,11 +38,19 @@ export const aiActivitySlice = createSlice({
         Reflect.deleteProperty(state.aiBusyByEnv, action.payload.key);
       }
     },
+    setAIBusyForSession(state, action: PayloadAction<{ sessionId: number; busy: boolean }>) {
+      if (action.payload.busy) {
+        state.aiBusyBySession[action.payload.sessionId] = true;
+      } else {
+        Reflect.deleteProperty(state.aiBusyBySession, action.payload.sessionId);
+      }
+    },
     clearAIBusy(state) {
       state.aiBusyByEnv = {};
+      state.aiBusyBySession = {};
     },
   },
 });
 
-export const { setAIBusyForEnv, clearAIBusy } = aiActivitySlice.actions;
+export const { setAIBusyForEnv, setAIBusyForSession, clearAIBusy } = aiActivitySlice.actions;
 export default aiActivitySlice.reducer;

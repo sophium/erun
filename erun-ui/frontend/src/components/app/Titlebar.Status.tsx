@@ -1,34 +1,39 @@
+import {
+  Button,
+  cn,
+  IconTooltip,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from 'erun-kit';
 import { AlertCircle, CheckCircle2, Copy, Info, LoaderCircle, X } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   copyTerminalOutput,
-  dismissNotification,
   dismissTerminalStatus,
   waitLongerForTerminalStatus,
 } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
-import type { AppDispatch } from '@/app/store';
-import { IconTooltip } from '@/components/app/IconTooltip';
-import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
-
-import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
 // Long error text can't be read or copied from a hover tooltip, so past
 // this length the message escalates to a selectable popover the operator
 // can copy into a bug report.
 const LONG_STATUS_THRESHOLD = 160;
 
-type TitlebarStatusKind =
-  | NonNullable<AppState['notification']>['kind']
-  | AppState['terminalStatusKind'];
+type TitlebarStatusKind = AppState['terminalStatusKind'];
 
+// TitlebarStatusValue is the currently-running/just-finished CLI command's
+// own status -- distinct from the classified message centre
+// (Titlebar.MessageCenter.tsx, rendered in the titlebar's right-hand group),
+// which owns every notification-queue message. This pill is scoped to the
+// terminal action just taken (piped commands like `erun init`/`erun deploy`,
+// or a dedicated PTY's own result), never a global toast.
 interface TitlebarStatusValue {
-  source: 'notification' | 'terminal';
   kind: TitlebarStatusKind;
   message: string;
   detail: string;
@@ -39,30 +44,26 @@ interface TitlebarStatusValue {
 }
 
 const statusBorderClassNames: Record<TitlebarStatusKind, string> = {
-  success: 'border-[oklch(0.72_0.12_150)] text-foreground',
   warning: 'border-[oklch(0.76_0.16_65)] text-foreground',
   error: 'border-destructive/60 text-foreground',
   info: 'border-border text-foreground',
 };
 
 const statusIconClassNames: Record<TitlebarStatusKind, string> = {
-  success: 'text-[oklch(0.52_0.15_150)]',
   warning: 'text-[oklch(0.58_0.15_65)]',
   error: 'text-destructive',
   info: 'text-muted-foreground',
 };
 
 export function TitlebarStatus(): React.ReactElement | null {
-  const notification = useAppSelector((state) => state.notification.notification);
   const terminalStatus = useAppSelector((state) => state.terminalStatus);
-  const status = computeTitlebarStatus(notification, terminalStatus);
+  const status = computeTitlebarStatus(terminalStatus);
   if (!status) {
     return null;
   }
-
-  // Cap width so the status pill never crowds the right-cluster buttons on
-  // narrow viewports.
   return (
+    // Cap width so the status pill never crowds the right-cluster buttons
+    // on narrow viewports.
     <div
       className="pointer-events-none flex min-w-0 max-w-full [--wails-draggable:no-drag]"
       role={status.kind === 'error' ? 'alert' : 'status'}
@@ -77,46 +78,22 @@ export function TitlebarStatus(): React.ReactElement | null {
         <StatusIcon status={status} />
         <StatusMessage status={status} />
         {status.action === 'wait-longer' && <StatusWaitAction />}
-        {status.copyOutput &&
-          (status.source === 'notification' ? (
-            <NotificationCopyAction text={status.copyOutput} />
-          ) : (
-            <StatusCopyAction status={status} />
-          ))}
-        <StatusDismissAction status={status} />
+        {status.copyOutput && <StatusCopyAction status={status} />}
+        <StatusDismissAction />
       </div>
     </div>
   );
 }
 
-function computeTitlebarStatus(
-  notification: AppState['notification'],
-  terminal: {
-    terminalMessage: string;
-    terminalStatusKind: AppState['terminalStatusKind'];
-    terminalStatusDetail: string;
-    terminalStatusAction: AppState['terminalStatusAction'];
-    terminalBusy: boolean;
-    terminalCopyOutput: string;
-    terminalCopyStatus: string;
-  },
-): TitlebarStatusValue | null {
-  if (notification) {
-    return {
-      ...notification,
-      source: 'notification',
-      detail: '',
-      busy: false,
-      // Only error/warning notifications carry a message the operator needs to
-      // copy into a bug report; transient success/info toasts don't get one.
-      copyOutput:
-        notification.kind === 'error' || notification.kind === 'warning'
-          ? notification.message
-          : '',
-      copyStatus: '',
-      action: '',
-    };
-  }
+function computeTitlebarStatus(terminal: {
+  terminalMessage: string;
+  terminalStatusKind: AppState['terminalStatusKind'];
+  terminalStatusDetail: string;
+  terminalStatusAction: AppState['terminalStatusAction'];
+  terminalBusy: boolean;
+  terminalCopyOutput: string;
+  terminalCopyStatus: string;
+}): TitlebarStatusValue | null {
   if (terminal.terminalBusy && terminal.terminalMessage) {
     return null;
   }
@@ -124,7 +101,6 @@ function computeTitlebarStatus(
     return null;
   }
   return {
-    source: 'terminal',
     kind: terminal.terminalStatusKind,
     message: terminal.terminalMessage,
     detail: terminal.terminalStatusDetail,
@@ -152,9 +128,6 @@ function StatusIcon({ status }: { status: TitlebarStatusValue }): React.ReactEle
 function statusIcon(status: TitlebarStatusValue): typeof LoaderCircle {
   if (status.busy) {
     return LoaderCircle;
-  }
-  if (status.kind === 'success') {
-    return CheckCircle2;
   }
   if (status.kind === 'warning' || status.kind === 'error') {
     return AlertCircle;
@@ -263,33 +236,7 @@ function StatusCopyAction({ status }: { status: TitlebarStatusValue }): React.Re
   );
 }
 
-function NotificationCopyAction({ text }: { text: string }): React.ReactElement {
-  const [copied, setCopied] = React.useState(false);
-  const onCopy = React.useCallback(() => {
-    void ClipboardSetText(text).then(() => {
-      setCopied(true);
-      window.setTimeout(() => {
-        setCopied(false);
-      }, 1400);
-    });
-  }, [text]);
-  return (
-    <IconTooltip label="Copy message">
-      <Button
-        className="h-6 flex-none gap-1 rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5"
-        type="button"
-        variant="ghost"
-        size="xs"
-        onClick={onCopy}
-      >
-        {copied ? <CheckCircle2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
-        {copied ? 'Copied' : 'Copy'}
-      </Button>
-    </IconTooltip>
-  );
-}
-
-function StatusDismissAction({ status }: { status: TitlebarStatusValue }): React.ReactElement {
+function StatusDismissAction(): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
     <IconTooltip label="Dismiss status">
@@ -300,19 +247,11 @@ function StatusDismissAction({ status }: { status: TitlebarStatusValue }): React
         size="icon-xs"
         aria-label="Dismiss status"
         onClick={() => {
-          dismissTitlebarStatus(dispatch, status);
+          dispatch(dismissTerminalStatus());
         }}
       >
-        <X />
+        <X aria-hidden="true" />
       </Button>
     </IconTooltip>
   );
-}
-
-function dismissTitlebarStatus(dispatch: AppDispatch, status: TitlebarStatusValue): void {
-  if (status.source === 'notification') {
-    dispatch(dismissNotification());
-    return;
-  }
-  dispatch(dismissTerminalStatus());
 }

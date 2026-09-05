@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type WhoamiUserRepository interface {
@@ -13,12 +14,26 @@ type WhoamiUserRepository interface {
 	RoleNames(ctx context.Context, userID string) ([]string, error)
 }
 
-type WhoamiRoutes struct {
-	users WhoamiUserRepository
+// WhoamiCapabilityResolver narrows a candidate route set to the ones the caller
+// may reach. The authorization middleware's own authorizer implements it, so
+// the capability set a client renders from is computed by the code that
+// enforces it rather than derived a second time.
+type WhoamiCapabilityResolver interface {
+	PermittedRoutes(ctx context.Context, candidates []eruncommon.PlatformCapability) ([]eruncommon.PlatformCapability, error)
 }
 
-func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepository) {
-	routes := WhoamiRoutes{users: users}
+// WhoamiRouteCatalog reports every registered route, evaluated per request so
+// registration order cannot leave routes out of the answer.
+type WhoamiRouteCatalog func() []eruncommon.PlatformCapability
+
+type WhoamiRoutes struct {
+	users        WhoamiUserRepository
+	capabilities WhoamiCapabilityResolver
+	catalog      WhoamiRouteCatalog
+}
+
+func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepository, capabilities WhoamiCapabilityResolver, catalog WhoamiRouteCatalog) {
+	routes := WhoamiRoutes{users: users, capabilities: capabilities, catalog: catalog}
 	register(http.MethodGet, "/v1/whoami", http.HandlerFunc(routes.handleWhoami))
 }
 
@@ -27,14 +42,21 @@ type whoamiResponse struct {
 	UserID   string   `json:"userId"`
 	Username string   `json:"username,omitempty"`
 	Roles    []string `json:"roles,omitempty"`
-	Issuer   string   `json:"issuer"`
-	Subject  string   `json:"subject"`
+	// Capabilities is what a client gates its surfaces on. Roles is
+	// descriptive: a role's name says nothing about what a tenant granted it.
+	//
+	// Deliberately not omitempty. A caller who may do nothing has to receive an
+	// empty set rather than no field, because a client treats a missing set as
+	// "this platform cannot tell me" and falls back to attempting every call.
+	Capabilities eruncommon.PlatformCapabilities `json:"capabilities"`
+	Issuer       string                          `json:"issuer"`
+	Subject      string                          `json:"subject"`
 }
 
 func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	securityContext, err := security.RequiredFromContext(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, http.StatusText(http.StatusInternalServerError))
+		writeInternalError(w, r, http.StatusText(http.StatusInternalServerError), err)
 		return
 	}
 
@@ -47,16 +69,28 @@ func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) 
 	if routes.users != nil {
 		user, err := routes.users.Get(r.Context(), securityContext.ErunUserID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeRepositoryError(w, r, err)
 			return
 		}
 		response.Username = user.Username
 		roles, err := routes.users.RoleNames(r.Context(), securityContext.ErunUserID)
 		if err != nil {
-			writeRepositoryError(w, err)
+			writeRepositoryError(w, r, err)
 			return
 		}
 		response.Roles = roles
+	}
+	// A capability set that cannot be resolved fails the request rather than
+	// answering without one: an omitted set is indistinguishable from "you may
+	// do nothing", and a client that degrades on it would hide surfaces the
+	// caller can actually use.
+	if routes.capabilities != nil && routes.catalog != nil {
+		capabilities, err := routes.capabilities.PermittedRoutes(r.Context(), routes.catalog())
+		if err != nil {
+			writeRepositoryError(w, r, err)
+			return
+		}
+		response.Capabilities = capabilities
 	}
 
 	writeJSON(w, http.StatusOK, response)

@@ -34,6 +34,10 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 		}
 	}
 	skipHelmExecution := common.DeploySpec{
+		Target: common.OpenResult{
+			Tenant:    tenant,
+			EnvConfig: common.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
+		},
 		SkipHelm: true,
 		Deploy: common.HelmDeploySpec{
 			ReleaseName:       common.RuntimeReleaseName(tenant),
@@ -69,4 +73,60 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 			t.Fatalf("deployRuntime: %v", err)
 		}
 	})
+}
+
+// TestDeployRuntimeHealsPersistedRuntimeImage pins the open-command twin of
+// the deploy-command RuntimeImage persistence fix: a deploy that resolves an
+// operator-stated runtime image must persist it, or the override installs
+// correctly this one time and is silently forgotten on the next plain
+// open/deploy. deployRuntime used to hand-roll its own persistence covering
+// only RuntimeVersion/RuntimeRegistry; it now delegates to the same
+// common.PersistRuntimeVersionFromDeploySpecs writer erun deploy/upgrade use,
+// so this asserts that wiring actually reaches RuntimeImage rather than
+// re-testing PersistRuntimeVersionFromDeploySpecs itself (already covered in
+// erun-common).
+func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
+	const tenant = "frs"
+	const version = "1.0.86"
+
+	var saved *common.EnvConfig
+	runner := &resolvedOpenRunner{
+		ctx: common.Context{Logger: common.NewLoggerWithWriters(0, io.Discard, io.Discard)},
+		result: common.OpenResult{
+			Tenant:    tenant,
+			EnvConfig: common.EnvConfig{Name: "build"},
+		},
+		options: openOptions{SaveEnvConfig: func(_ string, cfg common.EnvConfig) error {
+			c := cfg
+			saved = &c
+			return nil
+		}},
+		resolveDeployedVersion: func(common.Context, string, string, string) (string, error) { return version, nil },
+	}
+	// SkipHelm bypasses RunDeploySpec's real helm/kubectl work (as the cached-
+	// no-op test above does) so this stays a persistence-only unit test; the
+	// resolver above stands in for the running release's own reported version.
+	execution := common.DeploySpec{
+		Target:   common.OpenResult{Tenant: tenant, EnvConfig: common.EnvConfig{Name: "build"}},
+		SkipHelm: true,
+		Deploy: common.HelmDeploySpec{
+			ReleaseName:          common.RuntimeReleaseName(tenant),
+			Version:              version,
+			ContainerRegistry:    "ghcr.io/sophium",
+			ResolvedRuntimeImage: "ghcr.io/sophium/frs-devops:" + version,
+			PersistRuntimeImage:  "frs-devops",
+		},
+	}
+	if err := runner.deployRuntime(execution); err != nil {
+		t.Fatalf("deployRuntime: %v", err)
+	}
+	if saved == nil {
+		t.Fatalf("expected a save")
+	}
+	if saved.RuntimeImage != "frs-devops" {
+		t.Fatalf("RuntimeImage = %q, want persisted %q", saved.RuntimeImage, "frs-devops")
+	}
+	if saved.RuntimeVersion != version {
+		t.Fatalf("RuntimeVersion = %q, want %q", saved.RuntimeVersion, version)
+	}
 }

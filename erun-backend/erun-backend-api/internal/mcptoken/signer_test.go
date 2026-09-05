@@ -28,7 +28,7 @@ func TestSignerMintsPerEnvToken(t *testing.T) {
 		t.Fatalf("new signer: %v", err)
 	}
 	now := time.Unix(1_700_000_000, 0)
-	token, audience, err := signer.Sign("acme", "prod", "user-1", now)
+	token, audience, err := signer.Sign("acme", "prod", "user-1", string(eruncommon.MCPCapabilityAttach), now)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -36,7 +36,11 @@ func TestSignerMintsPerEnvToken(t *testing.T) {
 		t.Fatalf("audience = %q, want %q", audience, want)
 	}
 
-	assertEnforcedClaims(t, decodeClaims(t, token), audience, now)
+	claims := decodeClaims(t, token)
+	assertEnforcedClaims(t, claims, audience, now)
+	if claims.Scope != string(eruncommon.MCPCapabilityAttach) {
+		t.Fatalf("scope claim = %q, want %q", claims.Scope, eruncommon.MCPCapabilityAttach)
+	}
 
 	if !verifySignature(t, token, publicPEM) {
 		t.Fatal("token signature did not verify against the backend public key")

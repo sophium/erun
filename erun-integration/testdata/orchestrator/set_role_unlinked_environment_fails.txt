@@ -1,0 +1,2 @@
+audit: erun orchestrator set-role --role code eng-1 team staging
+orchestrator "eng-1" is not linked to team/staging

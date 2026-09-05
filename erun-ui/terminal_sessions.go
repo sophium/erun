@@ -21,8 +21,8 @@ import (
 // session is created or fails.
 func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start ERun session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 	return a.enqueueGatedSession(selection, "open", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runOpenSession(ctx, selection, slot, cols, rows)
@@ -107,7 +107,8 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 
 	a.recordTerminalActivity(selection)
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
-	go a.streamSession(managed)
+	a.lockNewlyJoinedSessionIfDeployInFlight(selection, serial)
+	a.spawnStreamSession(managed)
 	go a.startWorkspaceSyncForSelection(selection)
 	go a.startCloudCredentialsRefresherForSelection(selection)
 
@@ -130,8 +131,8 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 
 func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start local session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 	cols, rows = clampTerminalSize(cols, rows)
 
@@ -193,7 +194,7 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 		})
 	}
 
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 	return startSessionResult{
 		SessionID: serial,
 		Selection: selection,
@@ -205,17 +206,24 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 // StartAISession spawns the AI tab's `erun open` PTY under the same per-env
 // queue gating as StartSession, so an AI tab opened alongside an ERun tab
 // cannot trigger a duplicate build+deploy.
-func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
+//
+// A fresh (non-reattach) start checks the environment's activity leases first:
+// this desktop's own AI/ERun/Local sessions never take one, so any held lease
+// names a job (an orchestrator or CLI agent) already competing for the same
+// pod's CPU, memory and disk. Unless confirmed is true, that start is reported
+// back as occupied rather than launched, so starting a second agent stays a
+// deliberate choice instead of a silent one.
+func (a *App) StartAISession(selection uiSelection, slot, cols, rows int, confirmed bool) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start AI session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 	return a.enqueueGatedSession(selection, "ai", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
-		return a.runAISession(ctx, selection, slot, cols, rows)
+		return a.runAISession(ctx, selection, slot, cols, rows, confirmed)
 	})
 }
 
-func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
+func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, cols, rows int, confirmed bool) (startSessionResult, *managedTerminal, error) {
 	cols, rows = clampTerminalSize(cols, rows)
 
 	key := aiSessionKey(selection, slot)
@@ -239,6 +247,17 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		}, existing, nil
 	}
 	a.mu.Unlock()
+
+	if !confirmed {
+		if occupants := a.aiSessionOccupants(selection); len(occupants) > 0 {
+			return startSessionResult{
+				Selection: selection,
+				Slot:      slot,
+				Kind:      string(sessionKindAI),
+				Occupancy: occupants,
+			}, nil, nil
+		}
+	}
 
 	a.ensureEnvRuntimeOnce(selection)
 	params := startTerminalSessionParams{
@@ -279,7 +298,8 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	a.mu.Unlock()
 
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
-	go a.streamSession(managed)
+	a.lockNewlyJoinedSessionIfDeployInFlight(selection, serial)
+	a.spawnStreamSession(managed)
 
 	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params), "AI tab"))
 	_ = ctx
@@ -289,6 +309,18 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		Slot:      slot,
 		Kind:      string(sessionKindAI),
 	}, managed, nil
+}
+
+// aiSessionOccupants reuses the same idle-status resolution the titlebar polls
+// (local-vs-remote, merged) to read the environment's held leases. A failed
+// read fails open — returning no occupants rather than blocking the start —
+// because this is a best-effort notice, not an access check.
+func (a *App) aiSessionOccupants(selection uiSelection) []uiEnvironmentLease {
+	status, err := a.LoadIdleStatus(selection)
+	if err != nil {
+		return nil
+	}
+	return status.Leases
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -311,14 +343,21 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 
 // StartCreateVersionSession is the explicit "create & deploy new version"
 // action: it builds the env's working tree into a fresh version, pushes it, and
-// deploys it (build -> push -> deploy). Only a local-agent env has local source
-// to build; a runtime/consumer env produces nothing, so this errors and the
-// operator deploys a published version instead. The env-create flow's first
-// deploy runs through here too.
+// deploys it (build -> push -> deploy). Only a local-agent env builds and
+// deploys through this local orchestration; a runtime/consumer env produces
+// nothing, so this errors and the operator deploys a published version
+// instead, and a host env has no pod to deploy to at all regardless of it
+// having local source to build. The env-create flow's first deploy runs
+// through here too. Checked against ResolvedType rather than the broader
+// "BuildsHere() && !RemoteRepo()" combination, which a host env also
+// satisfies.
 func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if a.ctx == nil || strings.TrimSpace(selection.Tenant) == "" || strings.TrimSpace(selection.Environment) == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("start create-version session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
+	}
+	if a.ctx == nil {
+		return startSessionResult{}, fmt.Errorf("start create-version session: application context is not ready")
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -326,6 +365,9 @@ func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (
 	})
 	if err != nil {
 		return startSessionResult{}, err
+	}
+	if result.EnvConfig.ResolvedType() == eruncommon.EnvironmentTypeHost {
+		return startSessionResult{}, fmt.Errorf("%s/%s is a host environment; it has no pod and no cluster to deploy to", selection.Tenant, selection.Environment)
 	}
 	if !result.EnvConfig.BuildsHere() || result.RemoteRepo() {
 		return startSessionResult{}, fmt.Errorf("%s/%s has no local source to build; deploy a published version instead", selection.Tenant, selection.Environment)
@@ -377,8 +419,8 @@ func (a *App) StartDoctorSession(selection uiSelection, cols, rows int) (startSe
 
 func (a *App) runErunCommandInLocal(selection uiSelection, cols, rows int, args []string) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("run erun command in local session", selection.Tenant, selection.Environment); err != nil {
+		return startSessionResult{}, err
 	}
 
 	local, err := a.ensureLocalSession(selection, 0, cols, rows)
@@ -508,8 +550,8 @@ func shellQuoteSafeRune(r rune) bool {
 func (a *App) OpenIDE(selection uiSelection, ide string) error {
 	selection = normalizeSelection(selection)
 	ide = strings.TrimSpace(ide)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("open IDE", selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
 	if ide != "vscode" && ide != "intellij" {
 		return fmt.Errorf("unsupported IDE %q", ide)
@@ -603,7 +645,7 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 	a.sessions[key] = managed
 	a.mu.Unlock()
 
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 
 	return startSessionResult{SessionID: serial}, nil
 }
@@ -649,15 +691,15 @@ func (a *App) StartCloudInitCloudflareSession(cols, rows int) (startSessionResul
 	a.sessions[key] = managed
 	a.mu.Unlock()
 
-	go a.streamSession(managed)
+	a.spawnStreamSession(managed)
 
 	return startSessionResult{SessionID: serial}, nil
 }
 
 func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (deleteEnvironmentResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return deleteEnvironmentResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("delete environment", selection.Tenant, selection.Environment); err != nil {
+		return deleteEnvironmentResult{}, err
 	}
 	expected := eruncommon.DeleteEnvironmentConfirmation(selection.Tenant, selection.Environment)
 	if strings.TrimSpace(confirmation) != expected {
@@ -719,8 +761,15 @@ func (a *App) SendSessionInput(sessionID int, data string) error {
 	if _, err := io.WriteString(managed.session, data); err != nil {
 		return err
 	}
+	a.noteSessionInput(managed)
 	a.clearAwaitingPostRespawnInput(managed)
 	a.recordTerminalActivity(managed.selection)
+	if id, ok := orchestratorIDFromSessionKey(managed.key); ok {
+		// Real operator input into the pane is the other rearm the pacing
+		// nudge cap names: the operator is plainly at the keyboard, whatever
+		// the last report said.
+		a.rearmOrchestratorPacing(id)
+	}
 	return nil
 }
 
@@ -794,8 +843,8 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 	selection = normalizeSelection(selection)
 	options.Scope = strings.TrimSpace(options.Scope)
 	options.SelectedCommit = strings.TrimSpace(options.SelectedCommit)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return eruncommon.DiffResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load diff", selection.Tenant, selection.Environment); err != nil {
+		return eruncommon.DiffResult{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -809,23 +858,42 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 		ctx = context.Background()
 	}
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(mcpPort) {
-		return eruncommon.DiffResult{}, wrapMCPUnreachableError(fmt.Errorf("mcp port %d is not reachable", mcpPort))
+	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
+		return eruncommon.DiffResult{}, wrapMCPUnreachableErrorWithKind(
+			a.classifyMCPUnreachable(mcpPort),
+			errors.New(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
+		)
 	}
 	endpoint := mcpEndpointForOpenResult(result)
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
 	diff, err := a.deps.loadDiff(ctx, endpoint, bearer, options)
 	if err != nil && isMCPDialFailure(err) {
-		return eruncommon.DiffResult{}, wrapMCPUnreachableError(err)
+		return eruncommon.DiffResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 	}
 	return diff, err
 }
 
+// classifyMCPUnreachable reports which locally observable shape of
+// unreachability the review panel is looking at, through the same injectable
+// port-bound check the rest of erun-ui uses (so it stays testable without a
+// real dial).
+func (a *App) classifyMCPUnreachable(port int) eruncommon.LocalMCPUnreachableKind {
+	if a.deps.canConnectLocalPort != nil && a.deps.canConnectLocalPort(port) {
+		return eruncommon.LocalMCPStaleForward
+	}
+	return eruncommon.LocalMCPNotOpen
+}
+
 func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResult) error {
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if a.deps.ensureMCP != nil && !a.deps.canConnectLocalPort(mcpPort) {
+	// Reachability is a round trip, not a dial. A stale forward holds the port
+	// and answers nothing, so gating recovery on a dial left the env
+	// permanently unreachable behind a listener that looked fine.
+	if a.deps.ensureMCP != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
+		a.emitEnvNotification("warning", result.Tenant, result.EnvConfig.Name, notificationSourceMCPUnreachable,
+			eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort), "")
 		if err := a.deps.ensureMCP(ctx, result); err != nil {
-			if !a.deps.canConnectLocalPort(mcpPort) {
+			if !a.deps.canReachMCPEndpoint(mcpPort) {
 				return err
 			}
 		}
@@ -840,8 +908,8 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResu
 // to the frontend so a long-running deploy does not look frozen.
 func (a *App) ReconnectMCP(selection uiSelection) error {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("reconnect MCP", selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -895,24 +963,35 @@ func (a *App) RepaintSession(sessionID int) error {
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
 	var cols, rows int
+	var gen uint64
+	var typedRecently bool
 	if managed != nil {
 		cols, rows = managed.lastCols, managed.lastRows
+		gen = managed.inputGen
+		typedRecently = typedRecentlyLocked(managed)
 	}
 	a.mu.Unlock()
 	if managed == nil || managed.session == nil {
 		return nil
 	}
-	// Only AI TUIs (claude/codex) need the WINCH repaint: they render on the MAIN
-	// screen and only repaint on a real geometry change, so a tab switch leaves
-	// them blank until their next diff. Plain shells and alt-screen apps
-	// reconstruct from the replayed buffer, so a nudge would just cause a needless
-	// reflow. The frontend fires this on every switch and lets this gate decide.
-	if !isAITabKind(managed) {
+	if typedRecently {
+		// Switching into a pane fires this on every switch, so it is the other
+		// half of #1330: a switch-and-type sequence would resize the pty under
+		// a line being entered. Someone typing needs no synthetic repaint.
+		return nil
+	}
+	// Only main-screen TUIs (claude/codex, whether in an AI tab or an
+	// orchestrator pane) need the WINCH repaint: they only repaint on a real
+	// geometry change, so a tab switch leaves them blank until their next diff.
+	// Plain shells and alt-screen apps reconstruct from the replayed buffer, so a
+	// nudge would just cause a needless reflow. The frontend fires this on every
+	// switch and lets this gate decide.
+	if !needsWINCHRepaint(managed) {
 		return nil
 	}
 	// No attach delay on a switch: the program is already attached (unlike the
 	// attach-marker path, which must wait for dtach to reattach first).
-	go a.nudgeAIRepaint(managed, cols, rows, 0)
+	go a.nudgeAIRepaint(managed, cols, rows, 0, gen)
 	return nil
 }
 
@@ -953,8 +1032,8 @@ func (a *App) CloseSession(sessionID int) error {
 // lock would deadlock.
 func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("close environment sessions", selection.Tenant, selection.Environment); err != nil {
+		return nil, err
 	}
 	targets := a.collectAndMarkClosedForSelection(selection)
 	// Close is a real teardown: stop the env's workspace-sync worker so a
@@ -1036,8 +1115,8 @@ func closeManagedTerminals(targets []*managedTerminal) ([]int, error) {
 // cannot affect it.
 func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return false, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("end AI sessions", selection.Tenant, selection.Environment); err != nil {
+		return false, err
 	}
 	if envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment); err == nil {
 		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, selection.Tenant, selection.Environment)
@@ -1130,6 +1209,21 @@ func decodePastedFilePayload(payload pastedFilePayload) ([]byte, string, error) 
 	return data, mimeType, nil
 }
 
+// spawnStreamSession runs streamSession in its own goroutine, tracked on
+// a.sessionWG so shutdown (and tests via t.Cleanup) can wait for every
+// spawned reader to actually exit instead of just asking its session to
+// close. Without that wait, a goroutine left mid-Read races whatever a
+// caller's next teardown step touches — the failure mode that surfaced as a
+// race on the adrg/xdg package's globals between a still-running session and
+// a later t.Cleanup's xdg.Reload.
+func (a *App) spawnStreamSession(managed *managedTerminal) {
+	a.sessionWG.Add(1)
+	go func() {
+		defer a.sessionWG.Done()
+		a.streamSession(managed)
+	}()
+}
+
 func (a *App) streamSession(managed *managedTerminal) {
 	buffer := make([]byte, 8192)
 	var lastOutputActivity time.Time
@@ -1186,6 +1280,42 @@ var (
 	aiRepaintNudgeSettle = defaultAIRepaintNudgeSettle()
 )
 
+// aiRepaintInputQuiet is how recently input must have arrived for the repaint
+// nudge to stand down. The nudge exists to repaint a BLANK reattached screen; a
+// pane receiving keystrokes is by definition not that, and resizing it mid-line
+// is what corrupted submitted prompts (#1330). Generous on purpose: skipping a
+// repaint costs one keypress to fix, while a bad reflow costs the message.
+const aiRepaintInputQuiet = 1500 * time.Millisecond
+
+// noteSessionInput records that real user input just reached this pane.
+func (a *App) noteSessionInput(managed *managedTerminal) {
+	if managed == nil {
+		return
+	}
+	a.mu.Lock()
+	managed.inputGen++
+	managed.lastInputAt = time.Now()
+	a.mu.Unlock()
+}
+
+// sessionInputGen reads the pane's input counter so a nudge can detect input
+// that arrived after it was scheduled.
+func (a *App) sessionInputGen(managed *managedTerminal) uint64 {
+	if managed == nil {
+		return 0
+	}
+	a.mu.Lock()
+	gen := managed.inputGen
+	a.mu.Unlock()
+	return gen
+}
+
+// typedRecentlyLocked reports whether the pane saw input inside the quiet
+// window. Caller holds a.mu.
+func typedRecentlyLocked(managed *managedTerminal) bool {
+	return !managed.lastInputAt.IsZero() && time.Since(managed.lastInputAt) < aiRepaintInputQuiet
+}
+
 // defaultAIRepaintNudgeSettle sizes the shrink-hold to the platform's resize
 // delivery. POSIX kubectl exec delivers the resize via SIGWINCH immediately, so
 // a short hold suffices. On Windows there is no SIGWINCH: kubectl exec -it POLLS
@@ -1212,13 +1342,24 @@ func isAITabKind(managed *managedTerminal) bool {
 		(managed.kind == sessionKindAI || managed.kind == sessionKindContributeAI)
 }
 
+// needsWINCHRepaint reports whether a session runs a main-screen TUI that only
+// repaints on a real pty geometry change (a WINCH), so a same-size tab switch
+// or reattach leaves it blank until one is forced. AI tabs and the orchestrator
+// both run that kind of program (claude/codex). Kept separate from isAITabKind,
+// which also drives AI-activity accounting (managedAITabFor, aiActivityKind)
+// where an orchestrator is deliberately excluded for unrelated reasons — see
+// aiActivityKind's comment.
+func needsWINCHRepaint(managed *managedTerminal) bool {
+	return isAITabKind(managed) || (managed != nil && managed.kind == sessionKindOrchestrator)
+}
+
 // maybeNudgeAIRepaint fires the AI repaint nudge when the attach marker first
 // appears. dtach hands a reattached client a cleared screen, but Claude (an Ink
 // main-screen TUI) only fully repaints on an actual geometry change — a
 // same-size reattach raises no effective WINCH, so the tab would render blank.
 // The nudge forces that geometry change once Claude is attached.
 func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
-	if !isAITabKind(managed) || !bytes.Contains(chunk, aiAttachMarker) {
+	if !needsWINCHRepaint(managed) || !bytes.Contains(chunk, aiAttachMarker) {
 		return
 	}
 	a.mu.Lock()
@@ -1226,28 +1367,59 @@ func (a *App) maybeNudgeAIRepaint(managed *managedTerminal, chunk []byte) {
 		a.mu.Unlock()
 		return
 	}
+	if typedRecentlyLocked(managed) {
+		// The user is at the keyboard, so the pane is not the blank screen
+		// this nudge repaints -- and their typing will force the redraw
+		// anyway. Deliberately does NOT set repaintNudged: this attach has
+		// not been nudged, so a later chunk may still do it once they stop.
+		a.mu.Unlock()
+		return
+	}
 	managed.repaintNudged = true
 	cols, rows := managed.lastCols, managed.lastRows
+	gen := managed.inputGen
 	a.mu.Unlock()
-	go a.nudgeAIRepaint(managed, cols, rows, aiRepaintNudgeDelay)
+	go a.nudgeAIRepaint(managed, cols, rows, aiRepaintNudgeDelay, gen)
 }
 
 // nudgeAIRepaint briefly shrinks the backend pty by one row and restores it:
 // the change reaches Claude as a real WINCH and forces the full repaint a
 // same-size reattach cannot. The local xterm is never resized, so the user sees
 // the tab's content appear with no visible reflow.
-func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int, initialDelay time.Duration) {
+func (a *App) nudgeAIRepaint(managed *managedTerminal, cols, rows int, initialDelay time.Duration, gen uint64) {
 	if cols <= 0 || rows <= 1 {
 		return
 	}
 	if initialDelay > 0 {
 		time.Sleep(initialDelay)
 	}
+	// Input during the delay means the user started typing between the attach
+	// marker and here. Shrink now and the restore reflows their line, so do
+	// not start the cycle at all -- nothing has been resized yet, so bailing
+	// costs nothing.
+	if a.sessionInputGen(managed) != gen {
+		return
+	}
 	if !a.resizeSessionIfLive(managed, cols, rows-1) {
 		return
 	}
-	time.Sleep(aiRepaintNudgeSettle)
+	// Past this point the pty IS a row short, so it must be restored on every
+	// path. awaitRepaintSettle returns early on input so the shrunken geometry
+	// is held across as little typing as possible.
+	a.awaitRepaintSettle(managed, gen)
 	a.resizeSessionIfLive(managed, cols, rows)
+}
+
+// awaitRepaintSettle waits out the nudge settle, returning as soon as user
+// input arrives so the caller can restore the pty immediately.
+func (a *App) awaitRepaintSettle(managed *managedTerminal, gen uint64) {
+	const slice = 10 * time.Millisecond
+	for waited := time.Duration(0); waited < aiRepaintNudgeSettle; waited += slice {
+		time.Sleep(slice)
+		if a.sessionInputGen(managed) != gen {
+			return
+		}
+	}
 }
 
 // resizeSessionIfLive guards the AI repaint nudge: a session that exits
@@ -1305,7 +1477,16 @@ func (a *App) currentSessionFor(managed *managedTerminal) terminalSession {
 // guard is a terminal condition — handover, stopped cloud context, deploy
 // failure, fast-exit loop — where an automatic respawn would fight another
 // actor or storm a broken env; the recovery affordance is named in the marker.
-func (a *App) reconnectRefused(managed *managedTerminal) bool {
+func (a *App) reconnectRefused(managed *managedTerminal, exitReason string) bool {
+	// An orchestrator has no env selection, so every guard below that keys on
+	// managed.selection would silently pass it through. It gets its own check
+	// instead: refuse a clean exit (the operator quit the TUI, not a crash)
+	// and refuse whenever the operator's Stop already removed this
+	// orchestrator's registration, so Stop refuses its own respawn.
+	if managed.kind == sessionKindOrchestrator && a.orchestratorReconnectRefused(managed, exitReason) {
+		return true
+	}
+
 	// Another ERun window re-attached this persistent session — a
 	// deliberate handover, not a transient drop. Respawning would run
 	// `erun open` again, whose attach takes the session straight back,
@@ -1391,6 +1572,27 @@ func (a *App) reconnectRefused(managed *managedTerminal) bool {
 	return false
 }
 
+// orchestratorReconnectRefused is reconnectRefused's orchestrator-specific
+// guard. terminalSessionExitReason returns "" for a clean exit (Wait()
+// reported no error) — the operator quitting the TUI from inside, not a
+// failure — and a clean exit must never trigger the auto-resume this bound
+// exists for. stopOrchestratorSession deletes both a.orchestrators[id] and
+// a.sessions[key] under the same lock a Stop takes, so checking they are
+// still exactly this registration is what makes Stop refuse its own respawn
+// even if it raced tryReconnect's own managed.closed check.
+func (a *App) orchestratorReconnectRefused(managed *managedTerminal, exitReason string) bool {
+	if strings.TrimSpace(exitReason) == "" {
+		return true
+	}
+	id, ok := orchestratorIDFromSessionKey(managed.key)
+	if !ok {
+		return true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.orchestrators[id] == nil || a.sessions[managed.key] != managed
+}
+
 func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	a.mu.Lock()
 	if managed == nil || managed.closed || managed.respawn == nil {
@@ -1400,7 +1602,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	respawn := managed.respawn
 	a.mu.Unlock()
 
-	if a.reconnectRefused(managed) {
+	if a.reconnectRefused(managed, exitReason) {
 		return false
 	}
 
@@ -1409,8 +1611,9 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// shared thin reconnect (TTL-deduped) so a replaced pod's forwarders are
 	// rebound without every tab repeating it. If the pod is gone
 	// for good the reconnect surfaces a recoverable failure rather than
-	// silently redeploying — deploy stays the caller's explicit action.
-	if managed.kind != sessionKindLocal {
+	// silently redeploying — deploy stays the caller's explicit action. An
+	// orchestrator has no env runtime to rebind at all.
+	if managed.kind != sessionKindLocal && managed.kind != sessionKindOrchestrator {
 		a.ensureEnvRuntimeOnce(managed.selection)
 	}
 	next, err := respawn()
@@ -1434,8 +1637,11 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	a.mu.Unlock()
 	// The respawn went through — whatever stopped/failed condition the row
 	// was flagged with is being retried, so clear it (the refusal paths
-	// above re-flag on the next failure).
-	a.emitEnvStatus(managed.selection, "")
+	// above re-flag on the next failure). An orchestrator has no env row to
+	// clear a status on.
+	if managed.kind != sessionKindOrchestrator {
+		a.emitEnvStatus(managed.selection, "")
+	}
 	return true
 }
 
@@ -1675,8 +1881,31 @@ const aiActivityIdleThreshold = 3 * time.Second
 //     responses do not toggle the badge.
 //   - busy=false fires after aiActivityIdleThreshold (3 s) of silence.
 //   - Session close emits busy=false via finalizeAIActivity.
+//
+// aiActivityKind reports whether a session of this kind should drive the
+// sidebar's working spinner. An orchestrator runs the same agent an AI tab
+// does, and it is the row most likely to be working, so gating this on
+// sessionKindAI alone left the one row that is always driving work as the only
+// row that never showed it.
+//
+// It takes the kind rather than the session so each caller keeps its own
+// `managed == nil` guard visible: folding the nil check in here hid it from
+// static analysis, which then read every later field access as a possible nil
+// dereference.
+//
+// An orchestrator is deliberately NOT here. It runs an interactive agent TUI,
+// which repaints its prompt and counters continuously, so "this terminal is
+// emitting bytes" is true forever and the silence rule that releases the latch
+// never fires — the row span forever and the desktop burned CPU reading redraws
+// to keep it that way. An env's AI tab survives the same weakness only because
+// the pod heartbeat independently observes its program exit. An orchestrator has
+// no pod, so it reports its own turn boundaries instead (orchestrator_activity.go).
+func aiActivityKind(kind sessionKind) bool {
+	return kind == sessionKindAI
+}
+
 func (a *App) recordAIActivity(managed *managedTerminal) {
-	if managed == nil || managed.kind != sessionKindAI {
+	if managed == nil || !aiActivityKind(managed.kind) {
 		return
 	}
 	now := time.Now()
@@ -1767,7 +1996,7 @@ func (a *App) releaseAIActivity(managed *managedTerminal) {
 // tab mid-generation, or the underlying PTY drops). Caller must not
 // hold a.mu.
 func (a *App) finalizeAIActivity(managed *managedTerminal) {
-	if managed == nil || managed.kind != sessionKindAI {
+	if managed == nil || !aiActivityKind(managed.kind) {
 		return
 	}
 	a.mu.Lock()
@@ -1824,12 +2053,41 @@ func (a *App) emitEvent(name string, payload any) {
 	a.emit(name, payload)
 }
 
+// closeManagedLocked marks managed closed and hands back its underlying
+// session for the caller to tear down. The `closed` field (and `session`,
+// which callers read alongside it) is read everywhere else in this file under
+// a.mu — currentSessionFor, tryReconnect, finalizeSessionExit, and more all
+// take the lock before touching either. This is the one place that mutates
+// them, so it must take the same lock rather than grow a second one; every
+// caller here already holds a.mu.
+func (a *App) closeManagedLocked(managed *managedTerminal) terminalSession {
+	if managed == nil || managed.session == nil {
+		return nil
+	}
+	managed.closed = true
+	return managed.session
+}
+
+// closeManaged is closeManagedLocked for callers that do not already hold
+// a.mu. The session's real teardown (session.Close(), a file/process
+// operation) happens outside the lock, matching every other place in this
+// file that only holds a.mu around the field mutation and not around the
+// blocking I/O that follows it.
+func (a *App) closeManaged(managed *managedTerminal) error {
+	a.mu.Lock()
+	session := a.closeManagedLocked(managed)
+	a.mu.Unlock()
+	if session == nil {
+		return nil
+	}
+	return session.Close()
+}
+
 func (a *App) closeAllSessionsLocked() {
-	for _, session := range a.sessions {
-		if session == nil {
-			continue
+	for _, managed := range a.sessions {
+		if session := a.closeManagedLocked(managed); session != nil {
+			_ = session.Close()
 		}
-		_ = session.Close()
 	}
 	a.sessions = make(map[string]*managedTerminal)
 }
@@ -1846,8 +2104,8 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for key, session := range a.sessions {
-		if session == nil {
+	for key, managed := range a.sessions {
+		if managed == nil {
 			continue
 		}
 		matches := false
@@ -1860,7 +2118,9 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 		if !matches {
 			continue
 		}
-		_ = session.Close()
+		if session := a.closeManagedLocked(managed); session != nil {
+			_ = session.Close()
+		}
 		delete(a.sessions, key)
 	}
 }
@@ -1891,6 +2151,16 @@ type managedTerminal struct {
 	// on the first output after a (re)attach and not on every chunk.
 	// tryReconnect clears it so the next attach nudges again.
 	repaintNudged bool
+
+	// lastInputAt/inputGen record real user input into this pane. The repaint
+	// nudge changes pty geometry behind the user's back, so it must not fire
+	// into a pane someone is typing into and must abandon a hold in progress
+	// the moment they start: holding the pty a row short across a keystroke
+	// reflowed the line being edited and corrupted the submitted prompt
+	// (#1330). inputGen is a counter rather than a flag so a nudge can tell
+	// "input since I was scheduled" from "input at some point".
+	lastInputAt time.Time
+	inputGen    uint64
 
 	// awaitingPostRespawnInput, when true, tells streamSession to skip
 	// the 2s output-activity ticker. Set on each successful respawn so
@@ -2015,14 +2285,6 @@ const (
 	sessionKindCommand      sessionKind = "command"
 	sessionKindOrchestrator sessionKind = "orchestrator"
 )
-
-func (s *managedTerminal) Close() error {
-	if s == nil || s.session == nil {
-		return nil
-	}
-	s.closed = true
-	return s.session.Close()
-}
 
 func selectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)

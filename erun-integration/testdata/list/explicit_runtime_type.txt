@@ -7,14 +7,23 @@ Current Directory:
   path: none
   repo: none
   configured tenant: none
-  effective target: unavailable (repo path is not configured)
+  effective target: team/prod
+  kubernetes context: test-context
+  type: runtime
+  assigned local port range: 17000-17099
+  assigned mcp local port: 17000 (when MCP is running or forwarded)
+  assigned api local port: 17033 (when API is running or forwarded)
+  api url: http://<LOOPBACK>:17033
+  assigned ssh local port: 17022 (when SSH port-forward is active)
+  assigned contribute-app local port: 17050 (when contribute mode is active and `erun app --headless` is running)
+  repo path: none
 Cloud Providers:
   none
 Tenants:
-  team [default]
+  team [default, effective]
     default environment: prod
     environments:
-      - prod [default] context=test-context
+      - prod [default, effective] context=test-context
           type: runtime
           repo: none
           ports: 17000-17099
@@ -24,11 +33,13 @@ Tenants:
           ssh-port: 17022
           contribute-app-port: 17050
           container-registries: registry.example/test[build,deploy]
-          runtime-version: <VERSION>
+          runtime-version: <VERSION> (line undetermined — no resolved runtime image recorded; redeploy to record it)
           runtime-pod: none
           managed-cloud: off
           ai-tool: none
           claude: none
           idle: none
           sshd: off
+Orchestrators:
+  none
 audit: erun list

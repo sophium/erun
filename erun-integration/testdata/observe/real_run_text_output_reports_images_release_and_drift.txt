@@ -1,0 +1,26 @@
+Namespace: team-dev
+Pods (1):
+  team-devops-abc123: ready (phase Running, restarts 0)
+    erun-devops: image registry.example/test/erun-devops:<VERSION>, limits cpu=4, memory=8916Mi
+ResourceQuotas (1):
+  erun-quota: used limits.cpu=1, hard limits.cpu=4
+LimitRanges (1):
+  erun-limits:
+    Container: default cpu=1, defaultRequest cpu=100m, max none, min none
+Services (2):
+  team-mcp (ClusterIP): ports 8080
+  team-web (ClusterIP): ports http:80
+Ingresses (1):
+  web: hosts dev.example.test
+    -> service team-web:80
+    tls dev.example.test -> secret web-tls
+Certificates (1):
+  wildcard: not Ready: Issuing (waiting for order to complete), secret wildcard-tls, dnsNames *.dev.example.test
+    order wildcard-order-1: state pending, reason none
+      challenge wildcard-challenge-1: type DNS-01, dnsName *.dev.example.test, state invalid, reason RBAC denied: solvers.acme.cert-manager.io is forbidden: cannot create resource challenges
+Helm release team-devops: revision 3, status deployed, chart erun-devops-<VERSION>, appVersion <VERSION>
+  imageOverrides: erun-devops=registry.example/test/erun-devops:<VERSION>
+  runtime pod limits: cpu 4, memory 8916Mi
+Drift: none detected
+audit: erun observe
+observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason

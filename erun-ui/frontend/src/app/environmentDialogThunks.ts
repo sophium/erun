@@ -1,14 +1,18 @@
 import type { UISelection, UIVersionSuggestion } from '@/types';
 
 import { environmentApi } from './api/environmentApi';
-import { refreshDialogClusterRegistry, refreshKubernetesContexts } from './dialogContextsThunks';
+import {
+  refreshDialogClusterRegistry,
+  refreshDialogHostedRegistry,
+  refreshKubernetesContexts,
+} from './dialogContextsThunks';
 import {
   missingRequiredFieldReason,
   normalizedEnvironmentDialogValues,
   rememberEnvironmentDialogSelection,
 } from './environmentDialogState';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError } from './notificationThunks';
 import {
   runtimePodConfigToKubernetes,
   runtimeResourceLimitMessage,
@@ -53,6 +57,8 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
       containerRegistry: containerRegistryDefault,
       clusterRegistry: null,
       useClusterRegistry: false,
+      useErunRegistry: false,
+      hostedRegistry: null,
       envType: 'remote-agent',
       localRepoPath: '',
       noGit: false,
@@ -67,6 +73,7 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
   );
   void dispatch(refreshKubernetesContexts());
   void dispatch(refreshDialogVersionSuggestions(true));
+  void dispatch(refreshDialogHostedRegistry());
 };
 
 export const closeEnvironmentDialog = (): AppThunk => (dispatch, getState, extra) => {
@@ -175,7 +182,7 @@ export const submitEnvironmentDialog =
           error: message,
         }),
       );
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
     }
   };
 
@@ -208,13 +215,21 @@ function environmentDialogInitFields(
   const isLocalAgent = dialog.envType === 'local-agent';
   // When the in-cluster registry is chosen, seed a resolvable cluster: entry and
   // omit the static container-registry string (the two are mutually exclusive).
-  const useClusterRegistry = dialog.useClusterRegistry && !!dialog.clusterRegistry?.deployed;
+  // useErunRegistry only takes effect once the reachability probe has actually
+  // confirmed the hosted registry is available — otherwise this would resolve
+  // to an environment whose pushes go nowhere, mirroring how useClusterRegistry
+  // is already gated on clusterRegistry?.deployed below.
+  const useErunRegistry = dialog.useErunRegistry && dialog.hostedRegistry?.available === true;
+  const useClusterRegistry =
+    !useErunRegistry && dialog.useClusterRegistry && !!dialog.clusterRegistry?.deployed;
+  const resolvedRegistry = useErunRegistry || useClusterRegistry;
   return {
     runtimeCpu: runtimePod.cpu,
     runtimeMemory: runtimePod.memory,
     kubernetesContext: values.kubernetesContext,
-    containerRegistry: useClusterRegistry ? '' : values.containerRegistry,
+    containerRegistry: resolvedRegistry ? '' : values.containerRegistry,
     clusterRegistry: useClusterRegistry,
+    erunRegistry: useErunRegistry,
     type: dialog.envType,
     localRepoPath: isLocalAgent ? values.localRepoPath : undefined,
     setDefaultTenant: dialog.setDefaultTenant,

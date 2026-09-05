@@ -1,0 +1,2 @@
+audit: erun review list --author-user-id user-1 --dry-run --mine
+cannot combine --mine with an explicit author user id

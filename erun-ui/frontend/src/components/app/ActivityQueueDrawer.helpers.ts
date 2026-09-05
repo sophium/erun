@@ -28,11 +28,32 @@ export function isHistoryStatus(status: ActivityQueueEntry['status']): boolean {
   );
 }
 
+// A visible, readable-by-assistive-tech label for a status that is otherwise
+// conveyed only by an aria-hidden icon and a border color (WCAG 1.4.1).
+export function activityStatusLabel(status: ActivityQueueEntry['status']): string {
+  switch (status) {
+    case 'waiting':
+      return 'Waiting';
+    case 'running':
+      return 'Running';
+    case 'succeeded':
+      return 'Succeeded';
+    case 'failed':
+      return 'Failed';
+    case 'skipped':
+      return 'Skipped';
+    case 'cancelled':
+      return 'Cancelled';
+  }
+}
+
 export function activityElapsedLabel(entry: ActivityQueueEntry, now: number): string {
   const isRunning = entry.status === 'running';
   const isWaiting = entry.status === 'waiting';
   if (isRunning || isWaiting) {
-    const elapsedAnchor = isWaiting && entry.enqueuedAt ? entry.enqueuedAt : entry.startedAt;
+    const elapsedAnchor = isWaiting
+      ? (entry.enqueuedAt ?? entry.startedAt)
+      : (entry.startedRunningAt ?? entry.startedAt);
     return formatElapsed(elapsedAnchor, now);
   }
   if (entry.endedAt) {
@@ -130,7 +151,25 @@ export function commandSubtitle(entry: ActivityQueueEntry): string {
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
 
+// activitySubtitle is commandSubtitle's caller-facing wrapper: an
+// 'invite-approval' entry carries no command/release/namespace to
+// summarize, only its own message, so it branches here rather
+// than growing commandSubtitleParts a case for a field type that isn't a
+// cluster/host command at all.
+export function activitySubtitle(entry: ActivityQueueEntry): string {
+  if (entry.origin === 'invite-approval') {
+    return entry.message ?? '';
+  }
+  return commandSubtitle(entry);
+}
+
 export function activityTargetLabel(entry: ActivityQueueEntry): string {
+  // An invite-approval entry may carry no environment (the request may not
+  // have named one) -- "tenant/" with nothing after the slash reads as a
+  // truncated label, so fall back to the tenant alone.
+  if (!entry.environment) {
+    return entry.tenant;
+  }
   const target = `${entry.tenant}/${entry.environment}`.trim();
   if (entry.version) {
     return `${target} ${entry.version}`;

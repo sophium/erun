@@ -1,6 +1,6 @@
 no working build or agent processes
-audit: erun activity sample --environment dev --proc-root <TMP> --tenant team
+audit: erun activity sample --cgroup-root <TMP> --environment dev --proc-root <TMP> --tenant team
 working: java
-audit: erun activity sample --environment dev --proc-root <TMP> --tenant team
+audit: erun activity sample --cgroup-root <TMP> --environment dev --proc-root <TMP> --tenant team
 no working build or agent processes
-audit: erun activity sample --environment dev --proc-root <TMP> --tenant team
+audit: erun activity sample --cgroup-root <TMP> --environment dev --proc-root <TMP> --tenant team

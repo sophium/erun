@@ -16,40 +16,68 @@ import (
 // reopen re-checks reachability.
 const envEnsureTTL = 30 * time.Second
 
+// envEnsureReason says why a rebind is being asked for, because the two callers
+// hold different evidence. A tab spawn is one of a burst and has no reason to
+// think anything is wrong, so a recent success stands in for it. A forward
+// repair has watched the forward stop carrying traffic *since* that success, so
+// the window it stamped is exactly the thing that must not suppress it.
+type envEnsureReason int
+
+const (
+	envEnsureForTabSpawn envEnsureReason = iota
+	envEnsureForBrokenForward
+)
+
 // ensureEnvRuntimeOnce rebinds the env's MCP/API forwarders against the
 // already-deployed runtime, at most once per (re)start window across every tab
 // and respawn. It does NOT deploy — deploy is the caller's job — so an
 // undeployed env stays down here rather than being brought up.
-//
-// Fire-and-forget: a failed reconnect is surfaced, not swallowed, and does not
-// stamp the success window, so the next tab open retries instead of being
-// suppressed for the whole TTL while the user stares at a dead env.
 func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
-	// a.ctx is set by startup() in both desktop and headless modes and stays
-	// nil in unit tests: the ensure must never fall back from a test app to
-	// the machine's real CLI and config.
-	if a.ctx == nil {
-		return
-	}
-	selection = normalizeSelection(selection)
-	key := selectionKey(selection)
+	a.ensureEnvRuntime(selection, envEnsureForTabSpawn)
+}
 
+// claimEnvRuntimeEnsure takes the per-env rebind latch and reports whether this
+// caller got it. The in-flight half applies to every caller — it is what keeps
+// one rebind per environment at a time — while the completed window only stands
+// in for a caller with no evidence that anything is wrong.
+func (a *App) claimEnvRuntimeEnsure(key string, reason envEnsureReason) bool {
 	a.envEnsureMu.Lock()
+	defer a.envEnsureMu.Unlock()
 	if a.envEnsureInflight == nil {
 		a.envEnsureInflight = make(map[string]struct{})
 		a.envEnsureDone = make(map[string]time.Time)
 		a.envEnsureFailNotified = make(map[string]struct{})
 	}
 	if _, inflight := a.envEnsureInflight[key]; inflight {
-		a.envEnsureMu.Unlock()
-		return
+		return false
 	}
-	if done, ok := a.envEnsureDone[key]; ok && time.Since(done) < envEnsureTTL {
-		a.envEnsureMu.Unlock()
-		return
+	if done, ok := a.envEnsureDone[key]; ok && reason == envEnsureForTabSpawn && time.Since(done) < envEnsureTTL {
+		return false
 	}
 	a.envEnsureInflight[key] = struct{}{}
-	a.envEnsureMu.Unlock()
+	return true
+}
+
+// ensureEnvRuntime is the rebind itself, and reports whether this call is the
+// one that started it. Both dedup gates stay in force for every reason: the
+// in-flight latch is what guarantees one rebind per env at a time, so a repair
+// can never race a spawn for the same local port.
+//
+// Fire-and-forget: a failed reconnect is surfaced, not swallowed, and does not
+// stamp the success window, so the next tab open retries instead of being
+// suppressed for the whole TTL while the user stares at a dead env.
+func (a *App) ensureEnvRuntime(selection uiSelection, reason envEnsureReason) bool {
+	// a.ctx is set by startup() in both desktop and headless modes and stays
+	// nil in unit tests: the ensure must never fall back from a test app to
+	// the machine's real CLI and config.
+	if a.ctx == nil {
+		return false
+	}
+	selection = normalizeSelection(selection)
+	key := selectionKey(selection)
+	if !a.claimEnvRuntimeEnsure(key, reason) {
+		return false
+	}
 
 	go func() {
 		var ensureErr error
@@ -86,12 +114,16 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 			a.surfaceEnvRuntimeEnsureFailure(selection, ensureErr)
 		}
 	}()
+	return true
 }
 
 // surfaceEnvRuntimeEnsureFailure makes a failed runtime reconnect visible and
-// recoverable instead of discarding it (Nielsen #1/#9). The reconnect usually
-// fails because the runtime is not deployed — which `open` no longer fixes on
-// its own — so the recovery it points to is an explicit deploy.
+// recoverable instead of discarding it (Nielsen #1/#9). A reconnect failure is
+// not by itself evidence the runtime is down: `erun open --reconnect` can also
+// fail because it could not even ask the cluster (no context, an unreachable
+// API server, credentials or permissions refused) or for a reason this has no
+// way to recognize. Only a confirmed absent deployment gets the deploy
+// action — see runtimeCheckFoundDeploymentAbsent.
 func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	selection = normalizeSelection(selection)
 	// A deploy for this env being in flight IS the recovery this failure would
@@ -124,10 +156,32 @@ func (a *App) surfaceEnvRuntimeEnsureFailure(selection uiSelection, err error) {
 	// lifecycle can clear it once the state it describes moves on. Kind
 	// "warning" (not "warn") is the contract the frontend maps to the
 	// attention icon; an unrecognized kind renders as a neutral info ⓘ.
+	if runtimeCheckFoundDeploymentAbsent(err) {
+		a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
+			"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
+			selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
+		), notificationActionDeploy)
+		return
+	}
+	// Nothing here confirmed the deployment is absent, so a deploy is not
+	// offered: it would roll a runtime that may already be healthy. The
+	// recovery for a check that could not resolve an answer is a connectivity,
+	// credentials, or permissions fix, not a deploy.
 	a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
-		"Could not reach the runtime for %s/%s: %s. Deploy the environment to bring it up.",
+		"Could not tell whether the runtime for %s/%s is up: %s. Check the cluster connection, credentials, and permissions for this environment.",
 		selection.Tenant, selection.Environment, strings.TrimSpace(err.Error()),
-	))
+	), "")
+}
+
+// runtimeCheckFoundDeploymentAbsent reports whether err is the specific
+// "runtime is not deployed" failure ensureRuntimeDeployed
+// (erun-cli/cmd/open.go) raises for a deployment that genuinely does not
+// exist. Any other failure text — kubectl unreachable, an RBAC refusal, a
+// port-forward timeout, or anything unrecognized — must not be read as
+// absence: erun could not establish the runtime's state, so offering a
+// deploy would be acting on a state it never confirmed.
+func runtimeCheckFoundDeploymentAbsent(err error) bool {
+	return err != nil && strings.Contains(err.Error(), eruncommon.KubernetesDeploymentAbsentMessageMarker)
 }
 
 // surfaceEnvRuntimeStopped renders a stopped environment as stopped and names
@@ -141,7 +195,7 @@ func (a *App) surfaceEnvRuntimeStopped(selection uiSelection) {
 	a.emitEnvNotification("info", selection.Tenant, selection.Environment, notificationSourceRuntimeUnreachable, fmt.Sprintf(
 		"%s/%s is stopped, so its sessions did not reconnect. Open it to start it again.",
 		selection.Tenant, selection.Environment,
-	))
+	), "")
 }
 
 // ensureFailureAlreadyNotified latches one notification per failure episode and

@@ -278,31 +278,35 @@ func (s *activityQueueStore) updateContainers(id string, containers []activityQu
 	s.notifyLocked(snapshot)
 }
 
-// recordOutputLine buffers command output for the active entry matching
+// recordOutputLine buffers command output for every active entry matching
 // (tenant, environment), feeding entry.Detail if that entry later fails. A
-// no-op when nothing matches: output before the entry registers (e.g. before
-// "==> Deploying") or after it finishes is not failure context.
+// no-op when nothing matches: output before any entry registers (e.g. before
+// "==> Deploying") or after all of them finish is not failure context.
+//
+// A caller cannot always name which command a given line belongs to (the
+// build/push/deploy trace lines a subprocess or PTY interleaves are matched
+// after the fact, not before), so this buffers into every active entry for
+// the tenant/env rather than picking one arbitrarily. Normally only one entry
+// is active at a time, so this is a no-op difference; when a build and a
+// deploy are briefly active together for the same env, both get the shared
+// context rather than the ambiguous single pick silently attaching it to the
+// wrong one (the same map-iteration-order class of bug findActive had).
 func (s *activityQueueStore) recordOutputLine(tenant, environment, line string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	id := ""
-	for _, entry := range s.active {
-		if entry.Tenant == tenant && entry.Environment == environment {
-			id = entry.ID
-			break
-		}
-	}
-	if id == "" {
-		return
-	}
 	if len(line) > activityQueueOutputLineMaxChars {
 		line = line[:activityQueueOutputLineMaxChars]
 	}
-	buf := append(s.outputByID[id], line)
-	if len(buf) > activityQueueOutputBufferLines {
-		buf = buf[len(buf)-activityQueueOutputBufferLines:]
+	for _, entry := range s.active {
+		if entry.Tenant != tenant || entry.Environment != environment {
+			continue
+		}
+		buf := append(s.outputByID[entry.ID], line)
+		if len(buf) > activityQueueOutputBufferLines {
+			buf = buf[len(buf)-activityQueueOutputBufferLines:]
+		}
+		s.outputByID[entry.ID] = buf
 	}
-	s.outputByID[id] = buf
 }
 
 // finish moves an active entry into history. It is idempotent — returning false

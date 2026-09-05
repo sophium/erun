@@ -11,3 +11,14 @@ promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
 ==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
 ==> Verified published chart base <VERSION>
 ==> Pushed in <ELAPSED>
+step timing (ordered by duration):
+  push [<ELAPSED>]
+    api (cache hit) [<ELAPSED>]
+      linux/amd64 (cache hit) [<ELAPSED>]
+      linux/arm64 (cache hit) [<ELAPSED>]
+    base (cache hit) [<ELAPSED>]
+      linux/amd64 (cache hit) [<ELAPSED>]
+      linux/arm64 (cache hit) [<ELAPSED>]
+    chart api [<ELAPSED>]
+    chart base [<ELAPSED>]
+timing record written to <TMP>

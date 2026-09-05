@@ -36,6 +36,9 @@ function managedRunningIdleStatus(ctx: IdleStatusFixture): unknown {
     stopEligible: true,
     outsideWorkingHours: false,
     managedCloud: true,
+    // These fixtures stand in for a live pod-backed reading unless a test
+    // overrides it (see the fromPod provenance test below).
+    fromPod: true,
     cloudContextName: ctx.cloudContextName,
     cloudContextStatus: ctx.cloudContextStatus,
     cloudContextLabel: ctx.cloudContextLabel,
@@ -56,6 +59,7 @@ function managedRunningIdleStatusWithPendingStop(ctx: PendingStopFixture): unkno
     stopEligible: true,
     outsideWorkingHours: false,
     managedCloud: true,
+    fromPod: true,
     cloudContextName: ctx.cloudContextName,
     cloudContextStatus: ctx.cloudContextStatus,
     cloudContextLabel: ctx.cloudContextLabel,
@@ -573,5 +577,39 @@ test.describe('idle widget stop protection', () => {
     // The widget must keep reporting reality: still running, stop still
     // offered — never a silent flip to "stopped".
     await expect(stopButton).toBeVisible();
+  });
+
+  // Regression for erun#1216 bug 3: a reading LoadIdleStatus assembled on
+  // the host (fromPod: false, taken when the pod could not be reached) must
+  // not render with the same confidence as a live pod-confirmed one.
+  test('idle badge names the pod provenance caveat for a reading the pod never confirmed', async ({
+    app,
+    page,
+  }) => {
+    const ctxName = 'mock-ctx-stale-provenance';
+    const idle: IdleStatusFixture = {
+      cloudContextName: ctxName,
+      cloudContextStatus: 'running',
+      cloudContextLabel: ctxName,
+    };
+
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
+      if (body.method === 'LoadIdleStatus') {
+        return route.fulfill(
+          envelope({ ...(managedRunningIdleStatus(idle) as object), fromPod: false }),
+        );
+      }
+      if (body.method === 'DescribeCloudContextApiStop') {
+        return route.fulfill(envelope(apiStopStatus(ctxName, false)));
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
+
+    const badge = app.titlebar.idleStatusBadge();
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveAttribute('aria-label', /^not confirmed with the pod/);
   });
 });

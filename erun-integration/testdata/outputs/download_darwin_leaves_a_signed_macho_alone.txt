@@ -1,0 +1,3 @@
+audit: erun outputs download erun-darwin-arm64
+outputs: downloading <HOME>/.erun/outputs/erun-darwin-arm64
+Downloaded erun-darwin-arm64 (30B, sha256 <HEX>) to erun-darwin-arm64

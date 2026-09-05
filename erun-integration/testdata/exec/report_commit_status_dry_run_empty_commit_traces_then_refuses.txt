@@ -1,0 +1,4 @@
+audit: erun exec report-commit-status --description gate build passed --dry-run --remote-url https://github.com/sophium/erun.git --state success
+report-commit-status: resolving commit
+report-commit-status: commit resolution failed: commit is required
+commit is required

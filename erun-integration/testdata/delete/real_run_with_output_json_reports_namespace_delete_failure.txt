@@ -1,0 +1,10 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "remote": true,
+  "namespace": "team-dev",
+  "kubernetesContext": "test-context",
+  "configDir": "<TMP>",
+  "namespaceDeleteError": "failed to delete kubernetes namespace \"team-dev\" in context \"test-context\": exit status 1: Error from server (Forbidden): namespaces \"team-dev\" is forbidden"
+}
+audit: erun delete --output json --yes team dev

@@ -1,0 +1,5 @@
+audit: erun exec close-pr --dry-run --gated-commit sourcesha0000000000000000000000000000000 --landing-commit landedsha0000000000000000000000000000000 --remote-url https://gitlab.com/sophium/erun.git --target main feature/add-widget
+close-pr: resolving inputs
+close-pr: resolving owner/repo from remote-url
+close-pr: remote-url resolution failed: remote-url "https://gitlab.com/sophium/erun.git" is not a recognized github.com remote
+remote-url "https://gitlab.com/sophium/erun.git" is not a recognized github.com remote

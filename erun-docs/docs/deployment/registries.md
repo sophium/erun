@@ -74,11 +74,31 @@ ERun resolves the entry into two concrete hosts, matching the `build`/`deploy` s
 
 `insecure: true` marks the registry as plain HTTP, so `erun deploy` passes `--insecure-registry <ClusterIP>:5000` to the in-pod dind daemon (which otherwise only trusts loopback). The fields default to the `erun-registry`/`kube-system`/`5000` convention, so a bare `cluster: {}` resolves for the standard local setup. The `erun-setup-k3s-cluster` skill provisions the ClusterIP Service and the node mirror.
 
+## Hosted registry {#hosted-registry}
+
+ERun also offers its own hosted registry, `registry.erunpaas.com`, as a build+deploy registry with no setup: authenticate with your tenant's own API token instead of managing a separate registry account, and push/pull under your own tenant namespace.
+
+`erun build`/`erun push` log in for you automatically: once you're signed in to the platform (`erun cloud login <alias>`, after `erun cloud init erun --api-url <url>`), the same bearer token `erun platform whoami` uses becomes the registry password behind the scenes — nothing to type. This needs exactly one `erun`-type cloud provider alias configured; with zero or more than one, the login fails with a clear error naming what to fix instead of hanging on a prompt nobody can answer. A manual login works the same way if you'd rather drive it by hand:
+
+```
+docker login registry.erunpaas.com
+Username: erun
+Password: <your tenant API token>
+
+docker push registry.erunpaas.com/<tenant>/hello:1
+```
+
+`erun init --erun-registry` fills this in for you — a single `registry.erunpaas.com/<tenant>` entry marked **build + deploy**, in place of `--container-registry` or `--cluster-registry` (the three are mutually exclusive; pick one). Because the hosted registry then holds only *your* project's images, pair it with `--runtime-registry ghcr.io/sophium` so ERun still resolves its own runtime chart from erun's registry rather than yours.
+
+**Images older than a retention window are deleted automatically.** The default window is **30 days** since an image was last pulled; the platform operator can configure it per deployment. There is no separate "list what's about to expire" step today — if an image you rely on has not been pulled in that window, it is gone. Re-push it (or pull it periodically) to keep it alive.
+
+Until the platform side (DNS, TLS certificate, and the registry deployment itself) is stood up on your instance, `erun init --erun-registry` still records the config and `erun build`/`erun push` still resolve a login the way described above, but the push itself has nowhere real to land. For the token protocol and its security model, see the [Agent reference](/agent-reference/api-protocol#registry-token-endpoint).
+
 ## Discovering versions to deploy
 
 When the desktop offers versions to deploy or upgrade, it asks only the environment's listed registries — not a global default — and labels each offered version with the registry it came from. If two registries publish different newer versions, the deploy picker and the Upgrade-all dialog let you pick which one; `erun upgrade` on the command line skips such an environment as ambiguous until you pass `--version`. See [`erun upgrade`](/cli/upgrade).
 
-Version discovery uses the same local registry credentials as build and deploy (see [Authentication](#authentication)), so a **private** runtime image's versions appear only once you are logged in to its registry. A momentary registry hiccup is retried a few times first, so a transient blip doesn't strand a tenant environment on the upstream fallback. Only when the desktop still cannot list an image — a private one you have not authenticated to, or an unreachable registry — does it show a notice under the version picker naming the image and how to sign in, instead of silently offering nothing.
+Version discovery reads the registry directly, whichever registry it is: Docker Hub, ghcr.io, or any host that speaks the OCI distribution API -- a private mirror, an in-cluster registry, or an ECR account. It uses the same local registry credentials as build and deploy (see [Authentication](#authentication)), so a **private** runtime image's versions appear once you are logged in to its registry; for ECR it mints its own credential from the AWS CLI when no docker credential is available, because an ECR token expires after twelve hours. A momentary registry hiccup is retried a few times first, so a transient blip doesn't strand a tenant environment on the upstream fallback. Only when the desktop still cannot list an image — a private one you have not authenticated to, or an unreachable registry — does it show a notice under the version picker naming the image and how to sign in, instead of silently offering nothing.
 
 ## Multi-architecture builds
 
@@ -87,8 +107,10 @@ Every `erun build`, `erun build --release`, and `erun deploy` produces both `lin
 ## Authentication
 
 - **ghcr.io** — `gh auth login` (and a `write:packages` token scope) covers it. On a machine where keychain or subprocess access is restricted, set `GH_TOKEN` (or `GITHUB_TOKEN`) instead — the desktop reads it directly, with no keychain or `gh` dependency.
-- **AWS ECR** — the cluster's IRSA role grants the runtime pod permission to push; for local `docker push` you use a profile via `aws ecr get-login-password`.
+- **AWS ECR** — the cluster's IRSA role grants the runtime pod permission to push; for local `docker push` you use a profile via `aws ecr get-login-password`. Version listing falls back to that same command when the docker credential is missing or expired, so the version picker keeps working without a fresh `docker login`. If the runtime image itself is in ECR, `erun deploy` uses the same fallback to keep the [pull secret](/reference/configuration#advanced-image-pull-secrets) fresh across the token's twelve-hour expiry.
 - **Other registries** — `docker login` once; credentials are persisted at `~/.docker/config.json`.
+
+A **build-capable or deploy-capable environment's pod authenticates for itself** — the credential lives on whichever machine runs `erun build`/`erun push`/`erun deploy`, which for a `local-agent` or `remote-agent` environment is the pod, not your laptop. For a ghcr.io registry, `erun init` closes that gap automatically: before deploying the pod, it resolves a credential via the same three routes above from *your* machine, and if one resolves, mints a Kubernetes Secret and mounts it into the pod, which merges it into its own `~/.docker/config.json` on boot without overwriting anything already there. Right after deploying the pod, init then checks — directly inside it — that one of the three routes now resolves; if none does (your machine had nothing to provision, and the pod had nothing of its own either), init refuses rather than reporting success, so a missing credential surfaces immediately instead of after a wasted build at the first `erun release`. Authenticate the pod (`erun open`, then `gh auth login` or `docker login`) and re-run `erun init` to confirm.
 
 ## Where next
 

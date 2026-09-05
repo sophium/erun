@@ -1,3 +1,5 @@
+import type { StatusBadgeTone } from 'erun-kit';
+
 import type { UIEnvironmentConfig } from '@/types';
 
 export const dialogErrorClassName =
@@ -37,6 +39,18 @@ export function portRangeValue(rangeStart: number, rangeEnd: number): string {
 export function parseIdleTrafficBytes(value: string): number {
   const parsed = Number(value.trim() || 0);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+}
+
+// Keys are the workspaceSyncStatus values set by App.setWorkspaceSyncStatus (erun-ui/workspace_sync.go).
+const workspaceSyncStatusTones: Record<string, StatusBadgeTone> = {
+  error: 'destructive',
+  stopped: 'muted',
+  starting: 'in-progress',
+  syncing: 'in-progress',
+};
+
+export function workspaceSyncStatusTone(status: string): StatusBadgeTone {
+  return workspaceSyncStatusTones[status.trim()] ?? 'warning';
 }
 
 export function relativeTimeFromNow(timestamp: number): string {

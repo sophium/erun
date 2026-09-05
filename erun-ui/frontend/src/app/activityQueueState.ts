@@ -14,8 +14,9 @@ import {
   removeActivityEntriesForSession,
   removeActivityEntry,
   setActivityEntries,
+  upsertActivityEntry,
 } from './slices/activitySlice';
-import type { RootState } from './store';
+import type { AppThunk, RootState } from './store';
 
 export type ActivityQueueStatus =
   | 'waiting'
@@ -68,6 +69,20 @@ export interface ActivityQueueEntry {
   actionKind?: string;
   enqueuedAt?: string;
   startedRunningAt?: string;
+  // origin distinguishes a synthetic, desktop-pushed entry from the normal
+  // cluster/host-observed ones this queue is otherwise built from -- absent
+  // (== 'cluster') for every existing entry. A new discriminant rather than
+  // reusing `source` above: `source` already carries a different vocabulary
+  // (which trace/RPC produced a *cluster* entry) that shouldShowHelmRecovery/
+  // RecoveryActionRow read, and overloading it here would make those checks
+  // (`entry.source === 'shell'`, `entry.source !== 'helm'`) silently start
+  // seeing a value they were never written to expect.
+  origin?: 'cluster' | 'invite-approval';
+  // message/inviteLink back an 'invite-approval' entry's own render: most
+  // cluster-only fields above (release/namespace/containers/
+  // kubernetesContext) are simply absent for it.
+  message?: string;
+  inviteLink?: string;
 }
 
 export interface ActivityLockEvent {
@@ -200,6 +215,39 @@ export function formatElapsed(startedAt: string, now: number = Date.now()): stri
   }
   return raw.padStart(6, ' ');
 }
+
+// pushInviteApprovalActivityEntry appends a durable, in-memory record of an
+// invite-request approval -- a synthetic entry, not sourced from a
+// cluster/host read, which is a deliberate, explicitly-scoped
+// extension of a queue whose own doc comment says it "is rebuilt from live
+// cluster and host state on every launch and never persists across
+// restarts": there is no cluster/host state to rebuild this one from, so it
+// simply does not survive a restart, same as everything else here.
+export const pushInviteApprovalActivityEntry =
+  (params: {
+    tenant: string;
+    environment?: string;
+    message: string;
+    inviteLink?: string;
+  }): AppThunk =>
+  (dispatch) => {
+    const now = new Date().toISOString();
+    dispatch(
+      upsertActivityEntry({
+        id: `invite-approval-${params.tenant}-${now}`,
+        command: '',
+        tenant: params.tenant,
+        environment: params.environment ?? '',
+        status: 'succeeded',
+        startedAt: now,
+        endedAt: now,
+        lastUpdated: now,
+        origin: 'invite-approval',
+        message: params.message,
+        inviteLink: params.inviteLink,
+      }),
+    );
+  };
 
 export function activeActivityForSelection(
   entries: ActivityQueueEntry[],

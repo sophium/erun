@@ -1,21 +1,198 @@
+# Terraform does not substitute a variable's default when a caller assigns an
+# explicit null: the null reaches the variable's own validation and its uses, so
+# `length(null)` aborts outright and `null != ""` is *true*, silently selecting
+# the wrong branch of a guard. A wrapper module cannot conditionally omit an
+# argument in HCL, so "use this module's default" has to be expressible as null
+# -- otherwise every wrapper must duplicate the default and can drift from it
+# (#1161). Every optional input therefore declares `default = null` and resolves
+# its effective value exactly once here.
+#
+# The test is `== null`, deliberately not coalesce(): coalesce skips empty
+# strings as well as nulls, so it would silently replace a legitimately empty
+# input with the default -- and coalesce("", "") is a hard error, which would
+# abort every apply where an optional string is genuinely unset.
 locals {
-  cloudflare_token_secret = "${var.issuer_name}-cloudflare-token"
-  wildcard_cert_name      = "${var.issuer_name}-wildcard"
-  wildcard_secret_name    = "${var.issuer_name}-wildcard-tls"
-  use_rfc2136             = var.dns01_provider == "powerdns-rfc2136"
-  use_broker              = var.dns01_provider == "powerdns-broker"
-  tsig_secret_name        = "${var.issuer_name}-rfc2136-tsig"
+  arg_cloudflare_api_token             = var.cloudflare_api_token == null ? "" : var.cloudflare_api_token
+  arg_acme_server                      = var.acme_server == null ? "https://acme-v02.api.letsencrypt.org/directory" : var.acme_server
+  arg_install_ingress_controller       = var.install_ingress_controller == null ? true : var.install_ingress_controller
+  arg_install_cert_manager             = var.install_cert_manager == null ? true : var.install_cert_manager
+  arg_wildcard_certificate_enabled     = var.wildcard_certificate_enabled == null ? true : var.wildcard_certificate_enabled
+  arg_namespace                        = var.namespace == null ? "cert-manager" : var.namespace
+  arg_ingress_namespace                = var.ingress_namespace == null ? "traefik" : var.ingress_namespace
+  arg_issuer_name                      = var.issuer_name == null ? "erun-cloudflare" : var.issuer_name
+  arg_cert_manager_chart_version       = var.cert_manager_chart_version == null ? "v1.20.3" : var.cert_manager_chart_version
+  arg_traefik_chart_version            = var.traefik_chart_version == null ? "33.2.1" : var.traefik_chart_version
+  arg_dns01_provider                   = var.dns01_provider == null ? "cloudflare" : var.dns01_provider
+  arg_dns01_webhook_image_pull_secrets = var.dns01_webhook_image_pull_secrets == null ? [] : var.dns01_webhook_image_pull_secrets
+  arg_broker_url                       = var.broker_url == null ? "" : var.broker_url
+  arg_dns01_token_secret_name          = var.dns01_token_secret_name == null ? "" : var.dns01_token_secret_name
+  arg_dns01_webhook_group_name         = var.dns01_webhook_group_name == null ? "acme.erun.io" : var.dns01_webhook_group_name
+  arg_dns01_webhook_image              = var.dns01_webhook_image == null ? "" : var.dns01_webhook_image
+  arg_powerdns_nameserver              = var.powerdns_nameserver == null ? "" : var.powerdns_nameserver
+  arg_rfc2136_tsig_key_name            = var.rfc2136_tsig_key_name == null ? "" : var.rfc2136_tsig_key_name
+  arg_rfc2136_tsig_algorithm           = var.rfc2136_tsig_algorithm == null ? "HMACSHA256" : var.rfc2136_tsig_algorithm
+  arg_rfc2136_tsig_secret              = var.rfc2136_tsig_secret == null ? "" : var.rfc2136_tsig_secret
+  arg_per_env_certificate_enabled      = var.per_env_certificate_enabled == null ? false : var.per_env_certificate_enabled
+  arg_env_label                        = var.env_label == null ? "" : var.env_label
+  arg_env_namespace                    = var.env_namespace == null ? "" : var.env_namespace
+  arg_install_coredns_forward          = var.install_coredns_forward == null ? false : var.install_coredns_forward
+  arg_coredns_configmap_name           = var.coredns_configmap_name == null ? "coredns" : var.coredns_configmap_name
+  arg_manage_coredns_custom_configmap  = var.manage_coredns_custom_configmap == null ? true : var.manage_coredns_custom_configmap
+  arg_base_domain_name                 = var.base_domain_name == null ? "" : var.base_domain_name
+  arg_coredns_forward_upstreams        = var.coredns_forward_upstreams == null ? ["1.1.1.1", "1.0.0.1", "8.8.8.8"] : var.coredns_forward_upstreams
+}
+
+locals {
+  cloudflare_token_secret = "${local.arg_issuer_name}-cloudflare-token"
+  wildcard_cert_name      = "${local.arg_issuer_name}-wildcard"
+  wildcard_secret_name    = "${local.arg_issuer_name}-wildcard-tls"
+  use_rfc2136             = local.arg_dns01_provider == "powerdns-rfc2136"
+  use_broker              = local.arg_dns01_provider == "powerdns-broker"
+  # install_dns01_webhook left unset (null) preserves the historical behavior
+  # of installing the shim exactly when the platform's own Issuer uses the
+  # broker solver; setting it explicitly decouples the two, so a platform can
+  # install the shim for per-tenant brokered Issuers (e.g. erun expose's)
+  # while its own Issuer stays on cloudflare or rfc2136.
+  install_dns01_webhook = var.install_dns01_webhook != null ? var.install_dns01_webhook : local.use_broker
+  # The shim ships as one release with this module — chart-dns01-webhook's own
+  # Chart.yaml is stamped to the erun version at every release, the same way
+  # every umbrella chart's dependency versions are. Reading it here is this
+  # module's equivalent of a Helm template's `.Chart.AppVersion` default (see
+  # erun-zitadel's bootstrap image): the shim's image can no longer disagree
+  # with the module by construction, because they are pinned by the same file.
+  # local.arg_dns01_webhook_image still overrides it, for testing a build ahead of a
+  # release.
+  dns01_webhook_chart_app_version = yamldecode(file("${path.module}/chart-dns01-webhook/Chart.yaml")).appVersion
+  dns01_webhook_image             = local.arg_dns01_webhook_image != "" ? local.arg_dns01_webhook_image : "ghcr.io/sophium/erun-dns01-webhook:${local.dns01_webhook_chart_app_version}"
+  tsig_secret_name                = "${local.arg_issuer_name}-rfc2136-tsig"
   # Per-env wildcard: *.<env_label>.<services_zone> → Secret <env_label>-wildcard-tls
   # in the env namespace, which `erun expose` references from its Ingress.
-  env_namespace       = var.env_namespace != "" ? var.env_namespace : var.env_label
-  per_env_cert_name   = var.env_label != "" ? "${var.env_label}-wildcard" : ""
-  per_env_secret_name = var.env_label != "" ? "${var.env_label}-wildcard-tls" : ""
+  env_namespace       = local.arg_env_namespace != "" ? local.arg_env_namespace : local.arg_env_label
+  per_env_cert_name   = local.arg_env_label != "" ? "${local.arg_env_label}-wildcard" : ""
+  per_env_secret_name = local.arg_env_label != "" ? "${local.arg_env_label}-wildcard-tls" : ""
   # The namespaced Issuer, its DNS-01 credential Secret, and the apex wildcard
   # cert all live here. A namespaced Issuer only serves Certificates in its own
   # namespace, so this is the env namespace (co-locating the per-env cert with
   # its issuer); it falls back to the cert-manager namespace for an apex-only
   # edge with no env.
-  issuer_namespace = local.env_namespace != "" ? local.env_namespace : var.namespace
+  issuer_namespace = local.env_namespace != "" ? local.env_namespace : local.arg_namespace
+
+  # CoreDNS custom server block for base_domain_name. File name is derived from
+  # the domain (dots to dashes) rather than fixed, so it can't collide with an
+  # unrelated *.server file someone else drops in the same ConfigMap.
+  coredns_forward_key   = "${replace(local.arg_base_domain_name, ".", "-")}.server"
+  coredns_forward_block = <<-EOT
+    ${local.arg_base_domain_name}:53 {
+        errors
+        cache 30
+        forward . ${join(" ", local.arg_coredns_forward_upstreams)}
+    }
+  EOT
+}
+
+# k3s's bundled CoreDNS ends its default Corefile in `forward . /etc/resolv.conf`,
+# so every name outside cluster.local resolves through whatever DNS the node
+# happens to use — including the platform's own published names, which makes
+# cert-manager's HTTP-01 self-check (and every unattended renewal after it)
+# hostage to a resolver outside the platform's control. k3s's CoreDNS already
+# mounts coredns-custom at /etc/coredns/custom (optional) and imports every
+# *.server file from it, so this needs no change to the CoreDNS Deployment.
+
+# The CoreDNS Corefile, read back so the forward can refuse to be a silent
+# no-op. The whole mechanism depends on the Corefile importing
+# /etc/coredns/custom/*.server; on a distribution or a hand-edited Corefile
+# without that import, the ConfigMap applies cleanly, this module reports
+# success, and in-cluster resolution is completely unchanged (#1165). Since the
+# failure it prevents only shows up at certificate issuance or renewal, that
+# false success can go unnoticed for weeks.
+data "kubernetes_config_map" "coredns" {
+  count = local.arg_install_coredns_forward ? 1 : 0
+
+  metadata {
+    name      = local.arg_coredns_configmap_name
+    namespace = "kube-system"
+  }
+}
+
+# coredns-custom is k3s's general extension point, not this module's private
+# object, so ownership is split deliberately:
+#
+#   * this resource owns the object's EXISTENCE and nothing inside it, and
+#   * kubernetes_config_map_v1_data below owns exactly one key.
+#
+# The previous shape owned the whole object, which made the module's own
+# documented remedy destructive: it told an operator with a hand-applied
+# coredns-custom to `terraform import` it, and the very next apply then pruned
+# every key the module did not know about (#1165). ignore_changes on data is
+# what stops that -- without it this resource's (empty) data map is
+# authoritative and prunes on every apply.
+#
+# Set manage_coredns_custom_configmap = false on a cluster where something else
+# owns the object's lifecycle; the module then manages only its own key and
+# never creates or deletes coredns-custom.
+resource "kubernetes_config_map" "coredns_custom" {
+  count = local.arg_install_coredns_forward && local.arg_manage_coredns_custom_configmap ? 1 : 0
+
+  metadata {
+    name      = "coredns-custom"
+    namespace = "kube-system"
+  }
+
+  lifecycle {
+    # Every key is owned by kubernetes_config_map_v1_data, key by key.
+    ignore_changes = [data]
+
+    precondition {
+      condition     = local.arg_base_domain_name != ""
+      error_message = "install_coredns_forward requires base_domain_name (the platform's own apex domain, e.g. \"example.com\")."
+    }
+  }
+}
+
+# The one key this module owns. Server-side apply with an explicit field
+# manager, so a key another operator or component put in the same ConfigMap is
+# left strictly alone -- and so destroying the edge removes this key rather than
+# the whole shared object.
+resource "kubernetes_config_map_v1_data" "coredns_forward" {
+  count = local.arg_install_coredns_forward ? 1 : 0
+
+  metadata {
+    name      = "coredns-custom"
+    namespace = "kube-system"
+  }
+
+  data = {
+    (local.coredns_forward_key) = local.coredns_forward_block
+  }
+
+  field_manager = "erun-cluster-edge"
+  force         = true
+
+  depends_on = [kubernetes_config_map.coredns_custom]
+
+  lifecycle {
+    precondition {
+      condition     = local.arg_base_domain_name != ""
+      error_message = "install_coredns_forward requires base_domain_name (the platform's own apex domain, e.g. \"example.com\")."
+    }
+
+    # Refuse to apply a forward the Corefile will never read. This is the
+    # difference between a configuration that works and one that merely applies.
+    precondition {
+      condition     = can(regex("import\\s+/etc/coredns/custom/\\*\\.server", data.kubernetes_config_map.coredns[0].data["Corefile"]))
+      error_message = "CoreDNS's Corefile does not import /etc/coredns/custom/*.server, so a coredns-custom entry would be written and never read — in-cluster resolution of ${local.arg_base_domain_name} would be unchanged while this module reported success. Add `import /etc/coredns/custom/*.server` to the Corefile (k3s does this by default), or set install_coredns_forward = false and solve node-resolver dependence another way."
+    }
+  }
+}
+
+# The forward used to be one resource owning the whole ConfigMap. Renaming it
+# without this would destroy coredns-custom and recreate it, which on the
+# platform's own cluster is a DNS outage window for every name the forward
+# serves. The moved block carries the existing object into its new address
+# instead, and the v1_data resource then adopts the key it already contains.
+moved {
+  from = kubernetes_config_map.coredns_forward
+  to   = kubernetes_config_map.coredns_custom
 }
 
 # Namespace cert-manager itself runs in. The Issuer, its DNS-01 credential
@@ -25,30 +202,30 @@ locals {
 # existing cert-manager elsewhere).
 resource "kubernetes_namespace" "cert_manager" {
   metadata {
-    name = var.namespace
+    name = local.arg_namespace
   }
 }
 
 # Ingress controller. Optional: skip on a cluster that already has one.
 resource "helm_release" "traefik" {
-  count = var.install_ingress_controller ? 1 : 0
+  count = local.arg_install_ingress_controller ? 1 : 0
 
   name             = "traefik"
   repository       = "https://traefik.github.io/charts"
   chart            = "traefik"
-  version          = var.traefik_chart_version
-  namespace        = var.ingress_namespace
+  version          = local.arg_traefik_chart_version
+  namespace        = local.arg_ingress_namespace
   create_namespace = true
 }
 
 # cert-manager (with its CRDs). Optional: skip when the cluster already runs it.
 resource "helm_release" "cert_manager" {
-  count = var.install_cert_manager ? 1 : 0
+  count = local.arg_install_cert_manager ? 1 : 0
 
   name       = "cert-manager"
   repository = "https://charts.jetstack.io"
   chart      = "cert-manager"
-  version    = var.cert_manager_chart_version
+  version    = local.arg_cert_manager_chart_version
   namespace  = kubernetes_namespace.cert_manager.metadata[0].name
 
   set {
@@ -62,20 +239,22 @@ resource "helm_release" "cert_manager" {
 # it in-cluster; the namespaced Issuer references it by name + key from its own
 # namespace.
 resource "kubernetes_secret" "cloudflare_api_token" {
-  count = local.use_rfc2136 ? 0 : 1
+  # Only the cloudflare solver (chart-issuer's default branch) ever reads this
+  # secret; rfc2136 and broker both reference a different credential.
+  count = local.use_rfc2136 || local.use_broker ? 0 : 1
 
   metadata {
     name      = local.cloudflare_token_secret
     namespace = local.issuer_namespace
   }
   data = {
-    "api-token" = var.cloudflare_api_token
+    "api-token" = local.arg_cloudflare_api_token
   }
   type = "Opaque"
 
   lifecycle {
     precondition {
-      condition     = var.cloudflare_api_token != ""
+      condition     = local.arg_cloudflare_api_token != ""
       error_message = "cloudflare_api_token is required when dns01_provider is \"cloudflare\"."
     }
   }
@@ -92,13 +271,13 @@ resource "kubernetes_secret" "rfc2136_tsig" {
     namespace = local.issuer_namespace
   }
   data = {
-    "tsig-secret" = var.rfc2136_tsig_secret
+    "tsig-secret" = local.arg_rfc2136_tsig_secret
   }
   type = "Opaque"
 
   lifecycle {
     precondition {
-      condition     = var.rfc2136_tsig_secret != "" && var.powerdns_nameserver != "" && var.rfc2136_tsig_key_name != ""
+      condition     = local.arg_rfc2136_tsig_secret != "" && local.arg_powerdns_nameserver != "" && local.arg_rfc2136_tsig_key_name != ""
       error_message = "dns01_provider \"powerdns-rfc2136\" requires rfc2136_tsig_secret, powerdns_nameserver, and rfc2136_tsig_key_name."
     }
   }
@@ -106,18 +285,22 @@ resource "kubernetes_secret" "rfc2136_tsig" {
 
 # The per-cluster cert-manager DNS-01 webhook shim (multi-tenant broker path).
 # One per cluster: it forwards each per-tenant Issuer's challenge to the DNS-01
-# broker, carrying the env's scoped token. Only installed for powerdns-broker;
-# depends on cert-manager (its CRDs back the shim's serving-cert PKI).
+# broker, carrying the env's scoped token. Installed whenever
+# install_dns01_webhook resolves true — independent of the platform's own
+# Issuer solver, so a per-tenant Issuer elsewhere (e.g. erun expose's) can use
+# the broker even while dns01_provider keeps the platform's own Issuer on
+# cloudflare or rfc2136. Depends on cert-manager (its CRDs back the shim's
+# serving-cert PKI).
 resource "helm_release" "dns01_webhook" {
-  count = local.use_broker ? 1 : 0
+  count = local.install_dns01_webhook ? 1 : 0
 
-  name      = "${var.issuer_name}-dns01-webhook"
+  name      = "${local.arg_issuer_name}-dns01-webhook"
   chart     = "${path.module}/chart-dns01-webhook"
   namespace = kubernetes_namespace.cert_manager.metadata[0].name
 
   set {
     name  = "groupName"
-    value = var.dns01_webhook_group_name
+    value = local.arg_dns01_webhook_group_name
   }
   set {
     name  = "namespace"
@@ -125,17 +308,25 @@ resource "helm_release" "dns01_webhook" {
   }
   set {
     name  = "image"
-    value = var.dns01_webhook_image
+    value = local.dns01_webhook_image
   }
   set {
     name  = "brokerURL"
-    value = var.broker_url
+    value = local.arg_broker_url
+  }
+
+  dynamic "set" {
+    for_each = local.arg_dns01_webhook_image_pull_secrets
+    content {
+      name  = "imagePullSecrets[${set.key}].name"
+      value = set.value
+    }
   }
 
   lifecycle {
     precondition {
-      condition     = var.broker_url != "" && var.dns01_webhook_image != "" && var.dns01_token_secret_name != ""
-      error_message = "dns01_provider \"powerdns-broker\" requires broker_url, dns01_webhook_image, and dns01_token_secret_name."
+      condition     = local.arg_broker_url != ""
+      error_message = "install_dns01_webhook requires broker_url."
     }
   }
 
@@ -150,13 +341,13 @@ resource "helm_release" "dns01_webhook" {
 # in the cert-manager namespace, but the Issuer and its certs set their own
 # metadata.namespace (issuerNamespace) so they land in the env namespace.
 resource "helm_release" "issuer" {
-  name      = "${var.issuer_name}-issuer"
+  name      = "${local.arg_issuer_name}-issuer"
   chart     = "${path.module}/chart-issuer"
   namespace = kubernetes_namespace.cert_manager.metadata[0].name
 
   set {
     name  = "issuerName"
-    value = var.issuer_name
+    value = local.arg_issuer_name
   }
   set {
     name  = "issuerNamespace"
@@ -168,7 +359,7 @@ resource "helm_release" "issuer" {
   }
   set {
     name  = "acmeServer"
-    value = var.acme_server
+    value = local.arg_acme_server
   }
   set {
     name  = "servicesZone"
@@ -184,7 +375,7 @@ resource "helm_release" "issuer" {
   }
   set {
     name  = "wildcardCertificateEnabled"
-    value = tostring(var.wildcard_certificate_enabled)
+    value = tostring(local.arg_wildcard_certificate_enabled)
   }
   set {
     name  = "wildcardCertName"
@@ -196,19 +387,19 @@ resource "helm_release" "issuer" {
   }
   set {
     name  = "dns01Provider"
-    value = var.dns01_provider
+    value = local.arg_dns01_provider
   }
   set {
     name  = "rfc2136Nameserver"
-    value = var.powerdns_nameserver
+    value = local.arg_powerdns_nameserver
   }
   set {
     name  = "rfc2136TsigKeyName"
-    value = var.rfc2136_tsig_key_name
+    value = local.arg_rfc2136_tsig_key_name
   }
   set {
     name  = "rfc2136TsigAlgorithm"
-    value = var.rfc2136_tsig_algorithm
+    value = local.arg_rfc2136_tsig_algorithm
   }
   set {
     name  = "rfc2136TsigSecretName"
@@ -216,19 +407,19 @@ resource "helm_release" "issuer" {
   }
   set {
     name  = "dns01WebhookGroupName"
-    value = var.dns01_webhook_group_name
+    value = local.arg_dns01_webhook_group_name
   }
   set {
     name  = "brokerURL"
-    value = var.broker_url
+    value = local.arg_broker_url
   }
   set {
     name  = "dns01TokenSecretName"
-    value = var.dns01_token_secret_name
+    value = local.arg_dns01_token_secret_name
   }
   set {
     name  = "perEnvCertificateEnabled"
-    value = tostring(var.per_env_certificate_enabled)
+    value = tostring(local.arg_per_env_certificate_enabled)
   }
   set {
     name  = "perEnvCertName"
@@ -244,7 +435,23 @@ resource "helm_release" "issuer" {
   }
   set {
     name  = "envLabel"
-    value = var.env_label
+    value = local.arg_env_label
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !local.use_broker || local.install_dns01_webhook
+      error_message = "dns01_provider \"powerdns-broker\" makes the platform's own Issuer solve through the DNS-01 webhook shim, but install_dns01_webhook resolved to false. Rendering that Certificate without the shim's APIService/RBAC leaves cert-manager denied at admission and the resulting namespace undeletable — leave install_dns01_webhook unset (it defaults to true here) or set it to true."
+    }
+
+    # Only the platform's own Issuer reads these, and only in broker mode. A
+    # platform that installs the shim purely so tenant Issuers can solve names
+    # no token secret of its own: those are per-env and land beside each
+    # environment, not here.
+    precondition {
+      condition     = !local.use_broker || (local.arg_broker_url != "" && local.arg_dns01_token_secret_name != "")
+      error_message = "dns01_provider \"powerdns-broker\" solves the platform's own Issuer through the broker, so broker_url and dns01_token_secret_name are both required."
+    }
   }
 
   # The CRDs must exist (cert-manager installed) before the issuer/cert apply;

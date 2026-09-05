@@ -1,0 +1,38 @@
+Read CPU quota utilisation, memory against the runtime container's own cgroup
+limit, and disk usage for the workspace mount, straight from the runtime
+container's cgroup v2 accounting and a statfs of the workspace mount.
+
+No metrics-server is required: this works on clusters where `kubectl top`
+reports "Metrics API not available", which is every local (orbstack/k3s-style)
+cluster. Memory is reported against the container's own limit (current usage,
+the peak high-water mark, and a real OOM-kill count from the cgroup, replacing
+a post-mortem guess); CPU utilisation is measured against its quota over a
+sample interval. A named warning fires when memory, memory's peak, or disk
+usage cross a fixed threshold. Every field reports its own unavailability
+(cgroup v1, an unlimited limit, a file that could not be read) rather than
+failing the call, since those are normal on some clusters, not errors.
+
+On a build-capable environment (local-agent, remote-agent), CPU and memory
+are scoped to this container alone: every image build actually runs in the
+erun-dind sidecar, a separate cgroup this reading cannot see, so a busy build
+can show as idle here. The output states this exclusion explicitly on those
+environments; `erun observe` reports the sidecar's own resource limits.
+
+Usage:
+  erun usage [flags]
+
+Examples:
+  erun usage --tenant team --environment dev
+  erun usage --tenant team --environment dev --interval 3 --output json
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for usage
+      --interval float       CPU sample window in seconds, clamped to 0.1-30: usage is read, the window elapses, then it is read again so utilisation is a rate rather than a cumulative counter (default 1)
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

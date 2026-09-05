@@ -1,3 +1,4 @@
+import { builtinRules } from 'eslint/use-at-your-own-risk';
 import jsxA11y from 'eslint-plugin-jsx-a11y';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
@@ -11,10 +12,18 @@ import tseslint from 'typescript-eslint';
 // strictTypeChecked + stylisticTypeChecked. Every rule here is `error`;
 // inline disables and rule downgrades are not allowed (see
 // ~/.claude/projects/<this-repo>/memory/feedback_lint_no_disable.md).
+//
+// approaching-max-lines aliases the builtin max-lines implementation under a
+// second rule id so it can run at 'warn' with its own, lower threshold
+// alongside the 'error'-level max-lines below — the same counting rule ESLint
+// itself uses, just fired earlier, so a change that crosses 450 lines says so
+// in its own lint output instead of the next unrelated PR hitting the 500 cap
+// blind (#1302).
+const approachingMaxLines = builtinRules.get('max-lines');
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'node_modules', 'wailsjs', 'src/components/ui/**', '*.config.{js,mjs,ts}'],
+    ignores: ['dist', 'node_modules', 'wailsjs', '*.config.{js,mjs,ts}'],
   },
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
@@ -36,6 +45,7 @@ export default tseslint.config(
       sourceType: 'module',
     },
     plugins: {
+      'lines-budget': { rules: { 'approaching-max-lines': approachingMaxLines } },
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
       'simple-import-sort': simpleImportSort,
@@ -61,6 +71,16 @@ export default tseslint.config(
           skipComments: true,
         },
       ],
+      // Warning band ahead of the error cap above: fires 50 lines earlier so
+      // a change entering the last stretch says so in its own output.
+      'lines-budget/approaching-max-lines': [
+        'warn',
+        {
+          max: 450,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
@@ -69,6 +89,12 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
+      // A scrollable content region has no ARIA role that jsx-a11y classifies
+      // as interactive, yet WCAG 2.1.1 / axe's scrollable-region-focusable
+      // require it to be in the tab order (there is no native control for
+      // "scrollable div"). role="region" + tabIndex is the accepted pattern;
+      // scope the exception to that one role rather than loosening the rule.
+      'jsx-a11y/no-noninteractive-tabindex': ['error', { roles: ['region'] }],
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'error',
       'react-refresh/only-export-components': ['error', { allowConstantExport: true }],
@@ -84,6 +110,7 @@ export default tseslint.config(
       complexity: 'off',
       'max-lines-per-function': 'off',
       'max-lines': 'off',
+      'lines-budget/approaching-max-lines': 'off',
       // node:test top-level `test(...)` calls are fire-and-forget by design —
       // the runner collects and awaits them — so they are not floating promises.
       '@typescript-eslint/no-floating-promises': 'off',

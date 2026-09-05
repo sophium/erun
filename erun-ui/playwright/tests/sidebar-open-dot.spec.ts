@@ -128,6 +128,46 @@ test.describe('sidebar env open dot', () => {
     // closeEnvironment already asserts the row went quiet and stayed quiet.
     await app.sidebar.closeEnvironment(tenant, environment);
   });
+
+  // A failed deploy describes the environment's own broken runtime, not the
+  // desktop session that watched it fail — closing the tabs that observed the
+  // failure does not fix it. Before this the row went blank on close,
+  // indistinguishable from one nobody had ever opened, discarding the only
+  // signal that something needs attention.
+  test('a failed deploy stays visible after the env is closed', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await app.sidebar.openEnvironment(tenant, environment);
+    // ensureDefaultEnvTabs spawns ERun, then Local, then AI in sequence; waiting
+    // for AI (the last one) means every default-tab spawn this open kicked off
+    // has already resolved. Closing before that settles races a spawn still in
+    // flight, which can remount the dot (as open) right after closeEnvironment
+    // converges on it being gone — the race closeEnvironment's own doc comment
+    // warns a bare re-check would hit.
+    await page.getByRole('tab', { name: 'AI', exact: true }).waitFor({ state: 'visible' });
+    await app.sidebar.closeEnvironment(tenant, environment);
+
+    const row = app.sidebar.envRowButton(tenant, environment).locator('..');
+    const dot = row.getByTestId('env-open-dot');
+    await expect(dot).toHaveCount(0);
+
+    await expect(async () => {
+      await emitEnvStatus(page, tenant, environment, 'failed');
+      await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
+      await expect(dot).toHaveAttribute('data-env-opened', 'false', { timeout: 1_000 });
+      await expect(dot).toHaveAccessibleName(/deploy failed/, { timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+
+    // A passive light, not a control: there is no tab left to close.
+    await expect(dot).not.toHaveAccessibleName(new RegExp(`^Close ${tenant} / ${environment}`));
+
+    // Clear the sticky flag so the singleton backend returns to its
+    // pre-test shape for later specs.
+    await emitEnvStatus(page, tenant, environment, '');
+  });
 });
 
 // Mirrors the env-status event the Go side emits from tryReconnect's refusal paths

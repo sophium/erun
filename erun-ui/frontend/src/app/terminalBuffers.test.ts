@@ -1,9 +1,32 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { bufferCursorVisibility } from './terminalBuffers';
+import { bufferCursorVisibility, trimChunksToBudget } from './terminalBuffers';
 
 const ALT_ENTER = '\x1B[?1049h';
+
+test('trimChunksToBudget keeps everything under the line budget', () => {
+  const chunks = ['a\n', 'b\n', 'c\n'];
+  assert.equal(trimChunksToBudget(chunks, 10, 1_000_000), chunks);
+});
+
+test('trimChunksToBudget keeps only the tail once the line budget is exceeded', () => {
+  const chunks = ['1\n', '2\n', '3\n', '4\n', '5\n'];
+  // Budget of 2 lines: walk from the tail, stop once 2 newlines are counted.
+  const trimmed = trimChunksToBudget(chunks, 2, 1_000_000);
+  assert.deepEqual(trimmed, ['4\n', '5\n']);
+});
+
+test('trimChunksToBudget keeps only the tail once the byte budget is exceeded', () => {
+  const chunks = ['aaaa', 'bbbb', 'cccc'];
+  const trimmed = trimChunksToBudget(chunks, 1_000_000, 5);
+  assert.deepEqual(trimmed, ['bbbb', 'cccc']);
+});
+
+test('trimChunksToBudget returns the original array reference when nothing is trimmed', () => {
+  const chunks = ['x\n'];
+  assert.strictEqual(trimChunksToBudget(chunks, 100, 100), chunks);
+});
 
 test('detects alt-screen enter in a single chunk', () => {
   assert.equal(bufferCursorVisibility([ALT_ENTER]).altScreen, true);

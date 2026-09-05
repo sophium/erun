@@ -3,11 +3,22 @@ version: "2"
 run:
   timeout: 3m
   tests: true
+# The default uniq-by-line:true keys findings by file+line only, ignoring
+# column -- funlen/gocyclo/cyclop all anchor on the same func line, so it
+# silently drops all but one finding on a function that trips more than one
+# of them. Report everything found.
+issues:
+  uniq-by-line: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
 linters:
   exclusions:
     paths:
-      - ^frontend/node_modules/
-      - ^playwright/node_modules/
+      # Third-party Go vendored by npm sits inside this module, so `./...`
+      # analyses it. Match the segment, not an anchored prefix: a finding
+      # replayed from the content-keyed cache renders the path spelling of
+      # the run that cached it, which need not start at this working tree.
+      - (^|/)node_modules/
   enable:
     - errcheck
     - govet

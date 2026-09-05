@@ -4,18 +4,22 @@
 package fixture
 
 import (
+	"archive/tar"
+	"bytes"
 	"fmt"
 	"net"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
 
@@ -51,6 +55,34 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
 			"type: local-agent\n",
+	)
+}
+
+// SeedHostTenantEnv seeds a host env: a worktree with no pod and no cluster at
+// all, so unlike SeedTenantEnv it carries no kubernetescontext,
+// containerregistry, or runtimeversion — none of those apply to a type with no
+// pod to configure.
+func SeedHostTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"type: host\n",
 	)
 }
 
@@ -439,6 +471,24 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
+// SeedRuntimeTenantEnv writes a runtime-type env tree pinned to a version. It is
+// the fixture for the retype lane: a runtime env is remote-worktree like a
+// remote-agent one, so it is the shape that proves a type change lands between
+// two remote-worktree types rather than only out of local-agent.
+func SeedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	SeedRemoteTenantEnv(t, setup, tenant, environment)
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+filepath.Join(setup.Home, "git", tenant)+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"type: runtime\n",
+	)
+}
+
 // SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
 // runtimeversion (and no local/published chart), reproducing the fresh-env
 // decision path that the desktop create regression hit: with no version
@@ -473,6 +523,38 @@ func SeedRuntimeTenantEnvNoVersion(t testing.TB, setup env.Setup, tenant, enviro
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"type: runtime\n",
+	)
+}
+
+// SeedRuntimeTenantEnvNoRepoPath writes a runtime-type env tree with NO
+// repopath at all, reproducing the shape the backend's provisioning deploy,
+// stop, and delete Jobs seed for a control-plane-created tenant with no
+// project (deployexec.bootstrapEnvironmentScript writes exactly this: type
+// and kubernetescontext — never repopath, since nothing on the tenant's side
+// was ever `erun init`ed, and never a runtime version, which nothing on this
+// path reads back). Every other runtime fixture pins a repopath, so this is
+// the single fixture that locks the repo-path-optional resolution for a
+// genuinely projectless env.
+func SeedRuntimeTenantEnvNoRepoPath(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"type: runtime\n"+
+			"kubernetescontext: test-context\n",
 	)
 }
 
@@ -690,9 +772,10 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	}
 	mustWrite(t, filepath.Join(releaseRoot, "VERSION"), "1.4.2\n")
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), "apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n")
-	// base is a version-pinned base: its image carries its own VERSION (9.9.9)
-	// and is not re-pushed at the release version, but its co-located chart must
-	// still publish at the release version so platform deploys resolve it.
+	// base is a version-pinned base: its image carries its own VERSION (9.9.9),
+	// tagged and published at that version rather than the release's, same as
+	// its co-located chart, which publishes at the release version so platform
+	// deploys resolve it.
 	mustWrite(t, filepath.Join(releaseRoot, "k8s", "base", "Chart.yaml"), "apiVersion: v2\nname: base\nversion: 0.1.0\nappVersion: 0.1.0\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), "FROM alpine:3.22\n")
 	mustWrite(t, filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), "FROM alpine:3.22\n")
@@ -714,6 +797,31 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 		t.Fatalf("git commit: %v", err)
 	}
 	return dir
+}
+
+// SeedTerraformModuleImageReference adds a third release image
+// (erun-devops/docker/<imageName>) and a Terraform module under
+// erun-devops/terraform-erun that references it the way
+// terraform-erun-cluster-edge's real dns01_webhook_image references
+// ghcr.io/sophium/erun-dns01-webhook: through an interpolated version, not a
+// literal one. Release scenarios use this to exercise the
+// anonymous-pullability check's module-reference discovery.
+func SeedTerraformModuleImageReference(t testing.TB, dir, imageName string) {
+	t.Helper()
+	dockerDir := filepath.Join(dir, "erun-devops", "docker", imageName)
+	if err := os.MkdirAll(dockerDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dockerDir, err)
+	}
+	mustWrite(t, filepath.Join(dockerDir, "Dockerfile"), "FROM alpine:3.22\n")
+
+	moduleDir := filepath.Join(dir, "erun-devops", "terraform-erun", "modules", "terraform-erun-fixture")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", moduleDir, err)
+	}
+	mustWrite(t, filepath.Join(moduleDir, "main.tf"), `locals {
+  fixture_image = local.arg_fixture_image != "" ? local.arg_fixture_image : "ghcr.io/sophium/`+imageName+`:${local.fixture_chart_app_version}"
+}
+`)
 }
 
 // SeedMarketplaceJSON writes a placeholder .claude-plugin/marketplace.json so
@@ -828,6 +936,96 @@ exit 0
 	return StubEnv(stubsDir, "git")
 }
 
+// WorkspaceSyncSSHStubSpec answers the several different questions one
+// workspace-sync pass asks the same `ssh` — the pod's file listing, its
+// fingerprints, and the archive its fetch step streams.
+type WorkspaceSyncSSHStubSpec struct {
+	// IndexPaths is what `git ls-files -coz` reports: the pod's Git-visible files.
+	IndexPaths []string
+	// StatLines are `stat -c '%s %Y %n'` records (size, mtime, path). They are
+	// what lets a pass skip an unchanged file; with none, everything is fetched.
+	StatLines []string
+	// ArchivePath is a tar file the fetch step receives verbatim, standing in for
+	// the pod's `tar -cf -`. Empty makes the fetch fail.
+	ArchivePath string
+}
+
+// StubWorkspaceSyncSSH writes the argv-branching `ssh` stub a real sync pass
+// needs and returns its env routing. The pass's fingerprint listing pipes the
+// index listing into stat, so the stat branch has to be matched before the index
+// listing it contains.
+func StubWorkspaceSyncSSH(t testing.TB, dir string, spec WorkspaceSyncSSHStubSpec) []string {
+	t.Helper()
+	statBranch := ":"
+	if len(spec.StatLines) > 0 {
+		statBranch = `printf '%s\n' ` + shellSingleQuoteAll(spec.StatLines)
+	}
+	indexBranch := ":"
+	if len(spec.IndexPaths) > 0 {
+		indexBranch = `printf '%s\000' ` + shellSingleQuoteAll(spec.IndexPaths)
+	}
+	archiveBranch := "exit 1"
+	if spec.ArchivePath != "" {
+		archiveBranch = "cat " + shellSingleQuote(filepath.ToSlash(spec.ArchivePath))
+	}
+	// The readiness probe runs a bare `true`. The outputs listing's own script
+	// exits 42 when its `cd` fails (erun-common's remoteOutputsDirAbsentExitCode)
+	// -- the sentinel that tells "the outputs dir does not exist yet" apart from
+	// every other listing failure, so "nothing there yet" must answer with that
+	// exact code rather than the bare non-zero exit a real connection failure
+	// would also produce.
+	StubBinaryWithScript(t, dir, "ssh", `case "$*" in
+  *' true') : ;;
+  *'stat -c'*) `+statBranch+` ;;
+  *'git ls-files -coz'*) `+indexBranch+` ;;
+  *'git ls-files -dz'*) : ;;
+  *'git ls-files -sz'*) : ;;
+  *'find . -type f'*) exit 42 ;;
+  *'tar --null'*) `+archiveBranch+` ;;
+  *) exit 1 ;;
+esac
+exit 0
+`)
+	return StubEnv(dir, "ssh")
+}
+
+// TarEntry is one regular file in an archive written by WriteTarArchive.
+type TarEntry struct {
+	Path string
+	Body []byte
+}
+
+// WriteTarArchive writes the archive a stubbed pod streams back. Entries carry
+// an explicit mtime so a scenario can assert what the mirror did with the file
+// it received rather than with whatever the host clock stamped.
+func WriteTarArchive(t testing.TB, path string, entries []TarEntry, modTime time.Time) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir for archive %s: %v", path, err)
+	}
+	var buffer bytes.Buffer
+	writer := tar.NewWriter(&buffer)
+	for _, entry := range entries {
+		header := &tar.Header{
+			Name:     entry.Path,
+			Mode:     0o644,
+			Size:     int64(len(entry.Body)),
+			ModTime:  modTime,
+			Typeflag: tar.TypeReg,
+		}
+		if err := writer.WriteHeader(header); err != nil {
+			t.Fatalf("write archive header %s: %v", entry.Path, err)
+		}
+		if _, err := writer.Write(entry.Body); err != nil {
+			t.Fatalf("write archive body %s: %v", entry.Path, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close archive %s: %v", path, err)
+	}
+	mustWrite(t, path, buffer.String())
+}
+
 // RunGit runs git in dir so scenarios can set up branches, tags, or remotes
 // after SeedReleaseRepo.
 func RunGit(t testing.TB, dir string, args ...string) {
@@ -898,6 +1096,19 @@ func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
 	mustWrite(t, filepath.Join(dir, "config.yaml"), body)
 }
 
+// SeedGitignoredProjectConfig commits a ".erun/" gitignore rule (the exact
+// shape seen in the wild: a blanket directory ignore that also excludes the
+// per-project config it holds) and then writes .erun/config.yaml, so the
+// config resolves from disk but git never tracks it. Requires a git repo
+// already initialized at setup.Cwd (fixture.SeedGitRepo).
+func SeedGitignoredProjectConfig(t testing.TB, setup env.Setup, body string) {
+	t.Helper()
+	mustWrite(t, filepath.Join(setup.Cwd, ".gitignore"), ".erun/\n")
+	RunGit(t, setup.Cwd, "add", ".gitignore")
+	RunGit(t, setup.Cwd, "commit", "-q", "-m", "ignore .erun")
+	SeedProjectK8sConfig(t, setup, body)
+}
+
 // SeedTerraformEnvRoot materializes a platform's per-env Terraform root so erun
 // terraform resolves a folder to run in, mirroring the layout the
 // erun-blueprint-platform skill scaffolds. The per-env common.tf is a real
@@ -941,6 +1152,43 @@ func SeedProjectPathsConfig(t testing.TB, setup env.Setup, docker, dockerContext
 	} {
 		if strings.TrimSpace(kv.value) != "" {
 			b.WriteString("    " + kv.key + ": " + kv.value + "\n")
+		}
+	}
+	SeedProjectK8sConfig(t, setup, b.String())
+}
+
+// ComponentPathsConfig is one .erun/config.yaml components:<Name> entry —
+// the per-component twin of the fields SeedProjectPathsConfig writes under
+// the project-global paths: block. Empty fields are omitted.
+type ComponentPathsConfig struct {
+	Name          string
+	Docker        string
+	DockerContext string
+	K8s           string
+	Terraform     string
+	Version       string
+}
+
+// SeedProjectComponentsConfig writes the project .erun/config.yaml components:
+// map so build/deploy resolve a per-component docker/k8s/version root for a
+// monorepo of independent deployables that do not share one paths: root.
+// Entries are written in the given order for deterministic golden output.
+func SeedProjectComponentsConfig(t testing.TB, setup env.Setup, entries ...ComponentPathsConfig) {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("components:\n")
+	for _, entry := range entries {
+		b.WriteString("    " + entry.Name + ":\n")
+		for _, kv := range []struct{ key, value string }{
+			{"docker", entry.Docker},
+			{"dockercontext", entry.DockerContext},
+			{"k8s", entry.K8s},
+			{"terraform", entry.Terraform},
+			{"version", entry.Version},
+		} {
+			if strings.TrimSpace(kv.value) != "" {
+				b.WriteString("        " + kv.key + ": " + kv.value + "\n")
+			}
 		}
 	}
 	SeedProjectK8sConfig(t, setup, b.String())
@@ -1162,6 +1410,16 @@ func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
+// shellSingleQuoteAll renders values as space-separated printf operands, so one
+// format string repeats over them.
+func shellSingleQuoteAll(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, shellSingleQuote(value))
+	}
+	return strings.Join(quoted, " ")
+}
+
 // StubBinaryWithScript writes a stub binary whose POSIX-shell body is the
 // caller-supplied script. Use this when a stub must branch on argv (e.g.,
 // the AWS CLI returning JSON for sts get-caller-identity but exit 0 for
@@ -1177,6 +1435,84 @@ func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
 		body += "\n"
 	}
 	return writeStub(t, dir, name, body)
+}
+
+// StubKubectlGetJSON writes a kubectl stub that dispatches on the resource
+// named right after "get" (e.g. "pods", "certificates.cert-manager.io",
+// "secret my-secret") to return canned JSON, for a command like `observe`
+// that issues several distinct `kubectl get <resource> -o json` calls in one
+// run. Matching on "get <resource>" as a substring of the full argv (rather
+// than parsing --context/--namespace positionally) keeps this reusable across
+// scenarios with different context/namespace flags. A call whose resource
+// isn't in responses exits 1 naming the unstubbed argv, so a scenario that
+// forgets to stub a call fails loudly instead of asserting on empty data.
+func StubKubectlGetJSON(t testing.TB, dir string, responses map[string]string) string {
+	t.Helper()
+	keys := make([]string, 0, len(responses))
+	for key := range responses {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var body strings.Builder
+	body.WriteString("args=\"$*\"\n")
+	body.WriteString("case \"$args\" in\n")
+	for _, key := range keys {
+		body.WriteString("  *" + shellSingleQuote("get "+key) + "*)\n")
+		body.WriteString("    cat <<'ERUN_STUB_KUBECTL_JSON'\n")
+		body.WriteString(strings.TrimRight(responses[key], "\n"))
+		body.WriteString("\nERUN_STUB_KUBECTL_JSON\n")
+		body.WriteString("    ;;\n")
+	}
+	body.WriteString("  *) echo \"unstubbed kubectl call: $args\" >&2; exit 1 ;;\n")
+	body.WriteString("esac\n")
+	return StubBinaryWithScript(t, dir, "kubectl", body.String())
+}
+
+// StubHelmObserve writes a helm stub that dispatches on the subcommand
+// (status or list) to return statusStdout or listStdout, for observe's two
+// distinct real read-only helm calls in one run: `helm status -o json`, which
+// carries no chart metadata at all, and `helm list -o json`, which is where
+// observe actually reads chart/appVersion (see fetchObservedHelmRelease). A
+// call to any other subcommand exits 1 naming the unstubbed argv.
+func StubHelmObserve(t testing.TB, dir, statusStdout, listStdout string) string {
+	t.Helper()
+	body := "case \"$1\" in\n" +
+		"  status)\n" +
+		"    cat <<'ERUN_STUB_HELM_STATUS'\n" +
+		strings.TrimRight(statusStdout, "\n") + "\n" +
+		"ERUN_STUB_HELM_STATUS\n" +
+		"    ;;\n" +
+		"  list)\n" +
+		"    cat <<'ERUN_STUB_HELM_LIST'\n" +
+		strings.TrimRight(listStdout, "\n") + "\n" +
+		"ERUN_STUB_HELM_LIST\n" +
+		"    ;;\n" +
+		"  *) echo \"unstubbed helm call: $*\" >&2; exit 1 ;;\n" +
+		"esac\n"
+	return StubBinaryWithScript(t, dir, "helm", body)
+}
+
+// StubBinaryMergingIntoRemoteOnce writes a stub for name that, on its first
+// invocation only, commits and pushes one commit from repoDir onto origin's
+// branch, then exits 0 like a plain stub. It stands in for a pull request
+// merging while a long-running command is working, so a scenario can place the
+// move at a chosen point in the command's own execution rather than before it
+// starts. git is reached through the ERUN_GIT_BIN seam the scenario already
+// routes: the scrubbed PATH holds no git for a stub to find.
+func StubBinaryMergingIntoRemoteOnce(t testing.TB, dir, name, repoDir, branch, message string) string {
+	t.Helper()
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	marker := shellSingleQuote(filepath.ToSlash(filepath.Join(dir, name+"-merged-once")))
+	repo := shellSingleQuote(filepath.ToSlash(repoDir))
+	script := "if [ ! -f " + marker + " ]; then\n" +
+		"  : > " + marker + "\n" +
+		"  \"$ERUN_GIT_BIN\" -C " + repo + " commit -q --allow-empty -m " + shellSingleQuote(message) + " || exit 1\n" +
+		"  \"$ERUN_GIT_BIN\" -C " + repo + " push -q origin " + shellSingleQuote(branch) + " || exit 1\n" +
+		"fi\n" +
+		"exit 0"
+	return StubBinaryWithScript(t, dir, name, script)
 }
 
 // StubBinaryFailFirstThenSucceed writes a stub that fails on its first
@@ -1218,6 +1554,51 @@ func StubKubectlRuntimeRunState(t testing.TB, dir string, desired, ready int) st
 	return StubBinaryWithScript(t, dir, "kubectl", script)
 }
 
+// KubectlWorktreeClaimStubSpec shapes the answer a kubectl stub gives to the
+// deploy's worktree-volume check (`get pvc <release>-worktree -o name`).
+type KubectlWorktreeClaimStubSpec struct {
+	// ClaimName is the PVC the check reads.
+	ClaimName string
+	// Stderr and ExitCode answer that read. A NotFound stderr with exit 1 is an
+	// environment whose worktree still lives on the home volume; any other
+	// non-zero answer is a cluster the check cannot read at all, which deploy
+	// must treat as "unknown" rather than "settled".
+	Stderr   string
+	ExitCode int
+}
+
+// StubKubectlWorktreeClaim writes a kubectl stub that answers the worktree-claim
+// read as the spec says and exits 0 silently for everything else, so the rest of
+// a real-run rollout still completes. It branches on argv, which is why it lives
+// here rather than inline in a scenario.
+func StubKubectlWorktreeClaim(t testing.TB, dir string, spec KubectlWorktreeClaimStubSpec) []string {
+	t.Helper()
+	script := "case \"$*\" in\n" +
+		"  *" + shellGlobEscape("get pvc "+spec.ClaimName+" -o name") + "*)\n"
+	if spec.Stderr != "" {
+		script += "    printf '%s\\n' " + shellSingleQuote(spec.Stderr) + " >&2\n"
+	}
+	script += "    exit " + strconv.Itoa(spec.ExitCode) + " ;;\n" +
+		"esac\n" +
+		"exit 0"
+	StubBinaryWithScript(t, dir, "kubectl", script)
+	return StubEnv(dir, "kubectl")
+}
+
+// shellGlobEscape neutralizes the glob metacharacters a case pattern would
+// otherwise interpret, so a literal fragment matches as itself.
+func shellGlobEscape(literal string) string {
+	var escaped strings.Builder
+	for _, r := range literal {
+		switch r {
+		case '*', '?', '[', ']', '\\', ' ':
+			escaped.WriteRune('\\')
+		}
+		escaped.WriteRune(r)
+	}
+	return escaped.String()
+}
+
 // StubKubectlScalingRuntime writes a kubectl stub that remembers the replica
 // count `kubectl scale` last set and answers every later run-state read with
 // it. It is what lets one scenario run a whole stop → reconnect → open sequence
@@ -1246,6 +1627,46 @@ func StubKubectlScalingRuntime(t testing.TB, dir, release string, desired int) s
 		"esac\n" +
 		"exit 0"
 	return StubBinaryWithScript(t, dir, "kubectl", script)
+}
+
+// CodesignStubSpec configures the codesign stub. Host-side ad-hoc signing asks
+// codesign two different questions — "is this already signed?" (`codesign -d`)
+// and "sign it" (`codesign -s - -f`) — so the stub has to branch on argv, which
+// is why it lives here rather than inline in a scenario.
+type CodesignStubSpec struct {
+	// AlreadySigned makes the display probe report an existing signature, which
+	// is the branch where production must leave the artifact alone.
+	AlreadySigned bool
+	// SignExitCode and SignStderr shape the signing call's answer; a non-zero
+	// exit is the diagnosable failure that must not lose the artifact.
+	SignExitCode int
+	SignStderr   string
+}
+
+// StubCodesign writes the codesign stub and returns the path to a log file that
+// records one line per invocation ("<argv>"). The log is the only way a scenario
+// can prove a call did *not* happen — that an already-signed artifact was never
+// re-signed — because absence leaves no trace in the command's own output.
+func StubCodesign(t testing.TB, dir string, spec CodesignStubSpec) string {
+	t.Helper()
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	logPath := filepath.Join(dir, "codesign-calls.log")
+	quotedLog := shellSingleQuote(filepath.ToSlash(logPath))
+	displayExit := 1
+	if spec.AlreadySigned {
+		displayExit = 0
+	}
+	script := "printf '%s\\n' \"$*\" >> " + quotedLog + "\n" +
+		"case \"$1\" in\n" +
+		"  -d) printf '%s\\n' 'erun stub codesign display' >&2; exit " + strconv.Itoa(displayExit) + " ;;\n" +
+		"esac\n"
+	if spec.SignStderr != "" {
+		script += "printf '%s\\n' " + shellSingleQuote(spec.SignStderr) + " >&2\n"
+	}
+	script += "exit " + strconv.Itoa(spec.SignExitCode)
+	StubBinaryWithScript(t, dir, "codesign", script)
+	return logPath
 }
 
 // StubEnv returns the env-var pairs that route the named binary lookups to
@@ -1337,6 +1758,112 @@ func PortSimBinary(t testing.TB) string {
 	return portSimPath
 }
 
+// StartStalePortHolder starts a listener that binds a local port and never
+// answers anything through it — the forward whose target pod was replaced. It
+// returns the holder's real PID so a scenario can present it to erun's
+// adopt-or-replace probes and then assert that erun actually stopped it; a
+// fabricated PID must never be used for that, because production kills what the
+// probe names.
+func StartStalePortHolder(t testing.TB, port int) int {
+	t.Helper()
+	return startPortHolder(t, port, "--silent")
+}
+
+// StartServingPortHolder starts a listener that answers what erun's
+// reachability probe asks — the working forward a scenario wants erun to adopt
+// rather than replace. Adoption now depends on the tunnel carrying traffic, so
+// a scenario that only claims a holder through lsof would be deciding on
+// whatever else happens to hold that port on the host.
+func StartServingPortHolder(t testing.TB, port int) int {
+	t.Helper()
+	return startPortHolder(t, port)
+}
+
+func startPortHolder(t testing.TB, port int, extra ...string) int {
+	t.Helper()
+	cmd := osexec.Command(PortSimBinary(t), append([]string{"--port", strconv.Itoa(port)}, extra...)...)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start port holder on %d: %v", port, err)
+	}
+	pid := cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return pid
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("port holder never bound 127.0.0.1:%d", port)
+	return 0
+}
+
+// StalePortHolderStopped reports whether erun stopped the holder, waiting for
+// the port to come free rather than for a fixed delay.
+func StalePortHolderStopped(port int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 100*time.Millisecond)
+		if err != nil {
+			return true
+		}
+		_ = conn.Close()
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+// StartUnboundPortForwardProcess starts a live process that never binds any
+// port — the shape of a `kubectl port-forward` that is still retrying
+// against a pod that never answers, so its state-file PID is alive with
+// nothing to show for it. It exists to test the reap of a recorded forward
+// that never got as far as binding, as opposed to StartStalePortHolder's
+// bound-but-dead shape.
+func StartUnboundPortForwardProcess(t testing.TB) int {
+	t.Helper()
+	cmd := osexec.Command(PortSimBinary(t), "--no-listen")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start unbound port-forward process: %v", err)
+	}
+	pid := cmd.Process.Pid
+	// A killed process stays a zombie — still "alive" to signal(0) — until
+	// something calls Wait on it. Reaping it here, the moment it exits,
+	// rather than only in t.Cleanup (which does not run until the whole test
+	// body has returned) is what lets ProcessStopped's liveness probe below
+	// observe production's kill promptly instead of only at test teardown.
+	reaped := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(reaped)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-reaped
+	})
+	return pid
+}
+
+// ProcessStopped reports whether erun killed the process at pid, waiting for
+// the OS to actually reap it rather than for a fixed delay. Unlike a bound
+// port's holder, a never-bound forward leaves no listener to dial, so
+// liveness here goes through the real process table (see
+// eruncommon.DesktopProcessAlive) instead of a network probe.
+func ProcessStopped(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !eruncommon.DesktopProcessAlive(pid) {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
 // KubectlDeployedStubSpec describes the deployment shape the stubbed kubectl get
 // deployment -o json should report so production's deployment-match check
 // returns true and the open flow proceeds past the redeploy gate.
@@ -1384,6 +1911,14 @@ type KubectlDeployedStubSpec struct {
 	// the forwards the open flow starts after its own deploy. Real-run
 	// open scenarios use it to drive the deploy-then-forward path.
 	DeploymentNotFound bool
+	// FailingArgvSubstring, when non-empty, fails loudly (exit 1, a
+	// distinctive stderr message naming the substring) for any kubectl
+	// invocation whose argv contains it, before falling through to the rest
+	// of this stub's arms. A library-execution-mode real-run scenario uses
+	// this to prove a specific kubectl call was never reached as a
+	// subprocess fallback -- e.g. "get deployment team-api -o name" for the
+	// kubectl-deployment-get switch.
+	FailingArgvSubstring string
 }
 
 // StubKubectlDeployed writes a kubectl stub that reports the named deployment as
@@ -1512,6 +2047,11 @@ func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDepl
 	// Forward-slash every path embedded into the sh stub body so Git Bash /
 	// Cygwin sh on Windows reads them as paths, not escape sequences (ToSlash is
 	// a no-op on Unix). See the rationale in StubKubectlDeployed.
+	if spec.FailingArgvSubstring != "" {
+		arms.WriteString(`  *"` + spec.FailingArgvSubstring + `"*)` + "\n")
+		arms.WriteString(`    printf '%s\n' "fell through to the kubectl subprocess for the ` + spec.FailingArgvSubstring + ` check" >&2` + "\n")
+		arms.WriteString(`    exit 1 ;;` + "\n")
+	}
 	if len(spec.ExecExitCodes) > 0 {
 		counterFile := filepath.ToSlash(filepath.Join(stubsDir, "exec-calls"))
 		arms.WriteString(`  *" exec -it "*)` + "\n")

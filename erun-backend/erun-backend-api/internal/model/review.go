@@ -18,9 +18,12 @@ const (
 )
 
 type Review struct {
-	bun.BaseModel     `bun:"table:reviews,alias:r"`
-	ReviewID          string       `json:"reviewId" bun:"review_id,pk,scanonly"`
-	TenantID          string       `json:"tenantId" bun:"tenant_id,scanonly"`
+	bun.BaseModel `bun:"table:reviews,alias:r"`
+	ReviewID      string `json:"reviewId" bun:"review_id,pk,scanonly"`
+	TenantID      string `json:"tenantId" bun:"tenant_id,scanonly"`
+	// AuthorUserID defaults to the authenticated caller in the database
+	// (erun_current_user_id()); a client-supplied value is never persisted.
+	AuthorUserID      string       `json:"authorUserId" bun:"author_user_id,scanonly"`
 	Name              string       `json:"name" bun:"name"`
 	TargetBranch      string       `json:"targetBranch" bun:"target_branch"`
 	SourceBranch      string       `json:"sourceBranch" bun:"source_branch"`

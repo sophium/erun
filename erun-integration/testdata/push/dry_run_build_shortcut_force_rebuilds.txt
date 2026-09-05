@@ -2,8 +2,9 @@ audit: erun push --build --dry-run --force
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker push ghcr.io/sophium/cwd:<VERSION>
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker push ghcr.io/sophium/cwd:<VERSION>
-cd <TMP> && docker push ghcr.io/sophium/cwd:<VERSION>
-cd <TMP> && docker manifest create --amend ghcr.io/sophium/cwd:<VERSION> ghcr.io/sophium/cwd:<VERSION> ghcr.io/sophium/cwd:<VERSION>
+cd <TMP> && docker manifest rm ghcr.io/sophium/cwd:<VERSION>
+cd <TMP> && docker manifest create ghcr.io/sophium/cwd:<VERSION> ghcr.io/sophium/cwd:<VERSION> ghcr.io/sophium/cwd:<VERSION>
 cd <TMP> && docker manifest push ghcr.io/sophium/cwd:<VERSION>

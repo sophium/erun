@@ -108,7 +108,7 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 func TestEndAISessionsEndsBothPodSessions(t *testing.T) {
 	app, captureFile := newEndAISessionsTestApp(t, "")
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
-	if _, err := app.StartAISession(selection, 0, 80, 24); err != nil {
+	if _, err := app.StartAISession(selection, 0, 80, 24, false); err != nil {
 		t.Fatalf("StartAISession: %v", err)
 	}
 	ended, err := app.EndAISessions(selection)
@@ -134,7 +134,7 @@ func TestEndAISessionsEndsBothPodSessions(t *testing.T) {
 func TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached(t *testing.T) {
 	app, _ := newEndAISessionsTestApp(t, "")
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
-	ai, err := app.StartAISession(selection, 0, 80, 24)
+	ai, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached(t *testing.T) {
 	if _, err := app.EndAISessions(selection); err != nil {
 		t.Fatalf("EndAISessions: %v", err)
 	}
-	aiAgain, err := app.StartAISession(selection, 0, 80, 24)
+	aiAgain, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession after end: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached(t *testing.T) {
 func TestEndAISessionsSkipsVerbatimAITool(t *testing.T) {
 	app, _ := newEndAISessionsTestApp(t, "codex")
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
-	ai, err := app.StartAISession(selection, 0, 80, 24)
+	ai, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestEndAISessionsSkipsVerbatimAITool(t *testing.T) {
 	if ended {
 		t.Fatalf("a verbatim AI tool must not be ended by a claude-flag change")
 	}
-	aiAgain, err := app.StartAISession(selection, 0, 80, 24)
+	aiAgain, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession after no-op end: %v", err)
 	}

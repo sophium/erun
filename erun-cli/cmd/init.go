@@ -21,7 +21,9 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	setDefaultTenant := false
 	confirmEnvironment := false
 	clusterRegistry := false
+	erunRegistry := false
 	var envType string
+	var components []string
 
 	cmd := &cobra.Command{
 		Use:          "init [TENANT] [ENVIRONMENT]",
@@ -29,7 +31,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, clusterRegistry, envType)
+			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, clusterRegistry, erunRegistry, envType, components)
 			if err != nil {
 				return err
 			}
@@ -40,17 +42,22 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.Tenant, "tenant", "", "Tenant name to initialize")
 	cmd.Flags().StringVar(&params.ProjectRoot, "project-root", "", "Project root to bind to the tenant")
 	cmd.Flags().StringVar(&params.Environment, "environment", "", "Environment name")
-	cmd.Flags().StringVar(&params.RuntimeVersion, "version", "", "Runtime image version to initialize and deploy")
+	cmd.Flags().StringVar(&params.RuntimeVersion, "version", "", "Runtime image version to record; omitted, a new env takes this erun's version and an existing env keeps the one it runs. A brand-new remote-worktree env (--type remote-agent or runtime) deploys at this version immediately; on an existing env this only re-pins the version in config — run a separate erun deploy to actually roll it out")
 	cmd.Flags().StringVar(&params.RuntimeImage, "runtime-image", "", "Runtime image repository to initialize and deploy")
+	cmd.Flags().StringVar(&params.RuntimeRegistry, "runtime-registry", "", "Registry the environment resolves erun's own artifacts from — the runtime chart and the platform images the pod pulls (e.g. ghcr.io/sophium). Set it when the environment's deploy registry holds only this project's images, so erun's chart is not there to pull; persisted as the env's runtimeregistry")
+	cmd.Flags().StringSliceVar(&params.ImagePullSecrets, "image-pull-secret", nil, "Kubernetes dockerconfigjson secret the runtime pod pulls its image with; repeat or comma-separate for several. Required when the runtime image is in a private registry")
 	cmd.Flags().StringVar(&params.RuntimePod.CPU, "runtime-cpu", "", "Runtime pod CPU limit")
 	cmd.Flags().StringVar(&params.RuntimePod.Memory, "runtime-memory", "", "Runtime pod memory limit")
+	cmd.Flags().StringVar(&params.RuntimeDindPod.CPU, "dind-cpu", "", "erun-dind sidecar CPU limit — the container that actually runs erun build/erun release")
+	cmd.Flags().StringVar(&params.RuntimeDindPod.Memory, "dind-memory", "", "erun-dind sidecar memory limit; raise this when a multi-arch erun release/erun build --release OOMs inside the sidecar")
 	cmd.Flags().StringVar(&params.KubernetesContext, "kubernetes-context", "", "Kubernetes context to associate with the environment")
 	cmd.Flags().StringVar(&params.ContainerRegistry, "container-registry", "", "Container registry to associate with the environment")
 	cmd.Flags().BoolVar(&clusterRegistry, "cluster-registry", false, "Use the in-cluster erun-registry (addresses resolved from the env's kube-context) instead of --container-registry; mutually exclusive with it")
+	cmd.Flags().BoolVar(&erunRegistry, "erun-registry", false, "Use erun's hosted container registry (registry.erunpaas.com/<tenant>), authenticated by this tenant's own API token, instead of --container-registry; mutually exclusive with it and with --cluster-registry")
 	cmd.Flags().StringVar(&params.CodeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use for remote repository access")
 	cmd.Flags().BoolVar(&params.Bootstrap, "bootstrap", false, "Deprecated: ignored; remote runtimes deploy the published erun-devops chart")
 	_ = cmd.Flags().MarkDeprecated("bootstrap", "remote runtimes deploy the published erun-devops chart; the flag is ignored")
-	cmd.Flags().StringVar(&envType, "type", "", "Environment type: local-agent, remote-agent, or runtime (takes precedence over --remote)")
+	cmd.Flags().StringVar(&envType, "type", "", "Environment type: local-agent, remote-agent, runtime, or host (takes precedence over --remote). host names a directory on this machine with no pod and no cluster at all — for desktop-app builds and tasks needing host-wide credentials. On an existing env this changes the type; omit it and the env keeps the type it has")
 	cmd.Flags().BoolVar(&params.Remote, "remote", false, "Deprecated alias for --type=remote-agent")
 	cmd.Flags().BoolVar(&params.NoGit, "no-git", false, "Skip remote Git checkout setup when used with --remote or --type=remote-agent")
 	cmd.Flags().BoolVar(&setDefaultTenant, "set-default-tenant", false, "Set the initialized tenant as the default tenant")
@@ -59,14 +66,18 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().BoolVar(&params.DisableBuildScript, "disable-build-script", false, "Ignore any project build.sh for this env; erun build resolves docker/release contexts directly")
 	cmd.Flags().BoolVar(&params.PlatformAccount, "platform-account", false, "Make this env a cluster platform account: deploy binds its runtime ServiceAccount to cluster-admin so in-pod platform terraform (cluster edge) and component installs can manage cluster-scoped resources")
 	cmd.Flags().StringVar(&params.MCPAuthPublicKeyPath, "mcp-auth-public-key", "", "Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key; empty leaves the edge loopback-only. Folds MCP auth into init's single runtime deploy.")
+	cmd.Flags().StringSliceVar(&components, "components", nil, "Save this as the env's default deploy component selection — what a later erun deploy rolls out with no --components flag of its own. Pass an empty string to clear a saved selection and return the env to its repo k8s.deployments plan")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry bool, envType string) (common.BootstrapInitParams, error) {
+func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment, clusterRegistry, erunRegistry bool, envType string, components []string) (common.BootstrapInitParams, error) {
 	runParams := params
 	applyPositionalInitArgs(&runParams, args)
 	if err := applyClusterRegistryFlag(&runParams, clusterRegistry); err != nil {
+		return common.BootstrapInitParams{}, err
+	}
+	if err := applyErunRegistryFlag(&runParams, erunRegistry, clusterRegistry); err != nil {
 		return common.BootstrapInitParams{}, err
 	}
 	if err := applyInitTypeFlag(cmd, &runParams, envType); err != nil {
@@ -80,6 +91,9 @@ func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapIni
 	}
 	if cmd.Flags().Changed("confirm-environment") {
 		runParams.ConfirmEnvironment = &confirmEnvironment
+	}
+	if cmd.Flags().Changed("components") {
+		runParams.Components = &components
 	}
 	return runParams, nil
 }
@@ -106,6 +120,20 @@ func applyClusterRegistryFlag(runParams *common.BootstrapInitParams, clusterRegi
 	return nil
 }
 
+func applyErunRegistryFlag(runParams *common.BootstrapInitParams, erunRegistry, clusterRegistry bool) error {
+	if !erunRegistry {
+		return nil
+	}
+	if clusterRegistry {
+		return fmt.Errorf("--erun-registry conflicts with --cluster-registry; pick one")
+	}
+	if strings.TrimSpace(runParams.ContainerRegistry) != "" {
+		return fmt.Errorf("--erun-registry conflicts with --container-registry; pick one")
+	}
+	runParams.ErunRegistry = true
+	return nil
+}
+
 func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams, envType string) error {
 	envType = strings.TrimSpace(envType)
 	if envType == "" {
@@ -113,11 +141,15 @@ func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams
 	}
 	parsed := common.EnvironmentType(envType)
 	if !parsed.IsValid() {
-		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, or runtime", envType)
+		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, runtime, or host", envType)
 	}
+	// The deprecated --remote bool models "not local-agent" for exactly the
+	// two legacy types it predates; deriving it from RemoteWorktree (rather
+	// than repeating "!= local-agent" here) keeps host correctly reporting
+	// false instead of inheriting the old exclusion's wrong answer for it.
+	expectedRemote := (common.BootstrapInitParams{Type: parsed}).RemoteWorktree()
 	remoteFlag := cmd.Flags().Lookup("remote")
 	remoteChanged := remoteFlag != nil && remoteFlag.Changed
-	expectedRemote := parsed != common.EnvironmentTypeLocalAgent
 	if remoteChanged && runParams.Remote != expectedRemote {
 		return fmt.Errorf("--type=%s conflicts with --remote=%t", envType, runParams.Remote)
 	}

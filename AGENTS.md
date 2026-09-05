@@ -23,8 +23,9 @@ Each module owns its own `AGENTS.md` with the details for working in it; read th
 - `erun-mcp` — MCP server module (the `emcp` executable). See `erun-mcp/AGENTS.md`.
 - `erun-backend` — backend service area containing the API and database migration modules. See `erun-backend/AGENTS.md` (plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md`).
 - `erun-devops` — runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows. See `erun-devops/AGENTS.md`.
+- `erun-kit` — shared, transport-agnostic frontend foundation (design tokens, shadcn primitives, generic widgets, and eventually shared models/slices) consumed by both `erun-ui/frontend` and `erun-console` via Yarn workspaces; the frontend-side analogue of `erun-common`. See `erun-kit/AGENTS.md`.
 - `erun-ui` — desktop app built with Wails (Go backend + TypeScript/Yarn frontend). See `erun-ui/AGENTS.md` (plus `erun-ui/playwright/AGENTS.md`).
-- `erun-console` — hosted web console SPA (Vite + React + TypeScript/Yarn); separate from the desktop `erun-ui`, talks to `erun-backend-api` directly over HTTP. See `erun-console/AGENTS.md`.
+- `erun-console` — hosted web console SPA (Vite + React + TypeScript/Yarn); separate from the desktop `erun-ui`, talks to `erun-backend-api` directly over HTTP. See `erun-console/AGENTS.md` (plus `erun-console/playwright/AGENTS.md` for the real-Zitadel OIDC sign-in e2e).
 - `erun-docs` — public product documentation site (Docusaurus 3.x), published to Cloudflare Pages via a k8s Job under `erun-devops/k8s/erun-docs/`. See `erun-docs/AGENTS.md`.
 - `erun-integration` — cross-module integration test harness; runs the compiled `erun` binary with `--dry-run` against per-command goldens and gates merged coverage. See `erun-integration/AGENTS.md`.
 - `erun-skills` — canonical source for Claude Code / Codex SKILL.md files and the Claude Code plugin manifest; consumed by both the runtime image (in-pod install) and the marketplace at the repo root (laptop install). See `erun-skills/AGENTS.md`.
@@ -38,12 +39,13 @@ Each module owns its own `AGENTS.md` with the details for working in it; read th
 - Implement the change and run the relevant validation before publishing.
 - Push the branch and open a pull request back into `main`.
 - After a pull request is accepted, switch the local checkout back to the branch the PR targeted, usually `main`.
+- **Once a branch's PR has merged, that branch is dead — never push to it again.** The merge queue lands the PR as a squash commit under a new SHA, so a later push to the old branch updates a ref nothing reads: git and `gh` both report success, and the commit never reaches `main` (erun#2007). If trailing work turns up after merge — even minutes later — start a fresh branch from the updated `main` instead of resuming the old one. Before pushing to a branch you did not just create in this session, confirm its PR/review is still open.
 - When the PR is intended to close the issue, include `Closes #<issue-number>` in the PR body.
 - A pushed branch or an open PR does not close the issue by itself. The issue closes after the PR is merged or if it is closed manually.
 - If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
 - If the user asks to `close`, always treat that as the repository publish flow in this repo: push the branch, open the PR, merge it with squash unless they asked otherwise, close the PR via merge, and close the linked issue.
 - Do not interpret `close` as a request to end or archive the conversation in this repository.
-- Publishing needs an authenticated `gh`. If `gh auth status` reports no host, do not stop and hand the publish flow back to the user. Drive the GitHub OAuth device flow yourself: `POST https://github.com/login/device/code` with the GitHub CLI client id `178c6fc778ccc68e1d6a` and scope `repo read:org gist workflow`, surface the returned `user_code` together with `https://github.com/login/device`, then poll `POST https://github.com/login/oauth/access_token` (grant `urn:ietf:params:oauth:grant-type:device_code`) until it returns an `access_token`. Store it with `gh auth login --with-token`, then continue the publish flow without further user input.
+- Publishing needs an authenticated `gh`. If `gh auth status` reports no host, do not stop and hand the publish flow back to the user. Drive the GitHub OAuth device flow yourself: `POST https://github.com/login/device/code` with the GitHub CLI client id `178c6fc778ccc68e1d6a` and scope `repo read:org gist workflow write:packages` (`write:packages` is what publishing to ghcr needs — a token minted without it can clone, branch and PR, then fail at the release push), surface the returned `user_code` together with `https://github.com/login/device`, then poll `POST https://github.com/login/oauth/access_token` (grant `urn:ietf:params:oauth:grant-type:device_code`) until it returns an `access_token`. Store it with `gh auth login --with-token`, then continue the publish flow without further user input.
 - The device-code entry in the user's browser is the only auth step that requires the user, and it requires only that — not a pasted token, and not an interactive `gh auth login` in a TTY. `gh auth login` (including `--web`) hangs in this harness because it has no controlling terminal; the curl-driven device flow does not, so prefer it.
 - Never fabricate a token, scrape application secrets for one, or report the publish flow as blocked on authentication before attempting the device flow.
 - Stay within the current PR for the whole body of related work. When additional bugs, gaps, or improvements surface while working on a branch, add them to the same PR rather than filing a separate issue or opening a new branch. Do not propose splitting work into multiple PRs, and do not ask whether to split — assume the answer is "no" unless the user explicitly says otherwise. Update the PR title and body to reflect the broader scope when the diff grows.
@@ -83,6 +85,7 @@ Internal ownership and per-module conventions live in each module's `AGENTS.md`.
 - Keep work centered on the current user goal. Avoid opportunistic cleanup, broad redesign, or unrelated polish unless it directly reduces risk for the requested change.
 - When a problem crosses module boundaries, solve it at the lowest shared layer that owns the behavior, then keep transport-specific code focused on adaptation and presentation.
 - Make high-impact behavior explicit before executing it. Favor plans, previews, confirmations, and reversible steps when work can delete data, mutate remote systems, publish artifacts, or affect shared environments.
+- Record state that describes what has already been applied to a cluster when it is applied, not only when the whole operation succeeds. A run that fails after the change landed still leaves the environment carrying it, so a record withheld until success leaves the environment unable to name what it is running — precisely when an operator needs it to, since recovery usually means re-supplying that value. The exception is a value a failed run turns into a phantom, such as one minted locally that was never published; that stays a post-success write, and the comment beside it should say which of the two it is.
 - Preserve momentum by choosing the simplest defensible design that fits the repository. Add structure only when it clarifies ownership, reduces repeated logic, or prevents a real class of mistakes.
 - Treat repeated user corrections as signal that the interaction model is wrong, not just the implementation detail. Revisit the flow and simplify it around what the user is trying to accomplish.
 - Treat every change that affects a user-triggered code path as a UX-affecting change, including backend wiring, lifecycle refactors, event-handler edits, persistence work, and frontend logic that does not directly edit a component. Before considering such a change complete, walk through the user-facing sequence it produces and verify the user can see what is happening, recover from what fails, and confirm what succeeded. Setting state without a corresponding visible affordance, or surfacing a status that is cleared by the next lifecycle step before the user can register it, both count as gaps that block the change. For desktop work, follow the impact-review checklist in `erun-ui/AGENTS.md` § "UX Impact Review Checklist".
@@ -98,9 +101,214 @@ Internal ownership and per-module conventions live in each module's `AGENTS.md`.
 - For documentation-only guidance changes, do not change app behavior. Update the nearest applicable `AGENTS.md` and validate by reviewing the edited guidance for consistency.
 - Fix lint findings by correcting the code; never disable, suppress, downgrade, or threshold-bump a lint rule.
 - **Fixing pre-existing issues is mandatory, not optional.** A failing test, lint finding, or other violation you encounter is yours to investigate and fix, even when your change did not cause it. "It was already broken" / "not caused by me" / "out of scope" / "pre-existing" is never a reason to skip, ignore, suppress, defer, or bypass it — no `--no-verify`, no `//nolint`, no `t.Skip`, no `test.fixme`, no commenting-out, no threshold bump, and no reclassifying it as someone else's problem. A flaky test — one that passes only sometimes — is a failing test too: make it deterministic (wait on observable conditions, never wall-clock sleeps or retries-until-green), never skip it, mark it `fixme`, or wave it through as "pre-existing flakiness". The pre-commit hook lints the whole module, so touching any file in a module makes **every** pre-existing finding in that module yours to resolve. Fix it in the same PR — that is the default and the expectation, not a fallback. Deferring to a tracking issue is a narrow exception, permitted only when the fix genuinely cannot land in this PR (it needs a design decision the user must make, or it is a distinct large effort the user has been told about and explicitly agreed to defer); even then you file and link the issue *before* proceeding, and you never present the deferral as routine. A green commit hook, a green module lint, and a green `make integration-test` are the floor, not an aspiration. Surfacing a failure as "pre-existing" or "out of scope" without either fixing it or clearing an explicit deferral is the exact defect this rule exists to prevent — treat the temptation to punt as a signal to fix.
+- **Identical failure counts across repeated runs do not prove a failure is real.** A deterministic environmental fault (a missing directory, a stale cache, a fixture leaking state — see `erun-ui/AGENTS.md`'s shared-baseline-row leak for an example) reproduces the exact same count on every run just as reliably as a genuine bug does. Use a matching count as corroboration only after independently confirming the cause; treating it as the discriminator between "this is a real, reproducible bug" and "this environment breaks the same way every time" runs backwards and can cost hours chasing the wrong fix or reopening an already-fixed issue.
 - Clarify design and trade-offs in prose conversation; don't batch shaping decisions into rigid question-forms.
 - When delegating analysis to sub-agents, use a capable model — not a lightweight locator model — for substantive reasoning.
 - Once the user authorizes a body of work (e.g. "do it all" / "carry on"), carry it through to completion across commits and PRs without re-asking permission between increments; surface only genuine blockers. This does not license unrequested expansion — still get plan sign-off before multi-module or public-surface diffs the user did not ask for.
+- **A generated type's "never null" is a promise about the source struct, not about what actually crosses the wire.** A Go field with no `omitempty` and a slice type still marshals a nil slice as JSON `null`, and a bindings generator has no way to encode "unless the server took a shortcut" into the TypeScript type it emits. Any consumer that range-iterates or maps over such a field unconditionally will throw on that `null`, and if the throw happens during boot/render before an error boundary's fallback UI can help, the crash can hide a working affordance underneath it (see `erun-ui/frontend/src/app/bootThunks.ts`'s `normalizeBootTenants`, added after exactly this happened to a first-run empty state). Validate boundary-crossing data defensively (`Array.isArray`, a real null check) at the point it enters application state, everywhere the field is one control-flow path away from an unconditional iteration — do not rely on the generated type's nullability annotation alone.
+
+## Smooth, Seamless, No Dead Ends (Mandatory)
+
+**Anything less than a smooth, seamless end-to-end experience is a failure.**
+Not a nice-to-have missed, not polish deferred — a failure, on the same footing
+as a wrong result. Basic is never enough. A change is finished when the
+experience is right, not when the code path works.
+
+**Seamless means the user never has to do the product's work for it.** They
+should not have to guess what state they are in, refresh a panel by hand to see
+the outcome of something they just did, re-enter a value the product already
+holds, leave for a terminal to finish a task they started in the app, or notice
+the seam between two subsystems at all. Anywhere the user has to think about the
+product's internals to make progress, that is a defect to be filed and fixed,
+not the cost of doing business.
+
+**Smooth means the passage of time is handled, not ignored.** Anything that can
+take more than a moment shows that it is working, keeps the surface responsive
+while it does, and lands its result without a jolt. An action that leaves the
+app — an SSO sign-in that opens a browser, a deploy, a build — is the case that
+matters most: a frozen screen during it reads as broken, and so does a screen
+that snaps to a new state with no explanation of what happened.
+
+**Every state a user can reach must offer a way forward.** A message that names
+a problem must also name — and where it can, carry — the action that resolves
+it. A surface with no next action is a defect of the same severity as a crash:
+the user is stopped, and the product has told them nothing they can do about it.
+
+Three distinct failures, all of them dead ends:
+
+1. **Advice that cannot work.** An error whose suggested remedy does not apply
+   to the actual state. Diagnose precisely enough to be right, or say plainly
+   what is unknown — never emit a confident remedy for a cause that was not
+   checked.
+2. **An action that succeeds and changes nothing on screen.** If the surface
+   still shows the failure after the remedy succeeded, the user learns that the
+   product is broken. Whatever failed must be retried and its new result shown.
+   A button that appears to do nothing is worse than no button.
+3. **A capability that exists with no way in.** If the CLI or the API can do it
+   and the user's surface cannot, that surface has a dead end wherever that
+   capability is the answer. "Use the CLI" is not a resolution inside a GUI.
+   `erun-integration`'s desktop-surface gate (`erun-integration/AGENTS.md` §
+   "Desktop-surface gate") enforces exactly this failure mode for the desktop
+   app: a registered CLI command or MCP tool with no reference in
+   `erun-ui/frontend/src` fails the gate unless it is declared agent-facing
+   (`erun-common/mcp_tools.go`'s `AgentFacing` field, or
+   `erun-cli/cmd/command_tree.go`'s `cliOnlyAgentFacingCommands` for a
+   CLI-only command).
+
+**Distinguish causes before writing copy.** "Unauthorized" from the platform API
+is not one condition. *Session expired*, *identity never enrolled*, *tenant
+never connected*, and *permission genuinely refused* are four different user
+situations with four different next actions; collapsing them into one sentence
+guarantees the sentence is wrong for most of the people who read it.
+
+**Onboarding is where this is judged first.** The user who is not yet connected
+to the platform, or whose identity is not yet enrolled in a tenant, is the one
+most likely to be lost and least able to help themselves. Getting from "not set
+up" to "working" must be possible from inside the product, guided, and short.
+Where a step genuinely requires an administrator, the product still owns the
+handoff: say exactly who must do what, show the exact values they need, and make
+those values copyable — never leave the user to reconstruct them by hand.
+
+## One Agent Job Is One Run (Mandatory)
+
+**An in-pod agent job is one non-interactive run. There is no "later."** No
+scheduler wakes it back up, no monitor watches it, and nothing notifies
+anyone when a backgrounded process it started finishes. When the job's own
+process exits, the run is over — for good — whatever is still executing
+underneath it. This is the same dead-end failure mode as § "Smooth, Seamless,
+No Dead Ends" above (silence that reads as success), applied to the one
+surface an agent fully controls: its own final turn.
+
+- **Run gates in the foreground, with an explicit timeout.** No `&`, no
+  `nohup`, no background shell task, no "I'll report back when it finishes."
+  If a gate needs to outlive one command, start it as a nested detached job
+  (e.g. `erun job start`) and block on it — `job await` / `job status` — in
+  the same run, not a promise to check later.
+- **A result not in the final message does not exist.** The orchestrator
+  reads the job's recorded outcome, not the agent's intentions. Work reported
+  only as a plan to check back on it is work nobody will ever see reported.
+- **Never end a turn asking a question or offering an option.** Nobody is
+  there to answer. A final message that waits on a reply is a dead end
+  exactly like a UI screen with no next action: the run is stopped, and nothing
+  will ever unstick it.
+- This has already cost real work in this repo: agents that backgrounded a
+  gate and ended their turn reported `exitCode: 0` while the work sat
+  unfinished, uncommitted, or unrecovered, and the orchestrator believed it
+  because nothing in the job's own status said otherwise (erun#1374).
+
+## A Gate Holds The Environment To Itself (Mandatory)
+
+**A contended gate does not report a slow verdict, it reports a wrong one.**
+Measured on one 12-CPU/23-GiB agent pod, the same gate ran `GREEN 7m4s`,
+`GREEN 7m38s`, `GREEN 6m58s` alone (3/3), and `GREEN 17m36s`, `RED`, `RED`
+(1/3, 2.4x slower) with a second gate batch and verification probe jobs
+scheduled beside it. The two reds were on **different** tests, and both pass
+standalone: an `erun usage --output json` golden whose actual output carried
+real OOM warnings, and `TestPush/real_run_auth_failure_retries_after_login_via_auto_login_env`
+timing out. Contention did not just cost 10 minutes; it cost a false
+attribution, because two reds at a plausible-looking count read exactly like a
+real regression until a baseline was re-measured alone. That is the same trap
+§ "Working Rules" already warns about under "Identical failure counts across
+repeated runs do not prove a failure is real", arriving from the other
+direction.
+
+Worse than a wrong verdict, concurrency corrupts merge accounting. Two gate
+batches sharing one worktree produced a batch that reported `Pushed main to
+origin (<sha>)` where that sha was the **other** batch's commit, and two pull
+requests were closed against work that had not landed. `git rev-parse HEAD`
+answers whichever batch touched the tree last.
+
+So the rule is structural, not advisory:
+
+- **Long gates claim the environment.** `erun exec job start --exclusive`
+  takes an exclusive activity-lease claim on the scope named `environment`
+  for the job's lifetime, and while it is held **every** other job start
+  there is refused and told which job holds it — ordinary jobs included, not
+  only other exclusive ones. A gate needs protecting less from another gate
+  than from everything else scheduled beside it.
+  `scripts/agent-gate.sh` already passes `--exclusive`, so `make check`,
+  `make integration-test`, and `erun-ui/playwright/run.sh` hold the pod
+  without anybody remembering to ask.
+- **Work that mutates the shared worktree is refused by the same claim.**
+  `erun exec gate-merge` rewrites the environment's one worktree onto a
+  target branch, so it refuses while anything else holds the environment. A
+  caller whose hold spans several separate processes — a merge-queue drive,
+  which cannot be expressed as one job — takes the claim directly
+  (`erun activity lease take --exclusive --scope environment`) and names it
+  as `gate-merge --under-lease <id>` so its own hold does not refuse it. The
+  `erun-merge-queue-drive` skill does exactly this at rung 0.
+- **Never schedule work into an environment running a gate**, and do not
+  reach for a second environment's worth of parallelism inside one pod. If a
+  start is refused, the refusal names the holder and how to clear it; wait,
+  or use a different environment.
+- **This is a lease, not a lock.** It expires without renewal (`--lease-ttl`,
+  default 15m, renewed at TTL/3), reconciles against the supervisor pid
+  recorded on it, and is capped by the 12-hour lease lifetime ceiling, so a
+  crashed gate cannot pin an environment — the same three bounds every other
+  activity lease has. A start that fails before its supervisor comes up
+  releases the claim it took, and the supervisor releases it explicitly on
+  the way out so the next gate starts immediately rather than waiting out a
+  TTL.
+- **A gate's own nested work is exempt.** A start whose parent chain
+  (`startedByJobId`, walked transitively) reaches the holder proceeds under
+  that claim and takes no second one — otherwise a gate detached from inside
+  an agent job would be refused by its own ancestor, which is a dead end
+  rather than a safeguard.
+
+See `erun-common/job_exclusive.go` for the mechanism and
+`erun-docs/docs/agent-reference/cli-flags.md` § "Environment exclusivity" for
+the full contract.
+
+## Long Gates Detach Themselves Inside An Agent Pod
+
+`make check` is a thin front door (`scripts/agent-gate.sh`) around the real
+gate, `check-gate`. Outside an agent pod — a human's terminal, CI, a plain
+`docker build` — it execs `check-gate` directly and behavior is unchanged.
+Inside a coding agent's own pod (`ERUN_ENV_TYPE` `local-agent` or
+`remote-agent`) it instead detaches `check-gate` through `erun exec job
+start` and blocks on `erun exec job await` for a bounded window, because an
+ordinary foreground `make check` run (20-40 minutes) outruns a coding agent's
+own foreground window and gets auto-backgrounded into a bare task handle —
+exactly the case § "One Agent Job Is One Run" above warns about, except here
+the agent never chose to background anything. The fix has to be structural,
+not a prompt reminder: two lanes given opposite instructions ("foreground
+only, never poll" vs. the exact `job start`/`job await` invocations to use)
+both fell into the same turn-per-poll loop anyway, because nothing rejected
+the ordinary foreground invocation either agent actually typed. Whatever the
+caller does — wait once, or re-run the same command after a timeout — the
+cost is a small, bounded number of calls, and the job's real exit code and
+full captured output still reach the caller once it finishes.
+
+Apply the same pattern to any other command whose normal run time can exceed
+an agent's foreground window (see `scripts/agent-gate.sh`'s own header
+comment for the exact mechanics). Run `scripts/agent-gate_test.sh` directly
+after touching it — like `erun-devops/docker/erun-devops/entrypoint_test.sh`,
+it asserts process/argv behavior against a stubbed `erun` and is not wired
+into `make check`.
+
+`scripts/parallel-gate.sh`'s `width` mode is the single place that derives
+how wide a parallel fan-out (`LINT_PARALLELISM`, `HELM_CHART_TEST_PARALLELISM`)
+may run on this environment, from the real CPU quota and a memory ceiling
+rather than `nproc` alone — see its own header comment for why `nproc` (which
+reads the CPU affinity mask, not the CFS quota) isn't sufficient on its own.
+Run `scripts/parallel-gate_test.sh` directly after touching it, same
+not-wired-into-`make check` reasoning as `agent-gate_test.sh` above.
+
+The criterion for wrapping a command this way is "long enough that a harness
+will background it", never the target's name — `make check` was simply the
+first one found this way. `erun-ui/playwright/run.sh` (longer than `make
+check` itself; see `erun-ui/playwright/AGENTS.md` § "Headless Launch") and
+`make integration-test` (routinely run standalone per § "Integration Test
+Gate" below, and the single longest component of `check-gate`) are wired
+through the same wrapper for that reason. `erun release` / `erun build
+--release` were checked and are not: the merge queue already runs a release
+as a detached job in an agent env (see § "Integration Test Gate" below), and
+nothing tells an agent to run either directly as routine, foreground,
+per-change validation the way `make check`, `make integration-test`, and the
+playwright suite are. Re-check this list when a new command earns that same
+routine-and-long status.
+
+**A timeout waiting on one of these detached jobs is not the gate's verdict.** `job await`'s own bounded window elapsing reports only that the wait ended — exit 124 from `agent-gate.sh`'s wrapper, or exit 2 from other timeout paths — while the underlying job can still be running, or can already have finished green. Treat either as "unknown, check again" (the same distinction `GateRunStatus` draws between `INCONCLUSIVE` and a real `FAILED` verdict — see `erun-backend/erun-backend-api/AGENTS.md` § "Gate Runs") and re-query the job's actual status/output before reading it as red. Misreading a timeout as a failure has already produced a wrongly-failed green PR.
 
 ## Code Comments
 
@@ -109,6 +317,7 @@ Internal ownership and per-module conventions live in each module's `AGENTS.md`.
 - Do not put issue IDs (`#123`, `issue #123`, `See #123`) in comments — provenance lives in the git history (`git blame`), not the source. This rule overrides matching the surrounding comment style: much of the existing codebase (for example `erun-common/ai_launch.go` and the `open` integration scenarios) still carries issue IDs in comments, but those are known pre-existing violations, not precedent. Never add an issue ID because neighbouring comments have one, and strip the ID (keeping any explanatory text) from comments you edit.
 - The comment rules above apply to new and edited comments regardless of how the surrounding code is written. When the local style contradicts this guidance, the guidance wins; a pervasive in-repo pattern is not a licence to extend it.
 - Prune stale comments as you touch the code; a comment that no longer matches what the code does is worse than none.
+- The no-issue-ID rule above is checked mechanically, not just by review: `scripts/check-issue-references.mjs` (TypeScript comments under `erun-kit/src`, `erun-ui/frontend/src`, `erun-console/src`) and `erun-integration/issue_reference_test.go` (Go comments) both gate `main`. Catch a violation locally instead of in that gate: enable `.githooks/pre-commit` once per clone (`git config core.hooksPath .githooks`, see README "Enable git hooks") — it now runs the TypeScript-side check automatically on `git commit` whenever staged files fall under those three roots — or run `node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src` directly before pushing a change that touches frontend comments.
 
 ## End-to-End Verification Gate (Mandatory)
 
@@ -126,15 +335,26 @@ Exceptions are narrow: changes with no live-target surface (pure refactors that 
 
 Probe artifacts the agent leaves behind during verification (injected files, manual patches that diverge from the source of truth, helper processes) are the agent's mess to clean up before declaring done, so the user's environment returns to a clean state.
 
+## Run `make fast-check` Before Pushing
+
+`make fast-check` is a fast, local subset of `check-gate` — golangci-lint, the tracker-reference gate, and prettier formatting — that runs in seconds to under a minute, not the 9-10 minutes a full `make check`/`check-gate` cycle costs. Agents are what push in this repository (see § "Contributing" above), so an agent pushing a branch without having run `fast-check` first is choosing to find out about a lint finding, a tracker reference in a comment, or an unformatted file ten minutes later in the merge gate instead of immediately. Run `make fast-check` before every push; it is cheap enough that there is no reason not to.
+
+`fast-check` is **not** a substitute for `make check` / `make check-gate`, and passing it does not mean the branch is ready to merge — it runs no tests, no build, and no integration suite. Still run the full gate (or push and let the merge queue's own gate run it) before merging; `fast-check` only shortens the feedback loop for the narrow class of failure it covers.
+
 ## Integration Test Gate (Mandatory)
 
 - `make integration-test` must be green on `main` at all times. Do not merge a PR that leaves any scenario red, including scenarios that were already failing before your branch — if you discover a preexisting red, either fix it in the same PR or open a tracking issue and a follow-up PR before merging anything else that touches the suite. "Some tests were already broken" is not a license to add more.
-- This repository intentionally has no hosted CI (#521): GitHub-hosted runners are ephemeral, which defeats erun's daemon-centric build caching, and erun will provide its own build system and merge queue. Until that lands, the gate is enforced where it always was — run it locally before merging, and every erun-driven build anywhere re-runs it via the image's test stage (see `erun-devops/AGENTS.md` § "Build Workflow"). Do not reintroduce GitHub Actions workflows for build or test gating.
-- Run `go test ./...` (or `make integration-test`) under `erun-integration/` before pushing any change that touches `erun-cli`, `erun-common`, the runtime entrypoint, the chart deploy plumbing, or any integration golden. If a scenario is red on your machine but you believe it is "platform-dependent" or "flaky", that is a defect to fix (see the host-OS pinning guidance in `erun-integration/AGENTS.md`), not a reason to ship.
+- This repository intentionally has no hosted CI (#521): GitHub-hosted runners are ephemeral, which defeats erun's daemon-centric build caching, and erun provides its own build system and merge queue instead. Both halves of that queue are state in `erun-backend-api`, not a dedicated Job: promoting a review to `MERGE` is the environment's own cue to build the prospective merge of the review's source onto its *current* target and gate it with a real `erun build` itself, pushing only on green and reporting the outcome — `MERGED` is accepted only once the platform verifies the reported commit against the real repository, so it means a merge actually happened and a build actually passed, not a caller's assertion. An accepted (now actually-merged) review then enqueues a release, which the environment that earns it runs the same way. **This is no longer aspirational** (correcting the prior "nothing runs it against this repository's own PRs today" claim here): the client-side plumbing (`erun exec gate-merge`, `erun review record-build --gate`, `erun review report-merged`, and the `erun-merge-queue-drive` skill chaining them — see `erun-docs/docs/collaboration/merge-queue.md` § "The gate") is what actually landed dozens of this repository's own merges and two releases, verified server-side by `acceptMerged` on every one. What remains is a distinct, narrower gap tracked in #1912: GitHub's own branch-protection ruleset on `main` still has no way to tell the queue's own legitimate direct push apart from a human bypassing review outright — both currently authenticate as the same shared credential and print the identical "Bypassed rule violations" warning, so that warning carries no signal today. Both halves of the fix now exist in code — `erun exec plan-ruleset-bypass` resolves the exact two-stage ruleset edit that narrows the bypass grant to one non-human identity (and refuses when its preconditions do not hold), and `erun exec reconcile-bypass --expected-actor` accounts for every bypass afterwards — but applying the edit is a repository-settings change an operator performs, so the gap stays open until they do. See `erun-backend/erun-backend-api/AGENTS.md` § "Merge Queue" for the recorded plan and the corrections behind it. `erun exec report-commit-status` exists but is a separate mechanism aimed at a plain-GitHub-PR-flow repo requiring a status on a pull request's own head commit before its merge button unlocks — it has never been wired into this repository's own gate-merge/push flow, has never run against a real merge, and does not by itself close #1912's gap; nothing in the narrowing plan depends on it, and no `required_status_checks` rule may be added before a producer is proven end to end. Run the gate locally before merging (`make check`) in the meantime, and every erun-driven build anywhere else re-runs it via the image's test stage (see `erun-devops/AGENTS.md` § "Build Workflow"). Do not reintroduce GitHub Actions workflows for build or test gating.
+- Run `go test ./...` (or `make integration-test`) under `erun-integration/` before pushing any change that touches `erun-cli`, `erun-common`, the runtime entrypoint, the chart deploy plumbing, or any integration golden. If a scenario is red on your machine but you believe it is "platform-dependent" or "flaky", that is a defect to fix (see the host-OS pinning guidance in `erun-integration/AGENTS.md`), not a reason to ship. `make integration-test` is itself wired through `scripts/agent-gate.sh` (see § "Long Gates Detach Themselves Inside An Agent Pod" above) since it is routinely run standalone and is long enough on its own to hit the same foreground-timeout failure; `make check-gate` depends on the underlying `integration-test-gate` target directly so a `make check` run never nests one detached job inside another.
 - The integration suite runs the compiled binary as a subprocess against per-command `--dry-run` goldens. The contract for `--dry-run` is therefore a hard public-surface boundary: every action and every decision the command would take must appear as a trace line, regardless of whether downstream input resolution succeeds. Treat a missing trace as a bug, not a documentation gap.
 - Coverage is gated on `erun-cli` + `erun-common` only, and the integration suite is the single source of truth for that coverage — unit tests in those packages do not count toward the gate, so write the integration scenario for new `erun-cli`/`erun-common` behavior and delete unit tests that overlap one. Other modules (`erun-mcp`, `erun-backend`, `erun-ui`) are validated by their own per-module suites.
 - Do not skip integration scenarios to make the suite green. If a regression is discovered, leave the failing scenario in place so the gate fails until the regression is fixed; that is the suite working as designed.
+- **A Go test that reads something outside its own package's compiled inputs at run time fails open under the test cache.** Go's cache keys on compiled dependencies; it cannot see a `filepath.Walk`/`WalkDir`, `os.ReadDir`, `os.ReadFile`, or `filepath.Glob` against a sibling directory, another module, or a generated artifact, so editing what the test reads without touching its own module replays a stale `(cached) ok` — the test reports success while it has stopped checking anything. Four instances of this shape have reached this repo's own gates so far (`erun-ui`'s build-stamp guard, `erun-backend-api`'s package/module/Dockerfile readers, `erun-mcp`'s doc-drift reader, `erun-integration`'s tracker-reference scanner), and the tracker-reference one let issue-tracker references reach the merge gate repeatedly in a single day before its cached passes were traced to this cause. The tell: the test walks the filesystem, reads a sibling directory, or checks a generated artifact. The fix is `-count=1` on that module's test target, added in the same change as the test — prefer it over declaring the input as a real Go dependency, since a directory tree or a file in another module usually cannot be expressed as one. This is not worth a lint rule: flagging every `filepath.Walk`/`os.ReadDir`/`os.ReadFile` call in a `_test.go` file would also catch legitimate in-package reads the cache already tracks correctly, and a heuristic that clears on the cases it can't reason about would reproduce the exact false confidence this defect causes, at the tooling level. Catch it at review time by asking what the test reads, not with a checker.
 - See `erun-integration/AGENTS.md` for harness layout, scenario shape, fixture patterns, normalization rules, the coverage threshold and scope, and stub-injection guidance.
+- **The gate's `erun build` cannot verify the desktop app (#1933), and #1937 answers the toolchain half of the fix: yes, it can run there.** `make check`'s `test` stage had no Wails/webkit toolchain, so `erun-ui/playwright` never ran inside a `GATE` build even though `erun-ui/AGENTS.md` makes that suite mandatory for every desktop change — a green `GATE` build proved nothing about `erun-ui/**` until this was caught: four desktop PRs (#1911, #1925, #1926, #1927) merged through the gate with their own new Playwright specs never executed anywhere, and a real run against `main` afterward found `27` failures, including a regression in #1901's own spec that the gate had reported green. **Verified empirically, not assumed:** the `erun-devops` test stage now installs the same Wails/webkit CGO toolchain and Playwright Chromium runtime deps the final image installs (`build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev`, then `install-deps chromium`) — the packages install cleanly on the exact `golang:1.26.0` base the test stage already uses, `go build -tags "desktop,production,webkit2_41"` succeeds there, the compiled binary runs `--headless` with zero display (no Xvfb — `runHeadless` never calls `wails.Run`), and a `make check-gate` run against this exact Dockerfile change passed — so there is no platform blocker to running the suite inside the gate. `make test-playwright` (root Makefile) builds that headless `erun-app` and runs the suite against it from the same stage.
+- **#1937 also root-caused, and structurally fixed, one whole class of the suite's nondeterminism: the shared seeded baseline rows leak real state across spec files.** `SEED_ENV_ALPHA`/`SEED_ENV_BETA` are the two seeded rows nearly every spec touches, and the worker-scoped headless backend (`erun-ui/playwright/fixtures/workerBackend.ts`) that serves them lives for the whole worker's lifetime, not one spec file — so `App.envActivity`/`App.envUsage` (in-memory maps keyed by tenant/env, `erun-ui/environment_activity.go` and `environment_usage.go`) keep a real observation (including its own `observedAt` timestamp, stamped even for a never-deployed env's routine "not running" reading) from whichever spec ran first, and every later spec in that worker inherits it — first found as the #1901 hover-card layout spec's "zone 2" race (fixed there by switching to fresh, pristine envs; `erun-ui/playwright/tests/sidebar-hovercard-layout.spec.ts`), but the mechanism is general, not specific to that one spec. The fix lands at the fixture layer rather than by auditing every spec that touches the baseline rows: `App.ResetEnvironmentActivityObservations`/`App.ResetEnvironmentUsageObservations` clear both maps, and `erun-ui/playwright/fixtures/erunApp.ts`'s `app` fixture — the dependency nearly every spec pulls in — calls both over `/__erun_invoke` before the app ever boots, so every test's initial read model starts from "never yet observed" regardless of what an earlier spec in the same worker left behind. A second, independent race in the same #1901 spec — reading hover-card geometry immediately after Radix's `PopoverContent` becomes visible, racing its own ~150ms entrance transform — is fixed on the separate, not-yet-merged `feature/1901-hover-card-layout-fix` branch; it is not duplicated here.
+- **Re-verified after the fixture-isolation fix landed, still not yet a `check-gate` prerequisite.** The suite had 27 failing specs and non-deterministic results under parallel load (two full runs on the same commit: 27 vs 24 failures, only 3 files red in both) before the shared-baseline-row fix above. That fix (originally landed as `bug/playwright-fixture-isolation`, ported into this branch) has now been run against this exact commit via `erun exec job` in this agent's own pod (the `erun-devops` final image, which already carried the toolchain for in-pod contribute-mode builds): `make test-playwright`, `502 passed (502)`, zero failures, zero flakes. That is one clean run, not the repeated-run track record `erun-ui/playwright/AGENTS.md`'s "No flaky tests" rule calls for before trusting a suite this large under parallel load; the disciplined next step is more repeated runs, including inside the actual `erun-devops` Dockerfile `test` stage container (not just the final image) rather than assuming the final-image result transfers.
+- **The repeated-run track record the previous bullet called for now exists, and `test-playwright` is a real `check-gate` prerequisite.** Reason it was still excluded at that point: gating on a suite that had just cried wolf (27 vs 24 failing specs across two runs) would have red every build on `main` for no signal. It stopped being excludable once a PR landed this same session whose two failing tests were the exact Playwright specs covering the feature it implemented — the merge gate passed it anyway, because `check-gate` never ran them; only a human reading a started job's output by hand caught it, which is luck, not a control. The evidence for lifting the exclusion: a `--repeat-each=5` full-suite run (`2,525/2,525` passed — the whole suite, five times over, zero failures) plus two further independent full runs (`514/514` each, one against this exact commit) — zero failures across every full-suite execution recorded this session, post-fixture-isolation-fix. `check-gate` now lists `test-playwright` (see the Makefile target's own comment for the up-to-date evidence and the git history of the exclusion). Because the merge-queue gate's own `erun build` runs `make check` inside the `erun-devops` test stage (`erun-devops/AGENTS.md` § "Build Workflow"), this closes #1933 for real rather than through the `--desktop-playwright-verified` stopgap: a green `GATE` build now genuinely means the suite ran and passed, so `erun review record-build --gate` no longer requires that attestation flag (removed from `erun-common`/`erun-cli`/`erun-mcp`; see `erun-docs/docs/collaboration/merge-queue.md` § "The gate", whose former "desktop coverage gap" subsection now records the closure instead).
 
 ## Release Rules
 
@@ -143,17 +363,40 @@ Probe artifacts the agent leaves behind during verification (injected files, man
   - The publish is not assumed to have landed. `verify-publication` re-resolves every published image's multi-arch manifest, and each chart is read back as it publishes; a version whose artifacts cannot be resolved never reaches its tag.
   - The version bump is a post-publish step for a reason. It moves `VERSION` past the version being released, so a bump ahead of the publish strands that version: a plain `erun build` then mints the *next* one, and `push --version <released>` cannot assemble a manifest from per-arch tags nothing built. Keeping the bump after the publish means a failed release leaves `VERSION` on the version it was releasing, and re-running retries the same version.
   - A release refuses to run when its resolved images are not all covered by a build it will publish. Announcing a version the registry never receives is the failure this exists to prevent; do not soften it into a warning.
+  - **The base branch is not assumed to stand still.** `sync-remote` establishes fast-forwardability once, at the start; the release then re-reads the branch immediately before the build and refuses a move it can still see cheaply, and its final push rebases onto a branch that moved during the build and retries, bounded. Neither half may be dropped in favour of "do not merge while a release is in flight" — that is guidance for humans, and the tool must not depend on it being followed. A knowable blocker belongs before the spend, and a knowable recovery belongs where the alternative is a registry the repository disagrees with.
+- **A detached release can be interrupted by its own pod dying, and the recovery is designed around that (#1051).** A long release is the build most likely to fill the node's disk (a multi-arch, many-image build), and filling the node's disk is what gets a pod evicted — so the release most likely to need resuming is also the one that caused its own interruption. Three things follow:
+  - `ensureReleaseDiskHeadroom` (`erun-common/release_disk_headroom.go`) prunes reclaimable docker build cache and refuses up front when the docker root's free space is observably below a floor (20 GiB default, `ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES` to tune it) — the same "known failure caught before the spend" shape as the registry-permission and images-not-covered preflights above. An inconclusive read (the daemon's root is on a different container's filesystem, e.g. the erun-dind sidecar) is not a refusal; it proceeds exactly as before this preflight existed.
+  - Before rebuilding anything, the release reports what the registry already has at the target version (`reportAlreadyPublishedReleaseArtifacts` in `erun-common/release_publish.go`) — a single, non-retried probe, not a resumability rework: it does not change what actually gets rebuilt (the fingerprint-based promote-and-skip inside `Publish` still decides that), it only tells the operator up front rather than leaving them to infer progress from how fast the rebuild finishes.
+  - A local release tag that exists but not at HEAD is refused (as it always was — it must not tag a commit it did not build), but when it is unpushed *and* origin's branch history has never incorporated it, the refusal now names the diagnosis and the exact remedy (`git tag -d <tag>`) instead of leaving the operator to work out by hand that the tag is an interrupted run's leftover rather than a real collision. Reclaiming it automatically was judged too aggressive for a git tag inside a release flow.
+  - A job's own terminal state distinguishes "the runtime pod was replaced" from "the same pod is still running but the supervisor process is gone" (`EnvironmentJob.UnknownReasonKind`, `erun-common/job.go`) by comparing the pod hostname recorded at job start against the hostname reconciling the record — a Kubernetes pod's hostname is its pod name, unique per pod instance, so a mismatch is certain, not a guess.
 - Treat release work as repository-wide. When changing release behavior, validate `erun-common`, `erun-cli`, and `erun-mcp`, not just the module where the code change landed.
 - When release, launcher, or desktop packaging behavior changes affect the desktop app, validate `erun-ui` too and keep package-manager metadata aligned with the desktop build outputs.
 - Keep stable release automation responsible for all repository metadata that must move with the release, including versioned charts, package-manager metadata, and generated release references; when that metadata references GitHub archive assets, update both version fields and checksums instead of rewriting only URLs.
 - Treat release-time Docker images as dependency graphs, not isolated targets. If a release image depends on local base images, publish those local dependencies before publishing the dependent image.
-- Every Docker build — `erun build` and `erun build --release` — produces both `linux/amd64` and `linux/arm64`. There is no single-platform code path. A single-arch artifact built locally cannot be deployed to a cluster of a different architecture, and arch-specific Dockerfile bugs should fail at developer-machine build time, not at remote deploy time. `erun push` (including the push step `release` runs) assembles the multi-arch manifest list and publishes the runtime chart alongside the runtime image; `deploy` only installs a published version and never builds. Non-release `erun build` stops after the per-arch local builds.
+- `erun build --release` (and `erun release`, which reuses the same build) always produces both `linux/amd64` and `linux/arm64`, with no override: a released artifact is published for anyone and must be deployable on any cluster, and arch-specific Dockerfile bugs in a release must fail at build time, not at a stranger's remote deploy. Non-release `erun build`/`erun push` default to the same multi-arch pair, but may be narrowed to one platform for an environment whose own cluster can only ever run it and therefore never pays to build or promote the platform it can't — either per invocation (`erun build --platform linux/amd64`, repeatable) or pinned permanently for an environment via `.erun/config.yaml`'s `environments.<env>.docker.platforms`. Combining `--platform` with `--release` is refused outright rather than silently narrowing a released artifact. `erun push` (including the push step `release` runs) assembles the multi-arch manifest list — a list of one entry when the build targeted one platform — and publishes the runtime chart alongside the runtime image; `deploy` only installs a published version and never builds. Non-release `erun build` stops after the per-arch local builds.
 - Multi-architecture builds must verify daemon capability explicitly. Fail with a direct error when the local Docker daemon cannot produce all required target platforms (e.g. binfmt is missing for the foreign arch), rather than letting the per-platform `docker build` fail with a confusing message.
 - Keep the runtime deployment and release-build environment aligned. If the runtime pod performs release builds through dind, ensure the deployment installs the required binfmt or emulator support before the daemon is used for multi-arch builds.
 - Prefer pinned versions for release-critical infrastructure images such as binfmt helpers, dind, and runtime base images so release behavior stays reproducible.
 - When release automation pushes tags or branches mid-flow, add the follow-up verification needed for later steps. Do not assume remote state, package archives, or checksums are available without checking.
 - Add regression tests for each release failure mode that was fixed. When a release bug is caused by ordering, missing metadata, or missing platform support, encode that contract in tests so the next release cannot regress silently.
 - When a change affects generated runtime charts or embedded templates, test both the shared template source and the concrete runtime chart when practical. Treat them as one contract.
+
+### Release cadence policy (#1985, design recorded — not yet implemented)
+
+- **The trigger already exists; the drain does not.** Every merge already enqueues a release: `ReviewService.acceptMerged` calls `ReleaseTrigger.TriggerRelease` (`erun-backend/erun-backend-api/internal/service/reviews.go:451`), which is `ReleaseService.Enqueue` — one idempotent `queued` row per distinct commit (`UNIQUE (tenant_id, commit_id)` on `releases`). But `ReleaseRepository.ClaimNext`, the half that would take the oldest `queued` row and mark it running, has no caller anywhere in the codebase: no HTTP route registers it, no CLI/MCP command wraps it, and no skill exists in the `erun-merge-queue-drive` shape to drive it. A queued release simply sits until a human notices and runs `erun release` by hand — exactly the "reactive, operator-judgement-driven" cadence this issue was opened to replace. `ReleaseRepository.ClaimWindow.Cooldown` — a per-tenant minimum spacing between consecutive releases — already exists in the repository layer too, unused for the same reason.
+- **Release cost is measured from this session's own evidence, not the `~/.erun/timing/release-*.json` records the issue asked for** (none exist on the environment used to write this policy — `~/.erun/timing/` here holds only `build-*`/`deploy-*` records, both sub-millisecond no-ops on this pod; the releases this repository actually cut ran from a different environment/credential context, and nothing here can read its timing directory). The available evidence is the issue's own operator-observed measurement: four releases (1.0.244–247) cut in one day, hand-driven, ~20–30 minutes wall-clock each. Reading `erun-common/release.go`/`release_publish.go`'s stage list against that number narrows *where* the time goes without needing a fresh record: the stages before and after `publish` (`sync-remote`, the stamp/commit/local-tag, `push-release-tag`, `sync-packaging-checksums`, `post-release-version-bump`, `sync-develop`, `push`) are git plumbing — seconds each. `publish` (real multi-arch Docker builds and pushes for every image and chart the version resolves) and `verify-publication` (a registry manifest read-back, network-wait rather than CPU) are structurally the only stages that can plausibly account for 20–30 minutes; `erun-common/timing.go`'s per-run JSON tree already breaks a real run down to prove this precisely, so the next release run anywhere should keep its record and this estimate should be replaced with a real one rather than repeated as fact.
+- **Commit accumulation between releases is measured directly from tags.** The last 13 releases before this one (`v1.0.235`…`v1.0.247`) each shipped 5–22 commits since the previous tag (median 7, mean ~9), spaced a median 154 minutes (mean 178 minutes) apart by tag timestamp. `main` sits 16 commits past `v1.0.247` as of this policy being written, with nothing queued or running (`git tag --list 'v1.0.248*'` is empty) — consistent with the issue's "roughly 12 commits" observation, grown further while this design work was itself unreleased. Separately, `erun-backend-db/AGENTS.md`'s `#1956`/`#1970` retention designs already measured this repository's broader activity over 2026-08-27→2026-09-02: 243 PRs merged (~35/day average, 56/day peak) against 43 releases (~6/day) — i.e., the de-facto historical cadence was already **one release per ~6–9 merges**, matching the per-tag commit count above almost exactly. The existing cadence is a batch policy already, just an unwritten one enforced by an operator's judgement instead of a threshold.
+- **Per-merge cadence is refuted by the same numbers, not merely undesirable.** `ClaimNext`'s claim predicate allows only one `running` release per tenant at a time — releases are serialized, not parallel. At 35–56 merges/day and ~20–30 minutes per release, a strict one-release-per-merge policy needs 700–1,680 minutes (11.7–28 hours) of serial release execution per day just to keep up, on a tenant that already spends most of a day's wall-clock on other work. Either releases would need to run concurrently (breaking the single-in-flight invariant the queue's own partial unique index enforces, and racing `publish`'s registry writes) or each release would need to be far cheaper (nothing in this design changes what `publish` actually builds) — neither is in scope, so per-merge is measurement-refuted, not a matter of preference.
+- **A pure timer is redundant with what the queue already gives idempotently, and a pure batch-count needs a coalescing behavior the schema doesn't have.** A fixed-interval drain (e.g. hourly) that finds nothing `queued` costs nothing, thanks to `Enqueue`'s per-commit idempotency — so a timer is safe to run even when quiet. But `ClaimNext` claims the *oldest* queued row, one commit at a time; if merges outpace the timer, a drain still runs one release per queued row in FIFO order rather than folding N queued commits into one release of the newest — the exact coalescing the historical "~1 release per 6-9 merges" cadence achieved informally. Today's schema and `ClaimNext` query have no "supersede the older queued rows for this tenant" behavior; adding one (claim the *newest* `queued` row per tenant, and mark any now-superseded `queued` rows for the same tenant as resolved by that release rather than running them individually) is what turns "batch-threshold" from a policy statement into something `ClaimNext` can actually execute.
+- **Recommended policy: drain on whichever comes first — a commit-count threshold or a cooldown timer — always coalescing to the newest queued commit, until the automation below exists.** Concretely: drain when either 5–10 commits have accumulated since the last release (matching the observed 5–22/median-7 historical range) or `ClaimWindow.Cooldown` (recommend 30–60 minutes) has elapsed since the last release, whichever is sooner; claiming always takes the newest queued commit for the tenant, not the oldest, so N merges since the last drain cost one release, not N. Until a release-queue-drive mechanism exists (see below), this is a directive for whoever triggers `erun release` today — operator or agent — not a claim that it runs unattended.
+- **The gate environment's own version is part of this policy, not a detail left to notice.** This session's own hazard: the `build`-shaped environment that gates every merge (the `erun-merge-queue-drive` promotion flow, `erun-backend-api/AGENTS.md` § "Merge Queue") was still running `1.0.246` while every environment it had gated was already built at `1.0.247` — the tool doing the gating was one release behind the code it was validating, so a regression introduced between those two versions in erun's own build/gate logic could pass its own gate undetected. `erun release` never deploys anything — confirmed by reading `erun-common/release.go`: no `Deploy` call exists anywhere in the release execution path, consistent with root `AGENTS.md` § "Command primitives vs orchestration" (`release` orchestrates build→push→tag, never deploy). So nothing rolls any environment onto a newly published version automatically, ever, including the gate environment — and "let each environment decide when to update" (the correct default for ordinary tenant environments) is the wrong policy for the one environment whose own currency is a precondition for every gate it runs on everyone else's behalf. **This policy states explicitly what the merge-queue design left unstated: whichever environment(s) perform the merge-queue gate must be redeployed to the version a drain just published as an immediate, unconditional step of that same drain — never a step an operator remembers separately, and never bundled into ordinary per-environment update discretion.**
+- **What is missing to automate any of this, in order:** (1) a release-queue-drive mechanism — an HTTP route or CLI/MCP command wrapping `ClaimNext` with the newest-commit/supersede behavior above, plus a skill in the `erun-merge-queue-drive` shape to drive it, including the gate-environment redeploy step from the previous bullet as part of the same run; (2) `erun-backend-api/AGENTS.md`'s `#1969` design ("An agent environment cannot provision a platform cloud alias") — recorded but not implemented — which is what would let an agent environment run that drainer unattended rather than a human running `erun release` by hand each time. Until both land, this section's threshold-or-cooldown drain plus mandatory gate-environment redeploy is the policy to follow manually.
+
+## Kubernetes RBAC For Server-Side Executors
+
+- **A role that lets helm install is not a role that lets helm wait.** `helm --wait` decides a Deployment is ready by walking Deployment → ReplicaSet → Pods. A role with full `apps/deployments` and no `apps/replicasets` installs fine and then times out on a healthy release, reporting a timeout rather than the Forbidden it swallowed. When adding or auditing a role that runs helm, enumerate the object graph helm traverses, not the objects the chart declares. (#1080, #1083)
+- **`kubectl auth can-i <verb> <resource>/<subresource>` gives false positives.** It answered `yes` for `patch deployments/scale` against a role granting only `deployments`, while the live call was Forbidden. Use `kubectl auth can-i --list --as=<sa> -n <ns>` and trust a real impersonated call over either. RBAC treats a subresource as a distinct resource. (#1080)
+- **A test that pins a role's rule list only confirms the rules somebody already thought of.** Two consecutive releases shipped a broken provisioner role while such a test passed. Prefer a test that exercises the operation and asserts it succeeds. (#1081, #1083)
 
 ## Refactoring Rules
 
@@ -181,6 +424,7 @@ Probe artifacts the agent leaves behind during verification (injected files, man
 - Use `feature/<issue-number>-<short-kebab-case-description>` for new functionality.
 - Use `bug/<issue-number>-<short-kebab-case-description>` for bug fixes.
 - Include the issue number in the branch name for traceability, for example `feature/12-add-mcp-server-entrypoint`.
+- **Never branch from another open PR's branch head to pick up its unmerged work.** The merge queue lands a PR as a squash commit under a brand-new SHA (root `AGENTS.md` § "Integration Test Gate" / `erun-docs/docs/collaboration/merge-queue.md` § "The gate"); a branch forked from the old head still carries that same work under its original SHAs, so the moment the dependency merges, the dependent branch conflicts with itself against `main` — silently, with no warning from git, `gh`, or erun (erun#2007). If work genuinely depends on something unmerged, wait for it to merge and branch from `main` afterward; if it cannot wait, rebase the dependent branch onto `main` as soon as the dependency lands and drop the commits `main` already carries under the new SHA.
 
 ## Pull Request Titles
 

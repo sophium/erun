@@ -3,10 +3,13 @@ package integration
 import (
 	"crypto/sha1"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 )
 
 func TestDoctor(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"doctor", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -25,6 +29,19 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_reports_library_execution_mode", func(t *testing.T) {
+		// An operator who flipped execution.modes.aws-sts to "library" in
+		// config.yaml must see it reflected here, not just take it on faith.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "aws-sts", "library")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_library_execution_mode", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_prune_images_traces_dind_exec", func(t *testing.T) {
@@ -41,6 +58,91 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_prune_images_traces_dind_exec", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_unaffected_by_kubectl_deployment_wait_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-deployment-wait: the
+		// kubectl trace lines must stay byte-identical to the
+		// subprocess-mode golden (dry_run_prune_images_traces_dind_exec,
+		// modulo the "Execution modes" line itself reporting the flipped
+		// mode) even with execution.modes.kubectl-deployment-wait=library,
+		// since traceAndWaitForRuntime only ever renders the trace line
+		// (kubectlDeploymentWaitArgs) and never calls
+		// libraryWaitForDeploymentAvailable on a dry run.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_unaffected_by_kubectl_deployment_wait_library_execution_mode", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_deployment_wait_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (the runtime deployment reports Available, so the
+		// doctor action proceeds) via a real client-go call against a fake API
+		// server instead of shelling out to kubectl. The kubectl stub fails
+		// loudly and distinctively only for the "wait" argv shape (every
+		// other kubectl subcommand this doctor run needs -- pod listing,
+		// dind exec -- still succeeds), so a fallback to the subprocess path
+		// for the wait surfaces as a recognizable failure instead of
+		// silently passing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, `printf '%s\n' "fell through to the kubectl subprocess for the wait check" >&2; exit 1`)
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/apis/apps/v1/namespaces/team-dev/deployments/team-devops" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"team-devops","namespace":"team-dev"},`+
+				`"status":{"conditions":[{"type":"Available","status":"True"}]}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("deployment wait used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+	})
+
 	t.Run("dry_run_rollback_traces_helm_rollback", func(t *testing.T) {
 		// Exercises the deploy-recovery action: --rollback --dry-run must
 		// trace the `helm rollback <release> --namespace --kube-context
@@ -53,6 +155,32 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/dry_run_rollback_traces_helm_rollback", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_rollback_failure_reports_helm_stderr", func(t *testing.T) {
+		// erun#1768: RunDeployRecovery's rollback branch always captured
+		// helm's combined output, but runDeployRecoveryActions (the CLI
+		// caller) used to discard it on failure and return the bare error
+		// -- a real rollback failure read as a content-free "exit status
+		// 1" with no explanation of why. It must instead carry helm's own
+		// message.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`case "$1" in`,
+			`  status) printf '%s\n' 'NAME: team-devops' 'STATUS: deployed' ;;`,
+			`  rollback) echo 'Error: release: "team-devops": release has no rollback candidate' >&2; exit 1 ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n"))
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--rollback"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a failed rollback, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_rollback_failure_reports_helm_stderr", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_clear_pending_helm_traces_kubectl_delete", func(t *testing.T) {
@@ -1184,6 +1312,161 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_aws_alias_env_plans_host_credential_check", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_agent_env_plans_git_push_access_check", func(t *testing.T) {
+		// A remote-agent env's project checkout lives inside the pod, so an
+		// environment can look completely healthy (clone, build, test all work
+		// against a public repo) and only discover it cannot push at the very
+		// end of real work. doctor reads back fetch/push access so that
+		// asymmetry surfaces up front instead. The plan must show the exec and
+		// the read-only script -- it must never invoke `gh auth
+		// login`/`refresh`/`switch`, which would start gh's interactive
+		// device-code/browser flow and hang forever in a headless pod.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_remote_agent_env_plans_git_push_access_check", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_fetch_works_push_credential_missing", func(t *testing.T) {
+		// A public GitHub repository fetches anonymously for the whole life of
+		// a piece of work, so this is the exact asymmetry that hides until the
+		// moment something tries to push. doctor must name it plainly and point
+		// at a non-interactive fix (never suggesting `gh auth login` from an
+		// unattended run).
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithGitPushAccess(t, stubs, "https://github.com/acme/example.git", "1", "0", "0")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_fetch_works_push_credential_missing", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_git_push_credential_configured", func(t *testing.T) {
+		// The healthy verdict: a resolved gh session (or SSH key / token) reads
+		// as "credential configured" and offers no remedy.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithGitPushAccess(t, stubs, "https://github.com/acme/example.git", "1", "1", "1")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_git_push_credential_configured", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_fetch_also_fails", func(t *testing.T) {
+		// The other half: a private remote with no credential at all can't
+		// even fetch. Fetch and push are reported as independent verdicts.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithGitPushAccess(t, stubs, "git@github.com:acme/private.git", "0", "0", "0")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_fetch_also_fails", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_reports_runtime_image_registry_mismatch", func(t *testing.T) {
+		// #1328: a runtimeimage pinned to one registry (an ECR build host)
+		// while runtimeregistry names another (the deploy/chart registry)
+		// leaves the pod unable to pull unless a credential happens to
+		// resolve for the image's own registry at deploy time. This is a
+		// pure config comparison — no exec, no live read — so doctor reports
+		// it identically in --dry-run and for real, naming both registries
+		// and the fix.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeimage: 123456789012.dkr.ecr.eu-west-2.amazonaws.com/team-devops\nruntimeregistry: ghcr.io/sophium\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_runtime_image_registry_mismatch", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_reports_runtime_image_line_mismatch", func(t *testing.T) {
+		// erun#1754: a runtimeimage naming the stock erun-devops image while
+		// the env's last confirmed deploy (runtimerunningimage) actually ran a
+		// tenant's own <tenant>-devops image is static config drift a health
+		// check exists to catch -- comparing the two image fields needs no
+		// live cluster read (a bare version number alone cannot name a
+		// release line, but an image name always can), so doctor reports it
+		// identically in --dry-run and for real.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeimage: ghcr.io/sophium/erun-devops\nruntimerunningimage: ghcr.io/sophium/team-devops:1.0.86\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_runtime_image_line_mismatch", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_consistent_runtime_image_line_reports_nothing", func(t *testing.T) {
+		// The other half: a consistent pairing (both fields name the same
+		// release line) must never be flagged, so an env riding the stock
+		// image on purpose (frs/local's shape in the issue) sees no new
+		// friction from this check.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeimage: erun-devops\nruntimerunningimage: ghcr.io/sophium/erun-devops:1.0.203\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Runtime image release line") {
+			t.Fatalf("expected no release-line finding for a consistent pairing, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_consistent_runtime_image_line_reports_nothing", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_reports_gitignored_project_config", func(t *testing.T) {
+		// A project config that resolves from disk but is excluded by .gitignore
+		// silently works on this machine only, since git never sees it. doctor
+		// must report that under "== Project config ==" rather than staying silent.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedGitignoredProjectConfig(t, setup, "{}\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_gitignored_project_config", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_tracked_project_config_reports_nothing", func(t *testing.T) {
+		// The other half: a config that is present but not gitignored (the
+		// common case) must never be flagged.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "{}\n")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Project config") {
+			t.Fatalf("expected no project-config finding for a tracked config, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_tracked_project_config_reports_nothing", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_reports_expired_host_credentials", func(t *testing.T) {
 		// The failure #903 was filed for: the profile is present and well-formed
 		// but its credentials lapsed overnight, which otherwise first surfaces as
@@ -1254,6 +1537,30 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_reports_unrecorded_expiry_and_unresolved_region", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_pod_down_degrades_host_credentials_instead_of_aborting", func(t *testing.T) {
+		// #1325: the runtime pod is up but its erun-devops container has
+		// terminated (phase Running, reason Error) — exactly the situation
+		// doctor exists to diagnose, and the one case where its first check
+		// used to exec into that same down container and abort before
+		// reporting anything else. The helm/pod diagnosis must print first
+		// (it needs no exec and is safe on a down pod), then the
+		// host-credentials read must degrade to a "could not read" report
+		// instead of failing the whole command, and every check after it
+		// (the docker-storage inspection, prune) must still run against the
+		// dind sidecar rather than being skipped.
+		setup := env.New(t)
+		fixture.SeedLocalTenantEnvWithAWSAlias(t, setup, "team", "dev", "ops+123456789012@aws", "eu-west-2", "")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlHostCredentialsExecFails(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_pod_down_degrades_host_credentials_instead_of_aborting", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_prune_images_and_build_cache_via_stubs", func(t *testing.T) {
 		// Real-run doctor cleanup with a healthy release: covers the
 		// non-dry-run arms of runDeployDiagnosis (helm status + pods
@@ -1309,9 +1616,12 @@ func TestDoctor(t *testing.T) {
 		// kubectl wait fails with a disk i/o error: doctor must fold the
 		// stderr into the storage-unhealthy diagnostic
 		// (normalizeDoctorKubectlError → doctorKubectlDiagnostic's
-		// unhealthy-storage arm) instead of surfacing a bare exit-status
-		// error. Only reachable in a real run — dry-run never executes
-		// the wait.
+		// unhealthy-storage arm) and degrade the docker-storage check instead
+		// of aborting the whole command (#1325) — the helm/pod diagnosis
+		// above already reported the cluster is reachable, so this failure is
+		// specific to the docker inspection alone, and the requested prune is
+		// skipped for the same reason rather than attempted and failing too.
+		// Only reachable in a real run — dry-run never executes the wait.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := filepath.Join(setup.Cwd, "stubs")
@@ -1319,10 +1629,49 @@ func TestDoctor(t *testing.T) {
 		stubDoctorKubectl(t, stubs, `echo 'Error from server: disk i/o error' >&2; exit 1`)
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
 		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit, got 0: %s", result.Combined)
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_storage_unhealthy_diagnostic_error", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_unrecognized_wait_failure_still_reports_kubectl_stderr", func(t *testing.T) {
+		// erun#1768: kubectl wait fails with a cause doctorKubectlDiagnostic
+		// does not recognize (neither the disk-i/o-error nor the
+		// namespace-lookup-failed shape above matches). Before the fix,
+		// normalizeDoctorKubectlError's unrecognized-cause branch discarded
+		// the captured stderr and returned the bare wrapped error, so the
+		// degraded report read "could not read: exit status 1" with no
+		// explanation. It must instead carry kubectl's own message.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, `echo 'Error from server: etcdserver: request timed out' >&2; exit 1`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_unrecognized_wait_failure_still_reports_kubectl_stderr", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_unrecognized_wait_failure_with_no_stderr_reports_exit_status_plainly", func(t *testing.T) {
+		// erun#1768's empty-stderr case: when kubectl wait fails with
+		// nothing captured on stderr, normalizeDoctorKubectlError has
+		// nothing to add, so the degraded report must still name the exit
+		// status plainly rather than emitting a blank fragment.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, `exit 1`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_unrecognized_wait_failure_with_no_stderr_reports_exit_status_plainly", normalize.Apply(result.Combined))
 	})
 
 	t.Run("repair_config_recovers_cloud_context_real_run", func(t *testing.T) {
@@ -1418,7 +1767,9 @@ func TestDoctor(t *testing.T) {
 		// broken. Covers doctorNamespaceLookupFailed +
 		// doctorNamespaceIsListed and the second diagnostic arm of
 		// doctorKubectlDiagnostic; the probe-then-diagnose sequence only
-		// runs on a real wait failure.
+		// runs on a real wait failure. Degrades the docker-storage check
+		// rather than aborting the command (#1325), same as the storage
+		// scenario above.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := filepath.Join(setup.Cwd, "stubs")
@@ -1426,8 +1777,8 @@ func TestDoctor(t *testing.T) {
 		stubDoctorKubectl(t, stubs, `echo 'Error from server (NotFound): namespaces "team-dev" not found' >&2; exit 1`)
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
 		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit, got 0: %s", result.Combined)
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_namespace_listed_but_api_failing_error", normalize.Apply(result.Combined))
 	})
@@ -1745,6 +2096,25 @@ func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
 }
 
+// stubDoctorKubectlWithGitPushAccess answers the git-push-access read script
+// with a fixed remote/fetch/gh-auth/push-credential verdict — the decision
+// input dry-run cannot supply — while keeping every other doctor arm intact.
+// Matched on the push_credential key, which only that script prints.
+func stubDoctorKubectlWithGitPushAccess(t *testing.T, stubsDir, remote, fetchOK, ghAuthenticated, pushCredential string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"push_credential="*) printf 'remote=` + remote + `\nfetch_ok=` + fetchOK + `\ngh_authenticated=` + ghAuthenticated + `\npush_credential=` + pushCredential + `\n' ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
 // stubDoctorKubectlWithHostCredentials answers the host-credentials read script
 // with a fixed presence/expiry verdict — the decision input dry-run cannot
 // supply — while keeping every other doctor arm intact. Matched on the
@@ -1755,6 +2125,30 @@ func stubDoctorKubectlWithHostCredentials(t *testing.T, stubsDir, presence, expi
 		`case "$*" in`,
 		`  *"x_erun_expiration"*) printf 'profile=` + presence + `\nexpiration=` + expiration + `\n' ;;`,
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorKubectlHostCredentialsExecFails reproduces #1325: the runtime pod
+// is up but its erun-devops container is down, so the host-credentials exec
+// fails with the same "container not found" shape kubectl reports for a
+// missing container, while every other kubectl surface (the pod listing for
+// the diagnosis, docker storage) stays healthy.
+func stubDoctorKubectlHostCredentialsExecFails(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"x_erun_expiration"*)`,
+		`    echo 'Defaulted container "erun-devops" out of: erun-devops, erun-dind, prepare-volumes (init)' >&2`,
+		`    echo 'error: Internal error occurred: unable to upgrade connection: container not found ("erun-devops")' >&2`,
+		`    exit 1`,
+		`    ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   0/2     Error   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
 		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,

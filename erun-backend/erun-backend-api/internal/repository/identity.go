@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
@@ -20,13 +22,22 @@ type IdentityRepository struct {
 	db      *bun.DB
 	dialect Dialect
 	orgKeys *issuerOrgKeyCache
+	// platformTenant is this instance's own declared tenant identity
+	// (ERUN_TENANT), used to name the tenant empty-database bootstrap enrols.
+	// Empty means that configuration is genuinely absent.
+	platformTenant string
 }
 
-func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
+func NewIdentityRepository(db *sql.DB, dialect Dialect, platformTenant string) *IdentityRepository {
 	if dialect == "" {
 		dialect = DialectPostgres
 	}
-	return &IdentityRepository{db: bun.NewDB(db, pgdialect.New()), dialect: dialect, orgKeys: newIssuerOrgKeyCache()}
+	return &IdentityRepository{
+		db:             bun.NewDB(db, pgdialect.New()),
+		dialect:        dialect,
+		orgKeys:        newIssuerOrgKeyCache(),
+		platformTenant: strings.TrimSpace(platformTenant),
+	}
 }
 
 // issuerOrgKeyCacheTTL bounds staleness so an issuer reconfigured between
@@ -124,20 +135,64 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 		if err == nil {
 			user, err = r.refreshUserUsername(ctx, tenant, user, claims)
 			if err != nil {
-				return model.Tenant{}, model.User{}, err
+				return model.Tenant{}, model.User{}, sanitizeResolutionError(err, "username refresh", tenant.TenantID, claims)
 			}
 			return tenant, user, nil
 		}
 		if !errors.Is(err, ErrNotFound) {
-			return model.Tenant{}, model.User{}, err
+			return model.Tenant{}, model.User{}, sanitizeResolutionError(err, "user lookup", tenant.TenantID, claims)
 		}
+		// The tenant resolved; this external identity is simply not one of
+		// its users (or, if the tenant has zero users, becomes its first).
+		// Either way this is a user-level outcome, not a tenant-resolution
+		// failure, so it is never wrapped in security.ErrTenantUnresolved.
 		user, err = r.bootstrapFirstTenantUser(ctx, tenant, claims)
-		return tenant, user, err
+		return tenant, user, sanitizeResolutionError(err, "bootstrap first tenant user", tenant.TenantID, claims)
 	}
-	if !errors.Is(err, ErrNotFound) {
+	if errors.Is(err, security.ErrTenantUnresolved) {
 		return model.Tenant{}, model.User{}, err
 	}
-	return r.bootstrapFirstIdentity(ctx, claims)
+	if !errors.Is(err, ErrNotFound) {
+		return model.Tenant{}, model.User{}, sanitizeResolutionError(err, "tenant lookup", "", claims)
+	}
+	tenant, user, err := r.bootstrapFirstIdentity(ctx, claims)
+	if err != nil {
+		// bootstrapFirstIdentity only ever succeeds against a genuinely empty
+		// tenants table, so a failure here means this token's issuer really
+		// maps to no tenant at all -- the same "unresolved" condition
+		// ResolveTenantByIssuer reports directly for an org-scoped issuer's
+		// missing/unmatched org claim, not "you are not enrolled" (there is
+		// no tenant to be enrolled in).
+		err = sanitizeResolutionError(err, "bootstrap first identity", "", claims)
+		return model.Tenant{}, model.User{}, fmt.Errorf("%w: %s", security.ErrTenantUnresolved, err.Error())
+	}
+	return tenant, user, nil
+}
+
+// sanitizeResolutionError logs a raw PostgreSQL error -- a constraint name
+// and SQLSTATE, meaningless to an operator or to the console rendering it as
+// the auth-rejection message -- before ResolveIdentity can return it, and
+// replaces it with ErrIdentityResolutionFailed. step names which internal
+// branch produced it (e.g. "username refresh" vs "bootstrap first tenant
+// user"), since both write to users and can violate the identical
+// users_tenant_username_key constraint, and are otherwise indistinguishable
+// once the error reaches the auth-rejected log line alone (erun#1752).
+// Errors already classified as ErrNotFound or security.ErrTenantUnresolved
+// pass through unchanged -- they are safe, expected outcomes, not internal
+// failures.
+func sanitizeResolutionError(err error, step string, tenantID string, claims security.Claims) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrNotFound) || errors.Is(err, security.ErrTenantUnresolved) {
+		return err
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	log.Printf("erun api identity resolution failed step=%q tenant=%q issuer=%q subject=%q reason=%q", step, tenantID, claims.Issuer, claims.Subject, "unexpected database error")
+	return ErrIdentityResolutionFailed
 }
 
 func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant model.Tenant, user model.User, claims security.Claims) (model.User, error) {
@@ -146,6 +201,7 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 		return user, nil
 	}
 
+	refreshed := user
 	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if r.dialect == DialectPostgres {
 			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
@@ -162,14 +218,25 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 			 WHERE tenant_id = ?
 			   AND user_id = ?
 			RETURNING user_id, tenant_id, username, created_at, updated_at
-		`, username, tenant.TenantID, user.UserID).Scan(ctx, &user)
+		`, username, tenant.TenantID, user.UserID).Scan(ctx, &refreshed)
 		return normalizeNoRows(err)
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			// The token's claimed username now collides with a different user
+			// already enrolled under it in this tenant. That is a
+			// display-name refresh failing, not a reason to refuse
+			// authentication for an identity that already resolved — sign the
+			// caller in under the username already on record instead of
+			// surfacing the raw constraint violation as an auth rejection
+			// reason.
+			log.Printf("erun api identity username refresh skipped tenant=%q user=%q requestedUsername=%q reason=%q", tenant.TenantID, user.UserID, username, "username already in use by another user in this tenant")
+			return user, nil
+		}
 		return model.User{}, err
 	}
-	log.Printf("erun api identity refreshed username tenant=%q user=%q username=%q", tenant.TenantID, user.UserID, user.Username)
-	return user, nil
+	log.Printf("erun api identity refreshed username tenant=%q user=%q username=%q", tenant.TenantID, user.UserID, refreshed.Username)
+	return refreshed, nil
 }
 
 // ResolveTenantByIssuer maps a verified token to its tenant. The issuer's org-scoping
@@ -177,10 +244,14 @@ func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant mod
 // (resolve by issuer alone, the common BYO/external-IdP case); a set key names
 // the token claim whose value selects the tenant among that issuer's orgs
 // (shared multi-tenant issuer, e.g. a hosted Zitadel). An org-scoped issuer
-// whose token carries no matching org claim returns ErrNotFound — unauthorized,
-// and never bootstraps once tenants exist (bootstrapFirstIdentity guards on an
-// empty tenants table). An unregistered issuer also returns ErrNotFound, which
-// routes to first-identity bootstrap when the database is empty.
+// whose token carries no matching org claim, or whose org claim matches no
+// registered tenant, returns security.ErrTenantUnresolved: the issuer is known,
+// but this token cannot be mapped to one of its tenants — distinct from "not
+// enrolled", which requires a tenant to already have been resolved. An
+// unregistered issuer returns plain ErrNotFound, which routes to
+// first-identity bootstrap when the database is empty (ResolveIdentity wraps
+// a failed bootstrap attempt in security.ErrTenantUnresolved too, since that
+// only ever fails once a tenant already exists elsewhere).
 func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims security.Claims) (model.Tenant, error) {
 	issuer := strings.TrimSpace(claims.Issuer)
 	orgFieldKey, registered, err := r.orgFieldKeyForIssuer(ctx, issuer)
@@ -192,10 +263,11 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims s
 	}
 
 	var tenant model.Tenant
+	var org string
 	if orgFieldKey != "" {
-		org := orgClaimValue(claims.Raw, orgFieldKey)
+		org = orgClaimValue(claims.Raw, orgFieldKey)
 		if org == "" {
-			return model.Tenant{}, ErrNotFound
+			return model.Tenant{}, fmt.Errorf("%w: issuer %q is org-scoped (claim %q) but the token carries no matching claim", security.ErrTenantUnresolved, issuer, orgFieldKey)
 		}
 		err = r.db.NewRaw(`
 			SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
@@ -212,7 +284,14 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, claims s
 		`, issuer).Scan(ctx, &tenant)
 	}
 	if err != nil {
-		return model.Tenant{}, normalizeNoRows(err)
+		err = normalizeNoRows(err)
+		if errors.Is(err, ErrNotFound) {
+			if orgFieldKey != "" {
+				return model.Tenant{}, fmt.Errorf("%w: issuer %q has no tenant registered for org %q", security.ErrTenantUnresolved, issuer, org)
+			}
+			return model.Tenant{}, fmt.Errorf("%w: issuer %q is registered but has no tenant mapping", security.ErrTenantUnresolved, issuer)
+		}
+		return model.Tenant{}, err
 	}
 	return tenant, nil
 }
@@ -249,8 +328,37 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 	if err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
-	log.Printf("erun api identity enrolled first tenant/user tenant=%q tenantName=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
+	log.Printf("erun api identity enrolled first tenant/user tenant=%q tenantName=%q tenantNameSource=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, bootstrapTenantNameSource(r.platformTenant), tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
 	return tenant, user, nil
+}
+
+// defaultBootstrapTenantName is used when the platform's own tenant identity
+// (ERUN_TENANT) is not configured. Platforms already bootstrapped under this
+// name before ERUN_TENANT was read here keep working, since bootstrap only
+// ever runs once against an empty tenants table.
+const defaultBootstrapTenantName = "operations"
+
+// bootstrapTenantName resolves the name empty-database bootstrap enrols the
+// platform's own tenant under. The platform already declares which tenant it
+// is via ERUN_TENANT, and hosted provisioning resolves a tenant's runtime
+// image as <registry>/<tenant>-devops:<version>, so enrolling under that same
+// name is what lets the platform's first provision resolve an image it has
+// actually published instead of hunting for one nobody will ever publish.
+func bootstrapTenantName(platformTenant string) string {
+	if platformTenant != "" {
+		return platformTenant
+	}
+	return defaultBootstrapTenantName
+}
+
+// bootstrapTenantNameSource names which of the two bootstrapTenantName
+// branches produced the enrolled tenant's name, so the bootstrap log line
+// says why the name is what it is rather than just what it is.
+func bootstrapTenantNameSource(platformTenant string) string {
+	if platformTenant != "" {
+		return "ERUN_TENANT"
+	}
+	return "fallback"
 }
 
 // insertFirstIdentity creates the initial OPERATIONS tenant, its issuer, and the
@@ -266,7 +374,7 @@ func (r *IdentityRepository) insertFirstIdentity(ctx context.Context, tx bun.Tx,
 		return model.Tenant{}, model.User{}, ErrNotFound
 	}
 
-	tenant, err := r.insertTenant(ctx, tx, "operations", model.TenantTypeOperations)
+	tenant, err := r.insertTenant(ctx, tx, bootstrapTenantName(r.platformTenant), model.TenantTypeOperations)
 	if err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
@@ -277,7 +385,8 @@ func (r *IdentityRepository) insertFirstIdentity(ctx context.Context, tx bun.Tx,
 		return model.Tenant{}, model.User{}, err
 	}
 
-	if err := insertBootstrapIssuer(ctx, tx, claims.Issuer); err != nil {
+	orgFieldKey, orgFieldValue := bootstrapOrgScope(claims)
+	if err := insertBootstrapIssuer(ctx, tx, claims.Issuer, orgFieldKey, orgFieldValue); err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
 	user, err := r.insertUser(ctx, tx, bootstrapUsername(claims))
@@ -291,7 +400,7 @@ func (r *IdentityRepository) insertFirstIdentity(ctx context.Context, tx bun.Tx,
 	}); err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
-	if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
+	if err := r.insertDefaultUserAccess(ctx, tx, tenant.TenantID, user.UserID, claims.Issuer, claims.Subject); err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
 	return tenant, user, nil
@@ -312,9 +421,10 @@ func (r *IdentityRepository) bootstrapFirstTenantUser(ctx context.Context, tenan
 	return user, nil
 }
 
-// insertFirstTenantUser enrols the subject as the tenant's first user with the
-// predefined roles. A tenant that already has a user gets no implicit enrolment,
-// which is ErrNotFound so the caller rejects the unknown subject.
+// insertFirstTenantUser enrols the subject as the tenant's first user (see
+// insertTenantFirstUserAccess for which access it gets, which depends on the
+// tenant's type). A tenant that already has a user gets no implicit
+// enrolment, which is ErrNotFound so the caller rejects the unknown subject.
 func (r *IdentityRepository) insertFirstTenantUser(ctx context.Context, tx bun.Tx, tenant model.Tenant, claims security.Claims) (model.User, error) {
 	var userCount int
 	if err := tx.NewRaw(`SELECT COUNT(*) FROM users WHERE tenant_id = ?`, tenant.TenantID).Scan(ctx, &userCount); err != nil {
@@ -342,7 +452,7 @@ func (r *IdentityRepository) insertFirstTenantUser(ctx context.Context, tx bun.T
 	}); err != nil {
 		return model.User{}, err
 	}
-	if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
+	if err := r.insertTenantFirstUserAccess(ctx, tx, tenant, user.UserID, claims.Issuer, claims.Subject); err != nil {
 		return model.User{}, err
 	}
 	return user, nil
@@ -357,15 +467,43 @@ func (r *IdentityRepository) bindSecurityContext(ctx context.Context, tx bun.Tx,
 	return r.setPostgresSecurityContext(ctx, tx, securityContext)
 }
 
+// bootstrapOrgScopeClaims are the token claims that identify the caller's org
+// on an IdP erun itself ships. A platform's own IdP serves every tenant from
+// one issuer, so the bootstrap has to record which claim discriminates them —
+// otherwise the issuer is registered single-tenant and every later tenant on
+// it is permanently refused, with no API able to undo it.
+//
+// Only claims a shipped IdP is known to emit belong here. An unrecognised
+// issuer keeps the single-tenant registration, which is correct for a
+// dedicated per-tenant IdP and is what every existing deployment already has.
+var bootstrapOrgScopeClaims = []string{
+	// Zitadel, the IdP the erun-zitadel chart deploys. Requires the token to
+	// have been minted with the urn:zitadel:iam:user:resourceowner scope.
+	"urn:zitadel:iam:user:resourceowner:id",
+}
+
+// bootstrapOrgScope reports the org claim and value to register the bootstrap
+// issuer with, or empty strings to keep it single-tenant.
+func bootstrapOrgScope(claims security.Claims) (string, string) {
+	for _, key := range bootstrapOrgScopeClaims {
+		value, ok := claims.Raw[key].(string)
+		if ok && strings.TrimSpace(value) != "" {
+			return key, strings.TrimSpace(value)
+		}
+	}
+	return "", ""
+}
+
 // insertBootstrapIssuer registers the issuer before tenant_issuers references it
-// (tenant_issuers.issuer foreign-keys issuers.issuer). The bootstrap issuer is
-// single-tenant — org_field_key stays NULL — so the token's iss alone resolves
-// the tenant.
-func insertBootstrapIssuer(ctx context.Context, tx bun.Tx, issuer string) error {
-	if _, err := tx.NewRaw(`INSERT INTO issuers (issuer) VALUES (?) ON CONFLICT (issuer) DO NOTHING`, issuer).Exec(ctx); err != nil {
+// (tenant_issuers.issuer foreign-keys issuers.issuer). An orgFieldKey registers
+// the issuer as org-scoped, so later tenants can be added to the same IdP under
+// their own org; empty keeps it single-tenant, where the token's iss alone
+// resolves the tenant.
+func insertBootstrapIssuer(ctx context.Context, tx bun.Tx, issuer, orgFieldKey, orgFieldValue string) error {
+	if _, err := tx.NewRaw(`INSERT INTO issuers (issuer, org_field_key) VALUES (?, NULLIF(?, '')) ON CONFLICT (issuer) DO NOTHING`, issuer, orgFieldKey).Exec(ctx); err != nil {
 		return err
 	}
-	_, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name) VALUES (?, ?)`, issuer, defaultTenantIssuerName(issuer)).Exec(ctx)
+	_, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name, org_field_value) VALUES (?, ?, NULLIF(?, ''))`, issuer, defaultTenantIssuerName(issuer), orgFieldValue).Exec(ctx)
 	return err
 }
 
@@ -413,56 +551,161 @@ func (r *IdentityRepository) insertUser(ctx context.Context, tx bun.Tx, username
 	return user, nil
 }
 
-func (r *IdentityRepository) insertDefaultUserAccess(ctx context.Context, tx bun.Tx, userID string, issuer string, subject string) error {
-	readRoleID, err := r.insertRole(ctx, tx, "ReadAll")
-	if err != nil {
+// insertDefaultUserAccess links the bootstrapped user's external identity and
+// grants it ReadAll/WriteAll. Two callers need exactly this wildcard
+// operator reach rather than TenantAdmin: insertFirstIdentity (the
+// platform's own empty-database genesis bootstrap, creating the very first
+// OPERATIONS tenant) and insertTenantFirstUserAccess's OPERATIONS-tenant
+// case (any other OPERATIONS tenant's first user) — both have no other user
+// yet to administer even the platform's own tenant registration, IdP, or
+// bootstrap-name repair, which live only behind this wildcard. A COMPANY
+// tenant's first user goes through insertTenantFirstUserAccess's TenantAdmin
+// grant instead. tenantID must always be the enrolling tenant's own ID
+// explicitly: findOrCreateRole's
+// untenanted lookup mode relies on the active transaction's own RLS scoping
+// to stay tenant-safe, but that scoping only holds for the erun_tenant role.
+// An OPERATIONS-type tenant's own per-tenant-first-user bootstrap runs as
+// erun_operations, whose RLS policy is deliberately cross-tenant (USING
+// (true), the same reach the operations gate depends on elsewhere), so an
+// untenanted "WHERE name = ?" there can match a *different* tenant's
+// already-created ReadAll/WriteAll role — a real FK violation on
+// role_permissions, since registering a second OPERATIONS tenant (a
+// documented, legitimate action) is exactly what exposes it.
+func (r *IdentityRepository) insertDefaultUserAccess(ctx context.Context, tx bun.Tx, tenantID string, userID string, issuer string, subject string) error {
+	if err := insertUserExternalIdentity(ctx, tx, userID, issuer, subject); err != nil {
 		return err
 	}
-	writeRoleID, err := r.insertRole(ctx, tx, "WriteAll")
-	if err != nil {
+	if err := grantPredefinedRoles(ctx, tx, tenantID, userID); err != nil {
 		return err
 	}
-	statements := []struct {
-		query string
-		args  []any
+	// Also make TenantUser/TenantAdmin assignable in the platform's very
+	// first tenant immediately, rather than waiting for someone to first
+	// read GET /v1/roles (RoleRepository.List ensures them lazily too, the
+	// same self-healing path an already-bootstrapped tenant relies on).
+	return ensureNarrowerRolesExist(ctx, tx, tenantID)
+}
+
+// insertTenantFirstUserAccess links the bootstrapped user's external
+// identity and grants access for a tenant that already exists but has never
+// had a user sign in. For a COMPANY tenant this is the ordinary "a tenant
+// needs an admin" case: TenantAdmin, full administration of this tenant
+// including granting further roles, without the platform-operator reach
+// ReadAll/WriteAll would also carry inside an OPERATIONS tenant. For an
+// OPERATIONS tenant it defers to insertDefaultUserAccess instead — the same
+// ReadAll/WriteAll grant the platform's own genesis bootstrap uses — because
+// this tenant's root-resolution capabilities (registering another tenant,
+// administering the platform's own IdP, the one-time bootstrap-name repair)
+// live only behind that wildcard reach, and no other user exists yet in this
+// tenant to grant it later.
+func (r *IdentityRepository) insertTenantFirstUserAccess(ctx context.Context, tx bun.Tx, tenant model.Tenant, userID string, issuer string, subject string) error {
+	if tenant.Type == model.TenantTypeOperations {
+		return r.insertDefaultUserAccess(ctx, tx, tenant.TenantID, userID, issuer, subject)
+	}
+	if err := insertUserExternalIdentity(ctx, tx, userID, issuer, subject); err != nil {
+		return err
+	}
+	return grantFirstTenantUserRole(ctx, tx, tenant.TenantID, userID)
+}
+
+// insertUserExternalIdentity links the external identity that lets the
+// bootstrapped user actually sign in. tenant_id is left to the table's own
+// default (erun_current_tenant_id(), bound by the transaction's security
+// context already set before this runs), matching the original call site
+// this was factored out of.
+func insertUserExternalIdentity(ctx context.Context, tx bun.Tx, userID string, issuer string, subject string) error {
+	_, err := tx.NewRaw(`INSERT INTO user_external_ids (user_id, issuer, external_id) VALUES (?, ?, ?)`, userID, issuer, subject).Exec(ctx)
+	return err
+}
+
+// grantPredefinedRoles grants a user the two wildcard predefined roles.
+// tenantID is always the enrolling tenant's own ID, explicit rather than
+// relying on the active transaction's RLS scoping — see
+// insertDefaultUserAccess for why that scoping cannot be trusted for every
+// caller. findOrCreateRole makes this safe to call for a tenant's second and
+// later users too, since ReadAll/WriteAll are created once per tenant and
+// reused after that.
+func grantPredefinedRoles(ctx context.Context, tx bun.Tx, tenantID string, userID string) error {
+	specs := []struct {
+		name          string
+		methodPattern string
+		pathPattern   string
 	}{
-		{
-			query: `INSERT INTO user_external_ids (user_id, issuer, external_id) VALUES (?, ?, ?)`,
-			args:  []any{userID, issuer, subject},
-		},
-		{
-			query: `INSERT INTO role_permissions (role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?)`,
-			args:  []any{readRoleID, "^(GET|HEAD|OPTIONS)$", "^/.*$"},
-		},
-		{
-			query: `INSERT INTO role_permissions (role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?)`,
-			args:  []any{writeRoleID, "^(POST|PUT|PATCH|DELETE)$", "^/.*$"},
-		},
-		{
-			query: `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
-			args:  []any{userID, readRoleID},
-		},
-		{
-			query: `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
-			args:  []any{userID, writeRoleID},
-		},
+		{name: "ReadAll", methodPattern: "^(GET|HEAD|OPTIONS)$", pathPattern: "^/.*$"},
+		{name: "WriteAll", methodPattern: "^(POST|PUT|PATCH|DELETE)$", pathPattern: "^/.*$"},
 	}
-	for _, stmt := range statements {
-		if _, err := tx.NewRaw(stmt.query, stmt.args...).Exec(ctx); err != nil {
+	for _, spec := range specs {
+		roleID, err := findOrCreateRole(ctx, tx, tenantID, spec.name)
+		if err != nil {
+			return err
+		}
+		if err := grantRolePermissionPattern(ctx, tx, tenantID, roleID, spec.methodPattern, spec.pathPattern); err != nil {
+			return err
+		}
+		if err := grantUserRole(ctx, tx, tenantID, userID, roleID); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *IdentityRepository) insertRole(ctx context.Context, tx bun.Tx, name string) (string, error) {
+// findOrCreateRole returns the named role's id, creating it if this is the
+// tenant's first caller to need it.
+func findOrCreateRole(ctx context.Context, tx bun.Tx, tenantID string, name string) (string, error) {
 	var roleID string
-	err := tx.NewRaw(`
-		INSERT INTO roles (name)
-		VALUES (?)
-		RETURNING role_id
-	`, name).Scan(ctx, &roleID)
+	var err error
+	if tenantID != "" {
+		err = tx.NewRaw(`SELECT role_id FROM roles WHERE tenant_id = ? AND name = ?`, tenantID, name).Scan(ctx, &roleID)
+	} else {
+		err = tx.NewRaw(`SELECT role_id FROM roles WHERE name = ?`, name).Scan(ctx, &roleID)
+	}
+	if err == nil {
+		return roleID, nil
+	}
+	if !errors.Is(normalizeNoRows(err), ErrNotFound) {
+		return "", err
+	}
+	if tenantID != "" {
+		err = tx.NewRaw(`INSERT INTO roles (tenant_id, name) VALUES (?, ?) RETURNING role_id`, tenantID, name).Scan(ctx, &roleID)
+	} else {
+		err = tx.NewRaw(`INSERT INTO roles (name) VALUES (?) RETURNING role_id`, name).Scan(ctx, &roleID)
+	}
 	return roleID, err
+}
+
+// grantRolePermissionPattern is idempotent (ON CONFLICT DO NOTHING) because
+// findOrCreateRole may hand back a role that already carries this permission.
+func grantRolePermissionPattern(ctx context.Context, tx bun.Tx, tenantID string, roleID string, methodPattern string, pathPattern string) error {
+	var err error
+	if tenantID != "" {
+		_, err = tx.NewRaw(
+			`INSERT INTO role_permissions (tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?, ?)
+			 ON CONFLICT (tenant_id, role_id, api_method_pattern, api_path_pattern) DO NOTHING`,
+			tenantID, roleID, methodPattern, pathPattern,
+		).Exec(ctx)
+	} else {
+		_, err = tx.NewRaw(
+			`INSERT INTO role_permissions (role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?)
+			 ON CONFLICT (tenant_id, role_id, api_method_pattern, api_path_pattern) DO NOTHING`,
+			roleID, methodPattern, pathPattern,
+		).Exec(ctx)
+	}
+	return err
+}
+
+func grantUserRole(ctx context.Context, tx bun.Tx, tenantID string, userID string, roleID string) error {
+	var err error
+	if tenantID != "" {
+		_, err = tx.NewRaw(
+			`INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES (?, ?, ?) ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING`,
+			tenantID, userID, roleID,
+		).Exec(ctx)
+	} else {
+		_, err = tx.NewRaw(
+			`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?) ON CONFLICT (tenant_id, user_id, role_id) DO NOTHING`,
+			userID, roleID,
+		).Exec(ctx)
+	}
+	return err
 }
 
 func (r *IdentityRepository) ResolveUserByExternalID(ctx context.Context, tenantID string, issuer string, externalID string) (model.User, error) {

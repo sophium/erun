@@ -1,0 +1,2 @@
+audit: erun exec commit main values.yaml
+refusing to commit: the working tree has changes outside the declared paths: unrelated.txt

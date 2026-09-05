@@ -9,7 +9,7 @@ runtime run state: deployment team-devops is absent from namespace team-dev
 open: team-devops is not deployed, so there is nothing to wake
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
 kubectl --context test-context --namespace team-dev get deployment team-api -o name
-kubectl --context test-context --namespace team-dev port-forward service/team-api 17033:17033 --address <LOOPBACK>
+open: port-forwarding service/team-api if the check above finds the deployment present
 kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
 kubectl --context test-context --namespace team-dev exec -it deployment/team-devops -- /bin/sh -lc '<bootstrap-script>'
 bootstrap-script:
@@ -19,25 +19,31 @@ bootstrap-script:
   mkdir -p '<HOME>/git/team'
   cd '<HOME>/git/team'
   config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
-  mkdir -p "$config_home/erun"
-  cat > "$config_home/erun/config.yaml" <<'EOF'
+  if [ ! -f "$config_home/erun/config.yaml" ]; then
+    mkdir -p "$(dirname "$config_home/erun/config.yaml")"
+    cat > "$config_home/erun/config.yaml" <<'EOF'
   defaulttenant: team
 
   EOF
-  mkdir -p "$config_home/erun/team"
-  cat > "$config_home/erun/team/config.yaml" <<'EOF'
+  fi
+  if [ ! -f "$config_home/erun/team/config.yaml" ]; then
+    mkdir -p "$(dirname "$config_home/erun/team/config.yaml")"
+    cat > "$config_home/erun/team/config.yaml" <<'EOF'
   name: team
   defaultenvironment: dev
 
   EOF
-  mkdir -p "$config_home/erun/team/dev"
-  cat > "$config_home/erun/team/dev/config.yaml" <<'EOF'
+  fi
+  if [ ! -f "$config_home/erun/team/dev/config.yaml" ]; then
+    mkdir -p "$(dirname "$config_home/erun/team/dev/config.yaml")"
+    cat > "$config_home/erun/team/dev/config.yaml" <<'EOF'
   name: dev
   type: remote-agent
   localrepopath: <HOME>/git/team
   kubernetescontext: test-context
 
   EOF
+  fi
   mkdir -p "$HOME/.erun/team/dev"
   cat > "$HOME/.erun/team/dev/bashrc" <<'EOF'
   export ERUN_SHELL_HOST='team-dev'

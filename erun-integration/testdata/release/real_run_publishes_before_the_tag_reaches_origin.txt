@@ -22,6 +22,8 @@ Current branch main is up to date.
 stage: release
 [main <SHORTSHA>] [skip ci] release <VERSION>
  2 files changed, 4 insertions(+), 4 deletions(-)
+release: origin/main has not moved since sync-remote
+release: docker root free disk space is not observable from this process; skipping the headroom check
 stage: publish
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
@@ -35,6 +37,7 @@ promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
 ==> Verified published chart base <VERSION>
 stage: verify-publication
 ==> Verified published image ghcr.io/sophium/api:<VERSION>
+==> Verified published image ghcr.io/sophium/base:<VERSION>
 stage: post-release-version-bump
 [main <SHORTSHA>] [skip ci] prepare <VERSION>
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -44,3 +47,20 @@ To <TMP>
  * [new tag]         <VERSION> -> <VERSION>
 release version: <VERSION>
 ==> Released <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  release [<ELAPSED>]
+    post-release-version-bump [<ELAPSED>]
+    publish [<ELAPSED>]
+      api (cache hit) [<ELAPSED>]
+        linux/amd64 (cache hit) [<ELAPSED>]
+        linux/arm64 (cache hit) [<ELAPSED>]
+      base (cache hit) [<ELAPSED>]
+        linux/amd64 (cache hit) [<ELAPSED>]
+        linux/arm64 (cache hit) [<ELAPSED>]
+      chart api [<ELAPSED>]
+      chart base [<ELAPSED>]
+    push [<ELAPSED>]
+    release [<ELAPSED>]
+    sync-remote [<ELAPSED>]
+    verify-publication [<ELAPSED>]
+timing record written to <TMP>

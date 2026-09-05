@@ -1,0 +1,4 @@
+audit: erun exec plan-ruleset-bypass --dry-run --queue-actor erun-merge-queue --queue-actor-type MachineAccount --remote-url https://github.com/sophium/erun.git --ruleset-id 11081432
+plan-ruleset-bypass: resolving inputs
+plan-ruleset-bypass: input resolution failed: unsupported queue actor type MachineAccount
+queue actor type "MachineAccount" is not one of User, Integration, Team, RepositoryRole, OrganizationAdmin, DeployKey

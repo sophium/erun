@@ -1,4 +1,6 @@
+import { cloudNodeIsRunning } from '@/app/cloudNodeStatus';
 import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
+import type { CloudNodeOperation } from '@/app/model';
 import type { AppState } from '@/app/state';
 import type { UISelection } from '@/types';
 
@@ -46,7 +48,7 @@ export function isEnvOpenedAndRunning(
   if (!env) return false;
   if (!environmentTypeIsRemoteWorktree(env.type)) return true;
   if (idleStatus?.managedCloud) {
-    return (idleStatus.cloudContextStatus ?? '').trim().toLowerCase() === 'running';
+    return cloudNodeIsRunning(idleStatus.cloudContextStatus);
   }
   return true;
 }
@@ -77,22 +79,40 @@ export function formatGraceCountdown(seconds: number): string {
   return `in ${String(minutes)}m ${String(rem)}s`;
 }
 
+// idleCloudAction is the titlebar's power control for the selected
+// environment's cloud node. inFlight is the operation this desktop is running
+// against THAT node — cloudNodeOperationFor over the idle slice — and null when
+// there is none.
+//
+// The two verbs come from two different facts, and that separation is the whole
+// point. The idle verb is derived from the node's current state: a running
+// node's button offers to stop it. The progressive verb is derived from the
+// operation actually in flight, never from that state — state and operation
+// disagree precisely while an operation is running, which is the only time the
+// progressive label is shown, and deriving it from `running` is what made a
+// start announce "Stopping <node>" mid-start and claim a teardown that was not
+// happening.
 export function idleCloudAction(
   idleStatus: IdleStatus,
-  busy: boolean,
+  inFlight: CloudNodeOperation | null,
 ): { action: 'start' | 'stop'; label: string; busy: boolean } | null {
   const name = idleStatus.cloudContextName?.trim();
   if (!idleStatus.managedCloud || !name) {
     return null;
   }
   const displayName = idleCloudDisplayName(idleStatus, name);
-  const running = idleStatus.cloudContextStatus?.trim().toLowerCase() === 'running';
-  const verbActive = running ? 'Stopping' : 'Starting';
-  const verbIdle = running ? 'Stop' : 'Start';
+  if (inFlight) {
+    return {
+      action: inFlight,
+      label: `${inFlight === 'stop' ? 'Stopping' : 'Starting'} ${displayName}`,
+      busy: true,
+    };
+  }
+  const action = cloudNodeIsRunning(idleStatus.cloudContextStatus) ? 'stop' : 'start';
   return {
-    action: running ? 'stop' : 'start',
-    label: busy ? `${verbActive} ${displayName}` : `${verbIdle} ${displayName}`,
-    busy,
+    action,
+    label: `${action === 'stop' ? 'Stop' : 'Start'} ${displayName}`,
+    busy: false,
   };
 }
 
@@ -135,12 +155,24 @@ function isPersistentIdleBlocker(reason: string): boolean {
 }
 
 export function idleStatusTooltipLines(idleStatus: IdleStatus): string[] {
-  const lines = idleStatusSummaryLines(idleStatus);
+  const lines: string[] = [];
+  appendIdleProvenanceLine(lines, idleStatus);
+  lines.push(...idleStatusSummaryLines(idleStatus));
   appendIdleBlockerLine(lines, idleStatus);
   appendIdleCloudContextLine(lines, idleStatus);
   lines.push(...idleStatusActiveMarkerLines(idleStatus));
   appendIdleStopOutcomeLines(lines, idleStatus);
   return lines;
+}
+
+// Leads the tooltip, ahead of the countdown itself, because a reading the
+// pod never confirmed is the caveat that changes how the rest of the tooltip
+// should be read — not a footnote after it.
+function appendIdleProvenanceLine(lines: string[], idleStatus: IdleStatus): void {
+  if (idleStatus.fromPod) {
+    return;
+  }
+  lines.push('Not confirmed with the pod: showing the last known state; it may be stale.');
 }
 
 function idleStatusSummaryLines(idleStatus: IdleStatus): string[] {
@@ -252,6 +284,7 @@ function appendIdleStopOutcomeLines(lines: string[], idleStatus: IdleStatus): vo
 
 export function idleStatusAccessibleLabel(idleStatus: IdleStatus): string {
   const parts = [
+    ...(idleStatus.fromPod ? [] : ['not confirmed with the pod, showing the last known state']),
     `Idle timeout ${String(idleStatus.timeoutSeconds)} seconds`,
     `seconds until stop ${String(idleStatus.secondsUntilStop)}`,
     `stop eligible ${idleStatus.stopEligible ? 'yes' : 'no'}`,
@@ -263,10 +296,17 @@ export function idleStatusAccessibleLabel(idleStatus: IdleStatus): string {
   if (idleStatus.stopError) {
     parts.push(`stop error: ${idleStatus.stopError}`);
   }
-  if (idleStatus.cloudContextName) {
-    parts.push(
-      `cloud environment ${idleStatus.cloudContextLabel?.trim() ? idleStatus.cloudContextLabel : (idleStatus.cloudContextName ?? '')}${idleStatus.cloudContextStatus ? ` ${idleStatus.cloudContextStatus}` : ''}`,
-    );
-  }
+  appendIdleAccessibleCloudContextPart(parts, idleStatus);
   return parts.join(', ');
+}
+
+function appendIdleAccessibleCloudContextPart(parts: string[], idleStatus: IdleStatus): void {
+  if (!idleStatus.cloudContextName) {
+    return;
+  }
+  const label = idleStatus.cloudContextLabel?.trim()
+    ? idleStatus.cloudContextLabel
+    : idleStatus.cloudContextName;
+  const status = idleStatus.cloudContextStatus ? ` ${idleStatus.cloudContextStatus}` : '';
+  parts.push(`cloud environment ${label}${status}`);
 }

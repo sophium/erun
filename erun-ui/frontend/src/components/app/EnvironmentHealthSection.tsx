@@ -1,3 +1,4 @@
+import { Button, cn } from 'erun-kit';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -15,10 +16,8 @@ import {
   deployFromHealthCheck,
   focusRegistryFieldFromHealthCheck,
 } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import type { UIEnvironmentHealthCheck } from '@/uiDiagnosticsTypes';
 
 type ManageDialog = AppState['manageDialog'];
@@ -46,7 +45,7 @@ export function EnvironmentHealthSection({ dialog }: { dialog: ManageDialog }): 
           disabled={dialog.busy || dialog.configLoading || loading}
           onClick={() =>
             void dispatch(checkManageEnvironmentHealth()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             })
           }
         >
@@ -78,7 +77,7 @@ export function EnvironmentHealthSection({ dialog }: { dialog: ManageDialog }): 
 function HealthyBanner(): React.ReactElement {
   return (
     <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius)] border border-green-600/35 bg-green-600/10 px-3 py-2 text-[13px] leading-[1.4]">
-      <CheckCircle2 className="size-4 text-green-600 dark:text-green-500" aria-hidden="true" />
+      <CheckCircle2 className="size-4 text-green-700 dark:text-green-400" aria-hidden="true" />
       <span className="font-medium">All checks passed.</span>
     </div>
   );
@@ -128,7 +127,7 @@ function HealthCheckFix({
         disabled={disabled}
         onClick={() =>
           void dispatch(deployFromHealthCheck()).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           })
         }
       >
@@ -183,7 +182,7 @@ function HealthCheckIcon({ tone }: { tone: HealthTone }): React.ReactElement {
   if (tone === 'ok') {
     return (
       <CheckCircle2
-        className="size-4 shrink-0 text-green-600 dark:text-green-500"
+        className="size-4 shrink-0 text-green-700 dark:text-green-400"
         aria-hidden="true"
       />
     );
@@ -192,6 +191,6 @@ function HealthCheckIcon({ tone }: { tone: HealthTone }): React.ReactElement {
     return <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden="true" />;
   }
   return (
-    <HelpCircle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+    <HelpCircle className="size-4 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />
   );
 }

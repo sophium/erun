@@ -3,10 +3,14 @@ package integration
 import (
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,6 +84,24 @@ func portForwardStateFile(setup env.Setup, kind, tenant, environment string) str
 		base = filepath.Join(setup.Home, "Library", "Application Support")
 	}
 	return filepath.Join(base, "erun", "portforward", kind, tenant, environment+".json")
+}
+
+// writePortForwardState writes the per-env forward record erun itself would
+// have written, so a scenario can start from "erun already established this
+// forward" without a first pass. processID must name a real process: production
+// stops the recorded forward by that PID.
+func writePortForwardState(t *testing.T, setup env.Setup, kind, tenant, environment string, localPort, processID int) {
+	t.Helper()
+	path := portForwardStateFile(setup, kind, tenant, environment)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s state dir: %v", kind, err)
+	}
+	body := fmt.Sprintf(
+		`{"tenant":%q,"environment":%q,"kubernetesContext":"test-context","namespace":"%s-%s","localPort":%d,"processId":%d}`,
+		tenant, environment, tenant, environment, localPort, processID)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s state: %v", kind, err)
+	}
 }
 
 // adoptHolder describes one fake TCP port holder the lsof/ps probe stubs
@@ -165,6 +187,23 @@ func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 	return append(envVars, openHostOSOverride)
 }
 
+// stubKubectlKlogFramedError reproduces erun#1766's real captured toast
+// verbatim: client-go's klog "Unhandled Error" carrier around the same
+// connection-refused cause stubKubectlGenericError uses, framed with the
+// severity/timestamp/goroutine-id/source-location an operator can never act
+// on.
+func stubKubectlKlogFramedError(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	stubs := setup.Cwd + "/stubs"
+	fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+		Stderr:   `E0831 13:46:43.793908   10289 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://127.0.0.1:6443/api?timeout=32s\": dial tcp 127.0.0.1:6443: connect: connection refused"`,
+		ExitCode: 1,
+	})
+	stubLsofNoHolder(t, stubs)
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+	return append(envVars, openHostOSOverride)
+}
+
 // stubLsofNoHolder keeps the adopt-or-conflict probe silent in scenarios that
 // don't drive it, so a developer's leftover `kubectl port-forward` on an erun
 // default port can't fire the probe mid-scenario and corrupt the golden.
@@ -191,8 +230,29 @@ func stubKubectlRunState(t *testing.T, setup env.Setup, desired, ready int) []st
 	return append(envVars, openHostOSOverride)
 }
 
+// stubKubectlRunStateWithFailingWait is stubKubectlRunState's sibling for
+// proving the wake path's kubectl-deployment-wait library dispatch
+// (WaitRuntimeAvailable, stop.go) actually engages: it answers the run-state
+// read like stubKubectlRunState, but fails loudly and distinctively for the
+// "wait --for=condition=Available" argv shape instead of silently succeeding,
+// so a fallback to the subprocess path surfaces as a recognizable failure.
+func stubKubectlRunStateWithFailingWait(t *testing.T, stubsDir string, desired, ready int) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *jsonpath=*) printf '%s' '` + strconv.Itoa(desired) + `/` + strconv.Itoa(ready) + `'; exit 0 ;;`,
+		`  *"wait --for=condition=Available"*)`,
+		`    printf '%s\n' "fell through to the kubectl subprocess for the wait check" >&2`,
+		`    exit 1 ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
 func TestOpen(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		result := erun.Run(t, []string{"open", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
@@ -201,7 +261,20 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("refuses_host_environment", func(t *testing.T) {
+		t.Parallel()
+		// A host env has no pod and no cluster to open a kubectl-exec shell
+		// into — its worktree is already the operator's own directory, so open
+		// refuses and points there instead of resolving a kubernetes context
+		// (of which it has none) or attempting a port-forward.
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"open", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "open/refuses_host_environment", normalize.Apply(result.Combined))
+	})
+
 	t.Run("no_shell_dry_run", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
@@ -209,11 +282,47 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/no_shell_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("no_tty_dry_run_falls_back_to_no_shell", func(t *testing.T) {
+		t.Parallel()
+		// The stale-forward recovery advice names bare `erun open <tenant>
+		// <env>`, which a non-interactive caller (an MCP client, an
+		// orchestrator, a script) runs with no TTY on stdin — this harness's
+		// default piped stdin stands in for that. Without --no-shell on the
+		// command line, open must still take the no-shell branch on its own:
+		// a real kubectl exec -it there would read EOF and return almost
+		// instantly, exiting before anything supervises the port-forwards
+		// just started.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/no_tty_dry_run_falls_back_to_no_shell", normalize.Apply(result.Combined))
+	})
+
+	t.Run("no_tty_dry_run_falls_back_to_no_shell_stdin_dev_null", func(t *testing.T) {
+		t.Parallel()
+		// The scenario above already runs with stdin unset, which erun.Run
+		// binds to an in-memory pipe — never a character device, so it cannot
+		// reproduce a stat-based TTY check confusing a non-terminal character
+		// device for a terminal. Binding stdin to the real OS null device
+		// (StdinFromDevNull) is what actually exercises that: /dev/null is a
+		// character device but not a terminal, and a `command < /dev/null`
+		// invocation is the conventional way callers make a command
+		// non-interactive. Same assertion as the scenario above; the point of
+		// this one is the stdin source, not a different resolved plan.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, StdinFromDevNull: true})
+		golden.Equal(t, "open/no_tty_dry_run_falls_back_to_no_shell", normalize.Apply(result.Combined))
+	})
+
 	// zshAliasLine is the exact alias production appends for team/dev under
 	// zsh; the tests assert the startup file gains this line verbatim.
 	const zshAliasLine = `alias team-dev='eval "$(erun open team dev --no-shell)"'`
 
 	t.Run("alias_prompt_dry_run_accept_traces_append", func(t *testing.T) {
+		t.Parallel()
 		// ERUN_FORCE_TTY=1 lifts the stdout-TTY gate so the alias-setup flow
 		// runs in the piped harness; SHELL=/bin/zsh pins the startup file to
 		// ~/.zshrc. Accepting in --dry-run must trace the append but leave
@@ -240,6 +349,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("alias_prompt_decline_prints_hint", func(t *testing.T) {
+		t.Parallel()
 		// Declining ("n") must print the alias hint and write no file.
 		// ERUN_FORCE_TTY=1 lifts the TTY gate; SHELL=/bin/zsh pins ~/.zshrc.
 		setup := env.New(t)
@@ -332,6 +442,11 @@ func TestOpen(t *testing.T) {
 		// Real-run --no-shell still emits the setup preamble on stdout; pin
 		// DetectHost so its dialect stays POSIX. See openHostOSOverride.
 		envVars = append(envVars, openHostOSOverride)
+		// The runtime chart ladder must confirm erun-devops published at the
+		// version before installing it; the seam stands in for that registry
+		// read. Both the persisted 1.0.0 (the deploy-decision phase) and the
+		// requested 9.9.9 (the actual deploy) are resolved along the way.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0,erun-devops:9.9.9")
 		result := erun.Run(t, []string{"open", "team", "dev", "--version", "9.9.9", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{
 			Cwd: setup.Cwd,
 			Env: envVars,
@@ -355,6 +470,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("vscode_real_run_with_deploy_requires_shell_deploy_errors", func(t *testing.T) {
+		t.Parallel()
 		// open is pure: it does not deploy. --deploy is the
 		// operator-convenience shortcut, but an IDE launch has no shell to
 		// host the deploy progress, so even `open --deploy --vscode` must
@@ -374,6 +490,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_shell_real_run_not_deployed_errors", func(t *testing.T) {
+		t.Parallel()
 		// open is a pure primitive and does not deploy. A port-forward that
 		// can't bind is no longer fatal, so a genuinely undeployed runtime is
 		// caught up front by deployment presence — the run fails fast with an
@@ -391,7 +508,55 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/no_shell_real_run_not_deployed_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("no_shell_real_run_check_unreachable_errors_without_claiming_absence", func(t *testing.T) {
+		t.Parallel()
+		// The deployment presence check can fail without ever getting an
+		// answer — no context, an unreachable API server, credentials or
+		// permissions refused. That is not evidence the deployment is absent,
+		// so ensureRuntimeDeployed must surface the check's own classified
+		// error (naming the cause, carrying kubectl's real output) rather than
+		// the "is not deployed; run erun deploy" text reserved for a confirmed
+		// absence. The generic-error kubectl stub ("Unable to connect to the
+		// server: ... i/o timeout") is the decision input; no ports are needed
+		// because the run errors before the forwards.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlGenericError(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the deployment check could not resolve an answer, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "is not deployed") {
+			t.Fatalf("a check that could not ask the cluster must never read as absence, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/no_shell_real_run_check_unreachable_errors_without_claiming_absence", normalize.Apply(result.Combined))
+	})
+
+	t.Run("no_shell_real_run_check_unreachable_sanitizes_klog_framed_error", func(t *testing.T) {
+		t.Parallel()
+		// erun#1766: the same unreachable-cluster path above, but with the
+		// exact klog "Unhandled Error" shape client-go actually emits
+		// (severity, timestamp, goroutine id, Go source location wrapping
+		// the real cause). Before the fix, checkKubernetesDeploymentWithContext
+		// pasted this verbatim, so the operator-facing error carried
+		// kubectl-internal noise around the one sentence that named the
+		// unreachable address. It must instead read as the cause alone,
+		// with the kube context named from erun's own config.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlKlogFramedError(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the deployment check could not resolve an answer, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "is not deployed") {
+			t.Fatalf("a check that could not ask the cluster must never read as absence, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/no_shell_real_run_check_unreachable_sanitizes_klog_framed_error", normalize.Apply(result.Combined))
+	})
+
 	t.Run("alias_prompt_skipped_when_alias_configured", func(t *testing.T) {
+		t.Parallel()
 		// When ~/.zshrc already carries the team-dev alias,
 		// detectOpenNoShellAliasStartupFile reports it configured
 		// (startupFileHasAlias true branch) and the whole prompt is skipped:
@@ -444,6 +609,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("alias_powershell_dialect_prints_function_hint", func(t *testing.T) {
+		t.Parallel()
 		// SHELL=/bin/pwsh resolves the PowerShell dialect:
 		// detectOpenNoShellAliasStartupFile refuses a startup file, so the
 		// flow takes the hint-lines-only arm — "one-liner function:" plus the
@@ -458,6 +624,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("snapshot_env_config_drives_local_build", func(t *testing.T) {
+		t.Parallel()
 		// A local env whose config carries the legacy snapshot=true key
 		// migrates to type=local-agent on read, so BuildsHere() is true and
 		// `erun open` reaches the local-build branch. allowLocalBuilds is
@@ -473,6 +640,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("version_override_skips_local_build", func(t *testing.T) {
+		t.Parallel()
 		// --version pins the runtime chart to a specific version; the
 		// builder branch must be skipped (no docker build) and the helm
 		// upgrade must reference the override version explicitly.
@@ -485,6 +653,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("runtime_image_override_uses_default_chart", func(t *testing.T) {
+		t.Parallel()
 		// --runtime-image rewrites the runtime release to use the
 		// embedded default-devops chart with the chosen image. There is
 		// no local devops module seeded, so the path exercises
@@ -498,6 +667,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("vscode_without_sshd_errors_with_guidance", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -505,6 +675,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("intellij_without_sshd_errors_with_guidance", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -512,6 +683,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("vscode_and_intellij_conflict", func(t *testing.T) {
+		t.Parallel()
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -522,6 +694,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("remote_dry_run_traces_port_forwards", func(t *testing.T) {
+		t.Parallel()
 		// Exercises cmd/api_port_forward.go and cmd/mcp_port_forward.go:
 		// for a remote environment, --dry-run must trace the kubectl
 		// port-forward commands that would be started for both API and
@@ -536,6 +709,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("remote_dry_run_aws_alias_propagates_host_credentials", func(t *testing.T) {
+		t.Parallel()
 		// Locks the deploy plumbing that ships host AWS credentials into a
 		// remote runtime: attaching an AWS cloud alias to the env (the operator
 		// opting it into acting on their behalf) makes the helm command include
@@ -555,6 +729,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("dry_run_configured_aws_alias_refreshes_host_credentials", func(t *testing.T) {
+		t.Parallel()
 		// Injected host credentials are temporary and nothing else renews them,
 		// so open refreshes them at the moment the operator declares they are
 		// about to use the env. The plan must show the wait and the exec that
@@ -575,6 +750,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_dry_run_pure_open_does_not_deploy", func(t *testing.T) {
+		t.Parallel()
 		// open is a pure primitive: it does not deploy. The
 		// desktop composes build→push→deploy on create / via the Deploy
 		// button and spawns tabs that just open the shell, so the default
@@ -583,12 +759,18 @@ func TestOpen(t *testing.T) {
 		// runs, which holds the tab until the runtime is reachable.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1 mirrors the desktop's real invocation: an --app-session
+		// tab runs inside a dtach-allocated pty, so stdin really is a TTY there,
+		// unlike this harness's piped default. Without it open would now take the
+		// non-interactive no-shell branch instead of the shell preview this
+		// scenario exists to lock.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_dry_run_pure_open_does_not_deploy", normalize.Apply(result.Combined))
 	})
 
 	t.Run("deploy_flag_dry_run_deploys_runtime_before_opening", func(t *testing.T) {
+		t.Parallel()
 		// --deploy is the operator-convenience shortcut: open
 		// deploys the runtime before opening. The kubectl NotFound stub is the
 		// deployment-check decision input so the resolver picks the deploy
@@ -599,6 +781,9 @@ func TestOpen(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
+		// The runtime chart ladder must confirm erun-devops published at the
+		// version before installing it; the seam stands in for that registry read.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		result := erun.Run(t, []string{"open", "team", "dev", "--deploy", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -607,6 +792,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("dry_run_wakes_stopped_runtime_before_forwarding", func(t *testing.T) {
+		t.Parallel()
 		// The load-bearing wake: kubectl port-forward cannot attach to a
 		// Deployment with zero replicas, so a stopped environment must be scaled
 		// back up and waited for BEFORE the forwards are traced. The run-state
@@ -622,7 +808,27 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/dry_run_wakes_stopped_runtime_before_forwarding", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_unaffected_by_kubectl_deployment_wait_library_execution_mode", func(t *testing.T) {
+		t.Parallel()
+		// Locks the dry-run/audit contract for kubectl-deployment-wait: the
+		// wake plan must stay byte-identical to the subprocess-mode golden
+		// (dry_run_wakes_stopped_runtime_before_forwarding) even with
+		// execution.modes.kubectl-deployment-wait=library, since
+		// WaitRuntimeAvailable only ever renders the trace line and never
+		// calls libraryWaitForDeploymentAvailable on a dry run.
+		setup := env.New(t)
+		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
+		envVars := stubKubectlRunState(t, setup, 0, 0)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/dry_run_wakes_stopped_runtime_before_forwarding", normalize.Apply(result.Combined))
+	})
+
 	t.Run("reconnect_dry_run_refuses_to_start_a_stopped_runtime", func(t *testing.T) {
+		t.Parallel()
 		// The other half of the wake contract. A supervisor respawning `open` to
 		// re-establish a dropped session is not the operator opening the
 		// environment — and a stop is exactly what drops every session — so the
@@ -638,7 +844,77 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/reconnect_dry_run_refuses_to_start_a_stopped_runtime", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_kubectl_deployment_wait_library_execution_mode_wakes_a_stopped_runtime", func(t *testing.T) {
+		t.Parallel()
+		// Proves the wake path's dispatch (WaitRuntimeAvailable, stop.go)
+		// engages the library path too, not just open.go's/doctor.go's: it
+		// bypasses RunRawCommand entirely in library mode rather than
+		// sharing its subprocess plumbing, so it needs its own real-run
+		// proof rather than inheriting the other two call sites' coverage.
+		// The kubectl stub fails loudly and distinctively only for the
+		// "wait --for=condition=Available" argv shape (the run-state read
+		// and the scale call still succeed), so a fallback to the
+		// subprocess path surfaces as a recognizable failure instead of
+		// silently passing.
+		setup := env.New(t)
+		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubKubectlRunStateWithFailingWait(t, stubs, 0, 0)
+		stubLsofNoHolder(t, stubs)
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/apis/apps/v1/namespaces/team-dev/deployments/team-devops" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"team-devops","namespace":"team-dev"},`+
+				`"status":{"conditions":[{"type":"Available","status":"True"}]}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+		envVars = append(envVars, openHostOSOverride)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("wake wait used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+	})
+
 	t.Run("reconnect_dry_run_reattaches_a_running_runtime", func(t *testing.T) {
+		t.Parallel()
 		// A reconnect against a running environment is the common case and must
 		// stay a normal open: forwards rebound, no scale, and — the part that
 		// matters — no config write, so an intent recorded from elsewhere is not
@@ -654,6 +930,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("dry_run_running_runtime_wake_is_quiet", func(t *testing.T) {
+		t.Parallel()
 		// The common path must stay silent: an environment already running gets
 		// one run-state read and no scale call, so `open` does not churn the
 		// cluster on every invocation. The negative is the point of the golden.
@@ -668,6 +945,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("deploy_flag_dry_run_clears_stop_intent_before_rendering_the_chart", func(t *testing.T) {
+		t.Parallel()
 		// stop → deploy → open, third leg. The recorded stop must be cleared
 		// BEFORE helm renders, or the rollout would re-apply replicas: 0 and the
 		// wake would have to undo its own deploy. The golden therefore shows the
@@ -676,6 +954,9 @@ func TestOpen(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedStoppedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlRunState(t, setup, 0, 0)
+		// The runtime chart ladder must confirm erun-devops published at the
+		// version before installing it; the seam stands in for that registry read.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		result := erun.Run(t, []string{"open", "team", "dev", "--deploy", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -684,6 +965,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("deploy_flag_dry_run_fresh_env_requires_runtime_version", func(t *testing.T) {
+		t.Parallel()
 		// The fresh-env coverage gap that hid the regression: an env with
 		// no persisted runtimeversion and no local/published chart. With
 		// --deploy, the published-chart resolver bails with the "runtime
@@ -702,6 +984,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("app_session_ai_dry_run_wraps_dtach_and_launches_claude", func(t *testing.T) {
+		t.Parallel()
 		// The desktop AI tab runs `erun open --app-session ai --ai`. Without
 		// --no-shell the dry-run reaches traceShellPreview, so the bootstrap-script
 		// block locks that the remote program is wrapped in a persistent dtach
@@ -711,12 +994,14 @@ func TestOpen(t *testing.T) {
 		// model rather than the agent's own default.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_ai_dry_run_wraps_dtach_and_launches_claude", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", func(t *testing.T) {
+		t.Parallel()
 		// When the env config sets a default Claude model that is in
 		// the env's available models, and opts in to verbose+debug, the AI
 		// session's create-time program must carry `--model <m> --verbose
@@ -730,12 +1015,14 @@ func TestOpen(t *testing.T) {
 				"  defaultmodel: fable\n"+
 				"  verbosedebug: true\n"+
 				"  effort: high\n")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_ai_dry_run_falls_back_to_available_when_default_dropped", func(t *testing.T) {
+		t.Parallel()
 		// A chosen default no longer among the env's available models is
 		// dropped; the session falls back to the first available model rather
 		// than starting on none.
@@ -744,12 +1031,14 @@ func TestOpen(t *testing.T) {
 			"claude:\n"+
 				"  models: [opus]\n"+
 				"  defaultmodel: fable\n")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_ai_dry_run_falls_back_to_available_when_default_dropped", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_ai_dry_run_gateway_auth_disables_remote_control", func(t *testing.T) {
+		t.Parallel()
 		// The managed AI session enables Claude Code Remote Control by default
 		// (named <tenant>/<env>) so it is drivable from the Claude iOS app — but
 		// Remote Control pairs through the claude.ai account relay, which the
@@ -760,36 +1049,42 @@ func TestOpen(t *testing.T) {
 		fixture.SeedRemoteTenantEnvWithClaude(t, setup, "team", "dev",
 			"claude:\n"+
 				"  usemantle: true\n")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_ai_dry_run_gateway_auth_disables_remote_control", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_shell_dry_run_wraps_dtach", func(t *testing.T) {
+		t.Parallel()
 		// The ERun and custom "Terminal N" tabs run `erun open --app-session open-N`:
 		// the same persistent dtach session but running a plain interactive shell —
 		// no claude launch and no contribute prelude in the launcher body.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_shell_dry_run_wraps_dtach", normalize.Apply(result.Combined))
 	})
 
 	t.Run("app_session_contribute_ai_dry_run_preludes_clone", func(t *testing.T) {
+		t.Parallel()
 		// The contribute-AI tab runs `erun open --app-session contribute-ai
 		// --contribute --ai`. The persistent dtach launcher must prepend the
-		// contribute prelude (contribute toolchain on PATH, ERUN_SKIP_LINT, cd into
-		// the cloned repo) before launching the cwd-guarded claude, all inside the
+		// contribute prelude (contribute toolchain on PATH, cd into the cloned
+		// repo) before launching the cwd-guarded claude, all inside the
 		// reattachable session.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy.
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "contribute-ai", "--contribute", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/app_session_contribute_ai_dry_run_preludes_clone", normalize.Apply(result.Combined))
 	})
 
 	t.Run("vscode_dry_run", func(t *testing.T) {
+		t.Parallel()
 		// VSCode against an sshd-enabled remote env: dry-run must reach
 		// past validateIDEOptions and emit the redeploy / port-forward /
 		// IDE-launch traces. The launchVSCode dependency is a no-op in
@@ -806,6 +1101,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("intellij_dry_run", func(t *testing.T) {
+		t.Parallel()
 		// See vscode_dry_run for the host-OS pinning rationale; IntelliJ
 		// has its own platform-conditional code paths (Gateway lookup,
 		// installed-app fallback) that diverge by OS, so the golden
@@ -1174,6 +1470,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("default_tenant_environment_resolves_from_root_config", func(t *testing.T) {
+		t.Parallel()
 		// `erun open` without args must pick up defaulttenant +
 		// defaultenvironment from $XDG_CONFIG_HOME/erun. Exercises
 		// resolveOpenParams' "no args" branch and OpenParamsForArgs.
@@ -1185,6 +1482,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("kubectl_error_assumes_not_deployed", func(t *testing.T) {
+		t.Parallel()
 		// kubectl stub exits non-zero with a non-NotFound error. In
 		// dry-run, shouldDeployRuntime traces "assuming not deployed" and
 		// proceeds with the helm upgrade. Locks the dry-run fallback in
@@ -1197,6 +1495,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("not_initialized_triggers_init_retry", func(t *testing.T) {
+		t.Parallel()
 		// `erun open team dev` with no config triggers
 		// resolveOpenWithInitStopForParams' init-fired branch:
 		// resolveOpen errors with ErrNotInitialized, shouldRunInitForOpenCommand
@@ -1210,6 +1509,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("tenant_cloud_provider_issuers_flow_into_runtime_deploy", func(t *testing.T) {
+		t.Parallel()
 		// Exercises ResolveTenantCloudProviderIssuers +
 		// CloudProviderOIDCIssuerURL: when the tenant config names cloud
 		// provider aliases and the root config carries their OIDC issuer
@@ -1252,6 +1552,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("default_env_not_configured_runs_init_with_tenant", func(t *testing.T) {
+		t.Parallel()
 		// `erun open` (no args) against a tenant whose config lacks
 		// defaultenvironment: resolveOpen fails with
 		// ErrDefaultEnvironmentNotConfigured, the init-retry path resolves
@@ -1281,6 +1582,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("tenant_flag_only_resolves_default_env", func(t *testing.T) {
+		t.Parallel()
 		// `erun open --tenant team` (flag, no positional args) lands in
 		// resolveOpenParams' "tenant set, environment empty" switch case
 		// (open.go:172-174), with UseDefaultEnvironment=true so the env
@@ -1295,6 +1597,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("environment_positional_resolves_default_tenant", func(t *testing.T) {
+		t.Parallel()
 		// `erun open dev` (single positional arg) lands in
 		// resolveOpenParams' "tenant empty, environment set" switch case
 		// (open.go:169-171), with UseDefaultTenant=true so the tenant
@@ -1308,6 +1611,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("remote_runtime_image_override", func(t *testing.T) {
+		t.Parallel()
 		// Remote env + --runtime-image rewrites the runtime release to
 		// use the embedded default-devops chart with the chosen image.
 		// Locks the RemoteRepo() branch in applyRuntimeDeployImageOverride
@@ -1321,6 +1625,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("persisted_local_port_range_is_honoured", func(t *testing.T) {
+		t.Parallel()
 		// EnvConfig.LocalPortRangeStart is the durable per-env port
 		// contract. When it is already set on disk, open must derive every
 		// service port from it (MCP 17500, API 17533, SSH 17522) and must
@@ -1334,6 +1639,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("walker_skips_index_claimed_by_other_tenant", func(t *testing.T) {
+		t.Parallel()
 		// When a second env on the host has already persisted
 		// localportrangestart=17000, the alphabetical walker must skip
 		// that index when allocating an unpersisted env. team/dev sorts
@@ -1350,6 +1656,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("overlapping_persisted_ranges_fail_with_pointer", func(t *testing.T) {
+		t.Parallel()
 		// Two envs that persist the same localportrangestart must surface
 		// an ErrLocalPortRangeOverlap pointing at both. The CLI should
 		// fail with a non-zero exit and a message naming both envs and the
@@ -1364,6 +1671,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("misaligned_persisted_range_fails_with_pointer", func(t *testing.T) {
+		t.Parallel()
 		// localportrangestart must align to EnvironmentPortRangeSize=100
 		// boundaries from LowerServicePort=17000. A value like 17050
 		// would make MCP/API/SSH offsets bleed into another env's range,
@@ -1384,19 +1692,240 @@ func TestOpen(t *testing.T) {
 		// recognise the holder as its own and reuse it instead of erroring
 		// with "already in use". The probe runs in dry-run too, so we lock
 		// the decision in the golden via the "would adopt" trace.
+		//
+		// The holder is a real listener that answers, not just an lsof claim:
+		// adoption now requires the tunnel to carry traffic, so a stubbed
+		// holder alone would leave the decision to whatever else happens to
+		// hold that port on the host. That pins the scenario to the 26100
+		// range, like every other one that binds a port.
+		skipIfPortsBusy(t, 26100, 26133)
 		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
 		// Pin DetectHost to darwin so the --no-shell preamble stays POSIX (see
 		// openHostOSOverride); the adopt holder probe is stubbed, so the pinned OS
 		// only keeps the golden deterministic across hosts.
 		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
-		stubAdoptHolderProbes(t, setup, adoptHolder{port: 17000, pid: 99999,
-			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address 127.0.0.1"})
+		holderPID := fixture.StartServingPortHolder(t, 26100)
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/adopts_existing_kubectl_port_forward", normalize.Apply(result.Combined))
 	})
 
+	t.Run("previews_replacing_a_bound_but_dead_port_forward", func(t *testing.T) {
+		// The sibling decision, and the reason the one above needs a live
+		// holder at all: a holder with erun's exact port-forward argv whose
+		// far end is gone still binds the port and answers nothing through
+		// it. Adopting it would hand the caller a tunnel to a pod that no
+		// longer exists — the failure that left an environment unreachable
+		// for hours behind a listener that looked healthy. The plan must say
+		// it would replace the forward, and dry-run must stop at saying so:
+		// the holder is still bound when the run ends.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
+		holderPID := fixture.StartStalePortHolder(t, 26100)
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/previews_replacing_a_bound_but_dead_port_forward", normalize.Apply(result.Combined))
+		// Side effect outside the captured streams: dry-run plans the
+		// replacement, it does not perform it.
+		if fixture.StalePortHolderStopped(26100, 500*time.Millisecond) {
+			t.Error("dry-run must leave the stale holder running; it only plans the replacement")
+		}
+	})
+
+	t.Run("real_run_reestablishes_a_bound_but_dead_port_forward", func(t *testing.T) {
+		// The reported failure, verbatim: erun's own recorded forward is
+		// still bound — its state file matches this env and its process is
+		// alive — while every request through it dies, because the pod it
+		// targeted was replaced. Reusing it on the strength of the recorded
+		// state is what let that survive for five hours, so open must stop
+		// the dead forward and start a fresh one that answers.
+		//
+		// The holder is a real process and the ps/lsof stubs name its real
+		// PID: production kills what the probe names, so a fabricated PID
+		// would aim the kill at whatever else owns that number.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/cwd",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		envVars = append(envVars, openHostOSOverride)
+		// ERUN_FORCE_TTY=1: this scenario locks the interactive shell path (the
+		// form an operator at a real terminal runs); without it, stdin's
+		// non-TTY default in this harness would take the no-shell branch instead.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
+		holderPID := fixture.StartStalePortHolder(t, 26100)
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 26100, pid: holderPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, holderPID)
+
+		// The shell form, not --no-shell: real-run --no-shell silences stderr
+		// so an `eval "$(erun open ...)"` alias stays quiet, and the decision
+		// this scenario exists to lock is a trace line. The exec stub exits 0
+		// so runShellLoop ends after one pass.
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/real_run_reestablishes_a_bound_but_dead_port_forward", normalize.Apply(result.Combined))
+		// Side effects outside the captured streams: the dead forward is
+		// gone, and the recorded forward is a different process — the same
+		// PID would mean erun re-adopted the corpse.
+		stateBody, err := os.ReadFile(portForwardStateFile(setup, "mcp", "team", "dev"))
+		if err != nil {
+			t.Fatalf("read rewritten mcp state: %v", err)
+		}
+		if strings.Contains(string(stateBody), fmt.Sprintf(`"processId":%d`, holderPID)) {
+			t.Errorf("expected the state file to record a fresh forward, still claims the dead PID %d:\n%s", holderPID, stateBody)
+		}
+	})
+
+	t.Run("previews_reaping_a_recorded_forward_that_never_bound_its_port", func(t *testing.T) {
+		// Regression for erun#1847: a `kubectl port-forward` that is still
+		// retrying against a pod that never answers holds no port at all —
+		// unlike the bound-but-dead shape above, nothing binds, but the
+		// process itself is alive. Bound state alone can't tell that corpse
+		// apart from one that already exited, so the plan must still name
+		// it. Dry-run only plans: the process must still be alive when the
+		// run ends.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
+		deadPID := fixture.StartUnboundPortForwardProcess(t)
+		// port: 0 keeps the fabricated holder out of the lsof answer for
+		// 26100 (nothing is really bound), while the ps stub still answers
+		// for this exact PID — the shape production's isPortForwardProcess
+		// check needs to recognise the recorded PID as its own.
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 0, pid: deadPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, deadPID)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/previews_reaping_a_recorded_forward_that_never_bound_its_port", normalize.Apply(result.Combined))
+		// Side effect outside the captured streams: dry-run plans the reap,
+		// it does not perform it.
+		if fixture.ProcessStopped(deadPID, 500*time.Millisecond) {
+			t.Error("dry-run must leave the never-bound forward running; it only plans clearing it")
+		}
+	})
+
+	t.Run("real_run_reaps_a_recorded_forward_that_never_bound_its_port", func(t *testing.T) {
+		// The real-run sibling, and the reported failure itself: a forward
+		// that never bound its port is never reaped, so every repeat attempt
+		// starts a fresh kubectl beside the last one — 101 of them for one
+		// environment in the reported case. open must kill the recorded PID
+		// before starting a replacement, not leave it running as one more
+		// corpse nothing will ever clear.
+		//
+		// The holder is a real process and the ps/lsof stubs name its real
+		// PID: production kills what the probe names, so a fabricated PID
+		// would aim the kill at whatever else owns that number.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/cwd",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		envVars = append(envVars, openHostOSOverride)
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
+		deadPID := fixture.StartUnboundPortForwardProcess(t)
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 0, pid: deadPID,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"})
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+		writePortForwardState(t, setup, "mcp", "team", "dev", 26100, deadPID)
+
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/real_run_reaps_a_recorded_forward_that_never_bound_its_port", normalize.Apply(result.Combined))
+		if !fixture.ProcessStopped(deadPID, 2*time.Second) {
+			t.Errorf("expected the never-bound forward (PID %d) to be killed before starting a fresh one", deadPID)
+		}
+		stateBody, err := os.ReadFile(portForwardStateFile(setup, "mcp", "team", "dev"))
+		if err != nil {
+			t.Fatalf("read rewritten mcp state: %v", err)
+		}
+		if strings.Contains(string(stateBody), fmt.Sprintf(`"processId":%d`, deadPID)) {
+			t.Errorf("expected the state file to record a fresh forward, still claims the dead PID %d:\n%s", deadPID, stateBody)
+		}
+	})
+
+	t.Run("real_run_sweeps_an_orphaned_forward_with_no_matching_state", func(t *testing.T) {
+		// The race the recorded-PID reap alone cannot close: two overlapping
+		// opens for the same environment can each read the old state file
+		// before either overwrites it, so the invocation that loses that
+		// race leaves a kubectl process with no state entry left pointing at
+		// it. This scenario reproduces the same end state without needing
+		// real concurrency — no state file names this env's forward at
+		// all — so only the argv-identity sweep (not the state-based reap)
+		// can find and clear the orphan.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/cwd",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		envVars = append(envVars, openHostOSOverride)
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
+		orphanPID := fixture.StartUnboundPortForwardProcess(t)
+		orphanArgv := "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"
+		stubLsofNoHolder(t, stubsDir)
+		fixture.StubBinaryWithScript(t, stubsDir, "ps", fmt.Sprintf(`for arg in "$@"; do
+    if [ "$arg" = "-e" ]; then
+        printf '%%s %%s\n' %d %s
+        exit 0
+    fi
+    if [ "$arg" = "%d" ]; then
+        printf '%%s\n' %s
+        exit 0
+    fi
+done
+exit 1
+`, orphanPID, shellQuote(orphanArgv), orphanPID, shellQuote(orphanArgv)))
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+		// No writePortForwardState call: the sweep must find this PID by
+		// argv identity alone, with no state file naming it at all.
+
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/real_run_sweeps_an_orphaned_forward_with_no_matching_state", normalize.Apply(result.Combined))
+		if !fixture.ProcessStopped(orphanPID, 2*time.Second) {
+			t.Errorf("expected the unrecorded orphan (PID %d) to be swept before starting a fresh forward", orphanPID)
+		}
+	})
+
 	t.Run("refuses_to_bind_when_foreign_process_holds_port", func(t *testing.T) {
+		t.Parallel()
 		// When the port is held by a process whose argv does not look like
 		// the kubectl port-forward erun would start, adoption is unsafe.
 		// erun must trace what is holding the port (PID + argv) so the
@@ -1415,6 +1944,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("deployment_match_ignores_missing_api_port", func(t *testing.T) {
+		t.Parallel()
 		// Regression for the --intellij short-circuit on tenant-owned
 		// devops charts. The runtime-pod identity matcher must accept a
 		// deployment whose containers expose ERUN_REPO_PATH,
@@ -1513,6 +2043,10 @@ func TestOpen(t *testing.T) {
 			ExecExitCodes:  []int{0},
 			SeedKeyFile:    seededKeyFile,
 		})...)
+		// ERUN_FORCE_TTY=1: locks the interactive shell path an operator at a
+		// real terminal takes; this harness's stdin is otherwise non-TTY, which
+		// would now take the no-shell branch instead.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -1533,6 +2067,213 @@ func TestOpen(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "cli.json")); err != nil {
 			t.Errorf("expected RecordEnvironmentActivity to write cli.json: %v", err)
+		}
+	})
+
+	t.Run("no_tty_real_run_keeps_forwards_without_a_shell", func(t *testing.T) {
+		// The reported failure, end to end and for real (not a dry-run trace):
+		// a non-interactive `erun open` must never drop into an interactive
+		// shell that reads EOF and exits almost instantly, taking the
+		// port-forwards it just started down with it. This harness's default
+		// stdin is already non-TTY, standing in for the MCP client/orchestrator/
+		// script that hits this in practice. The kubectl port-forward stub
+		// really binds 127.0.0.1:26100, so dialing it again after open has
+		// already exited is the proof that the forward outlived the command —
+		// not just that no error was printed.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithPortRange(t, setup, "team", "dev", 26100)
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/team",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/no_tty_real_run_keeps_forwards_without_a_shell", normalize.Apply(result.Combined))
+		if _, err := os.Stat(filepath.Join(stubsDir, "exec-calls")); err == nil {
+			t.Fatal("a non-interactive open must never invoke the interactive shell exec")
+		}
+		conn, err := netDialTimeout("tcp", "127.0.0.1:26100", time.Second)
+		if err != nil {
+			t.Fatalf("MCP port-forward must still be listening after open returns without a shell: %v", err)
+		}
+		_ = conn.Close()
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_deployment_get_library_execution_mode", func(t *testing.T) {
+		t.Parallel()
+		// Locks the dry-run/audit contract for kubectl-deployment-get: the
+		// plan must stay byte-identical to the subprocess-mode golden
+		// (intellij_dry_run, which already exercises the API-deployment
+		// presence trace) even with
+		// execution.modes.kubectl-deployment-get=library, since
+		// ensureAPIPortForward only ever renders the trace line
+		// (common.KubectlGetDeploymentArgs) and never calls
+		// common.DeploymentPresent on a dry run.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-deployment-get", "library")
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
+		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/intellij_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_deployment_get_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (the team-api deployment is present, so the API
+		// port-forward proceeds) via a real client-go call against a fake API
+		// server instead of shelling out to kubectl. The kubectl stub fails
+		// loudly and distinctively only for the "get deployment team-api -o
+		// name" argv shape (every other kubectl subcommand this open needs --
+		// the runtime deployment checks, the wake wait, the port-forward
+		// simulator -- still succeeds), so a fallback to the subprocess path
+		// for the API-deployment check surfaces as a recognizable failure
+		// instead of silently passing.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithPortRange(t, setup, "team", "dev", 26100)
+		seedExecutionMode(t, setup, "kubectl-deployment-get", "library")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/apis/apps/v1/namespaces/team-dev/deployments/team-api" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"team-api","namespace":"team-dev"}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName:       "team-devops",
+			ContainerName:        "team-devops",
+			RepoPath:             "/home/erun/git/team",
+			MCPPort:              26100,
+			SSHPort:              26122,
+			ExecExitCodes:        []int{0},
+			FailingArgvSubstring: "get deployment team-api -o name",
+		})...)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("API deployment check used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+	})
+
+	t.Run("real_run_kubectl_deployment_wait_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (the runtime deployment reports Available, so the
+		// shell exec proceeds) via a real client-go call against a fake API
+		// server instead of shelling out to kubectl. The kubectl stub fails
+		// loudly and distinctively only for the "wait --for=condition=Available"
+		// argv shape (every other kubectl subcommand this open needs -- the
+		// deployment presence check, the port-forward simulator, the
+		// interactive exec -- still succeeds), so a fallback to the
+		// subprocess path for the wait surfaces as a recognizable failure
+		// instead of silently passing.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithPortRange(t, setup, "team", "dev", 26100)
+		seedExecutionMode(t, setup, "kubectl-deployment-wait", "library")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/apis/apps/v1/namespaces/team-dev/deployments/team-devops" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"Deployment","apiVersion":"apps/v1","metadata":{"name":"team-devops","namespace":"team-dev"},`+
+				`"status":{"conditions":[{"type":"Available","status":"True"}]}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName:       "team-devops",
+			ContainerName:        "team-devops",
+			RepoPath:             "/home/erun/git/team",
+			MCPPort:              26100,
+			SSHPort:              26122,
+			ExecExitCodes:        []int{0},
+			FailingArgvSubstring: "wait --for=condition=Available",
+		})...)
+		// ERUN_FORCE_TTY=1: WaitForShellDeployment only runs ahead of the
+		// interactive shell exec (runOpenShellWait); this harness's stdin is
+		// otherwise non-TTY, which takes the no-shell branch instead and
+		// never calls it at all.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("deployment wait used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
 		}
 	})
 
@@ -1557,6 +2298,9 @@ func TestOpen(t *testing.T) {
 			SSHPort:        26122,
 			ExecExitCodes:  []int{76},
 		})...)
+		// ERUN_FORCE_TTY=1: see app_session_dry_run_pure_open_does_not_deploy —
+		// an --app-session tab runs inside a real dtach pty.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("takeover must end the shell loop cleanly, exit %d: %s", result.ExitCode, result.Combined)
@@ -1649,6 +2393,9 @@ func TestOpen(t *testing.T) {
 			PodsJSON:       podsJSON,
 			EventsJSON:     eventsJSON,
 		})...)
+		// ERUN_FORCE_TTY=1: locks the interactive shell path an operator at a
+		// real terminal takes; this harness's stdin is otherwise non-TTY.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 1 {
 			t.Fatalf("expected exit 1 from the failed rollout wait, got %d: %s", result.ExitCode, result.Combined)
@@ -1680,6 +2427,13 @@ func TestOpen(t *testing.T) {
 		fixture.StubBinary(t, stubsDir, "helm", "")
 		fixture.StubBinary(t, stubsDir, "docker", "")
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "helm", "docker")...)
+		// The reattach handoff's managed deploy resolves the runtime chart ladder;
+		// the seam confirms erun-devops published so it installs it instead of
+		// refusing.
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		// ERUN_FORCE_TTY=1: locks the interactive shell path an operator at a
+		// real terminal takes; this harness's stdin is otherwise non-TTY.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -1731,6 +2485,9 @@ func TestOpen(t *testing.T) {
 			ExecExitCodes:  []int{137, 0},
 			PodsJSON:       healthyPodsJSON,
 		})...)
+		// ERUN_FORCE_TTY=1: locks the interactive shell path an operator at a
+		// real terminal takes; this harness's stdin is otherwise non-TTY.
+		envVars = append(envVars, "ERUN_FORCE_TTY=1")
 		result := erun.Run(t, []string{"open", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("pod replacement must reattach cleanly, exit %d: %s", result.ExitCode, result.Combined)

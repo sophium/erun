@@ -1,0 +1,2 @@
+audit: erun orchestrator set-role --role code ghost team dev
+orchestrator "ghost" not found

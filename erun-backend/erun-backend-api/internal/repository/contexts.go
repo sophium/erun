@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/uptrace/bun"
 )
 
@@ -11,34 +12,50 @@ type ContextRepository struct {
 	txs *TxManager
 }
 
-const contextColumns = `context_id, tenant_id, name, provider, cloud_provider_alias, region, instance_id, public_ip, instance_type, disk_type, disk_size_gb, kubernetes_context, status, provision_error, created_at, updated_at`
+const contextColumns = `context_id, tenant_id, name, provider, cloud_provider_alias, region, instance_id, public_ip, instance_type, disk_type, disk_size_gb, kubernetes_context, max_environments, status, provision_error, created_at, updated_at`
 
 func NewContextRepository(txs *TxManager) *ContextRepository {
 	return &ContextRepository{txs: txs}
 }
 
+// DefaultContextMaxEnvironments mirrors the contexts.max_environments column
+// default, applied when a create request names no explicit capacity.
+const DefaultContextMaxEnvironments = 20
+
 // Create persists a new cloud context; the database owns the identifiers and
 // timestamps and binds the row to the caller's tenant.
 func (r *ContextRepository) Create(ctx context.Context, cloudContext model.Context) (model.Context, error) {
 	created := cloudContext
+	if created.MaxEnvironments <= 0 {
+		created.MaxEnvironments = DefaultContextMaxEnvironments
+	}
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		return tx.NewInsert().
 			Model(&created).
-			Column("name", "provider", "cloud_provider_alias", "region", "instance_type", "disk_type", "disk_size_gb", "kubernetes_context").
+			Column("name", "provider", "cloud_provider_alias", "region", "instance_type", "disk_type", "disk_size_gb", "kubernetes_context", "max_environments").
 			Returning("*").
 			Scan(ctx)
 	})
 	return created, err
 }
 
+// List returns the caller's tenant's cloud contexts, filtered explicitly by
+// the security context's TenantID: erun_operations' RLS policy is
+// unconditional, so an OPERATIONS caller would otherwise see every tenant's
+// contexts.
 func (r *ContextRepository) List(ctx context.Context) ([]model.Context, error) {
 	var contexts []model.Context
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
 		return tx.NewRaw(`
 			SELECT `+contextColumns+`
 			  FROM contexts
+			 WHERE tenant_id = ?
 			 ORDER BY name ASC, context_id ASC
-		`).Scan(ctx, &contexts)
+		`, securityContext.TenantID).Scan(ctx, &contexts)
 	})
 	return contexts, err
 }

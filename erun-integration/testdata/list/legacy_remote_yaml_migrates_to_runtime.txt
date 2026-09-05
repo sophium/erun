@@ -33,11 +33,13 @@ Tenants:
           ssh-port: 17022
           contribute-app-port: 17050
           container-registries: registry.example/test[build,deploy]
-          runtime-version: <VERSION>
+          runtime-version: <VERSION> (line undetermined — no resolved runtime image recorded; redeploy to record it)
           runtime-pod: none
           managed-cloud: off
           ai-tool: none
           claude: none
           idle: none
           sshd: off
+Orchestrators:
+  none
 audit: erun list

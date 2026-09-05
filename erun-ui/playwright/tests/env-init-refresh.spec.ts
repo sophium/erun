@@ -33,26 +33,21 @@ test.describe('environment init refresh', () => {
   }) => {
     // Reproduces the reported scenario: `erun init` creates a brand-new
     // tenant + env and the init-complete signal must surface it in the
-    // sidebar. The success toast is the handler-only signal — the fsnotify
-    // watcher's reload surfaces the row but shows no toast — so asserting the
-    // toast proves the init handler ran, not that the row appeared by some
-    // other path.
+    // sidebar. The success toast (a message centre icon, not a
+    // pill) is the handler-only signal — the fsnotify watcher's reload
+    // surfaces the row but shows no toast — so asserting the icon proves the
+    // init handler ran, not that the row appeared by some other path.
     const tenant = uniqueEnvironmentName('init-tenant');
     const environment = 'local';
     seedTenant(tenant, environment);
     seedEnvironment(tenant, environment);
     try {
-      // The composed deploy's failure banner replaces this success banner within
-      // milliseconds in the inert harness, so record the banner stream rather
-      // than sampling the locator.
-      await app.titlebar.recordBanners();
+      // Freeze the clock so the transient success icon can't auto-dismiss
+      // before the assertion below observes it.
+      await app.page.clock.install();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
-      await expect
-        .poll(() => app.titlebar.sawBanner(`Created ${tenant} / ${environment}`), {
-          timeout: 10_000,
-        })
-        .toBe(true);
+      await expect(app.titlebar.messageCenterIcon('success')).toBeVisible({ timeout: 10_000 });
       await expect(app.sidebar.envRowButton(tenant, environment)).toBeVisible({ timeout: 10_000 });
     } finally {
       removeTenant(tenant);
@@ -72,10 +67,15 @@ test.describe('environment init refresh', () => {
     const environment = 'local';
     await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
-    await expect(app.titlebar.statusMessage()).toContainText('did not appear in the sidebar', {
-      timeout: 15_000,
-    });
+    // The env never exists, so the handler exhausts its full retry budget
+    // (8 attempts, a getInitialState round trip plus a 400ms delay each)
+    // before raising the error -- on a loaded machine each round trip alone
+    // can take longer than the 400ms delay between them, so the wait here
+    // must clear the retry loop's own worst case with real margin, not just
+    // the fast-path duration a lightly-loaded machine sees.
+    await expect(app.titlebar.messageCenterIcon('error')).toBeVisible({ timeout: 45_000 });
+    await app.titlebar.openMessageCenter('error');
+    await expect(app.titlebar.messageCenterRow('did not appear in the sidebar')).toBeVisible();
     await expect(app.sidebar.envRowButton(tenant, environment)).toHaveCount(0);
-    await app.titlebar.dismissStatus();
   });
 });

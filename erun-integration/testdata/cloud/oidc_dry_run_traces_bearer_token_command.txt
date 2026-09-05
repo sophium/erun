@@ -1,7 +1,9 @@
 Dry run: cloud provider OIDC setup planned.
 audit: erun cloud oidc --alias rihards+123456789012@aws --audience https://api.example --dry-run
-check cloud provider token status
+cloud oidc: refresh issuer for alias=rihards+123456789012@aws
 aws sso login --profile test-profile
+aws sts get-web-identity-token --audience https://api.example --signing-algorithm RS256 --duration-seconds 900 --query WebIdentityToken --output text --profile test-profile
 aws iam enable-outbound-web-identity-federation --query IssuerIdentifier --output text --profile test-profile
 aws sts get-web-identity-token --audience https://api.example --signing-algorithm RS256 --duration-seconds 900 --query WebIdentityToken --output text --profile test-profile
-write cloud provider OIDC issuer resolved from AWS web identity token
+cloud oidc: derived issuer = derived-from-aws-web-identity-token
+write cloud provider OIDC issuer for rihards+123456789012@aws

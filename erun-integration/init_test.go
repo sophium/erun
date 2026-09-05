@@ -1,8 +1,11 @@
 package integration
 
 import (
+	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -82,6 +85,11 @@ type remoteInitKubectlStub struct {
 	SSHConfigExists          bool
 	HostConfigVerifyExitCode int
 	LsRemoteFailures         int
+	// RegistryCredentialConfigured answers the #1201 registry-credential-check
+	// script: whether the pod appears to have a ghcr.io credential (docker
+	// config, gh session, or GH_TOKEN/GITHUB_TOKEN). Defaults to false (no
+	// credential), matching a freshly-deployed pod.
+	RegistryCredentialConfigured bool
 }
 
 // stubRemoteInitKubectl stands in for the remote pod's shell so real-run
@@ -108,6 +116,15 @@ func stubRemoteInitKubectl(t *testing.T, dir string, spec remoteInitKubectlStub)
 		`    printf '` + sshConfigState + `\n'`,
 		`    exit 0 ;;`,
 	}
+	credentialAnswer := "0"
+	if spec.RegistryCredentialConfigured {
+		credentialAnswer = "1"
+	}
+	lines = append(lines,
+		`  *'.docker/config.json'*)`,
+		`    printf '`+credentialAnswer+`\n'`,
+		`    exit 0 ;;`,
+	)
 	if spec.HostConfigVerifyExitCode != 0 {
 		lines = append(lines,
 			`  *'test -s'*)`,
@@ -140,6 +157,7 @@ func stubRemoteInitKubectl(t *testing.T, dir string, spec remoteInitKubectlStub)
 }
 
 func TestInit(t *testing.T) {
+	t.Parallel()
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"init", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -185,6 +203,28 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/remote_with_runtime_image_override", normalize.Apply(result.Combined))
 	})
 
+	// A tagged --runtime-image is persisted tagless, so the deploy this
+	// same init performs (and every later redeploy) pins the image to the env's
+	// own runtime version instead of sticking to the tag the operator happened
+	// to type at init time.
+	t.Run("remote_with_tagged_runtime_image_persists_tagless", func(t *testing.T) {
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--runtime-image", "custom-devops:stale-tag",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "init/remote_with_tagged_runtime_image_persists_tagless", normalize.Apply(result.Combined))
+	})
+
 	t.Run("remote_with_runtime_resources", func(t *testing.T) {
 		setup := env.New(t)
 		args := []string{
@@ -202,6 +242,28 @@ func TestInit(t *testing.T) {
 		}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "init/remote_with_runtime_resources", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_with_dind_resources", func(t *testing.T) {
+		// --dind-cpu/--dind-memory size the erun-dind sidecar independent of
+		// --runtime-cpu/--runtime-memory; the deployed helm command must carry
+		// both containers' resolved limits on separate --set-string flags.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--dind-cpu", "6",
+			"--dind-memory", "16Gi",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "init/remote_with_dind_resources", normalize.Apply(result.Combined))
 	})
 
 	t.Run("remote_without_bootstrap", func(t *testing.T) {
@@ -303,7 +365,11 @@ func TestInit(t *testing.T) {
 			"--confirm-environment=true",
 			"--dry-run",
 		}
-		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		// init's remote bootstrap deploys the runtime chart as part of setup; the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
+		// so that deploy confirms a chart instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -330,6 +396,73 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/cluster_registry_conflicts_with_container_registry", normalize.Apply(result.Combined))
 	})
 
+	t.Run("erun_registry_dry_run", func(t *testing.T) {
+		// --erun-registry seeds erun's hosted registry, namespaced under the
+		// tenant, as the env's container registry instead of a static
+		// --container-registry or the in-cluster --cluster-registry.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--erun-registry",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		// init's remote bootstrap deploys the runtime chart as part of setup; the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
+		// so that deploy confirms a chart instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/erun_registry_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("erun_registry_conflicts_with_container_registry", func(t *testing.T) {
+		// --erun-registry and --container-registry are mutually exclusive; supplying
+		// both fails fast before any resolution.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--erun-registry",
+			"--container-registry", "registry.example/test",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for conflicting flags, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "init/erun_registry_conflicts_with_container_registry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("erun_registry_conflicts_with_cluster_registry", func(t *testing.T) {
+		// --erun-registry and --cluster-registry are mutually exclusive; supplying
+		// both fails fast before any resolution.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--erun-registry",
+			"--cluster-registry",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for conflicting flags, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "init/erun_registry_conflicts_with_cluster_registry", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_with_mcp_auth_public_key", func(t *testing.T) {
 		// --mcp-auth-public-key folds the desktop's MCP-auth key into init's single
 		// runtime deploy: the runtime (team-devops) chart carries mcpAuth.* helm
@@ -353,7 +486,11 @@ func TestInit(t *testing.T) {
 			"--confirm-environment=true",
 			"--dry-run",
 		}
-		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		// init's remote bootstrap deploys the runtime chart as part of setup; the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
+		// so that deploy confirms a chart instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -380,6 +517,93 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/type_runtime_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("type_host_dry_run", func(t *testing.T) {
+		// A host env has no pod and no cluster at all, so init never asks for a
+		// kubernetes context or a container registry — unlike local-agent and
+		// remote-agent above, which both require one of those flags here or an
+		// interaction prompt fires. Leaving both off and still getting a clean
+		// dry run is a direct behavioral proof of no cluster contact.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "work",
+			"--type", "host",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/type_host_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("type_host_real_run_persists_config", func(t *testing.T) {
+		// The real run persists exactly a name, type, and local repo path — no
+		// kubernetescontext, containerregistry, or runtimeversion key, since
+		// none of those apply to a type with no pod.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "work",
+			"--type", "host",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/type_host_real_run_persists_config", normalize.Apply(result.Combined))
+		// KubernetesContext has no yaml `omitempty`, so it always serializes;
+		// asserting it is empty is the honest form of "unset" for this field.
+		assertEnvConfigContains(t, setup, "team", "work", "type: host", "localrepopath: "+setup.Cwd, `kubernetescontext: ""`)
+		assertEnvConfigLacks(t, setup, "team", "work", "containerregistry", "runtimeversion")
+	})
+
+	t.Run("reinit_retypes_a_local_agent_env_to_host", func(t *testing.T) {
+		// Retyping to host drops the env's pod-oriented fields' relevance but
+		// keeps the same local repo path — it is, after all, the same directory
+		// on the same machine, just with no pod mounting it anymore.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		args := []string{
+			"init", "team", "dev",
+			"--type", "host",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_retypes_a_local_agent_env_to_host", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: host", "localrepopath: "+setup.Cwd)
+	})
+
+	t.Run("reinit_refuses_a_host_retype_with_no_host_repo_path", func(t *testing.T) {
+		// The same refusal local-agent gets: retyping to host needs a host
+		// directory, and this run names neither a git repo cwd nor
+		// --project-root, so there is nothing to record.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		args := []string{
+			"init", "team", "dev",
+			"--type", "host",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/reinit_refuses_a_host_retype_with_no_host_repo_path", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: remote-agent")
+	})
+
 	t.Run("type_conflicts_with_remote", func(t *testing.T) {
 		// A --type that disagrees with --remote must error before any side
 		// effect, so the user never ends up with a half-configured env.
@@ -404,11 +628,48 @@ func TestInit(t *testing.T) {
 			"--type", "invalid",
 			"--dry-run",
 		}
+		before := snapshotConfigTree(t, setup.ConfigHome)
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "init/type_rejects_invalid_value", normalize.Apply(result.Combined))
+		// A validation failure before tenant/environment resolution must leave
+		// no directory behind, dry-run or not.
+		after := snapshotConfigTree(t, setup.ConfigHome)
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("invalid --type mutated the config directory\nbefore: %v\nafter:  %v", before, after)
+		}
+	})
+
+	t.Run("dry_run_creates_no_stray_config_directory", func(t *testing.T) {
+		// `erun init --dry-run` created the environment's (and its tenant's)
+		// config directory on disk even though the write-yaml the directory
+		// exists for was correctly traced only. Reproduces the exact repro
+		// shape — a brand-new tenant and a brand-new host environment — and
+		// asserts the config root is byte-identical afterwards, not merely
+		// that the command exited 0 and printed traces.
+		setup := env.New(t)
+		args := []string{
+			"init", "erun", "ios-host",
+			"--type", "host",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		before := snapshotConfigTree(t, setup.ConfigHome)
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		after := snapshotConfigTree(t, setup.ConfigHome)
+		if len(after) != 0 {
+			t.Fatalf("dry-run init left stray entries under the config directory: %v\noutput:\n%s", after, result.Combined)
+		}
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("dry-run init mutated the config directory\nbefore: %v\nafter:  %v", before, after)
+		}
 	})
 
 	t.Run("rejects_hyphenated_tenant", func(t *testing.T) {
@@ -689,6 +950,138 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/remote_real_run_existing_repo_pulls", normalize.Apply(result.Combined))
 	})
 
+	t.Run("remote_real_run_ghcr_registry_missing_credential_refuses", func(t *testing.T) {
+		// #1201: init deployed a pod configured to build+push to ghcr.io, but the
+		// pod itself never authenticated (no docker config, no gh session, no
+		// GH_TOKEN). Before this fix, init reported success and the failure only
+		// surfaced 7 minutes into the first `erun release`, at the push. Init must
+		// now refuse right after the deploy, before ever touching git/SSH setup --
+		// no repository state probe, no SSH key output.
+		setup := env.New(t)
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RegistryCredentialConfigured: false})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		// This scenario is about the in-pod registry credential check above, not
+		// the separate deploy-time pull-secret preflight (which runs first and
+		// checks the *host's* own ghcr.io credential): mark the tenant's runtime
+		// image anonymously pullable so that preflight is a no-op and the deploy
+		// reaches the in-pod check this scenario actually exercises.
+		envVars = append(envVars, "ERUN_ANONYMOUS_PULLABLE_OVERRIDE=sophium/team-devops:1.0.0")
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the pod has no ghcr.io credential, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/remote_real_run_ghcr_registry_missing_credential_refuses", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_real_run_ghcr_registry_credential_configured_succeeds", func(t *testing.T) {
+		// The other half of #1201: a pod that already has a ghcr.io credential
+		// (the operator authenticated it, or it inherited one from a prior push)
+		// must not be blocked by the new check -- init completes normally.
+		setup := env.New(t)
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RegistryCredentialConfigured: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		// As above: this scenario is about the in-pod registry credential check,
+		// not the separate host-side deploy-time pull-secret preflight, so mark
+		// the tenant's runtime image anonymously pullable to keep that preflight
+		// a no-op.
+		envVars = append(envVars, "ERUN_ANONYMOUS_PULLABLE_OVERRIDE=sophium/team-devops:1.0.0")
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			// No-git keeps this scenario about the credential check alone; git
+			// checkout setup is covered by the other remote real-run scenarios.
+			"--no-git",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/remote_real_run_ghcr_registry_credential_configured_succeeds", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_dry_run_traces_registry_credential_check", func(t *testing.T) {
+		// Dry-run must show the new check as a trace line like every other
+		// action init takes, and must not fail the plan preview over pod state a
+		// preview cannot know (the pod does not exist yet in dry-run).
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--no-git",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/remote_dry_run_traces_registry_credential_check", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_dry_run_provisions_registry_credential_from_host", func(t *testing.T) {
+		// When the host running `erun init` already has a ghcr.io credential
+		// (docker config, gh session, or GH_TOKEN), init mints the
+		// dockerconfigjson Secret the runtime chart mounts, rather than leaving
+		// the pod to hand-carry one. DOCKER_CONFIG points the host resolver at
+		// this isolated dir instead of the developer's real ~/.docker, the same
+		// seam TestVersion's docker-config scenarios use.
+		setup := env.New(t)
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("sophium:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--no-git",
+			"--dry-run",
+		}
+		envVars := append(setup.Env(), "DOCKER_CONFIG="+dockerCfgDir)
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "init/remote_dry_run_provisions_registry_credential_from_host", normalize.Apply(result.Combined))
+	})
+
 	t.Run("remote_real_run_codecommit_key_import_retry", func(t *testing.T) {
 		// CodeCommit real-run: init prints the pod's CodeCommit key with IAM
 		// upload instructions, then polls access — the stub fails the first
@@ -936,13 +1329,7 @@ func TestInit(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "init/reinit_real_run_updates_kubernetes_context", normalize.Apply(result.Combined))
-		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
-		if err != nil {
-			t.Fatalf("read env config: %v", err)
-		}
-		if !strings.Contains(string(raw), "kubernetescontext: new-context") {
-			t.Errorf("expected persisted env config to carry the new kubernetes context, got:\n%s", raw)
-		}
+		assertEnvConfigContains(t, setup, "team", "dev", "kubernetescontext: new-context")
 	})
 
 	t.Run("reinit_remote_real_run_updates_runtime_settings", func(t *testing.T) {
@@ -958,6 +1345,7 @@ func TestInit(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "git", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
 		args := []string{
 			"init", "team", "dev",
 			"--remote",
@@ -974,14 +1362,299 @@ func TestInit(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "init/reinit_remote_real_run_updates_runtime_settings", normalize.Apply(result.Combined))
-		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
-		if err != nil {
-			t.Fatalf("read env config: %v", err)
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeversion: 2.0.0", "cpu: \"8\"", "memory: 16Gi")
+	})
+
+	t.Run("reinit_remote_real_run_updates_dind_resources_independent_of_runtime_pod", func(t *testing.T) {
+		// --dind-cpu/--dind-memory on a re-init update the sidecar's own
+		// recorded resources without touching the runtime pod's separately
+		// recorded --runtime-cpu/--runtime-memory from an earlier init.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RepoExists: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "2.0.0",
+			"--dind-cpu", "6",
+			"--dind-memory", "16Gi",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
 		}
-		for _, want := range []string{"runtimeversion: 2.0.0", "cpu: \"8\"", "memory: 16Gi"} {
-			if !strings.Contains(string(raw), want) {
-				t.Errorf("expected persisted env config to contain %q, got:\n%s", want, raw)
-			}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
+		golden.Equal(t, "init/reinit_remote_real_run_updates_dind_resources_independent_of_runtime_pod", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeversion: 2.0.0", "runtimedindpod:\n    cpu: \"6\"\n    memory: 16Gi", "runtimepod:\n    cpu: \"8\"\n    memory: 16Gi")
+	})
+
+	t.Run("reinit_remote_real_run_redirects_the_runtime_registry", func(t *testing.T) {
+		// The way out of the bootstrap deadlock: runtimeregistry is the only field
+		// that redirects chart resolution, and every other writer of it is a side
+		// effect of a deploy that already succeeded. --runtime-registry writes it
+		// before this run's own deploy resolves a chart, so the recovery is one
+		// command rather than a hand-edit of erun's config store. The probe seam
+		// publishes the platform chart only in the redirected registry, so the
+		// resolved chart reference is the proof the redirect took effect.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RepoExists: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "1.0.0",
+			"--runtime-registry", "ghcr.io/sophium",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_remote_real_run_redirects_the_runtime_registry", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: ghcr.io/sophium")
+	})
+
+	t.Run("reinit_records_an_image_pull_secret_without_restating_the_type", func(t *testing.T) {
+		// A supplied setting lands on the env for having been supplied. The
+		// invocation names no --type, so it resolves to the local-agent default,
+		// and the setting still reaches an env stored as remote-agent — accepting
+		// the flag and dropping it is the failure this pins. The env keeps its
+		// type: a flag nobody passed must not retype anything.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--image-pull-secret", "ecr-pull",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_records_an_image_pull_secret_without_restating_the_type", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "imagepullsecrets:", "- ecr-pull", "type: remote-agent", "runtimeversion: 1.0.0")
+	})
+
+	t.Run("reinit_sets_saved_deploy_components", func(t *testing.T) {
+		// erun init gained --components so a saved deploy default can be
+		// set without hand-editing the env's config.yaml.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--components", "erun-backend-api,erun-backend-db",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_sets_saved_deploy_components", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "components:", "- erun-backend-api", "- erun-backend-db")
+	})
+
+	t.Run("reinit_clears_saved_deploy_components_returns_env_to_plan", func(t *testing.T) {
+		// The way back: an env stuck on a saved selection that shadows the
+		// repo's k8s.deployments plan had no command to return to the plan short
+		// of hand-editing erun's config store. `--components ''` is that command:
+		// it clears the saved set outright rather than being read as "nothing
+		// passed, leave it alone".
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--components", "",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_clears_saved_deploy_components_returns_env_to_plan", normalize.Apply(result.Combined))
+		assertEnvConfigLacks(t, setup, "team", "dev", "erun-backend-postgres", "components:")
+	})
+
+	t.Run("reinit_runtime_env_records_a_registry_and_keeps_its_type", func(t *testing.T) {
+		// The documented escape from a chart-resolution deadlock, run the way an
+		// operator reaches for it: --runtime-registry alone. It has to land on an
+		// existing env whatever type that env is, and the runtime env has to still
+		// be a runtime env afterwards — the default an omitted --type resolves to
+		// is local-agent, and acting on it would silently retype the env.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--runtime-registry", "ghcr.io/sophium",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_runtime_env_records_a_registry_and_keeps_its_type", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: ghcr.io/sophium", "type: runtime")
+	})
+
+	t.Run("reinit_retypes_a_runtime_env_to_remote_agent", func(t *testing.T) {
+		// Both env types keep their worktree off the laptop, so the old reconcile
+		// could never move between them and a runtime env could never become
+		// orchestratable. Named explicitly, the type moves, and the run does the
+		// remote-agent work — the runtime deploy and the checkout — a fresh
+		// --type=remote-agent init would. The kubectl stub reports the clone
+		// already present so the flow pulls instead of prompting for a URL.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RepoExists: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_retypes_a_runtime_env_to_remote_agent", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: remote-agent", "runtimeversion: 1.0.0")
+	})
+
+	t.Run("reinit_retypes_a_remote_env_to_local_agent", func(t *testing.T) {
+		// The other direction, which needs more than the type field: a local-agent
+		// worktree is hostPath-mounted, and the path a remote env carries names an
+		// in-pod directory. The retype adopts the host project root supplied with
+		// it, so the env it writes is one that can actually mount.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "local-agent",
+			"--project-root", setup.Cwd,
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_retypes_a_remote_env_to_local_agent", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: local-agent", "localrepopath: "+setup.Cwd)
+	})
+
+	t.Run("reinit_refuses_a_local_agent_retype_with_no_host_repo_path", func(t *testing.T) {
+		// The refusal that keeps the flag honest: the run is not in a git repo and
+		// names no --project-root, so there is no host path to mount. Writing the
+		// type anyway would move the failure to a later deploy, and reporting
+		// success would drop the flag. It refuses, naming what to supply.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		args := []string{
+			"init", "team", "dev",
+			"--type", "local-agent",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/reinit_refuses_a_local_agent_retype_with_no_host_repo_path", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "type: remote-agent")
+	})
+
+	t.Run("reinit_dry_run_traces_what_it_keeps_and_what_it_changes", func(t *testing.T) {
+		// The audit line for a re-init: every setting the run decided about shows
+		// up, whether it was supplied or deliberately left as found. The pod
+		// resources are the ones that matter most — they used to be reset to the
+		// defaults by any re-init that reached the reconcile at all, so an operator
+		// adding one flag lost limits they never mentioned.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")
+		args := []string{
+			"init", "team", "dev",
+			"--runtime-image", "registry.example/team-devops",
+			"--image-pull-secret", "ecr-pull",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_dry_run_traces_what_it_keeps_and_what_it_changes", normalize.Apply(result.Combined))
+		// A dry run traces the write and performs none of it: the limits it said it
+		// would keep are untouched, and what it said it would set never landed.
+		assertEnvConfigContains(t, setup, "team", "dev", "cpu: \"8\"", "memory: 16Gi")
+		assertEnvConfigLacks(t, setup, "team", "dev", "imagepullsecrets", "runtimeimage")
+	})
+
+	t.Run("reinit_dry_run_sets_dind_resources_independent_of_runtime_pod", func(t *testing.T) {
+		// --dind-cpu/--dind-memory on a re-init trace as set while an
+		// untouched runtimepod (from an earlier init) traces as kept —
+		// applyEnvRuntimeDindPod and applyEnvRuntimePod act independently.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		appendEnvConfig(t, setup, "team", "dev", "runtimepod:\n  cpu: \"8\"\n  memory: 16Gi\n")
+		args := []string{
+			"init", "team", "dev",
+			"--dind-cpu", "6",
+			"--dind-memory", "16Gi",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_dry_run_sets_dind_resources_independent_of_runtime_pod", normalize.Apply(result.Combined))
+		assertEnvConfigContains(t, setup, "team", "dev", "cpu: \"8\"", "memory: 16Gi")
+		assertEnvConfigLacks(t, setup, "team", "dev", "runtimedindpod")
 	})
 }

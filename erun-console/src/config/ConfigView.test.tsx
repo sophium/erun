@@ -1,7 +1,8 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../App';
+import { renderWithStore } from '../test/renderWithStore';
 
 // Mocking `fetch` exercises the whole config read path end-to-end. The OIDC
 // login flow is deliberately not covered here — it is a flagged placeholder
@@ -81,9 +82,11 @@ afterEach(() => {
 describe('ConfigView via App', () => {
   it('renders the tenant, both environments with their types, and the context', async () => {
     mockFetch(jsonResponse(SAMPLE_CONFIG));
-    render(<App />);
+    renderWithStore(<App />);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Acme' })).toBeInTheDocument();
+    // The shell's own h1 carries the active section title ("Overview"); the
+    // tenant name is a section-level h2 within it.
+    expect(await screen.findByRole('heading', { level: 2, name: 'Acme' })).toBeInTheDocument();
 
     expect(screen.getByRole('cell', { name: 'prod' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'dev' })).toBeInTheDocument();
@@ -102,7 +105,7 @@ describe('ConfigView via App', () => {
 
   it('renders a running badge and a failed badge with its provision error', async () => {
     mockFetch(jsonResponse(SAMPLE_CONFIG));
-    render(<App />);
+    renderWithStore(<App />);
 
     const contexts = within(await screen.findByRole('region', { name: 'Cloud contexts' }));
 
@@ -116,7 +119,7 @@ describe('ConfigView via App', () => {
 
   it('renders environment provisioning status badges, scoped to the environments table', async () => {
     mockFetch(jsonResponse(SAMPLE_CONFIG));
-    render(<App />);
+    renderWithStore(<App />);
 
     const envs = within(await screen.findByRole('region', { name: 'Environments' }));
     expect(envs.getByText('Running')).toBeInTheDocument();
@@ -127,26 +130,45 @@ describe('ConfigView via App', () => {
 
   it('renders empty states for an empty payload', async () => {
     mockFetch(jsonResponse(EMPTY_CONFIG));
-    render(<App />);
+    renderWithStore(<App />);
 
     expect(await screen.findByText('No environments yet.')).toBeInTheDocument();
     expect(screen.getByText('No cloud contexts yet.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1, name: 'Acme' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Acme' })).toBeInTheDocument();
   });
 
-  it('renders the sign-in prompt on a 401', async () => {
+  // A 401 *with* a token held is not a signed-out caller: the identity provider
+  // authenticated them and the API still refused, which means the identity is
+  // enrolled in no tenant. This test previously asserted the sign-in prompt,
+  // which encoded the dead end -- Sign in succeeds and lands right back here
+  // (#1167). The signed-out case is covered by the test below, which has no
+  // token at all.
+  it('tells a signed-in but unenrolled caller they need enrolling, not to sign in again', async () => {
     mockFetch(jsonResponse('invalid bearer token', 401));
-    render(<App />);
+    renderWithStore(<App />);
 
-    expect(await screen.findByText('Sign in to view your environments.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'You are signed in, but your account is not yet part of a tenant on this platform.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/An operator has to enrol you/)).toBeInTheDocument();
+    // Offering Sign in here is the loop this fix removes.
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
   });
 
-  it('renders the sign-in prompt when there is no dev token', async () => {
+  it('renders the landing page when there is no dev token', async () => {
     vi.stubEnv('VITE_DEV_BEARER_TOKEN', '');
-    render(<App />);
+    renderWithStore(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText('Sign in to view your environments.')).toBeInTheDocument();
+      expect(
+        screen.getByText(/A bearer token is required to view your environments\./),
+      ).toBeInTheDocument();
     });
+    expect(
+      screen.getByRole('link', { name: 'configure OIDC sign-in for this instance' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
   });
 });

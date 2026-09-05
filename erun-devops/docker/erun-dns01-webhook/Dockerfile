@@ -1,6 +1,11 @@
 ARG ERUN_VERSION=1.0.0
 
-FROM golang:1.26.0 AS builder
+# Pinned to BUILDPLATFORM: the RUN below cross-compiles via explicit
+# GOOS/GOARCH with CGO disabled, so the compiler runs natively on the build
+# host instead of under qemu emulation for the target arch. Only the
+# resulting binary is copied into the final image, so the stage's own
+# platform does not affect the shipped artifact's arch.
+FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder
 
 WORKDIR /src/erun-devops/dns01-webhook
 

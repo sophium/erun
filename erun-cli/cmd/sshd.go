@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -40,10 +41,84 @@ func newSSHDCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	initCmd.Flags().StringVar(&publicKeyPath, "public-key", "", "Public key to authorize for remote SSH access")
 	initCmd.Flags().IntVar(&localPort, "local-port", 0, "Fixed local port to use for kubectl port-forward")
 
-	return newCommandGroup("sshd", "Remote SSH utilities", initCmd)
+	syncTarget := common.OpenParams{}
+	syncCmd := &cobra.Command{
+		Use:          "sync [TENANT] [ENVIRONMENT]",
+		Short:        "Mirror a remote environment's workspace onto this host",
+		Args:         cobra.MaximumNArgs(2),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			if prepareContext != nil {
+				ctx = prepareContext(ctx)
+			}
+			params, err := resolveOpenParams(args, syncTarget)
+			if err != nil {
+				return err
+			}
+			result, _, err := resolveOpenWithInitRetryForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
+			if err != nil {
+				return err
+			}
+			return runSSHDSyncCommand(cmd.Context(), ctx, result, findProjectRoot)
+		},
+	}
+	addDryRunFlag(syncCmd)
+	syncCmd.Flags().StringVar(&syncTarget.Tenant, "tenant", "", "Sync a specific tenant")
+	syncCmd.Flags().StringVar(&syncTarget.Environment, "environment", "", "Sync a specific environment")
+
+	return newCommandGroup("sshd", "Remote SSH utilities", initCmd, syncCmd)
+}
+
+// runSSHDSyncCommand runs one workspace-sync pass, so an orchestrator whose
+// mirror is empty or stale can fill it without the desktop. Each precondition it
+// refuses on is named, because "the mirror did not change" is the one symptom
+// they all share.
+func runSSHDSyncCommand(ctx context.Context, cmdCtx common.Context, result common.OpenResult, findProjectRoot common.ProjectFinderFunc) error {
+	params, err := common.ResolveWorkspaceSyncParams(result, findProjectRoot)
+	if err != nil {
+		return fmt.Errorf("workspace sync for %s/%s: %w", result.Tenant, result.Environment, err)
+	}
+	cmdCtx.Trace(fmt.Sprintf("resolve workspace sync %s:%s -> %s", params.HostAlias, params.RemotePath, params.LocalPath))
+	if err := common.WorkspaceSyncSSHReady(ctx, params.HostAlias); err != nil {
+		return fmt.Errorf("workspace sync for %s/%s: the SSH channel to the pod is not up (%s): %w", result.Tenant, result.Environment, params.HostAlias, err)
+	}
+	pass := common.SyncWorkspaceOnce
+	if cmdCtx.DryRun {
+		cmdCtx.Trace("dry run: reporting what one pass would change, without touching the mirror")
+		pass = common.PreviewWorkspaceSync
+	}
+	synced, err := pass(ctx, params)
+	if err != nil {
+		return err
+	}
+	cmdCtx.Trace(sshdSyncSummary(cmdCtx.DryRun, synced))
+	return cmdCtx.WriteResult(synced)
+}
+
+func sshdSyncSummary(dryRun bool, synced common.WorkspaceSyncResult) string {
+	if dryRun {
+		return fmt.Sprintf("workspace sync would copy %d files, delete %d, and deliver %d artifacts", synced.FilesCopied, synced.FilesDeleted, synced.ArtifactsCopied)
+	}
+	return fmt.Sprintf("workspace sync copied %d files, deleted %d, delivered %d artifacts", synced.FilesCopied, synced.FilesDeleted, synced.ArtifactsCopied)
 }
 
 func runSSHDInitCommand(ctx common.Context, result common.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, common.EnvConfig) error, findProjectRoot common.ProjectFinderFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+	// The desktop pipes `erun sshd init` into its shared Local shell, which
+	// never produces a PTY exit (see erun-ui/AGENTS.md § "Command Completion
+	// And State-Refresh Wiring"), so these are the only completion signal the
+	// desktop has: an activity-queue entry to show the run in progress, and a
+	// recorded outcome the Manage dialog can display as the last run's result.
+	ctx.Info(fmt.Sprintf("==> SSHD init %s/%s", result.Tenant, result.Environment))
+	if err := runSSHDInitForTarget(ctx, result, publicKeyPath, localPort, saveEnvConfig, findProjectRoot, resolveRuntimeDeploySpec, deployHelmChart, runRemoteCommand, writeLocalConfig); err != nil {
+		ctx.Info(fmt.Sprintf("==> SSHD init failed %s/%s: %s", result.Tenant, result.Environment, err.Error()))
+		return err
+	}
+	ctx.Info(fmt.Sprintf("==> SSHD init done %s/%s", result.Tenant, result.Environment))
+	return nil
+}
+
+func runSSHDInitForTarget(ctx common.Context, result common.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, common.EnvConfig) error, findProjectRoot common.ProjectFinderFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	if err := validateSSHDInitDependencies(result, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart); err != nil {
 		return err
 	}

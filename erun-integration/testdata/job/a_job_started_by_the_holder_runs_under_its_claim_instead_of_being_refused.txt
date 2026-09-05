@@ -1,0 +1,5 @@
+audit: erun job start --dry-run --environment dev --name nested --tenant team work
+job: dev is held exclusively by job gate, which started this work; running under that claim rather than taking a second one
+job: detaching "nested" as job nested, output at <TMP>
+job: holding activity lease job-nested for the job's lifetime
+<TMP> exec job supervise --tenant team --environment dev --id nested --name nested --max-output-bytes 16777216 --lease-ttl 15m0s -- work

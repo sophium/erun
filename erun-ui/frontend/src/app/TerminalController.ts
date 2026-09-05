@@ -1,105 +1,49 @@
 import { FitAddon } from '@xterm/addon-fit';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import { type IDisposable, Terminal } from '@xterm/xterm';
+import { noop } from 'erun-kit';
 
-import { noop } from '@/lib/utils';
-import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
+import type { TerminalOutputPayload } from '@/types';
 
 import { RepaintSession, ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
-import { EventsOn } from '../../wailsjs/runtime/runtime';
-import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
+import { boot } from './bootThunks';
 import { decodeBase64Bytes } from './clipboard';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
-import type {
-  AIActivityPayload,
-  AppNotificationPayload,
-  AppStatusPayload,
-  EnvActivityPayload,
-  EnvironmentInitializedPayload,
-  EnvStatusPayload,
-  MountElements,
-  TerminalDataDisposable,
-  TerminalWriteData,
-} from './model';
-import { showTerminalMessage } from './notificationThunks';
+import { reconcileSidebarForViewport } from './layoutThunks';
+import type { MountElements, TerminalDataDisposable, TerminalWriteData } from './model';
+import { showTerminalError } from './notificationThunks';
+import { ReviewDiffKeyboardNav } from './reviewDiffKeyboardNav';
 import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import { setSelectedDiffPath } from './slices/reviewSlice';
+import { loadSavedTerminalScreenReaderMode } from './storage';
 import { store } from './store';
 import {
   bufferCursorVisibility,
   type CursorVisibilityState,
   filterTerminalDisplayData,
+  MAX_RETAINED_BYTES,
+  MAX_RETAINED_LINES,
   scanCursorVisibility,
   SHOW_CURSOR_SEQUENCE,
+  TERMINAL_SCROLLBACK,
+  trimChunksToBudget,
 } from './terminalBuffers';
 import { TerminalClipboard } from './terminalClipboard';
+import { safeFit } from './terminalFit';
+import { scheduleTerminalFocus } from './terminalFocus';
 import { applyTerminalLayoutVars } from './terminalLayoutVars';
+import { installTerminalLinkHandling } from './terminalLinkHandling';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import { TerminalReattachRepaint } from './terminalReattachRepaint';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeTerminalOutput } from './terminalStatus';
+import { TerminalWailsEvents } from './terminalWailsEvents';
 import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
 import { thunkExtra } from './thunkExtra';
-import {
-  handleAIActivity,
-  handleAppNotification,
-  handleAppStatus,
-  handleEnvActivity,
-  handleEnvironmentDeployed,
-  handleEnvironmentInitFailed,
-  handleEnvironmentInitialized,
-  handleEnvStatus,
-  handleReconnectLine,
-  handleTerminalExit,
-  hideTerminalMessageIfActive,
-  updateOpenStatusFromOutput,
-} from './wailsEventThunks';
+import { hideTerminalMessageIfActive, updateOpenStatusFromOutput } from './wailsEventThunks';
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
-
-// xterm keeps only this many lines of scrollback, so replaying more history than
-// this on a session switch is pure parse/render cost that xterm immediately
-// discards. Switching to a long-running session therefore replayed multiple MB
-// of history — the terminal visibly scrolled through all of it for ~20s before
-// landing at the prompt. The replay is capped to this budget below.
-const TERMINAL_SCROLLBACK = 5000;
-// Replay a little more than the scrollback (long lines wrap into several rows),
-// but never more than a hard byte ceiling so a sparse-newline stream can't blow
-// the cap. Both bound switch cost to O(scrollback) instead of O(total history).
-const MAX_REPLAY_LINES = TERMINAL_SCROLLBACK * 2;
-const MAX_REPLAY_BYTES = 2_000_000;
-
-function countNewlines(chunk: TerminalWriteData): number {
-  let count = 0;
-  if (typeof chunk === 'string') {
-    for (const ch of chunk) {
-      if (ch === '\n') count++;
-    }
-    return count;
-  }
-  for (const byte of chunk) {
-    if (byte === 10) count++;
-  }
-  return count;
-}
-
-// trimReplayChunks keeps only the tail of the retained buffer worth replaying —
-// enough to fill xterm's scrollback, not the whole session history. Returns the
-// original slice reference when nothing needs trimming.
-function trimReplayChunks(chunks: TerminalWriteData[]): TerminalWriteData[] {
-  let lines = 0;
-  let bytes = 0;
-  let start = 0;
-  for (let i = chunks.length - 1; i >= 0; i--) {
-    start = i;
-    const chunk = chunks[i];
-    if (chunk === undefined) continue;
-    lines += countNewlines(chunk);
-    bytes += chunk.length;
-    if (lines >= MAX_REPLAY_LINES || bytes >= MAX_REPLAY_BYTES) break;
-  }
-  return start === 0 ? chunks : chunks.slice(start);
-}
 
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
@@ -108,6 +52,7 @@ export class TerminalController {
   private readonly writeSources = new TerminalWriteSourceQueue();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
+  private serializeAddon: SerializeAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
   private _terminalPane: HTMLElement | null = null;
   private _reviewView: HTMLElement | null = null;
@@ -131,20 +76,16 @@ export class TerminalController {
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalQueryResponseDisposables: IDisposable[] = [];
-  private terminalOutputOff: (() => void) | null = null;
-  private terminalExitOff: (() => void) | null = null;
-  private appStatusOff: (() => void) | null = null;
-  private appNotificationOff: (() => void) | null = null;
-  private reconnectLineOff: (() => void) | null = null;
-  private environmentInitializedOff: (() => void) | null = null;
-  private environmentInitFailedOff: (() => void) | null = null;
-  private environmentDeployedOff: (() => void) | null = null;
-  private environmentsChangedOff: (() => void) | null = null;
-  private aiActivityOff: (() => void) | null = null;
-  private envStatusOff: (() => void) | null = null;
-  private envActivityOff: (() => void) | null = null;
+  private pathLinkProviderDisposable: IDisposable | null = null;
+  private clipboardOscDisposable: IDisposable | null = null;
+  private readonly wailsEvents = new TerminalWailsEvents();
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private contextMenuHandler: ((event: MouseEvent) => void) | null = null;
+  private readonly reviewDiffKeyboardNav = new ReviewDiffKeyboardNav({
+    getDiffList: () => this._diffList,
+    getTreeContainer: () => this.treeContainer,
+  });
+  private reviewDiffKeydownDisposable: (() => void) | null = null;
   // When the active session ends in "main screen + cursor hidden" with no
   // further output, restore the cursor so an unmatched hide leaked by
   // `erun open`, helm, kubectl, or a remote-side spinner doesn't strand the
@@ -189,7 +130,7 @@ export class TerminalController {
   }
 
   fitTerminal(): void {
-    this.fitAddon?.fit();
+    safeFit(this.fitAddon);
     this.publishTerminalDims();
   }
 
@@ -201,69 +142,25 @@ export class TerminalController {
     this.terminalRoot.dataset.terminalRows = String(this.terminal.rows);
   }
 
-  private subscribeEnvironmentLifecycleEvents(): void {
-    this.environmentInitializedOff = EventsOn(
-      'environment-initialized',
-      (payload: EnvironmentInitializedPayload) => {
-        void store.dispatch(handleEnvironmentInitialized(payload));
-      },
-    );
-    this.environmentInitFailedOff = EventsOn(
-      'environment-init-failed',
-      (payload: EnvironmentInitializedPayload) => {
-        store.dispatch(handleEnvironmentInitFailed(payload));
-      },
-    );
-    this.environmentDeployedOff = EventsOn(
-      'environment-deployed',
-      (payload: EnvironmentInitializedPayload) => {
-        void store.dispatch(handleEnvironmentDeployed(payload));
-      },
-    );
-  }
-
-  private subscribeWailsEvents(): void {
-    this.terminalOutputOff = EventsOn('terminal-output', (payload: TerminalOutputPayload) => {
-      this.handleTerminalOutput(payload);
-    });
-    this.terminalExitOff = EventsOn('terminal-exit', (payload: TerminalExitPayload) => {
-      void store.dispatch(handleTerminalExit(payload));
-    });
-    this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
-      store.dispatch(handleAppStatus(payload));
-    });
-    this.appNotificationOff = EventsOn('app-notification', (payload: AppNotificationPayload) => {
-      store.dispatch(handleAppNotification(payload));
-    });
-    this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
-      store.dispatch(handleReconnectLine(line));
-    });
-    this.subscribeEnvironmentLifecycleEvents();
-    this.environmentsChangedOff = EventsOn('environments-changed', () => {
-      void store.dispatch(reloadStateAfterEnvironmentChange());
-    });
-    this.aiActivityOff = EventsOn('ai-activity', (payload: AIActivityPayload) => {
-      store.dispatch(handleAIActivity(payload));
-    });
-    this.envStatusOff = EventsOn('env-status', (payload: EnvStatusPayload) => {
-      store.dispatch(handleEnvStatus(payload));
-    });
-    this.envActivityOff = EventsOn('env-activity', (payload: EnvActivityPayload) => {
-      store.dispatch(handleEnvActivity(payload));
-    });
-  }
-
   // Wires the OS-clipboard copy/paste handlers: the WebView2 embedding does not
   // deliver the browser paste event to xterm, so Ctrl+V / right-click / paste
   // route through TerminalClipboard, which reads the OS clipboard via the Wails
-  // runtime and feeds it through xterm's paste path.
+  // runtime and feeds it through xterm's paste path. The OSC 52 handler is the
+  // other direction: a program inside the session asking for text to be placed
+  // on the host clipboard.
   private installClipboardHandlers(root: HTMLDivElement): void {
-    this.terminal?.attachCustomKeyEventHandler((event: KeyboardEvent): boolean =>
-      this.clipboard.handleKeyEvent(event),
-    );
+    const terminal = this.terminal;
+    if (terminal) {
+      terminal.attachCustomKeyEventHandler((event: KeyboardEvent): boolean =>
+        this.clipboard.handleKeyEvent(event),
+      );
+      this.clipboardOscDisposable = this.clipboard.registerOscClipboardWrites(terminal, () =>
+        this.writeSources.currentIsReplay(),
+      );
+    }
     this.pasteHandler = (event: ClipboardEvent) => {
       void this.clipboard.handlePaste(event).catch((error: unknown) => {
-        store.dispatch(showTerminalMessage(readError(error)));
+        store.dispatch(showTerminalError(readError(error)));
       });
     };
     root.addEventListener('paste', this.pasteHandler, true);
@@ -288,6 +185,7 @@ export class TerminalController {
 
     this.terminal = new Terminal({
       allowProposedApi: false,
+      screenReaderMode: loadSavedTerminalScreenReaderMode(),
       scrollback: TERMINAL_SCROLLBACK,
       cursorBlink: true,
       fontFamily:
@@ -300,11 +198,15 @@ export class TerminalController {
     });
     this.fitAddon = new FitAddon();
     this.terminal.loadAddon(this.fitAddon);
+    this.serializeAddon = new SerializeAddon();
+    this.terminal.loadAddon(this.serializeAddon);
     this.terminal.open(elements.terminalRoot);
-    this.fitAddon.fit();
+    safeFit(this.fitAddon);
     this.publishTerminalDims();
+    this.pathLinkProviderDisposable = installTerminalLinkHandling(this.terminal);
 
     this.installClipboardHandlers(elements.terminalRoot);
+    this.reviewDiffKeydownDisposable = this.reviewDiffKeyboardNav.install(elements.reviewMain);
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
@@ -314,7 +216,7 @@ export class TerminalController {
       (data) =>
         SendSessionInput(this.writeSources.current(store.getState().terminal.sessionId), data),
       (error) => {
-        store.dispatch(showTerminalMessage(readError(error)));
+        store.dispatch(showTerminalError(readError(error)));
       },
       // Suppress replies to queries re-parsed from a replayed display buffer:
       // the asking tool consumed the live reply long ago, so a second reply
@@ -322,8 +224,12 @@ export class TerminalController {
       () => this.writeSources.currentIsReplay(),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
+      // Before the write, not after: a synthetic resize cycle in flight has to
+      // stand down as early as possible, because it is the reflow landing on a
+      // line being typed that corrupts the submission (#1330).
+      this.reattachRepaint.noteInput();
       SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
-        store.dispatch(showTerminalMessage(readError(error)));
+        store.dispatch(showTerminalError(readError(error)));
       });
     });
 
@@ -333,7 +239,9 @@ export class TerminalController {
     this.resizeObserver.observe(elements.terminalRoot);
     window.addEventListener('resize', this.queueTerminalResize);
 
-    this.subscribeWailsEvents();
+    this.wailsEvents.subscribe((payload) => {
+      this.handleTerminalOutput(payload);
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -359,52 +267,49 @@ export class TerminalController {
     for (const disposable of this.terminalQueryResponseDisposables) {
       disposable.dispose();
     }
-    this.detachWailsEventListeners();
+    this.wailsEvents.detach();
+    this.pathLinkProviderDisposable?.dispose();
+    this.pathLinkProviderDisposable = null;
     window.clearTimeout(this.idleStatusTimer);
     this.reattachRepaint.clear();
     this.stopReviewDiffRefresh();
-    if (this.pasteHandler && this.terminalRoot) {
-      this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
-    }
-    if (this.contextMenuHandler && this.terminalRoot) {
-      this.terminalRoot.removeEventListener('contextmenu', this.contextMenuHandler);
-    }
+    this.removeClipboardHandlers();
+    this.reviewDiffKeydownDisposable?.();
+    this.reviewDiffKeydownDisposable = null;
     this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
     this.terminal = null;
     this.fitAddon = null;
+    this.serializeAddon = null;
     // xterm drops pending write-completion callbacks on dispose, so reset the
     // source queue to avoid carrying a stale head into the next mount.
     this.writeSources.clear();
   }
 
-  private detachWailsEventListeners(): void {
-    const fields = [
-      'terminalOutputOff',
-      'terminalExitOff',
-      'appStatusOff',
-      'appNotificationOff',
-      'reconnectLineOff',
-      'environmentInitializedOff',
-      'environmentInitFailedOff',
-      'environmentDeployedOff',
-      'environmentsChangedOff',
-      'aiActivityOff',
-      'envStatusOff',
-      'envActivityOff',
-    ] as const;
-    for (const field of fields) {
-      this[field]?.();
-      this[field] = null;
+  private removeClipboardHandlers(): void {
+    this.clipboardOscDisposable?.dispose();
+    this.clipboardOscDisposable = null;
+    const root = this.terminalRoot;
+    if (this.pasteHandler && root) {
+      root.removeEventListener('paste', this.pasteHandler, true);
+    }
+    if (this.contextMenuHandler && root) {
+      root.removeEventListener('contextmenu', this.contextMenuHandler);
     }
   }
 
   focusTerminalSoon(): void {
-    window.setTimeout(() => {
-      this.terminal?.focus();
-      window.requestAnimationFrame(() => this.terminal?.focus());
-      window.setTimeout(() => this.terminal?.focus(), 80);
-    }, 0);
+    scheduleTerminalFocus({
+      getTerminal: () => this.terminal,
+      windowIsActive: () => document.hasFocus(),
+      focusIsFree: () => {
+        const active = document.activeElement;
+        if (!active || active === document.body) {
+          return true;
+        }
+        return this.terminalRoot?.contains(active) ?? false;
+      },
+    });
   }
 
   scheduleIdleStatusPoll(delay = 1000): void {
@@ -486,6 +391,10 @@ export class TerminalController {
   }
 
   applyLayoutVars(): void {
+    // Re-derive the sidebar's collapsed state on every layout pass (mount,
+    // window resize, any panel toggle) — a window resized rather than dragged
+    // needs the same auto-collapse a narrow launch already gets.
+    store.dispatch(reconcileSidebarForViewport());
     applyTerminalLayoutVars({
       reviewView: this._reviewView,
       terminalPane: this._terminalPane,
@@ -519,7 +428,7 @@ export class TerminalController {
 
   private runTerminalResize(): void {
     this.applyLayoutVars();
-    this.fitAddon?.fit();
+    safeFit(this.fitAddon);
     this.publishTerminalDims();
     const sessionId = store.getState().terminal.sessionId;
     if (sessionId > 0 && this.terminal) {
@@ -576,23 +485,70 @@ export class TerminalController {
     this.reviewDiffRefreshTimer = window.setTimeout(callback, delay);
   }
 
-  writeTerminalBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
-    // Rehydrate live cursor tracking from the full buffer (a cheap scan, not a
-    // render); its final alt-screen verdict also decides how much to replay.
-    const finalState = bufferCursorVisibility(chunks);
-    // Main-screen shells: replay only the tail that fills xterm's scrollback —
-    // replaying the whole history just scroll-renders lines xterm then discards
-    // (the ~20s scroll-through this cap fixed). Alt-screen TUIs (claude/codex):
-    // the visible frame is drawn by cursor-addressed redraws whose alt-screen
-    // enter (`?1049h`) + initial paint live in the buffer HEAD, so trimming the
-    // head would leave those redraws on a blank main screen — a black pane.
-    // Alt-screen has no scrollback, so a full replay carries no scroll-through
-    // cost; replay it whole.
-    const replayChunks = finalState.altScreen ? chunks : trimReplayChunks(chunks);
-    for (const chunk of replayChunks) {
-      this.writeToTerminal(sessionId, chunk, true);
+  // snapshotSession captures the outgoing session's rendered screen (its
+  // current scrollback + cursor state, via @xterm/addon-serialize) before a
+  // switch moves the shared xterm instance onto another session, and clears
+  // the JS-side display buffer -- everything up to now is captured in the
+  // snapshot, so only output that arrives after this point needs replaying on
+  // the next switch back to it. This is what makes a later switch back O(time
+  // since last visit) instead of O(session's total history) (#1322). A no-op
+  // for sessionId <= 0 (no prior session was actually showing).
+  snapshotSession(sessionId: number): void {
+    if (sessionId <= 0 || !this.terminal || !this.serializeAddon) {
+      return;
     }
-    this.liveCursorState = finalState;
+    this.sessions.captureSnapshot(sessionId, this.serializeAddon.serialize());
+  }
+
+  // activateSession renders `sessionId` into the (already-reset) shared
+  // terminal. A session with a prior snapshot (captured by snapshotSession the
+  // last time it was switched away from) restores that snapshot in one write
+  // and replays only the delta buffered since -- bounded, and independent of
+  // how long the session has been running. A session with no snapshot yet
+  // (never switched away from in this window) falls back to a bounded replay
+  // of its retained history, same as before #1322.
+  activateSession(sessionId: number): void {
+    const snapshot = this.sessions.snapshot(sessionId);
+    let cursorHidden: boolean;
+    if (snapshot !== undefined) {
+      this.writeToTerminal(sessionId, snapshot, true);
+      const delta = this.sessions.displayBuffer(sessionId);
+      for (const chunk of delta) {
+        this.writeToTerminal(sessionId, chunk, true);
+      }
+      // A snapshot's own trailing state (whether its cursor was hidden) isn't
+      // re-derived here -- only the delta is scanned, from a "visible cursor"
+      // baseline. The alt-screen verdict below instead comes straight from
+      // the live buffer xterm just reconstructed, which is authoritative
+      // regardless of what was or wasn't in the delta.
+      cursorHidden = bufferCursorVisibility(delta).cursorHidden;
+    } else {
+      const chunks = this.sessions.displayBuffer(sessionId);
+      // Rehydrate live cursor tracking from the full buffer (a cheap scan, not
+      // a render); its final alt-screen verdict also decides how much to
+      // replay. Main-screen shells: replay only the tail that fills xterm's
+      // scrollback — replaying the whole history just scroll-renders lines
+      // xterm then discards (the ~20s scroll-through this cap fixed).
+      // Alt-screen TUIs (claude/codex): the visible frame is drawn by
+      // cursor-addressed redraws whose alt-screen enter (`?1049h`) + initial
+      // paint live in the buffer HEAD, so trimming the head would leave those
+      // redraws on a blank main screen — a black pane. Alt-screen has no
+      // scrollback, so a full replay carries no scroll-through cost; replay it
+      // whole. This cold path only runs once per session per window lifetime
+      // (its first display), since every later switch-back has a snapshot.
+      const finalState = bufferCursorVisibility(chunks);
+      const replayChunks = finalState.altScreen
+        ? chunks
+        : trimChunksToBudget(chunks, MAX_RETAINED_LINES, MAX_RETAINED_BYTES);
+      for (const chunk of replayChunks) {
+        this.writeToTerminal(sessionId, chunk, true);
+      }
+      cursorHidden = finalState.cursorHidden;
+    }
+    this.liveCursorState = {
+      cursorHidden,
+      altScreen: this.terminal?.buffer.active.type === 'alternate',
+    };
     this.cancelCursorRestoreTimer();
     // xterm parses write() calls asynchronously, so a synchronous scroll would
     // run before the replayed chunks are laid out. The empty write's callback
@@ -602,18 +558,25 @@ export class TerminalController {
       this.terminal?.scrollToBottom();
     });
     // AI TUIs (claude/codex) render on the MAIN screen — not the alt-screen — and
-    // only repaint on a real geometry change, so the trimmed replay above can't
+    // only repaint on a real geometry change, so a trimmed cold-path replay can't
     // reconstruct their frame and the pane is blank on switch until the app next
-    // emits a diff (the black-pane the operator hit). Nudge the backend pty on
-    // every switch to raise a genuine WINCH and force a full repaint; the Go side
-    // (RepaintSession) applies it only to AI sessions and no-ops for plain shells
-    // and alt-screen apps (which reconstruct from the replay), so this is safe to
-    // call unconditionally. The local xterm is never resized — no visible reflow.
+    // emits a diff (the black-pane the operator hit). An orchestrator pane runs
+    // the same kind of TUI. Nudge the backend pty on every switch to raise a
+    // genuine WINCH and force a full repaint; the Go side (RepaintSession)
+    // applies it only to AI and orchestrator sessions and no-ops for plain
+    // shells and alt-screen apps (which reconstruct from the replay), so this is
+    // safe to call unconditionally. The local xterm is never resized — no
+    // visible reflow.
     void RepaintSession(sessionId);
-    // A pty-only WINCH (RepaintSession above) does not reach a reattached Claude,
-    // so if this session stays blank after selection (a reattached AI tab) the
-    // reattach-repaint helper forces a real xterm+pty resize cycle. See
-    // TerminalReattachRepaint.
+    // A pty-only WINCH (RepaintSession above) does not reach a reattached
+    // main-screen TUI, so if this session stays blank after selection (a
+    // reattached AI tab or orchestrator pane) the reattach-repaint helper
+    // forces a real xterm+pty resize cycle. See TerminalReattachRepaint.
     this.reattachRepaint.schedule(sessionId);
+    // A spinner elsewhere in the session's history can leave the cursor
+    // hidden on a plain shell prompt with no further output ever coming to
+    // re-show it (handleTerminalOutput's own timer only fires from live
+    // writes). Re-run the same stuck check after a switch lands on that state.
+    this.scheduleCursorRestoreIfStuck();
   }
 }

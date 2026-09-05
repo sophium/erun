@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -37,18 +38,17 @@ func (a *App) startConfigWatcher() {
 	a.mu.Unlock()
 
 	root, err := eruncommon.ERunConfigDir()
-	if err != nil || root == "" {
-		return
-	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return
-	}
-	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
+		a.reportConfigWatcherFailure(fmt.Errorf("resolve config directory: %w", err))
 		return
 	}
-	if err := addConfigWatchDirs(watcher, root); err != nil {
-		_ = watcher.Close()
+	if root == "" {
+		a.reportConfigWatcherFailure(fmt.Errorf("resolve config directory: no path returned"))
+		return
+	}
+	watcher, err := newFsnotifyConfigWatcher(root)
+	if err != nil {
+		a.reportConfigWatcherFailure(err)
 		return
 	}
 
@@ -64,6 +64,37 @@ func (a *App) startConfigWatcher() {
 	a.mu.Unlock()
 
 	go a.runConfigWatcher(ctx, cw, root)
+}
+
+// newFsnotifyConfigWatcher creates the fsnotify watcher rooted at root and
+// arms it on every existing subdirectory, naming which step failed so the
+// caller can surface it instead of leaving the watcher silently unstarted.
+func newFsnotifyConfigWatcher(root string) (*fsnotify.Watcher, error) {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, fmt.Errorf("create config directory %s: %w", root, err)
+	}
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, fmt.Errorf("start filesystem watcher: %w", err)
+	}
+	if err := addConfigWatchDirs(watcher, root); err != nil {
+		_ = watcher.Close()
+		return nil, fmt.Errorf("watch config directory %s: %w", root, err)
+	}
+	return watcher, nil
+}
+
+// reportConfigWatcherFailure surfaces a config watcher problem as an
+// actionable notification. Swallowing it — the previous behavior, for both a
+// failed start and a runtime error from the watcher itself — left config
+// changes made outside the desktop's own PTY (a hand-edited file, `erun env
+// delete` from another terminal, `erun init` in a separate shell) silently
+// unreflected, indistinguishable from "nothing changed".
+func (a *App) reportConfigWatcherFailure(err error) {
+	a.emitAppNotification("warning", fmt.Sprintf(
+		"Could not watch the config directory for external changes: %s. Environments created or edited outside this window may not appear until you reopen the app.",
+		err.Error(),
+	))
 }
 
 func (a *App) stopConfigWatcher() {
@@ -111,10 +142,11 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 				return
 			}
 			handleConfigWatchEvent(cw.watcher, event, queueEmit)
-		case _, ok := <-cw.watcher.Errors:
+		case watchErr, ok := <-cw.watcher.Errors:
 			if !ok {
 				return
 			}
+			a.reportConfigWatcherFailure(fmt.Errorf("watch config directory: %w", watchErr))
 		}
 	}
 }

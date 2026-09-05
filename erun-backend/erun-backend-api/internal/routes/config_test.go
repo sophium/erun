@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type stubConfigTenantRepository struct {
@@ -20,6 +22,15 @@ func (r stubConfigTenantRepository) Current(context.Context) (model.Tenant, erro
 	return r.tenant, r.err
 }
 
+type stubConfigRateLimitReader struct {
+	limit model.PlatformRateLimit
+	err   error
+}
+
+func (r stubConfigRateLimitReader) Get(context.Context) (model.PlatformRateLimit, error) {
+	return r.limit, r.err
+}
+
 type stubEnvironmentRepository struct {
 	environments []model.Environment
 	environment  model.Environment
@@ -28,10 +39,67 @@ type stubEnvironmentRepository struct {
 	createInput  model.Environment
 	count        int
 	countErr     error
-	err          error
+	// countByContext maps a contextID to the environment count
+	// CountByContext reports for it; an unlisted id reports 0.
+	countByContext    map[string]int
+	countByContextErr error
+	// countByRuntimeType is what CountByType reports for
+	// model.EnvironmentTypeRuntime (#1113's aggregate resource-budget check).
+	countByRuntimeType int
+	countByTypeErr     error
+	err                error
+	// claimTaken makes ClaimDeploy report the deploy slot as already held, the
+	// shape a concurrent deploy produces.
+	claimTaken       bool
+	claimErr         error
+	claimCalls       int
+	markFailedCalls  int
+	markFailedReason string
+	// claimDeleteTaken makes ClaimDelete report the delete slot as already
+	// held, the shape a concurrent or still-in-flight delete produces.
+	claimDeleteTaken        bool
+	claimDeleteErr          error
+	claimDeleteCalls        int
+	markDeleteBlockedCalls  int
+	markDeleteBlockedReason string
+	// lastListTenantID captures the security context's TenantID List saw, so a
+	// test can prove which tenant a scoped call actually queried without a
+	// real database's RLS to observe it.
+	lastListTenantID string
 }
 
-func (r *stubEnvironmentRepository) List(context.Context) ([]model.Environment, error) {
+func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Duration) (bool, error) {
+	r.claimCalls++
+	if r.claimErr != nil {
+		return false, r.claimErr
+	}
+	return !r.claimTaken, nil
+}
+
+func (r *stubEnvironmentRepository) MarkDeployFailed(_ context.Context, _ string, reason string) error {
+	r.markFailedCalls++
+	r.markFailedReason = reason
+	return nil
+}
+
+func (r *stubEnvironmentRepository) ClaimDelete(context.Context, string, time.Duration) (bool, error) {
+	r.claimDeleteCalls++
+	if r.claimDeleteErr != nil {
+		return false, r.claimDeleteErr
+	}
+	return !r.claimDeleteTaken, nil
+}
+
+func (r *stubEnvironmentRepository) MarkDeleteBlocked(_ context.Context, _ string, reason string) error {
+	r.markDeleteBlockedCalls++
+	r.markDeleteBlockedReason = reason
+	return nil
+}
+
+func (r *stubEnvironmentRepository) List(ctx context.Context) ([]model.Environment, error) {
+	if securityContext, ok := security.FromContext(ctx); ok {
+		r.lastListTenantID = securityContext.TenantID
+	}
 	return r.environments, r.err
 }
 
@@ -39,15 +107,74 @@ func (r *stubEnvironmentRepository) Count(context.Context) (int, error) {
 	return r.count, r.countErr
 }
 
-// stubTenantQuotaRepository reports a fixed environment-count cap for the
-// quota guardrail.
-type stubTenantQuotaRepository struct {
-	maxEnvironments int
-	err             error
+func (r *stubEnvironmentRepository) CountByContext(_ context.Context, contextID string) (int, error) {
+	if r.countByContextErr != nil {
+		return 0, r.countByContextErr
+	}
+	return r.countByContext[contextID], nil
 }
 
-func (r stubTenantQuotaRepository) MaxEnvironments(context.Context) (int, error) {
-	return r.maxEnvironments, r.err
+// CountByType reports countByRuntimeType for model.EnvironmentTypeRuntime and
+// 0 otherwise; the aggregate resource-budget check (#1113) is the only
+// caller, and it only ever asks about runtime environments.
+func (r *stubEnvironmentRepository) CountByType(_ context.Context, envType model.EnvironmentType) (int, error) {
+	if r.countByTypeErr != nil {
+		return 0, r.countByTypeErr
+	}
+	if envType == model.EnvironmentTypeRuntime {
+		return r.countByRuntimeType, nil
+	}
+	return 0, nil
+}
+
+// stubTenantQuotaRepository reports a fixed quota row for the quota guardrail.
+// Resource caps left at their zero value default to the same values an absent
+// tenant_quotas row would (repository.DefaultMax*), so existing test
+// constructions that only set maxEnvironments keep passing the resource-cap
+// floor check added for #605.
+type stubTenantQuotaRepository struct {
+	maxEnvironments       int
+	maxCPUMillicores      int
+	maxMemoryMB           int
+	maxStorageGB          int
+	maxTotalCPUMillicores int
+	maxTotalMemoryMB      int
+	maxTotalStorageGB     int
+	err                   error
+}
+
+func (r stubTenantQuotaRepository) Get(context.Context) (model.TenantQuota, error) {
+	if r.err != nil {
+		return model.TenantQuota{}, r.err
+	}
+	quota := model.TenantQuota{
+		MaxEnvironments:       r.maxEnvironments,
+		MaxCPUMillicores:      r.maxCPUMillicores,
+		MaxMemoryMB:           r.maxMemoryMB,
+		MaxStorageGB:          r.maxStorageGB,
+		MaxTotalCPUMillicores: r.maxTotalCPUMillicores,
+		MaxTotalMemoryMB:      r.maxTotalMemoryMB,
+		MaxTotalStorageGB:     r.maxTotalStorageGB,
+	}
+	if quota.MaxCPUMillicores == 0 {
+		quota.MaxCPUMillicores = repository.DefaultMaxCPUMillicores
+	}
+	if quota.MaxMemoryMB == 0 {
+		quota.MaxMemoryMB = repository.DefaultMaxMemoryMB
+	}
+	if quota.MaxStorageGB == 0 {
+		quota.MaxStorageGB = repository.DefaultMaxStorageGB
+	}
+	if quota.MaxTotalCPUMillicores == 0 {
+		quota.MaxTotalCPUMillicores = repository.DefaultMaxTotalCPUMillicores
+	}
+	if quota.MaxTotalMemoryMB == 0 {
+		quota.MaxTotalMemoryMB = repository.DefaultMaxTotalMemoryMB
+	}
+	if quota.MaxTotalStorageGB == 0 {
+		quota.MaxTotalStorageGB = repository.DefaultMaxTotalStorageGB
+	}
+	return quota, nil
 }
 
 func (r *stubEnvironmentRepository) Get(context.Context, string) (model.Environment, error) {
@@ -73,6 +200,7 @@ type stubContextRepository struct {
 	cloudContext model.Context
 	created      model.Context
 	createCalls  int
+	createInput  model.Context
 	err          error
 }
 
@@ -86,6 +214,7 @@ func (r *stubContextRepository) Get(context.Context, string) (model.Context, err
 
 func (r *stubContextRepository) Create(_ context.Context, cloudContext model.Context) (model.Context, error) {
 	r.createCalls++
+	r.createInput = cloudContext
 	if r.err != nil {
 		return model.Context{}, r.err
 	}
@@ -109,7 +238,9 @@ func TestConfigReturnsDenormalizedReadModel(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/config", nil)
 	rec := httptest.NewRecorder()
 
-	ConfigRoutes{tenants: tenants, environments: environments, contexts: contexts}.getConfig(rec, req)
+	rateLimits := stubConfigRateLimitReader{limit: model.PlatformRateLimit{InviteRequestWindowSeconds: 60}}
+
+	ConfigRoutes{tenants: tenants, environments: environments, contexts: contexts, rateLimits: rateLimits}.getConfig(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d", rec.Code)
@@ -127,6 +258,9 @@ func TestConfigReturnsDenormalizedReadModel(t *testing.T) {
 	if len(response.Contexts) != 1 || response.Contexts[0].Provider != "aws" {
 		t.Fatalf("unexpected contexts: %+v", response.Contexts)
 	}
+	if response.InviteRequestRateLimitWindowSeconds != 60 {
+		t.Fatalf("unexpected invite request rate limit window: %d", response.InviteRequestRateLimitWindowSeconds)
+	}
 }
 
 func TestConfigPropagatesRepositoryError(t *testing.T) {
@@ -135,7 +269,7 @@ func TestConfigPropagatesRepositoryError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/config", nil)
 	rec := httptest.NewRecorder()
 
-	ConfigRoutes{tenants: tenants, environments: &stubEnvironmentRepository{}, contexts: &stubContextRepository{}}.getConfig(rec, req)
+	ConfigRoutes{tenants: tenants, environments: &stubEnvironmentRepository{}, contexts: &stubContextRepository{}, rateLimits: stubConfigRateLimitReader{}}.getConfig(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("unexpected status: %d", rec.Code)

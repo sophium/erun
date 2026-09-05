@@ -3,6 +3,17 @@ audit: erun build
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 ==> Build failed after <ELAPSED>
-the local Docker daemon cannot build linux/arm64: no emulator is registered for the foreign architecture. erun always builds linux/amd64 + linux/arm64, so the build cannot proceed. Register binfmt/QEMU for the missing platform(s) and retry:
+step timing (ordered by duration):
+  build (failed) [<ELAPSED>] — the local Docker daemon cannot build linux/arm64: no emulator is registered for the foreign architecture. this build targets linux/amd64 + linux/arm64, so the build cannot proceed. Register binfmt/QEMU for the missing platform(s) and retry:
+  docker run --privileged --rm tonistiigi/binfmt --install all
+    api (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — the local Docker daemon cannot build linux/arm64: no emulator is registered for the foreign architecture. this build targets linux/amd64 + linux/arm64, so the build cannot proceed. Register binfmt/QEMU for the missing platform(s) and retry:
+  docker run --privileged --rm tonistiigi/binfmt --install all
+    base (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — the local Docker daemon cannot build linux/arm64: no emulator is registered for the foreign architecture. this build targets linux/amd64 + linux/arm64, so the build cannot proceed. Register binfmt/QEMU for the missing platform(s) and retry:
+  docker run --privileged --rm tonistiigi/binfmt --install all
+timing record written to <TMP>
+the local Docker daemon cannot build linux/arm64: no emulator is registered for the foreign architecture. this build targets linux/amd64 + linux/arm64, so the build cannot proceed. Register binfmt/QEMU for the missing platform(s) and retry:
   docker run --privileged --rm tonistiigi/binfmt --install all

@@ -6,6 +6,8 @@ import (
 	"net"
 	"strings"
 	"syscall"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // errMCPUnreachable signals the frontend to render an unreachable state with a
@@ -18,11 +20,37 @@ var errMCPUnreachable = errors.New("mcp unreachable")
 // underlying error text. The marker is opaque; it is never shown to users.
 const mcpUnreachableMarker = "ERUN_MCP_UNREACHABLE: "
 
+// mcpUnreachableKindMarkers give the review panel the reachability kind
+// DescribeLocalMCPUnreachable already computed, rather than asking it to
+// pattern-match the sentence (#1230): a never-opened/stopped environment reads
+// as informational, a stale forward reads as a fault, and the frontend cannot
+// tell those apart from prose alone. Both are still recognised as "MCP
+// unreachable" the same way the plain marker is.
+var mcpUnreachableKindMarkers = map[eruncommon.LocalMCPUnreachableKind]string{
+	eruncommon.LocalMCPNotOpen:      "ERUN_MCP_UNREACHABLE_NOT_OPEN: ",
+	eruncommon.LocalMCPStaleForward: "ERUN_MCP_UNREACHABLE_STALE: ",
+}
+
 func wrapMCPUnreachableError(err error) error {
 	if err == nil {
 		return nil
 	}
 	return fmt.Errorf("%s%w: %w", mcpUnreachableMarker, errMCPUnreachable, err)
+}
+
+// wrapMCPUnreachableErrorWithKind is wrapMCPUnreachableError plus the
+// reachability kind the caller already classified, so the review panel can
+// tell a stopped environment (informational, "Open") from a stale forward (a
+// fault, "Reconnect…") without re-deriving it from the message text.
+func wrapMCPUnreachableErrorWithKind(kind eruncommon.LocalMCPUnreachableKind, err error) error {
+	if err == nil {
+		return nil
+	}
+	marker, ok := mcpUnreachableKindMarkers[kind]
+	if !ok {
+		return wrapMCPUnreachableError(err)
+	}
+	return fmt.Errorf("%s%w: %w", marker, errMCPUnreachable, err)
 }
 
 func isMCPDialFailure(err error) bool {

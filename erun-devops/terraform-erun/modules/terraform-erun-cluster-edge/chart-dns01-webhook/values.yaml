@@ -16,6 +16,12 @@ namespace: cert-manager
 image: ""
 imagePullPolicy: IfNotPresent
 
+# Pull secrets for the image above, by name, in this chart's namespace. Empty for
+# a public registry. The Secret itself is provisioned out of band -- note it must
+# live in the cert-manager namespace, which is not where an operator expects to
+# put a registry credential.
+imagePullSecrets: []
+
 # The broker endpoint the shim forwards to, and the Secret key the per-env token
 # is delivered under. brokerURL is the base; the shim appends /present /cleanup.
 brokerURL: ""

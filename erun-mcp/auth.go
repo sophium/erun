@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/websocket"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
@@ -66,11 +67,35 @@ func (c mcpAuthConfig) enabled() bool {
 }
 
 func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
+	return authHTTPMiddlewareWithTokenResolver(cfg, bearerToken, next)
+}
+
+// wsAttachAuthHTTPMiddleware is the attach route's own auth wrapper: it
+// resolves the bearer token the same way authHTTPMiddleware does, but falls
+// back to a WebSocket-subprotocol-carried token (attachSubprotocolBearerToken)
+// when no Authorization header is present. A browser's WebSocket constructor
+// cannot set an Authorization header on the handshake at all -- the
+// subprotocol list is the only header-bearing surface it exposes -- so
+// without this fallback a browser client could never authenticate to this
+// route, regardless of capability. Every other route keeps the header-only
+// resolver; this wider acceptance is scoped to the one route that needs it.
+func wsAttachAuthHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
+	return authHTTPMiddlewareWithTokenResolver(cfg, resolveAttachBearerToken, next)
+}
+
+func resolveAttachBearerToken(req *http.Request) string {
+	if token := bearerToken(req); token != "" {
+		return token
+	}
+	return attachSubprotocolBearerToken(req)
+}
+
+func authHTTPMiddlewareWithTokenResolver(cfg mcpAuthConfig, resolveToken func(*http.Request) string, next http.Handler) http.Handler {
 	if !cfg.enabled() {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		token := bearerToken(req)
+		token := resolveToken(req)
 		if token == "" {
 			writeUnauthorized(w, "a bearer token is required")
 			return
@@ -91,11 +116,21 @@ func authHTTPMiddleware(cfg mcpAuthConfig, next http.Handler) http.Handler {
 			writeUnauthorized(w, "token tenant does not match this environment")
 			return
 		}
-		if _, err := eruncommon.VerifyMCPToken(req.Context(), cfg.oidc, token, issuer, cfg.audience, time.Now()); err != nil {
+		claims, err := eruncommon.VerifyMCPToken(req.Context(), cfg.oidc, token, issuer, cfg.audience, time.Now())
+		if err != nil {
 			writeUnauthorized(w, err.Error())
 			return
 		}
-		next.ServeHTTP(w, requestWithAuthTenant(req, tenant))
+		// Authentication is done; what the caller may do travels with the request
+		// from here, so the tool surface can be built for this caller rather than
+		// filtered after the fact.
+		identity := authIdentity{Tenant: tenant, User: claims.Subject, Capabilities: claims.Capabilities()}
+		if identity.Capabilities.Empty() {
+			writeForbidden(w, "token grants no erun capabilities")
+			return
+		}
+		req = requestWithAuthTenant(req, tenant)
+		next.ServeHTTP(w, req.WithContext(withAuthIdentity(req.Context(), identity)))
 	})
 }
 
@@ -117,6 +152,38 @@ func bearerToken(req *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(header[len(prefix):])
+}
+
+// attachAuthSubprotocol is the Sec-WebSocket-Protocol scheme name a browser
+// attach client offers alongside its bearer token, e.g.
+// new WebSocket(url, [attachAuthSubprotocol, token]) -- the RFC 6455 handshake
+// joins that array into one comma-separated header, which is the only place a
+// browser's WebSocket constructor lets a caller put a credential; it exposes
+// no way to set an Authorization header. The scheme name is versioned so a
+// future change to how the token is framed can't be silently misparsed by an
+// old client.
+const attachAuthSubprotocol = "erun.bearer.v1"
+
+// attachSubprotocolBearerToken extracts a bearer token from a two-entry
+// Sec-WebSocket-Protocol offer whose first entry is attachAuthSubprotocol.
+// Anything else -- no header, wrong scheme, wrong arity -- resolves to "",
+// which resolveAttachBearerToken then reports as the same "a bearer token is
+// required" 401 a missing Authorization header produces: a malformed offer is
+// refused the ordinary way, not with an error that leaks which channel was tried.
+func attachSubprotocolBearerToken(req *http.Request) string {
+	protocols := websocket.Subprotocols(req)
+	if len(protocols) != 2 || protocols[0] != attachAuthSubprotocol {
+		return ""
+	}
+	return strings.TrimSpace(protocols[1])
+}
+
+// A caller whose token is valid but grants nothing is authenticated and not
+// authorized, which is 403 rather than 401: retrying with the same credentials
+// is pointless, and saying so is the difference between "log in again" and "ask
+// for a role".
+func writeForbidden(w http.ResponseWriter, reason string) {
+	http.Error(w, "forbidden: "+reason, http.StatusForbidden)
 }
 
 func writeUnauthorized(w http.ResponseWriter, reason string) {

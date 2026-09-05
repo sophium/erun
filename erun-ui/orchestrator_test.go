@@ -3,10 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -38,15 +44,47 @@ func orchestratorTestApp(t *testing.T) *App {
 	return app
 }
 
+// investigateHelmTimeoutReport is the shape the desktop's failure card produces:
+// the command that failed, the target, the error, and the captured output. The
+// bounds in investigation_bounds.go admit it because it carries all three.
+const investigateHelmTimeoutReport = `erun deploy failed
+Target: frs/dev
+Version: 1.0.179
+Release: frs-devops
+Namespace: frs-dev
+Started: 2026-08-16T06:01:12Z
+Elapsed: 4s
+
+Error: ==> Deploy failed after 4s
+
+Output:
+helm upgrade --install frs-devops ./chart
+Error: UPGRADE FAILED: timed out waiting for the condition`
+
 // orchestratorTestAppWithLocalRepo also returns the local-agent env's worktree
 // path, for the assertions that care where that env is reviewed.
 func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
 	t.Helper()
+	return orchestratorTestAppWithReachability(t, orchestratorTestAlwaysReachable)
+}
+
+// orchestratorTestAppWithReachability is orchestratorTestAppWithLocalRepo with
+// an injectable MCP-edge reachability probe, so a test about the unreachable-
+// edge notice can simulate a down edge without a real port-forward,
+// while every other orchestrator test gets a deterministic "always reachable"
+// default instead of depending on a real network dial.
+func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool) (*App, string) {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
+	// Resolve the shipped skills to an empty directory by default, so a test
+	// about something else never trips over the report a desktop posts when no
+	// skills source resolves at all. Tests that are about the skills stage their
+	// own source AFTER calling this.
+	t.Setenv("ERUN_SKILLS_DIR", t.TempDir())
 	laptopRepo := t.TempDir()
-	return NewApp(erunUIDeps{
+	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(laptopRepo),
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
@@ -54,39 +92,240 @@ func orchestratorTestAppWithLocalRepo(t *testing.T) (*App, string) {
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
-	}), laptopRepo
+		canReachMCPEndpoint: reachable,
+	})
+	// Stage failure reports inside the test's own directory. Left at the default
+	// they land in the shared host temp dir, which is how a suite that spawns
+	// nothing still left two reports per run behind — and made a handful of real
+	// failures read as dozens of spawned agents.
+	app.investigations.reportDir = t.TempDir()
+	return app, laptopRepo
 }
 
-// TestListOrchestratorEnvCandidatesCoversBothAgentTypes locks the capability: an
-// orchestrator can link either agent type, and each candidate carries where that
-// env is reviewed — a mirror the operator may place anywhere, or the local-agent
-// worktree already on this machine. A runtime env stays out: nothing to review.
-func TestListOrchestratorEnvCandidatesCoversBothAgentTypes(t *testing.T) {
-	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
+// The three TestListOrchestratorEnvCandidates* tests below lock the
+// capability: an orchestrator can link either agent type, and each candidate
+// carries where that env is reviewed — a mirror the operator may place
+// anywhere, or the local-agent worktree already on this machine. A runtime
+// env is still listed, disabled, with a reason rather than dropped without
+// trace.
+// TestOrchestratableEnvCoversHost locks in that a host env links like
+// local-agent and remote-agent — the issue's own recommendation (#1380): a
+// host env's worktree is already the operator's own checkout, so the
+// orchestrator reviews it in place, the same as a local-agent worktree, never
+// a synced mirror (which only makes sense for a pod whose worktree lives
+// somewhere else). Every role, including undeclared, works for these three
+// types; a runtime env is the odd one out and is covered by its own test
+// below (TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole) since its answer
+// depends on the role, not just the type.
+func TestOrchestratableEnvCoversHost(t *testing.T) {
+	cases := []struct {
+		envType eruncommon.EnvironmentType
+		want    bool
+	}{
+		{eruncommon.EnvironmentTypeLocalAgent, true},
+		{eruncommon.EnvironmentTypeRemoteAgent, true},
+		{eruncommon.EnvironmentTypeHost, true},
+		{"", false},
+	}
+	for _, tc := range cases {
+		env := eruncommon.EnvConfig{Type: tc.envType}
+		if got := orchestratableEnv(env, ""); got != tc.want {
+			t.Errorf("orchestratableEnv(type=%q, role=undeclared) = %v, want %v", tc.envType, got, tc.want)
+		}
+		if got := orchestratableEnv(env, eruncommon.OrchestratorEnvRoleCode); got != tc.want {
+			t.Errorf("orchestratableEnv(type=%q, role=code) = %v, want %v", tc.envType, got, tc.want)
+		}
+	}
+}
+
+// TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole locks the fix: a runtime
+// env, which has no worktree to review and no in-pod agent to delegate to,
+// may only be linked with the runtime role. code, build, and undeclared are
+// all still refused — the same refusal the gate previously applied
+// unconditionally, now narrowed to every role except runtime rather than
+// dropped.
+func TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole(t *testing.T) {
+	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeRuntime}
+	cases := []struct {
+		role eruncommon.OrchestratorEnvRole
+		want bool
+	}{
+		{eruncommon.OrchestratorEnvRoleRuntime, true},
+		{eruncommon.OrchestratorEnvRoleCode, false},
+		{eruncommon.OrchestratorEnvRoleBuild, false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := orchestratableEnv(env, tc.role); got != tc.want {
+			t.Errorf("orchestratableEnv(runtime, role=%q) = %v, want %v", tc.role, got, tc.want)
+		}
+	}
+}
+
+// TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace mirrors the
+// local-agent case: a host env's review directory is exactly its local repo
+// path, with mirrored=false — there is no pod to sync from.
+func TestOrchestratorReviewDirectoryReviewsAHostEnvInPlace(t *testing.T) {
+	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeHost, LocalRepoPath: "/home/erun/work"}
+	dir, mirrored := orchestratorReviewDirectory("frs", env)
+	if dir != "/home/erun/work" || mirrored {
+		t.Fatalf("orchestratorReviewDirectory(host) = (%q, %v), want (%q, false)", dir, mirrored, "/home/erun/work")
+	}
+}
+
+// TestOrchestratorReviewDirectoryHasNoneForARuntimeEnv locks scope item 3: a
+// runtime-role link resolves no review directory, asserted on the resolved
+// value itself rather than the absence of an error — it must not fall
+// through to the mirror default meant for a remote-agent env that does have
+// a pod to sync a mirror from.
+func TestOrchestratorReviewDirectoryHasNoneForARuntimeEnv(t *testing.T) {
+	env := eruncommon.EnvConfig{Type: eruncommon.EnvironmentTypeRuntime}
+	dir, mirrored := orchestratorReviewDirectory("frs", env)
+	if dir != "" || mirrored {
+		t.Fatalf("orchestratorReviewDirectory(runtime) = (%q, %v), want (\"\", false)", dir, mirrored)
+	}
+}
+
+// listOrchestratorTestCandidates is the shared fixture read for the
+// candidate-shape assertions below: dev (remote-agent), laptop (local-agent),
+// runtime (eligible only for the runtime role), in that sorted order.
+func listOrchestratorTestCandidates(t *testing.T) (dev, laptop, rt orchestratorEnvCandidate, laptopRepo string) {
+	t.Helper()
+	app, repo := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
 
 	candidates, err := app.ListOrchestratorEnvCandidates()
 	if err != nil {
 		t.Fatalf("ListOrchestratorEnvCandidates failed: %v", err)
 	}
-	if len(candidates) != 2 {
-		t.Fatalf("expected both agent envs and no runtime env, got %+v", candidates)
+	if len(candidates) != 3 {
+		t.Fatalf("expected both agent envs plus the runtime env, got %+v", candidates)
 	}
-	dev, laptop := candidates[0], candidates[1]
-	if dev.Environment != "dev" || laptop.Environment != "laptop" {
-		t.Fatalf("expected dev then laptop, got %+v", candidates)
+	dev, laptop, rt = candidates[0], candidates[1], candidates[2]
+	if dev.Environment != "dev" || laptop.Environment != "laptop" || rt.Environment != "runtime" {
+		t.Fatalf("expected dev, laptop, runtime in that order, got %+v", candidates)
 	}
-	if !dev.Mirrored {
-		t.Fatalf("expected the remote-agent env to be reviewed in a mirror, got %+v", dev)
+	return dev, laptop, rt, repo
+}
+
+func TestListOrchestratorEnvCandidatesReviewsARemoteAgentEnvInAMirror(t *testing.T) {
+	dev, _, _, _ := listOrchestratorTestCandidates(t)
+	if !dev.Eligible || !dev.Mirrored {
+		t.Fatalf("expected the remote-agent env to be eligible and reviewed in a mirror, got %+v", dev)
 	}
 	if !strings.HasSuffix(dev.DefaultDirectory, "orchestrators"+string(os.PathSeparator)+"frs-dev") {
 		t.Fatalf("unexpected mirror directory: %q", dev.DefaultDirectory)
 	}
-	if laptop.Mirrored {
-		t.Fatalf("expected the local-agent env to be reviewed in place, got %+v", laptop)
+}
+
+func TestListOrchestratorEnvCandidatesReviewsALocalAgentEnvInPlace(t *testing.T) {
+	_, laptop, _, laptopRepo := listOrchestratorTestCandidates(t)
+	if !laptop.Eligible || laptop.Mirrored {
+		t.Fatalf("expected the local-agent env to be eligible and reviewed in place, got %+v", laptop)
 	}
 	if laptop.DefaultDirectory != laptopRepo {
 		t.Fatalf("local-agent review directory = %q, want the env worktree %q", laptop.DefaultDirectory, laptopRepo)
+	}
+}
+
+// TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole locks
+// scope item 5: a runtime env is no longer greyed out in the picker. It stays
+// eligible (the dialog offers the role picker for it, not the ineligibility
+// notice), carries no review directory or mirror flag, and names the one
+// role — runtime — the operator must pick for it to actually link.
+func TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole(t *testing.T) {
+	_, _, rt, _ := listOrchestratorTestCandidates(t)
+	if !rt.Eligible {
+		t.Fatalf("expected the runtime env to stay eligible, got %+v", rt)
+	}
+	if rt.DefaultDirectory != "" || rt.Mirrored {
+		t.Fatalf("expected the runtime env to carry no review directory, got %+v", rt)
+	}
+	if rt.RequiredRole != eruncommon.OrchestratorEnvRoleRuntime {
+		t.Fatalf("expected the runtime env to require the runtime role, got %+v", rt)
+	}
+	if rt.IneligibleReason != "" {
+		t.Fatalf("expected the eligible runtime env to carry no reason, got %+v", rt)
+	}
+}
+
+// TestOrchestratorIneligibilityReasonExplainsEachRejectedType locks the
+// operator-facing copy: an eligible env/role pair carries no reason, a
+// runtime env refused a non-runtime role names the concrete gap (no
+// worktree, no in-pod agent) and points at the role that does work, and an
+// unresolved type still gets an actionable — if generic — explanation rather
+// than "".
+func TestOrchestratorIneligibilityReasonExplainsEachRejectedType(t *testing.T) {
+	cases := []struct {
+		envType    eruncommon.EnvironmentType
+		role       eruncommon.OrchestratorEnvRole
+		wantEmpty  bool
+		wantSubstr string
+	}{
+		{eruncommon.EnvironmentTypeLocalAgent, "", true, ""},
+		{eruncommon.EnvironmentTypeRemoteAgent, "", true, ""},
+		{eruncommon.EnvironmentTypeHost, "", true, ""},
+		{eruncommon.EnvironmentTypeRuntime, eruncommon.OrchestratorEnvRoleRuntime, true, ""},
+		{eruncommon.EnvironmentTypeRuntime, eruncommon.OrchestratorEnvRoleCode, false, "no worktree"},
+		{eruncommon.EnvironmentTypeRuntime, "", false, "runtime role"},
+		{"", "", false, "type"},
+	}
+	for _, tc := range cases {
+		got := orchestratorIneligibilityReason(eruncommon.EnvConfig{Type: tc.envType}, tc.role)
+		if tc.wantEmpty && got != "" {
+			t.Errorf("orchestratorIneligibilityReason(type=%q, role=%q) = %q, want empty", tc.envType, tc.role, got)
+		}
+		if !tc.wantEmpty && !strings.Contains(got, tc.wantSubstr) {
+			t.Errorf("orchestratorIneligibilityReason(type=%q, role=%q) = %q, want substring %q", tc.envType, tc.role, got, tc.wantSubstr)
+		}
+	}
+}
+
+// TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole is the link-time
+// half of scope item 2: a runtime env may be linked when its role is
+// runtime, and the persisted link carries no review directory — the
+// operate-role link resolves no review directory, per scope item 3, asserted
+// on the resolved value rather than the absence of an error.
+func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
+	app, _ := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	info, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
+		{Tenant: "frs", Environment: "runtime", Role: eruncommon.OrchestratorEnvRoleRuntime},
+	})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if len(info.Environments) != 1 {
+		t.Fatalf("expected one linked environment, got %+v", info.Environments)
+	}
+	linked := info.Environments[0]
+	if linked.Role != eruncommon.OrchestratorEnvRoleRuntime {
+		t.Fatalf("expected the runtime role to persist, got %+v", linked)
+	}
+	if linked.Directory != "" {
+		t.Fatalf("expected no review directory for a runtime-role link, got %+v", linked)
+	}
+}
+
+// TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole locks scope
+// item 6: linking a runtime env as code or build (or leaving the role
+// undeclared) must still be refused, narrowing the gate rather than opening
+// it, with the same reason orchestratorIneligibilityReason gives.
+func TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole(t *testing.T) {
+	app, _ := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	for _, role := range []eruncommon.OrchestratorEnvRole{eruncommon.OrchestratorEnvRoleCode, eruncommon.OrchestratorEnvRoleBuild, ""} {
+		_, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
+			{Tenant: "frs", Environment: "runtime", Role: role},
+		})
+		if err == nil {
+			t.Fatalf("expected linking the runtime env with role %q to be refused", role)
+		}
+		if !strings.Contains(err.Error(), "no worktree") {
+			t.Fatalf("expected the refusal to name the concrete gap, got %v", err)
+		}
 	}
 }
 
@@ -358,6 +597,110 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 	}
 }
 
+// mcpConfigServerKeys reads back the wired MCP server map for id and returns
+// its keys, so a test can assert exactly which environments a live session's
+// toolset covers rather than trusting the in-memory scope alone (erun#1319).
+func mcpConfigServerKeys(t *testing.T, id string) []string {
+	t.Helper()
+	data, err := os.ReadFile(orchestratorMCPConfigPath(id))
+	if err != nil {
+		t.Fatalf("read orchestrator MCP config for %s: %v", id, err)
+	}
+	var config orchestratorMCPConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("unmarshal orchestrator MCP config for %s: %v", id, err)
+	}
+	keys := make([]string, 0, len(config.MCPServers))
+	for key := range config.MCPServers {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// requireOnlyOrchestratorMCPKey fails unless id's on-disk MCP config wires
+// exactly wantKey, so a test can assert what a live session can actually
+// reach rather than trusting the in-memory scope alone (erun#1319).
+func requireOnlyOrchestratorMCPKey(t *testing.T, id, wantKey, label string) {
+	t.Helper()
+	if keys := mcpConfigServerKeys(t, id); len(keys) != 1 || keys[0] != wantKey {
+		t.Fatalf("%s: expected the session wired for %s only, got %v", label, wantKey, keys)
+	}
+}
+
+// requireLoneOrchestratorRestartRequired fails unless ListOrchestrators
+// reports exactly one orchestrator whose RestartRequired flag matches want.
+func requireLoneOrchestratorRestartRequired(t *testing.T, app *App, want bool, label string) {
+	t.Helper()
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || listed[0].RestartRequired != want {
+		t.Fatalf("%s: expected one orchestrator with RestartRequired=%v, got %+v", label, want, listed)
+	}
+}
+
+// TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale is the red-then-
+// green case for erun#1319: re-scoping a running orchestrator changes what it
+// is allowed to touch but the live session — its --mcp-config was resolved at
+// launch and cannot be rewired in place — keeps whatever it was spawned with
+// until it is restarted. Both defect directions are asserted on disk, not just
+// against in-memory state: the unlinked env's server entry must still be
+// there (RED: it stays fully tool-reachable) and the newly linked env's must
+// not be (RED: it has no tools at all). The fix is UpdateOrchestrator no
+// longer reporting "running" as if the save took effect: it flags
+// RestartRequired, and ListOrchestrators keeps reporting it on every poll
+// until a restart actually re-wires the session (GREEN).
+func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
+	// Pin the executable seam, for the same reason
+	// TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired does:
+	// StartOrchestrator resolves the erun executable before it writes the
+	// per-orchestrator MCP config, so on a host without one it writes no config
+	// at all and the on-disk assertions below read a file that was never
+	// created. The build's own test stage has no erun on PATH.
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+
+	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	mustNoErr(t, err, "CreateOrchestrator")
+	started, err := app.StartOrchestrator(created.ID, 80, 24)
+	mustNoErr(t, err, "StartOrchestrator")
+	if started.RestartRequired {
+		t.Fatalf("expected a freshly spawned session to need no restart, got %+v", started)
+	}
+	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-dev", "before re-scope")
+
+	// Re-scope to a different environment while the session is still running.
+	updated, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{
+		{Tenant: "frs", Environment: "laptop", Directory: laptopRepo},
+	})
+	mustNoErr(t, err, "UpdateOrchestrator")
+	if updated.Status != "running" {
+		t.Fatalf("expected the live session to still be reported running, got %+v", updated)
+	}
+	if !updated.RestartRequired {
+		t.Fatalf("expected UpdateOrchestrator to flag a restart as required for a live scope change, got %+v", updated)
+	}
+
+	// RED: the live session's actual MCP config, read back from disk, has not
+	// moved — frs/dev (unlinked) is still wired and frs/laptop (newly linked)
+	// has no tools at all. Quoted here so the defect is visible, not asserted
+	// away.
+	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-dev", "RED: after re-scope, before restart")
+	// The same mismatch must keep showing up on every subsequent poll, not
+	// just in UpdateOrchestrator's own return value.
+	requireLoneOrchestratorRestartRequired(t, app, true, "RED: polled after re-scope")
+
+	// GREEN: restarting is the only thing that re-wires the session, and it
+	// resolves the flag along with the actual toolset.
+	restarted, err := app.RestartOrchestrator(created.ID, 80, 24)
+	mustNoErr(t, err, "RestartOrchestrator")
+	if restarted.RestartRequired {
+		t.Fatalf("expected a fresh spawn to clear RestartRequired, got %+v", restarted)
+	}
+	requireOnlyOrchestratorMCPKey(t, created.ID, "frs-laptop", "GREEN: after restart")
+	requireLoneOrchestratorRestartRequired(t, app, false, "GREEN: polled after restart")
+}
+
 func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T) {
 	var seededPrompt string
 	home := t.TempDir()
@@ -373,9 +716,10 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 			return "claude-stub", nil, nil
 		},
 	})
+	app.investigations.reportDir = t.TempDir()
 	defer app.shutdown(context.Background())
 
-	info, err := app.InvestigateFailure("deploy failed: helm timeout", "frs", "dev", 80, 24)
+	info, err := app.InvestigateFailure(investigateHelmTimeoutReport, "frs", "dev", 80, 24)
 	if err != nil {
 		t.Fatalf("InvestigateFailure failed: %v", err)
 	}
@@ -383,7 +727,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 		t.Fatalf("expected a transient investigator, got %+v", info)
 	}
 	assertLoneTenant(t, info.Tenants, "frs")
-	if !strings.Contains(seededPrompt, "erun-investigate") || !strings.Contains(seededPrompt, "erun-file-issue") {
+	if !strings.Contains(seededPrompt, "report-") || !strings.Contains(seededPrompt, "erun-file-issue") {
 		t.Fatalf("unexpected seed prompt: %q", seededPrompt)
 	}
 	start := strings.Index(seededPrompt, "saved at ") + len("saved at ")
@@ -395,7 +739,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 	if readErr != nil {
 		t.Fatalf("staged report file: %v", readErr)
 	}
-	if !strings.Contains(string(data), "helm timeout") {
+	if !strings.Contains(string(data), "UPGRADE FAILED") {
 		t.Fatalf("staged report missing the failure detail: %q", data)
 	}
 	assertSingleTransientOrchestrator(t, app)
@@ -434,6 +778,9 @@ func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {
 }
 
 func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
+	app := orchestratorTestApp(t) // confines $HOME to a temp dir
+	defer app.shutdown(context.Background())
+
 	// Fixture skills source standing in for the repo's erun-skills/skills.
 	srcRoot := t.TempDir()
 	for _, name := range []string{"erun-orchestrate", "erun-file-issue"} {
@@ -446,9 +793,6 @@ func TestOrchestratorSkillsInstalledByDefault(t *testing.T) {
 		}
 	}
 	t.Setenv("ERUN_SKILLS_DIR", srcRoot)
-
-	app := orchestratorTestApp(t) // confines $HOME to a temp dir
-	defer app.shutdown(context.Background())
 
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("ensureOrchestratorWorkspace failed: %v", err)
@@ -501,9 +845,9 @@ func singleSkillSource(t *testing.T, body string) string {
 }
 
 func TestOrchestratorSkillsRefreshWhenSourceChanges(t *testing.T) {
-	srcMD := singleSkillSource(t, "# v1\n")
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
+	srcMD := singleSkillSource(t, "# v1\n")
 
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("first ensureOrchestratorWorkspace: %v", err)
@@ -526,9 +870,9 @@ func TestOrchestratorSkillsRefreshWhenSourceChanges(t *testing.T) {
 }
 
 func TestOrchestratorSkillsPreserveEditAcrossSourceChange(t *testing.T) {
-	srcMD := singleSkillSource(t, "# v1\n")
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
+	srcMD := singleSkillSource(t, "# v1\n")
 
 	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
 		t.Fatalf("first ensureOrchestratorWorkspace: %v", err)
@@ -551,6 +895,357 @@ func TestOrchestratorSkillsPreserveEditAcrossSourceChange(t *testing.T) {
 	}
 }
 
+// clearSkillsOverride removes the exact-source override so a test exercises the
+// resolution a desktop actually runs with.
+func clearSkillsOverride(t *testing.T) {
+	t.Helper()
+	t.Setenv("ERUN_SKILLS_DIR", "")
+}
+
+// runFromBareLayout puts the running binary where the desktop actually runs
+// from: a directory with no checkout above it, so nothing but the build stamp
+// can name the skills this build ships. Pinned rather than inherited because a
+// test binary's own location is not the test's to choose — one compiled into the
+// checkout would otherwise resolve the repo's own skills and quietly stop
+// exercising the layout the test is about.
+func runFromBareLayout(t *testing.T) string {
+	t.Helper()
+	exeDir := filepath.Join(t.TempDir(), "dev-bin")
+	if err := os.MkdirAll(exeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(exeDir, "erun-app")
+	previous := runningExecutable
+	runningExecutable = func() (string, error) { return exe, nil }
+	t.Cleanup(func() { runningExecutable = previous })
+	return exeDir
+}
+
+// stampedSkillsCheckout stands in for the checkout a desktop build was produced
+// from, in the layout that motivated the stamp: the running binary sits nowhere
+// near a source tree, so the walk up from the executable resolves nothing and
+// only the build stamp names the skills this build shipped. Returns the source
+// SKILL.md.
+func stampedSkillsCheckout(t *testing.T, body string) string {
+	t.Helper()
+	clearSkillsOverride(t)
+	runFromBareLayout(t)
+	skillsRoot := filepath.Join(t.TempDir(), "checkout", "erun-skills", "skills")
+	skillDir := filepath.Join(skillsRoot, "erun-orchestrate")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srcMD := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(srcMD, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stampSkillsSource(t, skillsRoot)
+	return srcMD
+}
+
+// stampSkillsSource sets the build stamp for one test and restores it after.
+func stampSkillsSource(t *testing.T, dir string) {
+	t.Helper()
+	previous := buildSkillsSource
+	buildSkillsSource = dir
+	t.Cleanup(func() { buildSkillsSource = previous })
+}
+
+// orchestratorTestAppWithEmits captures the frontend events the app posts, so a
+// test can assert what the operator is actually told.
+func orchestratorTestAppWithEmits(t *testing.T) (*App, *capturedEmits) {
+	t.Helper()
+	app := orchestratorTestApp(t)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	return app, emits
+}
+
+// TestOrchestratorSkillsRefreshFromBuildStampedCheckout covers the layout the
+// desktop is actually built and run from: the bundle is copied out of its
+// checkout, so nothing above the running binary names a source tree and only the
+// build stamp resolves one. An installed copy erun itself wrote must track that
+// source instead of freezing at whatever landed on first install.
+func TestOrchestratorSkillsRefreshFromBuildStampedCheckout(t *testing.T) {
+	app, emits := orchestratorTestAppWithEmits(t)
+	defer app.shutdown(context.Background())
+	srcMD := stampedSkillsCheckout(t, "# v1\n")
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("first ensureOrchestratorWorkspace: %v", err)
+	}
+	installed := installedOrchestrateSkill(t)
+	if data, _ := os.ReadFile(installed); string(data) != "# v1\n" {
+		t.Fatalf("expected the stamped checkout's skill installed, got %q", data)
+	}
+
+	// The source changes and the desktop is restarted: the untouched install
+	// must follow it.
+	if err := os.WriteFile(srcMD, []byte("# v2 newer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("second ensureOrchestratorWorkspace: %v", err)
+	}
+	if data, _ := os.ReadFile(installed); string(data) != "# v2 newer\n" {
+		t.Fatalf("expected the untouched install refreshed from the stamped checkout, got %q", data)
+	}
+	// The marker moves with the refresh, so the next launch can still tell this
+	// untouched copy from an edited one.
+	marker, err := os.ReadFile(filepath.Join(filepath.Dir(installed), orchestratorSkillMarker))
+	if err != nil {
+		t.Fatalf("read skill marker: %v", err)
+	}
+	want, err := fileSHA256(srcMD)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(marker)) != want {
+		t.Fatalf("marker = %q, want the refreshed source sha %q", strings.TrimSpace(string(marker)), want)
+	}
+	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+		t.Fatalf("a resolved source must report nothing, got %+v", notes)
+	}
+}
+
+// TestOrchestratorSkillsPreserveEditFromBuildStampedCheckout keeps the
+// operator's copy theirs in that same layout: resolving a source is not licence
+// to overwrite a skill edited in place.
+func TestOrchestratorSkillsPreserveEditFromBuildStampedCheckout(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+	srcMD := stampedSkillsCheckout(t, "# v1\n")
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("first ensureOrchestratorWorkspace: %v", err)
+	}
+	installed := installedOrchestrateSkill(t)
+	if err := os.WriteFile(installed, []byte("# operator edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srcMD, []byte("# v2 newer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("second ensureOrchestratorWorkspace: %v", err)
+	}
+	if data, _ := os.ReadFile(installed); string(data) != "# operator edit\n" {
+		t.Fatalf("expected the operator's edit preserved, got %q", data)
+	}
+}
+
+// TestOrchestratorSkillsReportUnresolvableSource locks the second half of the
+// contract: when nothing resolves, the launch still succeeds and the operator is
+// told once — a build that silently stops installing skills reads exactly like
+// one where the skill had not changed.
+func TestOrchestratorSkillsReportUnresolvableSource(t *testing.T) {
+	app, emits := orchestratorTestAppWithEmits(t)
+	defer app.shutdown(context.Background())
+
+	clearSkillsOverride(t)
+	exeDir := runFromBareLayout(t)
+	// A checkout that is not on this machine, which is what a binary built
+	// elsewhere carries.
+	moved := filepath.Join(t.TempDir(), "checkout-that-moved", "erun-skills", "skills")
+	stampSkillsSource(t, moved)
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("the orchestrator must still launch cleanly: %v", err)
+	}
+	notes := emits.events(appNotificationEvent)
+	if len(notes) != 1 {
+		t.Fatalf("expected exactly one report, got %+v", notes)
+	}
+	payload, ok := notes[0].(appNotificationPayload)
+	if !ok {
+		t.Fatalf("unexpected payload type: %T", notes[0])
+	}
+	if payload.Kind != "warning" {
+		t.Fatalf("kind = %q, want warning", payload.Kind)
+	}
+	// The report has to be actionable on its own: what the build expected, where
+	// the running binary looked instead, and both recoveries.
+	for _, want := range []string{moved, exeDir, "ERUN_SKILLS_DIR", "build.sh"} {
+		if !strings.Contains(payload.Message, want) {
+			t.Fatalf("report does not name %q:\n%s", want, payload.Message)
+		}
+	}
+	home, _ := os.UserHomeDir()
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "erun-orchestrate")); !os.IsNotExist(err) {
+		t.Fatalf("nothing resolvable must install nothing, stat err = %v", err)
+	}
+	// Once: the condition belongs to the build, so a second launch repeats it in
+	// the log only.
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("second ensureOrchestratorWorkspace: %v", err)
+	}
+	if got := emits.events(appNotificationEvent); len(got) != 1 {
+		t.Fatalf("expected the report said once, got %+v", got)
+	}
+}
+
+// TestHostSkillsSourceOverrideWinsOverBuildStamp keeps ERUN_SKILLS_DIR meaning
+// "use exactly this": it beats the build stamp, and an empty directory installs
+// nothing rather than falling back to a source the caller did not name.
+func TestHostSkillsSourceOverrideWinsOverBuildStamp(t *testing.T) {
+	app, emits := orchestratorTestAppWithEmits(t)
+	defer app.shutdown(context.Background())
+
+	stampedSkillsCheckout(t, "# stamped\n")
+	override := t.TempDir()
+	t.Setenv("ERUN_SKILLS_DIR", override)
+
+	resolved, err := hostSkillsSource()
+	if err != nil {
+		t.Fatalf("an override must resolve: %v", err)
+	}
+	if resolved != override {
+		t.Fatalf("source = %q, want the override %q", resolved, override)
+	}
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
+	}
+	home, _ := os.UserHomeDir()
+	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "erun-orchestrate")); !os.IsNotExist(err) {
+		t.Fatalf("an empty override must install nothing, stat err = %v", err)
+	}
+	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+		t.Fatalf("an honoured override is not a failure to report, got %+v", notes)
+	}
+}
+
+// TestOrchestratorSkillsResolveFromCheckoutAroundExecutable keeps the layout
+// that already worked working: a binary sitting inside a checkout resolves that
+// checkout's skills even with no build stamp, which is the case a packaged
+// tree — or a binary built by anything other than these scripts — relies on.
+func TestOrchestratorSkillsResolveFromCheckoutAroundExecutable(t *testing.T) {
+	app, emits := orchestratorTestAppWithEmits(t)
+	defer app.shutdown(context.Background())
+
+	clearSkillsOverride(t)
+	stampSkillsSource(t, "")
+
+	checkout := t.TempDir()
+	skillDir := filepath.Join(checkout, "erun-skills", "skills", "erun-orchestrate")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# from the checkout\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Two levels down, the way a built binary sits under its checkout.
+	exeDir := filepath.Join(checkout, "erun-ui", "bin")
+	if err := os.MkdirAll(exeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous := runningExecutable
+	runningExecutable = func() (string, error) { return filepath.Join(exeDir, "erun-app"), nil }
+	t.Cleanup(func() { runningExecutable = previous })
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
+	}
+	if data, _ := os.ReadFile(installedOrchestrateSkill(t)); string(data) != "# from the checkout\n" {
+		t.Fatalf("expected the surrounding checkout's skill installed, got %q", data)
+	}
+	if notes := emits.events(appNotificationEvent); len(notes) != 0 {
+		t.Fatalf("a resolved source must report nothing, got %+v", notes)
+	}
+}
+
+// sessionStartHookEntry and sessionStartGroup decode one SessionStart hook
+// block from settings.json, shared by the tests below.
+type sessionStartHookEntry struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+}
+
+type sessionStartGroup struct {
+	Matcher string                  `json:"matcher"`
+	Hooks   []sessionStartHookEntry `json:"hooks"`
+}
+
+// readSessionStartGroups decodes the SessionStart hook blocks currently
+// written to settings.json at path, returning the raw bytes too so callers can
+// include them in failure messages.
+func readSessionStartGroups(t *testing.T, path string) ([]sessionStartGroup, []byte) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var settings struct {
+		Hooks struct {
+			SessionStart []sessionStartGroup `json:"SessionStart"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings.json: %v\n%s", err, data)
+	}
+	return settings.Hooks.SessionStart, data
+}
+
+// sessionStartGroupAsBlock re-renders a decoded group in the untyped shape the
+// hook-block predicates read, so a test can ask the production predicate which
+// blocks are which instead of matching on command text of its own.
+func sessionStartGroupAsBlock(group sessionStartGroup) map[string]any {
+	hooks := make([]any, 0, len(group.Hooks))
+	for _, hook := range group.Hooks {
+		hooks = append(hooks, map[string]any{"type": hook.Type, "command": hook.Command})
+	}
+	return map[string]any{"matcher": group.Matcher, "hooks": hooks}
+}
+
+// sessionStartCommandCounts flattens every command across the given groups
+// into a command -> occurrence-count map.
+func sessionStartCommandCounts(groups []sessionStartGroup) map[string]int {
+	seen := map[string]int{}
+	for _, group := range groups {
+		for _, hook := range group.Hooks {
+			seen[hook.Command]++
+		}
+	}
+	return seen
+}
+
+// assertSessionStartCommandsUnique fails if any SessionStart command appears
+// more than once across all groups: two matcher blocks ("startup", "resume")
+// carrying the same three commands would mean every SessionStart command,
+// including the ~5.5KB contract injection, is installed (and so read into
+// every session's context) twice.
+func assertSessionStartCommandsUnique(t *testing.T, groups []sessionStartGroup, data []byte) {
+	t.Helper()
+	for cmd, count := range sessionStartCommandCounts(groups) {
+		if count != 1 {
+			t.Fatalf("SessionStart command installed %d times, want 1:\n%s\nfull settings:\n%s", count, cmd, data)
+		}
+	}
+}
+
+// assertSessionStartMatchersCover fails unless every source is matched by
+// some group's matcher, tested the same way Claude Code itself resolves a
+// SessionStart matcher: as a regex against the event's source.
+func assertSessionStartMatchersCover(t *testing.T, groups []sessionStartGroup, data []byte, sources ...string) {
+	t.Helper()
+	for _, source := range sources {
+		matched := false
+		for _, group := range groups {
+			re, err := regexp.Compile(group.Matcher)
+			if err != nil {
+				t.Fatalf("SessionStart matcher %q does not compile as a regex: %v", group.Matcher, err)
+			}
+			if re.MatchString(source) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Fatalf("no SessionStart matcher covers source %q:\n%s", source, data)
+		}
+	}
+}
+
 func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
@@ -559,38 +1254,219 @@ func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
-	if err != nil {
-		t.Fatalf("read orchestrator settings.json: %v", err)
-	}
-	var settings struct {
-		Hooks struct {
-			SessionStart []struct {
-				Matcher string `json:"matcher"`
-				Hooks   []struct {
-					Type    string `json:"type"`
-					Command string `json:"command"`
-				} `json:"hooks"`
-			} `json:"SessionStart"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		t.Fatalf("unmarshal settings.json: %v\n%s", err, data)
-	}
-	matchers := map[string]bool{}
-	for _, group := range settings.Hooks.SessionStart {
-		matchers[group.Matcher] = true
+	groups, data := readSessionStartGroups(t, filepath.Join(dir, ".claude", "settings.json"))
+
+	contractGroups := make([]sessionStartGroup, 0, len(groups))
+	for _, group := range groups {
 		if len(group.Hooks) == 0 || group.Hooks[0].Type != "command" {
 			t.Fatalf("SessionStart matcher %q missing a command hook:\n%s", group.Matcher, data)
+		}
+		// The live-conversation recorder shares this event and is not a contract
+		// injector; it has its own coverage in
+		// TestOrchestratorLiveConversationRecorderIsInstalledWhereItIsRead.
+		if isOrchestratorLiveConversationHookBlock(sessionStartGroupAsBlock(group)) {
+			continue
 		}
 		if !strings.Contains(group.Hooks[0].Command, "CLAUDE.md") {
 			t.Fatalf("SessionStart command does not inject the contract (print CLAUDE.md):\n%s", group.Hooks[0].Command)
 		}
+		contractGroups = append(contractGroups, group)
 	}
-	for _, want := range []string{"startup", "resume"} {
-		if !matchers[want] {
-			t.Fatalf("SessionStart hook missing matcher %q:\n%s", want, data)
+	assertSessionStartCommandsUnique(t, groups, data)
+	assertSessionStartMatchersCover(t, contractGroups, data, "startup", "resume", "clear", "compact")
+}
+
+// TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignHooks
+// seeds settings.json with the shape an earlier release left on disk -- two
+// matcher blocks, each carrying the full three-command SessionStart payload --
+// alongside an operator-owned SessionStart hook the installer has never seen.
+// Installing on top of that must collapse the
+// duplicate blocks down to one clean copy, leave the operator's own hook alone,
+// and stay exactly that size across a second install (simulating a further
+// desktop restart), never growing.
+func TestOrchestratorSessionStartHookPrunesEarlierDuplicatesAndPreservesForeignHooks(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	dir := orchestratorsRoot()
+	claudeDir := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+
+	staleContractCommand := orchestratorSkillHookCommand(dir)
+	stale := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{"matcher": "startup", "hooks": []any{
+					map[string]any{"type": "command", "command": staleContractCommand},
+				}},
+				map[string]any{"matcher": "resume", "hooks": []any{
+					map[string]any{"type": "command", "command": staleContractCommand},
+				}},
+				map[string]any{"matcher": "clear", "hooks": []any{
+					map[string]any{"type": "command", "command": "echo operator-owned"},
+				}},
+			},
+		},
+	}
+	raw, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
+	}
+	groupsAfterFirst, data := readSessionStartGroups(t, settingsPath)
+	assertSessionStartContractCommandPrunedToOne(t, groupsAfterFirst, data)
+	if !strings.Contains(string(data), "echo operator-owned") {
+		t.Fatalf("expected the operator's own SessionStart hook preserved:\n%s", data)
+	}
+
+	// A further install (another desktop restart) against the now-clean file
+	// must not grow the count.
+	if _, err := app.ensureOrchestratorWorkspace(); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace (second run): %v", err)
+	}
+	groupsAfterSecond, data2 := readSessionStartGroups(t, settingsPath)
+	if got, want := sessionStartTotalCommands(groupsAfterSecond), sessionStartTotalCommands(groupsAfterFirst); got != want {
+		t.Fatalf("SessionStart command count changed across a second install: got %d, want %d (unchanged):\n%s", got, want, data2)
+	}
+}
+
+// sessionStartTotalCommands counts every hook entry across all groups.
+func sessionStartTotalCommands(groups []sessionStartGroup) int {
+	n := 0
+	for _, group := range groups {
+		n += len(group.Hooks)
+	}
+	return n
+}
+
+// assertSessionStartContractCommandPrunedToOne fails if the contract-injection
+// command (identified by its fallback text) appears more than once.
+func assertSessionStartContractCommandPrunedToOne(t *testing.T, groups []sessionStartGroup, data []byte) {
+	t.Helper()
+	for cmd, count := range sessionStartCommandCounts(groups) {
+		if strings.Contains(cmd, orchestratorContractFallback) && count != 1 {
+			t.Fatalf("expected the earlier duplicate contract-injection blocks pruned to one, found %d:\n%s", count, data)
 		}
+	}
+}
+
+// runOrchestratorSessionStartGroup runs every command in the SessionStart
+// group whose matcher regex matches source, the same way Claude Code itself
+// dispatches a SessionStart event, and returns their combined stdout. Fails
+// the test if no group's matcher covers source at all.
+func runOrchestratorSessionStartGroup(t *testing.T, shell string, groups []sessionStartGroup, data []byte, orchestratorID, source string) string {
+	t.Helper()
+	var out strings.Builder
+	matched := false
+	for _, group := range groups {
+		re, err := regexp.Compile(group.Matcher)
+		if err != nil {
+			t.Fatalf("SessionStart matcher %q does not compile as a regex: %v", group.Matcher, err)
+		}
+		if !re.MatchString(source) {
+			continue
+		}
+		matched = true
+		for _, hook := range group.Hooks {
+			cmd := exec.Command(shell, "-c", hook.Command)
+			cmd.Stdin = strings.NewReader(`{"session_id":"post-` + source + `-session","hook_event_name":"SessionStart","source":"` + source + `"}`)
+			cmd.Env = append(os.Environ(), "ERUN_ORCHESTRATOR_ID="+orchestratorID)
+			stdout, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("run SessionStart hook for source %q: %v", source, err)
+			}
+			out.Write(stdout)
+		}
+	}
+	if !matched {
+		t.Fatalf("no SessionStart matcher covers source %q:\n%s", source, data)
+	}
+	return out.String()
+}
+
+// assertRoleFilePreservedOnDisk fails unless rolePath still contains marker --
+// the operator's own content must never be rewritten.
+func assertRoleFilePreservedOnDisk(t *testing.T, rolePath, marker string) {
+	t.Helper()
+	got, err := os.ReadFile(rolePath)
+	if err != nil {
+		t.Fatalf("read role file: %v", err)
+	}
+	if !strings.Contains(string(got), marker) {
+		t.Fatalf("expected the role file preserved on disk, got %q", got)
+	}
+}
+
+// assertSessionStartReinjectsRoleAndContract runs the installed SessionStart
+// hooks for each of sources against a real shell, the way Claude Code would
+// dispatch them, and fails unless every one re-injects both the role marker
+// and the shared contract into stdout.
+func assertSessionStartReinjectsRoleAndContract(t *testing.T, shell, orchestratorID, roleMarker string, groups []sessionStartGroup, data []byte, sources ...string) {
+	t.Helper()
+	for _, source := range sources {
+		injected := runOrchestratorSessionStartGroup(t, shell, groups, data, orchestratorID, source)
+		if !strings.Contains(injected, roleMarker) {
+			t.Fatalf("source %q did not re-inject the role file into context; got stdout:\n%s", source, injected)
+		}
+		if !strings.Contains(injected, "# Orchestrator working directory") {
+			t.Fatalf("source %q did not re-inject the shared contract into context; got stdout:\n%s", source, injected)
+		}
+	}
+}
+
+// TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact is the
+// end-to-end reproduction from #1232: an orchestrator's standing role
+// (CLAUDE.<id>.md) survives on disk across a /clear or a compaction, but
+// nothing re-injected it into context because SessionStart's "clear" and
+// "compact" sources were not registered alongside "startup"/"resume". This
+// runs the actual installed hook commands, the way Claude Code would dispatch
+// them for each source, and checks the role text is really printed to stdout
+// rather than merely asserting the matcher string covers the source.
+func TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact(t *testing.T) {
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no POSIX shell on this host")
+	}
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	const orchestratorID = "erun-issues"
+	const roleMarker = "STANDING ROLE MARKER: triage erun issues, never close without a reproduction"
+
+	dir, err := app.ensureOrchestratorWorkspace()
+	if err != nil {
+		t.Fatalf("ensureOrchestratorWorkspace: %v", err)
+	}
+	// Seed a non-empty, operator-authored role file BEFORE the per-id ensure
+	// call, matching the real sequence (the file is written once and never
+	// rewritten): the operator's own content, not the placeholder seed, is
+	// what must survive and be re-injected.
+	rolePath := filepath.Join(dir, "CLAUDE."+orchestratorID+".md")
+	if err := os.WriteFile(rolePath, []byte(roleMarker+"\n"), 0o644); err != nil {
+		t.Fatalf("seed role file: %v", err)
+	}
+	if _, err := app.ensureOrchestratorWorkspaceFor(orchestratorID); err != nil {
+		t.Fatalf("ensureOrchestratorWorkspaceFor: %v", err)
+	}
+	assertRoleFilePreservedOnDisk(t, rolePath, roleMarker)
+
+	groups, data := readSessionStartGroups(t, filepath.Join(dir, ".claude", "settings.json"))
+	assertSessionStartReinjectsRoleAndContract(t, shell, orchestratorID, roleMarker, groups, data, "clear", "compact")
+
+	// A compaction does not move an orchestrator's conversation: the id is
+	// derived from the orchestrator id, so it is the same before and after, and
+	// nothing has to be recorded to keep up with it.
+	if before, after := orchestratorSessionID(orchestratorID), orchestratorSessionID(orchestratorID); before != after {
+		t.Fatalf("derived conversation is not stable: %q vs %q", before, after)
 	}
 }
 
@@ -621,8 +1497,14 @@ func TestOrchestratorSessionStartHookPreservesExistingSettings(t *testing.T) {
 		t.Fatalf("expected unrelated key preserved, got %v\n%s", settings["model"], data)
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
-	if _, ok := hooks["PreToolUse"]; !ok {
-		t.Fatalf("expected unrelated hook event preserved:\n%s", data)
+	// PreToolUse is an event erun writes to as well now, so "preserved" has to
+	// mean the operator's own hook is still there — not merely that the key is.
+	preToolUse, _ := hooks["PreToolUse"].([]any)
+	if !strings.Contains(string(data), "echo keep") {
+		t.Fatalf("expected the operator's own PreToolUse hook preserved:\n%s", data)
+	}
+	if len(preToolUse) < 2 {
+		t.Fatalf("expected erun's report merged alongside it, got %d blocks:\n%s", len(preToolUse), data)
 	}
 	if _, ok := hooks["SessionStart"]; !ok {
 		t.Fatalf("expected SessionStart hook added:\n%s", data)
@@ -685,6 +1567,70 @@ func TestBuildOrchestratorLaunchPinsPerOrchestratorSession(t *testing.T) {
 	}
 }
 
+// posixFallback splits a POSIX `primary || fallback` chain and returns the
+// fallback half, failing the (sub)test if the chain shape is not there.
+func posixFallback(t *testing.T, cmd string) string {
+	t.Helper()
+	parts := strings.SplitN(cmd, " || ", 2)
+	if len(parts) != 2 {
+		t.Fatalf("expected a primary || fallback chain, got %q", cmd)
+	}
+	return parts[1]
+}
+
+// TestBuildOrchestratorLaunchFallbackKeepsThePin locks down the crash-fallback
+// fix: a pinned orchestrator whose primary launch fails must fall back to
+// retrying its OWN conversation, never to a bare unpinned `claude`. An unpinned
+// fallback is what the live-session hook then records as this orchestrator's
+// conversation, silently swapping it onto an amnesiac session on every crash.
+func TestBuildOrchestratorLaunchFallbackKeepsThePin(t *testing.T) {
+	const sid = "6f7e9c2a-1b3d-4e5f-8a9b-000000000003"
+	const prompt = "carry on"
+
+	t.Run("existing session fallback retries resume", func(t *testing.T) {
+		_, launch := buildOrchestratorLaunch("linux", sid, true, "", "", "")
+		fallback := posixFallback(t, launch[len(launch)-1])
+		if !strings.Contains(fallback, "--resume "+sid) {
+			t.Fatalf("fallback for an existing session must retry --resume, got %q", fallback)
+		}
+	})
+
+	t.Run("first open fallback retries the same create", func(t *testing.T) {
+		// No conversation on disk yet: the fallback must retry the same
+		// --session-id create rather than dropping to unpinned fresh.
+		_, launch := buildOrchestratorLaunch("linux", sid, false, "", "", "")
+		fallback := posixFallback(t, launch[len(launch)-1])
+		if !strings.Contains(fallback, "--session-id "+sid) {
+			t.Fatalf("first-open fallback must keep the pinned session id, got %q", fallback)
+		}
+	})
+
+	t.Run("resume prompt chains through the pinned fallback", func(t *testing.T) {
+		_, launch := buildOrchestratorLaunch("linux", sid, true, "", prompt, "")
+		fallback := posixFallback(t, launch[len(launch)-1])
+		if !strings.Contains(fallback, sid) || !strings.Contains(fallback, prompt) {
+			t.Fatalf("resume-prompt fallback must keep both the pin and the prompt, got %q", fallback)
+		}
+	})
+
+	t.Run("windows uses the LASTEXITCODE chain", func(t *testing.T) {
+		_, launch := buildOrchestratorLaunch("windows", sid, true, "", "", "")
+		cmd := launch[len(launch)-1]
+		parts := strings.SplitN(cmd, "$LASTEXITCODE -ne 0", 2)
+		if len(parts) != 2 || !strings.Contains(parts[1], sid) {
+			t.Fatalf("windows fallback must keep the pinned session id, got %q", cmd)
+		}
+	})
+
+	t.Run("transient launch keeps the unpinned fresh fallback", func(t *testing.T) {
+		_, launch := buildOrchestratorLaunch("linux", "", false, "", "", "")
+		fallback := posixFallback(t, launch[len(launch)-1])
+		if !strings.HasPrefix(fallback, "claude"+orchestratorUltracodeFlag) {
+			t.Fatalf("transient fallback should remain unpinned fresh, got %q", fallback)
+		}
+	})
+}
+
 // Per-orchestrator session ids are deterministic and unique so each orchestrator
 // resumes its own conversation, while a transient (empty-id) orchestrator has no
 // pinned session.
@@ -733,10 +1679,315 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 	}
 }
 
+// A prompt is ordinary operator task text — code spans, `$`, backslashes and
+// quotes — and the harness has to receive it as one argument, unchanged. Two
+// independent things break that, so this drives both: the positional prompt is
+// consumed by the preceding multi-value --mcp-config unless option parsing ends
+// first, and the host shell executes the metacharacters unless the value is
+// quoted for the shell that re-parses the command line.
+// An orchestrator is contracted to resolve ambiguity itself and carry a task to
+// a verified end, so stopping to ask is a defect — and one asked while the
+// operator is away stalls the work until they come back. The harness cannot ask
+// if it does not have the tool, which makes that structural rather than a matter
+// of the agent's own judgement about its instructions.
+func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		_, launch := buildOrchestratorLaunch(goos, "", false, "", "", "")
+		if command := launch[len(launch)-1]; !strings.Contains(command, "--disallowedTools AskUserQuestion") {
+			t.Fatalf("%s launch must deny the ask tool: %q", goos, command)
+		}
+	}
+}
+
+func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
+	const prompt = "Run `erun-ui/playwright/run.sh`, read $HOME, keep C:\\tmp\\x and \"quotes\" and 'apostrophes'"
+
+	_, launch := buildOrchestratorLaunch("linux", "", false, prompt, "", "/cfg/orchestrator-mcp-erun.json")
+	command := launch[len(launch)-1]
+	if !strings.Contains(command, "--mcp-config '/cfg/orchestrator-mcp-erun.json' -- ") {
+		t.Fatalf("the prompt must follow a -- that ends option parsing: %q", command)
+	}
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	// Let a real POSIX shell parse what we composed and report the argv it
+	// produces: anything it expands, executes or drops shows up here.
+	dir := t.TempDir()
+	stub := filepath.Join(dir, defaultAITool)
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n"), 0o755); err != nil {
+		t.Fatalf("write stub: %v", err)
+	}
+	shellCmd := exec.Command("/bin/sh", "-c", command)
+	shellCmd.Env = []string{"PATH=" + dir, "HOME=/expanded-so-the-quoting-leaked"}
+	out, err := shellCmd.Output()
+	if err != nil {
+		t.Fatalf("run the composed command: %v", err)
+	}
+	argv := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+	if got := argv[len(argv)-1]; got != prompt {
+		t.Fatalf("the prompt did not survive the shell:\n got %q\nwant %q\nargv %v", got, prompt, argv)
+	}
+}
+
+// The same guarantee on the other host shell: PowerShell expands `$` and treats
+// the backtick as its escape character inside double quotes, so the prompt and
+// the config path are single-quoted there, with embedded apostrophes doubled.
+func TestBuildOrchestratorLaunchQuotesThePromptForPowerShell(t *testing.T) {
+	_, launch := buildOrchestratorLaunch("windows", "", false, "keep $HOME and `code` and it's fine", "", `C:\cfg\mcp.json`)
+	command := launch[len(launch)-1]
+	if !strings.Contains(command, "-- 'keep $HOME and `code` and it''s fine'") {
+		t.Fatalf("windows prompt must be single-quoted with doubled apostrophes: %q", command)
+	}
+	if !strings.Contains(command, `--mcp-config 'C:\cfg\mcp.json'`) {
+		t.Fatalf("windows mcp-config path must be single-quoted: %q", command)
+	}
+}
+
 func TestInvestigateFailureRejectsEmptyReport(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 	if _, err := app.InvestigateFailure("   ", "frs", "dev", 80, 24); err == nil {
 		t.Fatal("expected an empty failure report to be rejected")
+	}
+}
+
+// A restart hand-off names the conversation to continue, and the launch attaches
+// to that one rather than re-deriving it from the orchestrator id — which is
+// mutable and reusable, so several conversations answer to it.
+func TestStartOrchestratorWithResumeAttachesToTheNamedConversation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+	var launchedConversation, launchedPrompt string
+	app := NewApp(erunUIDeps{
+		store: newOrchestratorStubStore(t.TempDir()),
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+		resolveOrchestratorLaunch: func(sessionID, _, resumePrompt, _ string) (string, []string, error) {
+			launchedConversation, launchedPrompt = sessionID, resumePrompt
+			return "claude-stub", nil, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestratorWithResume(created.ID, "conversation-that-asked", "finish the task", 80, 24); err != nil {
+		t.Fatalf("StartOrchestratorWithResume failed: %v", err)
+	}
+
+	if launchedConversation != "conversation-that-asked" {
+		t.Fatalf("expected the named conversation to be resumed, got %q", launchedConversation)
+	}
+	if launchedPrompt != "finish the task" {
+		t.Fatalf("expected the task to be handed to it, got %q", launchedPrompt)
+	}
+
+	// Without one, the orchestrator's own pinned conversation still answers.
+	app.stopOrchestratorSession(created.ID)
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	if launchedConversation != orchestratorSessionID(created.ID) {
+		t.Fatalf("expected the pinned conversation without a hand-off, got %q", launchedConversation)
+	}
+}
+
+// TestOrchestratorReconnectRefusedGuards is the standalone unit test for the
+// two bounds tryReconnect's orchestrator-specific guard exists to enforce: a
+// clean exit (no reason — the operator quit the TUI, not a crash) is always
+// refused, and a torn-down registration is refused even carrying a real crash
+// reason — which is what makes an operator's Stop refuse its own respawn.
+func TestOrchestratorReconnectRefusedGuards(t *testing.T) {
+	app := NewApp(erunUIDeps{})
+	id := "agent"
+	key := orchestratorSessionKey(id)
+	managed := &managedTerminal{key: key, kind: sessionKindOrchestrator}
+	app.orchestrators[id] = &orchestratorSession{id: id}
+	app.sessions[key] = managed
+
+	if !app.orchestratorReconnectRefused(managed, "") {
+		t.Fatal("a clean exit (empty reason) must refuse respawn")
+	}
+	if app.orchestratorReconnectRefused(managed, "exit status 1") {
+		t.Fatal("a crash with an intact registration must not be refused")
+	}
+
+	delete(app.orchestrators, id)
+	delete(app.sessions, key)
+	if !app.orchestratorReconnectRefused(managed, "exit status 1") {
+		t.Fatal("a torn-down registration must refuse respawn, so Stop cannot be undone")
+	}
+}
+
+// TestOrchestratorRespawnsAfterCrashIntoTheSameConversation is the end-to-end
+// path for the crash-recovery half of #1260: a session that exits non-zero is
+// relaunched automatically, into the SAME conversation, carrying a prompt that
+// tells it to carry on rather than idling.
+func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+
+	var mu sync.Mutex
+	var sessions []*stubTerminalSession
+	var conversations, prompts []string
+	app := NewApp(erunUIDeps{
+		store: newOrchestratorStubStore(t.TempDir()),
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			mu.Lock()
+			sessions = append(sessions, session)
+			mu.Unlock()
+			return session, nil
+		},
+		resolveOrchestratorLaunch: func(sessionID, _, resumePrompt, _ string) (string, []string, error) {
+			mu.Lock()
+			conversations = append(conversations, sessionID)
+			prompts = append(prompts, resumePrompt)
+			mu.Unlock()
+			return "claude-stub", nil, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	mu.Lock()
+	first := sessions[0]
+	first.waitErr = errors.New("exit status 1")
+	mu.Unlock()
+	_ = first.Close()
+
+	waitForSessionCount(t, &mu, &sessions, 2, 2*time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(conversations) != 2 {
+		t.Fatalf("expected two launches (initial + respawn), got %d: %v", len(conversations), conversations)
+	}
+	if conversations[0] != conversations[1] {
+		t.Fatalf("respawn must resume the SAME conversation, got %q then %q", conversations[0], conversations[1])
+	}
+	if prompts[1] == "" || !strings.Contains(prompts[1], "carry") {
+		t.Fatalf("respawn must carry a prompt telling it to continue, got %q", prompts[1])
+	}
+}
+
+// TestOrchestratorCleanExitDoesNotRespawn is the counterpart: an exit with no
+// reason (Wait returned nil — the operator quit the TUI from inside) must end
+// the session rather than relaunch it.
+func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+
+	var mu sync.Mutex
+	var sessions []*stubTerminalSession
+	app := NewApp(erunUIDeps{
+		store: newOrchestratorStubStore(t.TempDir()),
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			mu.Lock()
+			sessions = append(sessions, session)
+			mu.Unlock()
+			return session, nil
+		},
+		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+			return "claude-stub", nil, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	mu.Lock()
+	first := sessions[0]
+	mu.Unlock()
+	_ = first.Close() // waitErr is nil: a clean exit
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(emits.events(terminalExitEvent)) > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(emits.events(terminalExitEvent)) == 0 {
+		t.Fatal("expected the clean exit to finalize the session")
+	}
+	mu.Lock()
+	got := len(sessions)
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("a clean exit must not respawn, got %d sessions", got)
+	}
+}
+
+// TestStopOrchestratorRefusesItsOwnRespawn locks the bound end to end: an
+// operator's Stop must never be undone by an in-flight crash respawn.
+func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
+
+	var mu sync.Mutex
+	var sessions []*stubTerminalSession
+	app := NewApp(erunUIDeps{
+		store: newOrchestratorStubStore(t.TempDir()),
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			mu.Lock()
+			sessions = append(sessions, session)
+			mu.Unlock()
+			return session, nil
+		},
+		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+			return "claude-stub", nil, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	if err := app.StopOrchestrator(created.ID); err != nil {
+		t.Fatalf("StopOrchestrator failed: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	mu.Lock()
+	got := len(sessions)
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("Stop must not be undone by a respawn, got %d sessions", got)
+	}
+	if info, ok := app.runningOrchestratorInfo(created.ID); ok {
+		t.Fatalf("expected no running session after Stop, got %+v", info)
 	}
 }

@@ -51,7 +51,7 @@ func TestResolveHostWorkspaceRequiresSyncedMirror(t *testing.T) {
 
 func TestRunHostArtifactLaunchesArtifactWithinOutputsDir(t *testing.T) {
 	local := t.TempDir()
-	outputs := filepath.Join(local, workspaceSyncArtifactsSubdir)
+	outputs := filepath.Join(local, eruncommon.WorkspaceSyncArtifactsSubdir)
 	requireWorkspaceSyncNoError(t, os.MkdirAll(outputs, 0o755), "mkdir outputs")
 	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(outputs, "erun-app.exe"), []byte("x"), 0o644), "write artifact")
 
@@ -90,6 +90,44 @@ func TestRunHostArtifactRejectsMissingAndTraversal(t *testing.T) {
 	}
 	if err := app.RunHostArtifact(uiSelection{Tenant: "frs", Environment: "dev"}, "missing.exe"); err == nil {
 		t.Fatal("expected a missing artifact to error")
+	}
+}
+
+// hostTypeEnvironmentStore builds a host env (no pod, no cluster) whose
+// worktree is localPath directly — unlike a remote-agent env, it needs no
+// SSHD/workspace-sync mirror, since the worktree IS the operator's own
+// directory and was never anywhere else.
+func hostTypeEnvironmentStore(localPath string) stubUIStore {
+	return stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs", DefaultEnvironment: "dev"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/dev": {
+				Name:          "dev",
+				LocalRepoPath: localPath,
+				Type:          eruncommon.EnvironmentTypeHost,
+			},
+		},
+	}
+}
+
+// TestHostWorkspacePathIsTheRepoPathDirectlyForAHostEnvironment locks in the
+// same "reading the diff works" contract TestLoadHostDiffReadsHostWorktreeWithoutMCP
+// proves for a remote-agent's synced mirror, but for a host env: no SSHD, no
+// workspace sync, no pod at all — just the local directory itself, resolved
+// entirely through EnvConfig.RemoteWorktree() correctly answering false for
+// host (erun-common/config.go).
+func TestHostWorkspacePathIsTheRepoPathDirectlyForAHostEnvironment(t *testing.T) {
+	local := t.TempDir()
+	store := hostTypeEnvironmentStore(local)
+	app := NewApp(erunUIDeps{store: store})
+	defer app.shutdown(context.Background())
+
+	_, path, err := app.resolveHostWorkspace(uiSelection{Tenant: "frs", Environment: "dev"})
+	requireWorkspaceSyncNoError(t, err, "resolve host workspace for a host-type env")
+	if path != local {
+		t.Fatalf("expected host workspace path %q, got %q", local, path)
 	}
 }
 

@@ -1,0 +1,4 @@
+audit: erun upgrade --dry-run --gate-environment build
+upgrade: tenant= environment= version-override= force=false fleet=false gate-environment=build
+upgrade: plan resolution failed: --gate-environment requires --tenant
+--gate-environment requires --tenant

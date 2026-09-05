@@ -3,9 +3,15 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
+
+// portForwardStateKinds are every kind of forward `erun open` can record for
+// one environment. Deleting the environment must clear all three, or whichever
+// one is skipped outlives the environment it describes.
+var portForwardStateKinds = []string{"mcp", "api", "sshd"}
 
 type (
 	NamespaceDeleterFunc func(string, string) error
@@ -51,8 +57,8 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if tenant == "" || environment == "" {
-		return DeleteEnvironmentResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("delete environment", tenant, environment); err != nil {
+		return DeleteEnvironmentResult{}, err
 	}
 
 	envConfig, configPath, err := store.LoadEnvConfig(tenant, environment)
@@ -68,6 +74,9 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	}
 
 	ctx.TraceCommand("", "rm", "-rf", result.ConfigDir)
+	if err := removePortForwardStateFiles(ctx, tenant, environment); err != nil {
+		return result, err
+	}
 	if ctx.DryRun {
 		return result, nil
 	}
@@ -80,6 +89,32 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	}
 
 	return result, nil
+}
+
+// removePortForwardStateFiles deletes every port-forward state file this
+// environment could have. Without it, the local port range the file names
+// keeps getting freed and reissued to whichever environment is created next,
+// while the deleted environment's file still claims it — so a stale record
+// resolves to a live forward that belongs to somebody else instead of reading
+// as "no forward" the way a missing file does.
+func removePortForwardStateFiles(ctx Context, tenant, environment string) error {
+	for _, kind := range portForwardStateKinds {
+		path, err := PortForwardStatePath(kind, tenant, environment)
+		if err != nil {
+			return err
+		}
+		if _, statErr := os.Stat(path); statErr != nil {
+			continue
+		}
+		ctx.TraceCommand("", "rm", "-f", path)
+		if ctx.DryRun {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func normalizeDeleteEnvironmentDependencies(store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteStore, NamespaceDeleterFunc) {

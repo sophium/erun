@@ -4,11 +4,18 @@ open: tenant=team environment=dev kubernetes-context=test-context remote=true no
 open: pure primitive — not deploying (run `erun deploy` first, or pass --deploy to deploy before opening)
 runtime run state: deployment team-devops wants 1 replica(s), 0 ready
 deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
+deploy: worktree volume team-devops-worktree already exists; <HOME>/git/team stays on it
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
 ==> Deploying team/dev <VERSION>
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 5m0s)...
 ==> Deployed team/dev <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  deploy [<ELAPSED>]
+    team/dev <VERSION> [<ELAPSED>]
+timing record written to <TMP>

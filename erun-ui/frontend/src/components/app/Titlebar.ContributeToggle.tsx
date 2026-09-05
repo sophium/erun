@@ -1,3 +1,4 @@
+import { Button, cn, IconTooltip } from 'erun-kit';
 import { ExternalLink, GitFork } from 'lucide-react';
 import * as React from 'react';
 
@@ -5,9 +6,6 @@ import { toggleContribute } from '@/app/contributeThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { showNotification } from '@/app/notificationThunks';
 import { contributeEnvKey } from '@/app/slices/contributeSlice';
-import { IconTooltip } from '@/components/app/IconTooltip';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
 
 import { StartContributeApp } from '../../../wailsjs/go/main/App';

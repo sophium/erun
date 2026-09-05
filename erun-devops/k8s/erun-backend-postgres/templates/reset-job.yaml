@@ -1,0 +1,63 @@
+{{- $tenant := default "erun" .Values.tenant -}}
+{{- $postgres := default dict (default dict .Values.api).postgres -}}
+{{- $postgresDatabase := default "erun" $postgres.database -}}
+{{- $postgresUser := default "erun" $postgres.user -}}
+{{- $postgresPort := default 5432 $postgres.port -}}
+{{- $postgresPasswordSecretName := default (printf "%s-backend-postgres" $tenant) $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+{{- $postgresReset := default false $postgres.reset -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
+{{- if $postgresReset }}
+# A disposable-data reset (snapshot deploys only, see deployResetsDatabase in
+# erun-common/deploy.go) rides as a Helm hook Job rather than a step inside
+# the postgres Deployment's own pod spec, so it runs exactly once per deploy
+# and can never fire from an unplanned pod restart. It wipes over the network
+# (DROP/CREATE DATABASE against the running server) instead of touching
+# PGDATA on disk, so it never contends with the running postgres pod for the
+# data PVC and needs no filesystem access of its own.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $tenant }}-postgres-reset
+  labels:
+    app: {{ $tenant }}-postgres-reset
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: {{ $tenant }}-postgres-reset
+    spec:
+      restartPolicy: Never
+      containers:
+        - image: {{ $postgresImage }}
+          name: erun-postgres-reset
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGHOST
+              value: {{ printf "%s-postgres" $tenant | quote }}
+            - name: PGPORT
+              value: {{ $postgresPort | quote }}
+            - name: PGUSER
+              value: {{ $postgresUser | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: PGDATABASE
+              value: {{ $postgresDatabase | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres; do sleep 1; done
+              psql -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -c "DROP DATABASE IF EXISTS \"$PGDATABASE\" WITH (FORCE);"
+              psql -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -c "CREATE DATABASE \"$PGDATABASE\" OWNER \"$PGUSER\";"
+{{- end }}

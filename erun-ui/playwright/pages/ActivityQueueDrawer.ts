@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test';
 
 // ActivityQueueDrawer POM. The drawer slides in from the right when its
-// launcher (fixed floating button labelled "Open deploy queue") is clicked.
+// launcher (fixed floating button labelled "Open activities") is clicked.
 export class ActivityQueueDrawer {
   constructor(public readonly page: Page) {}
 
@@ -10,7 +10,7 @@ export class ActivityQueueDrawer {
   }
 
   launcher(): Locator {
-    return this.page.getByRole('button', { name: /^Open deploy queue/ });
+    return this.page.getByRole('button', { name: /^Open activities/ });
   }
 
   closeButton(): Locator {

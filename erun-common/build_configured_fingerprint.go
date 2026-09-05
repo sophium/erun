@@ -67,7 +67,7 @@ func materializeBuildFingerprints(ctx Context, build DockerBuildSpec, hash strin
 			materialized[fpTag] = struct{}{}
 			continue
 		}
-		if err := pullAndTagConfiguredFingerprint(ctx, build.Image.Tag, fpTag, platform); err != nil {
+		if err := pullAndTagConfiguredFingerprint(ctx, build.Image.Tag, fpTag, platform, build.Image.Insecure); err != nil {
 			ctx.Trace(fmt.Sprintf("could not materialize configured fingerprint %s: %v", fpTag, err))
 			continue
 		}
@@ -75,10 +75,10 @@ func materializeBuildFingerprints(ctx Context, build DockerBuildSpec, hash strin
 	}
 }
 
-func pullAndTagConfiguredFingerprint(ctx Context, sourceTag, fpTag, platform string) error {
-	ctx.TraceCommand("", "docker", "manifest", "inspect", sourceTag)
+func pullAndTagConfiguredFingerprint(ctx Context, sourceTag, fpTag, platform string, insecure bool) error {
+	ctx.TraceCommand("", "docker", append(dockerManifestArgs("inspect", insecure), sourceTag)...)
 	if !ctx.DryRun {
-		exists, err := DockerManifestExists(sourceTag)
+		exists, err := DockerManifestExists(sourceTag, insecure)
 		if err != nil {
 			return err
 		}

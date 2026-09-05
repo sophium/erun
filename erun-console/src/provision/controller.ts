@@ -1,12 +1,14 @@
+import type { CloudContext } from 'erun-kit';
 import * as React from 'react';
 
 import {
-  createContext,
+  contextsApi,
   type CreateContextInput,
-  getContext,
-  setCloudProviderAlias,
-} from '../config/client';
-import type { CloudContext } from '../config/types';
+  useCreateContextMutation,
+  useSetCloudProviderAliasMutation,
+} from '../app/api/contextsApi';
+import { useAppDispatch } from '../app/hooks';
+import { queryErrorMessage } from '../app/queryError';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -23,10 +25,6 @@ export type ProvisionState =
   | { status: 'running'; context: CloudContext }
   | { status: 'failed'; context: CloudContext }
   | { status: 'error'; message: string };
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'unexpected error';
-}
 
 function isTerminal(context: CloudContext): boolean {
   return context.status === 'running' || context.status === 'failed';
@@ -48,6 +46,9 @@ export interface ProvisionController {
 export function useProvisionController(token: string): ProvisionController {
   const [alias, setAlias] = React.useState<AliasState>({ status: 'idle' });
   const [provision, setProvision] = React.useState<ProvisionState>({ status: 'idle' });
+  const dispatch = useAppDispatch();
+  const [setCloudProviderAlias] = useSetCloudProviderAliasMutation();
+  const [createContext] = useCreateContextMutation();
 
   // Guards the poll loop against running after the component unmounts.
   const activeRef = React.useRef(true);
@@ -61,15 +62,16 @@ export function useProvisionController(token: string): ProvisionController {
   const saveAlias = React.useCallback(
     (aliasName: string, provider: string, credentials: string) => {
       setAlias({ status: 'saving' });
-      setCloudProviderAlias(token, aliasName, { provider, credentials })
+      setCloudProviderAlias({ token, alias: aliasName, input: { provider, credentials } })
+        .unwrap()
         .then(() => {
           setAlias({ status: 'saved' });
         })
         .catch((error: unknown) => {
-          setAlias({ status: 'error', message: errorMessage(error) });
+          setAlias({ status: 'error', message: queryErrorMessage(error) });
         });
     },
-    [token],
+    [token, setCloudProviderAlias],
   );
 
   const poll = React.useCallback(
@@ -77,7 +79,10 @@ export function useProvisionController(token: string): ProvisionController {
       if (!activeRef.current) {
         return;
       }
-      getContext(token, contextId)
+      dispatch(
+        contextsApi.endpoints.getContext.initiate({ token, contextId }, { forceRefetch: true }),
+      )
+        .unwrap()
         .then((context) => {
           if (!activeRef.current) {
             return;
@@ -93,17 +98,18 @@ export function useProvisionController(token: string): ProvisionController {
         })
         .catch((error: unknown) => {
           if (activeRef.current) {
-            setProvision({ status: 'error', message: errorMessage(error) });
+            setProvision({ status: 'error', message: queryErrorMessage(error) });
           }
         });
     },
-    [token],
+    [token, dispatch],
   );
 
   const provisionContext = React.useCallback(
     (input: CreateContextInput) => {
       setProvision({ status: 'creating' });
-      createContext(token, input)
+      createContext({ token, input })
+        .unwrap()
         .then((context) => {
           if (!activeRef.current) {
             return;
@@ -117,11 +123,11 @@ export function useProvisionController(token: string): ProvisionController {
         })
         .catch((error: unknown) => {
           if (activeRef.current) {
-            setProvision({ status: 'error', message: errorMessage(error) });
+            setProvision({ status: 'error', message: queryErrorMessage(error) });
           }
         });
     },
-    [token, poll],
+    [token, createContext, poll],
   );
 
   return { alias, provision, saveAlias, provisionContext };

@@ -1,4 +1,18 @@
 Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+
 == Helm release status ==
 NAME: team-devops
 STATUS: deployed
@@ -8,6 +22,12 @@ NAME                READY   STATUS    RESTARTS
 team-devops-pod-1   2/2     Running   0
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+== Docker storage ==
+could not read: runtime namespace "team-dev" is listed, but direct Kubernetes API access is failing: Error from server (NotFound): namespaces "team-dev" not found
+The runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
+Skipping the requested prune action(s) for the same reason.
 audit: erun doctor --prune-images team dev
 trace-log: appending the full trace to <TMP>
-runtime namespace "team-dev" is listed, but direct Kubernetes API access is failing: Error from server (NotFound): namespaces "team-dev" not found
+==> Doctor team/dev
+==> Doctor done team/dev

@@ -2,7 +2,7 @@ Install a published version into an environment with helm.
 
 deploy is a pure consume operation: it installs the image and chart already published at a version, by reference. It never builds or pushes — produce a version with `erun build` and `erun push` (or `erun build --deploy` to chain them) first. Pass the version with --version; use --current to redeploy the version this environment already runs. Component selection is opt-in: deploy rolls out exactly the charts you select and nothing else. With no selection it deploys the environment's runtime chart alone (bootstrapping or healing it); use --components to deploy specific charts this run, or save a default selection (the desktop Runtime tab writes it to the env's deploy.components). Pass --runtime-image to install the canonical ERun base image (or any image) via the published runtime chart — useful to bootstrap an environment before its own image is built. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
 
-deploy waits for the rollout to become ready — default 5m, or the env's `deploy.timeout`, or --rollout-timeout — and watches the new pods: it keeps waiting while an image is still pulling and aborts early on a real container failure (crash, config error, or a permanent image-pull rejection) instead of waiting out the timeout.
+deploy waits for the rollout to become ready — default 5m, or the env's `deploy.timeout`, or --rollout-timeout — and watches the new pods: it keeps waiting while an image is still pulling and aborts early on a real container failure (crash, config error, or a permanent image-pull rejection) instead of waiting out the timeout. Pass --max-cpu/--max-memory/--max-storage together to cap the environment's namespace with a Kubernetes ResourceQuota+LimitRange for this deploy; omit to use the env's saved namespace quota, if any.
 
 Usage:
   erun deploy [TENANT] [ENVIRONMENT] [flags]
@@ -12,6 +12,7 @@ Examples:
   erun deploy team dev --current
   erun deploy team dev --version <VERSION> --runtime-image ghcr.io/sophium/erun-devops
   erun deploy team prod --version <VERSION> --rollout-timeout 10m
+  erun deploy team prod --version <VERSION> --max-cpu 4 --max-memory 8Gi --max-storage 80Gi
 
 Flags:
       --components strings                        Deploy exactly these charts this run — chart directory names under <tenant>-devops/k8s/, or the runtime release name (<tenant>-devops); overrides the env's saved selection and the k8s.deployments plan. Empty falls back to the saved selection, then the plan, then the runtime chart alone
@@ -20,9 +21,13 @@ Flags:
       --environment string                        Deploy for a specific environment; requires --tenant
       --force                                     Re-run the helm upgrade even when the deployed release already matches the requested version
   -h, --help                                      help for deploy
+      --max-cpu string                            Cap the environment's namespace to this much CPU (Kubernetes quantity, e.g. 4) via a ResourceQuota+LimitRange; requires --max-memory and --max-storage too, and overrides the env's saved namespace quota for this deploy only
+      --max-memory string                         Cap the environment's namespace to this much memory (Kubernetes quantity, e.g. 8Gi); requires --max-cpu and --max-storage too
+      --max-storage string                        Cap the environment's namespace to this much storage (Kubernetes quantity, e.g. 80Gi); requires --max-cpu and --max-memory too
       --mcp-auth-public-key string                Require the env's MCP edge to authenticate bearer tokens signed by this PEM public key, and record it on the env so later redeploys keep authenticating; omit to reuse the recorded key
       --no-mcp-auth                               Deploy the env's MCP edge unauthenticated (loopback-only) and forget its recorded public key; required to turn authentication off, which deploy otherwise refuses to do by omission
       --rollout-timeout string                    Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default
+      --runtime-chart string                      Install this runtime chart, as an OCI reference that may carry its own version (oci://registry/charts/erun-devops:<VERSION>). States the chart as its own coordinate instead of deriving it from --version and the registry a previous deploy recorded, which is what lets the runtime image be versioned on a different release line than the chart
       --runtime-image erun open --runtime-image   Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors erun open --runtime-image
       --tenant string                             Deploy for a specific tenant
       --version erun build                        Version to install by reference (produced by erun build/`erun push`); fails if that version's image is absent

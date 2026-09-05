@@ -1,0 +1,2 @@
+audit: erun orchestrator set-role --role none ops-1 frs prod
+orchestrator ops-1: frs/prod is a "runtime" environment, so it cannot take role "undeclared" -- Runtime environments have no worktree to review and no in-pod agent to delegate to, so they can't be linked to an orchestrator with the code or build role. Link with the runtime role instead to operate it directly.

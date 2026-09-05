@@ -1,18 +1,36 @@
-import type { UITenant, UITenantConfig, UITenantDashboardInput } from '@/types';
+import {
+  INVITE_REQUEST_KIND_JOIN_TENANT,
+  TENANT_PLATFORM_STATE_CHOOSE_ALIAS,
+  TENANT_PLATFORM_STATE_NOT_CONNECTED,
+  TENANT_PLATFORM_STATE_NOT_SIGNED_IN,
+  type UITenant,
+  type UITenantConfig,
+  type UITenantDashboardInput,
+} from '@/types';
 
 import { cloudApi } from './api/cloudApi';
 import { tenantApi } from './api/tenantApi';
+import { tenantInviteRequestApi } from './api/tenantInviteRequestApi';
 import { replaceCloudProvider } from './cloudContextState';
 import { readError } from './errors';
-import { showNotification, showTerminalMessage } from './notificationThunks';
+import { showNotification, showTerminalError, showTerminalMessage } from './notificationThunks';
 import { setIdleStatus } from './slices/idleSlice';
 import { setReviewOpen } from './slices/layoutSlice';
 import { setSelected } from './slices/selectionSlice';
 import { patchTenantDashboard, setTenantDashboard } from './slices/tenantDashboardSlice';
 import { patchTenantDialog, setTenantDialog } from './slices/tenantDialogSlice';
 import { setCloudProviders, setTenants } from './slices/tenantsSlice';
-import { defaultTenantDialog, type TenantDashboardTab, type TenantDialogState } from './state';
-import type { AppThunk } from './store';
+import {
+  defaultReviewFilter,
+  defaultTenantDialog,
+  type ReviewFilterState,
+  type TenantDashboardState,
+  type TenantDashboardTab,
+  type TenantDialogState,
+} from './state';
+import type { AppDispatch, AppThunk, RootState } from './store';
+import { defaultRegistrationState } from './tenantRegistrationState';
+import { updateRegistrationDraft } from './tenantRegistrationThunks';
 import { requireController } from './thunkExtra';
 
 export const openTenantDialog =
@@ -151,7 +169,7 @@ export const submitTenantConfig = (): AppThunk<Promise<void>> => async (dispatch
         error: message,
       }),
     );
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 
@@ -198,7 +216,7 @@ export const setupTenantCloudProviderOIDC =
           error: message,
         }),
       );
-      dispatch(showTerminalMessage(message));
+      dispatch(showTerminalError(message));
       dispatch(showNotification('error', message));
     }
   };
@@ -234,6 +252,34 @@ function applySavedTenantConfig(
   }
 }
 
+// inviteRequestDraftCarryOver keeps the request dialog's in-progress draft
+// (kind/note/rate-limit countdown) when reopening the same tenant's
+// dashboard, and resets it for a different one — split out of
+// openTenantDashboard so that thunk's own branching stays under the module's
+// complexity cap.
+function inviteRequestDraftCarryOver(
+  sameTenant: boolean,
+  currentDashboard: TenantDashboardState,
+): Pick<
+  TenantDashboardState,
+  'requestKindDraft' | 'requestNoteDraft' | 'requestRateLimitedUntil' | 'issuedInviteLink'
+> {
+  if (sameTenant) {
+    return {
+      requestKindDraft: currentDashboard.requestKindDraft,
+      requestNoteDraft: currentDashboard.requestNoteDraft,
+      requestRateLimitedUntil: currentDashboard.requestRateLimitedUntil,
+      issuedInviteLink: currentDashboard.issuedInviteLink,
+    };
+  }
+  return {
+    requestKindDraft: INVITE_REQUEST_KIND_JOIN_TENANT,
+    requestNoteDraft: '',
+    requestRateLimitedUntil: 0,
+    issuedInviteLink: null,
+  };
+}
+
 export const openTenantDashboard =
   (tenant: string): AppThunk =>
   (dispatch, getState) => {
@@ -242,15 +288,33 @@ export const openTenantDashboard =
       return;
     }
     const currentDashboard = getState().tenantDashboard;
+    const sameTenant = currentDashboard.tenant === tenant;
     dispatch(setSelected(null));
     dispatch(setIdleStatus(null));
     dispatch(
       setTenantDashboard({
         tenant,
-        tab: currentDashboard.tenant === tenant ? currentDashboard.tab : 'users',
+        tab: sameTenant ? currentDashboard.tab : 'users',
         loading: true,
         error: '',
         data: null,
+        reviewFilter: sameTenant ? currentDashboard.reviewFilter : defaultReviewFilter(),
+        platformAliasOverride: sameTenant ? currentDashboard.platformAliasOverride : '',
+        connectApiUrlDraft: sameTenant ? currentDashboard.connectApiUrlDraft : '',
+        connecting: false,
+        connectError: '',
+        enrollUsernameDraft: sameTenant ? currentDashboard.enrollUsernameDraft : '',
+        enrolling: false,
+        enrollError: '',
+        registration: sameTenant ? currentDashboard.registration : defaultRegistrationState(),
+        requestDialogOpen: false,
+        requesting: false,
+        requestError: '',
+        decliningInviteRequestId: '',
+        declineReasonDraft: '',
+        decidingInviteRequestId: '',
+        decideInviteRequestError: '',
+        ...inviteRequestDraftCarryOver(sameTenant, currentDashboard),
       }),
     );
     dispatch(setReviewOpen(false));
@@ -260,9 +324,54 @@ export const openTenantDashboard =
 
 export const setTenantDashboardTab =
   (tab: TenantDashboardTab): AppThunk =>
-  (dispatch) => {
+  (dispatch, getState) => {
     dispatch(patchTenantDashboard({ tab }));
+    if (tab === 'registration') {
+      prefillRegistrationFromInviteRequest(dispatch, getState());
+    }
   };
+
+// prefillRegistrationFromInviteRequest arrives at the Registration tab
+// already knowing the environment name the operator is about to register —
+// the same one the invite request already carried, whether it is still
+// pending, was declined and retried, or is long since approved. Never
+// overwrites a name the operator has already typed (only fills a
+// still-blank draft).
+function prefillRegistrationFromInviteRequest(dispatch: AppDispatch, state: RootState): void {
+  const request = state.tenantDashboard.data?.myInviteRequest;
+  const environmentName = request?.environmentName?.trim();
+  if (!environmentName) {
+    return;
+  }
+  const registration = state.tenantDashboard.registration;
+  if (!registration.envName.trim()) {
+    dispatch(updateRegistrationDraft({ envName: environmentName }));
+  }
+}
+
+// setReviewFilter applies a Reviews-tab discovery filter and reloads the
+// dashboard so the new filter reaches the platform read, not just local
+// state — matching every other tenant-dashboard filter's the-list-is-the-
+// state-of-the-world contract.
+export const setReviewFilter =
+  (next: Partial<ReviewFilterState>): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const reviewFilter = { ...getState().tenantDashboard.reviewFilter, ...next };
+    dispatch(patchTenantDashboard({ reviewFilter }));
+    await dispatch(loadTenantDashboard());
+  };
+
+// tenantDashboardWhoamiResolved reports whether loadTenantDashboard's own
+// load actually reached the platform's GET /v1/whoami -- true for every
+// platformState except the three that mean the identity resolution never
+// got that far (not connected, ambiguous alias, or no session at all).
+function tenantDashboardWhoamiResolved(platformState: string | undefined): boolean {
+  return (
+    platformState !== TENANT_PLATFORM_STATE_NOT_CONNECTED &&
+    platformState !== TENANT_PLATFORM_STATE_CHOOSE_ALIAS &&
+    platformState !== TENANT_PLATFORM_STATE_NOT_SIGNED_IN
+  );
+}
 
 export const loadTenantDashboard =
   (tenant?: string): AppThunk<Promise<void>> =>
@@ -273,22 +382,34 @@ export const loadTenantDashboard =
       return;
     }
     const tenantState = state.tenants.tenants.find((candidate) => candidate.name === target);
-    const input = tenantDashboardInput(tenantState);
-    if (!input) {
-      dispatch(
-        patchTenantDashboard({
-          loading: false,
-          error: 'Tenant dashboard requires an API URL and a primary cloud alias.',
-          data: null,
-        }),
-      );
-      return;
-    }
+    const input = tenantDashboardInput(
+      target,
+      tenantState,
+      state.tenantDashboard.reviewFilter,
+      state.tenantDashboard.platformAliasOverride,
+    );
     dispatch(patchTenantDashboard({ loading: true, error: '' }));
+    // forceRefetch: true, because this fires on every dashboard open and every
+    // Refresh click — without it RTK Query's cache (never invalidated here)
+    // just replays the first successful result for the life of the process.
+    // unsubscribe once consumed so the one-shot call doesn't pin that cache
+    // entry open forever either.
+    //
+    // loadTenantDashboard has many independent callers for the same tenant
+    // (dialog open, Refresh, and the post-mutation reload every registration,
+    // platform-connect, and invite-request thunk runs) with no periodic poll
+    // to catch a dropped one later, so two of them landing close together
+    // must not race. RTK Query's condition() bails a forced refetch out from
+    // under a pending request for the same query before ever looking at
+    // forceRefetch (see erun#1953's getInitialState fix), so without this
+    // wait the later caller would silently inherit the earlier request's
+    // pre-mutation data instead of its own fresh read.
+    await dispatch(tenantApi.util.getRunningQueryThunk('getTenantDashboard', input));
+    const request = dispatch(
+      tenantApi.endpoints.getTenantDashboard.initiate(input, { forceRefetch: true }),
+    );
     try {
-      const loadedData = await dispatch(
-        tenantApi.endpoints.getTenantDashboard.initiate(input),
-      ).unwrap();
+      const loadedData = await request.unwrap();
       if (getState().tenantDashboard.tenant !== target) {
         return;
       }
@@ -300,6 +421,13 @@ export const loadTenantDashboard =
           data,
         }),
       );
+      if (tenantDashboardWhoamiResolved(data.platformState)) {
+        // The dashboard's own load just made the exact call
+        // (GET /v1/whoami) the sidebar's enrollment poll uses to decide
+        // enrolled -- independent evidence of the same transition, and an
+        // invalidation here is a no-op when nothing changed.
+        dispatch(tenantInviteRequestApi.util.invalidateTags(['TenantEnrollment']));
+      }
     } catch (error) {
       if (getState().tenantDashboard.tenant !== target) {
         return;
@@ -311,6 +439,8 @@ export const loadTenantDashboard =
           data: null,
         }),
       );
+    } finally {
+      request.unsubscribe();
     }
   };
 
@@ -323,23 +453,39 @@ export const refreshTenantDashboard = (): AppThunk<Promise<void>> => async (disp
   }
 };
 
-function tenantDashboardInput(tenant: UITenant | undefined): UITenantDashboardInput | null {
-  if (!tenant) {
-    return null;
-  }
-  const environment = tenantDashboardEnvironment(tenant);
-  const apiUrl = trimOptional(environment?.apiUrl);
-  const cloudProviderAlias = trimOptional(tenant.primaryCloudProviderAlias);
-  if (!apiUrl || !cloudProviderAlias) {
-    return null;
-  }
+// chooseTenantPlatformAlias resolves the choose-alias state: more than one
+// erun-type platform alias is configured and the operator picked one. The
+// choice is kept in tenantDashboard state (not persisted) so it survives
+// tab switches for this session but resets the next time this tenant's
+// dashboard is opened fresh.
+export const chooseTenantPlatformAlias =
+  (alias: string): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    dispatch(patchTenantDashboard({ platformAliasOverride: alias.trim() }));
+    await dispatch(loadTenantDashboard());
+  };
+
+// tenantDashboardInput no longer resolves a platform base URL or cloud
+// alias itself — the desktop's Go side resolves the erun-type platform
+// alias the same way `erun platform` does and reports the outcome on the
+// response (platformState/platformAlias/platformUrl). This only still needs
+// an environment for the API-log panel's own MCP/kube-context read, which is
+// a distinct, per-environment concern.
+function tenantDashboardInput(
+  tenantName: string,
+  tenant: UITenant | undefined,
+  reviewFilter: ReviewFilterState,
+  platformAliasOverride: string,
+): UITenantDashboardInput {
+  const environment = tenant ? tenantDashboardEnvironment(tenant) : undefined;
   return {
-    tenant: tenant.name,
+    tenant: tenantName,
     environment: trimOptional(environment?.name),
-    apiUrl,
     mcpUrl: trimOptional(environment?.mcpUrl),
     kubernetesContext: trimOptional(environment?.kubernetesContext),
-    cloudProviderAlias,
+    platformAlias: platformAliasOverride,
+    reviewFilterMine: reviewFilter.mine,
+    reviewFilterWaitingOnMe: reviewFilter.waitingOnMe,
   };
 }
 

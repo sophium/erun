@@ -1,24 +1,22 @@
+import { Button, cn, IconTooltip } from 'erun-kit';
 import { Download, LoaderCircle, MoreHorizontal } from 'lucide-react';
 import * as React from 'react';
 
 import { readError } from '@/app/errors';
-import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { useAppDispatch } from '@/app/hooks';
 import { openManageDialog } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import { openOutputs } from '@/app/outputsThunks';
 import { closeEnvironment, openSelection } from '@/app/sessionThunks';
-import { envKey } from '@/app/slices/sessionsSlice';
-import { selectionKey } from '@/app/versionSuggestions';
-import { IconTooltip } from '@/components/app/IconTooltip';
+import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
+import { useEnvironmentRowState } from '@/components/app/Sidebar.EnvironmentRow.state';
 import {
-  deriveEnvironmentRow,
+  environmentCardActivityLabel,
   type EnvironmentIndicator,
-  environmentIndicator,
 } from '@/components/app/Sidebar.helpers';
+import { NodeStateIndicator } from '@/components/app/Sidebar.NodeStateIndicator';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
 
 function LocalEnvBadge({ selected }: { selected: boolean }): React.ReactElement {
@@ -33,6 +31,25 @@ function LocalEnvBadge({ selected }: { selected: boolean }): React.ReactElement 
       aria-label="Local environment"
     >
       Local
+    </span>
+  );
+}
+
+// HostEnvBadge marks a host environment distinctly from a local-agent one: it
+// has no pod and no cluster at all, so it must never be presented as a pod
+// that failed to start.
+function HostEnvBadge({ selected }: { selected: boolean }): React.ReactElement {
+  return (
+    <span
+      className={cn(
+        'flex-none rounded-[calc(var(--radius)-4px)] border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide',
+        selected
+          ? 'border-primary-foreground/40 text-primary-foreground/85'
+          : 'border-border text-muted-foreground',
+      )}
+      aria-label="Host environment — no pod, this machine only"
+    >
+      Host
     </span>
   );
 }
@@ -96,23 +113,12 @@ function EnvironmentRowOutputsButton({
         aria-label={`Outputs for ${tenantName} / ${environmentName}`}
         onClick={(event) => {
           event.stopPropagation();
-          void dispatch(openOutputs(selection));
+          void dispatch(openOutputs({ kind: 'environment', selection }));
         }}
       >
         <Download />
       </Button>
     </IconTooltip>
-  );
-}
-
-function BusyRowSpinner({ label }: { label: string }): React.ReactElement {
-  return (
-    <LoaderCircle
-      className="size-3.5 flex-none animate-spin text-current opacity-75"
-      aria-label={label || undefined}
-      aria-hidden={label ? undefined : true}
-      role={label ? 'status' : undefined}
-    />
   );
 }
 
@@ -131,7 +137,11 @@ function EnvStatusIndicator({
   envState: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const dataEnvState = envState || (indicator.dot === 'busy' ? 'busy' : 'running');
+  // Fall back to the derived indicator, not to a literal: a condition the
+  // environment reports rather than the desktop (a broken port-forward) has no
+  // envState, and hard-coding "running" for it would leave the attribute
+  // contradicting the glyph beside it.
+  const dataEnvState = envState || indicator.dot;
   // Not opened here means there are no tabs to close, so the indicator is a
   // passive status light rather than a control that would do nothing.
   if (!indicator.opened) {
@@ -172,7 +182,7 @@ function EnvStatusIndicator({
         onClick={(event) => {
           event.stopPropagation();
           void dispatch(closeEnvironment(selection)).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           });
         }}
       >
@@ -189,6 +199,7 @@ function EnvironmentRowOpenButton({
   selected,
   selection,
   isLocal,
+  isHost,
   busy,
   busyLabel,
 }: {
@@ -197,6 +208,7 @@ function EnvironmentRowOpenButton({
   selected: boolean;
   selection: UISelection;
   isLocal: boolean;
+  isHost: boolean;
   busy: boolean;
   busyLabel: string;
 }): React.ReactElement {
@@ -212,92 +224,19 @@ function EnvironmentRowOpenButton({
       aria-current={selected ? 'page' : undefined}
       onClick={() => {
         void dispatch(openSelection(selection)).catch((error: unknown) => {
-          dispatch(showTerminalMessage(readError(error)));
+          dispatch(showTerminalError(readError(error)));
         });
       }}
     >
       <span className="min-w-0 truncate">{environmentName}</span>
-      {isLocal && <LocalEnvBadge selected={selected} />}
+      {isHost ? (
+        <HostEnvBadge selected={selected} />
+      ) : (
+        isLocal && <LocalEnvBadge selected={selected} />
+      )}
       {busy && <BusyRowSpinner label={busyLabel} />}
     </button>
   );
-}
-
-// Each selector returns a primitive so React-Redux equality short-circuits
-// row re-renders on unrelated slice churn.
-function useEnvironmentRowSelectors(tenantName: string, environmentName: string) {
-  const selectedSelection = useAppSelector((state) => state.selection.selected);
-  const tenants = useAppSelector((state) => state.tenants.tenants);
-  const isOpening = useAppSelector(
-    (state) => state.sessions.openingByEnv[envKey(tenantName, environmentName)] === true,
-  );
-  // First running entry only, so the selector stays primitive-returning and
-  // the activity slice's additive churn does not re-render every row.
-  const runningCommand = useAppSelector((state) => {
-    for (const entry of state.activity.entries) {
-      if (
-        entry.tenant === tenantName &&
-        entry.environment === environmentName &&
-        entry.status === 'running'
-      ) {
-        return entry.command;
-      }
-    }
-    return '';
-  });
-  const aiBusy = useAppSelector(
-    (state) =>
-      state.aiActivity.aiBusyByEnv[
-        selectionKey({ tenant: tenantName, environment: environmentName })
-      ] === true,
-  );
-  const isOpen = useAppSelector((state) => {
-    const key = selectionKey({ tenant: tenantName, environment: environmentName });
-    return (state.terminal.tabsByEnv[key]?.length ?? 0) > 0;
-  });
-  // Scope the busy indicator to THIS env so a reconnect/redeploy in the
-  // review pane does not spin or lock the other rows.
-  const reconnecting = useAppSelector(
-    (state) =>
-      state.review.reconnect.status === 'running' &&
-      state.review.reconnect.tenant === tenantName &&
-      state.review.reconnect.environment === environmentName,
-  );
-  // The env's real condition behind the open dot: '' running, 'stopped'
-  // cloud context down, 'runtime-stopped' runtime scaled to zero, 'failed'
-  // deploy or reconnect gave up.
-  const envState = useAppSelector(
-    (state) =>
-      state.envStatus.statusByEnv[
-        selectionKey({ tenant: tenantName, environment: environmentName })
-      ] ?? '',
-  );
-  // What the environment itself reports, which is true whoever opened it — the
-  // desktop, a CLI `erun open`, or an agent over MCP. Selectors stay primitive-
-  // returning so an unchanged observation cannot re-render the row.
-  const activityKey = selectionKey({ tenant: tenantName, environment: environmentName });
-  const reachable = useAppSelector(
-    (state) => state.envStatus.activityByEnv[activityKey]?.reachable === true,
-  );
-  const envBusy = useAppSelector(
-    (state) => state.envStatus.activityByEnv[activityKey]?.busy === true,
-  );
-  const envBusyDetail = useAppSelector(
-    (state) => state.envStatus.activityByEnv[activityKey]?.detail ?? '',
-  );
-  return {
-    selectedSelection,
-    tenants,
-    isOpening,
-    runningCommand,
-    aiBusy,
-    isOpen,
-    reconnecting,
-    envState,
-    reachable,
-    envBusy,
-    envBusyDetail,
-  };
 }
 
 export function EnvironmentRow({
@@ -308,54 +247,25 @@ export function EnvironmentRow({
   environmentName: string;
 }): React.ReactElement {
   const {
-    selectedSelection,
-    tenants,
-    isOpening,
-    runningCommand,
-    aiBusy,
-    isOpen,
-    reconnecting,
-    envState,
-    reachable,
-    envBusy,
-    envBusyDetail,
-  } = useEnvironmentRowSelectors(tenantName, environmentName);
-  const {
-    selected: selectedBySelection,
+    selected,
     busy,
     busyLabel,
+    busyFromEnvironment,
     isLocal,
+    isHost,
+    usageExcludesBuilds,
     runtimeVersion,
+    runtimeVersionLine,
+    erunVersion,
+    runtimeImageLineMismatch,
     selection,
-  } = deriveEnvironmentRow(
-    tenantName,
-    environmentName,
-    selectedSelection,
-    tenants,
-    isOpening,
-    runningCommand,
-    aiBusy,
-    reconnecting,
-  );
-  // While an orchestrator owns the terminal pane, no environment is the focused
-  // thing — suppress the env's selected highlight so the sidebar matches what the
-  // pane renders (the orchestrator row carries the active highlight instead).
-  const orchestratorActive = useAppSelector(
-    (state) =>
-      state.terminal.sessionId > 0 &&
-      state.orchestrators.items.some((o) => o.sessionId === state.terminal.sessionId),
-  );
-  const selected = selectedBySelection && !orchestratorActive;
-
-  const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;
-  const indicator = environmentIndicator({
-    name: `${tenantName} / ${environmentName}`,
     envState,
-    isOpen,
-    reachable,
-    busy: envBusy,
-    detail: envBusyDetail,
-  });
+    indicator,
+    nodeIndicator,
+    usage,
+    node,
+  } = useEnvironmentRowState(tenantName, environmentName);
+  const rowLabel = `${tenantName} / ${environmentName}${isHost ? ' (host)' : isLocal ? ' (local)' : ''}`;
   return (
     <EnvHoverCard
       className={cn(
@@ -367,9 +277,22 @@ export function EnvironmentRow({
       environmentName={environmentName}
       selection={selection}
       isLocal={isLocal}
+      isHost={isHost}
       runtimeVersion={runtimeVersion}
-      activityLabel={busy ? busyLabel : ''}
+      runtimeVersionLine={runtimeVersionLine}
+      erunVersion={erunVersion}
+      runtimeImageLineMismatch={runtimeImageLineMismatch}
+      activityLabel={environmentCardActivityLabel(
+        busy,
+        busyFromEnvironment,
+        busyLabel,
+        indicator.dot,
+      )}
       indicator={indicator}
+      nodeIndicator={nodeIndicator}
+      node={node}
+      usage={usage}
+      usageExcludesBuilds={usageExcludesBuilds}
     >
       <EnvironmentRowOpenButton
         environmentName={environmentName}
@@ -377,12 +300,20 @@ export function EnvironmentRow({
         selected={selected}
         selection={selection}
         isLocal={isLocal}
+        isHost={isHost}
         busy={busy}
         busyLabel={busyLabel}
       />
-      {indicator.visible && (
+      {/* A host env has no pod, so it is never "running" or "stopped" — it
+          simply is. Showing the pod-shaped open/close status dot for it would
+          present a directory as a pod that failed to start. */}
+      {!isHost && indicator.visible && (
         <EnvStatusIndicator indicator={indicator} selection={selection} envState={envState} />
       )}
+      {/* A second indicator, about the machine rather than the environment. It
+          is what keeps a row from rendering as "nothing to say" when the one
+          thing that IS known about it is that its node is down. */}
+      {!isHost && <NodeStateIndicator indicator={nodeIndicator} />}
       <EnvironmentRowOutputsButton
         tenantName={tenantName}
         environmentName={environmentName}

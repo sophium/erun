@@ -1,9 +1,24 @@
 audit: erun upgrade --dry-run team
-upgrade: tenant=team environment= version-override= force=false
+upgrade: tenant=team environment= version-override= force=false fleet=false gate-environment=
 upgrade: team/agent opted in, channel=snapshot current=<VERSION>
 upgrade: resolving versions for team/agent from the listed registries
-upgrade: team/agent target unresolved: no snapshot version found in the listed registries
-==> Upgrade plan: 1 member(s), 0 lagging
-    team/agent [snapshot] <VERSION> -> (unset)  (target unresolved: no snapshot version found in the listed registries)
-upgrade: team/agent target unresolved, skipping: no snapshot version found in the listed registries
-==> Upgrade complete: 0 upgraded, 0 up to date, 1 unresolved, 0 failed
+upgrade: team/agent <VERSION> -> <VERSION>
+==> Upgrade plan: 1 member(s), 1 lagging, in this order:
+    1. team/agent [snapshot] <VERSION> -> <VERSION>  (will upgrade)
+==> Upgrading team/agent <VERSION> -> <VERSION> (snapshot)
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart team-devops <VERSION> not found in ghcr.io/sophium (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart)
+deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
+deploy: defaulting runtime image to the tenant's team-devops image ghcr.io/sophium/team-devops:<VERSION> (imageOverrides.erun-devops)
+image pull: ghcr.io/sophium/team-devops:<VERSION> has no resolvable ghcr.io credential
+image pull: anonymous pullability of ghcr.io/sophium/team-devops:<VERSION> is not probed in dry-run; a real deploy refuses before rollout if it turns out not to be anonymously pullable
+kubectl --context test-context get namespace team-agent -o name
+deploy: namespace team-agent is created if the check above reports it missing
+kubectl --context test-context --namespace team-agent get pvc team-devops-worktree -o name
+deploy: worktree <HOME>/git/cwd is served by the team-devops-worktree volume; a deploy that creates that volume adopts an existing tree from the team-devops-home volume before the pod starts
+helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 5m0s --namespace team-agent --debug --kube-context test-context --set-string tenant=team --set-string environment=agent --set-string worktreeStorage=pvc --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set api.postgres.reset=false --set-string containerRegistry=ghcr.io/sophium --set-json 'containerRegistries=[{"registry":"ghcr.io/sophium","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string imageOverrides.erun-devops=ghcr.io/sophium/team-devops:<VERSION> --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string runtime.dind.resources.limits.cpu=4 --set-string runtime.dind.resources.limits.memory=20Gi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops oci://ghcr.io/sophium/charts/erun-devops --version <VERSION>
+deploy: watching pods in team-agent on context test-context for early container failure (release team-devops)
+kubectl --context test-context --namespace team-agent get pods -o json
+dedup: ready (release=test-context-team-agent-team-devops, hash=<HASH>)
+==> Upgrade complete: 1 upgraded, 0 up to date, 0 unresolved, 0 failed

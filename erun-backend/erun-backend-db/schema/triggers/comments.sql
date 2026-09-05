@@ -10,8 +10,11 @@ BEGIN
        OR NEW.creator_user_id IS DISTINCT FROM OLD.creator_user_id
        OR NEW.parent_comment_id IS DISTINCT FROM OLD.parent_comment_id
        OR NEW.commit_id IS DISTINCT FROM OLD.commit_id
-       OR NEW.line IS DISTINCT FROM OLD.line THEN
-      RAISE EXCEPTION 'comment thread identity fields cannot be updated';
+       OR NEW.file_path IS DISTINCT FROM OLD.file_path
+       OR NEW.line IS DISTINCT FROM OLD.line
+       OR NEW.body IS DISTINCT FROM OLD.body THEN
+      RAISE EXCEPTION 'comment thread identity fields cannot be updated'
+        USING ERRCODE = 'check_violation';
     END IF;
   END IF;
 
@@ -22,11 +25,13 @@ BEGIN
        WHERE existing.tenant_id = NEW.tenant_id
          AND existing.review_id = NEW.review_id
          AND existing.commit_id = NEW.commit_id
+         AND existing.file_path = NEW.file_path
          AND existing.line = NEW.line
          AND existing.parent_comment_id IS NULL
          AND (TG_OP = 'INSERT' OR existing.comment_id <> OLD.comment_id)
     ) THEN
-      RAISE EXCEPTION 'root comment already exists for review %, commit %, line %', NEW.review_id, NEW.commit_id, NEW.line;
+      RAISE EXCEPTION 'root comment already exists for review %, commit %, file %, line %', NEW.review_id, NEW.commit_id, NEW.file_path, NEW.line
+        USING ERRCODE = 'unique_violation';
     END IF;
   ELSE
     IF NOT EXISTS (
@@ -36,17 +41,23 @@ BEGIN
          AND parent.review_id = NEW.review_id
          AND parent.comment_id = NEW.parent_comment_id
          AND parent.commit_id = NEW.commit_id
+         AND parent.file_path = NEW.file_path
          AND parent.line = NEW.line
          AND parent.parent_comment_id IS NULL
-         AND parent.creator_user_id IS NOT NULL
     ) THEN
-      RAISE EXCEPTION 'child comments must reference the root comment for the same review, commit, and line';
+      RAISE EXCEPTION 'child comments must reference the root comment for the same review, commit, file, and line'
+        USING ERRCODE = 'check_violation';
     END IF;
   END IF;
 
   IF TG_OP = 'UPDATE' AND NEW.status <> OLD.status THEN
-    IF OLD.creator_user_id IS NULL OR OLD.creator_user_id <> NULLIF(current_setting('erun.user_id', true), '')::UUID THEN
-      RAISE EXCEPTION 'only the comment creator can update comment status';
+    IF OLD.parent_comment_id IS NOT NULL THEN
+      RAISE EXCEPTION 'only the root comment of a thread can have its status updated'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    IF OLD.creator_user_id <> NULLIF(current_setting('erun.user_id', true), '')::UUID THEN
+      RAISE EXCEPTION 'only the root comment creator can update comment status'
+        USING ERRCODE = 'insufficient_privilege';
     END IF;
   END IF;
 

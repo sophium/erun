@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,13 +11,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newIdleCmd(store common.OpenStore) *cobra.Command {
+func newIdleCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
 	cmd := &cobra.Command{
-		Use:           "idle [TENANT] [ENVIRONMENT]",
-		Short:         "Show environment idle stop status",
+		Use:   "idle [TENANT] [ENVIRONMENT]",
+		Short: "Show environment idle stop status",
+		Long: "Report the environment's own idle markers: what it last saw, which leases are\n" +
+			"holding it busy, and how long it has before auto-stop.\n\n" +
+			"The answer comes from the environment, over its MCP edge, so it is the same\n" +
+			"one the desktop's activity view shows. An edge that cannot be reached is\n" +
+			"reported as such rather than as an idle environment — safe to act on before a\n" +
+			"stop, a redeploy, or a delete.",
+		Example:       "  erun idle --tenant team --environment dev\n  erun idle team dev --json",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -27,22 +35,41 @@ func newIdleCmd(store common.OpenStore) *cobra.Command {
 			if len(args) > 1 {
 				environment = args[1]
 			}
-			status, err := common.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
-			if err != nil {
-				return err
-			}
-			if jsonOutput {
-				encoder := json.NewEncoder(commandContext(cmd).Stdout)
-				encoder.SetIndent("", "  ")
-				return encoder.Encode(status)
-			}
-			return writeIdleStatus(commandContext(cmd), status)
+			return runIdleCommand(cmd.Context(), commandContext(cmd), store, resolveOpen, tenant, environment, jsonOutput)
 		},
 	}
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Tenant")
 	cmd.Flags().StringVar(&environment, "environment", "", "Environment")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	addDryRunFlag(cmd)
 	return cmd
+}
+
+func runIdleCommand(ctx context.Context, commandCtx common.Context, store common.OpenStore, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
+	status, resolved, err := resolveEnvironmentIdleStatus(ctx, commandCtx, store, resolveOpen, tenant, environment)
+	if err != nil {
+		return err
+	}
+	if !resolved {
+		return nil
+	}
+	if jsonOutput {
+		encoder := json.NewEncoder(commandCtx.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(status)
+	}
+	return writeIdleStatus(commandCtx, status)
+}
+
+// resolveEnvironmentIdleStatus reads the local store only when this process is
+// the environment being asked about; anywhere else the environment's own edge
+// is the only thing that knows.
+func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx common.Context, store common.OpenStore, resolveOpen OpenResolver, tenant, environment string) (common.EnvironmentIdleStatus, bool, error) {
+	if environmentTargetsItself() {
+		status, err := common.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
+		return status, err == nil, err
+	}
+	return callEnvironmentTool[common.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil, true)
 }
 
 func writeIdleStatus(ctx common.Context, status common.EnvironmentIdleStatus) error {

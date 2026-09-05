@@ -185,12 +185,35 @@ async function viewportEverAtBottom(page: Page, duration: number): Promise<boole
 
 // setViewportScrollTop drives a user-style scroll: assigning scrollTop fires
 // the viewport's scroll event, which xterm syncs into its buffer position.
+// xterm ignores exactly one native 'scroll' event after it writes scrollTop
+// itself (e.g. the pin-to-bottom write that follows a resize's reflow), so it
+// can tell its own write apart from a real user scroll. Issuing this write
+// immediately after such an app-driven one risks the browser coalescing both
+// into a single dispatched event — which xterm then discards as the one it
+// was expecting from its own write, silently dropping this position change
+// while the DOM still shows it. Waiting two animation frames first lets any
+// such pending write's event fire and be consumed on its own before this one
+// is issued, so the two can never be mistaken for each other.
 async function setViewportScrollTop(page: Page, top: number): Promise<void> {
-  await page.evaluate((value) => {
+  await page.evaluate(async (value) => {
     const viewport = document.querySelector<HTMLElement>('.xterm-viewport');
-    if (viewport) {
-      viewport.scrollTop = value;
+    if (!viewport) {
+      return;
     }
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    const before = viewport.scrollTop;
+    const settled = new Promise<void>((resolve) => {
+      viewport.addEventListener('scroll', () => resolve(), { once: true });
+    });
+    viewport.scrollTop = value;
+    if (viewport.scrollTop === before) {
+      // The assignment landed on the same (possibly clamped) value already in
+      // place, so no scroll event will fire — don't wait for one.
+      return;
+    }
+    await settled;
   }, top);
 }
 

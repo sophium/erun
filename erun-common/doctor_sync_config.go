@@ -134,14 +134,18 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	if region == "" {
 		return providers, nil
 	}
-	contexts := []CloudContextConfig{{
+	// Route through NormalizeCloudContextConfig so an unset ERUN_CLOUD_CONTEXT_NAME
+	// defaults to the kubernetes context exactly as every writer (upsertCloudContext,
+	// the entrypoint's shell twin) already defaults it — otherwise the injected ""
+	// never matches the on-disk default and drift never clears.
+	contexts := []CloudContextConfig{NormalizeCloudContextConfig(CloudContextConfig{
 		Name:               contextName,
 		Provider:           provider,
 		CloudProviderAlias: alias,
 		Region:             region,
 		InstanceID:         instanceID,
 		KubernetesContext:  kubernetesContext,
-	}}
+	})}
 	return providers, contexts
 }
 
@@ -188,6 +192,15 @@ func parseInjectedContainerRegistries(value string) ContainerRegistries {
 		return nil
 	}
 	return registries
+}
+
+// ResolveRuntimeConfigHome mirrors the entrypoint's config-home precedence so
+// every transport reads and writes the same tree the pod's config was written to.
+func ResolveRuntimeConfigHome(homeDir string) string {
+	if configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); configHome != "" {
+		return configHome
+	}
+	return filepath.Join(homeDir, ".config")
 }
 
 func runtimeEnvConfigPath(configHome, tenant, environment string) string {
@@ -455,12 +468,13 @@ func writeRuntimeYAML(ctx Context, path string, config any) error {
 	if ctx.DryRun {
 		return nil
 	}
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(path)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return ErrNoUserDataFolder
 	}
-	return writeFileAtomic(path, data, 0o644)
+	return WriteFileAtomic(path, data, 0o644)
 }

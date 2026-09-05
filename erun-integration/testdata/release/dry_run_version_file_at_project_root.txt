@@ -23,6 +23,10 @@ cd <TMP> && git rebase origin/main
 stage: release
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
+cd <TMP> && git fetch origin main
+cd <TMP> && git rev-list --count HEAD..FETCH_HEAD
+release: a base branch that moved since sync-remote refuses the release here, before the build spends anything
+docker builder prune -f
 stage: publish
 stage: verify-publication
 stage: post-release-version-bump
@@ -31,5 +35,6 @@ write <TMP>
 cd <TMP> && git add VERSION
 cd <TMP> && git commit -m '[skip ci] prepare <VERSION>'
 stage: push
+release: a push rejected by a branch that moved during the release is rebased onto origin/main and retried (up to 2 attempts)
 cd <TMP> && git push --follow-tags origin main
 release version: <VERSION>

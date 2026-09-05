@@ -4,8 +4,20 @@ Usage:
   erun exec [command]
 
 Available Commands:
-  diff        Show the current git diff
-  raw         Run a raw command from the project root
+  close-pr             Close the GitHub pull request a merge queue gate actually shipped
+  commit               Commit every change, or only the declared paths, in the project working tree
+  diff                 Show the current git diff
+  gate-merge           Build the prospective merge a merge queue promotion (or batch) gates
+  gate-run             Report a gate run's start and outcome to the erun platform
+  job                  Start long work in the environment and observe it by handle
+  merge                Merge a branch into the project working tree's current branch
+  plan-ruleset-bypass  Plan narrowing a ruleset's bypass grant to one non-human queue identity
+  push                 Push the project working tree's current branch to a remote
+  raw                  Run a raw command from the project root
+  reconcile-bypass     Check every ruleset-bypassed push against a real passed gate run
+  report-commit-status Report a GitHub commit status for a merge queue gate result
+  route-check          Prove every registered API route is reachable on a deployed plane
+  write                Write stdin to a file in the project working tree
 
 Flags:
   -h, --help   help for exec

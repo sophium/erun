@@ -24,10 +24,14 @@ func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, erro
 
 func loadAPILogFromKubernetes(ctx context.Context, kubernetesContext, tenant, environment string) (string, error) {
 	namespace := eruncommon.KubernetesNamespaceName(tenant, environment)
+	// A selector (rather than deployment/<name>) names which replica the log
+	// came from instead of quietly picking one; the API Deployment's
+	// Recreate strategy means a rollout transiently has two pods matching.
 	return kubectlText(ctx, kubernetesContext,
 		"--namespace", namespace,
 		"logs",
-		"deployment/"+eruncommon.RuntimeReleaseName(tenant),
+		"-l", "app="+eruncommon.APIDeploymentName(tenant),
+		"--prefix",
 		"-c", "erun-backend-api",
 		"--tail", "400",
 	)

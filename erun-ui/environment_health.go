@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -16,8 +18,8 @@ import (
 // cannot report the "not deployed" case this covers.
 func (a *App) CheckEnvironmentHealth(selection uiSelection) (uiEnvironmentHealth, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentHealth{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("check environment health", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentHealth{}, err
 	}
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
@@ -110,16 +112,29 @@ func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config erun
 
 // checkRuntimeDeployed reports whether a pod running the erun-devops runtime
 // container exists in the env's namespace on the given context. kubectl exits
-// non-zero when the namespace or cluster is absent — the not-deployed state —
-// which is treated as "not deployed", not an error, mirroring the convention
-// loadClusterRegistry uses for a missing Service.
+// non-zero both when the namespace is genuinely absent (the not-deployed
+// state, mirroring the convention loadClusterRegistry uses for a missing
+// Service) and when the probe itself could not be answered — a VPN down, a
+// rotated token, an unreachable API server. Collapsing both to a plain "not
+// deployed" hands the operator a Deploy button that will fail identically,
+// and the health check's own honest "could not check" branch
+// (runtimeDeployedHealthCheck's healthCheckStatusUnknown) never fires. Only a
+// genuine NotFound is a negative answer; anything else is propagated as an
+// error.
 func checkRuntimeDeployed(ctx context.Context, kubeContext, tenant, environment string) (bool, error) {
 	namespace := eruncommon.KubernetesNamespaceName(tenant, environment)
 	output, err := kubectlJSON(ctx, kubeContext,
 		"get", "pods", "-n", namespace,
 		"-o", `jsonpath={range .items[*]}{range .spec.containers[*]}{.name}{"\n"}{end}{end}`)
 	if err != nil {
-		return false, nil
+		// A missing kubectl binary reads as "not found" text too (`exec:
+		// "kubectl": executable file not found in $PATH`), which would
+		// otherwise be misclassified as an absent namespace rather than the
+		// "could not check" it actually is.
+		if !errors.Is(err, exec.ErrNotFound) && eruncommon.KubernetesResourceNotFound(err.Error()) {
+			return false, nil
+		}
+		return false, err
 	}
 	for _, name := range strings.Split(string(output), "\n") {
 		if strings.TrimSpace(name) == eruncommon.DevopsComponentName {

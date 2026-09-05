@@ -28,7 +28,7 @@ type sshdPortForwardState struct {
 
 func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common.SSHConnectionInfo, error) {
 	info := common.SSHConnectionInfoForResult(result)
-	statePath, err := sshdPortForwardStatePath(result.Tenant, result.Environment)
+	statePath, err := sshdPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return common.SSHConnectionInfo{}, err
 	}
@@ -41,18 +41,22 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 		LocalPort:         info.Port,
 	}
 
-	if stateMatchesSSHDTarget(state, expectedState) && !stateHasDeprecatedLocalProxy(state) && canReachLocalSSHEndpoint(info.Port) {
+	matches := stateMatchesSSHDTarget(state, expectedState)
+	if matches && !stateHasDeprecatedLocalProxy(state) && canReachLocalSSHEndpoint(info.Port) {
 		return info, nil
 	}
-	stopStaleSSHDPortForward(state, expectedState, info.Port)
 	args := kubectlPortForwardArgs(result, info.Port)
 	if ctx.DryRun {
-		if previewed, _ := previewAdoptOrConflict(ctx, "sshd", info.Port, args); previewed {
+		previewClearRecordedPortForward(ctx, "sshd", matches, state.ProcessID, info.Port)
+		previewSweepDeadPortForwardsMatching(ctx, "sshd", args, info.Port)
+		if previewed, _ := previewAdoptOrConflict(ctx, "sshd", info.Port, args, canReachLocalSSHEndpoint); previewed {
 			return info, nil
 		}
 		ctx.TraceCommand("", "kubectl", args...)
 		return info, nil
 	}
+	stopStaleSSHDPortForward(ctx, matches, state, info.Port)
+	sweepDeadPortForwardsMatching(ctx, "sshd", args, info.Port)
 	if canConnectLocalPort(info.Port) {
 		adopted, err := adoptForeignSSHDPortForward(ctx, statePath, expectedState, args, info)
 		if err != nil {
@@ -65,7 +69,7 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 
 	ctx.TraceCommand("", "kubectl", args...)
 
-	return startSSHDPortForward(statePath, expectedState, args, info)
+	return startSSHDPortForward(ctx, statePath, expectedState, args, info)
 }
 
 // adoptForeignSSHDPortForward mirrors adoptForeignMCPPortForward for the
@@ -78,6 +82,12 @@ func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected 
 	if !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
 		return false, fmt.Errorf("local SSH port %d is already in use by %s", info.Port, formatHolderForError(pid, argv))
 	}
+	if !canReachLocalSSHEndpoint(info.Port) {
+		if replaceStalePortForwardHolder(ctx, "sshd", pid, info.Port) {
+			return false, nil
+		}
+		return false, fmt.Errorf("local SSH port %d is held by a stale kubectl port-forward that could not be stopped: %s", info.Port, formatHolderForError(pid, argv))
+	}
 	adopted := expected
 	adopted.ProcessID = pid
 	adopted.LogPath = sshdPortForwardLogPath(statePath)
@@ -88,18 +98,35 @@ func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected 
 	return true, nil
 }
 
-func stopStaleSSHDPortForward(state, expectedState sshdPortForwardState, localPort int) {
-	if !stateMatchesSSHDTarget(state, expectedState) || state.ProcessID <= 0 || !canConnectLocalPort(localPort) {
+// stopStaleSSHDPortForward stops the process behind this env's own recorded
+// forward before a fresh one replaces it — whether that forward is
+// bound-but-dead or was never reached far enough to bind at all, since bound
+// state alone cannot tell a corpse that exited cleanly from one still
+// running with nobody left to reap it. deprecated (a legacy local-proxy
+// record) forces replacement regardless of reachability, so it is excluded
+// from the "holds the port but doesn't answer" trace, which would otherwise
+// misdescribe a forward that actually answers fine.
+func stopStaleSSHDPortForward(ctx common.Context, matches bool, state sshdPortForwardState, localPort int) {
+	if !matches || state.ProcessID <= 0 {
 		return
 	}
-	stopSSHDPortForwardState(state)
-	waitForLocalPortToClose(localPort)
+	bound := canConnectLocalPort(localPort)
+	if bound && !stateHasDeprecatedLocalProxy(state) {
+		ctx.Trace(fmt.Sprintf("sshd: the port-forward on 127.0.0.1:%d holds the local port but its edge does not answer; re-establishing it", localPort))
+	}
+	found := reapRecordedPortForwardProcess(matches, state.ProcessID, localPort)
+	if !bound && found {
+		ctx.Trace(fmt.Sprintf("sshd: the recorded port-forward for 127.0.0.1:%d never bound its port; clearing it (PID %d) before starting a fresh one", localPort, state.ProcessID))
+	}
+	if state.ProxyProcessID > 0 {
+		_ = stopSSHDActivityProxyProcess(state.ProxyProcessID)
+	}
 	if state.ForwardPort > 0 {
 		waitForLocalPortToClose(state.ForwardPort)
 	}
 }
 
-func startSSHDPortForward(statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
+func startSSHDPortForward(ctx common.Context, statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
 	logPath := sshdPortForwardLogPath(statePath)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return common.SSHConnectionInfo{}, err
@@ -127,6 +154,7 @@ func startSSHDPortForward(statePath string, expectedState sshdPortForwardState, 
 	}
 
 	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
+		releaseUnreachablePortForward(ctx, "sshd", cmd.Process, info.Port, err)
 		return common.SSHConnectionInfo{}, err
 	}
 	return info, nil
@@ -162,8 +190,8 @@ func kubectlPortForwardArgs(result common.OpenResult, localPort int) []string {
 	return args
 }
 
-func sshdPortForwardStatePath(tenant, environment string) (string, error) {
-	return portForwardStatePath("sshd", tenant, environment)
+func sshdPortForwardStatePath(tenant, environment string, dryRun bool) (string, error) {
+	return portForwardStatePath("sshd", tenant, environment, dryRun)
 }
 
 func sshdPortForwardLogPath(statePath string) string {
@@ -203,15 +231,6 @@ func stateMatchesSSHDTarget(state, expected sshdPortForwardState) bool {
 
 func stateHasDeprecatedLocalProxy(state sshdPortForwardState) bool {
 	return state.ForwardPort > 0 || state.ProxyProcessID > 0
-}
-
-func stopSSHDPortForwardState(state sshdPortForwardState) {
-	if state.ProxyProcessID > 0 {
-		_ = stopSSHDActivityProxyProcess(state.ProxyProcessID)
-	}
-	if state.ProcessID > 0 {
-		_ = stopPortForwardProcess(state.ProcessID)
-	}
 }
 
 func stopSSHDActivityProxyProcess(pid int) error {

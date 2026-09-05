@@ -22,6 +22,67 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
+// stdinIsTerminal decides whether open may safely block on an interactive
+// shell. A var (like currentHostOS above) so tests can force the TTY branch
+// via ERUN_FORCE_TTY, the same seam writerIsTerminal already honors.
+var stdinIsTerminal = func() bool { return writerIsTerminal(os.Stdin) }
+
+// refuseOpenForHostEnvironment refuses `open` against a host env: it has no
+// pod and no cluster to open a kubectl-exec shell into. Its worktree is
+// already the operator's own directory, so the resolution here is to open
+// that directory directly rather than through erun. Checked against
+// ResolvedType rather than the broader !HasPod() so a legacy env with an
+// unresolved type (ResolvedType == "", see EnvConfig docs) keeps opening
+// exactly as it did before host existed, instead of being misreported as a
+// host environment it never was. Checked before any other open side effect
+// (persisting the local port range, ensuring the kubernetes context) so a
+// refusal never partially applies one.
+func refuseOpenForHostEnvironment(result common.OpenResult) error {
+	if result.EnvConfig.ResolvedType() != common.EnvironmentTypeHost {
+		return nil
+	}
+	return fmt.Errorf("open %s/%s: %s is a host environment — it has no pod and no cluster to open a shell into; its worktree is already %s, so open that directory directly", result.Tenant, result.Environment, result.Environment, result.RepoPath)
+}
+
+// resolveOpenTarget runs the resolution chain that must complete before a
+// runtime can be opened: flag validation, parameter resolution, the init
+// hand-off, the host-environment refusal, and persisting the local port range.
+// done reports that init already handled the request, so the caller returns
+// without opening anything.
+func resolveOpenTarget(
+	ctx common.Context,
+	args []string,
+	target common.OpenParams,
+	vscode bool,
+	intellij bool,
+	resolveOpen func(common.OpenParams) (common.OpenResult, error),
+	runInitForOpen func(common.Context, common.OpenParams) error,
+	saveEnvConfig func(string, common.EnvConfig) error,
+) (common.OpenResult, bool, error) {
+	if vscode && intellij {
+		return common.OpenResult{}, false, fmt.Errorf("--vscode and --intellij cannot be used together")
+	}
+	params, err := resolveOpenParams(args, target)
+	if err != nil {
+		return common.OpenResult{}, false, err
+	}
+	result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
+	if err != nil {
+		return common.OpenResult{}, false, err
+	}
+	if initRan {
+		return common.OpenResult{}, true, nil
+	}
+	if err := refuseOpenForHostEnvironment(result); err != nil {
+		return common.OpenResult{}, false, err
+	}
+	result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
+	if err != nil {
+		return common.OpenResult{}, false, err
+	}
+	return result, false, nil
+}
+
 func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
@@ -45,7 +106,10 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			"`erun deploy` first, or pass --deploy to deploy before opening (the operator-convenience " +
 			"shortcut: builds-here envs build→push→deploy, runtime envs install the current version). " +
 			"Use --vscode or --intellij to open an IDE instead, or --no-shell to print the setup " +
-			"commands for your current shell.\n\n" +
+			"commands for your current shell. Without a TTY on stdin (an MCP client, an " +
+			"orchestrator, a script) open skips the shell automatically and behaves like " +
+			"--no-shell instead: the port-forwards still come up, but open never launches a " +
+			"shell that would read EOF and exit immediately.\n\n" +
 			"Opening is also how you start an environment you stopped with `erun stop`. That makes " +
 			"open an operator gesture: anything that respawns it automatically to re-establish a " +
 			"dropped session must pass --reconnect, which reattaches without starting a stopped " +
@@ -58,23 +122,12 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
-			if vscode && intellij {
-				return fmt.Errorf("--vscode and --intellij cannot be used together")
-			}
-			params, err := resolveOpenParams(args, target)
+			result, done, err := resolveOpenTarget(ctx, args, target, vscode, intellij, resolveOpen, runInitForOpen, saveEnvConfig)
 			if err != nil {
 				return err
 			}
-			result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
-			if err != nil {
-				return err
-			}
-			if initRan {
+			if done {
 				return nil
-			}
-			result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
-			if err != nil {
-				return err
 			}
 			allowLocalBuilds := result.EnvConfig.BuildsHere()
 			return runResolvedOpenCommandWithAPI(ctx, result, openOptions{
@@ -135,27 +188,6 @@ type openOptions struct {
 	Deploy           bool
 	Contribute       bool
 	Reconnect        bool
-}
-
-func persistOpenRuntimeVersion(result common.OpenResult, version, registry string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
-	version = strings.TrimSpace(version)
-	registry = strings.TrimSpace(registry)
-	if version == "" || saveEnvConfig == nil {
-		return result, nil
-	}
-
-	updated := result.EnvConfig
-	if strings.TrimSpace(updated.RuntimeVersion) == version && strings.TrimSpace(updated.RuntimeRegistry) == registry {
-		return result, nil
-	}
-	updated.RuntimeVersion = version
-	updated.RuntimeRegistry = registry
-
-	result.EnvConfig = updated
-	if err := saveEnvConfig(result.Tenant, updated); err != nil {
-		return common.OpenResult{}, err
-	}
-	return result, nil
 }
 
 func resolveOpenArgs(args []string, resolveOpen func(common.OpenParams) (common.OpenResult, error)) (common.OpenParams, common.OpenResult, error) {
@@ -339,6 +371,16 @@ func (r *resolvedOpenRunner) run() error {
 		r.ctx.Trace("open: --no-shell selected, emitting setup commands instead of launching shell")
 		return r.emitNoShellSetup()
 	}
+	if !stdinIsTerminal() {
+		// A non-interactive caller (an MCP client, an orchestrator, a script) is
+		// exactly the shape that hits this: kubectl exec -it reads EOF on a
+		// non-TTY stdin and returns almost instantly, so open would exit right
+		// behind it having done nothing to keep the port-forwards it just started
+		// alive or supervised. Falling back to the --no-shell behavior keeps them
+		// up without gambling a shell that cannot stay open.
+		r.ctx.Trace("open: stdin is not a TTY, so an interactive shell would read EOF and exit immediately; keeping the port-forwards up and emitting setup commands instead of a shell that cannot stay open")
+		return r.emitNoShellSetup()
+	}
 
 	r.traceShellPreview(shellReq)
 	if r.ctx.DryRun {
@@ -479,23 +521,16 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 	if err := common.RunDeploySpec(r.ctx, execution, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
-	if execution.SkipHelm {
-		// All runtime images came from the fingerprint cache, so
-		// execution.Deploy.Version is a freshly minted snapshot timestamp that
-		// was never pushed. Persisting it would point the env config — and the
-		// desktop runtime dialog — at a phantom version the deploy picker can
-		// never offer (it gates on registry presence), so heal to the version the
-		// release is actually running instead. Twin of the deploy-command guard in
-		// PersistRuntimeVersionFromDeploySpecs.
-		running := r.resolveRunningRuntimeVersion(execution)
-		if running == "" {
-			r.ctx.Trace("open: runtime images all cached (no rebuild); could not read the deployed version, leaving persisted runtime version unchanged")
-			return nil
-		}
-		r.ctx.Trace("open: runtime images all cached (no rebuild); persisting the running runtime version " + running)
-		return r.persistRuntimeVersion(running, execution.Deploy.ContainerRegistry)
-	}
-	return r.persistRuntimeVersion(execution.Deploy.Version, execution.Deploy.ContainerRegistry)
+	// Persist through the same shared writer `erun deploy`/`erun upgrade` use
+	// (common.PersistRuntimeVersionFromDeploySpecs) instead of a hand-rolled
+	// subset: the hand-rolled version only ever wrote RuntimeVersion and
+	// RuntimeRegistry, so an operator's own --runtime-image on `open --deploy`
+	// installed correctly this one time and then was silently forgotten on the
+	// next plain open/deploy. The shared writer also heals RuntimeRunningImage, a
+	// stated RuntimeChart, and the MCP-auth key, and already knows to heal to
+	// the running version instead of a never-pushed snapshot when every image
+	// came from the fingerprint cache (SkipHelm).
+	return common.PersistRuntimeVersionFromDeploySpecs(r.ctx, []common.DeploySpec{execution}, r.options.SaveEnvConfig, r.resolveDeployedVersion)
 }
 
 func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) common.HelmChartDeployerFunc {
@@ -504,33 +539,6 @@ func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) commo
 		wrapOpenHelmDeployWithSpinner(r.ctx, execution.Deploy.ReleaseName, r.deployHelmChart),
 		common.ClearHelmReleasePendingOperation,
 	)
-}
-
-func (r *resolvedOpenRunner) persistRuntimeVersion(version, registry string) error {
-	if r.ctx.DryRun {
-		return nil
-	}
-	result, err := persistOpenRuntimeVersion(r.result, version, registry, r.options.SaveEnvConfig)
-	if err != nil {
-		return err
-	}
-	r.result = result
-	return nil
-}
-
-// resolveRunningRuntimeVersion returns "" when the running version can't be read
-// (dry-run, no resolver, helm error), signalling the caller to leave the
-// persisted version untouched rather than record a phantom.
-func (r *resolvedOpenRunner) resolveRunningRuntimeVersion(execution common.DeploySpec) string {
-	if r.ctx.DryRun || r.resolveDeployedVersion == nil {
-		return ""
-	}
-	version, err := r.resolveDeployedVersion(r.ctx, execution.Deploy.ReleaseName, execution.Deploy.Namespace, execution.Deploy.KubernetesContext)
-	if err != nil {
-		r.ctx.Trace("open: reading the deployed runtime version failed: " + err.Error())
-		return ""
-	}
-	return strings.TrimSpace(version)
 }
 
 // ensureRuntimeDeployed fails a pure `open` when the env's runtime is not
@@ -560,7 +568,11 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 		return err
 	}
 	if !present {
-		return fmt.Errorf("runtime for %s/%s is not deployed (deployment %q not found in namespace %q); run `erun deploy %s %s` first",
+		// Builds on common.KubernetesDeploymentAbsentMessageMarker so the
+		// desktop, reading only this text across a CLI subprocess boundary, can
+		// tell a genuine absence apart from a check that could not resolve an
+		// answer without re-deriving kubectl's own error grammar.
+		return fmt.Errorf("runtime for %s/%s "+common.KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
 			r.result.Tenant, r.result.Environment, release, namespace, r.result.Tenant, r.result.Environment)
 	}
 	return nil

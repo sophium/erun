@@ -1,2 +1,2 @@
 audit: erun activity sample
-tenant and environment are required
+tenant and environment not set: erun activity commands run outside any resolved environment and never read the ambient config -- pass --tenant and --environment explicitly

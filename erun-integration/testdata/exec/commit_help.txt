@@ -1,0 +1,21 @@
+Stage every change in the project working tree and commit it with a message read verbatim from stdin — never a shell, so nothing in the message is reinterpreted. BRANCH must match the working tree's actual current branch; the commit is refused, loudly, when it does not, rather than landing on whatever branch HEAD happens to be on.
+
+Pass one or more PATH arguments to stage and commit only those paths instead of every change. A scoped commit is also refused, loudly, if the tree has changes outside the declared paths — an unrelated writer's edits can never be absorbed into a commit that did not ask for them.
+
+--dry-run verifies the branch and traces the files that would be committed, without staging or committing.
+
+Usage:
+  erun exec commit BRANCH [PATH...] [flags]
+
+Examples:
+  echo 'fix the values typo' | erun exec commit main
+  echo 'fix the values typo' | erun exec commit main values.yaml
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for commit
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

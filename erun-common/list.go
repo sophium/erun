@@ -19,6 +19,24 @@ type ListResult struct {
 	CurrentDirectory ListCurrentDirectoryResult `json:"currentDirectory"`
 	CloudProviders   []CloudProviderStatus      `json:"cloudProviders,omitempty"`
 	Tenants          []ListTenantResult         `json:"tenants,omitempty"`
+	Orchestrators    []ListOrchestratorResult   `json:"orchestrators,omitempty"`
+}
+
+// ListOrchestratorResult is the read-model view of one persisted
+// OrchestratorConfig for `erun list`.
+type ListOrchestratorResult struct {
+	ID           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	Environments []ListOrchestratorEnvResult `json:"environments,omitempty"`
+}
+
+// ListOrchestratorEnvResult is the read-model view of one
+// OrchestratorEnvConfig link, including its (possibly undeclared) Role.
+type ListOrchestratorEnvResult struct {
+	Tenant      string              `json:"tenant"`
+	Environment string              `json:"environment"`
+	Directory   string              `json:"directory,omitempty"`
+	Role        OrchestratorEnvRole `json:"role,omitempty"`
 }
 
 type ListDefaultsResult struct {
@@ -59,29 +77,56 @@ type ListTenantResult struct {
 }
 
 type ListEnvironmentResult struct {
-	Name                string                  `json:"name"`
-	Type                EnvironmentType         `json:"type,omitempty"`
-	APIURL              string                  `json:"apiUrl,omitempty"`
-	KubernetesContext   string                  `json:"kubernetesContext,omitempty"`
-	CloudProviderAlias  string                  `json:"cloudProviderAlias,omitempty"`
-	RepoPath            string                  `json:"repoPath,omitempty"`
-	LocalRepoPath       string                  `json:"localRepoPath,omitempty"`
-	ContainerRegistries ContainerRegistries     `json:"containerRegistries,omitempty"`
-	RuntimeVersion      string                  `json:"runtimeVersion,omitempty"`
-	RuntimePod          RuntimePodResources     `json:"runtimePod,omitempty"`
-	ManagedCloud        bool                    `json:"managedCloud,omitempty"`
-	DisableBuildScript  bool                    `json:"disableBuildScript,omitempty"`
-	PlatformAccount     bool                    `json:"platformAccount,omitempty"`
-	AITool              string                  `json:"aiTool,omitempty"`
-	Claude              EnvironmentClaudeConfig `json:"claude,omitempty"`
-	Idle                EnvironmentIdleConfig   `json:"idle,omitempty"`
-	Deploy              EnvironmentDeployConfig `json:"deploy,omitempty"`
-	IsActive            bool                    `json:"isActive,omitempty"`
-	LocalPorts          EnvironmentLocalPorts   `json:"localPorts,omitempty"`
-	IsDefault           bool                    `json:"isDefault,omitempty"`
-	IsEffective         bool                    `json:"isEffective,omitempty"`
-	SSH                 ListSSHResult           `json:"ssh,omitempty"`
-	AutoStart           *bool                   `json:"autoStart,omitempty"`
+	Name                string              `json:"name"`
+	Type                EnvironmentType     `json:"type,omitempty"`
+	APIURL              string              `json:"apiUrl,omitempty"`
+	KubernetesContext   string              `json:"kubernetesContext,omitempty"`
+	CloudProviderAlias  string              `json:"cloudProviderAlias,omitempty"`
+	RepoPath            string              `json:"repoPath,omitempty"`
+	LocalRepoPath       string              `json:"localRepoPath,omitempty"`
+	ContainerRegistries ContainerRegistries `json:"containerRegistries,omitempty"`
+	RuntimeVersion      string              `json:"runtimeVersion,omitempty"`
+	// RuntimeVersionLine names which release line RuntimeVersion's number
+	// belongs to. Nil whenever RuntimeVersion itself is empty -- there is
+	// nothing to annotate for an environment that has never deployed.
+	RuntimeVersionLine *RuntimeVersionLine `json:"runtimeVersionLine,omitempty"`
+	// ErunVersion is the erun version this environment's runtime chart carries
+	// -- see ResolveErunVersion. Nil whenever it cannot be read from config
+	// alone, including whenever RuntimeVersion itself is empty.
+	ErunVersion *ErunVersion `json:"erunVersion,omitempty"`
+	// RuntimeImageLineMismatch is set only when the environment's recorded and
+	// last-observed runtime images name different release lines -- see
+	// EnvConfig.RuntimeImageLineMismatch.
+	RuntimeImageLineMismatch *RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
+	RuntimePod               RuntimePodResources             `json:"runtimePod,omitempty"`
+	// Sizing is the environment's standing recommendation, derived from the usage
+	// history the in-pod monitor retains. Nil where erun has never observed this
+	// environment — which is every environment seen from a host other than its
+	// own runtime container, since the history is written by the container that
+	// produced it.
+	Sizing             *RuntimeSizingRecommendation `json:"sizing,omitempty"`
+	ManagedCloud       bool                         `json:"managedCloud,omitempty"`
+	DisableBuildScript bool                         `json:"disableBuildScript,omitempty"`
+	PlatformAccount    bool                         `json:"platformAccount,omitempty"`
+	AITool             string                       `json:"aiTool,omitempty"`
+	Claude             EnvironmentClaudeConfig      `json:"claude,omitempty"`
+	Idle               EnvironmentIdleConfig        `json:"idle,omitempty"`
+	Deploy             EnvironmentDeployConfig      `json:"deploy,omitempty"`
+	IsActive           bool                         `json:"isActive,omitempty"`
+	LocalPorts         EnvironmentLocalPorts        `json:"localPorts,omitempty"`
+	IsDefault          bool                         `json:"isDefault,omitempty"`
+	IsEffective        bool                         `json:"isEffective,omitempty"`
+	SSH                ListSSHResult                `json:"ssh,omitempty"`
+	AutoStart          *bool                        `json:"autoStart,omitempty"`
+}
+
+// RuntimeImageLineMismatchResult is the list read-model view of
+// EnvConfig.RuntimeImageLineMismatch, present only when it reports a real
+// disagreement -- an environment with no recorded history, or one whose
+// recorded and observed images agree, has nothing to surface.
+type RuntimeImageLineMismatchResult struct {
+	RecordedLine string `json:"recordedLine"`
+	ObservedLine string `json:"observedLine"`
 }
 
 type ListSSHResult struct {
@@ -125,11 +170,17 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 	if err != nil {
 		return ListResult{}, err
 	}
-	cloudProviders, err := ListCloudProviderStatuses(store, CloudDependencies{})
+	cloudProviders, err := ListCloudProviderStatuses(store, DefaultCloudDependencies())
 	if err != nil {
 		return ListResult{}, err
 	}
 	result.CloudProviders = cloudProviders
+
+	orchestrators, err := loadListOrchestrators(store)
+	if err != nil {
+		return ListResult{}, err
+	}
+	result.Orchestrators = orchestrators
 
 	for _, tenant := range tenants {
 		tenantResult, err := listTenantResult(store, tenant, defaultTenant, effectiveResult, effectiveErr, portAllocations)
@@ -198,31 +249,74 @@ func listTenantResult(store ListStore, tenant TenantConfig, defaultTenant string
 
 func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, effective OpenResult, effectiveErr error, portAllocations map[string]EnvironmentLocalPorts) ListEnvironmentResult {
 	localPorts := listEnvironmentLocalPorts(tenant.Name, env, portAllocations)
+	runtimeVersionLine := listRuntimeVersionLine(tenant.Name, env)
 	return ListEnvironmentResult{
-		Name:                env.Name,
-		Type:                env.ResolvedType(),
-		APIURL:              APIURLForListEnvironment(tenant, localPorts),
-		KubernetesContext:   strings.TrimSpace(env.KubernetesContext),
-		CloudProviderAlias:  strings.TrimSpace(env.CloudProviderAlias),
-		RepoPath:            env.EffectiveLocalRepoPath(),
-		LocalRepoPath:       strings.TrimSpace(env.LocalRepoPath),
-		ContainerRegistries: ResolveEnvironmentContainerRegistries(env),
-		RuntimeVersion:      strings.TrimSpace(env.RuntimeVersion),
-		RuntimePod:          env.RuntimePod,
-		ManagedCloud:        env.ManagedCloud,
-		DisableBuildScript:  env.DisableBuildScript,
-		PlatformAccount:     env.PlatformAccount,
-		AITool:              strings.TrimSpace(env.AITool),
-		Claude:              env.Claude,
-		Idle:                env.Idle,
-		Deploy:              env.Deploy,
-		IsActive:            listEnvironmentIsActive(store, env),
-		LocalPorts:          localPorts,
-		IsDefault:           env.Name == tenant.DefaultEnvironment,
-		IsEffective:         effectiveErr == nil && tenant.Name == effective.Tenant && env.Name == effective.Environment,
-		SSH:                 listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
-		AutoStart:           copyAutoStartPtr(env.AutoStart),
+		Name:                     env.Name,
+		Type:                     env.ResolvedType(),
+		APIURL:                   APIURLForListEnvironment(tenant, localPorts),
+		KubernetesContext:        strings.TrimSpace(env.KubernetesContext),
+		CloudProviderAlias:       strings.TrimSpace(env.CloudProviderAlias),
+		RepoPath:                 env.EffectiveLocalRepoPath(),
+		LocalRepoPath:            strings.TrimSpace(env.LocalRepoPath),
+		ContainerRegistries:      EffectiveEnvironmentContainerRegistries(env),
+		RuntimeVersion:           strings.TrimSpace(env.RuntimeVersion),
+		RuntimeVersionLine:       runtimeVersionLine,
+		ErunVersion:              ResolveErunVersion(env, runtimeVersionLine),
+		RuntimeImageLineMismatch: listRuntimeImageLineMismatch(env),
+		RuntimePod:               env.RuntimePod,
+		Sizing:                   EnvironmentRuntimeSizing(tenant.Name, env),
+		ManagedCloud:             env.ManagedCloud,
+		DisableBuildScript:       env.DisableBuildScript,
+		PlatformAccount:          env.PlatformAccount,
+		AITool:                   strings.TrimSpace(env.AITool),
+		Claude:                   env.Claude,
+		Idle:                     env.Idle,
+		Deploy:                   env.Deploy,
+		IsActive:                 listEnvironmentIsActive(store, env),
+		LocalPorts:               localPorts,
+		IsDefault:                env.Name == tenant.DefaultEnvironment,
+		IsEffective:              effectiveErr == nil && tenant.Name == effective.Tenant && env.Name == effective.Environment,
+		SSH:                      listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
+		AutoStart:                copyAutoStartPtr(env.AutoStart),
 	}
+}
+
+// listRuntimeVersionLine wraps ResolveRuntimeVersionLine, but only when there
+// is a RuntimeVersion to annotate at all -- an environment that has never
+// deployed has no version, and "undetermined" would misread as "deployed,
+// but the line is unknown" rather than "never deployed".
+func listRuntimeVersionLine(tenant string, env EnvConfig) *RuntimeVersionLine {
+	if strings.TrimSpace(env.RuntimeVersion) == "" {
+		return nil
+	}
+	line := ResolveRuntimeVersionLine(tenant, env)
+	return &line
+}
+
+// listRuntimeImageLineMismatch wraps EnvConfig.RuntimeImageLineMismatch, only
+// surfacing a result when it reports a real disagreement.
+func listRuntimeImageLineMismatch(env EnvConfig) *RuntimeImageLineMismatchResult {
+	recordedLine, observedLine, mismatched := env.RuntimeImageLineMismatch()
+	if !mismatched {
+		return nil
+	}
+	return &RuntimeImageLineMismatchResult{RecordedLine: recordedLine, ObservedLine: observedLine}
+}
+
+// EnvironmentRuntimeSizing attaches the standing recommendation when there is
+// one. A read failure is silence rather than an error: every caller of this
+// (`erun list`, `resize`, the `usage` MCP tool) treats sizing as advisory and
+// must not fail over it.
+func EnvironmentRuntimeSizing(tenant string, env EnvConfig) *RuntimeSizingRecommendation {
+	history, err := LoadRuntimeUsageHistory(tenant, env.Name)
+	if err != nil {
+		return nil
+	}
+	recommendation, ok := RecommendRuntimeSizing(RuntimeSizingParams{History: history, Ceiling: env.NamespaceQuota})
+	if !ok {
+		return nil
+	}
+	return &recommendation
 }
 
 func copyAutoStartPtr(value *bool) *bool {
@@ -331,6 +425,29 @@ func loadListDefaultTenant(store ListStore) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(config.DefaultTenant), nil
+}
+
+func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
+	config, _, err := store.LoadERunConfig()
+	if errors.Is(err, ErrNotInitialized) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	results := make([]ListOrchestratorResult, 0, len(config.Orchestrators))
+	for _, orchestrator := range config.Orchestrators {
+		envs := make([]ListOrchestratorEnvResult, 0, len(orchestrator.Environments))
+		for _, env := range orchestrator.Environments {
+			envs = append(envs, ListOrchestratorEnvResult(env))
+		}
+		results = append(results, ListOrchestratorResult{
+			ID:           orchestrator.ID,
+			Name:         orchestrator.Name,
+			Environments: envs,
+		})
+	}
+	return results, nil
 }
 
 func loadListDefaultEnvironment(store ListStore, tenant string) (string, error) {

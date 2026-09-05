@@ -65,8 +65,18 @@ CREATE TRIGGER review_merge_queue_set_timestamps
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
 
+CREATE TRIGGER review_reviewers_set_timestamps
+  BEFORE INSERT OR UPDATE ON review_reviewers
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
 CREATE TRIGGER builds_set_timestamps
   BEFORE INSERT OR UPDATE ON builds
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER releases_set_timestamps
+  BEFORE INSERT OR UPDATE ON releases
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
 
@@ -97,5 +107,30 @@ CREATE TRIGGER cloud_provider_aliases_set_timestamps
 
 CREATE TRIGGER context_credentials_set_timestamps
   BEFORE INSERT OR UPDATE ON context_credentials
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER invites_set_timestamps
+  BEFORE INSERT OR UPDATE ON invites
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER invite_requests_set_timestamps
+  BEFORE INSERT OR UPDATE ON invite_requests
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER platform_rate_limits_set_timestamps
+  BEFORE INSERT OR UPDATE ON platform_rate_limits
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER ai_sessions_set_timestamps
+  BEFORE INSERT OR UPDATE ON ai_sessions
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER gate_runs_set_timestamps
+  BEFORE INSERT OR UPDATE ON gate_runs
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();

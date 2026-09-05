@@ -352,3 +352,16 @@ func TestAISessionLaunchLines(t *testing.T) {
 		}
 	})
 }
+
+// TestAISessionLaunchCommandKeepsScheduleWakeup guards the legitimate side of
+// erun#1731: the AI tab's persistent, resumable session is exactly the launch
+// mode that has a later invocation to wake into, unlike the one-shot agent job
+// AgentJobCommand builds (locked by the erun-integration dry-run golden
+// job/agent_start_dry_run_plans_the_streaming_invocation). It must never pick
+// up the one-shot job's --disallowedTools ScheduleWakeup restriction.
+func TestAISessionLaunchCommandKeepsScheduleWakeup(t *testing.T) {
+	got := AISessionLaunchCommand("", EnvironmentClaudeConfig{}, "team", "dev")
+	if strings.Contains(got, "disallowedTools") || strings.Contains(got, "ScheduleWakeup") {
+		t.Fatalf("the persistent AI session must keep ScheduleWakeup available, got %q", got)
+	}
+}

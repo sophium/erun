@@ -1,3 +1,4 @@
+import { Button, cn } from 'erun-kit';
 import { ChevronRight } from 'lucide-react';
 import * as React from 'react';
 
@@ -12,8 +13,6 @@ import {
   isRecoverableContainerFailure,
   kubectlDescribeCommand,
 } from '@/components/app/ActivityQueueDrawer.helpers';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 import { StartForceDeploySession } from '../../../wailsjs/go/main/App';
 

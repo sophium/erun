@@ -2,7 +2,6 @@ import type { StartSessionResult, UISelection } from '@/types';
 
 import {
   CloseSession,
-  StartAISession,
   StartCreateVersionSession,
   StartDeploySession,
   StartInitialDeploySession,
@@ -10,20 +9,18 @@ import {
   StartLocalSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
+import { startAITabOrPrompt } from './aiOccupancyThunks';
 import { resolveAutoStartGate } from './autoStartGate';
 import { readError } from './errors';
-import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
+import { hideTerminalMessage, showTerminalError, showTerminalMessage } from './notificationThunks';
 import { reattachRemoteTerminalTabs } from './remoteSessionTabsThunks';
 import { loadReviewDiff } from './reviewThunks';
 import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
+import { createIsCurrentSelection, isStaleDefaultLandingOpen } from './sessionOpenGuards';
 import { isNewSessionSelection } from './sessionSelection';
 import { setAutoStartPrompt } from './slices/autoStartPromptSlice';
 import { setIdleStatus } from './slices/idleSlice';
-import {
-  setSelectedDiffPath,
-  setSelectedReviewCommit,
-  setSelectedReviewScope,
-} from './slices/reviewSlice';
+import { setEnvReviewCommit, setEnvReviewScope, setSelectedDiffPath } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
 import {
   clearEnvOpening,
@@ -31,7 +28,7 @@ import {
   resetEnvOpening,
   trackOpenSession,
 } from './slices/sessionsSlice';
-import { setTenantDashboard } from './slices/tenantDashboardSlice';
+import { resetTenantDashboard } from './slices/tenantDashboardSlice';
 import { setSelectedSessionForEnv, setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import type { TerminalTab, TerminalTabKind } from './state';
@@ -51,9 +48,14 @@ const spawnDefaultTab =
     rows: number,
   ): AppThunk<Promise<void>> =>
   async (dispatch) => {
-    const start = kind === 'local' ? StartLocalSession : StartAISession;
     try {
-      const result = (await start(runSelection, 0, cols, rows)) as StartSessionResult;
+      if (kind === 'ai') {
+        await dispatch(
+          startAITabOrPrompt({ key, selection: runSelection, slot: 0, cols, rows, label }),
+        );
+        return;
+      }
+      const result = (await StartLocalSession(runSelection, 0, cols, rows)) as StartSessionResult;
       dispatch(recordTab(key, result.sessionId, result.slot ?? 0, kind, label));
     } catch {
       // Tool unavailable; future env opens will retry.
@@ -197,8 +199,12 @@ const prepareOpenSelection =
     const previousKey = state.selection.selected ? selectionKey(state.selection.selected) : '';
     const newKey = selectionKey(selection);
     if (newKey !== previousKey) {
-      dispatch(setSelectedReviewScope('current'));
-      dispatch(setSelectedReviewCommit(''));
+      // Reset the range for the environment being opened. Scope and commit are
+      // per-env now, so resetting them globally would clear an unrelated
+      // section's selection (#1178).
+      const envKey = `${selection.tenant}/${selection.environment}`;
+      dispatch(setEnvReviewScope({ envKey, scope: 'current' }));
+      dispatch(setEnvReviewCommit({ envKey, commit: '' }));
       dispatch(setSelectedDiffPath(''));
     }
     // setSelected is observed by selectionSyncMiddleware, which reconciles
@@ -256,12 +262,16 @@ const showOpenSelectionStatus =
   };
 
 export const openSelection =
-  (selection: UISelection): AppThunk<Promise<void>> =>
+  (
+    selection: UISelection,
+    options: { isDefaultLandingOpen?: boolean } = {},
+  ): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
+    if (isStaleDefaultLandingOpen(getState, options)) {
+      return;
+    }
     const controller = requireController(extra);
-    dispatch(
-      setTenantDashboard({ tenant: '', tab: 'users', loading: false, error: '', data: null }),
-    );
+    dispatch(resetTenantDashboard());
     const runSelection = { ...selection };
     const key = selectionKey(runSelection);
     const previousSessionId = getState().terminal.sessionId;
@@ -272,6 +282,21 @@ export const openSelection =
     const previousSelected = getState().selection.selected;
 
     const verdict = await resolveAutoStartGate(selection, getState);
+    // resolveAutoStartGate can await real backend work. If the terminal's
+    // active session or selection has changed while it was resolving --
+    // most commonly an orchestrator session (or a different environment)
+    // grabbing focus while this was boot()'s own automatic
+    // default-landing-environment open still in flight -- that newer focus
+    // change already won and must not be dragged back by this stale call
+    // going on to dispatch prepareOpenSelection's unconditional setSelected
+    // underneath it.
+    const stateAfterGate = getState();
+    if (
+      stateAfterGate.terminal.sessionId !== previousSessionId ||
+      stateAfterGate.selection.selected !== previousSelected
+    ) {
+      return;
+    }
     if (verdict === 'prompt') {
       dispatch(
         setAutoStartPrompt({
@@ -285,7 +310,11 @@ export const openSelection =
     }
     const shouldSpawnERun = verdict !== 'skip-erun';
 
-    const isCurrentSelection = createIsCurrentSelection(getState, selection);
+    const isCurrentSelection = createIsCurrentSelection(
+      getState,
+      selection,
+      options.isDefaultLandingOpen,
+    );
 
     // The previous click's openSelection is still in flight; reset before the
     // new selection paints its spinner so the sidebar spinner does not linger
@@ -329,29 +358,13 @@ export const openSelection =
     } catch (error: unknown) {
       if (isCurrentSelection()) {
         dispatch(setSelected(previousSelected));
-        dispatch(showTerminalMessage(readError(error)));
+        dispatch(showTerminalError(readError(error)));
       }
       throw error;
     } finally {
       dispatch(clearEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     }
   };
-
-// Returns a predicate that post-await dispatches poll to decide whether the
-// user is still on this env or has navigated away. It reads getState()
-// afresh each call so it tracks setSelected dispatches that fire between awaits.
-function createIsCurrentSelection(
-  getState: () => import('./store').RootState,
-  selection: UISelection,
-): () => boolean {
-  return () => {
-    const current = getState().selection.selected;
-    if (current === null) {
-      return false;
-    }
-    return current.tenant === selection.tenant && current.environment === selection.environment;
-  };
-}
 
 // When the user has navigated away (isCurrentSelection() === false), the
 // spawned session is recorded for later reuse but not promoted to the visible
@@ -525,7 +538,7 @@ export const addTerminalTab = (): AppThunk<Promise<void>> => async (dispatch, ge
     controller.focusTerminalSoon();
     controller.queueTerminalResize();
   } catch (error: unknown) {
-    dispatch(showTerminalMessage(readError(error)));
+    dispatch(showTerminalError(readError(error)));
   }
 };
 
@@ -578,7 +591,7 @@ export const closeTerminalTab =
     try {
       await CloseSession(sessionId);
     } catch (error: unknown) {
-      dispatch(showTerminalMessage(readError(error)));
+      dispatch(showTerminalError(readError(error)));
       return;
     }
     const remaining = dispatch(removeTab(key, sessionId));

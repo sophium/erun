@@ -1,0 +1,6 @@
+audit: erun exec commit --dry-run main values.yaml
+git -C <TMP> rev-parse --abbrev-ref HEAD
+git -C <TMP> diff --relative --name-only -z
+git -C <TMP> diff --cached --relative --name-only -z
+git -C <TMP> ls-files --others --exclude-standard -z
+refusing to commit: the working tree has changes outside the declared paths: unrelated.txt

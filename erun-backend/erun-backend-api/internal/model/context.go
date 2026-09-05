@@ -23,6 +23,11 @@ type Context struct {
 	DiskType           string `json:"diskType,omitempty" bun:"disk_type,nullzero"`
 	DiskSizeGB         int    `json:"diskSizeGb,omitempty" bun:"disk_size_gb,nullzero"`
 	KubernetesContext  string `json:"kubernetesContext,omitempty" bun:"kubernetes_context,nullzero"`
+	// MaxEnvironments is this context's placement capacity (#1112): how many
+	// environments its cluster may host. Part of the per-instance placement
+	// inventory (cluster + credentials + capacity) alongside PublicIP/
+	// KubernetesContext and the credential custodied in context_credentials.
+	MaxEnvironments int `json:"maxEnvironments" bun:"max_environments"`
 	// Status is the provisioning lifecycle: provisioning | running | failed.
 	Status         string    `json:"status" bun:"status,scanonly"`
 	ProvisionError string    `json:"provisionError,omitempty" bun:"provision_error,nullzero,scanonly"`

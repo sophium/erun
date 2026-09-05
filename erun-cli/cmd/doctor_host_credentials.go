@@ -13,13 +13,20 @@ import (
 // whatever tool reached for AWS first — a registry pull, usually. Runs only for
 // an environment configured to act as the operator's identity; every other
 // environment sees no change.
+//
+// The read execs into the runtime pod, which is exactly the state doctor most
+// needs to diagnose when it is down — reading it must degrade to a clear
+// "could not read" report rather than aborting the rest of doctor's checks.
 func reportHostCredentials(ctx common.Context, store common.ConfigStore, result common.OpenResult) error {
 	if !result.EnvConfig.HasAWSCloudAlias() {
 		return nil
 	}
 	status, err := common.InspectHostAWSCredentials(ctx, nil, store, result)
 	if err != nil {
-		return err
+		if ctx.DryRun {
+			return nil
+		}
+		return reportPodUnreachable(ctx, "Host AWS credentials", err)
 	}
 	if ctx.DryRun {
 		return nil

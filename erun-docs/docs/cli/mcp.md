@@ -54,6 +54,34 @@ Each one resolves the target the same way `erun deploy` and `erun open` do — t
 
 Being able to reach the edge depends on the port-forward `erun open` establishes, and on the environment trusting this machine's identity — the same identity the desktop app injects when it deploys an env.
 
+## What a token is allowed to do {#capability-authorization}
+
+Authentication answers *which tenant* is calling. It does not answer *what that caller may do* — and the edge needs both, because `raw` can run arbitrary commands in the pod and `deploy`, `delete` and `context_*` all mutate.
+
+Every tool requires one of four capabilities:
+
+| Capability | Tools |
+| --- | --- |
+| `erun:read` | Observation that cannot change anything: `version`, `list`, `idle`, `idle_stop_history`, `context_list`, `cloud_list`, `diff`, `observe`, `outputs_list`, `outputs_download`, `job_status`, `job_output`, `job_await` |
+| `erun:attach` | Driving an existing attach session (the dtach takeover protocol) and nothing else |
+| `erun:operate` | Driving the lifecycle of an environment that already exists, without deciding what environments exist or running arbitrary code in one: `deploy`, `context_start`, `context_stop`, `resize` |
+| `erun:admin` | Everything else, including remote execution and every tool that decides what environments exist |
+
+`erun:admin` implies every other capability, so an admin token never carries them explicitly.
+
+A caller sees only the tools it may call. `tools/list` is filtered to the caller's capabilities, so a disallowed tool is *unknown* rather than forbidden — the answer to "what can I do here" is the same as the answer to "what am I allowed to do". Each surviving handler re-checks at call time as well, so a tool reached by any other route still refuses. Both decisions are audited with the resolved tenant, user and tool.
+
+Two deliberate defaults:
+
+- **A token that says nothing about capabilities is an admin.** That is the desktop's model — one operator who is the tenant admin — and it is what keeps this gate from locking out tokens minted before capabilities existed. Narrowing a caller is opt-in.
+- **A tool nobody has classified requires admin.** The read set is an allowlist, so a newly added tool is unreachable to a read-only caller until someone decides it is safe, rather than silently reachable.
+
+A token that carries roles, none of them erun's, grants *nothing* — treating an unrelated role as admin would make it a privilege escalation. Such a caller is authenticated but not authorized, and the edge answers `403` rather than `401`: retrying with the same credentials will not help, and the fix is a role rather than a fresh login.
+
+Capabilities are read from either shape an issuer produces — a space-delimited OAuth `scope` claim, or a `roles` array of the kind project roles arrive in. For a hosted deployment, model them as IdP project roles and grant the subset a tenant may use at the org level, so a role never granted to an org cannot appear in its users' tokens.
+
+An edge deployed without a trust anchor is the loopback-only case that predates authentication, and keeps its existing surface: turning authentication off does not turn authorization on.
+
 ## Wiring a laptop-side MCP client {#wiring-a-laptop-side-mcp-client}
 
 `erun mcp proxy` is the same edge again, for a client that speaks MCP itself. It reads JSON-RPC on stdin, relays each message to the environment's edge with a bearer minted for that one request, and writes the reply back on stdout. Configure the client to launch it as a stdio server:

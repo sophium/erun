@@ -1,0 +1,38 @@
+Report pods (each container's name, running image, and resource limits),
+ResourceQuota/LimitRange usage, Ingress hosts and TLS secret names,
+Certificate readiness, and the runtime helm release for the environment's
+namespace.
+
+When a Certificate is not Ready, its CertificateRequest -> Order -> Challenge
+chain is walked automatically, so the reason issuance is stuck (for example a
+webhook solver's RBAC denial) comes back in this one call instead of three more.
+
+The runtime helm release is reported with its chart/app version and the values
+erun itself sets (image overrides, runtime pod resource limits), and diffed
+against both the running containers and the env config's recorded
+runtimeversion/runtimeimage/runtimepod, so a disagreement (a hand-patched
+image, a resized pod the release never recorded) is named instead of left for
+the reader to spot by comparing two dumps.
+
+Every call is a kubectl get or a helm status: nothing here can mutate the
+cluster, which is what makes this safe to grant an orchestrator that must
+never reach for `exec raw`.
+
+Usage:
+  erun observe [flags]
+
+Examples:
+  erun observe --tenant team --environment dev
+  erun observe --tenant team --environment dev --secret db-credentials=password --output json
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for observe
+      --secret stringArray   Check a Secret for a key's presence, as name=key (repeatable); the value is never read
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

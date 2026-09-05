@@ -20,12 +20,15 @@ import (
 var shellUtilities = []string{"cat", "dirname", "mkdir", "sleep", "touch", "tr", "wc"}
 
 // hostTools are the host executables erun itself may resolve, forwarded through
-// their declared ERUN_<NAME>_BIN seam rather than through PATH. git is the
-// suite's one irreducible host dependency: the fixtures build real repositories
-// with it and the release/diff/exec scenarios read real git state, so no stub
-// could stand in for it. A scenario that wants a scripted git appends its own
-// ERUN_GIT_BIN after Env() (the later duplicate wins).
-var hostTools = []string{"git"}
+// their declared ERUN_<NAME>_BIN seam rather than through PATH. Both entries are
+// irreducible host dependencies: the fixtures build real repositories with git
+// and the release/diff/exec scenarios read real git state, and the workspace
+// mirror's fetch lane extracts a real archive with tar — a stub can answer a
+// listing but cannot extract, so without a real tar the lane that publishes
+// files into the mirror is unreachable from the binary. Both ship in the
+// golang image the build gate runs in. A scenario that wants a scripted tool
+// appends its own ERUN_<NAME>_BIN after Env() (the later duplicate wins).
+var hostTools = []string{"git", "tar"}
 
 // Setup is the resolved environment for a single subprocess invocation.
 type Setup struct {
@@ -78,13 +81,18 @@ func (s Setup) Env() []string {
 		// row append their own ERUN_SKILLS_DIR after Env() (the later
 		// duplicate wins).
 		"ERUN_SKILLS_DIR=" + filepath.Join(s.Home, ".no-baked-skills"),
-		// Answer the published-runtime-chart existence probe from a static
-		// (empty) list so deploy never reaches a real registry and drifts a
-		// golden by whatever charts happen to be published there. Scenarios
-		// that exercise the tenant-preferred branch append their own
-		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE after Env() (the later duplicate
-		// wins).
-		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=",
+		// Answer the published-runtime-chart existence probe from a static list
+		// so deploy never reaches a real registry and drifts a golden by whatever
+		// charts happen to be published there. The default marks only the shared
+		// erun-devops chart published, at any version -- the realistic baseline,
+		// since a real deploy only ever runs against a version erun has already
+		// released -- while a tenant's own umbrella (e.g. team-devops) stays
+		// unpublished by default, which is what most scenarios want to
+		// distinguish. Scenarios that exercise a narrower shape (a specific
+		// registry, a specific version, "nothing is published at all") append
+		// their own ERUN_PUBLISHED_CHART_PROBE_OVERRIDE after Env() (the later
+		// duplicate wins).
+		"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*",
 		// Answer the "does the live release already have MCP auth enabled?" probe
 		// as unknown, so a deploy that resolves no MCP auth never reads helm and
 		// no scenario depends on a real release (or consumes a helm stub call).

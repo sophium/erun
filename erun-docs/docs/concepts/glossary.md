@@ -31,6 +31,8 @@ Both are first-class. Both share every environment. An env can have an Operator 
 
 **Runtime env** — an environment for serving deployed services. No worktree, no builds; receives release-tagged artefacts via `erun deploy`. Common names: `dev`, `test`, `dr`, `prod`.
 
+**Host env** — an environment with no pod and no cluster at all: a directory on the Operator's own machine, for work a pod genuinely cannot do (desktop-app builds, tasks needing host-wide credentials). Not to be confused with local-agent, which also names a local directory but hostPath-mounts it into a pod — a host env has no pod to mount it into.
+
 See [Environment types](/concepts/environment-types) for the full split.
 
 ## Interfaces
@@ -69,7 +71,7 @@ Three interfaces, one engine. See the anatomy diagram on the [introduction](/int
 
 **Review** — a unit of work-to-be-merged. Source branch, target branch, status, and references to its latest builds. See [Reviews](/collaboration/reviews).
 
-**Merge queue** — shared per target branch. FIFO; `POST /v1/reviews/merge-queue/advance` promotes the head to `MERGED`.
+**Merge queue** — shared per target branch. FIFO; `POST /v1/reviews/merge-queue/advance` promotes the head to `MERGE`, which the gate then lands as `MERGED` or `FAILED`. See [Merge queue](/collaboration/merge-queue).
 
 ## Non-canonical terms
 

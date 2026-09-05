@@ -52,8 +52,8 @@ func runActivitySSHProxy(params activitySSHProxyParams) error {
 	params.Environment = strings.TrimSpace(params.Environment)
 	params.ListenAddress = strings.TrimSpace(params.ListenAddress)
 	params.TargetAddress = strings.TrimSpace(params.TargetAddress)
-	if params.Tenant == "" || params.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := validateActivityTarget(params.Tenant, params.Environment); err != nil {
+		return err
 	}
 	if params.ListenAddress == "" || params.TargetAddress == "" {
 		return fmt.Errorf("listen and target addresses are required")
@@ -199,6 +199,13 @@ func (r *sshActivityRecorder) Flush() {
 	r.save(pending, pendingByClient)
 }
 
+// save records the raw byte count the network-traffic-window signal needs,
+// but marks it Seen rather than active: this proxy relays encrypted bytes
+// blind to what is inside them, so a port-forward re-establishment or a
+// background sync channel counts here exactly like a person typing. Whether
+// someone is actually at an interactive shell is decided by the in-pod
+// sampler's pty check (ScanInteractiveSSHSession), which is what advances
+// LastActivity for this same kind.
 func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 	if bytes <= r.idleTrafficBytes {
 		return
@@ -207,6 +214,7 @@ func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 		Tenant:        r.tenant,
 		Environment:   r.environment,
 		Kind:          common.ActivityKindSSH,
+		Seen:          true,
 		Bytes:         bytes,
 		ClientUpdates: clientUpdatesFromMap(byClient),
 	})

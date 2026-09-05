@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -197,6 +196,22 @@ func (a *App) LogoutCloudProvider(alias string) (uiCloudProviderStatus, error) {
 	return cloudProviderStatusToUI(status), nil
 }
 
+// SwitchCloudProviderIdentity re-authenticates an already-connected alias as a
+// different account. LoginCloudProvider short-circuits without starting a new
+// sign-in whenever the stored session is still active, so switching needs
+// Force: true to reach the real OIDC flow at all; erunCloudProviderLogin only
+// overwrites the stored refresh/access tokens once that flow actually
+// succeeds, so a cancelled or failed switch leaves the previous identity
+// signed in rather than landing the alias signed out with nothing to show
+// for it.
+func (a *App) SwitchCloudProviderIdentity(alias string) (uiCloudProviderStatus, error) {
+	status, err := eruncommon.LoginCloudProviderAlias(eruncommon.Context{}, a.deps.store, eruncommon.CloudLoginParams{Alias: alias, Force: true}, a.deps.cloudDeps)
+	if err != nil {
+		return uiCloudProviderStatus{}, err
+	}
+	return cloudProviderStatusToUI(status), nil
+}
+
 func (a *App) SetupCloudProviderOIDC(alias string) (uiCloudProviderStatus, error) {
 	status, _, err := eruncommon.SetupCloudProviderOIDC(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: alias}, a.deps.cloudDeps)
 	if err != nil {
@@ -223,9 +238,9 @@ func (a *App) GetCloudProviderBearerToken(alias string) (uiCloudProviderBearerTo
 }
 
 func (a *App) LoadTenantConfig(tenant string) (uiTenantConfig, error) {
-	tenant = strings.TrimSpace(tenant)
-	if tenant == "" {
-		return uiTenantConfig{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("loading tenant settings", tenant)
+	if err != nil {
+		return uiTenantConfig{}, err
 	}
 
 	config, _, err := a.deps.store.LoadTenantConfig(tenant)
@@ -236,9 +251,9 @@ func (a *App) LoadTenantConfig(tenant string) (uiTenantConfig, error) {
 }
 
 func (a *App) SaveTenantConfig(config uiTenantConfig) (uiTenantConfig, error) {
-	tenant := strings.TrimSpace(config.Name)
-	if tenant == "" {
-		return uiTenantConfig{}, fmt.Errorf("tenant is required")
+	tenant, err := requireTenant("saving tenant settings", config.Name)
+	if err != nil {
+		return uiTenantConfig{}, err
 	}
 
 	existing, _, err := a.deps.store.LoadTenantConfig(tenant)
@@ -364,19 +379,24 @@ func cloudContextStatusToUI(status eruncommon.CloudContextStatus) uiCloudContext
 	}
 }
 
-func (a *App) emitAppStatus(message string, busy bool) {
+// emitAppStatus narrates a long-running busy indicator (a spinner plus what
+// it is doing). It carries no class and never represents an outcome: every
+// call site that used to report a finished/failed state through here now
+// posts a classified notification instead (emitAppNotification/
+// emitEnvNotification), so this stays the one channel for "still working",
+// never for "here is what happened".
+func (a *App) emitAppStatus(message string) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
-	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: busy})
+	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: true})
 }
 
-// emitAppNotification pushes a transient toast-style notification.
-// Use this for one-shot info/success events that should not linger in
-// the titlebar after the state they describe has moved on (e.g. the
-// idle-stop success line). Errors and long-running busy indicators
-// still belong on emitAppStatus so their pill stays readable until the
-// user dismisses or replaces it.
+// emitAppNotification pushes a transient toast-style notification, classified
+// by kind (success | warning | error | info | debug — see AppNotification in
+// the frontend). Use this for one-shot events with no env/orchestrator
+// identity to tag; emitEnvNotification/emitOrchestratorNotification are the
+// identity-carrying siblings.
 func (a *App) emitAppNotification(kind, message string) {
 	if strings.TrimSpace(message) == "" {
 		return
@@ -389,16 +409,67 @@ func (a *App) emitAppNotification(kind, message string) {
 // string the frontend compares in dismissNotificationForEnv.
 const notificationSourceRuntimeUnreachable = "runtime-unreachable"
 
+// notificationSourceForwardOutage tags the "…/… is unreachable: its port-forward
+// …" warning the activity sweep posts once a bounded repair has failed, so the
+// same lifecycle clear retires it when the forward starts carrying traffic
+// again. Kept apart from notificationSourceRuntimeUnreachable because the two
+// describe different failures: that one is a reconnect that could not run, this
+// one is a reconnect that ran and did not help.
+const notificationSourceForwardOutage = "port-forward-outage"
+
 // notificationSourceDeployFailed tags the "Deploy of …/… failed" error so the
 // same lifecycle clear retires it once a new deploy for the env starts or the
 // runtime becomes reachable.
 const notificationSourceDeployFailed = "deploy-failed"
 
+// notificationSourceOrchestratorEdgeUnreachable tags the "wired tools for …,
+// but its edge is not answering" warning an orchestrator launch posts when
+// exactly one linked environment's edge failed its reachability probe — the
+// only case with an unambiguous env to attach the deploy action to (#1390).
+const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
+
+// notificationSourceMCPUnreachable tags the "the local MCP endpoint isn't
+// reachable, reconnecting…" warning ensureMCPAvailable posts before attempting
+// its own reconnect, so a later success for the same env is free to clear it
+// through the generic wildcard clear in env_ensure.go.
+const notificationSourceMCPUnreachable = "mcp-unreachable"
+
+// notificationSourceCredentialRefreshFailed tags a host credential refresh
+// failure for the env it was refreshing on behalf of.
+const notificationSourceCredentialRefreshFailed = "credential-refresh-failed"
+
+// notificationSourceWorkspaceSyncNoPath tags the "workspace sync has no local
+// path" warning, posted once per sync start attempt for the env it names.
+const notificationSourceWorkspaceSyncNoPath = "workspace-sync-no-path"
+
+// notificationSourceWorkspaceSyncFailed tags a workspace sync failure for the
+// env it was syncing.
+const notificationSourceWorkspaceSyncFailed = "workspace-sync-failed"
+
+// notificationActionDeploy tags a notification whose remedy the frontend can
+// perform directly — opening the tagged env's deploy dialog. Passed as the
+// action to emitEnvNotification; "" means the notification carries no action.
+const notificationActionDeploy = "deploy"
+
+// notificationActionRestartOrchestrator tags a notification the frontend can
+// resolve by restarting the named orchestrator directly, via
+// emitOrchestratorNotification.
+const notificationActionRestartOrchestrator = "restart-orchestrator"
+
+// notificationActionInstallAndRestartOrchestrator is the executable-missing
+// variant of notificationActionRestartOrchestrator: the orchestrator also
+// needs the erun CLI installed first, so the frontend renders a link to the
+// install docs alongside the restart control rather than leaving "install the
+// CLI" as prose the desktop cannot act on.
+const notificationActionInstallAndRestartOrchestrator = "install-and-restart-orchestrator"
+
 // emitEnvNotification posts a notification tagged with the env it describes and
 // a stable source, so a later emitClearEnvNotification for the same
 // (source, tenant, environment) can dismiss it. Use it for env-scoped, state-
-// backed notifications (not one-shot toasts).
-func (a *App) emitEnvNotification(kind, tenant, environment, source, message string) {
+// backed notifications (not one-shot toasts). action names a control the
+// frontend can render to perform the message's own remedy directly ("" for
+// none — see notificationActionDeploy).
+func (a *App) emitEnvNotification(kind, tenant, environment, source, message, action string) {
 	if strings.TrimSpace(message) == "" {
 		return
 	}
@@ -408,6 +479,23 @@ func (a *App) emitEnvNotification(kind, tenant, environment, source, message str
 		Tenant:      tenant,
 		Environment: environment,
 		Source:      source,
+		Action:      action,
+	})
+}
+
+// emitOrchestratorNotification posts a notification tagged with the orchestrator
+// it describes, so the frontend can render an action that operates on that
+// orchestrator directly (restarting it) rather than leaving a named remedy with
+// no way to perform it.
+func (a *App) emitOrchestratorNotification(kind, orchestratorID, message, action string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	a.emit(appNotificationEvent, appNotificationPayload{
+		Kind:           kind,
+		Message:        message,
+		OrchestratorID: orchestratorID,
+		Action:         action,
 	})
 }
 

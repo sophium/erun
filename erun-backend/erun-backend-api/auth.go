@@ -2,13 +2,18 @@ package backendapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
@@ -177,14 +182,14 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, err := m.authenticate(r)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			writeAuthError(w, http.StatusUnauthorized, "UNAUTHENTICATED", err.Error())
 			return
 		}
 
 		identity, err := m.resolveIdentity(r.Context(), claims)
 		if err != nil {
 			log.Printf("erun api auth rejected method=%s path=%s issuer=%q subject=%q reason=%q", r.Method, r.URL.Path, claims.Issuer, claims.Subject, err.Error())
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+			writeAuthError(w, http.StatusUnauthorized, authErrorCode(err), err.Error())
 			return
 		}
 
@@ -310,7 +315,8 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 // bootstrap and must create tenant, issuer, and user atomically.
 func (m *AuthMiddleware) tenantAndUser(ctx context.Context, claims Claims) (Tenant, User, error) {
 	if m.identities != nil {
-		return resolvedIdentity(m.identities.ResolveIdentity(ctx, claims))
+		tenant, user, err := m.identities.ResolveIdentity(ctx, claims)
+		return resolvedIdentity(tenant, user, classifyIdentityError(err))
 	}
 	tenant, err := m.tenants.ResolveTenantByIssuer(ctx, claims)
 	if err != nil || strings.TrimSpace(tenant.TenantID) == "" {
@@ -323,16 +329,82 @@ func (m *AuthMiddleware) tenantAndUser(ctx context.Context, claims Claims) (Tena
 	return tenant, user, nil
 }
 
+// classifyIdentityError normalizes the combined IdentityResolver's error onto
+// the same ErrTenantNotResolved/ErrUserNotResolved split the separate
+// tenant/user resolver wiring above already produces, so Wrap reports which
+// half failed the same way regardless of which wiring is in play.
+// security.ErrTenantUnresolved means the tenant itself could not be
+// determined from the token (an org-scoped issuer whose token carries no
+// matching org claim, or an issuer with no tenant mapping at all) — distinct
+// from a repository.ErrNotFound reached after a tenant already resolved,
+// which means this external identity simply is not enrolled in it. Any other
+// error passes through unclassified rather than being guessed at;
+// repository.ErrIdentityResolutionFailed is one such error, and authErrorCode
+// still recognizes it directly as RESOLUTION_FAILED, distinct from both.
+func classifyIdentityError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, security.ErrTenantUnresolved) {
+		return fmt.Errorf("%w: %s", ErrTenantNotResolved, err.Error())
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		return fmt.Errorf("%w: %s", ErrUserNotResolved, err.Error())
+	}
+	return err
+}
+
 // resolvedIdentity treats a blank tenant or user as unresolved, so a resolver
 // that reports no error but no identity cannot authenticate a request.
 func resolvedIdentity(tenant Tenant, user User, err error) (Tenant, User, error) {
-	if err == nil && (strings.TrimSpace(tenant.TenantID) == "" || strings.TrimSpace(user.UserID) == "") {
+	if err == nil && strings.TrimSpace(tenant.TenantID) == "" {
+		err = ErrTenantNotResolved
+	}
+	if err == nil && strings.TrimSpace(user.UserID) == "" {
 		err = ErrUserNotResolved
 	}
 	if err != nil {
 		return Tenant{}, User{}, err
 	}
 	return tenant, user, nil
+}
+
+// authErrorCode reports the machine-readable code for a resolution failure so
+// a client can render "no tenant matched this token" apart from "you are not
+// enrolled" instead of collapsing both into one generic message — the
+// distinction the not-enrolled UI otherwise cannot make (erun#1721).
+// RESOLUTION_FAILED is a third, distinct outcome: an internal error (a
+// database failure IdentityRepository already sanitized into
+// repository.ErrIdentityResolutionFailed) rather than a real answer about
+// enrolment, so a client must not tell the caller they need enrolling, or
+// that their tenant could not be determined — neither claim is true here
+// (erun#1752).
+func authErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrTenantNotResolved):
+		return "TENANT_UNRESOLVED"
+	case errors.Is(err, ErrUserNotResolved):
+		return "NOT_ENROLLED"
+	case errors.Is(err, repository.ErrIdentityResolutionFailed):
+		return "RESOLUTION_FAILED"
+	default:
+		return "UNAUTHORIZED"
+	}
+}
+
+// authErrorEnvelope mirrors internal/routes' {code, message} error envelope
+// (see internal/routes/errors.go) so every API error response — including
+// this pre-route auth layer, which cannot import that internal package's
+// unexported writer — carries the same machine-readable shape.
+type authErrorEnvelope struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func writeAuthError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(authErrorEnvelope{Code: code, Message: message})
 }
 
 func (m *AuthMiddleware) resolveOrg(ctx context.Context, claims Claims) (string, error) {
@@ -389,7 +461,7 @@ func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {
 	if !ok {
 		return errors.New("api path not resolved")
 	}
-	return m.audit.LogAuditEvent(r.Context(), AuditEvent{
+	event := AuditEvent{
 		TenantID:         auth.Tenant.TenantID,
 		ErunUserID:       auth.User.UserID,
 		ExternalUserID:   auth.Claims.Subject,
@@ -399,7 +471,16 @@ func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {
 		APIMethod:        r.Method,
 		APIPath:          apiPath,
 		CreatedAt:        time.Now().UTC(),
-	})
+	}
+	// A caller authenticates with the same bearer token whether it arrived via
+	// the CLI, the console, or an MCP tool call, so nothing about the request
+	// otherwise distinguishes them; PlatformClient.WithMCPTool sets this header
+	// only when erun-mcp made the call, naming which tool did.
+	if tool := strings.TrimSpace(r.Header.Get(eruncommon.MCPToolAuditHeader)); tool != "" {
+		event.Type = model.AuditEventTypeMCP
+		event.MCPTool = tool
+	}
+	return m.audit.LogAuditEvent(r.Context(), event)
 }
 
 func bearerToken(header string) (string, error) {

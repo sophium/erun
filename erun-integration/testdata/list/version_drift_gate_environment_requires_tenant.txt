@@ -1,0 +1,2 @@
+audit: erun list --gate-environment build
+--gate-environment requires --tenant

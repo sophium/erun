@@ -1,3 +1,17 @@
+import {
+  Button,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  IconTooltip,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from 'erun-kit';
 import { LoaderCircle, Lock, Play, Power, Unlock, X } from 'lucide-react';
 import * as React from 'react';
 
@@ -6,13 +20,13 @@ import {
   useEnableCloudContextApiStopMutation,
   useGetCloudContextApiStopQuery,
 } from '@/app/api/cloudApi';
+import { cloudNodeOperationFor } from '@/app/cloudNodeOperations';
 import { readError } from '@/app/errors';
 import { toggleIdleCloudContext } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { displayableIdleStatus } from '@/app/idleStatusEligibility';
 import { cancelPendingIdleStop } from '@/app/idleThunks';
 import { showNotification } from '@/app/notificationThunks';
-import { IconTooltip } from '@/components/app/IconTooltip';
 import {
   formatGraceCountdown,
   idleCloudAction,
@@ -22,17 +36,6 @@ import {
   idleStatusTooltipLines,
   idleStopPending,
 } from '@/components/app/Titlebar.helpers';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 
 function useIdleWidgetState(): {
   idleStatus: IdleStatus | null;
@@ -41,10 +44,16 @@ function useIdleWidgetState(): {
   cloudContextName: string;
 } | null {
   const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
-  const idleCloudContextBusy = useAppSelector((state) => state.idle.idleCloudContextBusy);
   const idleStatus = displayableIdleStatus(rawIdleStatus);
-  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, idleCloudContextBusy) : null;
   const cloudContextName = rawIdleStatus?.cloudContextName?.trim() ?? '';
+  // Scoped to the node this widget actually names. The name follows the
+  // selected environment, so a flag that did not would pair one environment's
+  // node with another's operation — the cross-environment bleed that let a
+  // progressive label survive onto a row with nothing running.
+  const inFlight = useAppSelector((state) =>
+    cloudNodeOperationFor(state.idle.cloudNodeOperations, cloudContextName),
+  );
+  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, inFlight) : null;
   if (!idleStatus && !idleAction) {
     return null;
   }

@@ -4,7 +4,6 @@ import { OpenHostIDE } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
 import type { IDEKind } from './model';
 import {
-  dismissNotification,
   dismissTerminalStatus,
   showNotification,
   showTerminalFailure,
@@ -32,7 +31,6 @@ export const openHostIDE =
       await OpenHostIDE(selection, ide);
     } catch (error: unknown) {
       const failure = ideOpenFailure(selection, label, readError(error));
-      dispatch(dismissNotification());
       dispatch(showTerminalFailure(failure.message, failure.detail, failure.copyOutput, '', null));
       return;
     }

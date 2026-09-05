@@ -101,8 +101,8 @@ type MaybeArmOrFireIdleStopResult struct {
 func MaybeArmOrFireIdleStop(params MaybeArmOrFireIdleStopParams) (MaybeArmOrFireIdleStopResult, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if tenant == "" || environment == "" {
-		return MaybeArmOrFireIdleStopResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve idle-stop arm/wait/fire decision", tenant, environment); err != nil {
+		return MaybeArmOrFireIdleStopResult{}, err
 	}
 	now := params.Now
 	if now.IsZero() {
@@ -205,8 +205,8 @@ func cloneIdleMarkersForPending(markers []EnvironmentIdleMarker) []EnvironmentId
 func LoadEnvironmentStopPending(tenant, environment string) (EnvironmentStopPending, bool, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return EnvironmentStopPending{}, false, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load environment stop-pending state", tenant, environment); err != nil {
+		return EnvironmentStopPending{}, false, err
 	}
 	path, err := EnvironmentStopPendingPath(tenant, environment)
 	if err != nil {
@@ -284,8 +284,8 @@ func EnvironmentStopHistoryPath(tenant, environment string) (string, error) {
 func AppendStopHistoryEntry(tenant, environment string, entry EnvironmentStopHistoryEntry) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("append stop-history entry", tenant, environment); err != nil {
+		return err
 	}
 	path, err := EnvironmentStopHistoryPath(tenant, environment)
 	if err != nil {
@@ -315,8 +315,8 @@ func AppendStopHistoryEntry(tenant, environment string, entry EnvironmentStopHis
 func LoadEnvironmentStopHistory(tenant, environment string) ([]EnvironmentStopHistoryEntry, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load stop-history", tenant, environment); err != nil {
+		return nil, err
 	}
 	path, err := EnvironmentStopHistoryPath(tenant, environment)
 	if err != nil {

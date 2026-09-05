@@ -47,6 +47,7 @@ func workingIssueApp(t *testing.T, env eruncommon.EnvConfig, run workingIssueCom
 		findProjectRoot:        func() (string, string, error) { return "acme", "/tmp/acme", nil },
 		runWorkingIssueCommand: run,
 		canConnectLocalPort:    func(int) bool { return false },
+		canReachMCPEndpoint:    func(int) bool { return false },
 		loadPodBranch: func(context.Context, string, string) (string, error) {
 			t.Fatal("loadPodBranch must not run through the legacy working-issue helper")
 			return "", nil
@@ -147,6 +148,7 @@ func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(cont
 		store:                  store,
 		findProjectRoot:        func() (string, string, error) { return "acme", "/tmp/acme", nil },
 		canConnectLocalPort:    func(int) bool { return reachable },
+		canReachMCPEndpoint:    func(int) bool { return reachable },
 		loadPodBranch:          loadPodBranch,
 		runWorkingIssueCommand: run,
 	})

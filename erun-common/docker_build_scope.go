@@ -64,11 +64,11 @@ func resolveCurrentDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir string
 		return "", false, err
 	}
 
-	// A configured paths.docker override is authoritative: it wins over the
-	// -devops cwd shortcut and the project-root convention scan, and applies
-	// from any cwd inside the project.
+	// A configured paths.docker override (or a selected components: entry) is
+	// authoritative: it wins over the -devops cwd shortcut and the project-root
+	// convention scan, and applies from any cwd inside the project.
 	if projectRoot != "" {
-		if configured, ok, err := configuredDockerDir(projectRoot); err != nil || ok {
+		if configured, ok, err := resolveComponentAwareDockerDir(projectRoot, target.Component); err != nil || ok {
 			return configured, ok, err
 		}
 	}
@@ -106,7 +106,26 @@ func configuredDockerDir(projectRoot string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	dockerDir := resolveProjectPath(projectRoot, paths.Docker)
+	return resolveAndValidateDockerDir(projectRoot, paths.Docker, "paths.docker")
+}
+
+// resolveComponentAwareDockerDir resolves the docker build root a build/push
+// command should use: the selected components: entry when the project
+// declares one or more (see resolveProjectComponent), otherwise the unchanged
+// paths.docker override via configuredDockerDir.
+func resolveComponentAwareDockerDir(projectRoot, selectedComponent string) (string, bool, error) {
+	name, paths, ok, err := resolveProjectComponent(projectRoot, selectedComponent)
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		return configuredDockerDir(projectRoot)
+	}
+	return resolveAndValidateDockerDir(projectRoot, paths.Docker, fmt.Sprintf("components.%s.docker", name))
+}
+
+func resolveAndValidateDockerDir(projectRoot, override, configKey string) (string, bool, error) {
+	dockerDir := resolveProjectPath(projectRoot, override)
 	if dockerDir == "" {
 		return "", false, nil
 	}
@@ -115,7 +134,7 @@ func configuredDockerDir(projectRoot string) (string, bool, error) {
 		return "", false, err
 	}
 	if !ok {
-		return "", false, fmt.Errorf("configured docker path %q (.erun/config.yaml paths.docker) is not a docker build module: expected a directory named \"docker\" holding per-component build contexts", strings.TrimSpace(paths.Docker))
+		return "", false, fmt.Errorf("configured docker path %q (.erun/config.yaml %s) is not a docker build module: expected a directory named \"docker\" holding per-component build contexts", strings.TrimSpace(override), configKey)
 	}
 	return dockerDir, true, nil
 }
@@ -311,25 +330,56 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) *EnvConfig {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
-		return nil
+		return injectedDockerBuildEnvConfig(nil)
 	}
+	return resolveDockerBuildEnvConfigForProject(store, projectRoot, target.Environment)
+}
+
+// resolveDockerBuildEnvConfigForProject is ResolveDockerBuildEnvConfig's core,
+// usable by callers that already know the resolved project root and
+// environment name directly (e.g. newDockerBuildSpec) without re-deriving them
+// through a DockerCommandTarget.
+func resolveDockerBuildEnvConfigForProject(store DockerStore, projectRoot, wantEnv string) *EnvConfig {
 	cleanRoot := filepath.Clean(projectRoot)
 
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
-		return nil
+		return injectedDockerBuildEnvConfig(nil)
 	}
-	wantEnv := strings.TrimSpace(target.Environment)
+	wantEnv = strings.TrimSpace(wantEnv)
 	for _, tenantConfig := range tenants {
 		envs, err := store.ListEnvConfigs(tenantConfig.Name)
 		if err != nil {
 			continue
 		}
 		if match := matchDockerBuildEnvConfig(envs, wantEnv, cleanRoot); match != nil {
-			return match
+			return injectedDockerBuildEnvConfig(match)
 		}
 	}
-	return nil
+	return injectedDockerBuildEnvConfig(nil)
+}
+
+// injectedDockerBuildEnvConfig lets the values the chart injected win over the
+// on-disk copy when the build runs inside a runtime pod.
+//
+// That copy is a projection, and it is rewritten over the environment's life; a
+// build that trusted it resolved the default registry instead of the one the
+// environment marks for building, and stopped honouring disablebuildscript, so it
+// ran the project's own build script and minted no image version. Both failures
+// are silent and neither is recoverable from the build output, so the pod reads
+// its own identity from the env the chart set rather than from a file anything
+// else may have written since.
+func injectedDockerBuildEnvConfig(onDisk *EnvConfig) *EnvConfig {
+	injected, ok := ResolveInjectedRuntimeConfig(os.Getenv)
+	if !ok {
+		return onDisk
+	}
+	base := EnvConfig{}
+	if onDisk != nil {
+		base = *onDisk
+	}
+	merged := overlayInjectedEnvConfig(base, injected.Env)
+	return &merged
 }
 
 func matchDockerBuildEnvConfig(envs []EnvConfig, wantEnv, cleanRoot string) *EnvConfig {

@@ -1,0 +1,3 @@
+Dry run: erun review report-merged planned.
+audit: erun review report-merged --build-id build-1 --dry-run --remote-url https://github.com/org/repo.git review-1
+platform: PATCH https://api.example.test/v1/reviews/review-1/status (status=MERGED, buildId=build-1, remoteUrl=https://github.com/org/repo.git)

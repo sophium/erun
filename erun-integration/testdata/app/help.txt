@@ -2,6 +2,10 @@ Launch the ERun desktop app
 
 Usage:
   erun app [flags]
+  erun app [command]
+
+Available Commands:
+  restart     Restart the running desktop app in place to pick up a rebuild
 
 Flags:
       --dry-run    Resolve and trace mutating actions without executing them.
@@ -13,3 +17,5 @@ Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun app [command] --help" for more information about a command.

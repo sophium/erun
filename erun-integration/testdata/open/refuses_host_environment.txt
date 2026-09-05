@@ -1,0 +1,2 @@
+audit: erun open --dry-run team dev
+open team/dev: dev is a host environment — it has no pod and no cluster to open a shell into; its worktree is already <TMP> so open that directory directly

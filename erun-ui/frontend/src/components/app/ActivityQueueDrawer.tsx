@@ -1,4 +1,6 @@
+import { Button, Tooltip, TooltipContent, TooltipTrigger } from 'erun-kit';
 import { X } from 'lucide-react';
+import { Dialog as DialogPrimitive } from 'radix-ui';
 import * as React from 'react';
 
 import {
@@ -6,31 +8,63 @@ import {
   type ActivityRecoveryResult,
   useActivityQueue,
 } from '@/app/activityQueueState';
+import { useAppDispatch } from '@/app/hooks';
+import { removeActivityEntry } from '@/app/slices/activitySlice';
 import { ActivityCard } from '@/components/app/ActivityCard';
-import { isHistoryStatus } from '@/components/app/ActivityQueueDrawer.helpers';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
+import {
+  activityStatusLabel,
+  activityTargetLabel,
+  isHistoryStatus,
+} from '@/components/app/ActivityQueueDrawer.helpers';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 interface ActivityQueueDrawerProps {
   open: boolean;
   onClose: () => void;
+  restoreFocusRef: React.RefObject<HTMLElement | null>;
 }
 
 const drawerSurfaceClassName =
-  'fixed top-[52px] right-0 bottom-0 z-30 flex w-[420px] flex-col border-l bg-background shadow-2xl transition-transform duration-150 ease-out';
+  'fixed top-[52px] right-0 bottom-0 z-30 flex w-[420px] flex-col border-l bg-background shadow-2xl outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=open]:duration-150 data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=closed]:duration-150';
 
-const drawerHiddenClassName = 'translate-x-full';
-
-const drawerVisibleClassName = 'translate-x-0';
+// Announces a status transition once per entry, not the per-second ticking
+// clock a card renders locally -- an aria-live region wrapping the whole card
+// list re-announced that clock every second (WCAG 2.2.2).
+function useActivityStatusAnnouncement(entries: ActivityQueueEntry[]): string {
+  const previousStatuses = React.useRef<Map<string, ActivityQueueEntry['status']>>(new Map());
+  const [announcement, setAnnouncement] = React.useState('');
+  React.useEffect(() => {
+    const previous = previousStatuses.current;
+    const next = new Map<string, ActivityQueueEntry['status']>();
+    const changed: string[] = [];
+    for (const entry of entries) {
+      next.set(entry.id, entry.status);
+      const previousStatus = previous.get(entry.id);
+      if (previousStatus && previousStatus !== entry.status) {
+        changed.push(`${activityTargetLabel(entry)} ${activityStatusLabel(entry.status)}`);
+      }
+    }
+    previousStatuses.current = next;
+    if (changed.length > 0) {
+      setAnnouncement(changed.join('. '));
+    }
+  }, [entries]);
+  return announcement;
+}
 
 // ActivityQueueDrawer is the slide-in activity queue drawer. The queue is
 // rebuilt from live cluster and host state on every launch and never persists
-// across restarts, so failures from a previous session don't reappear.
+// across restarts, so failures from a previous session don't reappear. The
+// one exception is a synthetic 'invite-approval' entry (activityQueueState.ts'
+// pushInviteApprovalActivityEntry): nothing to rebuild it from on relaunch,
+// so it simply does not survive one either -- same non-persistence, just for
+// a different reason.
 export function ActivityQueueDrawer({
   open,
   onClose,
+  restoreFocusRef,
 }: ActivityQueueDrawerProps): React.ReactElement {
+  const dispatch = useAppDispatch();
   const { entries, dismiss, forceDismiss, recoverPendingHelm, killSession, cancelWaiting } =
     useActivityQueue();
   const nowEntries = entries.filter((entry) => entry.status === 'running');
@@ -38,6 +72,25 @@ export function ActivityQueueDrawer({
   const historyEntries = entries.filter((entry) => isHistoryStatus(entry.status));
   const [recoveryFeedback, setRecoveryFeedback] = React.useState<ActivityRecoveryResult | null>(
     null,
+  );
+  const statusAnnouncement = useActivityStatusAnnouncement(entries);
+
+  // A synthetic 'invite-approval' entry has no backend deploy record behind
+  // it, so the ordinary dismiss RPC (DismissDeploy)
+  // would find nothing to dismiss and leave the row stuck on screen after a
+  // click that reported success -- exactly the dead end root AGENTS.md's
+  // "Smooth, Seamless, No Dead Ends" forbids. Dismiss it locally instead;
+  // every other entry keeps going through the real backend dismiss.
+  const dismissHistoryEntry = React.useCallback(
+    async (id: string) => {
+      const entry = entries.find((candidate) => candidate.id === id);
+      if (entry?.origin === 'invite-approval') {
+        dispatch(removeActivityEntry(id));
+        return;
+      }
+      await dismiss(id);
+    },
+    [entries, dispatch, dismiss],
   );
 
   const dismissAllNow = React.useCallback(async () => {
@@ -47,8 +100,8 @@ export function ActivityQueueDrawer({
     await Promise.all(nextEntries.map((entry) => cancelWaiting(entry.id)));
   }, [nextEntries, cancelWaiting]);
   const dismissAllHistory = React.useCallback(async () => {
-    await Promise.all(historyEntries.map((entry) => dismiss(entry.id)));
-  }, [historyEntries, dismiss]);
+    await Promise.all(historyEntries.map((entry) => dismissHistoryEntry(entry.id)));
+  }, [historyEntries, dismissHistoryEntry]);
   const onRecoverPendingHelm = React.useCallback(
     async (id: string) => {
       const result = await recoverPendingHelm(id);
@@ -58,45 +111,53 @@ export function ActivityQueueDrawer({
   );
 
   return (
-    <>
-      {open && (
-        <div
-          role="presentation"
-          className="fixed inset-0 top-[52px] z-20 bg-foreground/10"
-          onClick={onClose}
-        />
-      )}
-      <aside
-        className={cn(
-          drawerSurfaceClassName,
-          open ? drawerVisibleClassName : drawerHiddenClassName,
-        )}
-        role="dialog"
-        aria-label="Activity queue"
-        aria-hidden={!open}
-      >
-        <ActivityQueueHeader
-          nowCount={nowEntries.length}
-          nextCount={nextEntries.length}
-          onClose={onClose}
-        />
-        <ActivityQueueSections
-          nowEntries={nowEntries}
-          nextEntries={nextEntries}
-          historyEntries={historyEntries}
-          recoveryFeedback={recoveryFeedback}
-          setRecoveryFeedback={setRecoveryFeedback}
-          dismiss={dismiss}
-          forceDismiss={forceDismiss}
-          cancelWaiting={cancelWaiting}
-          killSession={killSession}
-          onRecoverPendingHelm={onRecoverPendingHelm}
-          dismissAllNow={dismissAllNow}
-          cancelAllNext={cancelAllNext}
-          dismissAllHistory={dismissAllHistory}
-        />
-      </aside>
-    </>
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 top-[52px] z-20 bg-foreground/10 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0" />
+        <DialogPrimitive.Content
+          aria-label="Activity queue"
+          className={drawerSurfaceClassName}
+          onCloseAutoFocus={(event) => {
+            if (restoreFocusRef.current) {
+              event.preventDefault();
+              restoreFocusRef.current.focus();
+            }
+          }}
+        >
+          <DialogPrimitive.Description className="sr-only">
+            Running, queued, and recent deploy and shell activity.
+          </DialogPrimitive.Description>
+          <ActivityQueueHeader
+            nowCount={nowEntries.length}
+            nextCount={nextEntries.length}
+            onClose={onClose}
+          />
+          <div role="status" aria-live="polite" className="sr-only">
+            {statusAnnouncement}
+          </div>
+          <ActivityQueueSections
+            nowEntries={nowEntries}
+            nextEntries={nextEntries}
+            historyEntries={historyEntries}
+            recoveryFeedback={recoveryFeedback}
+            setRecoveryFeedback={setRecoveryFeedback}
+            dismiss={dismissHistoryEntry}
+            forceDismiss={forceDismiss}
+            cancelWaiting={cancelWaiting}
+            killSession={killSession}
+            onRecoverPendingHelm={onRecoverPendingHelm}
+            dismissAllNow={dismissAllNow}
+            cancelAllNext={cancelAllNext}
+            dismissAllHistory={dismissAllHistory}
+          />
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -151,7 +212,7 @@ interface ActivityQueueSectionsProps {
 
 function ActivityQueueSections(props: ActivityQueueSectionsProps): React.ReactElement {
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3" aria-live="polite">
+    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3">
       {props.recoveryFeedback && (
         <RecoveryFeedback
           result={props.recoveryFeedback}
@@ -200,34 +261,43 @@ function RecoveryFeedback({
   result: ActivityRecoveryResult;
   onDismiss: () => void;
 }): React.ReactElement {
+  const header = (
+    <div className="flex w-full items-start justify-between gap-2">
+      <p className="font-medium">{result.ok ? 'Recovery succeeded' : 'Recovery failed'}</p>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Dismiss recovery message"
+        onClick={onDismiss}
+      >
+        <X aria-hidden="true" className="size-3.5" />
+      </Button>
+    </div>
+  );
+  const output = result.output && (
+    <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-background/40 p-2 font-mono text-[10.5px] text-foreground">
+      {result.output}
+    </pre>
+  );
+  if (!result.ok) {
+    return (
+      <InlineAlert>
+        <div className="grid w-full gap-1 text-xs">
+          {header}
+          {result.error && <p className="break-words font-mono text-[10.5px]">{result.error}</p>}
+          {output}
+        </div>
+      </InlineAlert>
+    );
+  }
   return (
     <section
       role="status"
-      className={cn(
-        'rounded-md border px-3 py-2 text-xs',
-        result.ok
-          ? 'border-green-600/35 bg-green-600/10 text-foreground'
-          : 'border-[color-mix(in_oklch,var(--destructive)_35%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-destructive',
-      )}
+      className="rounded-md border border-green-600/35 bg-green-600/10 px-3 py-2 text-xs text-foreground"
     >
-      <div className="flex items-start justify-between gap-2">
-        <p className="font-medium">{result.ok ? 'Recovery succeeded' : 'Recovery failed'}</p>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Dismiss recovery message"
-          onClick={onDismiss}
-        >
-          <X aria-hidden="true" className="size-3.5" />
-        </Button>
-      </div>
-      {result.error && <p className="mt-1 break-words font-mono text-[10.5px]">{result.error}</p>}
-      {result.output && (
-        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-background/40 p-2 font-mono text-[10.5px] text-foreground">
-          {result.output}
-        </pre>
-      )}
+      {header}
+      {output}
     </section>
   );
 }

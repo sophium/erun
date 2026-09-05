@@ -65,6 +65,16 @@ export const refreshIdleStatus =
     }
 
     try {
+      // refreshIdleStatus has more than one trigger for the same selection --
+      // the self-rescheduling poll below, selectionSyncMiddleware on an env
+      // switch, a cloud-context start/stop, and cancelPendingIdleStop -- so a
+      // forced refetch here can land while another one for the identical
+      // selection is already in flight. RTK Query's condition() bails a
+      // forced refetch out from under a pending request for the same query
+      // before ever looking at forceRefetch (see erun#1953's getInitialState
+      // fix), so without this wait the triggering event's own fresh read
+      // would silently resolve with the in-flight request's older data.
+      await dispatch(idleApi.util.getRunningQueryThunk('getIdleStatus', selection));
       const status = await dispatch(
         idleApi.endpoints.getIdleStatus.initiate(selection, { forceRefetch: true }),
       ).unwrap();

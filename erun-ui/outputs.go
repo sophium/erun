@@ -31,8 +31,8 @@ func downloadAgentOutputViaRuntime(result eruncommon.OpenResult, params eruncomm
 // ListAgentOutputs lists the files an agent produced in the selected env's runtime pod, newest-first.
 func (a *App) ListAgentOutputs(selection uiSelection) (eruncommon.RuntimeOutputsListResult, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return eruncommon.RuntimeOutputsListResult{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("list agent outputs", selection.Tenant, selection.Environment); err != nil {
+		return eruncommon.RuntimeOutputsListResult{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -50,8 +50,8 @@ func (a *App) ListAgentOutputs(selection uiSelection) (eruncommon.RuntimeOutputs
 // as a <name>.tar.gz archive.
 func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return "", fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("download agent output", selection.Tenant, selection.Environment); err != nil {
+		return "", err
 	}
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("output name is required")
@@ -83,5 +83,23 @@ func (a *App) DownloadAgentOutput(selection uiSelection, name string) (string, e
 	if err := os.WriteFile(dest, out.Bytes, 0o644); err != nil {
 		return "", err
 	}
+	a.reportHostArtifactSigning(eruncommon.SignHostArtifact(dest))
 	return dest, nil
+}
+
+// reportHostArtifactSigning tells the operator what ad-hoc signing did to an
+// artifact that just landed here. Success is worth one line because the file was
+// modified on its way in; a failure is worth one because the alternative is the
+// silent SIGKILL macOS answers an unsigned binary with. Both go through the
+// notification surface so the message survives the dialog that started it.
+func (a *App) reportHostArtifactSigning(signing eruncommon.HostArtifactSigning) {
+	note := signing.Describe()
+	if note == "" {
+		return
+	}
+	kind := "warning"
+	if signing.Signed {
+		kind = "info"
+	}
+	a.emitAppNotification(kind, note)
 }

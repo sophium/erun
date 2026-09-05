@@ -2,7 +2,7 @@ import type { UIEnvironmentStopResult } from '@/uiLifecycleTypes';
 
 import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
+import { showTerminalError, showTerminalMessage } from './notificationThunks';
 import { patchManageDialog } from './slices/manageDialogSlice';
 import type { AppThunk } from './store';
 
@@ -36,7 +36,7 @@ export const submitManageStop = (): AppThunk<Promise<void>> => async (dispatch, 
   } catch (error) {
     const message = readError(error);
     dispatch(patchManageDialog({ busy: false, busyAction: '', busyTarget: '', error: message }));
-    dispatch(showTerminalMessage(message));
+    dispatch(showTerminalError(message));
   }
 };
 

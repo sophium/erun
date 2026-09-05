@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/adrg/xdg"
 )
 
 const (
@@ -250,8 +248,8 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 	if store == nil {
 		return EnvironmentIdleStatus{}, fmt.Errorf("store is required")
 	}
-	if tenant == "" || environment == "" {
-		return EnvironmentIdleStatus{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("resolve environment idle status", tenant, environment); err != nil {
+		return EnvironmentIdleStatus{}, err
 	}
 	config, _, err := store.LoadEnvConfig(tenant, environment)
 	if err != nil {
@@ -367,8 +365,8 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	kind := strings.TrimSpace(params.Kind)
-	if tenant == "" || environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("record environment activity", tenant, environment); err != nil {
+		return err
 	}
 	if !validEnvironmentActivityKind(kind) {
 		return fmt.Errorf("unsupported activity kind %q", kind)
@@ -472,14 +470,10 @@ func LoadEnvironmentActivity(tenant, environment string) (map[string]Environment
 func EnvironmentActivityDir(tenant, environment string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if tenant == "" || environment == "" {
-		return "", fmt.Errorf("tenant and environment are required")
-	}
-	dir, err := xdg.CacheFile(filepath.Join("erun", "activity", tenant, environment))
-	if err != nil {
+	if err := errMissingTenantOrEnvironment("resolve environment activity directory", tenant, environment); err != nil {
 		return "", err
 	}
-	return dir, nil
+	return resolveCacheFilePath(filepath.Join("erun", "activity", tenant, environment))
 }
 
 func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, policy EnvironmentIdlePolicy, now time.Time) EnvironmentIdleMarker {
@@ -538,6 +532,68 @@ func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, 
 		return out[i].LastActivity.After(out[j].LastActivity)
 	})
 	return out
+}
+
+// environmentOperatorPresenceMarkers are the activity kinds that name a human
+// at the console, and only that. "ssh" is unambiguous — no agent job opens an
+// interactive shell into its own pod as part of normal work. "codex" and
+// "process" were deliberately left out despite naming an AI session, because
+// they are not unambiguous the way the issue's description assumed: the
+// codex-wrapper touches the "codex" marker for *any* invocation of the
+// codex/claude binaries, including the one a detached orchestrator job starts
+// (job_agent.go execs the same wrapped "claude"/"codex" on PATH), and the
+// resident sampler's "process" marker fires for that same resident process.
+// Both are environment-wide, not scoped to a worktree, so gating on either
+// would make an orchestrator refuse itself, and would make a second
+// legitimate job in a *different* clone of the same pod refuse against the
+// first one's resident process — exactly the "not a global mutex" outcome
+// this feature must avoid. Phase 2 as shipped here is therefore narrower than
+// the issue's description: SSH presence only. Codex/claude session presence
+// remains visible (the marker is unchanged and still surfaces on `idle` and
+// the sidebar) but does not by itself refuse an exclusive take.
+var environmentOperatorPresenceMarkers = []string{ActivityKindSSH}
+
+// EnvironmentOperatorPresenceReason reports why an environment reads as having
+// an operator physically present at an interactive shell, in the same words
+// environmentBusyFromIdleStatus / the desktop sidebar already use, so an
+// exclusive lease refusal and the sidebar's busy detail never disagree about
+// what "busy" means. The operator never takes a lease, so this is inferred
+// from markers rather than from a competing claim.
+func EnvironmentOperatorPresenceReason(status EnvironmentIdleStatus) (string, bool) {
+	for _, marker := range status.Markers {
+		if marker.Idle {
+			continue
+		}
+		for _, kind := range environmentOperatorPresenceMarkers {
+			if marker.Name == kind {
+				return EnvironmentActivityMarkerDetail(kind), true
+			}
+		}
+	}
+	return "", false
+}
+
+// EnvironmentActivityMarkerDetail renders an idle marker's name as the phrase
+// an operator would use to describe it, so every surface that reports why an
+// environment is busy - the desktop sidebar, an exclusive lease refusal -
+// says the same thing.
+func EnvironmentActivityMarkerDetail(marker string) string {
+	switch marker {
+	case ActivityKindProcess:
+		return "running build or agent processes"
+	case ActivityKindMCP:
+		return "an agent is driving it over MCP"
+	case ActivityKindCodex:
+		return "an AI session is working"
+	case ActivityKindSSH:
+		return "an SSH session is active"
+	case ActivityKindAPI:
+		return "serving API traffic"
+	case ActivityKindCLI:
+		return "running erun commands"
+	default:
+		return "working"
+	}
 }
 
 func environmentStopBlockedReason(markers []EnvironmentIdleMarker) string {

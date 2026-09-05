@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -24,6 +24,14 @@ const (
 	// EnvironmentJobKindAgent is an AI tool run in streaming mode; its log is the
 	// tool's event stream and its progress is normalized from it.
 	EnvironmentJobKindAgent = "agent"
+	// EnvironmentJobKindTask is Go work run asynchronously in this process
+	// rather than a subprocess a supervisor waits on. Its typed return value is
+	// captured directly onto Result once it finishes, and liveness is decided
+	// by this process's own pid rather than a supervisor's. Its log is whatever
+	// the work wrote to the writer it was handed — there is no subprocess whose
+	// stdio could be captured instead, and a failed task with no log at all was
+	// undiagnosable after the fact.
+	EnvironmentJobKindTask = "task"
 
 	agentToolClaude = "claude"
 	agentToolCodex  = "codex"
@@ -54,9 +62,51 @@ func AgentJobCommand(tool, prompt string) ([]string, error) {
 	case agentToolClaude:
 		// --verbose is what makes stream-json emit per event instead of one
 		// closing envelope, which is the whole point of running it this way.
-		return []string{agentToolClaude, "-p", text, "--output-format", "stream-json", "--verbose"}, nil
+		//
+		// --disallowedTools ScheduleWakeup: this run is a one-shot supervised
+		// process with no later invocation to wake into, unlike the orchestrator's
+		// own persistent session (ai_launch.go), which keeps the tool. Offering it
+		// here let the agent "successfully" schedule a wakeup that will never
+		// fire and end its turn, while the supervisor still recorded a clean exit
+		// -- the run looked done and the work it was waiting on was still in
+		// flight (erun#1731). Denying the tool removes it from what the model is
+		// even offered, verified against a real `claude -p` run, rather than
+		// merely rejecting the call after the model has already committed to it.
+		return []string{agentToolClaude, "-p", text, "--output-format", "stream-json", "--verbose", "--disallowedTools", "ScheduleWakeup"}, nil
 	case agentToolCodex:
 		return []string{agentToolCodex, "exec", "--json", text}, nil
+	default:
+		return nil, fmt.Errorf("unsupported agent tool %q: expected one of %s", tool, strings.Join(AgentJobTools, ", "))
+	}
+}
+
+// AgentJobResumeCommand builds the argv for a bounded follow-up turn of a run
+// AgentJobCommand already started, resumed via the session/thread id that turn's
+// own stream reported (AgentJobProgress.SessionID) rather than restated from
+// scratch. Verified live against the installed claude (2.1.222): a fact told to
+// one `claude -p --session-id <id>` process was correctly recalled by a wholly
+// separate `claude -p --resume <id>` process afterwards, so this is genuine
+// conversational continuation, not a self-contained restatement of task facts.
+// codex's non-interactive twin (`codex exec resume <id> <prompt>`) is built the
+// same way but its own context-survival was not verified the same way: the
+// sandbox this was designed in had no authenticated codex, only an unauthenticated
+// CLI whose requests 401 before any content reaches the model. See
+// erun-common/AGENTS.md's note on this for the full evidence trail.
+func AgentJobResumeCommand(tool, sessionID, prompt string) ([]string, error) {
+	name := strings.ToLower(strings.TrimSpace(tool))
+	id := strings.TrimSpace(sessionID)
+	text := strings.TrimSpace(prompt)
+	if id == "" {
+		return nil, fmt.Errorf("a resumed agent turn needs the session id the earlier turn reported")
+	}
+	if text == "" {
+		return nil, fmt.Errorf("a resumed agent turn needs a prompt to run")
+	}
+	switch name {
+	case agentToolClaude:
+		return []string{agentToolClaude, "-p", text, "--resume", id, "--output-format", "stream-json", "--verbose", "--disallowedTools", "ScheduleWakeup"}, nil
+	case agentToolCodex:
+		return []string{agentToolCodex, "exec", "resume", "--json", id, text}, nil
 	default:
 		return nil, fmt.Errorf("unsupported agent tool %q: expected one of %s", tool, strings.Join(AgentJobTools, ", "))
 	}
@@ -79,6 +129,12 @@ func NormalizeAgentJobTool(tool string) (string, error) {
 // event shape — that is what makes it a contract rather than a passthrough.
 type AgentJobProgress struct {
 	Tool string `json:"tool,omitempty"`
+	// SessionID is the tool's own identifier for this conversation -- claude's
+	// session_id (present on every stream-json event from the first) or codex's
+	// thread_id (its thread.started event) -- captured so a bounded follow-up
+	// turn can resume the real conversation instead of restating the task from
+	// scratch. Empty until the tool's first event names it, and never guessed.
+	SessionID string `json:"sessionId,omitempty"`
 	// Activity is the one-line answer to "what is it doing right now", such as
 	// "editing erun-common/mcp_client.go". It clears when the run reports a
 	// result, because at that point the answer is the outcome.
@@ -123,51 +179,44 @@ func (p AgentJobProgress) Summary() string {
 	return strings.Join(parts, ", ")
 }
 
-// agentProgressReader folds an agent's event stream into progress as the log
-// grows. It keeps its own offset so the supervisor polling on a short interval
-// re-reads only what arrived rather than the whole log each time.
+// agentProgressReader folds an agent's event stream into progress as bytes
+// arrive. It is fed directly from the child process's stdout/stderr writes
+// (agentProgressReader.feed), independent of whatever the job's output log
+// retains — the byte cap that bounds the log on disk must not also silence
+// progress, since the progress fields it folds into are themselves small and
+// bounded. Two of the process's own pipe-copying goroutines can write
+// concurrently, so every method locks.
 type agentProgressReader struct {
-	tool     string
-	path     string
-	offset   int64
+	tool string
+
+	mu       sync.Mutex
 	pending  []byte
 	progress AgentJobProgress
 }
 
-func newAgentProgressReader(tool, path string) *agentProgressReader {
-	return &agentProgressReader{tool: tool, path: path, progress: AgentJobProgress{Tool: tool}}
+func newAgentProgressReader(tool string) *agentProgressReader {
+	return &agentProgressReader{tool: tool, progress: AgentJobProgress{Tool: tool}}
 }
 
-// read folds whatever arrived since the last call and returns progress as it now
-// stands. A log that is missing or unreadable yields the progress already folded
-// rather than an error: a run that has not written yet is not a failure.
-func (r *agentProgressReader) read() AgentJobProgress {
-	if strings.TrimSpace(r.path) == "" {
-		return r.progress
-	}
-	file, err := os.Open(r.path)
-	if err != nil {
-		return r.progress
-	}
-	defer func() { _ = file.Close() }()
-
-	info, err := file.Stat()
-	if err != nil || info.Size() <= r.offset {
-		return r.progress
-	}
-	chunk := make([]byte, info.Size()-r.offset)
-	read, err := file.ReadAt(chunk, r.offset)
-	if read <= 0 && err != nil {
-		return r.progress
-	}
-	r.offset += int64(read)
-	r.consume(chunk[:read])
+// snapshot returns progress as it currently stands.
+func (r *agentProgressReader) snapshot() AgentJobProgress {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.progress
 }
 
+// feed folds newly-arrived bytes into progress. It is called from the same
+// writer that captures the job's output, but it sees every byte the process
+// wrote, not only the bytes the output cap kept.
+func (r *agentProgressReader) feed(chunk []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.consume(chunk)
+}
+
 // consume splits the arrived bytes on newlines, folding complete lines and
-// carrying the partial trailing one — a poll routinely lands mid-line, and
-// re-reading it from the start would double-count everything before it.
+// carrying the partial trailing one — a feed can land mid-line, and re-reading
+// it from the start would double-count everything before it. Caller holds mu.
 func (r *agentProgressReader) consume(chunk []byte) {
 	buffer := append(r.pending, chunk...)
 	for {
@@ -208,6 +257,10 @@ type claudeStreamEvent struct {
 	NumTurns int                  `json:"num_turns"`
 	IsError  bool                 `json:"is_error"`
 	Message  *claudeStreamMessage `json:"message"`
+	// SessionID rides on every event claude's stream-json mode emits, from the
+	// very first ("system"/"init") one -- unlike Result, which arrives only on
+	// the closing event.
+	SessionID string `json:"session_id"`
 }
 
 type claudeStreamMessage struct {
@@ -229,6 +282,9 @@ func applyClaudeAgentEvent(progress *AgentJobProgress, raw []byte) bool {
 	var event claudeStreamEvent
 	if err := json.Unmarshal(raw, &event); err != nil {
 		return false
+	}
+	if id := strings.TrimSpace(event.SessionID); id != "" {
+		progress.SessionID = id
 	}
 	switch event.Type {
 	case "assistant":
@@ -323,6 +379,10 @@ type codexStreamEvent struct {
 	Error   *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+	// ThreadID names the conversation on codex's own "thread.started" event,
+	// the first event a `codex exec --json` run emits -- codex's twin of
+	// claude's per-event session_id above.
+	ThreadID string `json:"thread_id"`
 }
 
 type codexStreamItem struct {
@@ -347,6 +407,8 @@ func applyCodexAgentEvent(progress *AgentJobProgress, raw []byte) bool {
 		return false
 	}
 	switch event.Type {
+	case "thread.started":
+		applyCodexThreadStartedEvent(progress, event)
 	case "turn.started":
 		progress.Turns++
 	case "item.started", "item.updated", "item.completed":
@@ -364,6 +426,15 @@ func applyCodexAgentEvent(progress *AgentJobProgress, raw []byte) bool {
 		return false
 	}
 	return true
+}
+
+// applyCodexThreadStartedEvent captures the thread id off codex's first event,
+// split out of applyCodexAgentEvent's switch so a plain call keeps that
+// switch's own cyclomatic complexity from growing.
+func applyCodexThreadStartedEvent(progress *AgentJobProgress, event codexStreamEvent) {
+	if id := strings.TrimSpace(event.ThreadID); id != "" {
+		progress.SessionID = id
+	}
 }
 
 func applyCodexItem(progress *AgentJobProgress, item *codexStreamItem, completed bool) {

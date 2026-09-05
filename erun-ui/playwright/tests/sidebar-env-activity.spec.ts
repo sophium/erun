@@ -36,7 +36,7 @@ test.describe('sidebar env activity', () => {
     const dot = app.sidebar.envOpenDot(tenant, environment);
     await driveEnvActivity(
       page,
-      { tenant, environment, reachable: true, busy: false },
+      { tenant, environment, reachable: true, observed: true, busy: false },
       async () => {
         await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 1_000 });
         // Not opened here means there is nothing to close, so the indicator is a
@@ -50,8 +50,91 @@ test.describe('sidebar env activity', () => {
     );
 
     // And it goes back to blank when the environment stops answering.
-    await emitEnvActivity(page, { tenant, environment, reachable: false, busy: false });
+    await emitEnvActivity(page, {
+      tenant,
+      environment,
+      reachable: false,
+      observed: false,
+      busy: false,
+    });
     await expect(row.getByTestId('env-open-dot')).toHaveCount(0);
+  });
+
+  test('a bound-but-dead forward reads as an outage, not as a quiet row', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // The rarer shape. The environment's port-forward still holds its local
+    // port, so the desktop's reachability check keeps saying yes while nothing
+    // answers through it; the desktop re-established it, that did not help, and
+    // the only thing left is to say so. Rendered from reachable alone this is a
+    // green "in use elsewhere" light on an environment no client can talk to.
+    //
+    // The state needs a real port-forward with a dead far end, which the
+    // headless harness has no cluster to produce, so the spec drives the same
+    // env-activity event the Go sweep emits. The detection and the bounded
+    // repair behind the flag are owned by
+    // erun-ui/environment_forward_repair_test.go; the derivation is owned by
+    // erun-ui/frontend/src/components/app/Sidebar.helpers.test.ts.
+    const { tenant, environment } = seededEnv;
+    const dot = app.sidebar.envOpenDot(tenant, environment);
+    await driveEnvActivity(
+      page,
+      { tenant, environment, reachable: true, observed: false, outage: true, busy: false },
+      async () => {
+        await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
+        await expect(dot).toHaveAccessibleName(
+          new RegExp(`^${tenant} / ${environment} is unreachable —`),
+          { timeout: 1_000 },
+        );
+      },
+    );
+
+    // And the hover card says it in prose, with the recovery attached.
+    await driveEnvActivity(
+      page,
+      { tenant, environment, reachable: true, observed: false, outage: true, busy: false },
+      async () => {
+        await app.sidebar.hoverEnvironmentRow(tenant, environment);
+        await expect(app.sidebar.envHoverCard(tenant, environment)).toContainText(
+          'Unreachable — its connection is dead; deploy it to bring the runtime back',
+          { timeout: 1_000 },
+        );
+      },
+    );
+  });
+
+  test('a dropped forward reads as an outage, not as a row nobody opened', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // The ordinary shape, and the one with no other tell. A pod replacement
+    // makes kubectl exit, so the local port is free and every field except the
+    // diagnosis reads exactly like an environment nobody ever opened — which is
+    // how a row the operator had open went quiet instead of reporting an
+    // outage. Note reachable is false here: the row is carried by the outage
+    // alone, so a derivation that gated on reachable would render nothing.
+    //
+    // Same harness limitation as the sibling above: producing a real dropped
+    // forward needs a cluster, so the spec drives the env-activity event the Go
+    // sweep emits. The restart and its bound are owned by
+    // erun-ui/environment_forward_repair_test.go::TestDroppedForwardIsRestarted
+    // and ::TestUnrepairableForwardReportsInsteadOfLooping.
+    const { tenant, environment } = seededEnv;
+    const dot = app.sidebar.envOpenDot(tenant, environment);
+    await driveEnvActivity(
+      page,
+      { tenant, environment, reachable: false, observed: false, outage: true, busy: false },
+      async () => {
+        await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
+        await expect(dot).toHaveAccessibleName(
+          new RegExp(`^${tenant} / ${environment} is unreachable —`),
+          { timeout: 1_000 },
+        );
+      },
+    );
   });
 
   test('a busy env renders busy and says what is holding it', async ({ app, page, seededEnv }) => {
@@ -60,6 +143,7 @@ test.describe('sidebar env activity', () => {
       tenant,
       environment,
       reachable: true,
+      observed: true,
       busy: true,
       detail: 'holding: gradle-build',
     };
@@ -82,7 +166,13 @@ test.describe('sidebar env activity', () => {
       );
     });
 
-    await emitEnvActivity(page, { tenant, environment, reachable: false, busy: false });
+    await emitEnvActivity(page, {
+      tenant,
+      environment,
+      reachable: false,
+      observed: false,
+      busy: false,
+    });
     const row: Locator = app.sidebar.envRowButton(tenant, environment).locator('..');
     await expect(row.getByTestId('env-open-dot')).toHaveCount(0);
   });
@@ -92,6 +182,8 @@ interface EnvActivityEvent {
   tenant: string;
   environment: string;
   reachable: boolean;
+  observed: boolean;
+  outage?: boolean;
   busy: boolean;
   detail?: string;
 }

@@ -10,7 +10,24 @@ import { SEED_TENANT } from '../fixtures/seedRoot.js';
 // available resource status clears the capacity blocker, leaving the value
 // requirements (environment name, container registry) as the only blockers —
 // which is exactly what this spec exercises.
-async function stubDialogCluster(page: Page): Promise<void> {
+// clusterRegistryFailure, when set, makes the LoadClusterRegistry stub return
+// this error instead of the endpoint's usual pass-through — used by
+// stubDialogClusterWithRegistryFailure below. hostedRegistryAvailable, when
+// true, makes the LoadHostedRegistry stub report available instead of the
+// harness's default answer (ERUN_HOSTED_REGISTRY_PROBE_OVERRIDE=0 in
+// backendEnv(), since page.route cannot intercept the real outbound HTTP call
+// underneath that Wails method) — used by
+// stubDialogClusterWithHostedRegistryAvailable below. A single page.route
+// handler (not two stacked registrations) is required: Playwright runs the
+// most-recently registered handler first, and its route.continue() sends the
+// request to the real backend rather than falling through to an earlier
+// handler, so stacking silently defeated the first stub instead of composing
+// with it.
+async function stubDialogCluster(
+  page: Page,
+  clusterRegistryFailure?: string,
+  hostedRegistryAvailable?: boolean,
+): Promise<void> {
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
     if (body.method === 'LoadKubernetesContexts') {
@@ -46,8 +63,37 @@ async function stubDialogCluster(page: Page): Promise<void> {
         }),
       });
     }
+    if (body.method === 'LoadClusterRegistry' && clusterRegistryFailure) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ error: clusterRegistryFailure }),
+      });
+    }
+    if (body.method === 'LoadHostedRegistry' && hostedRegistryAvailable) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { host: 'registry.erunpaas.com', available: true } }),
+      });
+    }
     await route.continue();
   });
+}
+
+// stubDialogClusterWithRegistryFailure makes a context resolve and its
+// capacity load, but the cluster-registry probe (LoadClusterRegistry) fail —
+// a VPN hiccup or an RBAC gap, not a real "no registry deployed" answer. This
+// used to be a bare `catch { ... }` that silently reset
+// clusterRegistry/useClusterRegistry with no error surfaced anywhere,
+// indistinguishable from "no in-cluster registry found". The dialog must show
+// the probe failure instead.
+async function stubDialogClusterWithRegistryFailure(page: Page): Promise<void> {
+  await stubDialogCluster(page, 'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER');
+}
+
+// stubDialogClusterWithHostedRegistryAvailable is the one route a spec needs
+// to exercise the "available" branch of the hosted-registry gate.
+async function stubDialogClusterWithHostedRegistryAvailable(page: Page): Promise<void> {
+  await stubDialogCluster(page, undefined, true);
 }
 
 test.describe('environment init dialog', () => {
@@ -310,6 +356,183 @@ test.describe('environment init dialog', () => {
     await expect(skipGit).not.toBeChecked();
     await skipGit.click();
     await expect(skipGit).toBeChecked();
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  // erun#1217: VersionNotices used to render inside the version popover,
+  // whose open state required suggestions.length > 0 — so a listing failure
+  // (zero suggestions, one notice) computed the exact recovery advice and
+  // then put it in a surface that could structurally never open.
+  test('shows the version recovery advice even when the popover has nothing to list', async ({
+    app,
+    page,
+  }) => {
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              suggestions: [],
+              notices: [{ image: 'ghcr.io/acme/erun-devops', kind: 'auth' }],
+            },
+          }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // Visible directly, without ever opening the (now correctly disabled,
+    // nothing-to-pick) popover.
+    await expect(app.envInitDialog.versionChoicesButton()).toBeDisabled();
+    const notices = app.envInitDialog.versionNotices();
+    await expect(notices).toBeVisible();
+    await expect(notices).toContainText('ghcr.io/acme/erun-devops is private');
+    await expect(notices).toContainText('docker login ghcr.io');
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  // erun#1217: the in-app route that unblocks a user with no local kubectl
+  // context (Settings → Cloud aliases → Add AWS account → Cloud contexts →
+  // Init provisions a managed cluster) was never named on this screen.
+  test('names the managed-cloud-cluster route when no Kubernetes contexts are found', async ({
+    app,
+  }) => {
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const emptyState = app.envInitDialog.locator().getByText('No Kubernetes contexts found');
+    await expect(emptyState).toBeVisible();
+    const body = app.envInitDialog.locator();
+    await expect(body).toContainText('Cloud aliases');
+    await expect(body).toContainText('Cloud contexts');
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  // erun#1217: this dialog IS the documented Windows getting-started path
+  // (erun-docs/docs/getting-started/first-environment.md), but its recovery
+  // copy assumed macOS (~/.zshenv, brew) unconditionally.
+  test.describe('on a Windows user agent', () => {
+    test.use({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    });
+
+    test('names Windows recovery steps instead of macOS-only ones', async ({ app }) => {
+      await app.sidebar.openInitDialog();
+      await app.envInitDialog.waitForOpen();
+
+      const body = app.envInitDialog.locator();
+      await expect(body).toContainText('winget install');
+      await expect(body).not.toContainText('brew install');
+      await expect(body).not.toContainText('.zshenv');
+
+      await app.envInitDialog.cancel();
+      await app.envInitDialog.waitForClosed();
+    });
+  });
+
+  // erun#1217: a fresh install's container registry field offered no
+  // placeholder, no helper, and no suggestions — nothing to go on for a
+  // required free-text value.
+  test('explains the container registry format and the auto-detect route when nothing is detected', async ({
+    app,
+    page,
+  }) => {
+    await stubDialogCluster(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // stubDialogCluster resolves a context but the harness's kubectl stub
+    // cannot reach a real cluster, so no in-cluster registry is detected —
+    // the "nothing to go on" state this fix targets.
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await expect(page.getByText('Use in-cluster registry', { exact: false })).toHaveCount(0);
+
+    const help = app.envInitDialog.locator().getByText(/Where images push to and pull from/);
+    await expect(help).toBeVisible();
+    await expect(help).toContainText('ghcr.io/your-org');
+    await expect(help).toContainText('Cloud aliases');
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('a cluster-registry probe failure shows the failure, not a silent reset (#1212)', async ({
+    app,
+    page,
+  }) => {
+    await stubDialogClusterWithRegistryFailure(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    // Selecting the context fires refreshDialogClusterRegistry, which fails.
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+
+    await expect(app.envInitDialog.locator().getByRole('alert')).toContainText(
+      'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER',
+    );
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('offers the hosted registry only once it is confirmed reachable', async ({ app, page }) => {
+    // The reported defect: the hosted-registry option was offered
+    // unconditionally, with no check that registry.erunpaas.com was actually
+    // reachable, unlike the in-cluster registry which is already gated on
+    // clusterRegistry?.deployed. The harness's default answer (no stub) is
+    // "unavailable" — the same answer this host gets in real life — so the
+    // checkbox must stay disabled and explain why, and picking a different
+    // registry must still be possible.
+    await stubDialogCluster(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const hosted = app.envInitDialog.hostedRegistryCheckbox();
+    await expect(hosted).toBeVisible();
+    await expect(hosted).toBeDisabled();
+    await expect(app.envInitDialog.locator()).toContainText('does not resolve');
+
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await app.envInitDialog.fillEnvironment('review');
+    await app.envInitDialog.fillContainerRegistry('ghcr.io/sophium');
+    await expect(app.envInitDialog.createButton()).toBeEnabled();
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  test('once reachable, selecting the hosted registry clears the container-registry requirement', async ({
+    app,
+    page,
+  }) => {
+    await stubDialogClusterWithHostedRegistryAvailable(page);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const hosted = app.envInitDialog.hostedRegistryCheckbox();
+    await expect(hosted).toBeEnabled();
+
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await app.envInitDialog.fillEnvironment('review');
+    // No container registry is filled in — the hosted registry needs none.
+    await expect(app.envInitDialog.createButton()).toBeDisabled();
+
+    await hosted.click();
+    await expect(hosted).toBeChecked();
+    await expect(app.envInitDialog.createButton()).toBeEnabled();
+    await expect(app.envInitDialog.submitReason()).toHaveText('');
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();

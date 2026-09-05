@@ -34,6 +34,34 @@ func UpsertDefaultConfig(entry HostEntry) (string, error) {
 	return path, UpsertConfig(path, entry)
 }
 
+// DefaultConfigHasAlias reports whether the default ssh config (~/.ssh/config)
+// already declares a Host block for alias, so a caller can tell an alias name
+// that was merely derived from tenant/environment apart from one that will
+// actually resolve for an ssh client on this host.
+func DefaultConfigHasAlias(alias string) (bool, error) {
+	path, err := DefaultConfigPath()
+	if err != nil {
+		return false, err
+	}
+	return ConfigHasAlias(path, alias)
+}
+
+func ConfigHasAlias(path, alias string) (bool, error) {
+	data, err := os.ReadFile(filepath.Clean(strings.TrimSpace(path)))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, line := range splitConfigLines(string(data)) {
+		if hostLineHasAlias(line, alias) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func UpsertConfig(path string, entry HostEntry) error {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" {

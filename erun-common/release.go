@@ -136,7 +136,7 @@ type releaseArtifacts struct {
 }
 
 func ResolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
-	return resolveReleaseSpec(ctx, findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitLocalBranchExists, params)
+	return resolveReleaseSpec(ctx, findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitBranchExists, params)
 }
 
 func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, params ReleaseParams) (ReleaseSpec, error) {
@@ -179,13 +179,14 @@ type ReleasePackagingSyncerFunc func(Context, ReleasePackagingSyncSpec) ([]Relea
 
 // traceReleaseUmbrella brackets a standalone `erun release` with the
 // `==> Releasing`/`==> Released`/`==> Release failed` lines the desktop
-// activity-queue parser keys off to light the sidebar spinner. `erun build
-// --release` runs the same work under its own `==> Building` umbrella instead
-// of opening a second entry; dry-run omits the markers so the release goldens
-// stay stable.
-func traceReleaseUmbrella(ctx Context, version string) func(*error) {
+// activity-queue parser keys off to light the sidebar spinner, and starts the
+// step-timing root reported (as a duration-ordered table plus a JSON record)
+// when the bracket closes. `erun build --release` runs the same work under
+// its own `==> Building` umbrella instead of opening a second entry; dry-run
+// omits the markers and the timing so the release goldens stay stable.
+func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 	if ctx.DryRun {
-		return func(*error) {}
+		return ctx, func(*error) {}
 	}
 	releasing, released := "==> Releasing", "==> Released"
 	if target := strings.TrimSpace(version); target != "" {
@@ -194,13 +195,21 @@ func traceReleaseUmbrella(ctx Context, version string) func(*error) {
 	}
 	started := time.Now()
 	ctx.Info(releasing)
-	return func(errp *error) {
-		elapsed := time.Since(started).Round(time.Second)
-		if errp != nil && *errp != nil {
-			ctx.Info("==> Release failed after " + elapsed.String())
-			return
+	root := newStepTiming("release", nil)
+	ctx.timing = root
+	return ctx, func(errp *error) {
+		var err error
+		if errp != nil {
+			err = *errp
 		}
-		ctx.Info(released + " in " + elapsed.String())
+		root.finish(err)
+		elapsed := time.Since(started).Round(time.Second)
+		if err != nil {
+			ctx.Info("==> Release failed after " + elapsed.String())
+		} else {
+			ctx.Info(released + " in " + elapsed.String())
+		}
+		reportStepTiming(ctx, "release", root)
 	}
 }
 
@@ -212,6 +221,18 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 		syncPackagingChecksums = syncReleasePackagingChecksums
 	}
 
+	release, err := claimReleaseVersion(ctx, spec, os.Getenv)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	return runClaimedReleaseSpec(ctx, spec, runGit, runScript, syncPackagingChecksums, publisher)
+}
+
+// runClaimedReleaseSpec is the release's actual work, run only once
+// runReleaseSpec has claimed the version being released.
+func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher ReleasePublisher) error {
 	traceReleaseSpec(ctx, spec)
 	if err := ensureReleasePublishesResolvedImages(spec, publisher); err != nil {
 		return err
@@ -221,6 +242,9 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	}
 
 	if err := runReleaseStages(ctx, spec, spec.Stages, runGit, syncPackagingChecksums); err != nil {
+		return err
+	}
+	if err := ensureReleaseReadyToPublish(ctx, spec, runGit); err != nil {
 		return err
 	}
 	if err := runReleasePublication(ctx, publisher); err != nil {
@@ -236,9 +260,23 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	return runScriptSpecs(ctx, spec.LinuxReleases, runScript)
 }
 
+// ensureReleaseReadyToPublish runs the checks that must pass immediately
+// before the build spends anything: the base branch has not moved since
+// sync-remote re-established it, and the node has room for the build that is
+// about to start.
+func ensureReleaseReadyToPublish(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
+	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
+		return err
+	}
+	return ensureReleaseDiskHeadroom(ctx)
+}
+
 func runReleaseStages(ctx Context, spec ReleaseSpec, stages []ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	for _, stage := range stages {
-		if err := runReleaseStage(ctx, spec, stage, runGit, syncPackagingChecksums); err != nil {
+		stepCtx, finish := ctx.startTimingStep(stage.Name)
+		err := runReleaseStage(stepCtx, spec, stage, runGit, syncPackagingChecksums)
+		finish(err)
+		if err != nil {
 			return err
 		}
 	}
@@ -279,7 +317,7 @@ func runReleaseStage(ctx Context, spec ReleaseSpec, stage ReleaseStage, runGit G
 		return err
 	}
 	for _, command := range releaseStageCommands(ctx, stage, stageFileUpdates) {
-		if err := runReleaseCommand(ctx, spec, command, runGit); err != nil {
+		if err := runReleaseCommand(ctx, spec, stage, command, runGit); err != nil {
 			return err
 		}
 	}
@@ -318,7 +356,7 @@ func releaseStageCommands(ctx Context, stage ReleaseStage, updates []ReleaseFile
 	return stage.GitCommands
 }
 
-func runReleaseCommand(ctx Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
+func runReleaseCommand(ctx Context, spec ReleaseSpec, stage ReleaseStage, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
 	if command.Name == "git" && shouldSkipExistingReleaseTag(command.Args) {
 		skip, err := prepareReleaseTag(ctx, spec, runGit, command)
 		if err != nil {
@@ -329,12 +367,21 @@ func runReleaseCommand(ctx Context, spec ReleaseSpec, command ReleaseCommandSpec
 			return nil
 		}
 	}
+	branchPush := isReleaseBranchPush(stage, command)
+	if branchPush && ctx.DryRun {
+		// Part of the plan rather than the run: a real release says nothing here
+		// unless the push is actually rejected, and then says it as it happens.
+		ctx.Trace(fmt.Sprintf("release: a push rejected by a branch that moved during the release is rebased onto origin/%s and retried (up to %d attempts)", spec.Branch, releasePushRebaseAttempts))
+	}
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	if ctx.DryRun {
 		return nil
 	}
 	if command.Name != "git" {
 		return fmt.Errorf("unsupported release command %q", command.Name)
+	}
+	if branchPush {
+		return runReleaseBranchPush(ctx, spec, command, runGit)
 	}
 	return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
 }
@@ -354,10 +401,10 @@ func prepareReleaseTag(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFun
 		}
 		return false, nil
 	}
-	return canSkipExistingReleaseTag(ctx, command.Dir, tag)
+	return canSkipExistingReleaseTag(ctx, spec, command.Dir, tag, runGit)
 }
 
-func canSkipExistingReleaseTag(ctx Context, projectRoot, tag string) (bool, error) {
+func canSkipExistingReleaseTag(ctx Context, spec ReleaseSpec, projectRoot, tag string, runGit GitCommandRunnerFunc) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
@@ -379,10 +426,57 @@ func canSkipExistingReleaseTag(ctx Context, projectRoot, tag string) (bool, erro
 		return false, fmt.Errorf("could not resolve HEAD for release tag check")
 	}
 	if tagCommit != headCommit {
-		return false, fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
+		return false, releaseTagMismatchError(ctx, spec, projectRoot, tag, tagCommit, headCommit, runGit)
 	}
 
 	return true, nil
+}
+
+// releaseTagMismatchError diagnoses a tag that exists but not at HEAD. When it
+// is unpushed and the release branch's remote history has never incorporated
+// it, that is not a real collision — it is a leftover local tag+commit from a
+// release that was interrupted before it published anything (e.g. the
+// pod holding the worktree was replaced mid-release). Reclaiming it
+// automatically is judged too aggressive for a git tag inside a release flow,
+// so the refusal instead names the diagnosis and the exact remedy, rather than
+// leaving the operator to work out both by hand.
+func releaseTagMismatchError(ctx Context, spec ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit GitCommandRunnerFunc) error {
+	base := fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
+	pushed, err := gitRemoteTagExists(ctx, projectRoot, "origin", tag)
+	if err != nil || pushed {
+		return base
+	}
+	reachable, known := releaseBaseBranchIncorporates(projectRoot, spec.Branch, tagCommit, runGit)
+	if !known || reachable {
+		return base
+	}
+	return fmt.Errorf("%w\na previous run left an unpushed local tag %q at %s that origin/%s has never incorporated — most likely a release interrupted before it published anything; delete it with `git tag -d %s` to retry",
+		base, tag, tagCommit, spec.Branch, tag)
+}
+
+// releaseBaseBranchIncorporates reports whether commit is already part of the
+// release branch's remote history, fetching it fresh the same way
+// releaseBaseBranchAhead does. known is false when the read was inconclusive
+// (no remote, no network, unresolved ref) — an unknown answer is never
+// treated as "reachable" or "unreachable", since either would risk offering
+// the reclaim message, or withholding it, on a guess.
+func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit GitCommandRunnerFunc) (reachable bool, known bool) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" || commit == "" {
+		return false, false
+	}
+	if err := runGit(projectRoot, io.Discard, io.Discard, "fetch", "origin", branch); err != nil {
+		return false, false
+	}
+	err := Command("git", "-C", projectRoot, "merge-base", "--is-ancestor", commit, "FETCH_HEAD").Run()
+	if err == nil {
+		return true, true
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, true
+	}
+	return false, false
 }
 
 func deleteExistingReleaseTag(ctx Context, projectRoot, tag string, runGit GitCommandRunnerFunc) error {
@@ -430,6 +524,9 @@ func gitRemoteTagExists(ctx Context, projectRoot, remote, tag string) (bool, err
 	ctx.TraceCommand("", "git", "-C", projectRoot, "ls-remote", "--tags", "--refs", remote, "refs/tags/"+tag)
 	output, err := Command("git", "-C", projectRoot, "ls-remote", "--tags", "--refs", remote, "refs/tags/"+tag).CombinedOutput()
 	if err != nil {
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			return false, fmt.Errorf("%w: %s", err, detail)
+		}
 		return false, err
 	}
 	return strings.TrimSpace(string(output)) != "", nil
@@ -446,6 +543,9 @@ func gitResolvedRef(ctx Context, projectRoot, ref string) (string, bool, error) 
 	if errors.As(err, &exitErr) && exitErr.ExitCode() != 0 {
 		return "", false, nil
 	}
+	if detail := strings.TrimSpace(string(output)); detail != "" {
+		return "", false, fmt.Errorf("%w: %s", err, detail)
+	}
 	return "", false, err
 }
 
@@ -453,6 +553,9 @@ func GitCurrentBranch(ctx Context, projectRoot string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
@@ -462,19 +565,36 @@ func GitShortCommit(ctx Context, projectRoot string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--short", "HEAD")
 	output, err := Command("git", "-C", projectRoot, "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
 }
 
-func GitLocalBranchExists(ctx Context, projectRoot, branch string) (bool, error) {
+// GitBranchExists reports whether branch exists locally or as an
+// origin-tracking ref. release's sync-develop/push stages run `git checkout
+// <branch>`, which git resolves to a new local branch tracking
+// refs/remotes/origin/<branch> when no local ref exists — a checkout that
+// only ever cloned main and never fetched develop as a local branch still
+// runs those stages successfully. Checking refs/heads alone treated that
+// checkout the same as "no develop branch at all" and dropped both stages
+// from the resolved plan with no trace and no refusal.
+func GitBranchExists(ctx Context, projectRoot, branch string) (bool, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return false, nil
 	}
+	if exists, err := gitRefExists(ctx, projectRoot, "refs/heads/"+branch); err != nil || exists {
+		return exists, err
+	}
+	return gitRefExists(ctx, projectRoot, "refs/remotes/origin/"+branch)
+}
 
-	ctx.TraceCommand("", "git", "-C", projectRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
-	cmd := Command("git", "-C", projectRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+func gitRefExists(ctx Context, projectRoot, ref string) (bool, error) {
+	ctx.TraceCommand("", "git", "-C", projectRoot, "show-ref", "--verify", "--quiet", ref)
+	cmd := Command("git", "-C", projectRoot, "show-ref", "--verify", "--quiet", ref)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -504,6 +624,9 @@ func gitWorktreeClean(ctx Context, projectRoot string) (bool, error) {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no")
 	output, err := Command("git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no").CombinedOutput()
 	if err != nil {
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			return false, fmt.Errorf("%w: %s", err, detail)
+		}
 		return false, err
 	}
 	return strings.TrimSpace(string(output)) == "", nil
@@ -603,7 +726,7 @@ func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProject
 		resolveCommit = GitShortCommit
 	}
 	if branchExists == nil {
-		branchExists = GitLocalBranchExists
+		branchExists = GitBranchExists
 	}
 	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists
 }
@@ -642,7 +765,7 @@ func resolveReleaseInputs(ctx Context, findProjectRoot ProjectFinderFunc, loadPr
 	ctx.Trace(fmt.Sprintf("release: branch = %s, commit = %s", branch, commit))
 
 	ctx.Trace("release: resolving base version from VERSION file")
-	baseVersion, _, versionFilePath, err := ResolveDockerBuildVersion(releaseRoot, releaseRoot)
+	baseVersion, _, versionFilePath, err := ResolveDockerBuildVersion(releaseRoot, releaseRoot, "")
 	if err != nil {
 		ctx.Trace("release: base version resolution failed: " + err.Error())
 		return releaseInputs{}, err
@@ -915,8 +1038,35 @@ func resolveReleaseVersion(baseVersion, commit string, mode ReleaseMode) string 
 	}
 }
 
+// releaseChartSearchRoot scopes chart discovery to the project's own devops
+// module when the project declares where that module lives, so a repository
+// migrating onto erun publishes the tenant module's charts and not the legacy
+// module's alongside them. A project that declares neither keeps the
+// whole-project walk.
+func releaseChartSearchRoot(projectRoot string) (string, error) {
+	k8sDir, ok, err := configuredK8sDir(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return k8sDir, nil
+	}
+	dockerDir, ok, err := configuredDockerDir(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return filepath.Dir(dockerDir), nil
+	}
+	return projectRoot, nil
+}
+
 func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []ReleaseFileUpdate, error) {
-	chartPaths, err := findReleaseChartPaths(projectRoot)
+	searchRoot, err := releaseChartSearchRoot(projectRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	chartPaths, err := findReleaseChartPaths(projectRoot, searchRoot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -939,8 +1089,44 @@ func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []R
 	return charts, updates, nil
 }
 
+// releaseDockerDir is where the release looks for the images it publishes: the
+// project's configured paths.docker when set, otherwise the conventional
+// <release root>/docker. The build side already honours the override, so
+// without this a project that relocates its build contexts resolved no images
+// to publish — the release built them, pushed nothing, and still tagged a
+// version whose verify-publication had nothing to re-resolve.
+func releaseDockerDir(projectRoot, releaseRoot string) (string, error) {
+	configured, ok, err := configuredDockerDir(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return configured, nil
+	}
+	return filepath.Join(releaseRoot, "docker"), nil
+}
+
+// sameVersionFile reports whether two VERSION paths are the same file. A module
+// that symlinks the project's version line shares it, so it belongs in the
+// release; only a module carrying its own VERSION is a separately pinned
+// component the release must leave alone.
+func sameVersionFile(a, b string) bool {
+	return versionFileIdentity(a) == versionFileIdentity(b)
+}
+
+func versionFileIdentity(path string) string {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return resolved
+	}
+	return cleaned
+}
+
 func discoverReleaseDockerImages(ctx Context, projectRoot, releaseRoot, versionFilePath, version string) ([]ReleaseDockerImageSpec, error) {
-	dockerDir := filepath.Join(releaseRoot, "docker")
+	dockerDir, err := releaseDockerDir(projectRoot, releaseRoot)
+	if err != nil {
+		return nil, err
+	}
 	buildContexts, err := DockerBuildContextsUnderDir(dockerDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -952,40 +1138,53 @@ func discoverReleaseDockerImages(ctx Context, projectRoot, releaseRoot, versionF
 		return nil, nil
 	}
 
-	registry, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, "")
+	registry, _, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, "")
 	if err != nil {
 		return nil, err
 	}
 
 	images := make([]ReleaseDockerImageSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
-		_, _, candidateVersionFilePath, err := ResolveDockerBuildVersion(buildContext.Dir, releaseRoot)
+		image, included, err := releaseDockerImageForContext(buildContext, releaseRoot, versionFilePath, version, registry)
 		if err != nil {
 			return nil, err
 		}
-		if filepath.Clean(candidateVersionFilePath) != filepath.Clean(versionFilePath) {
-			continue
+		if included {
+			images = append(images, image)
 		}
-
-		imageName := strings.TrimSpace(filepath.Base(buildContext.Dir))
-		tag := imageName + ":" + version
-		if strings.TrimSpace(registry) != "" {
-			tag = strings.TrimRight(registry, "/") + "/" + tag
-		}
-		contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot)
-		if err != nil {
-			return nil, err
-		}
-		images = append(images, ReleaseDockerImageSpec{
-			ContextDir:     contextDir,
-			DockerfilePath: buildContext.DockerfilePath,
-			ImageName:      imageName,
-			Registry:       registry,
-			Tag:            tag,
-			Version:        version,
-		})
 	}
 	return images, nil
+}
+
+// releaseDockerImageForContext resolves one build context into the image the
+// release publishes, or reports it as excluded when the context takes its
+// version from a different VERSION file than the one being released.
+func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, versionFilePath, version, registry string) (ReleaseDockerImageSpec, bool, error) {
+	_, _, candidateVersionFilePath, err := ResolveDockerBuildVersion(buildContext.Dir, releaseRoot, "")
+	if err != nil {
+		return ReleaseDockerImageSpec{}, false, err
+	}
+	if !sameVersionFile(candidateVersionFilePath, versionFilePath) {
+		return ReleaseDockerImageSpec{}, false, nil
+	}
+
+	imageName := strings.TrimSpace(filepath.Base(buildContext.Dir))
+	tag := imageName + ":" + version
+	if strings.TrimSpace(registry) != "" {
+		tag = strings.TrimRight(registry, "/") + "/" + tag
+	}
+	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot, "")
+	if err != nil {
+		return ReleaseDockerImageSpec{}, false, err
+	}
+	return ReleaseDockerImageSpec{
+		ContextDir:     contextDir,
+		DockerfilePath: buildContext.DockerfilePath,
+		ImageName:      imageName,
+		Registry:       registry,
+		Tag:            tag,
+		Version:        version,
+	}, true, nil
 }
 
 func discoverReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, error) {
@@ -1307,6 +1506,9 @@ func syncMarketplaceReleaseSHA(ctx Context, spec ReleasePackagingSyncSpec) (Rele
 	}
 	output, err := Command("git", "-C", spec.ProjectRoot, "rev-parse", ref).CombinedOutput()
 	if err != nil {
+		if detail := strings.TrimSpace(string(output)); detail != "" {
+			return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w: %s", ref, err, detail)
+		}
 		return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w", ref, err)
 	}
 	sha := strings.TrimSpace(string(output))
@@ -1502,7 +1704,7 @@ func newPushReleaseStage(projectRoot string, config ReleaseConfig, developBranch
 	}
 
 	return ReleaseStage{
-		Name: "push",
+		Name: releasePushStageName,
 		GitCommands: []ReleaseCommandSpec{
 			releaseGitCommand(projectRoot, args...),
 		},
@@ -1516,7 +1718,7 @@ func newPushCandidateReleaseStage(projectRoot string, config ReleaseConfig) Rele
 	}
 
 	return ReleaseStage{
-		Name: "push",
+		Name: releasePushStageName,
 		GitCommands: []ReleaseCommandSpec{
 			releaseGitCommand(projectRoot, "push", "--follow-tags", "origin", developBranch),
 		},
@@ -1569,13 +1771,13 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func findReleaseChartPaths(projectRoot string) ([]string, error) {
+func findReleaseChartPaths(projectRoot, searchRoot string) ([]string, error) {
 	ignored, err := loadReleaseDiscoveryIgnoreSet(projectRoot)
 	if err != nil {
 		return nil, err
 	}
 	matches := make([]string, 0, 4)
-	err = filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -1601,7 +1803,7 @@ func findReleaseChartPaths(projectRoot string) ([]string, error) {
 func resolveReleaseModuleRoot(projectRoot string) (string, error) {
 	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
 
-	if _, _, _, err := ResolveDockerBuildVersion(projectRoot, projectRoot); err == nil {
+	if _, _, _, err := ResolveDockerBuildVersion(projectRoot, projectRoot, ""); err == nil {
 		return projectRoot, nil
 	} else if !errors.Is(err, ErrVersionFileNotFound) {
 		return "", err

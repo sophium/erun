@@ -105,10 +105,49 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 
+	// The desktop pipes `erun doctor` into its shared Local shell, which never
+	// produces a PTY exit (see erun-ui/AGENTS.md § "Command Completion And
+	// State-Refresh Wiring"), so these are the only completion signal the
+	// desktop has: an activity-queue entry to show doctor running, and a
+	// recorded outcome the Manage dialog can display as the last run's result.
+	ctx.Info(fmt.Sprintf("==> Doctor %s/%s", result.Tenant, result.Environment))
+	if err := runDoctorForTarget(ctx, configStore, promptRunner, result, options); err != nil {
+		ctx.Info(fmt.Sprintf("==> Doctor failed %s/%s: %s", result.Tenant, result.Environment, err.Error()))
+		return err
+	}
+	ctx.Info(fmt.Sprintf("==> Doctor done %s/%s", result.Tenant, result.Environment))
+	return nil
+}
+
+// runDoctorForTarget reports in the order a broken environment needs: the
+// helm release and pod state first, because nothing about reading them
+// requires the runtime pod to be up, and that is exactly the state most worth
+// diagnosing when it is not. Every check after it that does need the pod
+// (host credentials, the docker-storage inspection) degrades to a "could not
+// read" report instead of aborting, so a down pod stops none of the checks
+// that do not need it.
+func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
 	}
+	if err := reportProjectConfigAndExecutionModes(ctx, result); err != nil {
+		return err
+	}
+	req := common.ShellLaunchParamsFromResult(result)
+	diagnosis, err := runDeployDiagnosis(ctx, req)
+	if err != nil {
+		return err
+	}
+	if err := reportRuntimeImageRegistryMismatch(ctx, result); err != nil {
+		return err
+	}
+	if err := reportRuntimeImageLineMismatch(ctx, result); err != nil {
+		return err
+	}
 	if err := reportHostCredentials(ctx, configStore, result); err != nil {
+		return err
+	}
+	if err := reportGitPushAccess(ctx, result); err != nil {
 		return err
 	}
 	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {
@@ -117,13 +156,38 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	if doctorOnlyRepairWorkspaceSync(options) {
 		return nil
 	}
-	return runDoctorPostSyncActions(ctx, promptRunner, result, options)
+	return runDoctorPostSyncActions(ctx, promptRunner, result, req, diagnosis, options)
+}
+
+// reportProjectConfigAndExecutionModes runs the two checks that need neither
+// req nor a deploy diagnosis, ahead of everything that does.
+func reportProjectConfigAndExecutionModes(ctx common.Context, result common.OpenResult) error {
+	if err := reportProjectConfigTracked(ctx, result); err != nil {
+		return err
+	}
+	return reportExecutionModes(ctx)
+}
+
+// reportProjectConfigTracked reports when this environment's project config
+// (.erun/config.yaml) exists but is excluded by .gitignore -- a silent
+// onboarding failure: it resolves fine on this machine and nowhere else,
+// because git never sees it, so the same build/deploy elsewhere falls back to
+// unconfigured defaults with no clue why. A detection failure (no git
+// repository, no config file at all) is not reported; only a config that
+// resolves yet is untracked is worth flagging here.
+func reportProjectConfigTracked(ctx common.Context, result common.OpenResult) error {
+	present, ignored, err := common.ProjectConfigGitIgnored(ctx, result.RepoPath)
+	if err != nil || !present || !ignored {
+		return nil
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "== Project config ==\n.erun/config.yaml exists but is excluded by .gitignore: it resolves on this machine only, and nowhere else. Fix: %s.\n\n", common.ProjectConfigGitIgnoreFix)
+	return err
 }
 
 // runDoctorPostSyncActions runs the JetBrains Gateway repair and then the
 // remaining cleanup actions, unless the JetBrains repair was the only action
 // requested. It is the tail of runDoctorCommand's diagnosis sequence.
-func runDoctorPostSyncActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
+func runDoctorPostSyncActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, req common.ShellLaunchParams, diagnosis common.DeployDiagnosisResult, options doctorOptions) error {
 	repairedJetBrains, err := runSelectedJetBrainsGatewayRepair(ctx, promptRunner, result, options)
 	if err != nil {
 		return err
@@ -131,7 +195,7 @@ func runDoctorPostSyncActions(ctx common.Context, promptRunner PromptRunner, res
 	if repairedJetBrains && doctorOnlySelectedJetBrainsGatewayRepair(options) {
 		return nil
 	}
-	return runDoctorCleanupActions(ctx, promptRunner, result, options)
+	return runDoctorCleanupActions(ctx, promptRunner, result, req, diagnosis, options)
 }
 
 // runDoctorConfigRepairs runs the host-side config recoveries before
@@ -189,18 +253,20 @@ func validateDoctorRecoveryFlags(options doctorOptions) error {
 	return nil
 }
 
-func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
-	req := common.ShellLaunchParamsFromResult(result)
-	diagnosis, err := runDeployDiagnosis(ctx, req)
-	if err != nil {
-		return err
-	}
+// runDoctorCleanupActions runs the mutating helm-level recovery (if the
+// diagnosis recommends one and the operator confirms it), then the
+// docker-storage inspection and any requested prune actions. The inspection
+// and the prune actions all exec into the runtime pod's dind container, so a
+// pod that cannot be reached degrades this whole tail to a single "could not
+// read" report rather than one of them aborting with a raw exec error —
+// there is nothing left to run here that does not need the same pod.
+func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, req common.ShellLaunchParams, diagnosis common.DeployDiagnosisResult, options doctorOptions) error {
 	if err := runDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis); err != nil {
 		return err
 	}
 	inspection, err := common.RunDoctorInspection(ctx, nil, req)
 	if err != nil {
-		return err
+		return reportDoctorInspectionUnreachable(ctx, options, err)
 	}
 	if !ctx.DryRun {
 		if err := writeDoctorCommandOutput(ctx, inspection.Stdout, inspection.Stderr); err != nil {
@@ -222,6 +288,21 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 		}
 	}
 	return nil
+}
+
+// reportDoctorInspectionUnreachable degrades the docker-storage inspection
+// failure to a report and, when the operator requested a prune action that
+// execs into the same unreachable dind container, says plainly that it was
+// skipped rather than attempting it and failing with the same cause again.
+func reportDoctorInspectionUnreachable(ctx common.Context, options doctorOptions, err error) error {
+	if repErr := reportPodUnreachable(ctx, "Docker storage", err); repErr != nil {
+		return repErr
+	}
+	if !anyDoctorActionRequested(options.pruneImages, options.pruneBuildCache, options.pruneContainers) {
+		return nil
+	}
+	_, ferr := fmt.Fprintln(ctx.Stdout, "Skipping the requested prune action(s) for the same reason.")
+	return ferr
 }
 
 func writeNoDoctorActionsSelected(ctx common.Context) error {
@@ -265,6 +346,9 @@ func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req
 		}
 		output, runErr := common.RunDeployRecovery(ctx, req, action)
 		if runErr != nil {
+			if detail := strings.TrimSpace(output); detail != "" {
+				return fmt.Errorf("%w: %s", runErr, detail)
+			}
 			return runErr
 		}
 		if !ctx.DryRun {
@@ -452,7 +536,7 @@ func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options d
 	// fundamental (a wrong type mis-drives everything downstream), and gating it
 	// here leaves plain in-pod `erun doctor` output byte-for-byte unchanged.
 	if options.syncConfig {
-		return runRuntimeConfigSync(ctx, promptRunner, options, resolveRuntimeConfigHome(homeDir))
+		return runRuntimeConfigSync(ctx, promptRunner, options, common.ResolveRuntimeConfigHome(homeDir))
 	}
 	inspection, err := common.InspectRemoteInit(homeDir, os.Getenv)
 	if err != nil {

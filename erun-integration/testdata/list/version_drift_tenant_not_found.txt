@@ -1,0 +1,2 @@
+audit: erun list --tenant missing
+tenant "missing" not found

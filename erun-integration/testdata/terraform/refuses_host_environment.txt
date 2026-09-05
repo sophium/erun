@@ -1,0 +1,2 @@
+audit: erun terraform init --dry-run team dev
+terraform team/dev: dev is a host environment — it has no pod and no cluster to run terraform against

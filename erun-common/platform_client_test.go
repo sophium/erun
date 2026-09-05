@@ -1,0 +1,577 @@
+package eruncommon
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+func staticToken(token string) PlatformTokenMinter {
+	return func() (string, error) { return token, nil }
+}
+
+func TestPlatformClientPlatformDoesNotAuthenticate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Fatal("GET /v1/platform must not send a bearer token")
+		}
+		_ = json.NewEncoder(w).Encode(PlatformInfo{Issuer: "https://auth.example.test", CLIClientID: "cli-1"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, nil)
+	info, err := client.Platform(context.Background())
+	if err != nil {
+		t.Fatalf("Platform: %v", err)
+	}
+	if info.Issuer != "https://auth.example.test" || info.CLIClientID != "cli-1" {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+func TestPlatformClientAuthenticatedCallSendsMintedBearer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer token-1" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(PlatformWhoami{TenantID: "tenant-1", UserID: "user-1"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	whoami, err := client.Whoami(context.Background())
+	if err != nil {
+		t.Fatalf("Whoami: %v", err)
+	}
+	if whoami.TenantID != "tenant-1" || whoami.UserID != "user-1" {
+		t.Fatalf("whoami = %+v", whoami)
+	}
+}
+
+// TestPlatformClientWithMCPToolSendsAuditHeader pins the client side of the
+// AuditEventTypeMCP fix (erun#763): erun-backend-api can only classify a call
+// as MCP-driven if the request actually carries this header, so a
+// regression here would silently widen the dead-audit-type gap again.
+func TestPlatformClientWithMCPToolSendsAuditHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(MCPToolAuditHeader); got != "review_show" {
+			t.Fatalf("%s = %q, want %q", MCPToolAuditHeader, got, "review_show")
+		}
+		_ = json.NewEncoder(w).Encode(PlatformWhoami{TenantID: "tenant-1"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1")).WithMCPTool("review_show")
+	if _, err := client.Whoami(context.Background()); err != nil {
+		t.Fatalf("Whoami: %v", err)
+	}
+}
+
+// TestPlatformClientWithoutMCPToolSendsNoAuditHeader guards the CLI/library
+// default: a caller that never opts in must not send the header at all, so
+// erun-backend-api keeps classifying it as a plain API call.
+func TestPlatformClientWithoutMCPToolSendsNoAuditHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(MCPToolAuditHeader); got != "" {
+			t.Fatalf("%s = %q, want empty", MCPToolAuditHeader, got)
+		}
+		_ = json.NewEncoder(w).Encode(PlatformWhoami{TenantID: "tenant-1"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	if _, err := client.Whoami(context.Background()); err != nil {
+		t.Fatalf("Whoami: %v", err)
+	}
+}
+
+func TestPlatformClientAuthenticatedCallWithoutMinterFailsClearly(t *testing.T) {
+	client := NewPlatformClient("https://api.example.test", nil)
+	if _, err := client.Whoami(context.Background()); err == nil {
+		t.Fatal("expected an error when no token minter is configured")
+	} else if !strings.Contains(err.Error(), "token minter") {
+		t.Fatalf("error = %v, want to mention the missing token minter", err)
+	}
+}
+
+func TestPlatformClientMintErrorPropagates(t *testing.T) {
+	client := NewPlatformClient("https://api.example.test", func() (string, error) {
+		return "", errors.New("refresh failed")
+	})
+	if _, err := client.Whoami(context.Background()); err == nil || !strings.Contains(err.Error(), "refresh failed") {
+		t.Fatalf("error = %v, want to mention the mint failure", err)
+	}
+}
+
+func TestPlatformClientCreateUserSendsJSONBodyAndReturnsCreated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/users" {
+			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		var body PlatformCreateUserParams
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.Username != "alice" || body.TenantID != "tenant-b" {
+			t.Fatalf("body = %+v", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(PlatformUser{UserID: "user-1", TenantID: "tenant-b", Username: "alice"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	user, err := client.CreateUser(context.Background(), PlatformCreateUserParams{Username: "alice", TenantID: "tenant-b"})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if user.UserID != "user-1" || user.Username != "alice" {
+		t.Fatalf("user = %+v", user)
+	}
+}
+
+// TestPlatformClientCreateUserSendsRoleIDs is the cross-tenant recovery path:
+// an operations caller enrolls a tenant's administrator directly, so the roles
+// have to reach the platform on the enrollment itself rather than needing a
+// later grant from inside a tenant that may have nobody able to make one.
+func TestPlatformClientCreateUserSendsRoleIDs(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(PlatformUser{UserID: "user-1", TenantID: "tenant-b", Username: "admin"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	if _, err := client.CreateUser(context.Background(), PlatformCreateUserParams{
+		Username: "admin", TenantID: "tenant-b", RoleIDs: []string{"role-admin"},
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	roles, ok := raw["roleIds"].([]any)
+	if !ok || len(roles) != 1 || roles[0] != "role-admin" {
+		t.Fatalf("body = %+v, want roleIds=[role-admin]", raw)
+	}
+}
+
+// An empty role list must stay off the wire entirely, so the platform applies
+// its own default rather than seeing an explicit "grant nothing".
+func TestPlatformClientCreateUserOmitsEmptyRoleIDs(t *testing.T) {
+	var raw map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(PlatformUser{UserID: "user-1", Username: "alice"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	if _, err := client.CreateUser(context.Background(), PlatformCreateUserParams{Username: "alice"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, present := raw["roleIds"]; present {
+		t.Fatalf("body = %+v, want no roleIds key", raw)
+	}
+}
+
+func TestPlatformClientListUsersEncodesTenantIDQueryParam(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("tenantId") != "tenant-b" {
+			t.Fatalf("query = %s", r.URL.RawQuery)
+		}
+		_ = json.NewEncoder(w).Encode([]PlatformUser{{UserID: "u1"}})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	users, err := client.ListUsers(context.Background(), PlatformListUsersParams{TenantID: "tenant-b"})
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(users) != 1 || users[0].UserID != "u1" {
+		t.Fatalf("users = %+v", users)
+	}
+}
+
+func TestPlatformClientGetEnvironmentEscapesPathSegment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/v1/environments/env%201" {
+			t.Errorf("escaped path = %q, want /v1/environments/env%%201", r.URL.EscapedPath())
+		}
+		_ = json.NewEncoder(w).Encode(PlatformEnvironment{EnvironmentID: "env 1"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	if _, err := client.GetEnvironment(context.Background(), "env 1"); err != nil {
+		t.Fatalf("GetEnvironment: %v", err)
+	}
+}
+
+func TestPlatformClientDeployEnvironment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/environments/env-1/deploy" || r.Method != http.MethodPost {
+			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		var body PlatformDeployEnvironmentParams
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Version != "1.2.3" {
+			t.Fatalf("body = %+v", body)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(PlatformEnvironment{EnvironmentID: "env-1", Status: "provisioning"})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	environment, err := client.DeployEnvironment(context.Background(), "env-1", PlatformDeployEnvironmentParams{Version: "1.2.3"})
+	if err != nil {
+		t.Fatalf("DeployEnvironment: %v", err)
+	}
+	if environment.Status != "provisioning" {
+		t.Fatalf("environment = %+v", environment)
+	}
+}
+
+func TestPlatformClientCreateContextPreviewReturnsPlanOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body PlatformCreateContextParams
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if !body.Preview {
+			t.Fatal("expected preview=true in the request body")
+		}
+		_ = json.NewEncoder(w).Encode(PlatformCreateContextResult{Plan: []string{"step 1", "step 2"}})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	result, err := client.CreateContext(context.Background(), PlatformCreateContextParams{
+		Name: "ctx-1", CloudProviderAlias: "dev+123@aws", Region: "us-east-1", Preview: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateContext: %v", err)
+	}
+	if result.Context != nil || len(result.Plan) != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestPlatformClientProvision(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/provision" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(PlatformProvisionResult{Plan: []string{"a", "b"}, QuotaOk: true})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	result, err := client.Provision(context.Background(), PlatformProvisionParams{
+		Environment: PlatformProvisionEnvironment{Name: "prod", Type: "runtime"},
+	})
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if !result.QuotaOk || len(result.Plan) != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestPlatformClientStatusErrorMapping(t *testing.T) {
+	cases := []struct {
+		status int
+		want   error
+	}{
+		{http.StatusUnauthorized, ErrPlatformUnauthorized},
+		{http.StatusForbidden, ErrPlatformForbidden},
+		{http.StatusNotFound, ErrPlatformNotFound},
+		{http.StatusConflict, ErrPlatformConflict},
+		{http.StatusNotImplemented, ErrPlatformNotImplemented},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "detail: "+http.StatusText(tc.status), tc.status)
+			}))
+			defer srv.Close()
+
+			client := NewPlatformClient(srv.URL, staticToken("token-1"))
+			_, err := client.Whoami(context.Background())
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want errors.Is match for %v", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), "detail: "+http.StatusText(tc.status)) {
+				t.Fatalf("err %v does not carry the server's plain-text detail", err)
+			}
+		})
+	}
+}
+
+func TestPlatformClientUnrecognizedStatusIsAGenericError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	_, err := client.Whoami(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, sentinel := range []error{ErrPlatformUnauthorized, ErrPlatformForbidden, ErrPlatformNotFound, ErrPlatformConflict, ErrPlatformNotImplemented} {
+		if errors.Is(err, sentinel) {
+			t.Fatalf("err = %v matched sentinel %v, want no match for a 500", err, sentinel)
+		}
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("err = %v, want to carry the server's message", err)
+	}
+}
+
+func TestPlatformClientEmptyBodyResponseDecodesToZeroValue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	whoami, err := client.Whoami(context.Background())
+	if err != nil {
+		t.Fatalf("Whoami with empty body: %v", err)
+	}
+	if whoami.TenantID != "" || whoami.UserID != "" || len(whoami.Roles) != 0 {
+		t.Fatalf("whoami = %+v, want zero value", whoami)
+	}
+}
+
+func TestPlatformClientSubmitInviteRequestSendsBodyAndReturnsAccepted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/invite-requests" {
+			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token-1" {
+			t.Fatalf("Authorization = %q, want a bearer even though the caller has no tenant yet", got)
+		}
+		var body PlatformSubmitInviteRequestParams
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if body.Kind != PlatformInviteRequestKindJoinTenant || body.TenantName != "acme" {
+			t.Fatalf("body = %+v", body)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(PlatformInviteRequest{
+			InviteRequestID: "req-1", Kind: PlatformInviteRequestKindJoinTenant,
+			TenantName: "acme", Status: PlatformInviteRequestStatusPending,
+		})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	request, err := client.SubmitInviteRequest(context.Background(), PlatformSubmitInviteRequestParams{
+		Kind: PlatformInviteRequestKindJoinTenant, TenantName: "acme",
+	})
+	if err != nil {
+		t.Fatalf("SubmitInviteRequest: %v", err)
+	}
+	if request.InviteRequestID != "req-1" || request.Status != PlatformInviteRequestStatusPending {
+		t.Fatalf("request = %+v", request)
+	}
+}
+
+func TestPlatformClientMyInviteRequestNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/invite-requests/mine" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		http.Error(w, "no invite request found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	_, err := client.MyInviteRequest(context.Background())
+	if !errors.Is(err, ErrPlatformNotFound) {
+		t.Fatalf("err = %v, want ErrPlatformNotFound", err)
+	}
+}
+
+func TestPlatformClientListInviteRequestsEncodesFilters(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("status") != "PENDING" || r.URL.Query().Get("kind") != PlatformInviteRequestKindCreateTenant {
+			t.Fatalf("query = %s", r.URL.RawQuery)
+		}
+		_ = json.NewEncoder(w).Encode([]PlatformInviteRequest{{InviteRequestID: "req-1"}})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	requests, err := client.ListInviteRequests(context.Background(), PlatformListInviteRequestsParams{
+		Status: PlatformInviteRequestStatusPending, Kind: PlatformInviteRequestKindCreateTenant,
+	})
+	if err != nil {
+		t.Fatalf("ListInviteRequests: %v", err)
+	}
+	if len(requests) != 1 || requests[0].InviteRequestID != "req-1" {
+		t.Fatalf("requests = %+v", requests)
+	}
+}
+
+func TestPlatformClientApproveInviteRequestConflict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/invite-requests/req-1/approve" || r.Method != http.MethodPost {
+			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		http.Error(w, "invite request has already been decided", http.StatusConflict)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	_, err := client.ApproveInviteRequest(context.Background(), "req-1")
+	if !errors.Is(err, ErrPlatformConflict) {
+		t.Fatalf("err = %v, want ErrPlatformConflict", err)
+	}
+}
+
+func TestPlatformClientDeclineInviteRequestSendsReason(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/invite-requests/req-1/decline" || r.Method != http.MethodPost {
+			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		var body PlatformDeclineInviteRequestParams
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Reason != "tenant name already in use" {
+			t.Fatalf("body = %+v", body)
+		}
+		_ = json.NewEncoder(w).Encode(PlatformInviteRequest{
+			InviteRequestID: "req-1", Status: PlatformInviteRequestStatusDeclined, DeclineReason: body.Reason,
+		})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	request, err := client.DeclineInviteRequest(context.Background(), "req-1", PlatformDeclineInviteRequestParams{
+		Reason: "tenant name already in use",
+	})
+	if err != nil {
+		t.Fatalf("DeclineInviteRequest: %v", err)
+	}
+	if request.Status != PlatformInviteRequestStatusDeclined || request.DeclineReason != "tenant name already in use" {
+		t.Fatalf("request = %+v", request)
+	}
+}
+
+func TestPlatformClientSubmitInviteRequestRateLimitedExposesRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "42")
+		http.Error(w, "too many requests, try again later", http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	_, err := client.SubmitInviteRequest(context.Background(), PlatformSubmitInviteRequestParams{
+		Kind: PlatformInviteRequestKindJoinTenant, TenantName: "acme",
+	})
+	if !errors.Is(err, ErrPlatformRateLimited) {
+		t.Fatalf("err = %v, want ErrPlatformRateLimited", err)
+	}
+	var statusErr *PlatformStatusError
+	if !errors.As(err, &statusErr) {
+		t.Fatalf("err = %v, want *PlatformStatusError", err)
+	}
+	delay, ok := statusErr.RetryAfter()
+	if !ok || delay != 42*time.Second {
+		t.Fatalf("RetryAfter() = %v, %v, want 42s, true", delay, ok)
+	}
+}
+
+func TestPlatformClientTrimsTrailingSlashFromBaseURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/platform" {
+			t.Fatalf("path = %q, want exactly one leading slash", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(PlatformInfo{})
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL+"/", nil)
+	if _, err := client.Platform(context.Background()); err != nil {
+		t.Fatalf("Platform: %v", err)
+	}
+}
+
+// TestPlatformAuthErrorCodeDistinguishesTheThreeReasonsBehindA401 is the
+// regression for a caller that could only see ErrPlatformUnauthorized: the
+// platform's {code, message} envelope (erun-backend-api's auth.go) reports
+// TENANT_UNRESOLVED, NOT_ENROLLED, and RESOLUTION_FAILED as three different
+// situations behind the same HTTP status, and a caller must be able to tell
+// them apart.
+func TestPlatformAuthErrorCodeDistinguishesTheThreeReasonsBehindA401(t *testing.T) {
+	for _, code := range []string{"TENANT_UNRESOLVED", "NOT_ENROLLED", "RESOLUTION_FAILED"} {
+		t.Run(code, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "message": "denied"})
+			}))
+			defer srv.Close()
+
+			client := NewPlatformClient(srv.URL, staticToken("token-1"))
+			_, err := client.Whoami(context.Background())
+			if !errors.Is(err, ErrPlatformUnauthorized) {
+				t.Fatalf("err = %v, want ErrPlatformUnauthorized", err)
+			}
+			if got := PlatformAuthErrorCode(err); got != code {
+				t.Fatalf("PlatformAuthErrorCode() = %q, want %q", got, code)
+			}
+		})
+	}
+}
+
+// TestPlatformAuthErrorCodeUnclassifiedReturnsEmpty confirms an older
+// platform's plain-text 401 (no {code} envelope at all) reports "" rather
+// than guessing -- callers must treat "" the same as an unclassified 401.
+func TestPlatformAuthErrorCodeUnclassifiedReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	_, err := client.Whoami(context.Background())
+	if !errors.Is(err, ErrPlatformUnauthorized) {
+		t.Fatalf("err = %v, want ErrPlatformUnauthorized", err)
+	}
+	if got := PlatformAuthErrorCode(err); got != "" {
+		t.Fatalf("PlatformAuthErrorCode() = %q, want empty for an unclassified 401", got)
+	}
+}
+
+// TestPlatformAuthErrorCodeNonAuthErrorReturnsEmpty confirms the helper never
+// misreports a non-401 (or non-platform) error as one of the auth codes.
+func TestPlatformAuthErrorCodeNonAuthErrorReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	client := NewPlatformClient(srv.URL, staticToken("token-1"))
+	_, err := client.Whoami(context.Background())
+	if !errors.Is(err, ErrPlatformForbidden) {
+		t.Fatalf("err = %v, want ErrPlatformForbidden", err)
+	}
+	if got := PlatformAuthErrorCode(err); got != "" {
+		t.Fatalf("PlatformAuthErrorCode() = %q, want empty for a non-401 error", got)
+	}
+	if got := PlatformAuthErrorCode(nil); got != "" {
+		t.Fatalf("PlatformAuthErrorCode(nil) = %q, want empty", got)
+	}
+}

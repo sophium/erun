@@ -78,6 +78,7 @@ func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
 		Repository: strings.TrimSpace(c.Repository),
 		BaseURL:    strings.TrimSpace(c.BaseURL),
 		TokenURL:   strings.TrimSpace(c.TokenURL),
+		Insecure:   c.Insecure,
 	}
 	if resolved.Namespace == "" {
 		resolved.Namespace = DefaultContainerRegistry
@@ -86,9 +87,21 @@ func (c RuntimeRegistryConfig) Resolved() RuntimeRegistryConfig {
 		resolved.Repository = DefaultRuntimeImageName
 	}
 	if resolved.BaseURL == "" {
-		if _, ok := ghcrOwnerFromNamespace(resolved.Namespace); ok {
+		switch host, _, isRegistryHost := ociRegistryHostFromNamespace(resolved.Namespace); {
+		case namespaceIsGHCR(resolved.Namespace):
 			resolved.BaseURL = defaultGHCRRegistryBaseURL
-		} else {
+		case isRegistryHost:
+			// A namespace that names its own registry host is served by that host,
+			// not by Docker Hub; defaulting to the Hub sent the listing to a
+			// repository named after the host and answered 404. That host may speak
+			// plain HTTP only (an insecure in-cluster registry), so honor Insecure
+			// rather than always assuming TLS.
+			scheme := "https://"
+			if resolved.Insecure {
+				scheme = "http://"
+			}
+			resolved.BaseURL = scheme + host
+		default:
 			resolved.BaseURL = defaultDockerHubRegistryBaseURL
 		}
 	}
@@ -123,6 +136,9 @@ func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved 
 	client := &http.Client{Timeout: 5 * time.Second}
 	if owner, ok := ghcrOwnerFromNamespace(resolved.Namespace); ok {
 		return resolveGHCRRuntimeRegistryVersionsAt(ctx, client, owner, resolved.Repository, resolved.BaseURL, resolved.TokenURL)
+	}
+	if host, prefix, ok := ociRegistryHostFromNamespace(resolved.Namespace); ok {
+		return resolveOCIRuntimeRegistryVersionsAt(ctx, client, host, prefix, resolved.Repository, resolved.BaseURL)
 	}
 	return resolveDockerHubRuntimeRegistryVersionsAt(ctx, client, resolved.Namespace, resolved.Repository, resolved.BaseURL)
 }
@@ -172,6 +188,11 @@ func ResolveRuntimeImageRegistryVersions(ctx context.Context, namespace, reposit
 		Namespace:  namespace,
 		Repository: repository,
 	})
+}
+
+func namespaceIsGHCR(namespace string) bool {
+	_, ok := ghcrOwnerFromNamespace(namespace)
+	return ok
 }
 
 func ghcrOwnerFromNamespace(namespace string) (string, bool) {

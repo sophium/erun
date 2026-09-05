@@ -1,0 +1,74 @@
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+release: branch = main, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = stable
+release: develop branch "develop" exists = false
+<VERSION>
+audit: erun release
+==> Releasing <VERSION>
+release: branch=main mode=stable version=<VERSION>
+next version: <VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
+release: worktree clean = true
+stage: sync-remote
+Current branch main is up to date.
+stage: release
+[main <SHORTSHA>] [skip ci] release <VERSION>
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+release: origin/main has not moved since sync-remote
+release: docker root free disk space is not observable from this process; skipping the headroom check
+stage: publish
+fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
+fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
+==> Publishing api <VERSION> to oci://ghcr.io/sophium/charts
+==> Verified published chart api <VERSION>
+==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
+==> Verified published chart base <VERSION>
+stage: verify-publication
+==> Verified published image ghcr.io/sophium/api:<VERSION>
+==> Verified published image ghcr.io/sophium/base:<VERSION>
+stage: post-release-version-bump
+[main <SHORTSHA>] [skip ci] prepare <VERSION>
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+stage: push
+To <TMP>
+ * [new tag]         <VERSION> -> <VERSION>
+ ! [rejected]        main -> main (fetch first)
+error: failed to push some refs to '<TMP>'
+release: push rejected; origin/main moved during the release, rebasing onto it and retrying (1/2)
+release: rebase moved the commit tag <VERSION> named; re-pointing it onto <HEX> and force-pushing
+Updated tag '<VERSION>' (was <SHORTSHA>)
+To <TMP>
+ + <SHORTSHA>...<SHORTSHA> <VERSION> -> <VERSION> (forced update)
+To <TMP>
+   <SHORTSHA>..<SHORTSHA>  main -> main
+release version: <VERSION>
+==> Released <VERSION> in <ELAPSED>
+step timing (ordered by duration):
+  release [<ELAPSED>]
+    post-release-version-bump [<ELAPSED>]
+    publish [<ELAPSED>]
+      api (cache hit) [<ELAPSED>]
+        linux/amd64 (cache hit) [<ELAPSED>]
+        linux/arm64 (cache hit) [<ELAPSED>]
+      base (cache hit) [<ELAPSED>]
+        linux/amd64 (cache hit) [<ELAPSED>]
+        linux/arm64 (cache hit) [<ELAPSED>]
+      chart api [<ELAPSED>]
+      chart base [<ELAPSED>]
+    push [<ELAPSED>]
+    release [<ELAPSED>]
+    sync-remote [<ELAPSED>]
+    verify-publication [<ELAPSED>]
+timing record written to <TMP>

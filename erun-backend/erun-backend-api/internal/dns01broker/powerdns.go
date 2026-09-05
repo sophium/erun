@@ -76,6 +76,50 @@ func (w *PowerDNSWriter) CleanUp(fqdn, value string) error {
 	return w.update(fqdn, value, false)
 }
 
+// wildcardTTL is the TTL for a tenant-set environment wildcard A record,
+// matching erun-common's own defaultExposeWildcardTTL so a record written
+// through this route is indistinguishable from one `erun expose` wrote
+// directly via pdnsutil.
+const wildcardTTL = 60
+
+// UpsertA replaces (not merges) the A RRset at fqdn with a single record
+// pointing at value, mirroring `pdnsutil replace-rrset`'s semantics: any
+// existing A records at that name are cleared first, so re-pointing an
+// environment at a new IP never leaves the old one alongside it.
+func (w *PowerDNSWriter) UpsertA(fqdn, value string) error {
+	// RemoveRRset and Insert each mutate their RR's header in place (class,
+	// ttl, rdlength), so the remove and the insert need their own RR
+	// instances -- sharing one would let whichever mutation runs last win for
+	// both entries at pack time.
+	removeRR, err := dns.NewRR(fmt.Sprintf("%s %d IN A %s", dns.Fqdn(fqdn), wildcardTTL, value))
+	if err != nil {
+		return fmt.Errorf("build A record: %w", err)
+	}
+	insertRR, err := dns.NewRR(fmt.Sprintf("%s %d IN A %s", dns.Fqdn(fqdn), wildcardTTL, value))
+	if err != nil {
+		return fmt.Errorf("build A record: %w", err)
+	}
+	msg := new(dns.Msg)
+	msg.SetUpdate(w.zone)
+	msg.RemoveRRset([]dns.RR{removeRR})
+	msg.Insert([]dns.RR{insertRR})
+	return w.exchange(msg)
+}
+
+// DeleteA removes the entire A RRset at fqdn, symmetric with UpsertA. The
+// address is a placeholder: RemoveRRset zeroes the RR's rdlength before pack,
+// so its value never reaches the wire.
+func (w *PowerDNSWriter) DeleteA(fqdn string) error {
+	rr, err := dns.NewRR(fmt.Sprintf("%s 0 IN A 0.0.0.0", dns.Fqdn(fqdn)))
+	if err != nil {
+		return fmt.Errorf("build A rrset marker: %w", err)
+	}
+	msg := new(dns.Msg)
+	msg.SetUpdate(w.zone)
+	msg.RemoveRRset([]dns.RR{rr})
+	return w.exchange(msg)
+}
+
 func (w *PowerDNSWriter) update(fqdn, value string, insert bool) error {
 	rr, err := dns.NewRR(fmt.Sprintf("%s %d IN TXT %q", dns.Fqdn(fqdn), challengeTTL, value))
 	if err != nil {
@@ -88,6 +132,10 @@ func (w *PowerDNSWriter) update(fqdn, value string, insert bool) error {
 	} else {
 		msg.Remove([]dns.RR{rr})
 	}
+	return w.exchange(msg)
+}
+
+func (w *PowerDNSWriter) exchange(msg *dns.Msg) error {
 	msg.SetTsig(w.tsigKeyName, w.tsigAlgo, 300, time.Now().Unix())
 	reply, _, err := w.client.Exchange(msg, w.nameserver)
 	if err != nil {

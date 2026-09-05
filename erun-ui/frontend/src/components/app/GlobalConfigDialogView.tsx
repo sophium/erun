@@ -1,3 +1,14 @@
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  SelectField,
+  type SelectFieldOption,
+} from 'erun-kit';
 import { LoaderCircle, Save } from 'lucide-react';
 import * as React from 'react';
 
@@ -8,23 +19,13 @@ import {
   updateGlobalConfig,
 } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { useController } from '@/app/useController';
 import { CloudAliasesSection } from '@/components/app/GlobalConfigDialog.CloudAliases';
 import { CloudContextsSection } from '@/components/app/GlobalConfigDialog.CloudContexts';
 import { NOT_CONFIGURED_VALUE, optionValues } from '@/components/app/GlobalConfigDialog.helpers';
 import { DialogError } from '@/components/app/GlobalConfigDialog.shared';
-import { SelectField, type SelectFieldOption } from '@/components/app/SelectField';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
@@ -41,30 +42,40 @@ export function GlobalConfigDialogView(): React.ReactElement {
       }}
     >
       <DialogContent
-        className="sm:max-w-xl"
+        // Bound the panel to the viewport and let the body scroll, same shape as
+        // EnvironmentDialogView — cloud aliases and cloud contexts grow this
+        // dialog's content without limit, so a plain centered grid overflows off
+        // both edges with nothing scrollable.
+        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           controller.focusTerminalSoon();
         }}
       >
         <form
-          className="grid gap-4"
+          className="flex min-h-0 flex-1 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitGlobalConfig()).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             });
           }}
         >
-          <DialogHeader>
-            <DialogTitle>ERun settings</DialogTitle>
-            <DialogDescription>
-              Default tenant, cloud aliases, and cloud contexts shared across the app.
-            </DialogDescription>
-          </DialogHeader>
-          <GlobalConfigBody />
-          <DialogError error={dialog.error} />
-          <GlobalConfigFooter dialog={dialog} />
+          <div className="shrink-0 px-6 pt-6 pb-4">
+            <DialogHeader>
+              <DialogTitle>ERun settings</DialogTitle>
+              <DialogDescription>
+                Default tenant, cloud aliases, and cloud contexts shared across the app.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-1">
+            <GlobalConfigBody />
+            <DialogError error={dialog.error} />
+          </div>
+          <div className="shrink-0 border-t px-6 pt-4 pb-6">
+            <GlobalConfigFooter dialog={dialog} />
+          </div>
         </form>
       </DialogContent>
     </Dialog>

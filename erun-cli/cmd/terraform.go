@@ -95,14 +95,38 @@ func runTerraformCommand(ctx common.Context, store common.TerraformStore, findPr
 		Environment: environment,
 		Operation:   op,
 		ProjectRoot: projectRoot,
-	}, store, terraformConfirmer(op, confirmEnvironment))
+	}, store, terraformConfirmer(op, confirmEnvironment), nil)
 	if err != nil {
 		return err
 	}
-	if !ctx.DryRun {
-		_, _ = fmt.Fprintf(ctx.Stdout, "terraform %s complete in %s\n", result.Operation, result.Directory)
+	return writeTerraformCommandOutput(ctx, result)
+}
+
+// writeTerraformCommandOutput prints the dispatched run's captured output (a
+// dispatch has no local Directory to print progress against) and the final
+// status line, non-dry-run only — dry-run already traced the full plan.
+func writeTerraformCommandOutput(ctx common.Context, result common.TerraformResult) error {
+	stdout := strings.TrimSpace(result.Stdout)
+	stderr := strings.TrimSpace(result.Stderr)
+	if stdout != "" {
+		if _, err := fmt.Fprintln(ctx.Stdout, stdout); err != nil {
+			return err
+		}
 	}
-	return nil
+	if stderr != "" {
+		if _, err := fmt.Fprintln(ctx.Stderr, stderr); err != nil {
+			return err
+		}
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	if result.Dispatched {
+		_, err := fmt.Fprintf(ctx.Stdout, "terraform %s complete (dispatched into %s/%s's own runtime pod)\n", result.Operation, result.Tenant, result.Environment)
+		return err
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "terraform %s complete in %s\n", result.Operation, result.Directory)
+	return err
 }
 
 func terraformArgOrFlag(flag string, args []string, index int) string {

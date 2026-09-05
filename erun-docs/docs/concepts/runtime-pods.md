@@ -61,10 +61,11 @@ The developer containers live in one pod, not two:
 ## Stopping and starting an environment
 
 An environment is not always running. Most environments are idle most of the time, and an idle one
-still reserves everything it was given — the runtime container's CPU and memory limits, plus
-whatever `erun-dind` is really consuming, which has no limit at all. [`erun stop`](/cli/stop) scales
-the runtime to zero so all of it goes back to the node; **opening the environment starts it again**,
-and [`erun open`](/cli/open) waits for the pod before it forwards anything.
+still reserves everything it was given — the runtime container's CPU and memory limits, plus the
+`erun-dind` sidecar's own limits (sized independently — see [`erun resize`](/cli/resize)).
+[`erun stop`](/cli/stop) scales the runtime to zero so all of it goes back to the node; **opening the
+environment starts it again**, and [`erun open`](/cli/open) waits for the pod before it forwards
+anything.
 
 Both PVCs survive a stop, so starting is a pod start rather than a cold rebuild: the workspace,
 the agent config, the outputs directory, the image store and the build cache are all still there.
@@ -93,9 +94,43 @@ Two cases the number alone cannot explain, so the tab spells them out:
   which the figure rises.
 - **Some usage is not counted.** The reading prefers a container's declared limits, falls back to
   its measured usage when the cluster reports metrics, and says how many containers it could not
-  account for at all when neither is available. The `erun-dind` sidecar declares no limits, so on a
-  cluster without metrics its real consumption — Testcontainers, the build cache — is invisible to
-  the reading and the tab warns that the true usage is higher than shown.
+  account for at all when neither is available. The runtime pod's own two containers (`erun-devops`,
+  `erun-dind`) always declare limits — [`erun resize`](/cli/resize) is what moves them — so this gap
+  is about the application services deployed alongside them: any of those that declares no limit of
+  its own is invisible to the reading on a cluster without metrics, and the tab warns that the true
+  usage is higher than shown.
+
+That is the node's answer to "how full is the machine". The environment's own answer to "how close
+am I to my own limits" is a different reading — CPU against its own quota, memory current and peak
+against its own cgroup limit with a real OOM-kill count, disk on the workspace mount — and it needs
+no cluster metrics add-on at all, so it works on the same metrics-server-less clusters where the
+node reading above falls back to declared limits. **This environment's usage**, directly below the
+resource sliders on the Runtime tab, is the direct route to it; [`erun usage`](/cli/usage) gives the
+same reading from a terminal or an MCP-connected orchestrator.
+
+**On an agent env, that reading excludes the environment's own builds.** An agent env's runtime pod
+carries a second container, `erun-dind`, and every `erun build`/`erun release` actually runs there —
+not in the `erun-devops` container the reading above measures. `erun-dind`'s build containers are a
+separate cgroup the `erun-devops` container has no path to read, so a build that is genuinely
+saturating the sidecar can still show as an idle environment here. Rather than leave that
+unexplained, both **This environment's usage** and `erun usage` say so directly whenever the
+environment carries the sidecar (every type except runtime and host); [`erun resize`](/cli/resize)
+is what sizes the sidecar independently, and its own limits show up under [`erun observe`](/cli/observe).
+
+## What the environment thinks it should be sized as
+
+The figures above describe the node. The environment also has an opinion about *itself*: every
+environment accumulates a standing recommendation — raise memory, drop memory, raise CPU, or leave
+it alone — from its own container's cgroup counters, and [`erun list`](/cli/list#the-sizing-recommendation)
+prints it under `runtime-pod:`. Nothing is applied automatically: [`erun resize`](/cli/resize) (or the
+Runtime tab's Resize action) is what acts on it, and it refuses to roll the pod out from under a
+build, a deploy, or an agent session already using the environment unless you explicitly override
+that.
+
+It matters because sizing is otherwise set once and never revisited, and both ways of being wrong
+are live. Under-provisioning shows up as a killed agent. Over-provisioning shows up as nothing at
+all — it just quietly holds capacity that the free figure above then reports as unavailable to
+everyone else on the node.
 
 ## What is holding the environment's resources
 
@@ -104,7 +139,7 @@ leaves JVMs resident, the container build cache grows. That is fine while you ar
 wasteful afterwards — and until now nothing showed it, so a heavy environment had no explanation.
 
 The Runtime tab reports what the pod is running, directly under the resource sliders: how many
-[sessions](/desktop/overview) actually have a live program behind them, and the processes holding
+[sessions](/desktop/resources-and-usage) actually have a live program behind them, and the processes holding
 memory grouped by what they are. It is read-only by default — you see what is there before anything
 is stopped — and the groups that are safe to reclaim carry an action:
 

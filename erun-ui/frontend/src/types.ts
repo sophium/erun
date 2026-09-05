@@ -2,8 +2,16 @@
 // probe, environment health check) live in ./uiDiagnosticsTypes, imported by
 // name where needed. This file only needs the cluster block for the entry below.
 import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
+import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
+import type { UIEnvironmentNodeSnapshot } from './uiEnvironmentNodeTypes';
+import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
+import type {
+  UIErunVersion,
+  UIRuntimeImageLineMismatch,
+  UIRuntimeVersionLine,
+} from './uiRuntimeVersionLineTypes';
 
-export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | '';
+export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | 'host' | '';
 
 // EnvironmentTypeValues are the narrowed dropdown options; the `type` field
 // below must stay bare `string` because the Wails binding widens the Go
@@ -12,6 +20,7 @@ export const EnvironmentTypeValues: readonly EnvironmentType[] = [
   'local-agent',
   'remote-agent',
   'runtime',
+  'host',
 ] as const;
 
 export interface UIEnvironment {
@@ -20,10 +29,19 @@ export interface UIEnvironment {
   mcpUrl?: string;
   apiUrl?: string;
   runtimeVersion?: string;
+  runtimeVersionLine?: UIRuntimeVersionLine;
+  erunVersion?: UIErunVersion;
+  runtimeImageLineMismatch?: UIRuntimeImageLineMismatch;
   kubernetesContext?: string;
   isActive?: boolean;
   sshdEnabled?: boolean;
   autoStart?: boolean;
+  activity?: UIEnvironmentActivity;
+  usage?: UIEnvironmentUsageSnapshot;
+  // node is absent for an environment with no cloud node erun power-manages —
+  // a definite "there is nothing to say about a node here", never an
+  // undetermined reading (that arrives as a node with an empty status).
+  node?: UIEnvironmentNodeSnapshot;
 }
 
 // UIWorkingIssue is the env worktree's current branch and, when the branch
@@ -44,6 +62,16 @@ export interface UIEnvTrace {
   path: string;
   reason?: string;
   notice?: string;
+}
+
+// UIAppLog is the Diagnostics console's read model for the desktop's own
+// durable log — evidence for an orchestrator or app-level fault, neither of
+// which has an env trace to fall back on.
+export interface UIAppLog {
+  available: boolean;
+  content?: string;
+  path: string;
+  reason?: string;
 }
 
 // UIUpgradeVersionCandidate is one newer version an env's registries offered,
@@ -78,7 +106,15 @@ export interface UITenant {
   environments: UIEnvironment[];
 }
 
-export type ManageTab = 'general' | 'runtime' | 'ai' | 'ports' | 'ssh' | 'history' | 'delete';
+export type ManageTab =
+  | 'general'
+  | 'runtime'
+  | 'ai'
+  | 'ports'
+  | 'ssh'
+  | 'jobs'
+  | 'history'
+  | 'delete';
 export type ManageEditTab = Exclude<ManageTab, 'delete'>;
 
 export interface UISelection {
@@ -92,6 +128,9 @@ export interface UISelection {
   containerRegistry?: string;
   // Selects the in-cluster erun-registry instead of the containerRegistry string.
   clusterRegistry?: boolean;
+  // erunRegistry selects erun's hosted registry for the tenant. Mutually
+  // exclusive with both clusterRegistry and containerRegistry.
+  erunRegistry?: boolean;
   // Bare string to match the Wails binding, which widens the Go EnvironmentType
   // alias; use the EnvironmentType union for narrowed dropdown values.
   type?: string;
@@ -136,74 +175,11 @@ export interface UIState {
   versionSuggestions?: UIVersionSuggestion[];
   versionSuggestionNotices?: UIVersionSuggestionNotice[];
   cloudProviders?: UICloudProviderStatus[];
-}
-
-export interface UITenantDashboardInput {
-  tenant: string;
-  environment?: string;
-  apiUrl: string;
-  mcpUrl?: string;
-  kubernetesContext?: string;
-  cloudProviderAlias: string;
-}
-
-export interface UITenantDashboard {
-  tenant: string;
-  environment?: string;
-  apiUrl?: string;
-  apiError?: string;
-  apiLog?: string;
-  apiLogError?: string;
-  user?: UITenantDashboardUser;
-  reviews?: UITenantDashboardReview[];
-  mergeQueue?: UITenantDashboardReview[];
-  builds?: UITenantDashboardBuild[];
-  auditEvents?: UITenantDashboardAudit[];
-  auditLogMessage?: string;
-}
-
-export interface UITenantDashboardUser {
-  tenantId: string;
-  userId: string;
-  username?: string;
-  roles?: string[];
-  issuer?: string;
-  subject?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface UITenantDashboardReview {
-  reviewId: string;
-  tenantId: string;
-  name: string;
-  targetBranch: string;
-  sourceBranch: string;
-  status: string;
-  lastFailedBuildId?: string;
-  lastReadyBuildId?: string;
-  lastMergedBuildId?: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface UITenantDashboardBuild {
-  buildId: string;
-  tenantId: string;
-  reviewId: string;
-  reviewName?: string;
-  successful: boolean;
-  commitId: string;
-  version: string;
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface UITenantDashboardAudit {
-  type: string;
-  actor?: string;
-  action: string;
-  createdAt?: string;
+  // configUnreadable is set when one or more config files could not be read
+  // (e.g. a torn write) even after erun-common's own retries, so tenants is
+  // empty for a reason other than "no environments configured" — render this
+  // distinctly rather than falling into the empty-state affordance.
+  configUnreadable?: boolean;
 }
 
 export interface UIIdleStatus {
@@ -212,12 +188,21 @@ export interface UIIdleStatus {
   stopEligible: boolean;
   outsideWorkingHours: boolean;
   managedCloud: boolean;
+  // fromPod is true only when this reading came from the pod's own idle
+  // monitor over MCP. False means it was assembled on the host because the
+  // pod could not be reached, so the countdown it carries may be stale.
+  fromPod: boolean;
   stopBlockedReason?: string;
   stopError?: string;
   cloudContextName?: string;
   cloudContextStatus?: string;
   cloudContextLabel?: string;
   markers?: UIIdleMarker[];
+  // Leases are the work claims currently holding the environment (an
+  // orchestrator or CLI job) — not this desktop's own interactive AI/ERun/Local
+  // sessions, which never take one. A non-empty list is a coexisting agent the
+  // AI tab does not manage.
+  leases?: UIEnvironmentLease[];
   // RFC3339 timestamp when the desktop first saw stopEligible=true. While set,
   // the auto-stop is "armed": ec2:StopInstances fires after
   // secondsUntilForcedStop more seconds unless cancelled or activity resumes.
@@ -278,6 +263,17 @@ export interface UIIdleMarkerClient {
   secondsAgo?: number;
 }
 
+// UIEnvironmentLease is one activity lease held on the environment — a named
+// job, not this desktop's own interactive session. secondsHeld is precomputed
+// so the renderer never redoes the time math.
+export interface UIEnvironmentLease {
+  name: string;
+  secondsHeld?: number;
+  // Set only when a job holds the lease, so a surface that names the occupancy
+  // can also act on it. Absent for every other holder.
+  jobId?: string;
+}
+
 export interface UIVersionSuggestion {
   label: string;
   version: string;
@@ -335,9 +331,10 @@ export interface UIAWSCloudAliasInput {
 }
 
 // Canonical cloud provider type strings; must match erun-common's
-// CloudProviderAWS / CloudProviderCloudflare.
+// CloudProviderAWS / CloudProviderCloudflare / CloudProviderERun.
 export const CloudProviderAWS = 'aws';
 export const CloudProviderCloudflare = 'cloudflare';
+export const CloudProviderERun = 'erun';
 
 // UIEnvironmentCloudAlias is one provider-type slot in the env's cloud-alias
 // view: the alias attached for that type (empty when none) and the aliases the
@@ -436,6 +433,17 @@ export interface UIEnvironmentConfig {
   cloudAliasSlots?: UIEnvironmentCloudAlias[];
   cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
+  // runtimeChart names the chart this env's runtime is installed from, as an OCI
+  // reference that may carry its own version. Empty means the chart published
+  // with the deployed version -- right whenever chart and image ride one line.
+  runtimeChart?: string;
+  // Where the environment resolves erun's own artifacts from -- the runtime
+  // chart and platform images -- as distinct from where this project's images
+  // are pushed.
+  runtimeRegistry?: string;
+  // The Kubernetes dockerconfigjson secrets the runtime pod pulls its image
+  // with. Without one, a private runtime image leaves the pod unable to start.
+  imagePullSecrets?: string[];
   runtimePod: UIRuntimePodConfig;
   sshd: UISSHDConfig;
   idle: {
@@ -550,6 +558,10 @@ export interface StartSessionResult {
   // no Local tab to activate, so progress and completion surface through the
   // activity queue.
   orchestrated?: boolean;
+  // Occupancy lists the leases already holding the environment when an
+  // unconfirmed AI session start found it occupied: sessionId is 0 and no
+  // session was started. Retry with confirmed=true to start anyway.
+  occupancy?: UIEnvironmentLease[];
 }
 
 export interface TerminalOutputPayload {
@@ -584,73 +596,50 @@ export interface AgentOutputsList {
   truncated: boolean;
 }
 
-export interface DiffResult {
-  workingDirectory?: string;
-  rawDiff: string;
-  summary: DiffSummary;
-  files?: DiffFile[];
-  tree?: DiffTreeNode[];
-  reviewBase?: DiffReviewBase;
-  reviewCommits?: DiffCommit[];
-  scope?: 'current' | 'commit' | 'all';
-  selectedCommit?: string;
-  includesWorktree?: boolean;
-}
+// Diff view types live in ./diffTypes to keep this file under eslint's max-lines
+// cap; re-exported here so `from './types'` keeps resolving them.
+export * from './diffTypes';
 
-export interface DiffSummary {
-  fileCount: number;
-  additions: number;
-  deletions: number;
-}
+// Review-detail types live in ./reviewTypes for the same reason.
+export * from './reviewTypes';
 
-export interface DiffFile {
-  path: string;
-  oldPath?: string;
-  newPath?: string;
-  status: string;
-  additions: number;
-  deletions: number;
-  binary?: boolean;
-  hunks?: DiffHunk[];
-}
+// Tenant dashboard read-model types live in ./tenantDashboardTypes for the
+// same reason.
+export * from './tenantDashboardTypes';
 
-export interface DiffHunk {
-  header: string;
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lines?: DiffLine[];
-}
+// Ports tab public-exposure read-model types live in ./uiExposureTypes for
+// the same reason.
+export * from './uiExposureTypes';
 
-export interface DiffLine {
-  kind: 'context' | 'add' | 'delete' | 'meta';
-  content: string;
-  oldLine?: number;
-  newLine?: number;
-}
-
-export interface DiffTreeNode {
+// A retained job in an environment's job store. exitCode is null unless the job
+// reached exited, so a missing outcome is never read as a successful zero, and
+// progress is absent for a command job rather than a fabricated zero state.
+export interface UIEnvironmentJob {
+  id: string;
   name: string;
-  path: string;
-  parentPath?: string;
-  type: 'directory' | 'file';
-  depth: number;
-  status?: string;
-  additions?: number;
-  deletions?: number;
+  state: string;
+  kind?: string;
+  agentTool?: string;
+  command?: string[];
+  dir?: string;
+  exitCode: number | null;
+  startedAtUnix?: number;
+  endedAtUnix?: number;
+  progress?: UIEnvironmentJobProgress;
 }
 
-export interface DiffReviewBase {
-  branch?: string;
-  commit?: string;
-  shortCommit?: string;
+export interface UIEnvironmentJobProgress {
+  activity?: string;
+  lastMessage?: string;
+  turns: number;
+  toolsRun: number;
 }
 
-export interface DiffCommit {
-  hash: string;
-  shortHash: string;
-  subject: string;
-  author: string;
-  date: string;
+export interface UIEnvironmentJobOutput {
+  job: UIEnvironmentJob;
+  offset: number;
+  nextOffset: number;
+  output: string;
+  hasMore: boolean;
+  complete: boolean;
 }

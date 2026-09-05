@@ -89,6 +89,16 @@ func traceAndWaitForRuntime(ctx Context, req ShellLaunchParams) error {
 	if ctx.DryRun {
 		return nil
 	}
+	if currentExecutionMode(kubectlDeploymentWaitExecutionOperation) == ExecutionModeLibrary {
+		if err := libraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
+			// normalizeDoctorKubectlError's diagnostics (doctorKubectlDiagnostic)
+			// pattern-match literal kubectl CLI stderr text, which a client-go
+			// error never produces, so library-mode failures return unadorned
+			// rather than trying to force them through that string matching.
+			return err
+		}
+		return nil
+	}
 	stderr, err := runDoctorKubectl(args, io.Discard)
 	if err == nil {
 		return nil
@@ -150,10 +160,16 @@ func runDoctorKubectl(args []string, stdout io.Writer) (string, error) {
 
 func normalizeDoctorKubectlError(req ShellLaunchParams, stderr string, err error) error {
 	diagnostic := doctorKubectlDiagnostic(req, stderr)
-	if diagnostic == "" {
-		return err
-	}
 	stderr = strings.TrimSpace(stderr)
+	if diagnostic == "" {
+		// No recognized cause, but kubectl's own stderr was still captured --
+		// include it rather than falling back to the bare "%w" (which renders
+		// as content-free "exit status N") that this branch used to return.
+		if stderr == "" {
+			return err
+		}
+		return fmt.Errorf("%w: %s", err, stderr)
+	}
 	if stderr == "" {
 		return fmt.Errorf("%s: %w", diagnostic, err)
 	}

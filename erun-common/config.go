@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
@@ -29,6 +30,14 @@ type ERunConfig struct {
 	// set reappears across desktop restarts; the running session itself is
 	// ephemeral and re-spawned on demand.
 	Orchestrators []OrchestratorConfig `yaml:"orchestrators,omitempty" json:"orchestrators,omitempty"`
+	// Whip overrides the pacing nudge's message/threshold/cap/automatic-pass
+	// defaults (see WhipConfig, ResolveWhipConfig). Nil keeps every unconfigured
+	// install on exactly today's behaviour.
+	Whip *WhipConfigOverride `yaml:"whip,omitempty" json:"whip,omitempty"`
+	// Execution holds per-operation subprocess/library execution mode
+	// overrides (see execution_mode.go). Absent keeps every operation on the
+	// subprocess path it has always used.
+	Execution ExecutionConfig `yaml:"execution,omitempty" json:"execution,omitempty"`
 }
 
 // OrchestratorConfig is a persisted host-side AI orchestrator definition. An
@@ -48,6 +57,93 @@ type OrchestratorEnvConfig struct {
 	Tenant      string `yaml:"tenant" json:"tenant"`
 	Environment string `yaml:"environment" json:"environment"`
 	Directory   string `yaml:"directory" json:"directory"`
+	// Role states what this orchestrator uses the environment for. It is
+	// orthogonal to EnvironmentType: type is where the worktree lives, role is
+	// what this orchestrator asks the environment to do, and several
+	// orchestrators can link the same environment with different roles. Empty
+	// means undeclared, never a default of either OrchestratorEnvRoleCode,
+	// OrchestratorEnvRoleBuild, or OrchestratorEnvRoleRuntime. The two are
+	// independent even where they share a spelling: a runtime-*type*
+	// environment linked with role "code" is still refused (see
+	// OrchestratorEnvRoleAllowed) -- nothing here derives one from the other.
+	Role OrchestratorEnvRole `yaml:"role,omitempty" json:"role,omitempty"`
+}
+
+// OrchestratorEnvRole is what an orchestrator uses a linked environment for.
+type OrchestratorEnvRole string
+
+const (
+	// OrchestratorEnvRoleCode is an environment that writes code, iterates
+	// fast, and pushes feature branches. It does not run full regressions.
+	OrchestratorEnvRoleCode OrchestratorEnvRole = "code"
+	// OrchestratorEnvRoleBuild is an environment that checks out pushed
+	// feature branches, runs the gates, fixes what the gates surface, and cuts
+	// releases.
+	OrchestratorEnvRoleBuild OrchestratorEnvRole = "build"
+	// OrchestratorEnvRoleRuntime is an environment this orchestrator
+	// operates -- deploy, pin, observe -- rather than reviews or delegates
+	// to. A runtime environment has no worktree and no in-pod agent, so this
+	// is the only role that may be declared for one; see
+	// OrchestratorEnvRoleAllowed.
+	OrchestratorEnvRoleRuntime OrchestratorEnvRole = "runtime"
+)
+
+// IsValid reports whether r is either undeclared (empty) or a known role.
+func (r OrchestratorEnvRole) IsValid() bool {
+	switch r {
+	case "", OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime:
+		return true
+	default:
+		return false
+	}
+}
+
+// OrchestratorEnvRoleAllowed reports whether role may be declared for a link
+// to an environment of envType -- the single decision the CLI's
+// SetOrchestratorEnvRole and the desktop's link/edit gate both consult, so
+// neither can drift from the other on what a role is allowed to be. A
+// local-agent, remote-agent, or host environment has a worktree to review and
+// an in-pod agent to delegate to, so any role -- including undeclared -- is
+// fine. A runtime environment has neither, so only OrchestratorEnvRoleRuntime
+// may be declared for it; code and build, which both presuppose what it
+// lacks, are refused, the same as any type this function does not recognize.
+func OrchestratorEnvRoleAllowed(envType EnvironmentType, role OrchestratorEnvRole) bool {
+	switch envType {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost:
+		return true
+	case EnvironmentTypeRuntime:
+		return role == OrchestratorEnvRoleRuntime
+	default:
+		return false
+	}
+}
+
+// OrchestratorEnvRoleRequiredFor returns the one role a link to an
+// environment of envType must declare for OrchestratorEnvRoleAllowed to
+// accept it, or "" when every role -- including undeclared -- already works.
+// Only a runtime environment constrains this today.
+func OrchestratorEnvRoleRequiredFor(envType EnvironmentType) OrchestratorEnvRole {
+	if envType == EnvironmentTypeRuntime {
+		return OrchestratorEnvRoleRuntime
+	}
+	return ""
+}
+
+// OrchestratorEnvRoleIneligibilityReason explains, in the operator's words,
+// why role may not be declared for envType -- the shared reason both the
+// CLI's SetOrchestratorEnvRole and the desktop's link/edit gate surface, so
+// an operator sees the same explanation regardless of which surface refused
+// them. Empty when OrchestratorEnvRoleAllowed(envType, role) is true.
+func OrchestratorEnvRoleIneligibilityReason(envType EnvironmentType, role OrchestratorEnvRole) string {
+	if OrchestratorEnvRoleAllowed(envType, role) {
+		return ""
+	}
+	if envType == EnvironmentTypeRuntime {
+		return "Runtime environments have no worktree to review and no in-pod agent to delegate to, " +
+			"so they can't be linked to an orchestrator with the code or build role. Link with the " +
+			"runtime role instead to operate it directly."
+	}
+	return "This environment's type isn't recognized, so it can't be linked to an orchestrator."
 }
 
 // RuntimeRegistryConfig lets operators running an internal mirror of `erun-devops`
@@ -62,6 +158,13 @@ type RuntimeRegistryConfig struct {
 	BaseURL string `yaml:"baseurl,omitempty"`
 	// TokenURL is consulted only on the GHCR flow; defaults to https://ghcr.io.
 	TokenURL string `yaml:"tokenurl,omitempty"`
+	// Insecure marks Namespace as plain HTTP (a cluster registry marked
+	// `insecure: true`), so an unset BaseURL resolves to http:// instead of
+	// https:// for it. Never persisted -- only a caller that already knows the
+	// registry is insecure (e.g. probing a tenant's own published chart) sets
+	// it; the operator-configured mirror this struct otherwise describes is
+	// always addressed over HTTPS.
+	Insecure bool `yaml:"-"`
 }
 
 type SSHDConfig struct {
@@ -84,17 +187,61 @@ const (
 	EnvironmentTypeLocalAgent  EnvironmentType = "local-agent"
 	EnvironmentTypeRemoteAgent EnvironmentType = "remote-agent"
 	EnvironmentTypeRuntime     EnvironmentType = "runtime"
+	// EnvironmentTypeHost is a worktree on the operator's own machine with no
+	// pod and no cluster at all — for work a pod cannot do (desktop app builds
+	// needing a GUI toolchain, tasks needing host-wide credentials such as a
+	// keychain or a code-signing identity). Unlike EnvironmentTypeLocalAgent,
+	// which is the same kind of host directory but hostPath-mounted into a pod
+	// that runs its agent, a host env has no pod to mount it into.
+	EnvironmentTypeHost EnvironmentType = "host"
 )
 
-// IsValid reports whether the value is one of the three canonical types.
-// Empty is not valid; callers wanting "unset" should test against the zero
-// value separately and then resolve via EnvConfig.ResolvedType.
+// validEnvironmentTypes is the canonical, exhaustive list of environment
+// types. IsValid and the completeness test in config_test.go both walk this
+// slice, so a fifth type added here without an explicit case in every
+// exclusion-shaped predicate fails that test rather than silently falling
+// into whichever branch nobody updated.
+var validEnvironmentTypes = []EnvironmentType{
+	EnvironmentTypeLocalAgent,
+	EnvironmentTypeRemoteAgent,
+	EnvironmentTypeRuntime,
+	EnvironmentTypeHost,
+}
+
+// IsValid reports whether the value is one of the canonical types. Empty is
+// not valid; callers wanting "unset" should test against the zero value
+// separately and then resolve via EnvConfig.ResolvedType.
 func (t EnvironmentType) IsValid() bool {
-	switch t {
-	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
-		return true
+	for _, valid := range validEnvironmentTypes {
+		if t == valid {
+			return true
+		}
 	}
 	return false
+}
+
+// UsesDindSidecar reports whether an environment of this type carries the
+// erun-dind sidecar every image build actually runs in -- mirrors
+// $dindEnabled in erun-devops/k8s/erun-devops/templates/service.yaml (`ne
+// $envType "runtime"`), narrowed by the one case that chart condition doesn't
+// cover: a host env renders no pod at all. This is the one signal that tells
+// a runtime-container-scoped reading (RunRuntimeUsage) whether it is leaving
+// out a real, separate cgroup where builds spend CPU/memory -- see
+// environmentUsesDindSidecar in
+// erun-ui/frontend/src/components/app/Sidebar.helpers.ts, which this mirrors;
+// keep both in sync.
+func (t EnvironmentType) UsesDindSidecar() bool {
+	if !t.IsValid() {
+		return false
+	}
+	switch t {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent:
+		return true
+	case EnvironmentTypeRuntime, EnvironmentTypeHost:
+		return false
+	default:
+		panic(fmt.Sprintf("UsesDindSidecar: unhandled EnvironmentType %q", t))
+	}
 }
 
 func (c SSHDWorkspaceSyncConfig) IsZero() bool {
@@ -146,13 +293,27 @@ type EnvConfig struct {
 	// published <registry>/erun-devops:<version> default. A full reference is used
 	// verbatim; a bare name resolves against the env's registry and runtime version.
 	RuntimeImage string `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
-	// MCPAuthIssuer is the tenant's registered OIDC issuer (an `https://` URL)
-	// the env's erun-mcp edge trusts bearer tokens from. Set on a hosted deploy
-	// so the edge authenticates the console/agent against the tenant IdP; the
-	// per-env audience is derived (MCPTokenAudience). Empty leaves a non-desktop
-	// deploy unauthenticated (loopback-only), preserving back-compat. Distinct
-	// from the desktop `file://` path, which threads a local public key instead.
-	MCPAuthIssuer string `yaml:"mcpauthissuer,omitempty" json:"mcpAuthIssuer,omitempty"`
+	// RuntimeRunningImage is a display-only memo of the runtime image a deploy
+	// last actually resolved for this env's pod (imageOverrides.erun-devops, or
+	// the chart's own stock default when no override applied) -- healed
+	// alongside RuntimeVersion by PersistRuntimeVersionFromDeploySpecs. `erun
+	// list` reads it to name which release line RuntimeVersion's number
+	// belongs to (erun's own vs. a tenant's own <tenant>-devops line; see
+	// erun#1746). Unlike RuntimeImage above, it is never read back to
+	// influence a deploy's own image choice, and stays empty whenever the
+	// resolution path that produced the deploy could not know the image (a
+	// repo-local runtime chart's own values decide it) -- callers must render
+	// that as undetermined, never guess a line from the tenant name alone.
+	RuntimeRunningImage string `yaml:"runtimerunningimage,omitempty" json:"runtimeRunningImage,omitempty"`
+	// RuntimeChart names the runtime chart this env rides, as an OCI reference
+	// that may carry its own version. The chart and the runtime image are separate
+	// artifacts on separate lines: the chart is erun's, published at erun's
+	// versions, while RuntimeImage may be a project's own, versioned on the
+	// project's line. Deriving both from RuntimeVersion can only name one line, so
+	// an env whose image rides its own states the chart here. Empty keeps the
+	// published lookup at the runtime version, which is right whenever push
+	// published the pair together.
+	RuntimeChart string `yaml:"runtimechart,omitempty" json:"runtimeChart,omitempty"`
 	// MCPAuthPublicKeyPath records the desktop public key a deploy last enabled
 	// MCP auth with, so a later redeploy that does not re-supply the key rethreads
 	// it instead of falling back to the chart default and silently turning the
@@ -164,8 +325,23 @@ type EnvConfig struct {
 	// Empty leaves the pod pulling anonymously, so envs on public images (the erun
 	// product tenant's own) are unaffected. erun references an operator-provisioned
 	// secret by name; it does not create the credential.
-	ImagePullSecrets    []string                `yaml:"imagepullsecrets,omitempty" json:"imagePullSecrets,omitempty"`
-	RuntimePod          RuntimePodResources     `yaml:"runtimepod,omitempty"`
+	ImagePullSecrets []string `yaml:"imagepullsecrets,omitempty" json:"imagePullSecrets,omitempty"`
+	// RegistryCredentialSecretName names a Kubernetes dockerconfigjson Secret that
+	// `erun init` minted from the host's own resolved ghcr.io credential, so the
+	// pod it deploys can read from and push to a registry it has never
+	// authenticated to on its own. Empty means init found no host
+	// credential to provision; an existing in-pod credential, if any, is
+	// unaffected. Only init mints or rotates this value -- a plain `erun deploy`
+	// only carries the persisted name forward.
+	RegistryCredentialSecretName string              `yaml:"registrycredentialsecretname,omitempty" json:"registryCredentialSecretName,omitempty"`
+	RuntimePod                   RuntimePodResources `yaml:"runtimepod,omitempty"`
+	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
+	// independent of RuntimePod which only sizes the runtime container itself.
+	// Zero falls back to DefaultRuntimeDindCPU/Memory (NormalizeRuntimeDindPodResources).
+	RuntimeDindPod RuntimePodResources `yaml:"runtimedindpod,omitempty"`
+	// NamespaceQuota is a hard per-namespace ceiling (ResourceQuota + LimitRange)
+	// distinct from RuntimePod's own-container sizing; see NamespaceResourceQuota.
+	NamespaceQuota      NamespaceResourceQuota  `yaml:"namespacequota,omitempty" json:"namespaceQuota,omitempty"`
 	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
 	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`
 	Deploy              EnvironmentDeployConfig `yaml:"deploy,omitempty" json:"deploy,omitempty"`
@@ -235,19 +411,54 @@ func (c EnvConfig) ResolvedType() EnvironmentType {
 	return ""
 }
 
-// BuildsHere reports whether builds happen inside this env (local-agent and
-// remote-agent build here; runtime envs only receive deploys). An env whose
-// type is unresolved is treated as not building here.
+// BuildsHere reports whether builds happen inside this env (local-agent,
+// remote-agent, and host build here; runtime envs only receive deploys). An
+// env whose type is unresolved is treated as not building here. Every valid
+// type has an explicit case — see validEnvironmentTypes — so a type added
+// without updating this switch panics instead of silently taking a default.
 func (c EnvConfig) BuildsHere() bool {
-	return c.Type.IsValid() && c.Type != EnvironmentTypeRuntime
+	if !c.Type.IsValid() {
+		return false
+	}
+	switch c.Type {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost:
+		return true
+	case EnvironmentTypeRuntime:
+		return false
+	default:
+		panic(fmt.Sprintf("BuildsHere: unhandled EnvironmentType %q", c.Type))
+	}
 }
 
 // RemoteWorktree reports whether the worktree lives outside the local
-// machine (PVC for remote-agent, none for runtime). Local-agent mounts the
-// worktree from the local filesystem via hostPath. An env whose type is
-// unresolved is treated as not having a remote worktree.
+// machine (PVC for remote-agent, none for runtime). Local-agent and host both
+// mount/use the local filesystem directly — the only difference between them
+// is whether a pod exists at all. An env whose type is unresolved is treated
+// as not having a remote worktree. Every valid type has an explicit case —
+// see validEnvironmentTypes — so a type added without updating this switch
+// panics instead of silently taking a default.
 func (c EnvConfig) RemoteWorktree() bool {
-	return c.Type.IsValid() && c.Type != EnvironmentTypeLocalAgent
+	if !c.Type.IsValid() {
+		return false
+	}
+	switch c.Type {
+	case EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
+		return true
+	case EnvironmentTypeLocalAgent, EnvironmentTypeHost:
+		return false
+	default:
+		panic(fmt.Sprintf("RemoteWorktree: unhandled EnvironmentType %q", c.Type))
+	}
+}
+
+// HasPod reports whether this env has a runtime pod at all. Every type but
+// host does; host is the one type with no pod and no cluster contact of any
+// kind. Operations that are meaningless without a pod (deploy, push, pin,
+// terraform, port-forwards, runtime-pod diagnostics) must check this — or the
+// narrower predicate that already applies to their own decision — and refuse
+// explicitly rather than resolving a plan that cannot run.
+func (c EnvConfig) HasPod() bool {
+	return c.Type.IsValid() && c.Type != EnvironmentTypeHost
 }
 
 // MountsRuntimeSource reports whether this runtime env opts into a mutable
@@ -266,6 +477,47 @@ func (c EnvConfig) MountsRuntimeSource() bool {
 // mirroring how attaching a Cloudflare alias delivers its token.
 func (c EnvConfig) HasAWSCloudAlias() bool {
 	return strings.TrimSpace(c.ResolvedCloudAliases()[CloudProviderAWS]) != ""
+}
+
+// RuntimeImageRegistryMismatch reports the registries `erun doctor` compares
+// to catch a pod that can never pull: a persisted RuntimeImage naming a
+// registry other than the env's own RuntimeRegistry. The pull secret erun
+// refreshes on every deploy is keyed off exactly the registries in play
+// (containerRegistry, which follows RuntimeRegistry when the env records one,
+// plus each imageOverrides registry) — but a credential still has to resolve
+// for both at deploy time, so a RuntimeImage on a different registry than
+// RuntimeRegistry is worth flagging even when the refresh above already
+// tries to cover it. mismatched is false when the image carries no registry
+// of its own (a bare name follows RuntimeRegistry, nothing to compare) or the
+// env records no RuntimeRegistry to compare against.
+func (c EnvConfig) RuntimeImageRegistryMismatch() (imageRegistry, runtimeRegistry string, mismatched bool) {
+	imageRegistry = runtimeImageRegistry(c.RuntimeImage)
+	runtimeRegistry = strings.TrimSpace(c.RuntimeRegistry)
+	if imageRegistry == "" || runtimeRegistry == "" {
+		return imageRegistry, runtimeRegistry, false
+	}
+	return imageRegistry, runtimeRegistry, !strings.EqualFold(imageRegistry, runtimeRegistry)
+}
+
+// RuntimeImageLineMismatch reports whether the operative RuntimeImage (the
+// value a future deploy reads back to pick the runtime pod's image) and the
+// observed RuntimeRunningImage (the last image a deploy actually confirmed
+// running, healed alongside RuntimeVersion by
+// PersistRuntimeVersionFromDeploySpecs) name different release lines --
+// stock erun-devops vs a tenant's own <tenant>-devops. A version number alone
+// cannot name a line (the same number is valid on both), but an image name
+// always can, so this needs no live cluster read: it is the persisted half
+// of the pairing erun#1754 was filed over, readable from config alone.
+// mismatched is false whenever either field is empty or fails to parse as a
+// runtime image reference -- an environment with no recorded history yet has
+// nothing to disagree with, and this must never guess.
+func (c EnvConfig) RuntimeImageLineMismatch() (recordedLine, observedLine string, mismatched bool) {
+	recordedLine, recordedOK := runtimeImageReleaseLine(c.RuntimeImage)
+	observedLine, observedOK := runtimeImageReleaseLine(c.RuntimeRunningImage)
+	if !recordedOK || !observedOK {
+		return recordedLine, observedLine, false
+	}
+	return recordedLine, observedLine, recordedLine != observedLine
 }
 
 // legacyEnvTypeFromRemoteSnapshot migrates configs written before the `type`
@@ -305,15 +557,20 @@ func IsValidUpgradeChannel(channel string) bool {
 // ResolvedUpgradeChannel returns the release channel an upgrade targets for
 // this env. The explicit UpgradeChannel field is the source of truth when
 // valid; otherwise it defaults from the resolved type — runtime envs track
-// "stable", agent envs track "snapshot" (they iterate on snapshot builds) —
-// and anything unresolved falls back to "stable".
+// "stable", agent envs and host envs track "snapshot" (they iterate on
+// snapshot builds) — and anything unresolved falls back to "stable". A host
+// env never actually upgrades (it has no runtime to redeploy — see
+// EnvConfig.HasPod), so this only matters if AutoUpgrade is set on one, which
+// the upgrade planner skips outright.
 func (c EnvConfig) ResolvedUpgradeChannel() string {
 	if IsValidUpgradeChannel(c.UpgradeChannel) {
 		return strings.TrimSpace(c.UpgradeChannel)
 	}
 	switch c.ResolvedType() {
-	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent:
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost:
 		return UpgradeChannelSnapshot
+	case EnvironmentTypeRuntime:
+		return UpgradeChannelStable
 	default:
 		return UpgradeChannelStable
 	}
@@ -324,6 +581,30 @@ func (c EnvConfig) ResolvedUpgradeChannel() string {
 // path should use this helper rather than reading the field directly.
 func (c EnvConfig) EffectiveLocalRepoPath() string {
 	return strings.TrimSpace(c.LocalRepoPath)
+}
+
+// TenantLocalCheckoutRoot finds a tenant's repo on this machine through one of
+// its other environments, for a caller whose own target environment has no
+// worktree here — a sourceless runtime env (no MountSource) chief among them.
+// Every environment of a tenant shares the same repo, so a sibling env whose
+// worktree lives on this host (RemoteWorktree false) and whose recorded path
+// still exists on disk is the tenant's own checkout, not a guess from the
+// caller's unrelated working directory.
+func TenantLocalCheckoutRoot(envs []EnvConfig) (string, bool) {
+	for _, candidate := range envs {
+		if candidate.RemoteWorktree() {
+			continue
+		}
+		path := candidate.EffectiveLocalRepoPath()
+		if path == "" {
+			continue
+		}
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			continue
+		}
+		return path, true
+	}
+	return "", false
 }
 
 type ProjectEnvironmentConfig struct {
@@ -339,10 +620,17 @@ type ProjectEnvironmentConfig struct {
 // (the locally computed fingerprint diverges from the tagged hash).
 type ProjectDockerConfig struct {
 	Fingerprints map[string]string `yaml:"fingerprints,omitempty"`
+	// Platforms pins the docker --platform targets a non-release build/push mints
+	// for this environment (e.g. ["linux/amd64"]), for an environment whose
+	// cluster can only ever run one architecture. It never applies to a release
+	// build (`erun build --release`, `erun release`): those always publish every
+	// platform erun supports, since a release artifact must be deployable
+	// anywhere. Empty keeps the default multi-arch build.
+	Platforms []string `yaml:"platforms,omitempty"`
 }
 
 func (c ProjectDockerConfig) IsZero() bool {
-	return len(c.Fingerprints) == 0
+	return len(c.Fingerprints) == 0 && len(c.Platforms) == 0
 }
 
 type ReleaseConfig struct {
@@ -360,6 +648,11 @@ type ProjectConfig struct {
 	// Paths overrides where erun discovers the project's devops assets (docker/,
 	// k8s/, terraform-<tenant>/, VERSION); empty keeps the conventional layout.
 	Paths ProjectPathsConfig `yaml:"paths,omitempty"`
+	// Components declares more than one paths:-shaped root, keyed by component
+	// name, for a monorepo of independent deployables that do not share one
+	// docker/k8s root (e.g. harnesses/<name>/{docker,k8s}). Empty keeps paths: as
+	// the project's only root. See project_components_config.go for selection.
+	Components map[string]ProjectPathsConfig `yaml:"components,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given
@@ -466,6 +759,30 @@ func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[
 	return out
 }
 
+// DockerPlatformsForEnvironment returns the configured docker --platform targets
+// for the given environment, or nil when none is set (keeping the default
+// multi-arch build).
+func (c ProjectConfig) DockerPlatformsForEnvironment(environment string) []string {
+	environment = strings.TrimSpace(environment)
+	if environment == "" || c.Environments == nil {
+		return nil
+	}
+	envConfig, ok := c.Environments[environment]
+	if !ok || len(envConfig.Docker.Platforms) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(envConfig.Docker.Platforms))
+	for _, platform := range envConfig.Docker.Platforms {
+		if platform = strings.TrimSpace(platform); platform != "" {
+			out = append(out, platform)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (c ProjectConfig) NormalizedReleaseConfig() ReleaseConfig {
 	config := c.Release
 	if strings.TrimSpace(config.MainBranch) == "" {
@@ -491,6 +808,33 @@ func ERunConfigDir() (string, error) {
 		return "", ErrNoUserDataFolder
 	}
 	return filepath.Join(configHome, configRoot), nil
+}
+
+// resolveConfigFilePath resolves the on-disk path of a config file under
+// configHome without creating anything. xdg.ConfigFile's own path resolution
+// creates the parent directory as a side effect of resolving the path, which
+// runs even for a read or a dry-run trace and before any caller has decided
+// the write should actually happen. Callers that are about to write still
+// need os.MkdirAll immediately before the write.
+func resolveConfigFilePath(relPath string) (string, error) {
+	configHome := strings.TrimSpace(xdg.ConfigHome)
+	if configHome == "" {
+		return "", ErrNoUserDataFolder
+	}
+	return filepath.Join(configHome, relPath), nil
+}
+
+// resolveCacheFilePath is resolveConfigFilePath's cache-directory
+// counterpart: xdg.CacheFile has the same create-the-parent-directory side
+// effect on resolution as xdg.ConfigFile, which a mere read or a dry-run
+// trace must not trigger. Callers that are about to write still need
+// os.MkdirAll immediately before the write.
+func resolveCacheFilePath(relPath string) (string, error) {
+	cacheHome := strings.TrimSpace(xdg.CacheHome)
+	if cacheHome == "" {
+		return "", ErrNoUserDataFolder
+	}
+	return filepath.Join(cacheHome, relPath), nil
 }
 
 type ConfigStore struct{}
@@ -552,7 +896,7 @@ func (ConfigStore) SaveProjectConfig(projectRoot string, config ProjectConfig) e
 }
 
 func SaveERunConfig(config ERunConfig) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -561,7 +905,8 @@ func SaveERunConfig(config ERunConfig) error {
 		return ErrNoUserDataFolder
 	}
 
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(configFilePath)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -572,7 +917,7 @@ func SaveERunConfig(config ERunConfig) error {
 	// Idempotent across repeated saves within one local day.
 	_ = writeRootConfigBackupIfDue(configFilePath, timeNow)
 
-	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -581,28 +926,20 @@ func SaveERunConfig(config ERunConfig) error {
 
 func LoadERunConfig() (ERunConfig, string, error) {
 	config := ERunConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
 
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return config, configFilePath, ErrNotInitialized
-	}
-
-	// A zero-length file is the residue of an interrupted non-atomic
-	// write. Treating it as "successfully loaded empty config" lets
-	// the next writer rebuild a fresh ERunConfig{} with only the
-	// field it cares about, silently dropping every other section.
-	// Surface it as corruption so callers route into the doctor
-	// recovery path instead.
-	if len(bytes.TrimSpace(data)) == 0 {
-		return config, configFilePath, ErrConfigCorrupted
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, ErrConfigCorrupted
+	// A zero-length or unparseable file is the residue of an interrupted
+	// write, possibly one not even erun's own -- loadConfigFile retries it a
+	// few times before giving up. Treating it as "successfully loaded empty
+	// config" lets the next writer rebuild a fresh ERunConfig{} with only the
+	// field it cares about, silently dropping every other section, so a read
+	// that never recovers is surfaced as corruption instead, routing callers
+	// into the doctor recovery path.
+	if err := loadConfigFile(configFilePath, &config); err != nil {
+		return config, configFilePath, err
 	}
 
 	return config, configFilePath, nil
@@ -610,7 +947,7 @@ func LoadERunConfig() (ERunConfig, string, error) {
 
 func SaveTenantConfig(config TenantConfig) error {
 	config = NormalizeTenantConfig(config)
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, config.Name, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -619,12 +956,13 @@ func SaveTenantConfig(config TenantConfig) error {
 		return ErrNoUserDataFolder
 	}
 
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(configFilePath)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -640,7 +978,7 @@ func NormalizeTenantConfig(config TenantConfig) TenantConfig {
 }
 
 func DeleteTenantConfig(tenant string) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -653,29 +991,20 @@ func DeleteTenantConfig(tenant string) error {
 
 func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 	config := TenantConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
 
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return config, configFilePath, ErrNotInitialized
-	}
-
-	if len(bytes.TrimSpace(data)) == 0 {
-		return config, configFilePath, ErrConfigCorrupted
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, ErrConfigCorrupted
+	if err := loadConfigFile(configFilePath, &config); err != nil {
+		return config, configFilePath, err
 	}
 
 	return NormalizeTenantConfig(config), configFilePath, nil
 }
 
 func ListTenantConfigs() ([]TenantConfig, error) {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, configFile))
 	if err != nil {
 		return nil, ErrNoUserDataFolder
 	}
@@ -715,7 +1044,7 @@ func ListTenantConfigs() ([]TenantConfig, error) {
 }
 
 func SaveEnvConfig(tenant string, config EnvConfig) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, config.Name, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -724,7 +1053,8 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 		return ErrNoUserDataFolder
 	}
 
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(configFilePath)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -737,7 +1067,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 	// backup dir is unwritable would be worse.
 	_ = writeEnvConfigBackupIfDue(configFilePath, timeNow)
 
-	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -745,7 +1075,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 }
 
 func DeleteEnvConfig(tenant, envName string) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, envName, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -758,29 +1088,20 @@ func DeleteEnvConfig(tenant, envName string) error {
 
 func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	config := EnvConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, envName, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
 	}
 
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return config, configFilePath, ErrNotInitialized
-	}
-
-	if len(bytes.TrimSpace(data)) == 0 {
-		return config, configFilePath, ErrConfigCorrupted
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, ErrConfigCorrupted
+	if err := loadConfigFile(configFilePath, &config); err != nil {
+		return config, configFilePath, err
 	}
 
 	return config, configFilePath, nil
 }
 
 func ListEnvConfigs(tenant string) ([]EnvConfig, error) {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return nil, ErrNoUserDataFolder
 	}
@@ -829,12 +1150,13 @@ func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	data, err := yaml.Marshal(config)
+	existing, _ := os.ReadFile(configFilePath)
+	data, err := marshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -848,17 +1170,8 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 		return config, "", err
 	}
 
-	data, err := os.ReadFile(configFilePath)
-	if err != nil {
-		return config, configFilePath, ErrNotInitialized
-	}
-
-	if len(bytes.TrimSpace(data)) == 0 {
-		return config, configFilePath, ErrConfigCorrupted
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, fmt.Errorf("%w: %v", ErrConfigCorrupted, err)
+	if err := loadConfigFile(configFilePath, &config); err != nil {
+		return config, configFilePath, err
 	}
 
 	return config, configFilePath, nil
@@ -909,11 +1222,11 @@ func projectConfigPath(projectRoot string) (string, error) {
 	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
 }
 
-// writeFileAtomic writes via a sibling temp file, fsync, then rename so a crash
+// WriteFileAtomic writes via a sibling temp file, fsync, then rename so a crash
 // or kill mid-write leaves either the previous contents or no change at all —
 // never a 0-byte or partially written file. The rename is atomic because the temp
 // file shares the destination's directory, and thus its filesystem.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -945,4 +1258,64 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	committed = true
 	return nil
+}
+
+// configReadRetryAttempts/configReadRetrySleep bound how long a read waits out
+// a torn write before surfacing ErrConfigCorrupted. WriteFileAtomic makes erun's
+// own writers atomic, but a reader still has to tolerate a write it does not
+// control -- an external editor saving in place, another process's own
+// non-atomic writer, a crash mid-write -- and a torn read from any of those is
+// transient by construction: it resolves itself within microseconds, well
+// under this budget. A file that still fails to parse after every retry is
+// genuinely corrupt, not merely caught mid-write.
+const (
+	configReadRetryAttempts = 5
+	configReadRetrySleep    = 20 * time.Millisecond
+)
+
+// loadConfigFile reads path and unmarshals it into out, retrying through
+// configReadRetryAttempts when the file is momentarily empty or fails to
+// parse. Every Load*Config function in this file routes its read through
+// here so the retry policy lives in one place. A missing file is a real
+// absence (ErrNotInitialized) and is never retried; an empty or unparseable
+// file is retried and, if it never recovers, reported as ErrConfigCorrupted.
+// A read that fails for any other reason (permission denied, the path is a
+// directory, too many open files, ...) is neither of those things and is
+// returned as-is: reporting it as ErrNotInitialized would tell the operator
+// to run `erun init` for a problem `erun init` cannot fix.
+// configReadRetryObserved, when non-nil, runs synchronously after each failed
+// attempt instead of the real sleep. A test sets it to heal a torn read
+// deterministically (write the real content the moment a retry is about to
+// happen) rather than racing a concurrent writer goroutine against this
+// function's wall-clock sleep budget, which is exactly the kind of timing
+// race that flakes under CPU contention from unrelated tests running
+// alongside it in the same `go test ./...` process.
+var configReadRetryObserved func(attempt int)
+
+func loadConfigFile(path string, out any) error {
+	var lastErr error
+	for attempt := 0; attempt < configReadRetryAttempts; attempt++ {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return ErrNotInitialized
+			}
+			return err
+		}
+		if len(bytes.TrimSpace(data)) == 0 {
+			lastErr = ErrConfigCorrupted
+		} else if err := yaml.Unmarshal(data, out); err != nil {
+			lastErr = fmt.Errorf("%w: %v", ErrConfigCorrupted, err)
+		} else {
+			return nil
+		}
+		if attempt < configReadRetryAttempts-1 {
+			if configReadRetryObserved != nil {
+				configReadRetryObserved(attempt)
+			} else {
+				time.Sleep(configReadRetrySleep)
+			}
+		}
+	}
+	return lastErr
 }

@@ -1,0 +1,31 @@
+{
+  "name": "erun-console-playwright",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "test": "./run.sh",
+    "test:headed": "./run.sh --headed",
+    "test:mcp-operate-scope": "./run-mcp-operate-scope.sh",
+    "test:mcp-operate-scope:headed": "./run-mcp-operate-scope.sh --headed",
+    "test:mcp-attach-session": "./run-mcp-attach-session.sh",
+    "test:mcp-attach-session:headed": "./run-mcp-attach-session.sh --headed",
+    "test:rest-surfaces": "./run-rest-surfaces.sh",
+    "test:rest-surfaces:headed": "./run-rest-surfaces.sh --headed",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "install-browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^25.6.0",
+    "eslint": "^10.2.1",
+    "eslint-plugin-playwright": "^2.10.2",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.3",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.59.1"
+  }
+}

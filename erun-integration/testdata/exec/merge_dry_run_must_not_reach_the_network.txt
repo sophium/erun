@@ -1,0 +1,4 @@
+audit: erun exec merge --dry-run --remote nonexistent main
+git -C <TMP> rev-parse --abbrev-ref HEAD
+cd <TMP> && git fetch nonexistent main
+cd <TMP> && git merge --no-edit nonexistent/main

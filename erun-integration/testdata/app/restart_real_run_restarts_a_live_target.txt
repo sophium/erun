@@ -1,0 +1,5 @@
+restarted the running desktop app (pid <PID>)
+audit: erun app restart --orchestrator my-orchestrator
+app restart: orchestrator="my-orchestrator"
+app restart: resolving the running desktop app from <TMP>
+app restart: status=restarted pid=<PID> controlPort=26150

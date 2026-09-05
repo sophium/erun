@@ -1,0 +1,8 @@
+audit: erun terraform init --dry-run team prod
+terraform: init in <TMP> (env team/prod, type runtime, namespace team-prod)
+terraform: state <STATE_ROOT>/team/prod/terraform.tfstate (this environment's own home PVC, resolved from inside its runtime pod — survives pod restarts)
+terraform: TF_DATA_DIR <STATE_ROOT>/team/prod/data
+terraform: no .terraform.lock.hcl yet — init will generate it and record provider hashes for linux_amd64, linux_arm64; commit it so read-only envs can init with -lockfile=readonly
+mkdir -p <STATE_ROOT>/team/prod
+cd <TMP> && terraform init -input=false -backend-config=path=<STATE_ROOT>/team/prod/terraform.tfstate
+cd <TMP> && terraform providers lock -platform=linux_amd64 -platform=linux_arm64

@@ -17,6 +17,7 @@ publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: release
 release tag already exists at HEAD; skipping <VERSION>
+release: docker root free disk space is not observable from this process; skipping the headroom check
 stage: publish
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
@@ -30,5 +31,20 @@ rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing f
 ==> Verified published chart base <VERSION>
 stage: verify-publication
 ==> Verified published image ghcr.io/sophium/api:<VERSION>
+==> Verified published image ghcr.io/sophium/base:<VERSION>
 release version: <VERSION>
 ==> Built in <ELAPSED>
+step timing (ordered by duration):
+  build [<ELAPSED>]
+    publish [<ELAPSED>]
+      api (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+        linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+        linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      base (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+        linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+        linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      chart api [<ELAPSED>]
+      chart base [<ELAPSED>]
+    release [<ELAPSED>]
+    verify-publication [<ELAPSED>]
+timing record written to <TMP>

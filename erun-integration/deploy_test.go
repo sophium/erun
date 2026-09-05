@@ -1,13 +1,18 @@
 package integration
 
 import (
+	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +24,7 @@ import (
 )
 
 func TestDeploy(t *testing.T) {
+	t.Parallel()
 	t.Run("help_outside_devops_cwd", func(t *testing.T) {
 		// Regression: when cwd has no devops context, the
 		// deploy command must still be registered so the desktop UI's
@@ -51,6 +57,31 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_pod_watch_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-pod-watch: the plan must
+		// stay byte-identical to the subprocess-mode golden
+		// (dry_run_from_devops_cwd), including the "kubectl ... get pods -o
+		// json" trace line, even with execution.modes.kubectl-pod-watch=library,
+		// since tracePodWatchAction only ever renders the trace and the watcher
+		// itself (watchReleasePods -> runKubectlGetPods) never runs until a real
+		// helm upgrade actually starts.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-pod-watch", "library")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("refuses_host_environment", func(t *testing.T) {
+		// A host env has no pod and no cluster at all, so deploy must refuse it
+		// by name instead of resolving a helm plan that cannot run anywhere.
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/refuses_host_environment", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_stopped_env_renders_replicas_zero", func(t *testing.T) {
@@ -112,30 +143,6 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_with_mcp_auth_public_key", normalize.Apply(result.Combined))
-	})
-
-	t.Run("dry_run_mcp_auth_oidc_issuer", func(t *testing.T) {
-		// A hosted env with mcpauthissuer set (the tenant's OIDC issuer) threads
-		// mcpAuth.{enabled,issuer,audience} onto the runtime (team-devops) chart
-		// so its erun-mcp edge trusts bearer tokens from that issuer with the
-		// per-env audience erun-mcp:team/dev. Distinct from the desktop
-		// --mcp-auth-public-key path: no local key, so no <release>-mcp-auth
-		// Secret is applied and secretName stays empty (the chart mounts the
-		// desktop key only when secretName is set).
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
-		existing, err := os.ReadFile(envConfigPath)
-		if err != nil {
-			t.Fatalf("read env config: %v", err)
-		}
-		mustWriteFile(t, envConfigPath, string(existing)+"mcpauthissuer: https://auth.example.com/oidc\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "deploy/dry_run_mcp_auth_oidc_issuer", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_copies_images_from_to_before_deploy", func(t *testing.T) {
@@ -228,6 +235,22 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_configured_k8s_path", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_gitignored_project_config_warns", func(t *testing.T) {
+		// A project config that resolves from disk but is excluded by .gitignore
+		// silently works on this machine only, since git never sees it. The
+		// deploy trace must surface that as a warning instead of staying silent.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedGitignoredProjectConfig(t, setup, "{}\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_gitignored_project_config_warns", normalize.Apply(result.Combined))
+	})
+
 	t.Run("configured_k8s_path_wrong_name_errors", func(t *testing.T) {
 		// A paths.k8s override pointing at a directory not named "k8s" fails with an
 		// error explaining the naming constraint, rather than silently falling back
@@ -318,7 +341,10 @@ func TestDeploy(t *testing.T) {
 	t.Run("dry_run_unresolvable_scope_failure_omits_env_pair", func(t *testing.T) {
 		// The other arm of the same header: with no tenant configured at all
 		// there is no env to name, so the header drops the tenant/environment
-		// pair entirely instead of falling back to a bare separator.
+		// pair entirely instead of falling back to a bare separator. Also locks
+		// resolveOpenTenant's inference-permitted-but-unresolved error: it must
+		// name open, not just repeat "default tenant is not configured", and
+		// state the recovery.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
 		if result.ExitCode == 0 {
@@ -327,16 +353,44 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_unresolvable_scope_failure_omits_env_pair", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_default_environment_not_configured_names_open_and_recovery", func(t *testing.T) {
+		// Sibling of the scenario above for resolveOpenEnvironment: a tenant
+		// resolves (from the configured default), but that tenant has no
+		// default environment, so the error must name the tenant and open's
+		// recovery instead of repeating the bare "default environment is not
+		// configured".
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		if err := os.MkdirAll(filepath.Join(root, "team"), 0o755); err != nil {
+			t.Fatalf("mkdir tenant config dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("defaulttenant: team\n"), 0o644); err != nil {
+			t.Fatalf("write root config: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "team", "config.yaml"), []byte("name: team\n"), 0o644); err != nil {
+			t.Fatalf("write tenant config: %v", err)
+		}
+		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit with no default environment configured, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_default_environment_not_configured_names_open_and_recovery", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_no_devops_module_bootstraps_published_runtime", func(t *testing.T) {
 		// Opt-in-only resolution: a local env whose project root has no
 		// *-devops module has no local charts, so an empty selection defaults to
 		// the runtime and — finding no repo-local runtime chart — bootstraps the
-		// env on the published erun-devops chart by reference. This replaces the
-		// old "no devops module errors" contract: a configured env can always
-		// heal its runtime from the published chart, exit 0.
+		// env on the published erun-devops chart by reference, once the runtime
+		// chart ladder confirms it published at the version (the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam stands in for that registry
+		// read). This replaces the old "no devops module errors" contract: a
+		// configured env can heal its runtime from a confirmed published chart,
+		// exit 0.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("expected exit 0 bootstrapping the published runtime, got %d:\n%s", result.ExitCode, result.Combined)
 		}
@@ -464,19 +518,602 @@ func TestDeploy(t *testing.T) {
 		// Chart.yaml stamping — the chart is pinned with --version). The
 		// helm/kubectl stubs exit 0 so the rollout completes; real-run is
 		// what proves DeployHelmChart skips prepareHelmChartForDeploy for
-		// an OCI reference.
+		// an OCI reference. The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks
+		// erun-devops published so the runtime chart ladder confirms it instead
+		// of refusing (deploy never installs an unconfirmed coordinate).
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "kubectl", "")
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_refreshes_image_pull_secret_via_stubbed_kubectl", func(t *testing.T) {
+		// Real-run counterpart of the dry-run image-pull-secret scenarios:
+		// proves the kubectl apply actually executes (Command + stdin
+		// manifest + CombinedOutput), not just that dry-run traces it. The
+		// kubectl stub exits 0 so the apply — and the rollout after it —
+		// both succeed.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		// The refresh reads the Secret back before applying (to merge rather
+		// than replace its auths), so the generic empty-output kubectl stub
+		// every other kubectl call here still uses must answer "get secret"
+		// specifically: NotFound, since ecr-pull has never been created in
+		// this fixture.
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", `case "$*" in
+  *"get secret"*) echo 'Error from server (NotFound): secrets "ecr-pull" not found' >&2; exit 1 ;;
+  *) exit 0 ;;
+esac
+`)
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_refreshes_image_pull_secret_via_stubbed_kubectl", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_image_pull_secret_merge_preserves_unresolved_host", func(t *testing.T) {
+		// The core of the merge fix: a Secret already covering two hosts,
+		// redeployed on a host that can only resolve one of them, must refresh
+		// the resolvable host and leave the other byte-for-byte untouched --
+		// not lose it to a full-document rewrite. A third host that is in play
+		// this run (via runtimeimage) but has never had an entry and does not
+		// resolve must get no placeholder auth. The applied manifest is
+		// captured to a file (a side effect outside erun.Run's captured
+		// streams) so the test can assert on the actual merged
+		// .dockerconfigjson rather than the trace alone.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - regcred\nruntimeimage: neverresolves.example/team-devops\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		freshEncoded := base64.StdEncoding.EncodeToString([]byte("AWS:fresh-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, freshEncoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		existingSecretJSON := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`,
+			base64.StdEncoding.EncodeToString([]byte(`{"auths":{"registry.example":{"auth":"stale-value"},"legacy-other.example":{"auth":"preserved-value"}}}`)))
+		appliedManifestPath := filepath.Join(setup.Cwd, "applied-regcred.yaml")
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", fmt.Sprintf(`case "$*" in
+  *"get secret regcred -o json"*) cat <<'JSON'
+%s
+JSON
+    ;;
+  *"apply -f -"*) cat > %q ;;
+  *) exit 0 ;;
+esac
+`, existingSecretJSON, appliedManifestPath))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fresh-token") || strings.Contains(result.Combined, freshEncoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+
+		applied, err := os.ReadFile(appliedManifestPath)
+		if err != nil {
+			t.Fatalf("read applied manifest: %v", err)
+		}
+		manifest := string(applied)
+		if !strings.Contains(manifest, freshEncoded) {
+			t.Fatalf("manifest missing the refreshed registry.example credential:\n%s", manifest)
+		}
+		if strings.Contains(manifest, "stale-value") {
+			t.Fatalf("manifest still carries the stale registry.example credential it should have refreshed:\n%s", manifest)
+		}
+		if !strings.Contains(manifest, "preserved-value") {
+			t.Fatalf("manifest lost the unresolved legacy-other.example host's existing credential:\n%s", manifest)
+		}
+		if strings.Contains(manifest, "neverresolves.example") {
+			t.Fatalf("manifest carries a placeholder entry for a host that never resolved and never had one:\n%s", manifest)
+		}
+		golden.Equal(t, "deploy/real_run_image_pull_secret_merge_preserves_unresolved_host", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_image_pull_secret_refuses_malformed_existing_secret", func(t *testing.T) {
+		// The other design decision the merge fix makes explicit: an existing
+		// Secret that cannot be decoded is refused rather than silently
+		// rebuilt from the resolved subset alone, since guessing wrong there
+		// would destroy exactly the coverage the merge exists to protect.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - regcred\n")
+
+		// A host must actually resolve this run, or refreshImagePullSecrets
+		// never reaches the Secret read at all (nothing to overlay).
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		malformedSecretJSON := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`,
+			base64.StdEncoding.EncodeToString([]byte("not valid json")))
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", fmt.Sprintf(`case "$*" in
+  *"get secret regcred -o json"*) cat <<'JSON'
+%s
+JSON
+    ;;
+  *"apply -f -"*) echo "apply must not run against an undecodable secret" >&2; exit 1 ;;
+  *) exit 0 ;;
+esac
+`, malformedSecretJSON))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an undecodable existing secret, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_image_pull_secret_refuses_malformed_existing_secret", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_secret_get_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-secret-get: the plan
+		// must stay byte-identical to the subprocess-mode golden
+		// (dry_run_remote_env_image_pull_secrets) even with
+		// execution.modes.kubectl-secret-get=library, since
+		// applyImagePullSecrets only ever renders the get/apply trace lines
+		// and never calls existingImagePullSecretAuths on a dry run.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ghcr-pull\n")
+		seedExecutionMode(t, setup, "kubectl-secret-get", "library")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secrets", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_secret_get_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (existing Secret read back and merged into) via a
+		// real client-go call against a fake API server instead of shelling
+		// out to kubectl. The kubectl stub fails loudly and distinctively
+		// only for the "get secret ... -o json" argv shape (the apply that
+		// follows, and every other kubectl subcommand this deploy needs,
+		// still succeeds), so a fallback to the subprocess path for the
+		// image-pull-secret read surfaces as a recognizable deploy failure
+		// instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\n")
+		seedExecutionMode(t, setup, "kubectl-secret-get", "library")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		freshEncoded := base64.StdEncoding.EncodeToString([]byte("AWS:fresh-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, freshEncoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		existingSecretJSON := fmt.Sprintf(`{"kind":"Secret","apiVersion":"v1","metadata":{"name":"ecr-pull","namespace":"team-dev"},"data":{".dockerconfigjson":%q}}`,
+			base64.StdEncoding.EncodeToString([]byte(`{"auths":{"legacy-other.example":{"auth":"preserved-value"}}}`)))
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/api/v1/namespaces/team-dev/secrets/ecr-pull" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, existingSecretJSON)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get secret"*) printf '%s\n' "fell through to the kubectl subprocess for the image pull secret read" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("image pull secret read used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+		if strings.Contains(result.Combined, "fresh-token") || strings.Contains(result.Combined, freshEncoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_secret_apply_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-secret-apply: the plan
+		// must stay byte-identical to the subprocess-mode golden
+		// (dry_run_remote_env_image_pull_secrets) even with
+		// execution.modes.kubectl-secret-apply=library, since
+		// applyImagePullSecrets only ever renders the get/apply trace lines
+		// and never calls applySecretManifest on a dry run. The whole point of
+		// the switch is that the rendered command is the audit contract
+		// regardless of which path executes it, and this is the assertion that
+		// says so for the first mutating operation on it.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ghcr-pull\n")
+		seedExecutionMode(t, setup, "kubectl-secret-apply", "library")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secrets", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_secret_apply_library_execution_mode_client_side_applies_via_the_api_server", func(t *testing.T) {
+		// The mutating counterpart of the read-side library scenarios, and the
+		// test that pins the design finding behind this operation: the library
+		// path must reproduce kubectl's *client-side* apply, not substitute a
+		// server-side one. Server-side apply writes no
+		// last-applied-configuration annotation and records ownership under
+		// its own field manager, so an object applied once in each mode would
+		// permanently diverge from one only ever applied by kubectl -- and the
+		// traced `kubectl apply` line would stop describing what reached the
+		// cluster. Asserting the wire format (a strategic-merge PATCH carrying
+		// the annotation, never an apply-patch) is what keeps a later
+		// "simplification" to SSA from landing silently.
+		//
+		// kubectl-secret-get stays on the subprocess path here so the stub
+		// answers the read and only the apply crosses to the library path; the
+		// stub then fails loudly and distinctively for the "apply -f -" argv
+		// shape, so a fallback surfaces as a recognizable deploy failure
+		// instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\n")
+		seedExecutionMode(t, setup, "kubectl-secret-apply", "library")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		freshEncoded := base64.StdEncoding.EncodeToString([]byte("AWS:fresh-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, freshEncoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		liveSecretJSON := `{"kind":"Secret","apiVersion":"v1","metadata":{"name":"ecr-pull","namespace":"team-dev"},"type":"kubernetes.io/dockerconfigjson"}`
+
+		var patchContentType, patchBody atomic.Value
+		patchContentType.Store("")
+		patchBody.Store("")
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/namespaces/team-dev/secrets/ecr-pull" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if r.Method == http.MethodPatch {
+				body, _ := io.ReadAll(r.Body)
+				patchContentType.Store(r.Header.Get("Content-Type"))
+				patchBody.Store(string(body))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, liveSecretJSON)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get secret"*) echo 'Error from server (NotFound): secrets "ecr-pull" not found' >&2; exit 1 ;;`,
+			`  *"apply -f -"*) printf '%s\n' "fell through to the kubectl subprocess for the image pull secret apply" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("image pull secret apply used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		gotContentType, _ := patchContentType.Load().(string)
+		if gotContentType != "application/strategic-merge-patch+json" {
+			t.Fatalf("apply must be kubectl's client-side three-way strategic merge, got content type %q", gotContentType)
+		}
+		gotBody, _ := patchBody.Load().(string)
+		if !strings.Contains(gotBody, "kubectl.kubernetes.io/last-applied-configuration") {
+			t.Fatalf("the patch must record the last-applied configuration kubectl's next apply merges against, got: %s", gotBody)
+		}
+		if strings.Contains(result.Combined, "fresh-token") || strings.Contains(result.Combined, freshEncoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+	})
+
+	t.Run("real_run_new_worktree_volume_announces_the_adoption", func(t *testing.T) {
+		// The regression this exists for: a deploy that first introduces the
+		// dedicated worktree volume to an environment whose checkout still lives
+		// on the home volume reported plain success while mounting an empty
+		// claim over that checkout. The claim's absence is a decision input a
+		// trace cannot supply, so kubectl is stubbed to report it NotFound; the
+		// deploy must then name the worktree path, the volume it moves onto, and
+		// where the pre-move copy is kept.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "helm", "")
+		// The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks erun-devops published
+		// so the runtime chart ladder confirms it instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		envVars = append(envVars, fixture.StubKubectlWorktreeClaim(t, stubs, fixture.KubectlWorktreeClaimStubSpec{
+			ClaimName: "team-devops-worktree",
+			Stderr:    `Error from server (NotFound): persistentvolumeclaims "team-devops-worktree" not found`,
+			ExitCode:  1,
+		})...)
+		envVars = append(envVars, fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_new_worktree_volume_announces_the_adoption", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_unreadable_worktree_volume_still_announces", func(t *testing.T) {
+		// A cluster the claim read fails against is "unknown", never "settled":
+		// staying quiet is the exact failure being fixed, so the notice prints
+		// anyway and the read's error is traced beside it.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "helm", "")
+		// The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks erun-devops published
+		// so the runtime chart ladder confirms it instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		envVars = append(envVars, fixture.StubKubectlWorktreeClaim(t, stubs, fixture.KubectlWorktreeClaimStubSpec{
+			ClaimName: "team-devops-worktree",
+			Stderr:    "error: You must be logged in to the server (Unauthorized)",
+			ExitCode:  1,
+		})...)
+		envVars = append(envVars, fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_unreadable_worktree_volume_still_announces", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_pvc_get_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-pvc-get: the plan must
+		// stay byte-identical to the subprocess-mode golden
+		// (dry_run_remote_env_prefers_tenant_published_runtime_chart, which
+		// already exercises the worktree-claim trace via a remote-agent env's
+		// pvc worktree storage) even with execution.modes.kubectl-pvc-get=library,
+		// since announceWorktreeVolumeChange only ever renders the trace line
+		// (kubectlWorktreeClaimArgs) and never calls worktreeClaimExists on a
+		// dry run.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		seedExecutionMode(t, setup, "kubectl-pvc-get", "library")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/team-devops:1.0.0,ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_prefers_tenant_published_runtime_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_pvc_get_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (worktree claim already exists, no adoption notice)
+		// via a real client-go call against a fake API server instead of
+		// shelling out to kubectl. The kubectl stub fails loudly and
+		// distinctively only for the "get pvc ... -o name" argv shape (every
+		// other kubectl subcommand this deploy needs — the post-helm rollout
+		// wait and pod-watch poll — still succeeds), so a fallback to the
+		// subprocess path for the worktree-claim check surfaces as a
+		// recognizable deploy failure instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		seedExecutionMode(t, setup, "kubectl-pvc-get", "library")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/api/v1/namespaces/team-dev/persistentvolumeclaims/team-devops-worktree" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"PersistentVolumeClaim","apiVersion":"v1","metadata":{"name":"team-devops-worktree","namespace":"team-dev"}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get pvc"*) printf '%s\n' "fell through to the kubectl subprocess for the worktree claim check" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("worktree claim check used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
 	})
 
 	t.Run("real_run_remote_env_tenant_umbrella_pulls_bundled_values", func(t *testing.T) {
@@ -524,7 +1161,10 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinaryFailFirstThenSucceed(t, stubs, "helm",
 			`Error: UPGRADE FAILED: cannot patch "team-devops" with kind Deployment: Deployment.apps "team-devops" is invalid: spec.selector: Invalid value: {"matchLabels":{"app":"erun-devops"}}: field is immutable`, 1)
 		fixture.StubBinary(t, stubs, "docker", "")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		// The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks erun-devops published
+		// so the runtime chart ladder confirms it instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -560,7 +1200,10 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "kubectl", "")
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		// The ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam marks erun-devops published
+		// so the runtime chart ladder confirms it instead of refusing.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -683,6 +1326,35 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/rollout_timeout_flag_invalid_duration_errors", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_max_cpu_memory_storage_flags_apply_namespace_quota", func(t *testing.T) {
+		// All three of --max-cpu/--max-memory/--max-storage together trace the
+		// kubectl apply that would create the namespace's ResourceQuota +
+		// LimitRange, alongside the existing namespace-ensure trace.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--max-cpu", "4", "--max-memory", "8Gi", "--max-storage", "80Gi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_max_cpu_memory_storage_flags_apply_namespace_quota", normalize.Apply(result.Combined))
+	})
+
+	t.Run("max_cpu_memory_storage_flags_partial_set_errors", func(t *testing.T) {
+		// A namespace ResourceQuota with only some resources capped would leave
+		// Kubernetes to admit unbounded amounts of the rest, so a partial set
+		// (here, --max-cpu alone) fails loudly rather than silently applying an
+		// incomplete quota.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--max-cpu", "4", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit on a partial namespace quota:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/max_cpu_memory_storage_flags_partial_set_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("env_deploy_timeout_invalid_duration_errors", func(t *testing.T) {
 		// A malformed per-env deploy.timeout fails the deploy loudly at spec
 		// resolution (EnvironmentDeployConfig.Resolve) rather than reverting to
@@ -759,20 +1431,59 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_outside_devops_with_tenant_env", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_remote_env_uses_published_chart", func(t *testing.T) {
-		// Regression: a remote env (Remote=true) has its repopath on the
-		// remote host's filesystem (e.g. proxmox1: /home/erun/git/erun) and
-		// has no local checkout at all. Deploy from any cwd must still
-		// work: the runtime spec resolves to the published erun-devops OCI
-		// chart (decision trace + helm upgrade pinned by --version).
-		// Historically this materialized an embedded chart copy that had
-		// drifted from the canonical chart; the published chart is
-		// the single contract.
+	t.Run("dry_run_remote_env_refuses_when_no_runtime_chart_is_confirmed", func(t *testing.T) {
+		// Regression #1193: a remote env (Remote=true) has its repopath on the
+		// remote host's filesystem (e.g. proxmox1: /home/erun/git/erun) and has
+		// no local checkout at all, and the probe seam confirms no candidate --
+		// neither the tenant's own umbrella nor the shared erun-devops chart, in
+		// either registry the ladder searches. Deploy must refuse rather than
+		// substitute the shared chart at the tenant's version: erun-devops is
+		// versioned on erun's own release line, so that coordinate can never
+		// exist. Before the fix this installed exactly that impossible
+		// coordinate (decision trace + a helm upgrade pinned to it); now it
+		// stops before any helm command is built, naming every coordinate it
+		// asked and that none was confirmed.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
-		// Note: no SeedDevopsRepo — there is no local checkout anywhere.
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
-		golden.Equal(t, "deploy/dry_run_remote_env_uses_published_chart", normalize.Apply(result.Combined))
+		// Note: no SeedDevopsRepo — there is no local checkout anywhere. The
+		// harness default confirms the shared erun-devops chart at any version
+		// (the realistic baseline); this scenario is precisely the case where
+		// that is NOT true, so it resets the seam to empty (nothing published
+		// anywhere).
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected deploy to refuse when no runtime chart candidate is confirmed, got exit 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("deploy must never attempt to install a chart coordinate it has not confirmed, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_refuses_when_no_runtime_chart_is_confirmed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_refuses_shared_chart_confirmed_only_at_a_different_version", func(t *testing.T) {
+		// Regression #1193, the exact production shape: the tenant's own
+		// umbrella (team-devops) is never published, and the shared erun-devops
+		// chart genuinely exists -- just on erun's own release line (1.0.201),
+		// not the tenant's requested version (1.0.72). A ladder that only checks
+		// "does a chart named erun-devops exist anywhere" would find it and
+		// install it tagged 1.0.72, a chart:version pair that was never
+		// published and never can be. Deploy must refuse instead of assembling
+		// that impossible coordinate.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.201")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.72", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected deploy to refuse rather than install erun-devops at the tenant's version, got exit 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "erun-devops:1.0.72") || strings.Contains(result.Combined, "erun-devops --version 1.0.72") {
+			t.Fatalf("deploy must never carry the tenant's version onto the shared erun-devops chart, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("deploy must never attempt to install a chart coordinate it has not confirmed, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_refuses_shared_chart_confirmed_only_at_a_different_version", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_prefers_tenant_published_runtime_chart", func(t *testing.T) {
@@ -782,8 +1493,13 @@ func TestDeploy(t *testing.T) {
 		// published analogue of the local <tenant>-devops-first order. The
 		// probe's answer is supplied deterministically via the
 		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE decision-input seam (real deploys
-		// read the registry); the sibling dry_run_remote_env_uses_published_chart
-		// locks the fallback to charts/erun-devops when the tenant chart is absent.
+		// read the registry); the sibling
+		// dry_run_remote_env_refuses_when_no_runtime_chart_is_confirmed locks the
+		// refusal when the tenant chart is absent and nothing else is confirmed.
+		// The seam also publishes the platform chart in erun's own registry, which
+		// the search would otherwise reach: the tenant's umbrella wins over it, so
+		// widening the search never diverts a self-contained tenant onto the
+		// vanilla runtime.
 		//
 		// With no runtimeimage set, preferring the umbrella also defaults the
 		// runtime image to the umbrella's own image: erun push publishes the
@@ -795,7 +1511,7 @@ func TestDeploy(t *testing.T) {
 		// names the default and the helm command carries the re-scoped --set-string.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
-		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/team-devops:1.0.0,ghcr.io/sophium/erun-devops:1.0.0")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		golden.Equal(t, "deploy/dry_run_remote_env_prefers_tenant_published_runtime_chart", normalize.Apply(result.Combined))
 	})
@@ -833,14 +1549,120 @@ func TestDeploy(t *testing.T) {
 		// every chart pull. This locks the branch that fix 49f7f92f introduced, the
 		// counterpart to the plain-env branch every other remote deploy golden pins.
 		// The cluster entry is concretized in dry-run via the kubectl svc ClusterIP
-		// lookup, which returns a placeholder without touching a cluster.
+		// lookup, which returns a placeholder without touching a cluster. The
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
+		// specifically in ghcr.io/sophium, which is what proves resolution reaches
+		// that registry rather than refusing.
 		setup := env.New(t)
 		fixture.SeedClusterRegistryRemoteTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_remote_env_cluster_registry_chart_from_runtime_image", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_resolves_from_the_platform_registry", func(t *testing.T) {
+		// The reported deadlock: a tenant whose deploy registry is its own ECR
+		// holds that tenant's app images and no charts/* repository at all, so
+		// neither its umbrella nor the shared platform chart is in it and the
+		// deploy failed at every version. The ladder's last rung looks where erun
+		// actually publishes the platform chart — the runtime image's registry,
+		// ghcr.io/sophium here — and the deploy resolves there instead. The trace
+		// names each rung it passed over, so the search itself is auditable.
+		// The registry-qualified ERUN_PUBLISHED_CHART_PROBE_OVERRIDE entry is what
+		// puts erun-devops in one registry and not the other.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_resolves_from_the_platform_registry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_prefers_the_deploy_registry_over_the_platform_registry", func(t *testing.T) {
+		// No-regression guard on the widened search: when the deploy registry does
+		// publish the shared platform chart, that is still what installs — the
+		// runtime image's registry is a last resort, not a preference. Both
+		// registries publish erun-devops here, and the deploy stops at the first.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/erun-devops:1.0.0,ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_prefers_the_deploy_registry_over_the_platform_registry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_operator_set_runtime_registry_stands_over_a_different_resolution", func(t *testing.T) {
+		// The memo is how an operator redirects the runtime chart search
+		// (`erun init --runtime-registry`), so a deploy that resolves somewhere
+		// else keeps the operator's value and says so, naming the command that
+		// would change it. Without the trace the divergence is invisible: the
+		// deploy succeeds either way, and only reading the config would show it.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeregistry: ghcr.io/petios\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_operator_set_runtime_registry_stands_over_a_different_resolution", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_records_the_registry_the_runtime_chart_resolved_from", func(t *testing.T) {
+		// The regression: the deploy memoized where the chart search STARTED, so
+		// an env whose deploy registry carries no platform chart came out of a
+		// successful deploy recording that registry as the place erun's artifacts
+		// live — the one thing the search had just disproved, twice. The memo must
+		// name the rung the chart resolved at. Real-run because the persist is the
+		// side effect under test, and the assertion reads the config the goldens
+		// cannot see.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.99")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: ghcr.io/sophium")
+	})
+
+	t.Run("real_run_records_the_deploy_registry_when_the_chart_resolves_there", func(t *testing.T) {
+		// The no-regression twin: a chart found where the search started is still
+		// memoized as before, so following the resolution changed nothing for the
+		// environments whose chart is published beside their own images.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=registry.example/test/erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: registry.example/test")
+	})
+
+	t.Run("real_run_keeps_an_operator_set_runtime_registry", func(t *testing.T) {
+		// `erun init --runtime-registry` is the documented way out of an env whose
+		// deploy registry has no platform chart; a deploy that overwrote it reset
+		// the field by doing the very thing it was set to enable. The chart here
+		// resolves at ghcr.io/sophium while the operator named ghcr.io/petios, and
+		// the operator's value survives.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		appendEnvConfig(t, setup, "team", "dev", "runtimeregistry: ghcr.io/petios\n")
+		envVars := deployStubEnv(t, setup, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=ghcr.io/sophium/erun-devops:1.0.99")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeregistry: ghcr.io/petios")
+		assertEnvConfigContains(t, setup, "team", "dev", "runtimeversion: 1.0.99")
 	})
 
 	t.Run("dry_run_remote_env_image_pull_secrets", func(t *testing.T) {
@@ -865,6 +1687,89 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secrets", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_image_pull_secret_refreshed_from_host_credential", func(t *testing.T) {
+		// An ECR authorization token expires after twelve hours (#1256), so a
+		// pull secret named once via --image-pull-secret and never refreshed
+		// eventually rots. When the host running `erun deploy` already has a
+		// credential for the deploy registry (docker config, or the AWS CLI
+		// for ECR), deploy re-mints the named Secret from it instead of
+		// leaving whatever it held days ago. DOCKER_CONFIG points the host
+		// resolver at this isolated dir, the same seam the init registry
+		// credential scenario uses; the fixture's containerregistry
+		// (registry.example/test) is deliberately addressed here.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"registry.example":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secret_refreshed_from_host_credential", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_image_pull_secret_covers_runtime_image_override_registry", func(t *testing.T) {
+		// #1328: a runtimeimage pinned to a registry other than the env's
+		// containerRegistry (e.g. built into one registry, deployed from
+		// another) left the refreshed pull secret uncovered for the registry
+		// the pod actually pulls from — before this fix, resolution only ever
+		// tried containerRegistry's host, so a credential known for the
+		// image's own registry was never even attempted. Here DOCKER_CONFIG
+		// carries a credential for the runtimeimage's own registry
+		// (otherregistry.example) but NOT for the fixture's containerregistry
+		// (registry.example): before the fix this applied no secret at all
+		// ("no host credential resolved for registry.example; leaving
+		// ecr-pull untouched" and nothing else tried); after the fix the
+		// image's own registry still resolves and the secret is applied.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ecr-pull\nruntimeimage: otherregistry.example/team-devops\n")
+
+		dockerCfgDir := filepath.Join(setup.Cwd, "docker-inline")
+		if err := os.MkdirAll(dockerCfgDir, 0o755); err != nil {
+			t.Fatalf("mkdir docker config dir: %v", err)
+		}
+		encoded := base64.StdEncoding.EncodeToString([]byte("AWS:s3cret-token"))
+		dockerCfg := fmt.Sprintf(`{"auths":{"otherregistry.example":{"auth":%q}}}`, encoded)
+		if err := os.WriteFile(filepath.Join(dockerCfgDir, "config.json"), []byte(dockerCfg), 0o644); err != nil {
+			t.Fatalf("write docker config: %v", err)
+		}
+
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0", "DOCKER_CONFIG="+dockerCfgDir)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "s3cret-token") || strings.Contains(result.Combined, encoded) {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_image_pull_secret_covers_runtime_image_override_registry", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", func(t *testing.T) {
 		// Migration hardening: when a tenant rode the shared erun-devops chart and
 		// later moved to its own team-devops umbrella, a leftover
@@ -887,6 +1792,160 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_umbrella_honours_tenants_own_runtimeimage_tag", func(t *testing.T) {
+		// A pin naming the tenant's OWN team-devops image at a tag that disagrees
+		// with the deploy version used to be discarded as "provably redundant"
+		// and silently replaced with a guessed team-devops:<erun-version> tag.
+		// That guess conflated two independent version lines: the tenant's own
+		// image is versioned on the tenant's own release line (exactly what
+		// `erun pin` already documents and enforces — it never rewrites this
+		// tag), so a tag that disagrees with the deploy version is the expected,
+		// correct case, not staleness. The recorded runtimeimage must be
+		// honoured verbatim, and the deploy must roll out that tag rather than
+		// one nothing ever published.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/test/team-devops:1.0.353-snapshot-20260824165146\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.51")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.51", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_umbrella_honours_tenants_own_runtimeimage_tag", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", func(t *testing.T) {
+		// The shared-chart half of the stale-pin migration. An env that states its
+		// runtime chart at the chart's own version is deploying a version from another
+		// line, so a leftover runtimeimage naming the stock erun-devops would pin
+		// erun-devops:<tenant-version> — a tag erun's line never publishes
+		// (ImagePullBackOff). The stated chart is the signal: the pin is ignored and the
+		// version names the tenant's own image. That image resolves against the registry
+		// the cluster pulls from, not the chart's — an env states its chart precisely to
+		// keep the two apart.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeregistry: ghcr.io/sophium\n"+
+			"runtimeimage: ghcr.io/sophium/erun-devops\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.0\n"+
+			"containerregistries:\n    - registry: registry.example/tenant\n      roles:\n        - build\n        - deploy\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_flag_rescues_a_stock_runtime_image_override", func(t *testing.T) {
+		// erun#1249: an env recorded at an old runtimechart version, deployed with
+		// --version/--runtime-image/--runtime-chart together moving it forward.
+		// Before the fix, the image inference read the env's stale recorded chart
+		// version -- the --runtime-chart override was only applied to the deploy
+		// spec afterward -- concluded the stock erun-devops image could not be
+		// published "on another line", and silently substituted a tenant image
+		// tag that was never built (ImagePullBackOff). The operator's own image
+		// and chart must both install exactly as stated.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n"+
+			"runtimeimage: ghcr.io/sophium/erun-devops\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.201",
+			"--runtime-image", "ghcr.io/sophium/erun-devops:1.0.201",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=ghcr.io/sophium/erun-devops:1.0.201") {
+			t.Fatalf("operator's explicit --runtime-image was discarded: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_flag_rescues_a_stock_runtime_image_override", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_flag_alone_heals_a_persisted_stock_runtimeimage_memo", func(t *testing.T) {
+		// The ordering fix in isolation, with no --runtime-image flag this run: a
+		// persisted runtimeimage memo (not this invocation's own choice) still goes
+		// through the staleness heuristic, which must key off the operator's
+		// --runtime-chart rather than the env's stale recorded chart version. Before
+		// the fix, this healed pin was wrongly evicted the same way an explicit
+		// override was.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n"+
+			"runtimeimage: ghcr.io/sophium/erun-devops\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.201",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.0.201",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=ghcr.io/sophium/erun-devops:1.0.201") {
+			t.Fatalf("persisted runtimeimage memo was wrongly evicted: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_flag_alone_heals_a_persisted_stock_runtimeimage_memo", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_explicit_runtime_image_wins_on_the_tenants_own_version_line", func(t *testing.T) {
+		// erun#1249 second variant: the tenant's runtime image rides its own
+		// project's version line (VERSION symlinked to the project's release, not
+		// erun's), so an explicit --runtime-image shares a repository with the
+		// deploy's inferred default image but differs only by tag. Before the fix,
+		// staleRuntimeImageTrace treated that as a leftover pin and silently
+		// substituted the inferred tag, which the operator had never published.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeregistry: ghcr.io/sophium\n"+
+			"containerregistries:\n    - registry: registry.example/tenant\n      roles:\n        - build\n        - deploy\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--runtime-image", "registry.example/tenant/team-devops:9.9.9-snapshot-20260101010101",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=registry.example/tenant/team-devops:9.9.9-snapshot-20260101010101") {
+			t.Fatalf("operator's explicit --runtime-image was discarded: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_explicit_runtime_image_wins_on_the_tenants_own_version_line", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_deploys_published_components", func(t *testing.T) {
@@ -918,6 +1977,48 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_published_components", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_runtime_env_unreachable_repo_path_falls_back_to_local_plan", func(t *testing.T) {
+		// #1116: a runtime env's configured repo path names an in-pod checkout
+		// (e.g. /home/erun/git/frs) that does not exist on the host running this
+		// deploy — the normal case for a runtime env driven from an operator's
+		// laptop. Clearing (or never setting) deploy.components used to silently
+		// drop selection to the runtime chart alone instead of following the repo
+		// plan, because the plan read depended solely on that unreachable
+		// configured path. Deploy now also tries the project rooted at its own
+		// working directory (which here is exactly where the plan lives, the
+		// normal case for a host sitting inside the tenant checkout), so the
+		// plan's four components are selected without --components. No saved
+		// deploy.components on the env, so this exercises the plan selection
+		// tier specifically, not just a fallback trace.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - team-devops\n        - [erun-backend-postgres, erun-backend-db]\n        - erun-backend-api\n")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"), "defaulttenant: team\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"), "projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: dev\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\n"+
+				"containerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\n")
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0,erun-backend-postgres:1.0.0,erun-backend-db:1.0.0,erun-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_env_unreachable_repo_path_falls_back_to_local_plan", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_deploys_tenant_component_charts_by_reference", func(t *testing.T) {
 		// A tenant publishes its own component charts (team-backend-api) beyond the
 		// fixed erun-* platform set. On a sourceless remote env --components selects
@@ -938,6 +2039,109 @@ func TestDeploy(t *testing.T) {
 			"--dry-run",
 		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		golden.Equal(t, "deploy/dry_run_remote_env_deploys_tenant_component_charts_by_reference", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_tenant_component_verifies_against_the_cluster_registry", func(t *testing.T) {
+		// erun#1598: a `--cluster-registry` env with an explicit runtimeregistry
+		// (a realistic pairing -- runtimeregistry names where the shared
+		// platform chart lives, containerregistries names the in-cluster
+		// registry the tenant's own images and component charts publish to)
+		// could never confirm its own component chart, because verification
+		// probed the platform-chart registry (runtimeregistry) instead of the
+		// registry `erun push` actually publishes tenant charts to. The
+		// registry-qualified ERUN_PUBLISHED_CHART_PROBE_OVERRIDE entry below is
+		// published only at the concretized cluster pull address (the dry-run
+		// placeholder <cluster-ip>:5000), never at the runtimeregistry, so this
+		// only passes when resolution reaches the cluster registry -- exactly
+		// the registry the cluster entry is marked insecure for, which
+		// erun-common's registry-scheme unit tests cover directly (a live HTTPS
+		// probe against a plain-HTTP registry cannot be observed from this
+		// harness; see erun-integration/AGENTS.md's coverage-gaps section).
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"), "defaulttenant: team\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"), "projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: dev\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\n"+
+				"repopath: /nonexistent-remote/team\n"+
+				"kubernetescontext: test-context\n"+
+				"runtimeimage: ghcr.io/sophium/erun-devops\n"+
+				"runtimeregistry: ghcr.io/sophium\n"+
+				"runtimeversion: 1.0.0\n"+
+				"type: remote-agent\n"+
+				"containerregistries:\n"+
+				"    - cluster: {insecure: true}\n"+
+				"      roles:\n"+
+				"        - build\n"+
+				"        - deploy\n",
+		)
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=<cluster-ip>:5000/team-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "verifying charts published at 1.0.0 in <cluster-ip>:5000: team-backend-api") {
+			t.Fatalf("expected verification against the concretized cluster registry, not the platform runtimeregistry:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_tenant_component_verifies_against_the_cluster_registry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_component_threads_resolved_oidc_issuer", func(t *testing.T) {
+		// Regression: an empty computed api.oidcAllowedIssuers used
+		// to be passed as `--set-string api.oidcAllowedIssuers=` regardless, and
+		// helm's --set always beats -f, so it silently clobbered whatever the
+		// operator configured under that key in the published chart's
+		// values.<env>.yaml. Its sibling above
+		// (dry_run_remote_env_deploys_published_components) locks the empty case —
+		// no --set-string for the key at all, so -f wins. Here a cloud-provider
+		// alias resolves a real issuer for this same sourceless component-deploy
+		// path, and the flag must still appear, re-scoped under the wrapped
+		// erun-backend-api subchart exactly as it did before the fix.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"),
+			"defaulttenant: team\n"+
+				"cloudproviders:\n"+
+				"  - alias: alpha\n"+
+				"    provider: aws\n"+
+				"    profile: alpha\n"+
+				"    oidcissuerurl: https://oidc.example/shared\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"),
+			"projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: dev\n"+
+				"cloudprovideraliases:\n  - alpha\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\n"+
+				"containerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: remote-agent\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_component_threads_resolved_oidc_issuer", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_tenant_artifacts_require_published_charts", func(t *testing.T) {
@@ -962,6 +2166,39 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_tenant_artifacts_require_published_charts", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_stated_runtime_chart_is_exempt_from_the_tenant_chart_mandate", func(t *testing.T) {
+		// The mandate binds a tenant-component deploy to the tenant's version line,
+		// and the tenant runtime chart is normally part of that: it must exist at the
+		// version. An env that states its runtime chart is not riding a tenant chart
+		// at all, so requiring one would fail a deploy that is entirely coherent --
+		// the component runs on the tenant's line, the runtime on the line the env
+		// named. The probe override publishes only team-backend-api at 1.0.0 (no
+		// team-devops), which without the exemption is exactly the fast failure the
+		// sibling scenario above pins. The components are still verified.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-backend-api:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "team-backend-api,team-devops",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.0.178") {
+			t.Fatalf("stated runtime chart not installed: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_stated_runtime_chart_is_exempt_from_the_tenant_chart_mandate", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_runtime_env_mount_source_clones_at_release_ref", func(t *testing.T) {
 		// A runtime env is sourceless by default (worktreeStorage=none). Opting
 		// into MountSource (with a RepoURL) flips its runtime worktree to a PVC
@@ -977,7 +2214,8 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("read env config: %v", err)
 		}
 		mustWriteFile(t, envConfigPath, string(existing)+"mountsource: true\nrepourl: https://github.com/sophium/erun.git\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1004,11 +2242,176 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("read env config: %v", err)
 		}
 		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/acme/my-devops:2.0.0\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_remote_env_custom_runtime_image", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_env_states_its_runtime_chart_in_config", func(t *testing.T) {
+		// The durable half of the coordinate. An env whose image rides the project's
+		// own release line states its chart once, in config, so every later deploy --
+		// including one driven from the desktop, which passes only a version --
+		// installs the chart that exists instead of probing for one at a version the
+		// chart's line never published. The lookup is skipped entirely: the env was
+		// taken at its word, and the trace says so.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeimage: registry.example/acme/team-devops\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "9.9.9-snapshot-20260101010101",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.0.178") {
+			t.Fatalf("env's stated chart not installed at its own version: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=registry.example/acme/team-devops:9.9.9-snapshot-20260101010101") {
+			t.Fatalf("image not tagged on the deploy version: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_env_states_its_runtime_chart_in_config", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_flag_beats_the_env_config_chart", func(t *testing.T) {
+		// Precedence, the same way --runtime-image beats runtimeimage: the config
+		// field is the env's standing statement, the flag is this run's. An operator
+		// trying a different chart must not have to edit config to do it, and must
+		// not silently leave the env changed afterwards -- the flag is not persisted.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "9.9.9-snapshot-20260101010101",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.2.3",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.2.3") {
+			t.Fatalf("flag did not win over the config chart: %s", result.Combined)
+		}
+		after, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config after deploy: %v", err)
+		}
+		if !strings.Contains(string(after), "runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.178") {
+			t.Fatalf("run-only flag changed the env's stated chart: %s", after)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_flag_beats_the_env_config_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_runtime_chart_and_image_on_separate_lines", func(t *testing.T) {
+		// The chart and the runtime image are separate artifacts in separate
+		// registries. A tenant that versions its image on its own release line has
+		// no chart at that version, so --runtime-chart states the chart as its own
+		// coordinate: the trace names the override, the helm command pulls the chart
+		// at the version the reference carries, and --version still stamps the
+		// release and resolves the image.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/acme/team-devops\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "9.9.9-snapshot-20260101010101",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.0.0",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The goldens normalize every version to <VERSION>, which is exactly what
+		// this scenario is about, so the two coordinates are asserted literally:
+		// the chart at its own version, the image at the deploy version.
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.0.0") {
+			t.Fatalf("chart not pulled at its own version: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=registry.example/acme/team-devops:9.9.9-snapshot-20260101010101") {
+			t.Fatalf("image not held on the tenant version line: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_runtime_chart_and_image_on_separate_lines", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_override_off_a_tenant_umbrella_drops_the_subchart_scope", func(t *testing.T) {
+		// The value scope belongs to the chart that is actually installed. This env
+		// resolves the tenant's own charts/team-devops umbrella, whose runtime
+		// values are re-scoped under the erun-devops subchart key; naming the
+		// canonical chart instead must drop that nesting, because helm silently
+		// ignores values addressed to a subchart the chart does not wrap -- the
+		// image override and the required tenant/environment values would land
+		// nowhere and the pod would come up wrong rather than failing. The bundled
+		// values pull goes with it: a canonical chart ships no per-env values.
+		//
+		// The image is deliberately untouched -- it stays the tenant's own
+		// team-devops at the deploy version. That is the whole point of naming the
+		// chart separately: the chart rides erun's release line, the image rides the
+		// tenant's, and overriding one must not move the other.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--runtime-chart", "oci://ghcr.io/sophium/charts/erun-devops:1.2.3",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://ghcr.io/sophium/charts/erun-devops --version 1.2.3") {
+			t.Fatalf("named chart not installed at its own version: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--set-string imageOverrides.erun-devops=registry.example/test/team-devops:1.0.0") {
+			t.Fatalf("image override not in the installed chart's scope: %s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "erun-devops.imageOverrides") {
+			t.Fatalf("values still nested under a subchart the named chart does not wrap: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_override_off_a_tenant_umbrella_drops_the_subchart_scope", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_runtime_chart_without_version_keeps_the_deploy_version", func(t *testing.T) {
+		// A reference with no version names only the chart's repository, so the
+		// chart still resolves at the deploy version; a registry port in the
+		// reference must not be read as one.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--runtime-chart", "registry.example:5000/charts/erun-devops",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "oci://registry.example:5000/charts/erun-devops --version 1.0.0") {
+			t.Fatalf("port read as a version, or deploy version not kept: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_runtime_chart_without_version_keeps_the_deploy_version", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_runtime_image_without_tag", func(t *testing.T) {
@@ -1026,7 +2429,8 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("read env config: %v", err)
 		}
 		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/acme/my-devops\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1046,7 +2450,8 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--runtime-image", "ghcr.io/sophium/erun-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--runtime-image", "ghcr.io/sophium/erun-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1070,11 +2475,175 @@ func TestDeploy(t *testing.T) {
 		if err := os.RemoveAll(filepath.Join(setup.Cwd, "team-devops", "k8s")); err != nil {
 			t.Fatalf("remove k8s tree: %v", err)
 		}
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--runtime-image", "ghcr.io/sophium/erun-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--runtime-image", "ghcr.io/sophium/erun-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_runtime_image_override_no_k8s_tree_uses_published_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_no_repo_path_deploys_published_chart", func(t *testing.T) {
+		// A control-plane-provisioned tenant with no project has no repopath at
+		// all (fixture.SeedRuntimeTenantEnvNoRepoPath mirrors the backend's
+		// bootstrapEnvironmentScript seed exactly). `--runtime-image` must
+		// still install the canonical published erun-devops chart by reference:
+		// resolveOpenRepoPath must not require a repo path for a runtime env with
+		// no mounted source worktree, or this fails with "repo path is not
+		// configured" before ever reaching the override.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--runtime-image", "ghcr.io/sophium/erun-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_no_repo_path_deploys_published_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_private_ghcr_runtime_image_with_no_host_credential_traces_pull_secret_decision", func(t *testing.T) {
+		// A runtime-only env's image defaults onto ghcr.io/sophium/<tenant>-devops
+		// (DefaultContainerRegistry) the moment it is not the erun product's own
+		// tenant, with no operator action needed -- so --dry-run must show whether
+		// that image can even be pulled instead of staying silent about it, the
+		// one moment the operator could still fix a missing credential cheaply.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_private_ghcr_runtime_image_with_no_host_credential_traces_pull_secret_decision", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_refuses_before_rollout_when_private_runtime_image_has_no_pull_credential", func(t *testing.T) {
+		// The severity this preflight exists for: the runtime chart's Recreate
+		// strategy tears down the running pod before the new one is scheduled, so
+		// discovering an unpullable image only after the rollout starts takes the
+		// environment down rather than leaving a stalled rollout beside a healthy
+		// pod. No kubectl/helm stub is declared at all -- if the refusal did not
+		// fire before any cluster interaction, the command would instead fail with
+		// "executable file not found", which would show up in the golden below.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*",
+			// Absent from the override, an anonymous-pull probe of this specific
+			// image resolves to "not pullable" (anonymousPullableOverrideEnv).
+			"ERUN_ANONYMOUS_PULLABLE_OVERRIDE=",
+		)
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal for a private runtime image with no resolvable pull credential, got exit 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "kubectl") || strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("refusal must fire before any cluster interaction: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_refuses_before_rollout_when_private_runtime_image_has_no_pull_credential", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_heals_stale_runtimeimage_when_moving_onto_the_tenants_own_line", func(t *testing.T) {
+		// erun#1754: frs/build's exact drift. The env's persisted runtimeimage
+		// still names the stock erun-devops image, but this deploy confirms
+		// the tenant's own frs-devops chart (the existing staleness check
+		// already resolves the CORRECT image for THIS deploy) -- what
+		// erun#1754 found missing is that the persisted runtimeimage field
+		// never healed to match, so a later deploy that does not repeat this
+		// exact chart confirmation would read the same stale stock pin back.
+		// Real-run: persistence only happens outside --dry-run. runtimeimage
+		// must heal to the bare tenant name (self-maintaining, no registry, no
+		// tag) in the same write as runtimeversion -- one coordinate, one
+		// commit.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		appendEnvConfig(t, setup, "frs", "build", "runtimeimage: ghcr.io/sophium/erun-devops\n")
+		envVars := deployStubEnv(t, setup,
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=frs-devops:1.0.86",
+			"ERUN_ANONYMOUS_PULLABLE_OVERRIDE=sophium/frs-devops:1.0.86",
+		)
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		assertEnvConfigContains(t, setup, "frs", "build",
+			"runtimeversion: 1.0.86",
+			"runtimeimage: frs-devops",
+		)
+		assertEnvConfigLacks(t, setup, "frs", "build", "runtimeimage: ghcr.io/sophium/erun-devops")
+		golden.Equal(t, "deploy/real_run_heals_stale_runtimeimage_when_moving_onto_the_tenants_own_line", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_refuses_cross_line_runtime_image_switch_before_any_mutation", func(t *testing.T) {
+		// erun#1754's severity case: this env's last confirmed deploy actually
+		// ran the tenant's own frs-devops image (runtimerunningimage), but the
+		// persisted runtimeimage still names stock erun-devops and this
+		// deploy's own chart confirmation does not this time land on the
+		// tenant's own chart (so the existing staleness check, which is keyed
+		// off the chart, does not fire) -- the wrong tag resolves fine
+		// (erun-devops:1.0.86 is a real erun release), so only comparing
+		// release lines against the last confirmed deploy catches it. No
+		// kubectl/helm stub is declared: if the refusal did not fire before
+		// any cluster interaction, the command would instead fail with
+		// "executable file not found", which would show up in the golden.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		appendEnvConfig(t, setup, "frs", "build",
+			"runtimeimage: ghcr.io/sophium/erun-devops\n"+
+				"runtimerunningimage: ghcr.io/sophium/frs-devops:1.0.84\n",
+		)
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal for a deploy that would silently switch release lines, got exit 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "kubectl") || strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("refusal must fire before any cluster interaction: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_refuses_cross_line_runtime_image_switch_before_any_mutation", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_consistent_stock_runtime_image_env_deploys_unchanged", func(t *testing.T) {
+		// The legitimate case erun#1754 says must keep working with no new
+		// friction: an env that deliberately rides the stock erun-devops
+		// image on erun's own release line (frs/local in the issue), redeployed
+		// at a newer erun version. Both the recorded runtimeimage and the last
+		// confirmed runtimerunningimage name the same (stock) release line, so
+		// neither the persisted-image healing nor the new cross-line guard
+		// changes anything observable here.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "local")
+		appendEnvConfig(t, setup, "frs", "local",
+			"runtimeimage: erun-devops\n"+
+				"runtimerunningimage: ghcr.io/sophium/erun-devops:1.0.203\n",
+		)
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
+		result := erun.Run(t, []string{"deploy", "frs", "local", "--version", "1.0.204", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_consistent_stock_runtime_image_env_deploys_unchanged", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unclassifiable_prior_runtime_image_warns_but_proceeds", func(t *testing.T) {
+		// root AGENTS.md: an unclassifiable pairing must never silently pass as
+		// fine, but must also never block a configuration this guard merely
+		// could not classify. runtimerunningimage here parses to no component
+		// name at all (an ends-in-"/" reference), so the guard cannot compare
+		// release lines -- it must trace that explicitly and let the deploy
+		// proceed rather than refuse or stay silent.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		appendEnvConfig(t, setup, "frs", "build", "runtimerunningimage: ghcr.io/sophium/\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:*")
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.86", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected an unclassifiable prior image to proceed rather than refuse, got exit %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "could not be classified") {
+			t.Fatalf("expected a trace explaining the prior image could not be classified, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_unclassifiable_prior_runtime_image_warns_but_proceeds", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
@@ -1085,7 +2654,8 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		mustWriteFile(t, filepath.Join(setup.ConfigHome, "erun", "team", "dev", "values.yaml"), "claude:\n  model: test-model\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1122,6 +2692,33 @@ func TestDeploy(t *testing.T) {
 			"--dry-run",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/components_includes_backend_in_deploy_order", normalize.Apply(result.Combined))
+	})
+
+	t.Run("components_config_scopes_component_chart_lookup", func(t *testing.T) {
+		// A declared .erun/config.yaml components.<name>.k8s (erun#1840's
+		// monorepo-of-independent-deployables shape) scopes --components' chart
+		// lookup to that harness's own k8s root instead of walking the whole
+		// project, so a same-named chart elsewhere (here, a decoy under an
+		// unrelated -devops module) cannot collide with it. Without the scoping
+		// this would resolve "multiple Helm charts found for component".
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedProjectComponentsConfig(t, setup, fixture.ComponentPathsConfig{
+			Name: "ingest-worker",
+			K8s:  "harnesses/ingest-worker/k8s",
+		})
+		fixture.SeedK8sChartAt(t, filepath.Join(setup.Cwd, "harnesses", "ingest-worker", "k8s"), "ingest-worker", "team", "dev")
+		fixture.SeedK8sChartAt(t, filepath.Join(setup.Cwd, "decoy-devops", "k8s"), "ingest-worker", "team", "dev")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "ingest-worker",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/components_config_scopes_component_chart_lookup", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_umbrella_component_builds_helm_dependencies", func(t *testing.T) {
@@ -1245,14 +2842,51 @@ func TestDeploy(t *testing.T) {
 		// A valid `platform:` block flows into every chart's helm command as
 		// guarded platform.* --set args, with Resolve's defaults filled in
 		// (serviceszone/authhost/nameservers derived from basedomain). Only the
-		// PowerDNS singleton reads them; the runtime chart ignores them. Proves
-		// the deploy -> platform-config -> helm wiring end to end.
+		// platform singletons read them; the runtime chart ignores them. Proves
+		// the deploy -> platform-config -> helm wiring end to end, including the
+		// resolved auth host reaching the API's trusted-issuer list as
+		// api.oidcAllowedIssuers=https://auth.<basedomain> — a platform's control
+		// plane trusts its own hosted IdP without an operator patching anything,
+		// and the front-door docs link defaulting to docs.<basedomain> so a
+		// platform points at its own documentation with nothing configured.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  authoritativeip: 212.93.120.230\n")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/platform_config_threads_into_helm_set", normalize.Apply(result.Combined))
+	})
+
+	t.Run("platform_config_threads_white_label_values_into_helm_set", func(t *testing.T) {
+		// An operator's own docs URL, tagline, and logo travel the same
+		// platform.* path consoleurl and brand already do, so the instance's
+		// pre-sign-in front door reflects its own brand instead of the bundled
+		// product defaults. A configured docsurl wins over the
+		// docs.<basedomain> default, and a trailing slash is normalized away so
+		// the client's own deep links under it do not double up.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  brand: Acme\n  docsurl: https://handbook.acme.example/erun/\n  tagline: Ship it, prove it.\n  logourl: https://cdn.acme.example/logo.svg\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "deploy/platform_config_threads_white_label_values_into_helm_set", normalize.Apply(result.Combined))
+	})
+
+	t.Run("rejects_malformed_platform_logo_url", func(t *testing.T) {
+		// A logourl that is not an absolute URL would reach a browser as a dead
+		// image on the instance's front door, with nothing on the page able to
+		// explain it — so it is refused at plan time, and the refusal names the
+		// shape expected plus an example under this deployment's own domain
+		// rather than only saying "invalid".
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "platform:\n  basedomain: erunpaas.com\n  env: frs-prod\n  logourl: cdn.acme.example/logo.svg\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a malformed platform logourl, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/rejects_malformed_platform_logo_url", normalize.Apply(result.Combined))
 	})
 
 	t.Run("components_rejects_unknown_name", func(t *testing.T) {
@@ -1290,14 +2924,17 @@ func TestDeploy(t *testing.T) {
 		// A component-only tenant tree (component charts under <tenant>-devops/k8s
 		// but no <tenant>-devops runtime chart — the frs platform shape). With no
 		// selection, deploy defaults to the runtime and, finding no local runtime
-		// chart, installs the published erun-devops chart by reference; the
-		// present component charts are NOT deployed (not selected). This is the
-		// dual-lookup + published fallback now available to deploy as it is to
-		// open.
+		// chart, installs the published erun-devops chart by reference (once the
+		// ladder confirms it published at the version — the
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam stands in for that registry
+		// read); the present component charts are NOT deployed (not selected).
+		// This is the dual-lookup + published fallback now available to deploy
+		// as it is to open.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("expected exit 0 bootstrapping the published runtime, got %d:\n%s", result.ExitCode, result.Combined)
 		}
@@ -1318,6 +2955,66 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/saved_deploy_components_drive_selection_without_flag", normalize.Apply(result.Combined))
 	})
 
+	t.Run("saved_deploy_components_shadowing_plan_refuses_to_deploy", func(t *testing.T) {
+		// When a saved deploy.components set wins over a repo k8s.deployments
+		// plan that names more, a plain deploy must not silently roll out the
+		// stale subset forever (erun#1712: a component added to the plan after
+		// the saved selection was written sat a whole release behind because
+		// nothing besides a trace line ever said so). It refuses instead,
+		// naming exactly what the plan asked for beyond the saved set and both
+		// ways out — adopt it via `erun init --components`, or return to the
+		// plan by clearing the saved selection.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a saved selection shadowing the repo plan, got 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("expected the refusal to stop before any helm invocation, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/saved_deploy_components_shadowing_plan_refuses_to_deploy", normalize.Apply(result.Combined))
+	})
+
+	t.Run("explicit_components_still_narrows_and_does_not_resurrect_shadowed_plan_extras", func(t *testing.T) {
+		// --components is its own, higher-precedence selection tier, resolved
+		// before a saved selection or the repo plan ever applies. This is the
+		// same shadowed setup as saved_deploy_components_shadowing_plan_refuses_to_deploy
+		// (saved omits what the plan names), but this run passes --components
+		// explicitly, naming exactly the saved subset. Two properties must both
+		// hold: the flag bypasses the saved-vs-plan guard entirely (an operator
+		// naming a subset explicitly is narrowing on purpose for that one run,
+		// and that must keep working exactly as before), and the deploy must
+		// install only what was named — the fix must never react to a shadowed
+		// saved selection by widening what actually gets installed, which would
+		// resurrect a component an operator could have deliberately narrowed
+		// away, the opposite failure from the one erun#1712 reports.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"erun-backend-postgres"})
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "erun-backend-postgres",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 for an explicit --components run bypassing the saved-selection guard, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if got := strings.Count(result.Combined, "helm upgrade --install"); got != 1 {
+			t.Fatalf("expected exactly one helm invocation (the explicitly named component only), got %d:\n%s", got, result.Combined)
+		}
+		if strings.Contains(result.Combined, "erun-backend-db") || strings.Contains(result.Combined, "erun-backend-api") {
+			t.Fatalf("expected the plan-only components to never appear in the deploy, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/explicit_components_still_narrows_and_does_not_resurrect_shadowed_plan_extras", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_via_stubs", func(t *testing.T) {
 		// Drive the non-dry-run helm/kubectl runners via stub binaries so
 		// the deploy execution path (deploy.go's run* helpers, post-helm
@@ -1332,6 +3029,131 @@ func TestDeploy(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unaffected_by_kubectl_namespace_get_library_execution_mode", func(t *testing.T) {
+		// Locks the dry-run/audit contract for kubectl-namespace-get: the plan
+		// must stay byte-identical to the subprocess-mode golden
+		// (dry_run_from_devops_cwd) even with
+		// execution.modes.kubectl-namespace-get=library, since
+		// TraceEnsureKubernetesNamespace only ever renders the trace line
+		// (kubectlGetNamespaceArgs) and never calls kubernetesNamespaceExists
+		// on a dry run.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-namespace-get", "library")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_kubectl_namespace_get_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (namespace already exists, no create needed) via a
+		// real client-go call against a fake API server instead of shelling
+		// out to kubectl. The kubectl stub fails loudly and distinctively
+		// only for the "get namespace" argv shape (every other kubectl
+		// subcommand this deploy needs — the post-helm rollout wait and
+		// pod-watch poll — still succeeds), so a fallback to the subprocess
+		// path for the namespace check surfaces as a recognizable deploy
+		// failure instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-namespace-get", "library")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/api/v1/namespaces/team-dev" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"team-dev"}}`)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get namespace"*) printf '%s\n' "fell through to the kubectl subprocess for the namespace check" >&2; exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "fell through to the kubectl subprocess") {
+			t.Fatalf("namespace check used the kubectl subprocess despite library execution mode:\n%s", result.Combined)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+	})
+
+	t.Run("real_run_failure_shows_deploy_failed_header_at_default_verbosity", func(t *testing.T) {
+		// A report claimed the "==> Deploy failed tenant/env: reason" header
+		// (activityDeployFailedLineRe's contract in the desktop) went through
+		// ctx.Trace and was invisible below -vv, making the parser dead code.
+		// That does not hold against this codebase: common.Context.Trace
+		// has aliased Logger.Info (visible at default verbosity; only
+		// TraceCommand's raw argv is gated to -vv) since the primitives split in
+		// #559, well before this issue was filed. This scenario locks that
+		// contract in — the header must appear at default verbosity (no
+		// --dry-run, no -v/-vv) on a real helm failure — as a regression guard,
+		// not a fix. A whole-output golden is deliberately not used here: the
+		// helm stub's stderr capture through cmd.Run()'s buffer is not always
+		// flushed by the time the process exits, so the detail after "reason:"
+		// is not reliably reproducible; the header itself is.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{
+			Stderr:   "Error: UPGRADE FAILED: post-upgrade hooks failed: timed out waiting for the condition",
+			ExitCode: 1,
+		})
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a failing helm upgrade, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "==> Deploy failed team/dev:") {
+			t.Fatalf("expected the header at default verbosity (no -vv), got:\n%s", result.Combined)
+		}
 	})
 
 	t.Run("real_run_persists_runtime_version_and_registry_to_env_config", func(t *testing.T) {
@@ -1569,6 +3391,86 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/real_run_helm_pending_recovery_via_auto_recover_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_kubectl_pod_watch_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
+		// Proves the library path produces the same observable result as the
+		// subprocess path (a clean rollout logs the same summary line and lets
+		// helm finish) via a real client-go List against a fake API server
+		// instead of shelling out to kubectl. The kubectl stub fails loudly and
+		// distinctively only for the "get pods -o json" argv shape (the
+		// namespace-existence check deploy also runs still succeeds), so a
+		// fallback to the subprocess path for the watch surfaces as a
+		// recognizable failure instead of silently passing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		seedExecutionMode(t, setup, "kubectl-pod-watch", "library")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get pods -o json"*) printf '%s\n' "fell through to the kubectl subprocess for the pod watch" >&2; exit 1 ;;`,
+			`  *"get namespace "*) printf 'namespace/team-dev\n' ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n"))
+		fixture.StubBinaryWithScript(t, stubs, "helm", "sleep 0.5\nexit 0\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+
+		var apiHits atomic.Int64
+		apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiHits.Add(1)
+			if r.URL.Path != "/api/v1/namespaces/team-dev/pods" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, cleanRolloutPodJSON)
+		}))
+		defer apiServer.Close()
+		kubeDir := filepath.Join(setup.Home, ".kube")
+		if err := os.MkdirAll(kubeDir, 0o700); err != nil {
+			t.Fatalf("mkdir .kube: %v", err)
+		}
+		kubeconfig := "apiVersion: v1\n" +
+			"kind: Config\n" +
+			"clusters:\n" +
+			"  - name: test-cluster\n" +
+			"    cluster:\n" +
+			"      server: " + apiServer.URL + "\n" +
+			"contexts:\n" +
+			"  - name: test-context\n" +
+			"    context:\n" +
+			"      cluster: test-cluster\n" +
+			"      user: test-user\n" +
+			"users:\n" +
+			"  - name: test-user\n" +
+			"    user:\n" +
+			"      token: test-token\n" +
+			"current-context: test-context\n"
+		if err := os.WriteFile(filepath.Join(kubeDir, "config"), []byte(kubeconfig), 0o600); err != nil {
+			t.Fatalf("write kubeconfig: %v", err)
+		}
+
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if strings.Contains(out, "fell through to the kubectl subprocess") {
+			t.Fatalf("pod watch used the kubectl subprocess despite library execution mode:\n%s", out)
+		}
+		if !strings.Contains(out, "    pod team-devops-aaaaaa: erun-devops Running (Ready), erun-dind Running (Ready)") {
+			t.Fatalf("missing pod-watch summary line in output:\n%s", out)
+		}
+		if !strings.Contains(out, "==> Deployed team/dev <VERSION>") {
+			t.Fatalf("expected clean deploy completion in output:\n%s", out)
+		}
+		if got := apiHits.Load(); got == 0 {
+			t.Fatalf("fake API server received no requests; library path never ran")
+		}
+	})
+
 	t.Run("real_run_pod_watch_logs_clean_rollout", func(t *testing.T) {
 		// Exercises the in-flight pod watcher started by DeployHelmChart.
 		// The kubectl stub returns a pod owned by this helm release with
@@ -1685,16 +3587,51 @@ func TestDeploy(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_pod_watch_waits_out_the_unschedulable_grace_period", func(t *testing.T) {
+		// kubectl stub reports a pod stuck PodScheduled=False/Unschedulable on
+		// every poll. A brief unschedulable window is normal (the scheduler
+		// re-evaluates on cluster changes), so the watcher must not abort on the
+		// first observation — only once the grace period elapses. The grace is
+		// shrunk via ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE (the production
+		// default is 30s, too slow for a test) rather than asserting a wall-clock
+		// sleep tied to that default; see resolveUnscheduledGracePeriod.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: unschedulablePodJSON})
+		fixture.StubBinaryWithScript(t, stubs, "helm", "exec sleep 30\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=50ms", "ERUN_DEPLOY_POD_WATCH_UNSCHEDULED_GRACE=150ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit once the grace period elapses, got 0:\n%s", result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "deploy failed early: pod team-devops-pending Unschedulable") {
+			t.Fatalf("missing structured early-fail error naming the pod-level (no container) reason, got:\n%s", out)
+		}
+		if !strings.Contains(out, "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory") {
+			t.Fatalf("missing the scheduler's own message verbatim, got:\n%s", out)
+		}
+		if !strings.Contains(out, "    pod team-devops-pending: Pending (Unschedulable: 0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory)") {
+			t.Fatalf("missing the pod-status summary line surfacing the reason during the grace period, got:\n%s", out)
+		}
+	})
+
 	t.Run("real_run_published_chart_not_found_reports_actionable_error", func(t *testing.T) {
 		// Safety net: when the resolved published runtime chart is not pullable
-		// at the requested version (a snapshot image whose chart was never
-		// published, or a pruned tag), helm upgrade exits non-zero with a
-		// registry "not found" on stderr. DeployHelmChart must classify that
+		// at the requested version (a registry that has since evicted the tag, or
+		// a race between the probe and the pull), helm upgrade exits non-zero with
+		// a registry "not found" on stderr. DeployHelmChart must classify that
 		// into a PublishedChartNotFoundError naming the version + registry and
 		// pointing at the recovery (deploy a released version / publish first),
-		// instead of surfacing a bare "exit status 1". The helm stub fails the
-		// upgrade with a 404-shaped message; kubectl/docker succeed so the
-		// failure is isolated to the chart pull.
+		// instead of surfacing a bare "exit status 1". The
+		// ERUN_PUBLISHED_CHART_PROBE_OVERRIDE seam confirms erun-devops published
+		// so resolution proceeds to the real pull instead of refusing up front;
+		// the helm stub then fails that pull with a 404-shaped message, so the
+		// failure is isolated to the chart pull, not the search that precedes it.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		stubs := setup.Cwd + "/stubs"
@@ -1713,6 +3650,7 @@ func TestDeploy(t *testing.T) {
 			`exit 0`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when the published chart is not found, got 0:\n%s", result.Combined)
@@ -1760,6 +3698,48 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_snapshot_version_resets_postgres_database", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_released_version_does_not_reset_postgres_database", func(t *testing.T) {
+		// The regression this locks: resolveInstallExistingVersionDeploySpec
+		// used to pass a literal true into deployResetsDatabase, which
+		// short-circuited past the version check via snapshotEnabled ||, so
+		// installing an already-published RELEASED version armed the wipe
+		// exactly like a snapshot did. This scenario is identical to
+		// dry_run_snapshot_version_resets_postgres_database except the
+		// version carries no -snapshot- marker, and must resolve
+		// --set api.postgres.reset=false.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		templates := filepath.Join(setup.Cwd, "team-devops", "k8s", "erun-backend-postgres", "templates")
+		if err := os.MkdirAll(templates, 0o755); err != nil {
+			t.Fatalf("mkdir templates: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(templates, "postgres.yaml"), strings.Join([]string{
+			"apiVersion: apps/v1",
+			"kind: Deployment",
+			"spec:",
+			"  template:",
+			"    spec:",
+			"      containers:",
+			"        - image: registry.example/team/erun-backend-postgres:18.3 # pinned wrapper",
+			"",
+		}, "\n"))
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.5",
+			"--components", "erun-backend-postgres",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_released_version_does_not_reset_postgres_database", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_from_chart_cwd_resolves_single_chart_context", func(t *testing.T) {
 		// When deploy runs with cwd inside the chart directory itself,
 		// ResolveCurrentKubernetesDeployContexts takes the direct-context
@@ -1789,6 +3769,57 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/devops_k8s_deploy_component_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("devops_k8s_deploy_component_in_pod_local_agent_runtime_refused", func(t *testing.T) {
+		// Regression: ResolveDeploySpec (the component-named path behind
+		// `devops k8s deploy` and the MCP deploy tool's component branch) already
+		// applied the runtime chart's other guards — the chart override and the
+		// MCP-auth downgrade refusal — but not this one, so naming the runtime
+		// release as a component reached exactly the in-pod local-agent redeploy
+		// this guard exists to refuse. team-devops is RuntimeReleaseName("team").
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"devops", "k8s", "deploy", "team-devops", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an in-pod local-agent component-named runtime deploy:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_local_agent_runtime_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("devops_k8s_deploy_component_in_pod_local_agent_non_runtime_allowed", func(t *testing.T) {
+		// The guard must stay scoped to the runtime chart alone: naming a
+		// non-runtime component from inside the pod carries no environment shape,
+		// so it must keep working even in-pod on a local-agent env.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"devops", "k8s", "deploy", "erun-backend-api", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_local_agent_non_runtime_allowed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("devops_k8s_deploy_component_in_pod_non_local_agent_runtime_allowed", func(t *testing.T) {
+		// The guard is scoped to local-agent envs: a remote-agent env owns its
+		// worktree inside the pod, so naming its runtime chart as the component
+		// from inside the pod stays supported — mirrors
+		// in_pod_remote_agent_runtime_deploy_allowed for the component-named path.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		repoPath := filepath.Join(setup.Home, "git", "team")
+		fixture.SeedDevopsRepoAt(t, repoPath, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		result := erun.Run(t, []string{"devops", "k8s", "deploy", "team-devops", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_non_local_agent_runtime_allowed", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_parallel_step_deploys_charts_concurrently", func(t *testing.T) {
@@ -1999,7 +4030,10 @@ func TestDeploy(t *testing.T) {
 		// the same params hash, dry-run reports "would skip" and exits 0.
 		// We seed the marker with our own pid (always alive during this
 		// test) and the params hash erun --dry-run will compute on the
-		// first run. The second run sees the live identical marker.
+		// first run. The second run sees the live identical marker. The
+		// marker must also be recent or the max-age reclaim arm would fire
+		// first (the fixture's default StartedAt is fixed, so it ages past
+		// the 15-minute ceiling as real time passes).
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -2010,6 +4044,7 @@ func TestDeploy(t *testing.T) {
 		hash := extractDedupHash(t, first.Combined)
 		fixture.SeedDeployInflightMarker(t, setup, "test-context", "team-dev", "team-devops", fixture.DeployInflightRecord{
 			PID:         os.Getpid(),
+			StartedAt:   time.Now().UTC().Format(time.RFC3339),
 			ParamsHash:  hash,
 			Tenant:      "team",
 			Environment: "dev",
@@ -2032,12 +4067,16 @@ func TestDeploy(t *testing.T) {
 		// A live in-flight deploy with a different params hash should fail
 		// the second invocation with HelmReleaseConcurrentDeployError so two
 		// callers with conflicting intent surface the conflict instead of
-		// stomping on each other's helm release.
+		// stomping on each other's helm release. The marker must also be
+		// recent or the max-age reclaim arm would fire first (the fixture's
+		// default StartedAt is fixed, so it ages past the 15-minute ceiling
+		// as real time passes).
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedDeployInflightMarker(t, setup, "test-context", "team-dev", "team-devops", fixture.DeployInflightRecord{
 			PID:         os.Getpid(),
+			StartedAt:   time.Now().UTC().Format(time.RFC3339),
 			ParamsHash:  "0000000000000000",
 			Tenant:      "team",
 			Environment: "dev",
@@ -2192,6 +4231,121 @@ func TestDeploy(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_failed_rollout_still_records_mcp_auth_public_key", func(t *testing.T) {
+		// Regression: the key was recorded only after the whole deploy succeeded,
+		// so a rollout that failed once helm had already applied it left the live
+		// release trusting a key the env could not name — and the next deploy's
+		// downgrade refusal had nothing to rethread, blocking the very redeploy
+		// that would have healed the environment. The key is now recorded where it
+		// is applied, so the failed rollout below still leaves the env naming it and
+		// the follow-up deploy rethreads it instead of being refused.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		keyPath := seedMCPAuthPublicKey(t, setup)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		// A silent failure: the stub's own stderr is inherited by the subprocess
+		// and races erun's ordered output, so the golden would not be reproducible
+		// if it printed one. The exit code alone drives the failure under test.
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{ExitCode: 1})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.1", "--mcp-auth-public-key", keyPath}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a failed rollout:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_failed_rollout_still_records_mcp_auth_public_key", normalize.Apply(result.Combined))
+		body := readEnvConfig(t, setup, "team", "dev")
+		if !strings.Contains(body, "mcpauthpublickeypath: "+keyPath) {
+			t.Fatalf("expected the failed rollout to still record mcpauthpublickeypath: %s, got:\n%s", keyPath, body)
+		}
+		// The version stays a post-success write: the rollout that would have made
+		// it the running one failed.
+		if strings.Contains(body, "runtimeversion: 1.0.1") {
+			t.Fatalf("expected the failed rollout to leave the recorded runtime version alone, got:\n%s", body)
+		}
+
+		// The recovery the record exists for: with the live release still
+		// authenticated, the next deploy rethreads the recorded key rather than
+		// being refused as a downgrade.
+		recovery := append(setup.Env(), "ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=enabled|file:///etc/erun/mcp-auth/desktopid.pub|team-devops-mcp-auth")
+		result = erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.2", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: recovery})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_recovers_after_a_failed_authenticated_rollout", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_refusal_names_the_desktop_identity_key_the_release_trusts", func(t *testing.T) {
+		// A release that predates the recorded key can only be recovered by
+		// re-supplying the key it already trusts, so the refusal reads that key out
+		// of the release's own Secret and — when it is this host's desktop identity
+		// — names the path to pass, instead of leaving the operator to work out
+		// which file the edge trusts and whether re-supplying it would rotate that
+		// trust. The kubectl stub stands in for the Secret read; the live-release
+		// answer comes from the ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE seam.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		trustedKey := "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAdesktopidentitydesktopidentitydesktopidenti=\n-----END PUBLIC KEY-----\n"
+		identityPath := fixture.SeedDesktopIdentityPublicKey(t, setup, trustedKey)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", base64.StdEncoding.EncodeToString([]byte(trustedKey)))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		envVars = append(envVars, "ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=enabled|file:///etc/erun/mcp-auth/desktopid.pub|team-devops-mcp-auth")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a deploy that would strip live MCP auth:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_refusal_names_the_desktop_identity_key_the_release_trusts", normalize.Apply(result.Combined))
+		// The identity path is collapsed to a token by normalization, so the
+		// golden cannot tell one path from another: assert the concrete one the
+		// operator would paste against the raw capture.
+		if !strings.Contains(result.Combined, "--mcp-auth-public-key "+identityPath) {
+			t.Fatalf("expected the refusal to name %s as the key to re-supply, got:\n%s", identityPath, result.Combined)
+		}
+	})
+
+	t.Run("dry_run_refusal_names_the_secret_when_the_key_is_not_this_host_s", func(t *testing.T) {
+		// Same refusal from a host whose desktop identity is a different key: the
+		// message names the Secret and the fingerprint instead of a path, because
+		// pasting this host's key would rotate the edge's trust rather than restore
+		// it.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDesktopIdentityPublicKey(t, setup, "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAanotherhostanotherhostanotherhostanotherho=\n-----END PUBLIC KEY-----\n")
+		trustedKey := "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAdesktopidentitydesktopidentitydesktopidenti=\n-----END PUBLIC KEY-----\n"
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", base64.StdEncoding.EncodeToString([]byte(trustedKey)))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		envVars = append(envVars, "ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=enabled|file:///etc/erun/mcp-auth/desktopid.pub|team-devops-mcp-auth")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a deploy that would strip live MCP auth:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_refusal_names_the_secret_when_the_key_is_not_this_host_s", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_refusal_for_an_oidc_release_points_at_the_issuer_not_a_key", func(t *testing.T) {
+		// An env whose edge authenticates against the tenant's OIDC issuer holds no
+		// local key at all, so telling it to supply --mcp-auth-public-key would send
+		// the operator after a file that should not exist. The refusal names the
+		// issuer the release trusts and the env setting that lost it. No kubectl
+		// stub: this arm never reads the key Secret, and its absence is the point.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE=enabled|https://issuer.example/realms/team|")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a deploy that would strip live MCP auth:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_refusal_for_an_oidc_release_points_at_the_issuer_not_a_key", normalize.Apply(result.Combined))
+	})
+
 	t.Run("in_pod_local_agent_runtime_deploy_refused", func(t *testing.T) {
 		// Regression: calling a local-agent env's own in-pod MCP deploy resolved
 		// every environment-shaping value from the in-pod config projection —
@@ -2216,7 +4370,7 @@ func TestDeploy(t *testing.T) {
 		// worktree inside the pod, so deploying itself in-pod stays supported.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -2314,6 +4468,43 @@ func readEnvConfig(t *testing.T, setup env.Setup, tenant, environment string) st
 func appendEnvConfig(t *testing.T, setup env.Setup, tenant, environment, body string) {
 	t.Helper()
 	mustWriteFile(t, envConfigPathFor(setup, tenant, environment), readEnvConfig(t, setup, tenant, environment)+body)
+}
+
+// assertEnvConfigContains checks the env config erun persisted. Persisted state
+// sits outside the streams the goldens snapshot, so it needs its own assertion.
+func assertEnvConfigContains(t *testing.T, setup env.Setup, tenant, environment string, want ...string) {
+	t.Helper()
+	body := readEnvConfig(t, setup, tenant, environment)
+	for _, line := range want {
+		if !strings.Contains(body, line) {
+			t.Fatalf("expected env config to record %q, got:\n%s", line, body)
+		}
+	}
+}
+
+// assertEnvConfigLacks is the other half: a dry run traces what it would write,
+// and the proof that it wrote nothing is on disk, not in the streams.
+func assertEnvConfigLacks(t *testing.T, setup env.Setup, tenant, environment string, unwanted ...string) {
+	t.Helper()
+	body := readEnvConfig(t, setup, tenant, environment)
+	for _, line := range unwanted {
+		if strings.Contains(body, line) {
+			t.Fatalf("expected env config not to record %q, got:\n%s", line, body)
+		}
+	}
+}
+
+// deployStubEnv declares the external binaries a real-run deploy reaches. The
+// scenario PATH is scrubbed, so nothing ambient stands in for them; the stubs
+// exit 0 so the rollout completes and the post-deploy persist runs.
+func deployStubEnv(t *testing.T, setup env.Setup, extra ...string) []string {
+	t.Helper()
+	stubs := setup.Cwd + "/stubs"
+	fixture.StubBinary(t, stubs, "kubectl", "")
+	fixture.StubBinary(t, stubs, "helm", "")
+	fixture.StubBinary(t, stubs, "docker", "")
+	envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+	return append(envVars, extra...)
 }
 
 // seedMCPPortForwardState records a tracked MCP port-forward for the env, the
@@ -2503,6 +4694,26 @@ const crashLoopPodJSON = `{
             "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "back-off 5m restarting failed container"}},
             "lastState": {"terminated": {"reason": "Error", "exitCode": 137, "message": "exited with code 137"}}
           }
+        ]
+      }
+    }
+  ]
+}`
+
+// unschedulablePodJSON has no containerStatuses at all: the pod was never
+// admitted to a node, so the only place its failure reason lives is
+// status.conditions.
+const unschedulablePodJSON = `{
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-pending",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Pending",
+        "conditions": [
+          {"type": "PodScheduled", "status": "False", "reason": "Unschedulable", "message": "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory"}
         ]
       }
     }

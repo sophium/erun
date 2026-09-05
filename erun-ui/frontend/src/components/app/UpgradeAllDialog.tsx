@@ -1,3 +1,17 @@
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from 'erun-kit';
 import { ArrowRight, ArrowUp, LoaderCircle, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
@@ -5,22 +19,6 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { setUpgradeAllChoice } from '@/app/slices/upgradeAllSlice';
 import { closeUpgradeAllDialog, confirmUpgradeAll } from '@/app/upgradeThunks';
 import { selectionKey } from '@/app/versionSuggestions';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import type { UIUpgradePlanItem } from '@/types';
 
 // Must match the key confirmUpgradeAll resolves the picked version under.
@@ -168,7 +166,7 @@ function UpgradeAllBody({
         {upgradeCount} of {items.length} will be redeployed.
       </p>
       {unresolvedCount > 0 ? (
-        <p className="flex items-start gap-1.5 pt-1.5 text-[12px] text-amber-600 dark:text-amber-500">
+        <p className="flex items-start gap-1.5 pt-1.5 text-[12px] text-amber-700 dark:text-amber-400">
           <TriangleAlert className="mt-0.5 size-3.5 flex-none" aria-hidden="true" />
           <span>
             {unresolvedCount === 1
@@ -296,7 +294,7 @@ function UpgradePlanRowStatus({
       );
     }
     return (
-      <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap text-[11px] font-medium text-amber-600 dark:text-amber-500">
+      <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap text-[11px] font-medium text-amber-700 dark:text-amber-400">
         <TriangleAlert className="size-3 flex-none" aria-hidden="true" />
         pick a version
       </span>
@@ -308,7 +306,7 @@ function UpgradePlanRowStatus({
     // "(target unresolved)" and surfaces the same reason (e.g. a registry 403) inline.
     return (
       <span className="inline-flex flex-col items-end gap-0.5">
-        <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-medium text-amber-600 dark:text-amber-500">
+        <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-medium text-amber-700 dark:text-amber-400">
           <TriangleAlert className="size-3 flex-none" aria-hidden="true" />
           latest unknown
         </span>

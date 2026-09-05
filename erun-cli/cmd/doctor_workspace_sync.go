@@ -202,7 +202,13 @@ func reportWorkspaceSyncRepairOutcome(ctx common.Context, result common.OpenResu
 		return nil
 	}
 	if reachable, _ := probeWorkspaceSyncSSH(info.HostAlias); reachable {
-		_, err := fmt.Fprintf(ctx.Stdout, "Workspace sync SSH is reachable for %s/%s; the host mirror will sync on the next pass.\n", result.Tenant, result.Environment)
+		// The repair fixes SSH provisioning, which is all it can see. Whether a
+		// pass ever runs is a separate question — the desktop polls, and if it
+		// is not running nothing is — so this must not promise one. Naming the
+		// command that runs a pass outright turns "wait and hope" into a step.
+		_, err := fmt.Fprintf(ctx.Stdout,
+			"Workspace sync SSH is reachable for %s/%s. The desktop mirrors this env while it is running; to fill or refresh the mirror now, run `erun sshd sync %s %s`.\n",
+			result.Tenant, result.Environment, result.Tenant, result.Environment)
 		return err
 	}
 	_, err := fmt.Fprintf(ctx.Stdout,

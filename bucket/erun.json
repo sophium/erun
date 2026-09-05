@@ -1,5 +1,5 @@
 {
-  "version": "1.0.174",
+  "version": "1.0.250",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
   "license": "MIT",
@@ -9,9 +9,9 @@
     "nodejs",
     "yarn"
   ],
-  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.174.zip",
-  "hash": "102fbc4232ba4855420a18e426468bebf7204c2ab7a5726e19bd6d3aa5ad2cb3",
-  "extract_dir": "erun-1.0.174",
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.250.zip",
+  "hash": "76b8f2ea2eba6f1634aae26ae5a54e4da4942627e068a922045aa3826b6f484a",
+  "extract_dir": "erun-1.0.250",
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
@@ -32,7 +32,7 @@
       "Pop-Location",
       "Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue",
       "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
-      "$appLdflags = \"-s -w -H windowsgui -X github.com/sophium/erun/erun-ui.buildVersion=$version\"",
+      "$appLdflags = \"-s -w -H windowsgui -X main.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-ui\"",
       "$wailsVersion = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to resolve Wails version' }",

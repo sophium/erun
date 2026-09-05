@@ -1,4 +1,4 @@
 audit: erun cloud oidc --alias test-user@aws
 cloud oidc: refresh issuer for alias=test-user@aws
-cloud oidc: bearer token retrieval failed: enable AWS outbound web identity federation: An error occurred (AccessDenied) when calling the EnableOutboundWebIdentityFederation operation
-enable AWS outbound web identity federation: An error occurred (AccessDenied) when calling the EnableOutboundWebIdentityFederation operation
+cloud oidc: bearer token retrieval failed: enable AWS outbound web identity federation requires the iam:EnableOutboundWebIdentityFederation permission: An error occurred (AccessDenied) when calling the EnableOutboundWebIdentityFederation operation
+enable AWS outbound web identity federation requires the iam:EnableOutboundWebIdentityFederation permission: An error occurred (AccessDenied) when calling the EnableOutboundWebIdentityFederation operation

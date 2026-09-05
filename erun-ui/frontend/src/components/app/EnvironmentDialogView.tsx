@@ -1,3 +1,16 @@
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  EditableComboField,
+  Label,
+  uniqueSuggestions,
+} from 'erun-kit';
 import { FolderPlus, LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
@@ -11,30 +24,14 @@ import {
 } from '@/app/environmentDialogThunks';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
-import {
-  loadSavedPastContainerRegistries,
-  loadSavedPastEnvironments,
-  loadSavedPastTenants,
-} from '@/app/storage';
+import { loadSavedPastEnvironments, loadSavedPastTenants } from '@/app/storage';
 import { useController } from '@/app/useController';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+import { ContainerRegistryField } from '@/components/app/EnvironmentDialogView.RegistryField';
 
-import { EditableComboField } from './EditableComboField';
-import { uniqueSuggestions } from './EditableComboField.helpers';
 import { EnvironmentTypeSelect, LocalRepoPathField } from './EnvironmentTypeFields';
 import { KubernetesContextSelect } from './KubernetesContextSelect';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
@@ -97,7 +94,7 @@ export function EnvironmentDialogView(): React.ReactElement {
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitEnvironmentDialog(event.currentTarget)).catch((error: unknown) => {
-              dispatch(showTerminalMessage(readError(error)));
+              dispatch(showTerminalError(readError(error)));
             });
           }}
         >
@@ -227,74 +224,24 @@ function EnvironmentNameFields({
 }
 
 function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  // A host env has no pod and no cluster at all: no kubernetes context, no
+  // runtime pod sizing, no container registry — none of those apply to it.
+  // Showing them as required fields would block creating a host env entirely
+  // (a dead end per root AGENTS.md "Smooth, Seamless, No Dead Ends").
+  const isHost = dialog.envType === 'host';
   return (
     <>
       <EnvironmentTypeSelect dialog={dialog} />
-      {dialog.envType === 'local-agent' && <LocalRepoPathField dialog={dialog} />}
-      <KubernetesContextSelect dialog={dialog} />
-      <RuntimePodFields dialog={dialog} />
-      <ContainerRegistryField dialog={dialog} />
+      {(dialog.envType === 'local-agent' || isHost) && <LocalRepoPathField dialog={dialog} />}
+      {!isHost && (
+        <>
+          <KubernetesContextSelect dialog={dialog} />
+          <RuntimePodFields dialog={dialog} />
+          <ContainerRegistryField dialog={dialog} />
+        </>
+      )}
       <EnvironmentCreateChecks dialog={dialog} />
     </>
-  );
-}
-
-// ContainerRegistryField offers the in-cluster erun-registry (resolved from the
-// selected Kubernetes context) as the default when one is detected, and falls
-// back to a free-text registry otherwise. There is no hardcoded default host —
-// the deployed cluster registry is the default, not a placeholder like erunpaas.
-function ContainerRegistryField({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const containerRegistrySuggestions = React.useMemo(
-    () => uniqueSuggestions([dialog.containerRegistry, ...loadSavedPastContainerRegistries()]),
-    [dialog.containerRegistry],
-  );
-  const cluster = dialog.clusterRegistry;
-  const clusterAvailable = cluster?.deployed === true;
-  const useCluster = clusterAvailable && dialog.useClusterRegistry;
-  const clusterToggle = clusterAvailable ? (
-    <label className="flex items-center gap-2 text-sm font-normal">
-      <Checkbox
-        id="environment-use-cluster-registry"
-        checked={dialog.useClusterRegistry}
-        disabled={dialog.busy}
-        onCheckedChange={(value) => {
-          dispatch(updateEnvironmentDialog({ useClusterRegistry: value === true }));
-        }}
-      />
-      Use in-cluster registry ({cluster.service ?? 'erun-registry'})
-    </label>
-  ) : null;
-
-  if (useCluster) {
-    return (
-      <div className="grid gap-2">
-        <Label htmlFor="environment-use-cluster-registry">Container registry</Label>
-        {clusterToggle}
-        <p className="text-[12px] leading-[1.4] text-muted-foreground">
-          Resolved from {cluster.service}.{cluster.namespace}:{cluster.port} via this
-          environment&apos;s Kubernetes context — pushed and pulled in-cluster, no host address
-          needed.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid gap-2">
-      <EditableComboField
-        id="environment-container-registry"
-        label="Container registry"
-        value={dialog.containerRegistry}
-        suggestions={containerRegistrySuggestions}
-        required
-        disabled={dialog.busy}
-        onValueChange={(containerRegistry) => {
-          dispatch(updateEnvironmentDialog({ containerRegistry }));
-        }}
-      />
-      {clusterToggle}
-    </div>
   );
 }
 
@@ -316,8 +263,10 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // "Initialize without Git checkout" is a no-op for local-agent envs, so hide it there.
-  const isLocalAgent = dialog.envType === 'local-agent';
+  // "Initialize without Git checkout" is a no-op for local-agent and host
+  // envs — both resolve their worktree from this machine's own directory,
+  // never a remote checkout — so hide it there.
+  const skipsRemoteCheckoutAlready = dialog.envType === 'local-agent' || dialog.envType === 'host';
   return (
     <div className="grid gap-3">
       <CheckboxField
@@ -330,7 +279,7 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
           dispatch(updateEnvironmentDialog({ setDefaultTenant }));
         }}
       />
-      {!isLocalAgent && (
+      {!skipsRemoteCheckoutAlready && (
         <CheckboxField
           id="environment-no-git"
           label="Skip Git checkout"

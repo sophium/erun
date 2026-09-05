@@ -37,13 +37,15 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun sshd`](/cli/sshd) | Enable SSH (and IDE) access to a remote environment. |
 | [`erun list`](/cli/list) | List tenants, environments, and the effective target. |
 | [`erun idle`](/cli/idle) | Show an environment's idle / auto-stop status. |
+| [`erun observe`](/cli/observe) | Report an environment's Kubernetes state, read-only — pods, quota/limit usage, ingress + TLS, certificate readiness. |
+| [`erun usage`](/cli/usage) | Report an environment's live CPU, memory, and disk usage, read from cgroup v2 — no metrics-server required. |
 | [`erun job`](/agent-reference/cli-flags#erun-job) | Start long work in an environment and observe it by handle — `start`, `status`, `await`, `output`, `cancel`. |
 | [`erun doctor`](/cli/doctor) | Diagnose and repair an environment's runtime and config. |
 | [`erun version`](/cli/version) | Print erun's build version (and the project's, when in one) + latest published versions. |
 | [`erun mcp`](/cli/mcp) | Run the MCP server for Agents (launches `emcp`); `call` / `tools` / `token` reach an env's MCP edge. |
 | [`erun api`](/cli/api) | Run the backend API server (launches `eapi`). |
 | [`erun app`](/cli/app) | Launch the desktop app. |
-| [`erun exec`](/cli/exec) | Run repository helpers — `diff`, `raw`. |
+| [`erun exec`](/cli/exec) | Run repository helpers — `diff`, `raw`, `write`, `commit`, `push`, `merge`. |
 | [`erun contribute`](/cli/contribute) | Contribute-mode helpers — clone the ERun repo locally. |
 
 ## Dry-run and verbosity
@@ -52,7 +54,7 @@ Every action-oriented command supports `--dry-run` — resolve and print every s
 
 `-v` / `--verbose` streams external tool output; `-vv` adds per-command trace lines for every action and decision; `--time` prints elapsed wall time at the end. Full flag set per command is on the [CLI flag spec](/agent-reference/cli-flags) page.
 
-You never have to re-run a failed command just to capture diagnostics: every environment-scoped command (`open`, `doctor`, `deploy`, a scoped `upgrade`) automatically appends its full trace to the environment's rolling [trace log](/reference/config-locations#trace-log), readable at any time from the [desktop's Diagnostics console](/desktop/overview#diagnostics-console) — including for runs that finished before you went looking. `--dry-run` previews are never written to it.
+You never have to re-run a failed command just to capture diagnostics: every environment-scoped command (`open`, `doctor`, `deploy`, a scoped `upgrade`) automatically appends its full trace to the environment's rolling [trace log](/reference/config-locations#trace-log), readable at any time from the [desktop's Diagnostics console](/desktop/diagnostics-console) — including for runs that finished before you went looking. `--dry-run` previews are never written to it.
 
 ## How arguments resolve
 

@@ -73,10 +73,19 @@ func (r RemoteInitInspection) MissingItems() []RemoteInitInspectionItem {
 }
 
 // IsInRuntimeEnvironment reports whether the current process is running
-// inside an erun runtime pod.
+// inside an erun runtime pod. The chart sets ERUN_ENV_TYPE on every pod it
+// renders to local-agent, remote-agent, or runtime — never to host, the one
+// EnvironmentType with no pod — so a valid, non-host value is true for any
+// pod regardless of how its worktree is stored. ERUN_REPO_REMOTE records
+// worktree storage, not pod-ness, and stays false for a local-agent pod
+// (hostPath-mounted worktree) even though it runs in a pod; it is kept only
+// as a fallback for a pod deployed by a chart that predates ERUN_ENV_TYPE.
 func IsInRuntimeEnvironment(env func(string) string) bool {
 	if env == nil {
 		env = os.Getenv
+	}
+	if envType := EnvironmentType(strings.TrimSpace(env("ERUN_ENV_TYPE"))); envType.IsValid() {
+		return envType != EnvironmentTypeHost
 	}
 	return strings.EqualFold(strings.TrimSpace(env("ERUN_REPO_REMOTE")), "true")
 }
@@ -645,13 +654,13 @@ func finishRemoteInitCodeCommitSSHConfig(ctx Context, homeDir string, repository
 }
 
 // ensureRemoteInitSSHKeyPermissions re-tightens the SSH key file modes. ssh
-// silently refuses a private key that is group- or world-accessible, and
-// runtime pods on shared PVCs keep getting permissive group bits because the
-// chart's fsGroup makes kubelet re-OR g+rw into every PVC file on each pod
-// start. Init's chmod is therefore best-effort and gets reset between runs, so
-// doctor re-applies the expected mode every time it touches the key. The
-// runtime entrypoint also heals ~/.ssh on container start, so this stays as a
-// belt-and-braces guarantee for the doctor recovery path.
+// silently refuses a private key that is group- or world-accessible, and every
+// runtime PVC that was ever mounted under the chart's former pod-wide fsGroup
+// still carries the g+rw the kubelet ORed into each file on pod start. Those
+// bits do not heal themselves when the fsGroup goes away, so doctor re-applies
+// the expected mode every time it touches the key. The runtime entrypoint also
+// heals ~/.ssh on container start, so this stays as a belt-and-braces guarantee
+// for the doctor recovery path.
 func ensureRemoteInitSSHKeyPermissions(path string) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		if os.IsNotExist(err) {
@@ -670,12 +679,12 @@ func finishRemoteInitGitCheckout(ctx Context, projectRoot, sshKeyPath string, re
 	if strings.TrimSpace(repository.URL) == "" {
 		return errors.New("repository URL is required to finish git checkout")
 	}
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil && !ctx.DryRun {
-		return err
-	}
 	ctx.TraceCommand(projectRoot, "git", "clone", repository.URL, ".")
 	if ctx.DryRun {
 		return nil
+	}
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		return err
 	}
 	capture := ctx.ToolCapture()
 	cmd := Command("git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommandFor(repository, sshKeyPath), "clone", repository.URL, ".")

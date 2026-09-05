@@ -15,20 +15,21 @@ type DeleteInput struct {
 	Confirmation string `json:"confirmation,omitempty" jsonschema:"must exactly match tenant-environment when preview is false"`
 	Preview      bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity    int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	JobEnvelopeInput
 }
 
-func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeleteInput) (*mcp.CallToolResult, CommandOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input DeleteInput) (*mcp.CallToolResult, CommandOutput, error) {
+func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DeleteInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input DeleteInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		tenant, environment, err := scopedTenantEnv(input.Tenant, input.Environment, runtime)
 		if err != nil {
-			return nil, CommandOutput{}, err
+			return nil, JobEnvelopeOutput{}, err
 		}
 		expected := eruncommon.DeleteEnvironmentConfirmation(tenant, environment)
 		if expected == "" {
-			return nil, CommandOutput{}, fmt.Errorf("tenant and environment are required")
+			return nil, JobEnvelopeOutput{}, errMissingLocalTarget(tenant == "", environment == "")
 		}
 		if !input.Preview && strings.TrimSpace(input.Confirmation) != expected {
-			return nil, CommandOutput{}, fmt.Errorf("delete confirmation must match %q", expected)
+			return nil, JobEnvelopeOutput{}, fmt.Errorf("delete confirmation must match %q", expected)
 		}
 
 		deleteStore, ok := any(runtime.Store).(eruncommon.DeleteStore)
@@ -36,7 +37,7 @@ func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			deleteStore = eruncommon.ConfigStore{}
 		}
 
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
 			result, err := eruncommon.RunDeleteEnvironment(runCtx, eruncommon.DeleteEnvironmentParams{
 				Tenant:      tenant,
 				Environment: environment,
@@ -49,6 +50,7 @@ func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			}
 			return nil
 		})
-		return nil, output, err
+		envelope, err := runJobEnvelope(runtime, "delete", input.JobEnvelopeInput, input.Preview, execute)
+		return nil, envelope, err
 	}
 }

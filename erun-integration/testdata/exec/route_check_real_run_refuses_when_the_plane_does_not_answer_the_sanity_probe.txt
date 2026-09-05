@@ -1,0 +1,7 @@
+<PLATFORM_API> did not answer the sanity probe (GET /v1/whoami returned http 404: 404 page not found); no routes were checked.
+audit: erun exec route-check --routes-dir <TMP>
+route-check: reading route inventory from <TMP>
+route-check: 4 route(s) registered
+platform: GET <PLATFORM_API>/v1/whoami (sanity probe: the plane must answer before any route in the inventory is probed)
+route-check: sanity probe failed: GET /v1/whoami returned http 404: 404 page not found
+route-check: <PLATFORM_API> did not answer the sanity probe (GET /v1/whoami returned http 404: 404 page not found); refusing to report on an unreachable plane

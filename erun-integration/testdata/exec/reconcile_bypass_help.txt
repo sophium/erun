@@ -1,0 +1,29 @@
+Cross-reference GitHub's own bypass ledger (`GET .../rulesets/rule-suites`) for --ruleset-id on --target-branch against erun's gate runs: every push that bypassed --ruleset-id is reported next to what accounts for it. A push is RECONCILED when a PASSED gate run built one of the commits it landed, RELEASE when a tag in the repository points at one of them (a release stamps, tags and then pushes, so its own commits were never gated as a merge), and UNRECONCILED when nothing accounts for it at all.
+
+--expected-actor names the identities allowed to hold the bypass grant. Any other actor's bypass is reported UNEXPECTED_ACTOR even when the content it landed was really gated -- that is what makes narrowing the grant to one non-human identity (`erun exec plan-ruleset-bypass`) observable rather than merely configured.
+
+Exits non-zero, after printing the full report, when any push is unaccounted for or any unnamed identity bypassed -- a bypass nobody can explain is loud, never silent.
+
+--dry-run traces the GitHub and platform lookups without sending them.
+
+Usage:
+  erun exec reconcile-bypass [flags]
+
+Examples:
+  erun exec reconcile-bypass --ruleset-id 11081432 --target-branch main \
+    --expected-actor erun-merge-queue
+
+Flags:
+      --dry-run                      Resolve and trace mutating actions without executing them.
+      --erun-alias string            erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+      --expected-actor stringArray   An identity allowed to hold the bypass grant; repeatable. Any other actor's bypass is reported UNEXPECTED_ACTOR
+  -h, --help                         help for reconcile-bypass
+      --remote-url string            The github.com remote the ruleset lives on (defaults to the current checkout's origin)
+      --ruleset-id int               The ruleset to check bypasses against (required)
+      --since string                 Narrow the GitHub lookup window: hour, day, week, or month (defaults to GitHub's own window)
+      --target-branch string         The ruleset's protected branch (required)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

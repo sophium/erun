@@ -16,13 +16,45 @@ erun doctor [TENANT] [ENVIRONMENT] [flags]
 
 `erun doctor` runs a different check set depending on context. From your laptop, it validates the per-user tenant + env config, the kubeconfig context, the runtime pod's reachability, and the project root, and reports why a deploy may have failed: the helm release status and the runtime namespace's pods (read-only — it never touches the release). Inside the runtime pod (detected via `ERUN_REPO_REMOTE=true`) it inspects the bootstrap marker, the in-pod project root, the git checkout, the SSH keypair, and the CodeCommit RSA key when applicable.
 
-When the deploy diagnosis shows a stuck pending release or a failed image pull, the fix is to re-run `erun deploy --force` (rebuild and redeploy) or clear the pending release — the desktop app offers both as one-click buttons on the failed deploy in its [Activities panel](/desktop/overview#control-panel).
+When the deploy diagnosis shows a stuck pending release or a failed image pull, the fix is to re-run `erun deploy --force` (rebuild and redeploy) or clear the pending release — the desktop app offers both as one-click buttons on the failed deploy in its [Activities panel](/desktop/activities-and-recovery).
 
 For the full per-check id catalogue and the offered recovery actions, see [Agent reference · CLI flag spec · `erun doctor`](/agent-reference/cli-flags#erun-doctor).
 
-For an environment carrying an AWS cloud alias, `doctor` also reports the **host AWS credentials** it acts with: whether the pod's `erun-host` profile exists, when it expires (or that it has already **expired**), and the AWS region the environment resolves — or that none does. Both failures otherwise surface far from their cause, as an SDK `ExpiredToken` or an image pull rejected with `no basic auth credentials`, so this is the check that names them. The fix in either case is [`erun cloud refresh`](/cli/cloud#cloud-refresh); see [Troubleshooting](/reference/troubleshooting#host-credentials-expired).
+For an environment carrying an AWS cloud alias, `doctor` also reports the **host AWS credentials** it acts with: whether the pod's `erun-host` profile exists, when it expires (or that it has already **expired**), and the AWS region the environment resolves — or that none does. Both failures otherwise surface far from their cause, as an SDK `ExpiredToken` or an image pull rejected with `no basic auth credentials`, so this is the check that names them. The fix in either case is [`erun cloud refresh`](/cli/cloud#cloud-refresh); see [Troubleshooting](/reference/troubleshooting#host-credentials-expired). Reading it requires the runtime pod: when the pod isn't reachable, `doctor` reports **could not read** for this check instead of aborting, pointing back at the helm release status and pod state it already reported above, and carries on to the rest of the run — retry the check once the pod is running again.
+
+For a **remote-agent or runtime** environment — one whose project checkout lives inside the pod rather than on your own machine — `doctor` also reports **git push access**: the project's `origin` remote, whether an anonymous fetch against it succeeds, and whether any credential that could push (a `gh` session, `GH_TOKEN`/`GITHUB_TOKEN`, or an SSH key the remote host accepts) is configured. A public GitHub repository fetches anonymously for the entire life of a piece of work, so an environment can look completely healthy through a whole session of cloning, building, and testing, and only discover at the very end — trying to push a branch or open a PR — that it never had a credential. This check exists to surface that gap up front instead. It never runs `gh auth login`, `gh auth refresh`, or `gh auth switch` — only the read-only `gh auth status` — so reading it can never itself start gh's interactive device-code/browser flow, which cannot complete in a headless pod. See [Troubleshooting](/reference/troubleshooting#git-push-access). This check does not apply to a local-agent or host environment, whose checkout lives on your own machine and already carries your own git/gh credentials.
+
+`doctor` also compares the environment's `runtimeimage` against its `runtimeregistry` and flags a mismatch by name — a runtime image pinned to a different registry than the one credentials refresh for is exactly the split that leaves a redeployed pod stuck in `ImagePullBackOff`. This check reads only local config, so it runs identically whether or not the pod is up. On a mismatch it names both registries and points to two fixes: confirm a credential for the image's registry resolves where `erun deploy`/`erun open --deploy` runs, or realign the two with `erun init <tenant> <env> --runtime-registry <registry>` so `runtimeregistry` matches the image. For example:
+
+```
+== Runtime image registry ==
+runtimeimage resolves to registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com, but runtimeregistry is ghcr.io/sophium.
+The deploy that installs this env sets imageOverrides.erun-devops from 123456789012.dkr.ecr.eu-west-2.amazonaws.com while runtimeRegistry stays ghcr.io/sophium; the runtime pod can only pull if a credential for 123456789012.dkr.ecr.eu-west-2.amazonaws.com also resolves where `erun deploy`/`erun open --deploy` runs (the same AWS/docker session that can push to it). If the pod is failing to pull, confirm that credential is available there, or realign the two with `erun init team dev --runtime-registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com` to match the image.
+```
+
+See [Troubleshooting](/reference/troubleshooting#runtime-image-registry-mismatch).
 
 When any item is `missing`, `doctor` offers to run the corresponding recovery step.
+
+`doctor` also reports the **execution mode** of every operation that can run through either a CLI subprocess or an equivalent Go library — today `aws-sts` (`aws sts get-caller-identity`), `aws-sts-web-identity-token` (`aws sts get-web-identity-token`), `aws-export-credentials` (`aws configure export-credentials`), `kubectl-namespace-get` (`kubectl get namespace <name> -o name`), `kubectl-pvc-get` (`kubectl get pvc <claim> -o name`), `kubectl-secret-get` (`kubectl get secret <name> -o json`), `kubectl-pod-get` (`kubectl get pod <name> -o json`), `kubectl-deployment-get` (`kubectl get deployment <name> -o name`), `kubectl-deployment-wait` (`kubectl wait --for=condition=Available`), `kubectl-secret-apply` (`kubectl apply -f -` of a Secret), `kubectl-pod-watch` (the `kubectl get pods -o json` poll `erun deploy` runs alongside every helm rollout), and `kubectl-context-configure` (the `kubectl config set-cluster`/`set-credentials`/`set-context` trio `erun cloud context` uses to point a cloud context's kubeconfig entry at its own cluster), with more to follow — so whether an install opted an operation into the library path, or left it on the default subprocess path, can be confirmed rather than guessed at:
+
+```
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+```
+
+See [Configuration reference · Execution modes](/reference/configuration#execution-modes) for the config key that controls it.
 
 ## What it can repair
 
@@ -111,6 +143,7 @@ The check format is fixed (`<category>: <name> <status> <detail>`); machine-read
 | `--restore-env-config-from-backup` without an explicit tenant and environment. | Aborts with `--restore-env-config-from-backup needs an explicit tenant and environment`; exit code 1; nothing is changed. |
 | `--restore-env-config-from-backup <date>` with no matching backup. | Aborts naming the unmatched selector and the target env (`no env config backup matches "<date>" for <tenant>/<env>`); exit code 1; nothing is changed. |
 | Helm release missing or cluster unreachable during deploy diagnosis. | The helm/pod probe output (including the error) is shown as part of the diagnosis and `doctor` continues; the diagnosis is read-only, so nothing is changed. |
+| Host AWS credentials, git push access, or docker-storage check needs the runtime pod, but it isn't reachable. | `doctor` reports `could not read` for that check, points back at the helm release status and pod state already shown, and continues the rest of the run instead of aborting. Any requested prune action (`--prune-images`, `--prune-build-cache`, `--prune-containers`) is skipped with the same reason. |
 | Deploy recovery (`--clear-pending-helm` / `--rollback`) fails. | The failing helm/kubectl output is surfaced and `doctor` aborts with that error; the release is left as helm leaves it (a failed rollback does not partially apply). Re-run the diagnosis to see the new state, then retry or `erun deploy --force`. |
 | `--rollback` with no prior successful revision. | `helm rollback` reports it has no revision to roll back to; nothing changes. Use `--clear-pending-helm` then `erun deploy --force` instead. |
 | Both `--clear-pending-helm` and `--rollback` passed. | Aborts immediately with `--clear-pending-helm and --rollback are alternative recoveries; pass only one`; exit code 1; nothing runs. |

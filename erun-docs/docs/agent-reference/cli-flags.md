@@ -47,16 +47,49 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | Flag | Type | Default | Validation | Persists to |
 |---|---|---|---|---|
 | `--project-root <path>` | string (absolute path) | `<cwd>`'s git repo root (`git rev-parse --show-toplevel`) | Must be an existing directory; must contain a `.git/` directory or `.git` file. | The new env's `EnvConfig.localRepoPath` (every env type records it; #549). |
+| `--type <type>` | enum (`local-agent`, `remote-agent`, `runtime`, `host`) | unset. A **new** env then resolves to `local-agent` (or `remote-agent` when `--remote` is given); an **existing** env keeps `EnvConfig.type`. | Must be one of the four values. Conflicts with a `--remote` whose value disagrees (`host` also conflicts, since it resolves `RemoteWorktree() == false` the same as `local-agent`). | `EnvConfig.type`. On an existing env this is a [retype](#init-existing-env), permitted between any two types in either direction. `host` creates or retypes to an env with **no cluster contact at all** — see the host branch noted in the lifecycle algorithm below, which skips steps 2, 5, 6, 7, 8 entirely. |
 | `--remote` | bool | `false` | Conflicts with a `--type` whose value disagrees (e.g. `--type=local-agent --remote`). | Deprecated alias for `--type=remote-agent`: sets `EnvConfig.type = remote-agent`. Init then writes the in-pod bootstrap marker. |
 | `--no-git` | bool | `false` | Only meaningful with `--remote` / `--type=remote-agent`. | Skips the in-pod `git clone` step. |
-| `--version <version>` | string (semver) | The CLI's built-in `ERUN_VERSION`. | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`. | `EnvConfig.runtimeversion`. |
+| `--version <version>` | string (semver) | A **new** env takes the CLI's built-in `ERUN_VERSION`; an **existing** env keeps `EnvConfig.runtimeversion` (the built-in fills in only when the env records none). | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`. | `EnvConfig.runtimeversion`. The transport's own version is a fallback, not a request — an `init` about something else never repins a running env; move a version with [`erun deploy --version`](#erun-deploy). |
 | `--runtime-image <ref>` | string | unset — deploy then [defaults the image](#deploy-runtime-image-default) from the chart (a `<tenant>-devops` umbrella → its own image; the shared `erun-devops` chart → no override). | A full OCI reference (registry path and/or tag present) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>` at deploy time. | `EnvConfig.runtimeimage`; applied as `imageOverrides.erun-devops` on every published-chart deploy. |
+| `--runtime-registry <host>` | string (registry host, optional org path) | unset — the [runtime chart search](#deploy-runtime-chart-search) then resolves ERun's artifacts from the env's `deploy`-marked registry, widening to the runtime image's registry when the chart is not there. | Recorded verbatim (trimmed); no scheme, no `charts/` suffix. | `EnvConfig.runtimeregistry`, which the chart search and the in-pod `RUNTIME_REGISTRY` projection both honour first. Init's own runtime deploy sees it in the same run, so it is also the recovery path for an env that cannot complete a deploy. It is the only writer that replaces the field: a deploy records the registry its chart search resolved at, but only when the field is empty or already agrees — a value set here survives a deploy that resolved elsewhere, which traces `deploy: the env's runtime registry <recorded> stands; the runtime chart resolved from <resolved> instead (…)` rather than overwriting it. |
 | `--bootstrap` | bool | `false` | — | **Deprecated, ignored.** Prints a deprecation warning; `init` no longer scaffolds a `<tenant>-devops/` module — envs deploy the published `erun-devops` chart. |
-| `--runtime-cpu <value>` | Kubernetes quantity | `4` | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. |
-| `--runtime-memory <value>` | Kubernetes quantity | `8916Mi` | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. |
+| `--runtime-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimepod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
+| `--runtime-memory <value>` | Kubernetes quantity | A **new** env takes `8916Mi`; an **existing** env keeps `EnvConfig.runtimepod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. Merges with `--runtime-cpu` the same way. |
+| `--dind-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimedindpod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimedindpod.cpu` — the `erun-dind` sidecar's own limit, independent of `--runtime-cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
+| `--dind-memory <value>` | Kubernetes quantity | A **new** env takes `20Gi`; an **existing** env keeps `EnvConfig.runtimedindpod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimedindpod.memory`. Merges with `--dind-cpu` the same way. Raise this when a multi-arch `erun release`/`erun build --release` OOMs inside the sidecar — every image build runs there, not in the runtime container. |
 | `--codecommit-ssh-key-id <id>` | string (`APKA…` shape) | unset | Must start with `APKA`; must be a valid IAM key id (length 21). | Stored in the in-pod bootstrap marker (`bootstrap.yaml` → `codecommitSshKeyId`). |
 | `--confirm-environment` | bool | `false` | — | Equivalent to `-y` for the env-overwrite confirmation only. |
 | `--platform-account` | bool | `false` | — | Makes the env a **cluster platform account**: `EnvConfig.platformaccount = true`, which threads `--set platformAccount=true` at deploy so the runtime chart binds the env's ServiceAccount to the built-in `cluster-admin` (a `<release>-platform` `ClusterRoleBinding`). Lets in-pod platform Terraform (the [cluster edge](/agent-reference/skills-spec#erun-enable-hosting-edge)) and component installs manage cluster-scoped resources. The first deploy that adds the binding must run from an admin-capable context (the API server's escalation check). |
+| `--components <a,b,…>` | list of strings | unset — nothing changes. | Any string; not validated against a chart universe at init time (that check happens at deploy time). | `EnvConfig.deploy.components`, the [saved deploy selection](/reference/configuration#envconfig) — the same field `erun deploy --components` overrides per run but never persists. An explicit empty value (`--components ''`), distinct from omitting the flag, clears a saved selection and returns the env to its repo [`k8s.deployments`](#components-value-set) plan; there is no other command that resets it. |
+| `--erun-registry` | bool | `false` | Conflicts with `--container-registry` and with `--cluster-registry` — pick one. | Seeds the env's registry list with a single static entry, `registry.erunpaas.com/<tenant>` (`eruncommon.HostedRegistryReference`), marked `build`+`deploy` — the same shape `--container-registry` produces, just pointed at erun's hosted registry instead of an operator-named host. `(Planned.)` end to end: the flag, `BootstrapInitParams.ErunRegistry`, and the resolved registry entry all work today, but `registry.erunpaas.com` itself is not yet a live, reachable registry (see [Container registries · Hosted registry](/deployment/registries#hosted-registry)) — the DNS, TLS certificate, and the platform's zot deployment are not cut over. The env's deploy registry then holds only this project's images, so pair it with `--runtime-registry ghcr.io/sophium` (see the row above) to keep resolving erun's own runtime chart. |
+
+### Re-initializing an existing environment {#init-existing-env}
+
+When the env config already exists, `init` reconciles it against the invocation instead of creating it. Two questions are answered separately, and conflating them is what made settings vanish before: **what type is this invocation asking for**, and **which settings did it supply**.
+
+A setting is applied because it was supplied, not because of the type the invocation resolved to. Every field below describes the runtime pod, which an env of any type has, so `erun init <tenant> <env> --image-pull-secret X` lands on a `remote-agent` or `runtime` env without restating `--type`.
+
+| Input | Supplied | Omitted |
+|---|---|---|
+| `--version` | Sets `EnvConfig.runtimeversion`. Trace: `init: runtime version set to <v>` (or `… already <v>`). | Keeps it. Trace: `init: runtime version not given; keeping <v>`. The transport's built-in version fills in **only** when the env records none, tracing `init: env records no runtime version; adopting <v>`. |
+| `--runtime-image` | Sets `EnvConfig.runtimeimage` — **tagless**, even when the flag value carries a tag (a trailing `:<tag>`/digest is stripped before persisting). [Deploy resolution](/reference/configuration#advanced-image-overrides) already pins a tagless reference to the env's own runtime version on every deploy; persisting the tag is what leaves a stale pin behind after the env's version moves on, so init never records one. | Keeps it. Trace: `init: runtime image not given; keeping <ref>`. |
+| `--runtime-registry` | Sets `EnvConfig.runtimeregistry`. | Keeps it. |
+| `--image-pull-secret` | Replaces `EnvConfig.imagepullsecrets` with the trimmed, de-duplicated list. | Keeps the recorded list. |
+| `--runtime-cpu` / `--runtime-memory` | Merges onto `EnvConfig.runtimepod`: the limit named is set, the other is kept. Trace: `init: runtime pod resources set to cpu=<c> memory=<m>`. | Keeps both. Trace: `init: runtime pod resources not given; keeping cpu=<c> memory=<m>`. |
+| `--dind-cpu` / `--dind-memory` | Merges onto `EnvConfig.runtimedindpod`, independently of `--runtime-cpu`/`--runtime-memory`. Trace: `init: erun-dind sidecar resources set to cpu=<c> memory=<m>`. | Keeps both. Trace: `init: erun-dind sidecar resources not given; keeping cpu=<c> memory=<m>`. |
+| `--type` / `--remote` | Retypes the env — see below. | **Never** retypes. Trace: `init: --type not given; keeping env type "<t>"`. |
+| `--components` | Replaces `EnvConfig.deploy.components` outright, including with an empty list when the value is explicitly empty (`--components ''`) — that clears a saved selection and returns deploy to the repo plan. Trace: `init: deploy components set to <a,b,…>` (or `… (cleared — deploy now follows the repo k8s.deployments plan)`). | Keeps the recorded selection. Trace: `init: deploy components not given; keeping <a,b,…>` (silent when there was none). |
+
+The `--type` default is the asymmetry that matters: a new env with no `--type` resolves to `local-agent`, but that fallback is a default, not a request, so an existing env is not moved by it.
+
+**Retyping.** A named `--type` that differs from `EnvConfig.type` changes it, in either direction and between any two of the four types — including `runtime` → `remote-agent`, which is what makes a runtime env orchestratable by the desktop. Trace: `init: env type "<from>" -> "<to>"` (or `init: env type already "<t>"` when they match). The rest of the run then does the work the named type implies: retyping to `remote-agent` or `runtime` runs the same runtime deploy and in-pod checkout a fresh `--type=<t>` init would; retyping to `host` runs no deploy at all and skips the cluster/cloud reconcile in [Side effects](#side-effects) below entirely.
+
+Retyping **to** `local-agent` or `host` is the one case that needs more than the field: a `local-agent` worktree is hostPath-mounted, and a `host` env *is* the directory with no pod to mount it into — either way, the path a remote/runtime env carries in `EnvConfig.localRepoPath` names an in-pod directory or is empty, not a usable host path. The retype re-resolves the host project root (`--project-root`, else the cwd's git root) and records it (`init: local repo path set to <path>`); when neither answers, it fails and writes nothing — `LOCAL_AGENT_RETYPE_NEEDS_REPO_PATH` for `--type=local-agent`, `HOST_RETYPE_NEEDS_REPO_PATH` for `--type=host` (same cause, worded for what the type actually does with the path — "mount" vs "use").
+
+Settings are reconciled before `init`'s own runtime deploy, so that deploy carries them: a re-init that adds `--image-pull-secret` deploys with the secret, and one that omits `--runtime-cpu` deploys at the env's recorded limits rather than the defaults.
+
+An env created by this same run skips the reconcile entirely — it was written from these params moments ago, so there is nothing to reconcile and no trace lines are emitted.
 
 ### Side effects
 
@@ -71,22 +104,27 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 ### `erun init` lifecycle algorithm
 
 1. Parse flags; resolve effective tenant + env (see [Configuration · Resolution order](/reference/configuration#effective-tenant--environment-for-a-cli-command)).
-2. Validate `--kubernetes-context` against `~/.kube/config`. On miss, abort with the available context list.
-3. Resolve `--project-root` (defaults to `git rev-parse --show-toplevel`). On miss, abort with `not in a git repository`.
-4. If the tenant/env already exists, prompt unless `-y` / `--confirm-environment`. Aborting on `n` is the safe default.
-5. Resolve the runtime chart — repo-local when the project carries one, the published `oci://<registry>/charts/erun-devops` otherwise — and `helm upgrade --install` it into `<tenant>-<environment>`.
-6. With `--remote`: open SSH and write the in-pod bootstrap marker.
-7. Update default-tenant pointer if `--set-default-tenant`.
-8. Exit `0`.
+2. Validate `--kubernetes-context` against `~/.kube/config`. On miss, abort with the available context list. **Skipped for `--type=host`** — a host env never resolves a kubernetes context at all, at this or any other step; that is the whole point of the type.
+3. Resolve `--project-root` (defaults to `git rev-parse --show-toplevel`). On miss, abort with `not in a git repository` (`local-agent`, `host`) or proceed sourceless (`remote-agent`, `runtime`, whose worktree is not a host path).
+4. If the tenant/env already exists, prompt unless `-y` / `--confirm-environment`. Aborting on `n` is the safe default. Runs for `--type=host` too — the confirmation is local and interactive, not cluster-touching.
+5. With `--remote`/`--type=remote-agent` (and `--type=runtime`): resolve a ghcr.io credential from the machine running `init` itself (a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`) for every registry the env is configured to build to or deploy from. When one resolves, mint (or refresh) a `kubernetes.io/dockerconfigjson` Secret named `<tenant>-devops-registry-credential` via `kubectl apply -f -` and persist its name to `EnvConfig.registrycredentialsecretname`, so step 6's chart install mounts it. Resolves to nothing (no error) when the host itself has no credential to give. **Never runs for `--type=host`.**
+6. Resolve the runtime chart — repo-local when the project carries one, the published `oci://<registry>/charts/erun-devops` otherwise — and `helm upgrade --install` it into `<tenant>-<environment>`, threading `registryCredentialSecretName` when step 5 minted one. **Never runs for `--type=host`** — it has no pod for any chart to render into, so it records `name`, `type`, and `localRepoPath` and stops.
+7. With `--remote`/`--type=remote-agent` (and `--type=runtime`): verify the pod can authenticate to any ghcr.io registry it is configured to build to or deploy from — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`, checked directly in the pod. The Secret step 5 minted is what usually makes this resolve on a freshly created environment; abort if none resolves regardless — the pod is left deployed (init is safe to re-run once authenticated). **Never runs for `--type=host`.**
+8. With `--remote`: open SSH and write the in-pod bootstrap marker. **Never runs for `--type=host`.**
+9. Update default-tenant pointer if `--set-default-tenant`.
+10. Exit `0`.
 
 ### Error codes
 
 | Code | Cause | Exit code |
 |---|---|---|
 | `NOT_IN_GIT_REPO` | `--project-root` unset and cwd is not in a git repo. | `1` |
+| `LOCAL_AGENT_RETYPE_NEEDS_REPO_PATH` | `--type=local-agent` on an existing env, with no `--project-root` and no git repo at the cwd, so there is no host path to mount as the worktree. Nothing is written. Message: ``cannot change <tenant>/<env> to type local-agent: it needs a host repo path to mount — run init from the project directory or pass --project-root``. | `1` |
+| `HOST_RETYPE_NEEDS_REPO_PATH` | `--type=host` on a new or existing env, with no `--project-root` and no git repo at the cwd, so there is no directory to record. Nothing is written. Message (existing env): ``cannot change <tenant>/<env> to type host: it needs a host directory to use — run init from the project directory or pass --project-root``; a new env's message says "cannot create" in place of "cannot change". | `1` |
 | `KUBE_CONTEXT_MISSING` | `--kubernetes-context` is not present in `~/.kube/config`. | `1` |
 | `HELM_INSTALL_FAILED` | Runtime chart install failed; the per-user config is written but the in-pod marker is not. | `2` |
 | `REGISTRY_UNREACHABLE` | `--container-registry` is set but DNS/network failed. (Warning, not abort.) | `0` (with warning) |
+| `REGISTRY_CREDENTIAL_MISSING` | The pod init just deployed has no ghcr.io credential for a registry it is configured to build to or deploy from (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`), and the machine running `init` had none to provision either. The pod is left deployed; authenticate it (`erun open`) and re-run `erun init` to confirm. | `1` |
 
 ---
 
@@ -128,6 +166,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | Code | Cause | Exit code |
 |---|---|---|
 | `TENANT_NOT_CONFIGURED` | Resolved tenant has no `~/.config/erun/<tenant>/tenant.yaml`. | `1` |
+| `HOST_ENV_NO_SHELL` | The environment is a [host env](/concepts/environment-types#host) — no pod and no cluster to open a kubectl-exec shell into. Checked before every other step (before `KUBE_CONTEXT_MISSING`, before any port-forward). Message names the worktree directory to open directly instead. | `1` |
 | `KUBE_CONTEXT_MISSING` | `EnvConfig.kubernetescontext` is absent from `~/.kube/config`. | `1` |
 | `CLUSTER_UNREACHABLE` | Cluster API does not respond after 5 minutes. | `2` |
 | `CLOUD_START_FAILED` | Cloud-provider start command returned an error or the context entered a terminal failure state. | `2` |
@@ -148,6 +187,10 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 
 `--deploy`, `--release`, `--force`, `--dry-run`, `--output`.
 
+`--jobs`/`-j` sets how many images build at once: `0` (default) resolves a conservative degree from the host, `1` is strictly sequential, `N` is explicit. `ERUN_BUILD_JOBS` sets the same value by environment, and is the deterministic seam for tests — pin it rather than inheriting the runner's core count.
+
+Scheduling honours the `FROM` graph: independent images share a **wave**, and an image that `FROM`s a sibling waits for it. With more than one worker the wave plan is emitted as a trace line before any build, followed by every image's decision lines in dependency order, then the builds themselves with each image's output buffered and flushed in wave order — so output is deterministic at any degree and the dry-run contract is unaffected. At `--jobs 1` the decision lines stay interleaved with each image's own output, exactly as before. `push`, `release`, and `build --deploy` are always sequential. A `FROM` cycle fails with an error naming the images rather than deadlocking.
+
 `--deploy` and `--release` are **operator-convenience switches** that compose downstream primitives (`--deploy` → push + deploy; `--release` → the release flow). Programmatic callers do not use them: they run `erun build --output json`, capture `version`, and call `push`/`deploy` themselves. See [Structured output](#structured-output-flag).
 
 ### Advanced flags
@@ -156,6 +199,8 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 |---|---|---|---|---|
 | `--no-incremental` | bool | `false` | — | Disables the fingerprint cache. Every Docker context rebuilds. |
 | `--version <version>` | string (semver) | Resolved per [Build path resolution · VERSION walking](/reference/configuration-build-paths). | Same as `erun init --version`. Conflicts with `--release` (which resolves the version itself). | Pins a bare version for this build instead of minting a snapshot. |
+| `--platform <platform>` | string[] (repeatable) | Resolved per [Multi-architecture build contract](/agent-reference/conventions-spec#multi-architecture-build-contract). | Rejected together with `--release` (`release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports`). | Overrides the docker `--platform` targets for this build/push, e.g. `linux/amd64`. Absent, falls back to the project's configured `environments.<env>.docker.platforms`, then the default multi-arch pair. |
+| `--component <name>` | string | Auto-selects the lone [`components:`](/reference/configuration#components-block) entry when the project declares exactly one; empty otherwise. | Must name a declared `components:` entry when the project declares any. Fails naming the declared choices when omitted and more than one entry is declared. | Selects which `components:` root (`docker`/`dockercontext`/`version`) this build resolves, for a monorepo of independent deployables that do not share one `docker`/`k8s` root. Unused (falls through to `paths:`/convention) when the project declares no `components:` map. |
 
 ### `--output json` result
 
@@ -168,8 +213,8 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 3. **Mint the version.** Default: append the snapshot suffix `-snapshot-<UTC-timestamp>` to the resolved base. With `--release` / `--version` / a build-dir version: use the bare version. Compute the per-image content fingerprint.
 4. For each resolved image:
    a. If fingerprint matches the registry copy and `--no-incremental` / `--force` is not set: promote the registry copy locally; skip the build.
-   b. Otherwise: invoke `docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/<image>:<version> -f <Dockerfile> <context>` with the resolved `--build-arg` set.
-   c. Tag the result `<registry>/<image>:fp-<fingerprint>-<arch>` for each architecture.
+   b. Otherwise: for each platform in the [resolved platform list](/agent-reference/conventions-spec#multi-architecture-build-contract) (both by default), invoke `docker build --platform <platform> -t <registry>/<image>:<version>-<arch> -f <Dockerfile> <context>` with the resolved `--build-arg` set.
+   c. Tag the result `<registry>/<image>:fp-<fingerprint>-<arch>` for each targeted architecture.
    d. **`ERUN_VERSION` for a base built by this same run.** Images are ordered so a `FROM <registry>/<base>:${ERUN_VERSION}` wrapper builds after its base. A build that does not push tags only per-arch (`…:<version>-<arch>`) — the arch-less `…:<version>` is a manifest list [`push`](#erun-push) mints in the registry, so it exists neither locally nor remotely for an unpublished version. So when the wrapper's base is one of this run's own unpublished images, its `ERUN_VERSION` build arg is `<version>-<arch>` for the architecture being built, resolving the base from the local daemon at the matching arch (an arch-less local tag would be last-arch-wins, and therefore single-arch). This is what lets `erun build --version <v>` validate a whole release locally, dependent images included, before any git ref moves. A local snapshot base follows the same rule at `<base>-snapshot-<arch>`. A `--release` wrapper keeps the plain `<version>`: its base is pushed earlier in the same run, so it resolves from the published multi-arch manifest. No plain-`<version>` local tag is ever created, so a local build can never be mistaken for a published manifest or pushed in place of one.
 5. Emit the minted version (and, with `--output json`, the structured result).
 6. If `--deploy`: compose push + deploy at the minted version (operator-convenience shortcut). If `--release`: run the `erun release` flow, which builds and reuses `push` to publish the release-tagged variants and chart, verifies they resolve, and only then moves the git refs. Programmatic callers skip both and orchestrate the primitives themselves.
@@ -193,6 +238,8 @@ binfmt for <arch> not installed. Run:
 | `NO_BUILDABLE_CONTEXT` | Walked up from cwd and found no `<tenant>-devops/docker/<image>/` directory. | `1` |
 | `BINFMT_MISSING` | Local docker daemon cannot produce one of the target platforms. | `2` |
 | `BUILD_FAILED` | `docker buildx build` returned non-zero. | `2` |
+| `COMPONENT_NOT_DECLARED` | `--component <name>` names an entry the project's [`components:`](/reference/configuration#components-block) map does not declare (or the project declares no `components:` map at all). | `1` |
+| `AMBIGUOUS_COMPONENT_SELECTION` | No `--component` and the project declares more than one `components:` entry. | `1` |
 
 ---
 
@@ -207,7 +254,7 @@ binfmt for <arch> not installed. Run:
 
 ### What push publishes
 
-For the supplied `--version`, `push` always builds each image from its source context (never a prebuilt bare tag), pushes per-arch tags, assembles the manifest list, then publishes every Helm chart discovered under the project's `k8s/*` directories — a **directory scan**, not a lookup keyed to same-named images, so image-less charts (a tenant's own `frs-backend-api`, `frs-powerdns`, … wrappers) publish too. For each: `helm dependency build` (umbrella charts that vendor published subcharts) + `helm package` + `helm push` to `oci://<registry>/charts` at `--version`, verified with a `helm pull` round-trip. Chart publishing is decoupled from the image push: a **version-pinned base** (`erun-powerdns`, `erun-backend-postgres`) keeps its image at the upstream pin and is not re-pushed at `--version`, but its chart still publishes at `--version` so platform deploys resolve it. [`erun build`](#erun-build) packages the same charts locally (validate + `--output json`) without publishing. Charts publish under `/charts`, separate from the same-named image repo so a chart never collides with its image at the same ref. There is no environment-type branch. [`erun release`](#erun-release) reuses this step for all its publishing.
+For the supplied `--version`, `push` always builds each image from its source context (never a prebuilt bare tag), pushes per-arch tags, assembles the manifest list, then publishes every Helm chart discovered under the project's `k8s/*` directories — a **directory scan**, not a lookup keyed to same-named images, so image-less charts (a tenant's own `frs-backend-api`, `frs-powerdns`, … wrappers) publish too. For each: `helm dependency build` (umbrella charts that vendor published subcharts) + `helm package` + `helm push` to `oci://<registry>/charts` at `--version`, verified with a `helm pull` round-trip. Chart publishing is decoupled from the image push: a **version-pinned base** (`erun-powerdns`, `erun-backend-postgres`, `erun-zitadel`, `erun-zitadel-login`) keeps its image at the upstream pin and is not re-pushed at `--version`, but its chart still publishes at `--version` so platform deploys resolve it. [`erun build`](#erun-build) packages the same charts locally (validate + `--output json`) without publishing. Charts publish under `/charts`, separate from the same-named image repo so a chart never collides with its image at the same ref. There is no environment-type branch. [`erun release`](#erun-release) reuses this step for all its publishing.
 
 ### Chart verification retry semantics
 
@@ -223,7 +270,11 @@ Any other failure is treated as final and fails on the first attempt. A read tha
 
 ### Common flags
 
-`--force`, `--dry-run`, `--output`.
+`--force`, `--dry-run`, `--output`, `--component` (same selector and validation as [`erun build`'s `--component`](#erun-build) — see [`components:`](/reference/configuration#components-block)).
+
+### Upfront registry-credential check
+
+Before building anything, `erun push` (and `erun release`, which reuses `push`'s publish stage) checks whether any credential resolves for a ghcr.io registry it would push to — a docker config entry, a gh session, or `GH_TOKEN`/`GITHUB_TOKEN`. GHCR never accepts an anonymous push, so no credential at all is a certain failure, not an ambiguous one; refusing here turns a multi-arch build spent for nothing into an immediate, actionable error naming the missing credential and the `gh auth login`/`docker login` commands to fix it.
 
 ### Authentication retry semantics
 
@@ -257,9 +308,12 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 |---|---|---|
 | `NO_VERSION` | No `<version>` argument. `push` publishes a specific version; it does not mint one. | `1` |
 | `NO_BUILDABLE_CONTEXT` | No `<tenant>-devops/docker/<image>/` build context found to build the version from. | `1` |
+| `REGISTRY_CREDENTIAL_MISSING` | No credential resolves for a ghcr.io registry to push to at all (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`). Refused before any build. | `1` |
 | `REGISTRY_AUTH_FAILED` | All retry attempts failed (or no TTY for the interactive login). | `2` |
 | `MANIFEST_LIST_ASSEMBLY_FAILED` | Per-arch tags pushed but `docker manifest create` failed. | `2` |
 | `CHART_PUSH_FAILED` | Images pushed but a chart's `helm push`, or its `helm pull` verification after every retry, failed — the version is not yet deployable. Charts publish one at a time, so the error names the split explicitly (`published:` / `failed:` / `not attempted:`) and states the recovery: re-run `erun push --version <version>`, which republishes idempotently. | `2` |
+| `COMPONENT_NOT_DECLARED` | `--component <name>` names an entry the project's `components:` map does not declare. | `1` |
+| `AMBIGUOUS_COMPONENT_SELECTION` | No `--component` and the project declares more than one `components:` entry. | `1` |
 
 ---
 
@@ -269,7 +323,7 @@ gh auth token -u <owner> -h github.com | docker login ghcr.io -u <owner> --passw
 
 ### Common flags
 
-`--version`, `--runtime-image`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--mcp-auth-public-key`, `--no-mcp-auth`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
+`--version`, `--runtime-image`, `--runtime-chart`, `--current`, `--components`, `--force`, `--rollout-timeout`, `--mcp-auth-public-key`, `--no-mcp-auth`, `--dry-run`, `--output`. Subcommand: `erun deploy <component>`.
 
 ### Version selection — `--version` / `--current` (required)
 
@@ -299,6 +353,30 @@ A tenant that publishes its own artifacts ships **umbrella** charts — the runt
 
 The dry-run trace shows the `helm pull … --untar` line before the `helm upgrade` line; the temp dir is removed after the rollout. Local (worktree) deploys are unchanged: a local runtime umbrella re-scopes via its Chart.yaml `erun-devops` dependency and `-f`s its worktree `values.<env>.yaml`; a local component umbrella `-f`s its worktree `values.<env>.yaml` (which is why authoring the nested subchart values there is still required for the worktree path).
 
+### Runtime chart search order {#deploy-runtime-chart-search}
+
+An env with no repo-local runtime chart and no stated chart ([`--runtime-chart`](#deploy-runtime-chart) / `EnvConfig.runtimechart`) resolves the chart by probing coordinates in order. Let `R` be the chart registry — `EnvConfig.runtimeregistry` when set, else the runtime image's registry for a `--cluster-registry` env, else the env's `deploy`-marked registry, else the project's configured registry, else `ghcr.io/sophium` — and `P` the platform registry, the registry prefix of `EnvConfig.runtimeimage` when it names one, else `ghcr.io/sophium`.
+
+| # | Coordinate | Probed when | Trace on a miss |
+|---|---|---|---|
+| 1 | `oci://R/charts/<tenant>-devops` | `RuntimeReleaseName(tenant) != erun-devops` (skipped for the `erun` product tenant) | `deploy: runtime chart <tenant>-devops <v> not found in R (the tenant's own umbrella)` |
+| 2 | `oci://R/charts/erun-devops` | always | `deploy: runtime chart erun-devops <v> not found in R (the shared platform chart)` |
+| 3 | `oci://P/charts/erun-devops` | `P != ""` and `P != R` | `deploy: runtime chart erun-devops <v> not found in P (the shared platform chart in the runtime image's registry \| in erun's own registry)` |
+
+Each probe is the same authenticated registry read `push` writes with; the first coordinate that publishes `<v>` installs, tracing `deploy: runtime chart <chart> <v> found in <registry> (<reason>)`. Rung 3 exists because ERun publishes `charts/erun-devops` only beside the runtime image it releases: an env whose `deploy` registry is its own ECR (or the in-cluster `erun-registry`) has the platform chart at no version there, and a search that stopped at rung 2 left it undeployable at every version.
+
+When no coordinate is confirmed published at `<v>`, the search **refuses** rather than install rung 2 unconfirmed: `charts/erun-devops` is versioned on ERun's own release line, so pairing it with another project's version is a coordinate that can never exist, and installing it anyway was the failure mode this refusal replaced. Each probe answer is one of two kinds, and the refusal distinguishes them rather than treating a registry it couldn't read as a "no": **confirmed absent** (the registry answered and the version was not in the chart's published tags) or **could not determine** (the read itself failed — an unreadable or unauthenticated registry, a network error). The search traces each rung's answer as it goes (`deploy: runtime chart <chart> <v> not found in <registry> (<reason>)` for a confirmed miss, `deploy: runtime chart <chart> <v> could not be confirmed in <registry> (<reason>): <error>` for an inconclusive one), then a final `deploy: no runtime chart candidate confirmed at <v>; refusing to guess` before returning the error, so the dry-run trace shows the stopping decision even though the deploy never reaches a `helm` command. The error message enumerates every coordinate probed and its answer, plus the three ways out: [`erun init --runtime-registry <host>`](#erun-init) to record where ERun's artifacts live, `erun push --version <v>` from the project that owns a `<tenant>-devops` umbrella, or [`--runtime-chart`](#deploy-runtime-chart) / `EnvConfig.runtimechart` to name the chart outright — the last of which also lets a deploy proceed on an env whose search cannot itself confirm a coordinate, since a `--runtime-chart`/`EnvConfig.runtimechart` value supersedes the search's answer entirely.
+
+The registry the search **resolved at** — not `R`, where it started — is what a successful deploy (or `open`) memoizes as `EnvConfig.runtimeregistry`, so the next search short-circuits there. The write is fill-or-confirm only, and resolution traces which of the two applies whenever the resolved registry differs from `R`:
+
+| `EnvConfig.runtimeregistry` before | Deploy records | Trace |
+|---|---|---|
+| empty | the registry the chart resolved at | `deploy: recording runtime registry <resolved>, where the runtime chart resolved, rather than R, where the search started` |
+| set (so `R` = it) and the chart resolved at `R` | the same value (no change) | none — nothing decided |
+| set (so `R` = it) and the chart resolved at `P` | the value already there, unchanged | ``deploy: the env's runtime registry <recorded> stands; the runtime chart resolved from <resolved> instead (`erun init <tenant> <env> --runtime-registry <resolved>` changes it)`` |
+
+A deploy that did not search — a repo-local chart, a chart stated via `--runtime-chart` / `EnvConfig.runtimechart`, or a component-only rollout — records the registry it pulled the runtime image from, which is the provenance `--current` re-addresses.
+
 ### Runtime image override — `--runtime-image` {#deploy-runtime-image}
 
 `--runtime-image <ref>` installs the runtime running the given image via the canonical published `erun-devops` chart (the image rides in as `imageOverrides.erun-devops`), pinned to `--version` — **even when the env carries a repo-local `<tenant>-devops` chart**, which the override deliberately bypasses. This lets an operator bootstrap an environment on the canonical ERun base image (or any external image) before the env's own `<tenant>-devops` image has been built and pushed, then switch to the tenant image once it exists. It mirrors [`erun open --runtime-image`](#erun-open) but on the pure `deploy` primitive (it does not imply anything beyond the deploy).
@@ -313,10 +391,26 @@ The dry-run trace names the decision: `deploy: bypassing the repo-local runtime 
 
 With **no** `--runtime-image` and **no** `EnvConfig.runtimeimage`, deploy resolves `imageOverrides.erun-devops` from the published chart it is installing:
 
-- Deploying the tenant's own `charts/<tenant>-devops` umbrella (the [tenant-preferred runtime chart](#deploy-subchart-forwarding)) → deploy **defaults the image to the umbrella's own** `<registry>/<tenant>-devops:<version>`. `erun push` publishes the umbrella and its `<tenant>-devops` image together on the tenant version line, so the chart's identity names the image; building and pushing it is sufficient. Trace: `deploy: defaulting runtime image to the <tenant>-devops chart's own image <ref> (imageOverrides.erun-devops)`, re-scoped into the deploy as `--set-string erun-devops.imageOverrides.erun-devops=<ref>`.
+- Deploying the tenant's own `charts/<tenant>-devops` umbrella (rung 1 of the [runtime chart search](#deploy-runtime-chart-search)) → deploy **defaults the image to the umbrella's own** `<registry>/<tenant>-devops:<version>`. `erun push` publishes the umbrella and its `<tenant>-devops` image together on the tenant version line, so the chart's identity names the image; building and pushing it is sufficient. Trace: `deploy: defaulting runtime image to the <tenant>-devops chart's own image <ref> (imageOverrides.erun-devops)`, re-scoped into the deploy as `--set-string erun-devops.imageOverrides.erun-devops=<ref>`.
 - Deploying the shared `charts/erun-devops` chart (no tenant umbrella published) → **no override** is set; the chart's own default image runs. An image-only build env therefore still points at its image through `runtimeimage`.
 
 An explicit `runtimeimage` (or `--runtime-image`) always wins over this default — so a tenant that publishes its own umbrella can still pin a *different* image (e.g. a hotfix build) by setting the field, which traces the `runtime image override` line above rather than the `defaulting` line. This default is why a `<tenant>-devops` umbrella deploy runs the tenant's own image without any `runtimeimage`, instead of silently falling back to a stock `erun-devops:<tenant-version>` the tenant line never published (which would `ImagePullBackOff`).
+
+### Runtime chart override -- `--runtime-chart` {#deploy-runtime-chart}
+
+`--runtime-chart <ref>` names the runtime chart as its own deploy coordinate instead of deriving it from `--version`. ERun has four coordinates in play -- chart repository, chart version, image repository, image version -- and `--version` normally collapses all four, which is correct whenever [`erun push`](#erun-push) published the chart and image as a pair. It is wrong the moment they ship on different release lines: a project whose `<tenant>-devops` image is versioned on the project's own line (`9.9.9-snapshot-<ts>`) has no chart at that version and never will, so the published-chart lookup resolves nothing and the deploy fails `FetchReference … not found`. With this flag the operator states the chart (repository, and optionally version) while `--version` keeps stamping the env's runtime version and tagging the image.
+
+| Flag | Type | Default | Validation | Persists to |
+|---|---|---|---|---|
+| `--runtime-chart <ref>` | string (OCI chart ref, optional `:<version>` suffix) | unset → the [runtime chart search](#deploy-runtime-chart-search) at `--version`. | An `oci://` scheme is added when absent. The version is split from the **last path segment only**, so a registry port (`registry.example:5000/charts/erun-devops`) is not read as a version. No version → the chart resolves at `--version`. | Nothing — run-only, deliberately not persisted, so an env's recorded state never implies a chart it was not deployed with. |
+
+The override applies to the **runtime release only**; component charts continue to resolve at `--version`. It composes with [`--runtime-image`](#deploy-runtime-image) and with `EnvConfig.runtimeimage`, which is how each artifact ends up on its own line — the dry-run then carries both decisions:
+
+```
+deploy: runtime image override registry.example/acme/team-devops:9.9.9-snapshot-20260101010101 (imageOverrides.erun-devops)
+deploy: runtime chart override oci://ghcr.io/sophium/charts/erun-devops version 1.2.3
+helm upgrade --install … oci://ghcr.io/sophium/charts/erun-devops --version 1.2.3 …
+```
 
 ### `--components` value set and selection precedence {#components-value-set}
 
@@ -328,11 +422,13 @@ An explicit `runtimeimage` (or `--runtime-image`) always wins over this default 
 The selection resolves by **precedence** — the first non-empty tier wins entirely; tiers do not merge:
 
 1. `--components <a,b,…>` — the explicit one-shot selection for this run.
-2. `EnvConfig.deploy.components` — the environment's saved per-machine default (the desktop app's Runtime-tab checklist writes it; see [Configuration · `deploy.components`](/reference/configuration#envconfig)).
+2. `EnvConfig.deploy.components` — the environment's saved per-machine default (`erun init --components <a,b,…>`, or the desktop app's Runtime-tab checklist; see [Configuration · `deploy.components`](/reference/configuration#envconfig)).
 3. `ProjectConfig.environments.<env>.k8s.deployments[]` — the repo deployment plan.
 4. Empty (none of the above name anything) → the runtime chart alone, which bootstraps or heals the environment.
 
-A chart deploys **iff** its component name is in the resolved selection. The runtime deploys only when the selection names a runtime alias, or when the selection is empty (tier 4) — an explicit selection that omits the runtime deploys the named components without it. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so sequence it after postgres in the plan. The dry-run trace names the tier: `deploy: component selection source <tier>; deploying the runtime chart alone` (empty selection) or `deploy: component selection source <tier>; components <a, b, …>`.
+A chart deploys **iff** its component name is in the resolved selection. The runtime deploys only when the selection names a runtime alias, or when the selection is empty (tier 4) — an explicit selection that omits the runtime deploys the named components without it. `erun-powerdns` is the platform's authoritative DNS singleton; it runs the gpgsql backend against `erun-backend-postgres`, so sequence it after postgres in the plan. `erun-zitadel` is the platform's hosted IdP singleton, sequenced after postgres for the same reason (its own `zitadel` database on the shared instance); it renders one pod carrying both Zitadel core and the separate Login V2 container, a Service, and one Ingress routing `/ui/v2/login` to login and everything else to core, and it refuses to render without `zitadel.masterkeySecretName` naming an existing Secret and an auth host resolvable from the [`platform:` block](/reference/configuration#platform-block). The dry-run trace names the tier: `deploy: component selection source <tier>; deploying the runtime chart alone` (empty selection) or `deploy: component selection source <tier>; components <a, b, …>`.
+
+Tiers never merge, so a saved tier-2 selection can permanently shadow a richer tier-3 plan — the same divergence a `--components` flag run once and never cleared can leave behind. Whenever the resolved source is tier 2 and the repo plan (tier 3) names components the saved set omits, a trace line names the gap at normal verbosity — `deploy: saved components shadow the repo plan; plan also names <a, b, …>` — and a **plain deploy (no `--components`) then refuses to run** rather than silently rolling out the stale subset: code cannot tell a saved selection that simply predates a plan addition from one an operator narrowed on purpose forever, so it does not guess either way. The refusal names both ways out: adopt the addition with `erun init --components <the saved set plus what the plan names>`, or return to the plan outright with `erun init --components ''` (an explicit empty value, not an omitted flag), which clears the saved selection; nothing else exists today that resets it. Passing `--components` explicitly for that one run (tier 1) bypasses the guard entirely, exactly as it bypasses the saved selection itself — an intentional one-shot narrowing is never blocked by it, and it never widens what actually deploys beyond what was named.
 
 ### MCP-auth stickiness and the downgrade guard {#deploy-mcp-auth}
 
@@ -340,12 +436,21 @@ A chart deploys **iff** its component name is in the resolved selection. The run
 
 | Input | Resolution |
 |---|---|
-| `--mcp-auth-public-key <path>` (MCP `deploy` `mcp_auth_public_key` input) | Trust that key. The path is persisted to `EnvConfig.mcpauthpublickeypath` after a successful runtime rollout. |
+| `--mcp-auth-public-key <path>` (MCP `deploy` `mcp_auth_public_key` input) | Trust that key. The path is persisted to `EnvConfig.mcpauthpublickeypath` at the point the deploy applies the key — after the `<release>-mcp-auth` Secret apply, before the `helm upgrade` — so a rollout that fails afterwards still leaves the environment naming the key its release trusts. Trace: `deploy: mcp auth: recording the public key <path> on <tenant>/<environment>`, emitted only when the recorded value would change. |
 | Neither flag, `EnvConfig.mcpauthpublickeypath` set | Rethread the recorded key. Trace: `deploy: mcp auth: rethreading the env's recorded public key <path>`. |
-| Neither flag, no recorded key, `EnvConfig.mcpauthissuer` set | The `https://` OIDC-issuer path (unchanged; already an env setting). |
-| `--no-mcp-auth` (MCP `deploy` `no_mcp_auth` input) | Resolve **no** authentication and clear `mcpauthpublickeypath`. Suppresses the OIDC-issuer path for this deploy without erasing `mcpauthissuer`. Trace: `deploy: mcp auth disabled by request; …`. |
+| `--no-mcp-auth` (MCP `deploy` `no_mcp_auth` input) | Resolve **no** authentication and clear `mcpauthpublickeypath` — the clear is written after the unauthenticated release has rolled out, since only then has the edge actually stopped trusting the key. Trace: `deploy: mcp auth disabled by request; …`. |
 
-**Downgrade guard.** When the resolved plan has authentication off and `--no-mcp-auth` was not given, deploy reads the live release's values (`helm get values <release> -o json`) and fails at resolution if `mcpAuth.enabled` is true — the case of an environment that enabled authentication before the key was recorded. Error code `MCP_AUTH_DOWNGRADE_REFUSED`; the message names both remedies. The read runs **only** on that path (an authenticated deploy pays nothing) and a release that cannot be read imposes no constraint, so an unreachable cluster never blocks a deploy. `ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE` is the integration-suite seam that answers the read without a cluster; it is a test seam, not a production knob.
+There is one signing mechanism — a `file://`-issued key — used by two callers: the desktop passes its own key via `--mcp-auth-public-key`, and a hosted environment's server-side deploy Job passes the backend's own MCP-signing public key (`mcptoken.Signer`) the same way, automatically, so the console's minted tokens verify with no Operator action. Both write the same `mcpAuth.*` chart values; only the key's origin differs.
+
+**Downgrade guard.** When the resolved plan has authentication off and `--no-mcp-auth` was not given, deploy reads the live release's values (`helm get values <release> -o json`) and fails at resolution if `mcpAuth.enabled` is true — the case of an environment that enabled authentication before the key was recorded. Error code `MCP_AUTH_DOWNGRADE_REFUSED`; the message names what the release trusts, resolved from the same read plus the release's own Secret:
+
+1. `mcpAuth.issuer` is an OIDC (`https://`) issuer — only possible on a legacy or hand-configured release, since erun has no supported way to write one — the message names that issuer and says so, pointing at `--mcp-auth-public-key` to switch the release onto the key-based path instead. Trace: `deploy: mcp auth: release <release> authenticates against the OIDC issuer <issuer>; no local key is involved`.
+2. Otherwise the release trusts a desktop key, so deploy reads it out of `mcpAuth.secretName` (defaulting to `<release>-mcp-auth`) with `kubectl get secret <name> -o jsonpath={.data.desktopid\.pub}` and compares it byte-for-byte with this host's desktop identity public key (`<user config dir>/ERun/desktopid.pub`):
+   - **Match** → the message names that path, and its `sha256`, as the key to pass to `--mcp-auth-public-key` — the match is also what says re-supplying it keeps the edge's existing trust rather than rotating it. Trace: `deploy: mcp auth: release <release> trusts this host's desktop identity key <path>`.
+   - **No match** → the message names the Secret and the key's `sha256`, and says it is not this host's desktop identity key.
+   - **Secret unreadable** → the message names the Secret alone. Trace: `deploy: mcp auth: secret <name> could not be read`.
+
+   The `--no-mcp-auth` opt-out is named in every case. The read runs **only** on that path (an authenticated deploy pays nothing) and a release that cannot be read imposes no constraint, so an unreachable cluster never blocks a deploy. `ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE` is the integration-suite seam that answers the read without a cluster; it is a test seam, not a production knob.
 
 The guard is scoped to explicit deploy requests (`erun deploy`, `erun upgrade`, `erun publish`, `open --deploy`, `build --deploy`). `erun open`'s heal-redeploy rethreads a recorded key but is never blocked by the guard — it must still be able to hand over a shell.
 
@@ -414,11 +519,13 @@ The recovery is bounded to a single retry (the delete removes the conflict, so t
 
 | Code | Cause | Exit code |
 |---|---|---|
+| `HOST_ENV_NO_DEPLOY` | The environment is a [host env](/concepts/environment-types#host) — no pod and no cluster to deploy to. Checked before spec resolution, so nothing is built or resolved first. | `1` |
 | `NO_VERSION` | Neither `--version` nor `--current` given. `deploy` does not mint a version, so there is nothing to install. | `1` |
 | `NO_CURRENT_VERSION` | `--current` given but the env has no recorded runtime version yet. Deploy a specific `--version` once to seed it. | `1` |
 | `CLUSTER_UNREACHABLE` | Same as `erun open`. | `2` |
 | `MISSING_IMAGE_IN_REGISTRY` | A chart references `<registry>/<component>:<version>` that does not exist (and was never built/pushed). | `1` |
-| `MISSING_CHART_IN_REGISTRY` | The runtime chart was not published at the requested version (`helm pull` failed). Push the version first — push publishes image and chart together. | `1` |
+| `RUNTIME_CHART_NOT_CONFIRMED` | The [runtime chart search](#deploy-runtime-chart-search) confirmed no coordinate published at the requested version — refused before any `helm` command runs. The message names each coordinate probed and whether it was confirmed absent or could not be read; see that section for the full contract. | `1` |
+| `MISSING_CHART_IN_REGISTRY` | A chart resolution *did* confirm a coordinate (a component chart, always trusted on the sourceless path; or a runtime chart the search resolved) but the `helm pull` for it failed anyway — a tag evicted between the probe and the pull, or a genuinely unpublished component chart version. The message names each coordinate: record where ERun's artifacts live (`erun init --runtime-registry`), push the version from the project that owns the chart, or name the chart with `--runtime-chart`. For a component chart, push the version first — push publishes image and chart together. | `1` |
 | `HELM_UPGRADE_FAILED` | A step in the plan failed (or helm's own `--timeout` elapsed while the rollout was still not ready); later steps are not executed. | `2` |
 | `ROLLOUT_CONTAINER_FAILED` | The [pod monitor](#rollout-wait-and-pod-monitoring) observed a terminal container failure (crash loop, config/runtime error, or a permanent image-pull rejection) and aborted the rollout early instead of waiting out the timeout. The message names the pod, container, and reason. | `2` |
 | `INVALID_ROLLOUT_TIMEOUT` | `--rollout-timeout` or `EnvConfig.deploy.timeout` is not a positive Go duration. Nothing runs. | `1` |
@@ -466,6 +573,18 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 | `ssh.keypair` | `~/.ssh/id_ed25519` and `.pub` exist. | Offers `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''`. |
 | `ssh.codecommit_key` | When the marker recorded a CodeCommit host: `~/.ssh/id_rsa` (RSA, not ed25519) is registered with the IAM user. | Offers to generate and upload via `aws iam upload-ssh-public-key`. |
 
+### Git push access check
+
+Gating: runs only when `EnvConfig.RemoteWorktree()` is true (`remote-agent` or `runtime` env types) — the project checkout lives inside the pod for those types, so a credential gap there is invisible to anything running on the operator's own machine. A `local-agent` or `host` env is skipped entirely: its checkout lives on the operator's machine, which already carries their own git/gh credentials.
+
+The check execs a single read-only shell script into the runtime pod (`kubectl exec deployment/<release> -- /bin/sh -lc '<script>'`) that: resolves `origin` via `git remote get-url origin`; runs `git ls-remote --exit-code <remote> HEAD` to test an anonymous fetch; runs `gh auth status -h <host>` (never `gh auth login`, `gh auth refresh`, or `gh auth switch`) to test whether a `gh` session is configured for the remote's host; checks `GH_TOKEN`/`GITHUB_TOKEN`; and, for an SSH remote with none of the above, runs `ssh -o BatchMode=yes -T git@<host>` and greps its stderr for `successfully authenticated`. Every one of these is read-only and side-effect-free, so the check can never itself start gh's interactive device-code/browser flow, which cannot complete headlessly — there is no browser, and no human at a prompt, inside an agent pod.
+
+Report shape (printed under `== Git push access ==`): `Remote` (the resolved `origin` URL, or the section is omitted entirely when there is no checkout or no `origin`), `Fetch` (`ok` or `FAILED`), `Push` (`credential configured (...)` or `NO CREDENTIAL — <remedy>`). The remedy text always names the same non-interactive-safe fix: authenticate once from an interactive shell opened with `erun open <tenant> <environment>` (`gh auth login -h <host>`, or `gh auth login -h <host> --with-token < token-file` to skip gh's browser flow entirely), and never attempt it from an unattended agent run. Provisioning this credential is deliberately manual — the same model as `~/.aws/credentials`' `erun-host` profile, but for a full `gh`/git identity rather than a narrowly-scoped registry token, so erun does not copy a live operator credential into a shared, ephemeral pod on the environment's behalf.
+
+Reading this check requires the runtime pod, same as host AWS credentials: when the pod isn't reachable, `doctor` reports `could not read` for it instead of aborting and continues the rest of the run.
+
+Exposed identically on both transports: the CLI's plain-text report and the [MCP `doctor` tool](/mcp/overview#doctor)'s output carry the same `== Git push access ==` section, both driven by the same `eruncommon.InspectGitPushAccess`.
+
 ### Deploy recovery actions {#deploy-recovery-actions}
 
 After the read-only deploy diagnosis (helm release status + runtime pods), `doctor` can run two recovery actions that **mutate the live release**. They are **alternative** fixes for different failure modes, not additive steps — clearing a pending lock leaves the release at its last deployed revision, so a rollback run straight after would step back a further revision. `--clear-pending-helm` and `--rollback` are therefore mutually exclusive; passing both aborts with `--clear-pending-helm and --rollback are alternative recoveries; pass only one` (exit 1, nothing runs).
@@ -488,6 +607,333 @@ Both actions are also exposed on the [MCP `doctor` tool](/mcp/overview#doctor) v
 | `0` | All checks `ok`, or every `missing` check was recovered. |
 | `1` | At least one check `missing` and recovery declined (or `--dry-run`). |
 | `2` | At least one check `error` (parse failure, permission denied). Inspect the trace to find which. |
+
+---
+
+## `erun list` {#erun-list}
+
+For the Operator view, see [`erun list`](/cli/list). With no flags, `list` prints the full listing (every configured tenant and environment) and never mutates state.
+
+### Version drift across a tenant {#version-drift}
+
+Pass `--tenant` to switch the command into a distinct read: erun-version drift across that one tenant's own environments, instead of the full listing.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <name>` | string | none | Switches the command to a version-drift report for this tenant. Errors `tenant "<name>" not found` if the tenant has no config. |
+| `--gate-environment <name>` | string | none | Requires `--tenant`. Names the environment driving that tenant's merge-queue gate (erun has no stored concept of which environment gates a tenant's merges — see [merge-queue § the gate](/collaboration/merge-queue#the-gate) — so the caller states it). Errors `--gate-environment requires --tenant` when passed alone, or `gate environment "<name>" not found in tenant "<tenant>"` when the named environment doesn't exist in the tenant. |
+| `--fail-on-drift` | bool | `false` | Requires `--tenant` (or `--control-planes`, see below). Makes this one invocation exit non-zero when the report finds drift, instead of `list`'s usual unconditional `0` — see [Exit codes](#erun-list) below. Errors `--fail-on-drift requires --tenant or --control-planes` if neither is set. |
+
+The MCP `list` tool takes the same two inputs as `versionDriftTenant`/`gateEnvironment`, alongside its existing `verbosity`; when `versionDriftTenant` is set, the structured result carries an additional `versionDrift` field beside the ordinary list result rather than replacing it (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the version-drift report alone. `--fail-on-drift` has no MCP equivalent: an MCP tool call never fails over a finding, only over the check itself failing to run, so the calling agent reads `versionDrift` and judges it itself.
+
+Each environment's version comes from the same `ResolveErunVersion` config-only resolution the full listing's `runtime-version:` line uses (see [Release lines](/cli/list#release-lines)) — nil (rendered `version=none`) whenever it can't be read from config alone, e.g. a deploy that never recorded a resolved runtime image.
+
+```
+Version drift for tenant erun:
+  max version: 1.0.247
+  environments:
+    - build version="1.0.246" [behind max]
+    - code4 version="1.0.247"
+  gate:
+    environment: build
+    version: 1.0.246
+    behind: yes -- outdated relative to code4
+```
+
+`max version` is the newest version observed among the tenant's *own* environments, not the newest erun has ever published — that's `erun version`'s/`erun upgrade`'s registry-latest concern. `[behind max]` marks an environment whose version parses lower than the max; an unparseable or missing version is shown bare (never guessed at) and excluded from the max computation. The `gate:` block only prints when `--gate-environment` is given, and `behind:` has three readings: `no` (the gate carries the max, or ties it), `yes -- outdated relative to <envs>` (naming every environment running a newer version), and `unknown (gate's own erun version could not be resolved from config)` when the gate's own version can't be read — reported explicitly rather than folded into a silent `no`, since a gate older than the code it gates can pass a change that would fail on current code.
+
+### Control plane versions {#control-plane-versions}
+
+Pass `--control-planes` to switch the command into a third distinct read: every configured erun-hosted control plane's deployed version, compared against the newest version erun's own registry has actually published — deployed-vs-published, not deployed-vs-main. Cannot be combined with `--tenant`/`--gate-environment`.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--control-planes` | bool | `false` | Switches the command to a control-plane version report instead of the full listing. Errors `--control-planes cannot be combined with --tenant/--gate-environment` if either is also set. |
+| `--dry-run` | bool | `false` | Only meaningful alongside `--control-planes`. Traces which control planes, which of their consoles, and which registry lookup would be checked, without making any network call, and prints `Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.` |
+| `--fail-on-drift` | bool | `false` | Makes this one invocation exit non-zero when any plane or its linked console is behind/ahead of published or unreachable, or the published baseline itself couldn't be resolved — see [Exit codes](#erun-list) below. Never fires under `--dry-run` (nothing was probed). |
+
+The MCP `list` tool exposes the same behavior as `controlPlanes` (bool) and `preview` (bool, the MCP-side equivalent of `--dry-run`); when `controlPlanes` is set, the structured result carries an additional `controlPlaneVersionDrift` field (`eruncommon.ControlPlaneVersionDrift`) beside the ordinary list result (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the control-plane version report alone. `--fail-on-drift` has no MCP equivalent, for the same reason as `--tenant`'s above.
+
+Every configured cloud-provider alias with `provider: erun` is treated as a control plane. For each one, the command calls that plane's own unauthenticated `GET /v1/platform` to read its deployed `version`; a plane that does not answer (network failure, non-2xx) is reported `reachable: false` with `unreachableReason` set, and never gets a `behind`/`ahead` verdict — an unreachable plane is never reported current. The published baseline comes from the same registry lookup `erun pin`/`erun upgrade` already use (`ResolveDefaultRuntimeRegistryVersions`, erun's own `ghcr.io/sophium/erun-devops` image tags) rather than a hand-maintained list, so it can never drift from what erun has actually shipped.
+
+**Each reachable plane's own `GET /v1/platform` response also names its linked console's URL** (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias). When that field is non-empty, the command additionally calls the console's own unauthenticated `GET /version.json` (a static file `erun-devops/docker/erun-console`'s image stamps from `ERUN_VERSION` at build time — the console's counterpart to the API's `-ldflags`-baked version) and reports the result nested under the plane as a `console` field (`ConsoleVersionStatus`: `url`, `reachable`, `unreachableReason`, `version`, `behind`, `ahead` — the same shape and the same published baseline as the plane's own fields). A plane whose response carries no `consoleUrl` gets no `console` field at all (omitted from JSON, no `console:` line in text), never a guessed one. The plane's own reachability and the console's are independent: a reachable plane can have an unreachable console and vice versa.
+
+```
+$ erun list --control-planes
+published version: 1.0.247
+Control planes:
+  - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+    console: url="https://console.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+```
+
+`behind` is set only when both the deployed version and the registry's published latest stable parse as plain three-part semver, and the deployed version orders strictly *below* the published one — routine drift, the deployable simply hasn't been rolled onto an already-published release yet. `ahead` is the opposite order: the deployable is running something the registry has never published at all, reported distinctly because it is a more alarming condition than routine drift (an unpublished build reached a live deployable some other way), never folded into `behind`. Neither is set when the registry lookup itself failed (`publishedVersionError`, printed as `published version: unresolved (<reason>)`) or either version fails to parse as plain semver — absent evidence is reported explicitly rather than guessed at. This applies identically to a plane's own fields and to its nested `console` fields, since both compare against the one published baseline the report resolves once per run.
+
+### Exit codes
+
+`list` is a reporting command, not a gate (see `erun-cli/AGENTS.md` § "Exit-Code Contract: Reporting Commands Vs Gating Checks") — every finding below prints in full regardless of exit code; `--fail-on-drift` only changes whether a finding also turns into a non-zero exit.
+
+| Code | Meaning |
+|---|---|
+| `0` | Full listing, version-drift report, or control-plane version report resolved (including when a plane or its console is unreachable or behind/ahead, or an environment is behind max — those are findings in the report, not command failures) **and** either `--fail-on-drift` was not passed, or it was passed and found nothing to fail on. |
+| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`; `--control-planes` combined with `--tenant`/`--gate-environment`; `--fail-on-drift` without `--tenant`/`--control-planes`; or `--fail-on-drift` was passed and the report found drift (an environment behind max, a behind/unresolved gate, an unreachable/behind/ahead plane or console, or an unresolved published baseline) — never while `--dry-run` is also set, since nothing was actually probed. |
+
+---
+
+## `erun observe` {#erun-observe}
+
+Reports an environment's Kubernetes state, read-only: every underlying call is `kubectl [--context <ctx>] --namespace <ns> get <resource> [name] -o json`, never anything that mutates. Same operation as the MCP `observe` tool (see [MCP overview § `observe`](/mcp/overview#observe)).
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+| `--secret <name>=<key>` | string, repeatable | none | Check Secret `<name>` for key `<key>`'s presence. Malformed (missing `=`, empty name, or empty key) aborts with `--secret must be name=key, got "<value>"` (exit 1) before any `kubectl` call. |
+
+### Resolution and output shape
+
+Resolves tenant/environment/namespace the same way every other typed command does (`ResolveOpen`), then issues, in order: `get pods`, `get resourcequota`, `get limitrange`, `get ingress`, `get certificates.cert-manager.io`, then one `get secret <name>` per `--secret` check. `--output json` emits:
+
+```jsonc
+{
+  "tenant": "myapp", "environment": "prod", "namespace": "myapp-prod",
+  "pods": [ { "name": "web-0", "phase": "Running", "ready": true, "restartCount": 0, "reason": "" } ],
+  "resourceQuotas": [ { "name": "erun-quota", "hard": { "limits.cpu": "4" }, "used": { "limits.cpu": "1" } } ],
+  "limitRanges": [ { "name": "erun-limits", "limits": [
+    { "type": "Container", "max": {}, "min": {}, "default": { "cpu": "1" }, "defaultRequest": { "cpu": "100m" } }
+  ] } ],
+  "ingresses": [ { "name": "web", "hosts": ["prod.example.com"],
+    "tls": [ { "hosts": ["prod.example.com"], "secretName": "web-tls" } ] } ],
+  "certificates": [ { "name": "wildcard", "ready": false, "reason": "Issuing", "message": "…",
+    "secretName": "wildcard-tls", "dnsNames": ["*.prod.example.com"], "orders": [ /* see below */ ] } ],
+  "secrets": [ { "name": "db-credentials", "key": "password", "exists": true, "hasKey": true, "error": "" } ]
+}
+```
+
+`reason` on a pod is the container's `waiting`/`terminated` reason if present, else the `PodScheduled=False` reason (a pod never admitted to a node has no container status to read a reason from), else the `Ready=False` condition's reason. `secrets` is omitted entirely when no `--secret` was given.
+
+### The Certificate → CertificateRequest → Order → Challenge walk {#certificate-failure-chain}
+
+`certificates[].orders` is populated only when that Certificate's `status.conditions[type=Ready]` is not `True`. The walk, run once against a fresh listing of each resource kind in the namespace (not once per certificate):
+
+1. List `certificaterequests.cert-manager.io`; filter to the ones labelled `cert-manager.io/certificate-name=<certificate>`; take the one with the latest `metadata.creationTimestamp` (a Certificate can be reissued, leaving stale requests behind — only the newest one's chain is live). None matching → `orders` is empty.
+2. List `orders.acme.cert-manager.io`; keep the ones whose `ownerReferences` include `{kind: CertificateRequest, name: <request from step 1>}`.
+3. For each such Order, list `challenges.acme.cert-manager.io` and keep the ones owned (`ownerReferences`) by that Order.
+4. Each reported order carries `state`/`reason` from `status`; each challenge carries `type`/`dnsName` from `spec` and `state`/`reason` from `status` — `reason` is the field that explains a stuck issuance (e.g. a webhook solver's RBAC denial), which is otherwise three separate `kubectl get` calls away.
+
+A cluster with no cert-manager CRDs installed (`kubectl` reports "the server doesn't have a resource type" / "no matches for kind") reports `certificates: []` rather than erroring — a cluster simply has no certificates to walk.
+
+### Secret presence checks
+
+Each `--secret <name>=<key>` becomes one `kubectl get secret <name> -o json`, read only for its key names (`data`/`stringData`), never a value:
+
+| Outcome | `exists` | `hasKey` | `error` |
+|---|---|---|---|
+| Secret and key both present. | `true` | `true` | `""` |
+| Secret present, key absent. | `true` | `false` | `""` |
+| Secret not found. | `false` | `false` | `""` |
+| Any other failure (e.g. RBAC denial reading the Secret). | `false` | `false` | the kubectl error, so a permission problem is never reported indistinguishably from "does not exist" |
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant/environment can't be resolved. | Errors before any `kubectl` call. |
+| `--secret` isn't `name=key`. | Errors before any `kubectl` call, naming the malformed value. |
+| `get pods` / `resourcequota` / `limitrange` / `ingress` fails (namespace or cluster unreachable). | Errors naming the failed call; nothing is reported. |
+| `get certificates.cert-manager.io` fails because the CRD isn't installed. | `certificates: []`; not an error. |
+| `get certificates.cert-manager.io` fails for another reason. | Errors naming the failed call. |
+
+---
+
+## `erun usage` {#erun-usage}
+
+Reports an environment's live CPU, memory, and disk usage, read from the runtime container's own cgroup v2 accounting and a statfs of its workspace mount. Same operation as the MCP `usage` tool (see [MCP overview § `usage`](/mcp/overview#usage)).
+
+**No metrics-server is required.** Unlike `kubectl top` (which reports `error: Metrics API not available` on any cluster without the metrics-server add-on — every local orbstack/k3s-style cluster included), the underlying `kubectl exec`s a fixed diagnostic script into the runtime pod's `erun-devops` container and reads `/sys/fs/cgroup` and `df` directly. Nothing here can mutate the cluster.
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+| `--interval <seconds>` | float | `1` | CPU sample window, clamped to `[0.1, 30]`. `cpu.stat`'s `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter. |
+
+### Resolution and output shape
+
+Resolves tenant/environment/namespace the same way every other typed command does (`ResolveOpen`), then runs one `kubectl exec -c erun-devops deployment/<tenant>-devops -- /bin/sh -lc <script>` against the resolved namespace. `--output json` emits:
+
+```jsonc
+{
+  "tenant": "myapp", "environment": "prod",
+  "cpu": { "quotaCores": 1, "utilizationPercent": 12.4, "intervalSeconds": 1 },
+  "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
+  "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ],
+  "warnings": [],
+  "excludesBuilds": true
+}
+```
+
+`cpu.quotaCores` is `cpu.max`'s quota ÷ period; `memory.percentOfLimit` is `memory.current` ÷ `memory.max`; `disk[].percentUsed` is `df`'s used ÷ total for the watched mount (the runtime chart's `HOME`, `/home/erun`, is the only mount watched today). `warnings` is omitted (empty) unless a threshold below is crossed.
+
+`excludesBuilds` is `true` whenever the environment's type carries the `erun-dind` sidecar (every type except `runtime` and `host` — `EnvironmentType.UsesDindSidecar`), omitted (false) otherwise. `cpu`/`memory` above are read from the `erun-devops` container's own cgroup alone; an image build (`erun build`/`erun release`) actually runs in `erun-dind`, a separate cgroup whose build containers are cgroup siblings rather than descendants of this one, so there is no path from inside `erun-devops` to read them. `excludesBuilds` names that gap explicitly rather than let a busy build read as an idle environment — the same disclosure the desktop's Runtime tab caption makes (`usageExcludesBuilds` in `erun-ui/frontend/src/components/app/Sidebar.helpers.ts`) and the non-JSON output states as a `Note:` line. [`erun observe`](/agent-reference/cli-flags#erun-observe) reports the sidecar's own resource limits.
+
+### Unavailability, not failure {#usage-unavailability}
+
+Every field group reports its own unavailability rather than failing the whole call — cgroup v1, an unlimited limit, and a file the exec script could not read are all normal on some clusters, not errors:
+
+| Condition | Reported as |
+|---|---|
+| `/sys/fs/cgroup` is not `cgroup2fs` (cgroup v1, or absent). | `cpu.unavailable` and `memory.unavailable` name the reason; every other CPU/memory field stays zero. |
+| `cpu.max`'s quota is `max` (unlimited) or the file could not be read. | `cpu.unavailable` names the reason — there is no quota to measure utilisation against. |
+| `memory.max` is `max` (unlimited). | `memory.unlimited: true`; `memory.limitBytes`/`percentOfLimit` stay zero rather than a fabricated percentage. |
+| `memory.current` could not be read. | `memory.unavailable` names the reason. |
+| `df` reported nothing for the watched mount. | that entry's `disk[].unavailable` names the reason. |
+
+`memory.oomKills` comes from `memory.events`' `oom_kill` counter — a real kill count, not a guess made after the fact.
+
+### Named warning thresholds {#usage-thresholds}
+
+A reading nobody acts on is decoration, so `warnings` fires a plain-language entry (not a code) when:
+
+| Threshold | Reasoning |
+|---|---|
+| `memory.percentOfLimit` ≥ 85%. | A container this close to its limit is one build step away from an OOM kill. |
+| `memory.peak` ÷ `memory.limitBytes` ≥ 95%. | `memory.peak` is a high-water mark, so a near-limit peak matters even after current usage drops back down. |
+| any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. |
+| `memory.oomKills` > 0. | Always reported: a kill already happened. |
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant/environment can't be resolved. | Errors before any `kubectl` call. |
+| The namespace, deployment, or cluster is unreachable. | Errors naming the failed `kubectl exec`. |
+
+---
+
+## `erun resize` {#erun-resize}
+
+Changes the runtime pod's and/or the `erun-dind` sidecar's CPU/memory limits and rolls them out through the same deploy composition `erun deploy` uses (`ResolveCurrentDeploySpecs`/`RunDeploySpecs`), so it reuses the existing rollout mechanism rather than inventing a second one. Same operation as the MCP `resize` tool (see [MCP overview § `resize`](/mcp/overview#resize)).
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+| `--cpu <cpu>` | string (Kubernetes CPU quantity) | unset | Explicit target CPU limit for the runtime pod. Merged onto the current value — naming only `--cpu` leaves memory unchanged. |
+| `--memory <memory>` | string (Kubernetes memory quantity) | unset | Explicit target memory limit for the runtime pod. Merged onto the current value the same way. |
+| `--dind-cpu <cpu>` | string (Kubernetes CPU quantity) | unset | Explicit target CPU limit for the `erun-dind` sidecar. Merged onto the current value, independent of `--cpu`/`--memory` — may be combined with them in one call. |
+| `--dind-memory <memory>` | string (Kubernetes memory quantity) | unset | Explicit target memory limit for the `erun-dind` sidecar. Merged onto the current value the same way. |
+| `--apply-recommendation` | bool | `false` | Size the runtime pod from `RecommendRuntimeSizing`'s per-resource verdicts (see [`erun list` § the sizing recommendation](/cli/list#the-sizing-recommendation)) instead of `--cpu`/`--memory`. Mutually exclusive with them. Never sizes the `erun-dind` sidecar — see step 2 below for why. |
+| `--override-lease` | bool | `false` | Proceed even though `LoadEnvironmentActivityLeases` reports a held lease. |
+| `--orchestrator <id>` | string | `""` | Recorded as `EnvironmentActivityLeaseHolder.Orchestrator` on the resize's own exclusive lease. |
+| `--dry-run` | bool | `false` | Resolve and trace the plan; performs no write. |
+
+### Resolution algorithm
+
+1. Resolve tenant/environment/`EnvConfig` (`ResolveOpen`, the same resolver every other typed command uses).
+2. Resolve the target `RuntimePodResources` for the runtime pod:
+   - `--apply-recommendation`: load the standing recommendation the same way `erun list` does (`LoadRuntimeUsageHistory` + `RecommendRuntimeSizing`, scoped to **this process's own** cache directory — see [Idle policy § activity leases](/agent-reference/idle-policy#activity-leases) for why that is in-pod-only for a remote/runtime environment). For each verdict whose `action` is `raise` or `lower`, adopt its `suggested` value; a verdict of `hold`/`insufficient-evidence` leaves that resource unchanged. No recommendation available → error. `RecommendRuntimeSizing` derives its verdicts from cgroup counters read out of the container it runs inside — the `erun-devops` container, not the `erun-dind` sidecar next to it in the same pod — so there is no standing recommendation for the sidecar today; covering it would mean exec'ing into it specifically and retaining a second usage history.
+   - Explicit `--cpu`/`--memory`: merge onto the current `EnvConfig.runtimepod`, matching `erun init`'s own merge semantics for the same field.
+3. Resolve the target `RuntimePodResources` for the `erun-dind` sidecar, independently: explicit `--dind-cpu`/`--dind-memory` merge onto the current `EnvConfig.runtimedindpod` the same way. Both targets normalize and validate (`ValidateRuntimePodResources`/`ValidateRuntimeDindPodResources`), then validate together against `EnvConfig.namespacequota` if one is set: a `ResourceQuota` counts every container in the pod, so the runtime pod's target CPU/memory plus the sidecar's own *resolved* target (not a fixed constant — a `--dind-cpu`/`--dind-memory` in the same call moves it) must not exceed the quota. A violation errors naming the resource, the sidecar's share, and how much is actually available to the runtime container.
+4. If both resolved targets equal their current recorded values, stop: report a no-op, no lease check, no deploy.
+5. Load every currently held activity lease for the environment (`LoadEnvironmentActivityLeases` — plain and exclusive alike, the same predicate the desktop's own AI-session spawn uses to decide occupancy). Any result and `--override-lease` unset → refuse, naming every holder (`EnvironmentActivityLeaseHolder.String()` plus the lease's `name`). An override is traced explicitly when used.
+6. `--dry-run` stops here, after tracing the per-resource `current -> target` lines (`cpu`/`memory` for the runtime pod, `dind-cpu`/`dind-memory` for the sidecar) and the occupancy decision.
+7. Take an exclusive lease (scope `worktree`, name `resize`) for the duration of the write — this is what a *second, concurrent* resize call collides with, distinct from step 5's occupancy check against other workers. Persist `EnvConfig.runtimepod`/`EnvConfig.runtimedindpod` to the resolved targets, then run the same deploy composition `erun deploy` uses with no explicit version override (redeploys the environment's own recorded `runtimeversion`), so the runtime chart's `--set-string runtime.resources.limits.cpu/memory` and `runtime.dind.resources.limits.cpu/memory` rerender with the new values and the `Recreate`-strategy Deployment rolls exactly once. Release the lease when the deploy finishes (or fails).
+
+### What moves and what doesn't
+
+| Quantity | Affected by `resize`? |
+|---|---|
+| Runtime container's `resources.limits.cpu`/`.memory` (the throttle/OOM ceiling) | Yes, via `--cpu`/`--memory` or `--apply-recommendation`. |
+| `erun-dind` sidecar's `resources.limits.cpu`/`.memory` | Yes, via `--dind-cpu`/`--dind-memory` — independent of the runtime pod's own limits and combinable with them in one call. |
+| The namespace `ResourceQuota`'s draw from this environment | Yes, indirectly: quota accounting is limits-based and counts both containers. |
+| Runtime container's and sidecar's `resources.requests` (what the scheduler reserves) | No — pinned to small fixed defaults (`DefaultLimitRangeDefaultRequestCPU`/`Memory`, `DefaultRuntimeDindRequestCPU`/`Memory`) independent of this command. |
+| Any PVC (home, docker state, worktree) | No — PVC sizes are chart literals today, not values-driven. |
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant/environment can't be resolved. | Errors before any read or write. |
+| None of `--cpu`/`--memory`/`--dind-cpu`/`--dind-memory`/`--apply-recommendation` given. | Errors naming what to pass instead. |
+| Both `--apply-recommendation` and explicit `--cpu`/`--memory` given. | Errors naming the conflict. `--dind-cpu`/`--dind-memory` may still be combined with `--apply-recommendation` in the same call — they size a different resource with no recommendation of its own. |
+| `--apply-recommendation` with no retained history for this environment. | Errors, and names the explicit-values fallback. |
+| Resolved runtime-pod target plus the sidecar's resolved target would exceed `EnvConfig.namespacequota`. | Errors naming the resource, the sidecar's share, and the remainder actually available. |
+| Another holder's lease is present (`LoadEnvironmentActivityLeases` non-empty) and `--override-lease` is unset. | Errors naming every holder (`orchestrator`, `user`, lease `name`). |
+| A second resize is already running (`TakeEnvironmentActivityLease` with `Exclusive: true` conflicts). | Errors naming that holder. |
+| The deploy step fails (chart resolution, helm rollout). | Errors as `erun deploy` would for the same failure; `EnvConfig.runtimepod`/`runtimedindpod` have already been persisted to the new values at this point, since deploy is what makes them live and a retry should redeploy the same target rather than resolve a stale one. |
+| Both resolved targets equal their current recorded values. | No-op: reports "already sized" (naming all four current values), takes no lease, and does not deploy. |
+
+---
+
+## `erun whip` {#erun-whip}
+
+Pushes the pacing nudge into every reachable target: every configured environment's own AI session (over that environment's MCP `whip` tool — see [MCP overview § `whip`](/mcp/overview#whip)) plus every persisted orchestrator (`ERunConfig.orchestrators`). Same population-agnostic decide/report core (`eruncommon.DecideWhip`/`WhipReport`) the desktop's automatic pacing reconciler and the MCP tool both use.
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | unset | Whip only this environment; requires `--environment`. |
+| `--environment <e>` | string | unset | Whip only this environment; requires `--tenant`. |
+| `--dry-run` | bool | `false` | Still calls each reachable environment's `whip` tool, with `preview: true`, so the report reflects a real decision without ever writing into the session. |
+| `--json` | bool | `false` | Emit the full `WhipReport` as JSON. |
+
+### Resolution algorithm
+
+1. If both `--tenant`/`--environment` are given, the target list is that one pair. If neither is given, list every environment across every configured tenant (`ListTenantConfigs` + `ListEnvConfigs`) — never the ambient current-directory default a bare `resolveOpen` would resolve to. Passing only one of the two errors.
+2. For each environment target: resolve its MCP edge the same way `erun idle`/`erun exec` do (a local port-forward state file `erun open` maintains while the environment is open). An edge that cannot be resolved, or whose call fails, resolves to `{decision: none, reason: "not-alive"}` — not a command failure. A resolved edge is called with `whip {preview: <ctx.DryRun>}`; the decoded `eruncommon.WhipResult` is used verbatim.
+3. Load `~/.erun/config.yaml`'s `Orchestrators` list and turn each into a candidate via `eruncommon.ListWhipOrchestratorCandidates` (always `Reachable: false`), then `eruncommon.DecideWhip` against the resolved `WhipConfig` with `explicit: true`. Every orchestrator therefore always resolves to `{decision: none, reason: "unreachable-from-transport"}` from this transport.
+4. Render one line per result (`candidate.id`/name, decision, reason, and the write error if any), or the full `WhipReport` JSON with `--json`.
+
+### `WhipReport` shape
+
+```jsonc
+{
+  "dryRun": false,
+  "results": [
+    {
+      "candidate": { "kind": "environment", "id": "myapp/dev", "name": "myapp/dev", "reachable": true, "alive": true, "lastActiveAt": "...", "nudgeCount": 1, "capped": false },
+      "decision": 1,        // 0 none, 1 nudge, 2 cap
+      "reason": "nudge",    // not-alive | unreachable-from-transport | fresh | already-capped | cap-crossed | nudge
+      "pushed": true
+    },
+    {
+      "candidate": { "kind": "orchestrator", "id": "eng-1", "name": "Eng One", "reachable": false, "alive": false, "nudgeCount": 0, "capped": false },
+      "decision": 0,
+      "reason": "unreachable-from-transport",
+      "pushed": false
+    }
+  ]
+}
+```
+
+### Configuration: `ERunConfig.whip` {#whip-config}
+
+`~/.erun/config.yaml`'s optional `whip` section (`eruncommon.WhipConfigOverride`) overrides the pacing defaults every surface reads through `eruncommon.ResolveWhipConfig`:
+
+| Key | Type | Unset behaviour |
+|---|---|---|
+| `message` | string | `eruncommon.DefaultWhipMessage` (the built-in pacing text) |
+| `staleafterseconds` | int | `eruncommon.DefaultWhipStaleAfter` (600 = 10 minutes) |
+| `maxnudges` | int | `eruncommon.DefaultWhipMaxNudges` (6) |
+| `autoenabled` | bool | `true` — gates only the *automatic*, schedule-driven pass; an explicit whip (this command, the MCP tool's default, or a future in-app row action) always ignores it |
+
+Every field is a pointer in the on-disk override so "unset" (keep the default) is distinguishable from an explicit zero/false. The desktop's automatic reconciler re-reads this section once per tick (no rebuild or restart needed); this command and the MCP tool read it fresh on every invocation.
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Only one of `--tenant`/`--environment` given. | Errors naming the conflict; nothing is read or pushed. |
+| An environment's MCP edge cannot be resolved or called. | That target resolves to `{decision: none, reason: "not-alive", error: "<the underlying error>"}`; the command still exits 0. |
+| A persisted orchestrator. | Always `{decision: none, reason: "unreachable-from-transport"}`; the command still exits 0. |
+| No environments and no orchestrators configured. | Exits 0 with `results: []` (or omitted under `--json` if empty). |
 
 ---
 
@@ -516,6 +962,23 @@ Lists one directory one level deep over `kubectl exec … find <dir> -maxdepth 1
 | `--force` | bool | `false` | Overwrite an existing local destination. |
 
 A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<name>.tar.gz`). The payload is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + script and the planned destination; no I/O).
+
+---
+
+## `erun inputs`
+
+`erun inputs upload` is the inverse of `erun outputs download`: it streams a file from this host into an environment's runtime pod over `kubectl exec -i` (stdin), never through argv or a base64 blob in a tool argument. It has no in-pod MCP counterpart — the edge runs in the pod and has no path back to the operator's filesystem — but an MCP-connected orchestrator reaches the same transfer through the `inputs_upload` local tool `erun mcp proxy` serves (see [MCP overview § Host-served](/mcp/overview#host-served)).
+
+### `erun inputs upload`
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `<local-path>` (arg) | path | **required** | File on this host to upload; must exist and not be a directory. |
+| `<remote-path>` (arg) | absolute path | **required, never defaulted** | Full destination inside the pod, including the file name. Must be absolute and free of `..`. Not defaulted deliberately: a transfer can never silently land somewhere a background process (e.g. the workspace-sync mirror) reconciles away. |
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+
+The remote script creates the destination directory if missing, writes to a same-directory temp file, and renames into place — so a killed transfer never leaves a partial file visible at the final path — then reports the written size and SHA-256. The command errors if that checksum (or size) disagrees with what was sent. `--output json` emits `{remotePath, bytes, sha256}`. `--dry-run` traces the `kubectl exec` argv and the upload script without sending anything (the local file must still exist to resolve its size).
 
 ---
 
@@ -669,7 +1132,7 @@ The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,
 
 ## `erun job` {#erun-job}
 
-`erun job` starts long work in an environment and answers what happened to it. It is the in-environment half of the job surface; the host-side half is the `job_*` [MCP tools](/mcp/overview#job-tools), which run the same shared implementation.
+`erun job` starts long work in an environment and answers what happened to it. The work always runs in the environment, wherever the command is typed: inside the environment the verbs act on its store directly, and from anywhere else they act through the environment's MCP edge, which needs the port-forward `erun open` establishes. The `job_*` [MCP tools](/mcp/overview#job-tools) are that same surface reached directly, over the same shared implementation. Paths are the environment's — `--dir` and the reported log path resolve inside it, and a pid names a process in the environment.
 
 Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sentinel token, and an exit-code parse around [`erun exec raw`](/cli/exec) / the `raw` MCP tool. Three properties are the reason it exists:
 
@@ -683,9 +1146,89 @@ Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sen
 |---|---|---|
 | `running` | The recorded process is alive and no outcome has been observed. | `null` |
 | `exited` | The work finished and the supervisor captured its status. `-1` means it was terminated by a signal, which `signal` names. | integer |
+| `abandoned` | The job's own process exited and the supervisor captured its exit status, but it left something it spawned still running in its process group — background work started and never waited for, e.g. a gate a job backgrounded and then exited past. `reason` describes it. Never a success, whatever `exitCode` says. | integer |
+| `gate-incomplete` | The job's own process exited, but a job *it started* (via `job start`, e.g. a gate run through `agent-gate.sh`) had not reached a verdict even after the supervisor waited for it (see below). `reason` names the still-running job(s). Never a success, whatever `exitCode` says. | integer |
 | `unknown` | The record outlived whatever was meant to finish it — the supervisor is gone without recording an outcome (most often because the runtime pod was replaced), or an attached job's tracked process is gone. `reason` says which. | `null` |
 
 The demotion to `unknown` happens on the next read and is persisted, so every later read gives the same answer. An `unknown` job is never a success: `job await` exits `125` for it, distinct from both `0` and a failure.
+
+`abandoned` sits between the two: like `exited`, the supervisor did observe the process end and recorded a real `exitCode` for it; like `unknown`, it is never a success — even an `exitCode` of `0` is not one, because something the job started is still running and nothing will ever report on it again. Detection happens once, right after the supervisor reaps the job's own process, by checking whether its process group still has a live member; that check is POSIX-only, so on Windows a job that backgrounds work this way still reads back as a plain `exited`. `job status`/`job await` render it as `abandoned <exitCode>: <name> (<reason>)`, distinct from both `exited <exitCode>: <name>` and `unknown: <name> (<reason>)`.
+
+Every state line names why it ended when there is anything recorded to say, `exited` included: `exited <exitCode>: <name> (signal <signal>)` when the work was signalled (the signal *is* the reason), `exited <exitCode>: <name> (<reason>)` otherwise when the record carries one, and the bare `exited <exitCode>: <name>` only when it carries neither. `job await`'s own failure message follows the same rule — `job "<id>" exited <exitCode> (signal <signal>)` or `job "<id>" exited <exitCode>: <reason>`. A job whose work could not be started at all (`failed to start: …`) is the case this matters most for: its exit code is `-1` and the reason is the entire answer.
+
+`gate-incomplete` is `abandoned`'s sibling for a different shape of leftover work: not a process in the job's own process group, but a *sibling job record* — one started through `job start` from inside this job's own work, most commonly an agent running its `make check` gate through `agent-gate.sh` (which detaches the gate as its own job precisely so it survives the caller). That detachment is also what makes `abandoned`'s process-group check blind to it: the child job runs in its own session on purpose. Every job's own process carries `ERUN_JOB_ID` naming the job it is running as, so a nested `job start` reached from inside it — directly, or through anything it spawns — records that value as its own `startedByJobId`.
+
+That inheritance only holds for a plain nested subprocess (a Bash tool calling the erun CLI directly). A start forwarded through the environment's MCP edge instead crosses into that server's own long-lived process, which was never itself started as anyone's job and so has no `ERUN_JOB_ID` to inherit, however deep the logical nesting is on the calling side — `exec_agent`/`exec_raw` (with `wait: false`) and every [job-envelope tool](/mcp/overview#job-envelope) (`build`, `deploy`, `doctor`, and the rest, with `wait: false`) accept an explicit `startedByJobId` field for exactly this case. The erun CLI's own off-environment `job start` fills it in automatically from its own `ERUN_JOB_ID` when forwarding; a caller reaching the MCP tools directly sets it itself if it wants the linkage.
+
+Nothing is guessed when it is absent. A caller driving an environment from outside any job at all is genuinely parentless, and attributing its work to whichever job happens to be running there would be a definite answer to an unknown question — so an unlinked job records no parent, and its outcome is simply nobody's finish check to wait on.
+
+`startedJobFailed` names the *latest* attempt under a given `--name`, not every failure that name has ever seen: `agent-gate.sh` folds the working tree and command into the generated `--id`, so an agent that fixes what a gate found and reruns it gets a fresh id under the same `--name`, and the earlier failing attempt's record is never replaced (only reusing an id outright does that). A later attempt under the same name supersedes an earlier failure once it starts, whether or not it has finished yet, so a stale failure from a fixed-and-rerun gate never haunts the parent's own outcome once the current attempt has gone green.
+
+When a job's process ends, the supervisor checks the job store for any non-[handoff](#job-handoff) job naming it as `startedByJobId` that has not finished, and **waits for it** rather than deciding the outcome on the spot — polling the started job's record until it finishes or a generous cap elapses (24 hours by default; tunable per process via `ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP`, a `time.ParseDuration` string). Nothing is holding a connection or an orchestrator's turn open on the other end of this wait — the supervisor is already a detached background process — so waiting out even the longest gate costs nothing the way holding an interactive `job await` call open would.
+
+- If the wait ends because the cap elapses with the started job still running, the outcome is `gate-incomplete`, even at `exitCode: 0`. This is what turns "an agent ended its turn while the gate it started was still running" from a silent, unnoticed success into a state an orchestrator can poll for.
+- If the wait ends because the started job finished, its own outcome is folded into this job's record instead: `state` stays whatever this job's own process produced (usually `exited`), and `startedJobFailed` names the started job if — and only if — it did **not** succeed. `succeeded` is `false` whenever `startedJobFailed` is set, regardless of this job's own `exitCode`. This is the common case in practice: a gate that runs long but eventually passes or fails is waited out and reported truthfully, rather than ever surfacing a misleading intermediate `gate-incomplete` a caller would have to separately chase down.
+
+`job status`/`job await` render `gate-incomplete` as `gate-incomplete <exitCode>: <name> (<reason>)`, and append `, <startedJobFailed text>` to an otherwise-`exited`/`abandoned` line when `startedJobFailed` is set.
+
+### Bounded reinvocation for an agent job {#job-reinvocation}
+
+`gate-incomplete`/`startedJobFailed` tell an orchestrator polling from outside the truth, but a one-shot `--agent` run's own process has already exited by the time either is recorded — nothing wakes it to act on what it started. For an agent job specifically (never a plain command job, and never for a plain nonzero exit with no started work involved), erun closes that gap itself: before finalizing `gate-incomplete` or `startedJobFailed`, it resumes the same tool session with the concrete outcome, giving the agent a real turn to fix it, verify it, or explain why it cannot be resolved.
+
+This is a **resumption of the same conversation**, not a fresh, context-free retry: `claude -p --resume <session-id>` / `codex exec resume <thread-id>` carry the tool's own prior context forward, verified live for Claude (a fact told in one process was correctly recalled from a wholly separate resumed process). It only runs when a session id was actually captured from the tool's own event stream (`session_id` on every Claude stream-json event, `thread_id` on Codex's `thread.started` event) — an agent job with no captured session id gets the plain, unresumed outcome exactly as before this existed.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `reinvocationCount` | integer | How many bounded follow-up turns already ran for this job. `0` for a command job and for an agent job that never needed one. |
+
+Two independent caps bound the chain, both on the job's own record so neither can be extended by anything a reinvoked turn itself starts:
+
+- A fixed count, `EnvironmentJobMaxReinvocations` (default `2`), overridable per supervisor process via `ERUN_JOB_MAX_REINVOCATIONS`.
+- A wall-clock budget across the whole chain, `EnvironmentJobReinvocationBudget` (default `30m`), overridable via `ERUN_JOB_REINVOCATION_BUDGET` (a `time.ParseDuration` string), struck once before the first turn rather than reset per turn.
+
+Once either cap is reached, the job finalizes exactly as it would without this feature — `gate-incomplete` or `startedJobFailed`, `succeeded: false` — except `reason` now says so explicitly (`"... (already resumed N time(s) without a clean outcome; the reinvocation bound is exhausted)"`), distinct from a job that never got a reinvocation at all. `job status` also appends `, resumed N/M time(s)` to the rendered line for any job with `reinvocationCount > 0`, running or finished.
+
+### Deliberate handoff: `--handoff` {#job-handoff}
+
+Not every job a job starts is meant to be waited for. `job start --handoff` marks the new job as deliberately outliving whatever starts it — a release, a long render, anything an agent kicks off on purpose before ending its own turn. A handoff job is excluded from its parent's finish check entirely: it is never counted toward `gate-incomplete`, and its own eventual outcome (success or failure) is never folded into `startedJobFailed`. Without `--handoff`, *every* nested `job start` defaults into the wait-then-report behavior above, which is correct for a gate but wrong for work genuinely meant to keep running past the caller's own turn.
+
+### Environment exclusivity: `--exclusive` {#job-exclusivity}
+
+An activity lease is **presence** — many holders coexist, and taking one says nothing about whether anybody else should. That is the right default for observability and the wrong one for a gate, whose verdict a neighbour changes rather than merely delays. Measured on one 12-CPU/23-GiB agent pod, the same gate ran `GREEN 7m4s`, `GREEN 7m38s`, `GREEN 6m58s` alone, and `GREEN 17m36s`, `RED`, `RED` with a second gate batch and a handful of probe jobs beside it — the two reds on *different* tests, both of which pass standalone (an `erun usage --output json` golden whose actual output carried real OOM warnings, and an auth-retry test that timed out). A contended gate does not report a slow verdict; it reports a wrong one, and the wrong one costs a false attribution before anyone thinks to re-measure alone.
+
+`job start --exclusive` is how work declares it needs the environment to itself:
+
+| Property | Value |
+|---|---|
+| Requested by | `erun exec job start --exclusive`; MCP `exec_raw` (`wait: false`) and `exec_agent` both take `exclusive: true`. |
+| Scope | Always `environment` — the [exclusive-claim](/agent-reference/idle-policy#exclusive-claims) scope that means "no other work here at all". Job exclusivity is deliberately not scope-parameterised: what a gate contends for is the pod's CPU and memory, which no worktree boundary divides. A narrower claim is still available directly through `erun activity lease take --exclusive --scope <scope>`. |
+| Refuses a second exclusive job | Yes. |
+| Refuses an **ordinary** job too | Yes, and this is the point. A gate needs protecting less from another gate than from everything else scheduled beside it; a probe job started during a gate is exactly what the measurement above recorded. |
+| Refusal shape | Never queued and never silently allowed. The error names the holder (`orchestrator`/`user`/`tenant`, lease `name`, lease `id`), how long the claim has left, that it is reclaimed if its holder dies, and the exact `erun exec job cancel` (or `erun activity lease release`) command that clears it. |
+| Lineage exemption | A start whose parent chain (`startedByJobId`, walked transitively) reaches the holder proceeds — that is the holder starting its own work, not contention. Such a job takes **no** second claim, so it cannot drop the ancestor's on its way out, and its record reads `exclusive: false`. |
+| Expiry and reclaim | It is a lease, not a lock. The claim is taken at start time with no pid (the supervisor does not exist yet), and the supervisor's first heartbeat records its own pid on it; from then on a dead supervisor releases the environment on the next read. It also expires at `--lease-ttl` (default `15m`, renewed at TTL/3) and at the 12-hour lease lifetime ceiling. A crashed gate cannot pin an environment. |
+| Release | Explicit, on the supervisor's way out, so the next gate starts immediately rather than waiting out a TTL. A start that fails before its supervisor comes up releases the claim it took. |
+| Storage | `${XDG_CACHE_HOME}/erun/activity/<tenant>/<environment>/leases/exclusive/environment.json`, id `job-exclusive-<jobId>` — keyed by scope, created with `O_CREATE\|O_EXCL`, so of any number of concurrent starts exactly one create lands and the losers are refused with the winner named. |
+
+| Field | Type | Meaning |
+|---|---|---|
+| `exclusive` | bool | Whether this job holds the environment's claim. It is what the job actually holds, not what its caller asked for: a job running under an ancestor's claim reads `false`. `job status` appends `, holding this environment exclusively` to its line. |
+
+`scripts/agent-gate.sh` passes `--exclusive` for every gate it detaches (`make check`, `make integration-test`, `erun-ui/playwright/run.sh`), so the repository's own long gates hold the pod by default. `erun exec gate-merge` is gated by the same claim from the other direction: it rewrites the environment's one shared worktree, so it is refused while anything else holds the environment exclusively — two merge-queue drives racing that worktree is how a batch came to report pushing another batch's commit and closed two pull requests against work that had not landed. A caller that took the claim itself (a drive holding the environment across several separate processes, which cannot be expressed as one job) passes `erun exec gate-merge --under-lease <leaseId>` so its own hold does not refuse it.
+
+### The alive contract {#alive-contract}
+
+`state` alone answers "did the work finish", but it can only be as fresh as the last thing that read and reconciled the record — a pid-liveness check runs only when something calls `status`/`await`/`output`. A supervisor can also die between reads (a `SIGTERM`'d container, an OOM kill) with nothing to say so from the inside until the next reconcile. To close that gap every job record carries three more fields, written by the supervisor on a fixed cadence independent of the work's own output:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `lastAliveAt` | RFC3339 timestamp | The supervisor's own clock timestamp at its last beat, stamped every ~1 second (`EnvironmentJobAliveHeartbeatInterval`) for as long as the supervisor runs — an image pull or a silent test suite beats exactly as often as a chatty one. |
+| `aliveSeq` | integer | A monotonic counter bumped on every beat, so a caller can distinguish "still beating" from "the same timestamp read twice" at second resolution. |
+| `aliveAgeMs` | integer or `null` | Computed fresh on every read as `now − lastAliveAt`, **in the reader's own process, using the same clock `lastAliveAt` was stamped with** — never a caller subtracting its own wall clock from a pod timestamp, which a few seconds of skew would turn into a false failure against a 5-second bound. `null` only when the job has never beaten: an attached job (no supervisor loop exists for it) or one whose supervisor has not registered its first beat yet. |
+
+**The caller rule:** once `aliveAgeMs` exceeds `5000`, stop waiting and treat the job as failed — report it as an `unknown` outcome, never as a success and never as the tool itself having errored — even if `state` still reads `running`. 1 second of beat cadence against a 5 second bound is 5× headroom for poll jitter and scheduling delay, not slack for the beat itself to run late by design. A silent-but-healthy command never trips this: the beat has nothing to do with `outputBytes`.
+
+In practice the two signals — `state` and `aliveAgeMs` — usually agree, because the same pid-liveness check that would demote `state` to `unknown` also stops finding a live supervisor at the same moment beats stop landing. `aliveAgeMs` matters when a caller cannot afford to wait for the next reconcile, or when a reused pid could otherwise pass a liveness probe without actually being the job's supervisor: verified end to end by killing a real supervisor process with `SIGKILL` and confirming `aliveAgeMs` exceeds `5000` within ~6 seconds of the kill, with `state` landing on `unknown` in the same window.
 
 ### `erun job start`
 
@@ -700,6 +1243,8 @@ The demotion to `unknown` happens on the next read and is persisted, so every la
 | `--agent <tool>` | string | none | Run an AI tool instead of a command; the trailing arguments are the prompt. `claude` or `codex`. See [Agent jobs](#agent-jobs). |
 | `--max-output-bytes <n>` | int64 | `4194304` (4 MiB) | Cap on captured output. |
 | `--lease-ttl <duration>` | duration | `15m` | Activity lease TTL; the supervisor renews at TTL/3 (minimum 5s) for as long as the work runs, and at 2s intervals for an agent job so the lease's name can carry the current activity. |
+| `--handoff` | bool | `false` | Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check. See [Deliberate handoff](#job-handoff). |
+| `--exclusive` | bool | `false` | Claim the environment for this job's lifetime; while it is held, **every** other job start here is refused and told which job holds it. See [Environment exclusivity](#job-exclusivity). |
 | `--dry-run` | bool | `false` | Trace the supervisor argv, the log path, and the lease; start nothing. |
 
 erun spawns a supervisor in **its own session**, so the work survives this call returning, the caller exiting, and the transport dropping — nothing needs wrapping in `setsid`, `nohup`, or a redirect. The work itself runs in its own process group, which is what lets [`cancel`](#erun-job-cancel) reach it without touching the supervisor.
@@ -750,6 +1295,33 @@ The supervisor folds the stream every 2 seconds and rewrites the record only whe
 
 `job output` needs no special handling for an agent job: the log is the event stream, so the existing incremental read returns events while the agent works.
 
+### Working tree checkpoints {#worktree-checkpoints}
+
+An agent job's exit status says nothing about the state of the working tree it ran in — a clean `exited 0` and a tree with a thousand uncommitted lines are otherwise indistinguishable. When an [agent job](#agent-jobs) (`kind: agent`) with a `--dir` finishes, the supervisor checks that directory's git state once, before the record is written, and folds what it found into seven more fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `worktreeDirty` | bool | `true` only when `--dir` was a git working tree with uncommitted changes (tracked or untracked, respecting `.gitignore`) at the moment the job ended. `false` — meaning absent from the record — covers every other case identically: a command job (never checked), an agent job with no `--dir` or a `--dir` outside a git repo, and an agent job that left its tree clean. |
+| `worktreeBranch` | string | The branch HEAD pointed at when the check ran; the literal `"HEAD"` when detached. Empty when `worktreeDirty` is `false`. |
+| `worktreeDetached` | bool | `true` when HEAD was not on a branch at all. |
+| `worktreeCommit` | string | The checkpoint commit the supervisor made, empty when it made none. |
+| `worktreePushed` | bool | Whether `worktreeCommit` reached `worktreeRemote`. A commit that exists only in the working tree is exactly as exposed to a lost pod as the uncommitted changes it was meant to save. |
+| `worktreeRemote` | string | The remote `worktreeCommit` was pushed to (`origin`), empty when nothing was pushed. |
+| `worktreeReason` | string | Why no checkpoint was made, or why one was made but not pushed. Empty when `worktreeDirty` is `false`, or when a commit was made and pushed cleanly. |
+
+When the tree is dirty, the supervisor does not just report — it makes a machine-authored checkpoint commit (message: `WIP: checkpoint by the erun job supervisor`, explicitly inviting the reader to rewrite or squash it) and pushes it to `origin`, because the agent that would otherwise do this by hand is already gone by the time anyone reads the record. It only does this where committing is actually safe:
+
+| Condition | What happens |
+|---|---|
+| HEAD is detached (`worktreeBranch: "HEAD"`) | No commit: it would be unreachable the moment HEAD moves. `worktreeDetached: true`, `worktreeReason` explains it. |
+| A merge, rebase, cherry-pick, or revert is in progress | No commit: committing over the operation's own state could corrupt it. |
+| The branch is one this job treats as protected — the remote's actual default branch (`origin/HEAD`) when it can be read, else `main`/`master`/`develop` | No commit: refused rather than depositing a WIP commit directly on a protected branch. |
+| None of the above, and the commit itself fails | `worktreeCommit` empty, `worktreeReason` names the failure. |
+| The commit succeeds but the push fails | `worktreeCommit` set, `worktreePushed: false`, `worktreeReason` names the push failure — the commit still exists locally, but "only as safe as this one working tree". |
+| The commit succeeds and the push succeeds | `worktreeCommit` and `worktreeRemote` set, `worktreePushed: true`, `worktreeReason` empty. |
+
+A dirty working tree is never a success, whatever `exitCode` says: `job.Succeeded()`'s single definition folds `!worktreeDirty` in alongside `state == exited && exitCode == 0`, the same way it already folds in "nothing left running behind it" for `abandoned`/`gate-incomplete`. `job status`/`job await`'s text line appends `working tree was dirty; checkpointed as <sha> and pushed to <remote>` (or `but not pushed: <reason>`, or `and left uncommitted: <reason>`) to whatever state line it would otherwise render — including a plain `exited 0` line, since a checkpointed-and-pushed tree is still worth an orchestrator's attention even though nothing was lost.
+
 ### `erun job attach`
 
 Registers work erun did **not** start, so it is visible and holds an activity lease.
@@ -778,8 +1350,10 @@ An attached job resolves against the named pid and nothing else. It reads `runni
 For an [agent job](#agent-jobs) the text line and the record both carry the progress view, so `status` answers what the agent is doing rather than only that it is running:
 
 ```
-running: sweep, pid 4243, agent claude, editing erun-common/mcp_client.go, 12 turns, 47 tools, 91204 bytes of output
+running: sweep, pid 4243, last beat 210ms ago, agent claude, editing erun-common/mcp_client.go, 12 turns, 47 tools, 91204 bytes of output
 ```
+
+The `last beat <n>ms ago` segment is the text rendering of `aliveAgeMs` (see [The alive contract](#alive-contract)) for a running job — present whenever the record has beaten at least once.
 
 An agent job that has not emitted yet reads `agent claude, no events yet` — distinct from an idle one, and the honest answer while the tool is still starting.
 
@@ -797,9 +1371,9 @@ The call returns inside the timeout either way, so no connection is held open fo
 
 | Exit code | Meaning |
 |---|---|
-| `0` | The job reached `exited` with code `0`. |
-| `1` | The job reached `exited` with a non-zero code. The real code is in the message and in `job.exitCode`. |
-| `124` | The timeout elapsed with the job still running. Matches `timeout(1)`. |
+| `0` | The job reached `exited` with code `0`, `startedJobFailed` is empty, and, for an agent job, `worktreeDirty` is `false`. |
+| `1` | The job reached `exited` with a non-zero code, its state is `abandoned` or `gate-incomplete` (work it started — a process it left running, or a job it started whose wait was exhausted — outlived it), `startedJobFailed` names a job it started and waited for that did not succeed (see [gate-incomplete](#erun-job) / [Deliberate handoff](#job-handoff)), or `worktreeDirty` is `true` — see [Working tree checkpoints](#worktree-checkpoints). Any of these is never a success, even at a captured `exitCode` of `0`. `job.exitCode` carries the captured code either way; the message text says which case it is. |
+| `124` | This one call's own bounded wait elapsed with the job still running — never a verdict on the job itself. Matches `timeout(1)`. A job that can run longer than the 10-minute cap (a full test-suite gate routinely does) is not a case this command refuses to cover: call it again, at up to the cap, each time it reports `124`, rather than asking for one longer wait. |
 | `125` | The job's state is `unknown` — no outcome was ever recorded. |
 
 `--output json` emits `{job, timedOut, waitedSeconds, timeoutSeconds}`. `timedOut` is `true` only for the `124` case, so a caller reading the payload does not have to infer it from the exit code either.
@@ -841,7 +1415,7 @@ On Windows there are no signals: every name maps to a `taskkill /F /T` of the re
 | Durability | The same store the [activity leases](/agent-reference/idle-policy#activity-leases) use. Inside a runtime pod that path is on the home PVC, so records survive pod replacement — deliberately not container-local `/tmp`, which every deploy strands. |
 | Output cap | `--max-output-bytes` (default 4 MiB) per job. Past it the log stops growing, the record sets `outputTruncated: true` (immediately, not at exit), and `job status` says `(truncated at the output cap)`. The **head** is kept: the outcome never comes from the log, so a bounded log costs detail, never the result. |
 | Retention | A finished job stays readable for **24 hours** after it ended, and the newest **50** finished records per environment are kept. Running jobs are never pruned. An orchestrator reconnecting after the work ended can therefore still learn the outcome; reaping at exit would recreate the problem this surface closes. |
-| Pruning | Happens on read and on write, alongside the same reconcile-on-read pass that demotes abandoned records. Pruning removes the record and its log together. |
+| Pruning | Happens on read and on write, alongside the same reconcile-on-read pass that demotes a stranded record to `unknown`. Pruning removes the record and its log together. |
 
 ### The lease a job holds
 

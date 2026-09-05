@@ -1,0 +1,7 @@
+audit: erun exec gate-merge --dry-run --remote nonexistent --source [feature/add-widget] --target main --under-lease my-drive
+gate-merge: running under the caller's own exclusive claim my-drive, proceeding
+git -C <TMP> status --porcelain --untracked-files=no
+cd <TMP> && git fetch nonexistent main feature/add-widget
+cd <TMP> && git checkout -B main nonexistent/main
+cd <TMP> && git merge --squash nonexistent/feature/add-widget
+cd <TMP> && git commit -m '<message>'

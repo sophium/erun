@@ -1,5 +1,10 @@
+import { createSelector } from '@reduxjs/toolkit';
+
 import type { UISelection } from '@/types';
 
+import type { SidebarFocus, WhipDefaultTarget } from './model';
+import { type NotificationCounts, unreadNotificationCounts } from './notificationCenter';
+import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 import type { RootState } from './store';
 import { findVersionSuggestion, normalizeDialogValue, selectionKey } from './versionSuggestions';
 
@@ -72,6 +77,20 @@ export const selectActiveSlotForSelection = (state: RootState, selection: UISele
   return (active ?? first).slot;
 };
 
+// selectActiveTabIsAI reports whether the terminal pane's currently-selected
+// tab (for the currently-selected environment) is the AI tab — used to gate
+// the "another agent is already here" persistent indicator to the one tab it
+// actually applies to.
+export const selectActiveTabIsAI = (state: RootState): boolean => {
+  const selection = state.selection.selected;
+  if (!selection) {
+    return false;
+  }
+  const tabs = state.terminal.tabsByEnv[selectionKey(selection)] ?? [];
+  const active = tabs.find((tab) => tab.sessionId === state.terminal.sessionId);
+  return active?.kind === 'ai';
+};
+
 // selectManageRuntimeImage resolves the runtime image for the version being
 // deployed. It resolves against the dialog-owned suggestion list — the same one
 // the picker renders (dialog.versionSuggestions), NOT the shared tenants slice,
@@ -106,3 +125,169 @@ export const selectDialogKubernetesContext = (state: RootState, contexts: string
   }
   return '';
 };
+
+// selectActiveSessionOrchestrator returns the orchestrator whose terminal
+// session is currently active, or null when the active session is an
+// environment tab.
+//
+// This derivation used to live inline in TerminalTabStrip, which was the only
+// component that had it. The titlebar never got it, so its right-hand cluster
+// went on acting on state.selection.selected -- the SIDEBAR's environment
+// selection, which is independent of which terminal tab is active. With an
+// orchestrator tab focused, "Open in VS Code" opened an IDE against an
+// environment the orchestrator may not even be linked to (#1178).
+//
+// It returns the orchestrator rather than a boolean because a cross-env surface
+// needs its `environments` list, not just the knowledge that one is active.
+export const selectActiveSessionOrchestrator = (state: RootState): OrchestratorInfo | null => {
+  const activeId = state.terminal.sessionId;
+  if (activeId <= 0) {
+    return null;
+  }
+  return state.orchestrators.items.find((item) => item.sessionId === activeId) ?? null;
+};
+
+// selectIsOrchestratorSession is the boolean form, for a caller that only needs
+// to know whether env-scoped chrome applies.
+export const selectIsOrchestratorSession = (state: RootState): boolean =>
+  selectActiveSessionOrchestrator(state) !== null;
+
+// selectSidebarFocus names the one thing the sidebar highlights and the main
+// pane shows. The tenant dashboard, an orchestrator's session, and an
+// environment's session each used to compute their own "active" condition
+// from a different state slice, so a tenant dashboard row and an orchestrator
+// row could both render selected at once while the pane showed only one of
+// them (#1204). Every sidebar row derives its highlight from this single
+// value instead. The tenant dashboard takes priority regardless of a stale
+// terminal.sessionId left over from before it opened; an orchestrator session
+// takes priority over an environment selection for the same reason.
+export const selectSidebarFocus = (state: RootState): SidebarFocus => {
+  const dashboardTenant = state.tenantDashboard.tenant;
+  if (dashboardTenant) {
+    return { kind: 'dashboard', tenant: dashboardTenant };
+  }
+  const orchestrator = selectActiveSessionOrchestrator(state);
+  if (orchestrator) {
+    return { kind: 'orchestrator', sessionId: orchestrator.sessionId };
+  }
+  const selected = state.selection.selected;
+  if (selected) {
+    return { kind: 'environment', tenant: selected.tenant, environment: selected.environment };
+  }
+  return { kind: 'none' };
+};
+
+// selectWhipDefaultTarget resolves the one target Whip preselects: the same
+// orchestrator-session-over-sidebar-selection precedence selectSidebarFocus
+// already established, translated into the id/name a whip target row uses.
+// The tenant dashboard and "nothing focused" both resolve to null rather than
+// falling back to any environment or orchestrator -- an unfocused whip must
+// have no default, never "everything" (erun#1700).
+export const selectWhipDefaultTarget = (state: RootState): WhipDefaultTarget => {
+  const orchestrator = selectActiveSessionOrchestrator(state);
+  if (orchestrator) {
+    return { kind: 'orchestrator', id: orchestrator.id, name: orchestrator.name };
+  }
+  if (state.tenantDashboard.tenant) {
+    return null;
+  }
+  const selected = state.selection.selected;
+  if (selected) {
+    const id = `${selected.tenant}/${selected.environment}`;
+    return { kind: 'environment', id, name: id };
+  }
+  return null;
+};
+
+export interface ReviewEnvTarget {
+  envKey: string;
+  tenant: string;
+  environment: string;
+}
+
+// DiagnosticsContext names which evidence the Diagnostics console shows: an
+// orchestrator's own state, the selected environment's, or — when neither is
+// active — the desktop app itself, so the panel is never blank.
+export type DiagnosticsContext =
+  | { kind: 'orchestrator'; orchestrator: OrchestratorInfo }
+  | { kind: 'environment'; tenant: string; environment: string }
+  | { kind: 'app' };
+
+// selectDiagnosticsContext mirrors selectReviewEnvTargets' own precedence
+// (orchestrator session over sidebar selection) rather than introducing a
+// second notion of "what's active" — an orchestrator session used to leave
+// the Diagnostics panel reading "environment: none selected" with no trace,
+// because it derived its context from state.selection.selected alone (#1241).
+export const selectDiagnosticsContext = (state: RootState): DiagnosticsContext => {
+  const orchestrator = selectActiveSessionOrchestrator(state);
+  if (orchestrator) {
+    return { kind: 'orchestrator', orchestrator };
+  }
+  const selected = state.selection.selected;
+  if (selected) {
+    return { kind: 'environment', tenant: selected.tenant, environment: selected.environment };
+  }
+  return { kind: 'app' };
+};
+
+// selectReviewEnvTargets resolves which environments the diff panel shows: an
+// orchestrator session's linked environments in its configured order, else the
+// single selected environment. A single environment is the one-entry case, so
+// the panel has one code path rather than two (#1178).
+export const selectReviewEnvTargets = (state: RootState): ReviewEnvTarget[] => {
+  const orchestrator = selectActiveSessionOrchestrator(state);
+  if (orchestrator) {
+    return orchestrator.environments.map((env) => ({
+      envKey: `${env.tenant}/${env.environment}`,
+      tenant: env.tenant,
+      environment: env.environment,
+    }));
+  }
+  const selection = state.selection.selected;
+  if (!selection) {
+    return [];
+  }
+  return [
+    {
+      envKey: `${selection.tenant}/${selection.environment}`,
+      tenant: selection.tenant,
+      environment: selection.environment,
+    },
+  ];
+};
+
+// selectReviewTargetBranches lists the branches this tenant's reviews and
+// merge queue already target, so opening a review offers the branches that
+// exist rather than asking the operator to retype one from memory. Memoized:
+// the dialog re-reads it on every store change.
+export const selectReviewTargetBranches = createSelector(
+  [
+    (state: RootState) => state.tenantDashboard.data?.reviews,
+    (state: RootState) => state.tenantDashboard.data?.mergeQueue,
+  ],
+  (reviews, mergeQueue): string[] => {
+    const branches = new Set<string>();
+    for (const review of [...(reviews ?? []), ...(mergeQueue ?? [])]) {
+      const branch = review.targetBranch.trim();
+      if (branch) {
+        branches.add(branch);
+      }
+    }
+    return [...branches].sort((left, right) => left.localeCompare(right));
+  },
+);
+
+// selectNotificationUnreadCounts backs the titlebar's per-class icon badges.
+// Memoized against the notifications array so a dismiss/mark-read only
+// recomputes when the history itself actually changes.
+export const selectNotificationUnreadCounts = createSelector(
+  [(state: RootState) => state.notification.notifications],
+  (notifications): NotificationCounts => unreadNotificationCounts(notifications),
+);
+
+// selectNotificationHistoryCount backs the titlebar's fallback "message
+// history" entry point (Titlebar.MessageCenter.tsx): once every class is
+// fully read, no per-class icon renders, but a session with history is still
+// worth being able to reopen -- see that component's own doc comment.
+export const selectNotificationHistoryCount = (state: RootState): number =>
+  state.notification.notifications.length;

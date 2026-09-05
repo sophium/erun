@@ -90,6 +90,70 @@ func TestStateFromListResultOmitsEmptyTenants(t *testing.T) {
 	}
 }
 
+// TestLoadStateFirstRunNeverRendersBareCLIInstruction is the red-then-green
+// regression for the first-run dead end: a genuinely fresh install (no tool
+// config at all) must resolve to the same renderable, non-nil-tenants shape
+// as "initialized with zero tenants", never a bare CLI instruction the
+// desktop cannot carry out and never a shape that crashes the frontend's
+// unconditional tenants iteration on boot.
+func TestLoadStateFirstRunNeverRendersBareCLIInstruction(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			listTenantsErr: eruncommon.ErrNotInitialized,
+		},
+		findProjectRoot:  func() (string, string, error) { return "", "", eruncommon.ErrNotInitialized },
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+	})
+
+	state, err := app.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState failed: %v", err)
+	}
+	if state.Tenants == nil {
+		t.Fatal("expected a non-nil Tenants slice so the frontend's boot-time iteration and JSON marshaling both stay safe")
+	}
+	if len(state.Tenants) != 0 {
+		t.Fatalf("expected zero tenants for a fresh install, got: %+v", state.Tenants)
+	}
+	if strings.Contains(state.Message, "`") || strings.Contains(state.Message, "erun init") {
+		t.Fatalf("expected no bare CLI instruction in the first-run message, got: %q", state.Message)
+	}
+}
+
+// TestLoadStateConfigCorruptedRendersDistinctFromEmptyList is the regression
+// for erun#1774: a torn/corrupt config file must not surface as "zero
+// environments configured" (which the sidebar renders identically to a
+// genuinely empty install), and the raw yaml/unmarshal error text must never
+// reach the caller -- it crosses the headless HTTP bridge verbatim into a
+// browser console otherwise (headlessserver.handleInvoke writes err.Error()
+// into the response body).
+func TestLoadStateConfigCorruptedRendersDistinctFromEmptyList(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			listTenantsErr: eruncommon.ErrConfigCorrupted,
+		},
+		findProjectRoot:  func() (string, string, error) { return "", "", eruncommon.ErrNotInGitRepository },
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+	})
+
+	state, err := app.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState failed: %v", err)
+	}
+	if !state.ConfigUnreadable {
+		t.Fatal("expected ConfigUnreadable=true so the sidebar renders a distinct state from a genuine empty list")
+	}
+	if state.Tenants == nil {
+		t.Fatal("expected a non-nil Tenants slice so the frontend's boot-time iteration and JSON marshaling both stay safe")
+	}
+	if len(state.Tenants) != 0 {
+		t.Fatalf("expected zero tenants (the read genuinely failed), got: %+v", state.Tenants)
+	}
+	if strings.Contains(state.Message, "unmarshal") || strings.Contains(state.Message, "yaml:") {
+		t.Fatalf("expected no raw unmarshal error text in the message, got: %q", state.Message)
+	}
+}
+
 func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
@@ -502,6 +566,9 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		canConnectLocalPort: func(int) bool {
 			return true
 		},
+		canReachMCPEndpoint: func(int) bool {
+			return true
+		},
 		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
 			ensureCalls++
 			return nil
@@ -554,6 +621,9 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 		canConnectLocalPort: func(int) bool {
 			return false
 		},
+		canReachMCPEndpoint: func(int) bool {
+			return false
+		},
 		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
 			ensureCalls++
 			return nil
@@ -571,8 +641,61 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 	if !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
 	}
+	// A closed local port is the "nobody opened it" shape (#1230), not a stale
+	// forward — the review panel needs the two apart to stop presenting a
+	// stopped environment as a broken connection.
+	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_NOT_OPEN: ") {
+		t.Fatalf("expected the not-open reachability marker, got %v", err)
+	}
 	if ensureCalls != 0 || loadCalls != 0 {
 		t.Fatalf("LoadDiff must not run erun open or attempt the dial when the port is closed; got ensure=%d load=%d", ensureCalls, loadCalls)
+	}
+}
+
+// TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead is the sibling
+// case to the not-open one above: the local port is still held (a live
+// listener), but the edge behind it never answers, so the review panel must
+// treat this as an actual fault worth reconnecting rather than an
+// informational "not running" state (#1230).
+func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				DefaultEnvironment: "test",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/test": {
+				Name:              "test",
+				LocalRepoPath:     projectRoot,
+				KubernetesContext: "orbstack",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{
+		store: store,
+		canConnectLocalPort: func(int) bool {
+			return true
+		},
+		canReachMCPEndpoint: func(int) bool {
+			return false
+		},
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
+			return eruncommon.DiffResult{}, nil
+		},
+	})
+
+	_, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	if err == nil {
+		t.Fatalf("expected unreachable error when the edge never answers")
+	}
+	if !errors.Is(err, errMCPUnreachable) {
+		t.Fatalf("expected errMCPUnreachable, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_STALE: ") {
+		t.Fatalf("expected the stale-forward reachability marker, got %v", err)
 	}
 }
 
@@ -599,6 +722,9 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 		canConnectLocalPort: func(int) bool {
 			return true
 		},
+		canReachMCPEndpoint: func(int) bool {
+			return true
+		},
 		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
 			ensureCalls++
 			return nil
@@ -614,6 +740,12 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 	}
 	if !errors.Is(err, errMCPUnreachable) {
 		t.Fatalf("expected errMCPUnreachable, got %v", err)
+	}
+	// The port is still held here (canConnectLocalPort returns true) — the RPC
+	// dial failed mid-call, not the initial reachability probe — so this is
+	// the stale-forward shape, not not-open.
+	if !strings.Contains(err.Error(), "ERUN_MCP_UNREACHABLE_STALE: ") {
+		t.Fatalf("expected the stale-forward reachability marker, got %v", err)
 	}
 	if ensureCalls != 0 {
 		t.Fatalf("LoadDiff must not implicitly run erun open after a dial failure; got ensureCalls=%d", ensureCalls)
@@ -1731,133 +1863,257 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 	}
 }
 
-func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
-	jwt := testUIJWT("https://sts.aws.example")
+// TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias is the "green"
+// half of the erun-vs-AWS seam: the dashboard's bearer and username
+// hint come from the resolved erun-type platform alias, never from whichever
+// alias happens to be the tenant's primary one. See
+// TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform for the "red"
+// half — proving an AWS-only configuration cannot reach this path at all.
+func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T) {
 	var requests []string
-	server := httptest.NewServer(tenantDashboardHandler(t, jwt, &requests))
+	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests))
 	defer server.Close()
 
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
-		Alias:    "team-cloud",
-		Provider: eruncommon.CloudProviderAWS,
-		Profile:  "team",
-		Username: "Rihards.Freimanis",
-	}}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig},
-		cloudDeps: eruncommon.CloudDependencies{
-			RunAWSBearerToken: func(_ eruncommon.Context, profile, audience string) (string, error) {
-				if profile != "team" || audience != eruncommon.CloudProviderBearerAudience {
-					t.Fatalf("unexpected bearer input profile=%q audience=%q", profile, audience)
-				}
-				return jwt, nil
-			},
-			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
-			},
-		},
-	})
-
-	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
-		Tenant:             "frs",
-		APIURL:             server.URL,
-		CloudProviderAlias: "team-cloud",
-	})
+	app := testERunPlatformAliasApp(t, server.URL)
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
-	assertPrimaryCloudDashboard(t, dashboard, requests)
+	assertERunPlatformDashboard(t, dashboard, requests)
 }
 
-func tenantDashboardHandler(t *testing.T, jwt string, requests *[]string) http.HandlerFunc {
+// erunPlatformDashboardFixtures is erunPlatformDashboardHandler's fixture
+// body for every path, keyed by path rather than a switch — a switch here
+// once tripped golangci-lint's cyclomatic-complexity cap the moment a gate-run
+// case joined the rest.
+func erunPlatformDashboardFixtures() map[string]string {
+	return map[string]string{
+		"/v1/whoami":                  `{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"` + testERunIssuer + `","subject":"` + testERunSubject + `"}`,
+		"/v1/reviews":                 `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
+		"/v1/reviews/merge-queue":     `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
+		"/v1/reviews/review-1/builds": `[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`,
+		"/v1/builds":                  `{"builds":[]}`,
+		"/v1/gate-runs":               `[{"gateRunId":"gate-1","tenantId":"tenant-1","sourceBranch":"feature","targetBranch":"main","sourceCommit":"abc","mergeCommit":"def","status":"PASSED","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`,
+		"/v1/audit-events":            `{"events":[{"auditEventId":"event-1","tenantId":"tenant-1","erunUserId":"user-1","externalUserId":"subject-1","externalIssuerId":"` + testERunIssuer + `","type":"API","apiMethod":"GET","apiPath":"/v1/reviews","createdAt":"2026-01-01T00:00:00Z"}]}`,
+		"/v1/users":                   `[]`,
+	}
+}
+
+func erunPlatformDashboardHandler(t *testing.T, requests *[]string) http.HandlerFunc {
 	t.Helper()
+	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
+	fixtures := erunPlatformDashboardFixtures()
 
 	return func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Authorization") != "Bearer "+jwt {
 			t.Fatalf("unexpected authorization header: %q", req.Header.Get("Authorization"))
 		}
-		if req.Header.Get("X-ERun-Username") != "Rihards.Freimanis" {
+		if req.Header.Get("X-ERun-Username") != "erun" {
 			t.Fatalf("unexpected username hint: %q", req.Header.Get("X-ERun-Username"))
 		}
 		*requests = append(*requests, req.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		switch req.URL.Path {
-		case "/v1/whoami":
-			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"https://sts.aws.example","subject":"subject-1"}`))
-		case "/v1/reviews":
-			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
-		case "/v1/reviews/merge-queue":
-			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
-		case "/v1/reviews/review-1/builds":
-			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
-		default:
+		body, ok := fixtures[req.URL.Path]
+		if !ok {
 			http.NotFound(w, req)
+			return
 		}
+		_, _ = w.Write([]byte(body))
 	}
 }
 
-func assertPrimaryCloudDashboard(t *testing.T, dashboard uiTenantDashboard, requests []string) {
+func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requests []string) {
 	t.Helper()
 
-	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
+	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.GateRuns) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
-	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds" {
-		t.Fatalf("unexpected API requests: %+v", requests)
+	if dashboard.PlatformAlias != testERunAlias {
+		t.Fatalf("expected the resolved platform alias to be reported, got %q", dashboard.PlatformAlias)
+	}
+	assertERunPlatformDashboardAuditEvents(t, dashboard.AuditEvents)
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/gate-runs,/v1/reviews/review-1/builds,/v1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
+	if strings.Join(requests, ",") != want {
+		t.Fatalf("unexpected API requests: %+v, want %q", requests, want)
 	}
 }
 
-func TestLoadTenantDashboardReturnsAPILogWhenAPIAuthFails(t *testing.T) {
-	jwt := testUIJWT("https://sts.aws.example")
+func assertERunPlatformDashboardAuditEvents(t *testing.T, events []uiTenantDashboardAudit) {
+	t.Helper()
+	if len(events) != 1 || events[0].Actor != "subject-1" || events[0].Action != "GET /v1/reviews" {
+		t.Fatalf("unexpected audit events: %+v", events)
+	}
+}
+
+func TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/v1/whoami" {
-			t.Fatalf("unexpected request path: %s", req.URL.Path)
-		}
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		notEnrolledDashboardAPIResponse(t, w, req.URL.Path)
 	}))
 	defer server.Close()
 
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
-		Alias:    "team-cloud",
-		Provider: eruncommon.CloudProviderAWS,
-		Profile:  "team",
-	}}}
-	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig},
-		cloudDeps: eruncommon.CloudDependencies{
-			RunAWSBearerToken: func(eruncommon.Context, string, string) (string, error) {
-				return jwt, nil
-			},
-			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
-			},
-		},
-		loadAPILog: func(_ context.Context, input uiTenantDashboardInput) (string, error) {
-			if input.MCPURL != "http://127.0.0.1:17000/mcp" || input.KubernetesContext != "" {
-				t.Fatalf("unexpected log input: %+v", input)
-			}
-			return "auth rejected token", nil
-		},
-	})
+	app := testERunPlatformAliasApp(t, server.URL)
+	app.deps.loadAPILog = func(_ context.Context, input uiTenantDashboardInput) (string, error) {
+		if input.MCPURL != "http://127.0.0.1:17000/mcp" || input.KubernetesContext != "" {
+			t.Fatalf("unexpected log input: %+v", input)
+		}
+		return "auth rejected token", nil
+	}
 
 	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
-		Tenant:             "frs",
-		APIURL:             server.URL,
-		MCPURL:             "http://127.0.0.1:17000/mcp",
-		CloudProviderAlias: "team-cloud",
+		Tenant: "frs",
+		MCPURL: "http://127.0.0.1:17000/mcp",
 	})
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
-	if !strings.Contains(dashboard.APIError, "/v1/whoami: 401") || dashboard.APILog != "auth rejected token" {
+	if dashboard.PlatformState != tenantPlatformStateNotEnrolled {
+		t.Fatalf("expected the not-enrolled state, got %q (message %q)", dashboard.PlatformState, dashboard.APIError)
+	}
+	if !strings.Contains(dashboard.APIError, "not enrolled") {
+		t.Fatalf("unexpected dashboard message: %q", dashboard.APIError)
+	}
+	if dashboard.APILog != "auth rejected token" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
+	}
+	if dashboard.MyInviteRequest != nil {
+		t.Fatalf("expected no invite request yet, got %+v", dashboard.MyInviteRequest)
+	}
+	if dashboard.InviteRequestRateLimitWindowSeconds != 60 {
+		t.Fatalf("expected the platform's current submission window to be reported, got %d", dashboard.InviteRequestRateLimitWindowSeconds)
+	}
+}
+
+// notEnrolledDashboardAPIResponse serves TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled's
+// fixture: whoami always 401s, and the identity-scoped invite-request/config
+// reads it still makes with the same bearer both answer normally.
+func notEnrolledDashboardAPIResponse(t *testing.T, w http.ResponseWriter, path string) {
+	t.Helper()
+	switch path {
+	case "/v1/whoami":
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	case "/v1/invite-requests/mine":
+		// Not-enrolled is exactly the identity "request an invitation"
+		// serves — the dashboard still checks this caller's own request
+		// status using the same bearer, even though whoami itself 401s.
+		http.Error(w, "no invite request found", http.StatusNotFound)
+	case "/v1/config":
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tenant":{},"inviteRequestRateLimitWindowSeconds":60}`))
+	default:
+		t.Fatalf("unexpected request path: %s", path)
+	}
+}
+
+// TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAsNotEnrolled
+// is the regression: a 401 whoami response can mean three different things
+// per its {code, message} envelope (erun-backend-api's auth.go) -- the
+// dashboard used to collapse all of them into "not enrolled", which is false
+// advice for the other two. TENANT_UNRESOLVED and RESOLUTION_FAILED must
+// fall through to the generic whole-dashboard error instead of asserting an
+// enrollment answer that is not true.
+func TestLoadTenantDashboardDoesNotMisreportTenantUnresolvedOrResolutionFailedAsNotEnrolled(t *testing.T) {
+	for _, code := range []string{"TENANT_UNRESOLVED", "RESOLUTION_FAILED"} {
+		t.Run(code, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				switch req.URL.Path {
+				case "/v1/whoami":
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					_, _ = w.Write([]byte(`{"code":"` + code + `","message":"platform-provided detail"}`))
+				case "/v1/invite-requests/mine":
+					http.Error(w, "no invite request found", http.StatusNotFound)
+				case "/v1/config":
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"tenant":{},"inviteRequestRateLimitWindowSeconds":60}`))
+				default:
+					t.Fatalf("unexpected request path: %s", req.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			app := testERunPlatformAliasApp(t, server.URL)
+			dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+			if err != nil {
+				t.Fatalf("LoadTenantDashboard failed: %v", err)
+			}
+			if dashboard.PlatformState == tenantPlatformStateNotEnrolled {
+				t.Fatalf("%s must not be reported as not-enrolled, got state %q message %q", code, dashboard.PlatformState, dashboard.APIError)
+			}
+			if dashboard.PlatformState != "" {
+				t.Fatalf("expected the generic whole-dashboard error state, got %q", dashboard.PlatformState)
+			}
+			if !strings.Contains(dashboard.APIError, "platform-provided detail") {
+				t.Fatalf("expected the platform's own detail in the message, got %q", dashboard.APIError)
+			}
+		})
+	}
+}
+
+// TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault
+// guards against the failure a round trip other than "not found" must not
+// silently collapse into "never submitted one": a caller with an already
+// pending or approved request would be shown "Request an invitation" again.
+func TestLoadTenantDashboardReportsMyInviteRequestErrorRatherThanNilOnFault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/v1/whoami":
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		case "/v1/invite-requests/mine":
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		case "/v1/config":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tenant":{},"inviteRequestRateLimitWindowSeconds":60}`))
+		default:
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if dashboard.MyInviteRequest != nil {
+		t.Fatalf("expected no invite request on a transport fault, got %+v", dashboard.MyInviteRequest)
+	}
+	if dashboard.MyInviteRequestError == "" {
+		t.Fatal("expected MyInviteRequestError to be set rather than silently nil on a transport fault")
+	}
+}
+
+// TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform is the "red" half
+// of the erun-vs-AWS seam: on a machine configured exactly like the
+// operator's own (only an AWS cloud alias, no erun platform alias at all),
+// the dashboard must report not-connected rather than signing the platform
+// read with the AWS identity. Before this fix, LoadTenantDashboard took its
+// apiUrl/cloudProviderAlias straight from the frontend, which happily handed
+// it the tenant's AWS-typed primary alias and an environment's own loopback
+// port-forward — this test fails against that shape because there is no
+// APIURL/CloudProviderAlias field left to even construct it with, and it
+// would otherwise reach an AWS-signed 401 rather than this local, no-network
+// classification.
+func TestLoadTenantDashboardNeverUsesAnAWSAliasForThePlatform(t *testing.T) {
+	app := testAWSAliasApp(t)
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if dashboard.PlatformState != tenantPlatformStateNotConnected {
+		t.Fatalf("expected not-connected with only an AWS alias configured, got %q (apiError=%q)", dashboard.PlatformState, dashboard.APIError)
+	}
+	if dashboard.APIURL != "" || dashboard.PlatformAlias != "" {
+		t.Fatalf("expected no platform URL or alias to be reported, got %+v", dashboard)
 	}
 }
 
 func TestLoadAPILogPrefersKubernetesLogs(t *testing.T) {
 	t.Setenv("PATH", fakeKubectl(t, func(args []string) (string, int) {
 		got := strings.Join(args, "\n")
-		want := "--context\ncluster-dev\n--namespace\nfrs-prod\nlogs\ndeployment/frs-devops\n-c\nerun-backend-api\n--tail\n400"
+		// The erun-backend-api chart's Deployment/Service is <tenant>-api
+		// (eruncommon.APIDeploymentName), not the runtime's <tenant>-devops
+		// Deployment: the erun-backend-api container never exists there (#1197).
+		want := "--context\ncluster-dev\n--namespace\nfrs-prod\nlogs\n-l\napp=frs-api\n--prefix\n-c\nerun-backend-api\n--tail\n400"
 		if got != want {
 			t.Fatalf("unexpected kubectl args:\n%s", got)
 		}
@@ -1885,7 +2141,7 @@ func fakeKubectl(t *testing.T, handler func([]string) (string, int)) string {
 	outputPath := filepath.Join(dir, "kubectl.output")
 	exitPath := filepath.Join(dir, "kubectl.exit")
 	writeFakeKubectlStub(t, dir, argsPath, outputPath, exitPath)
-	output, code := handler([]string{"--context", "cluster-dev", "--namespace", "frs-prod", "logs", "deployment/frs-devops", "-c", "erun-backend-api", "--tail", "400"})
+	output, code := handler([]string{"--context", "cluster-dev", "--namespace", "frs-prod", "logs", "-l", "app=frs-api", "--prefix", "-c", "erun-backend-api", "--tail", "400"})
 	if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
 		t.Fatalf("write fake kubectl output failed: %v", err)
 	}
@@ -1963,8 +2219,12 @@ func TestLoadAndSaveERunConfig(t *testing.T) {
 }
 
 func testUIJWT(issuer string) string {
+	return testUIJWTWithSubject(issuer, "test-subject")
+}
+
+func testUIJWTWithSubject(issuer, subject string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `","sub":"` + subject + `"}`))
 	return header + "." + payload + ".signature"
 }
 
@@ -2261,10 +2521,10 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 		"frs-devops", "frs-backend-postgres", "frs-backend-db",
 		"frs-backend-api", "frs-powerdns", "frs-docs",
 	}
-	if got := names(at100); !reflect.DeepEqual(got, wantAt100) {
+	if got := names(at100.Components); !reflect.DeepEqual(got, wantAt100) {
 		t.Fatalf("components at 1.0.0 = %v, want %v (published-version view, runtime first)", got, wantAt100)
 	}
-	runtime := at100[0]
+	runtime := at100.Components[0]
 	if !runtime.Runtime || !runtime.Selected || runtime.Source != "published-chart" {
 		t.Fatalf("runtime item = %+v, want {frs-devops runtime selected published-chart}", runtime)
 	}
@@ -2275,7 +2535,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
 	}
-	if got, want := names(atCurrent), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
+	if got, want := names(atCurrent.Components), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("components at current 1.0.106 = %v, want %v (runtime only)", got, want)
 	}
 }
@@ -2331,7 +2591,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(1.0.112) failed: %v", err)
 	}
-	if got, want := names(at112), []string{"frs-devops", "frs-backend-postgres", "frs-backend-api"}; !reflect.DeepEqual(got, want) {
+	if got, want := names(at112.Components), []string{"frs-devops", "frs-backend-postgres", "frs-backend-api"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("components at 1.0.112 = %v, want %v (runtime first; unpublished db/powerdns/docs filtered out)", got, want)
 	}
 
@@ -2341,7 +2601,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadDeployComponents(current) failed: %v", err)
 	}
-	if got, want := names(atCurrent), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
+	if got, want := names(atCurrent.Components), []string{"frs-devops"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("components at current version 1.0.106 = %v, want %v (runtime only)", got, want)
 	}
 }
@@ -2378,7 +2638,7 @@ func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadDeployComponents failed: %v", err)
 		}
-		for _, component := range components {
+		for _, component := range components.Components {
 			if component.Runtime {
 				return component.PublishedChart
 			}
@@ -2661,6 +2921,57 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	}
 	if uiRegistryWithRole(saved.ContainerRegistries, "deploy") != "ghcr.io/sophium" {
 		t.Fatalf("expected the deploy-only registry to persist, got %+v", saved.ContainerRegistries)
+	}
+}
+
+// The chart the runtime is installed from is one of the four deploy coordinates,
+// stated by the operator rather than derived, so the dialog must both show what
+// the env rides and write a change back. Clearing it means "the chart published
+// with the deployed version", which must reach the env config as an empty field
+// rather than being ignored as a no-op.
+func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				LocalRepoPath:     projectRoot,
+				KubernetesContext: "cluster-local",
+				RuntimeChart:      "oci://ghcr.io/sophium/charts/erun-devops:1.0.178",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
+	}
+	if loaded.RuntimeChart != "oci://ghcr.io/sophium/charts/erun-devops:1.0.178" {
+		t.Fatalf("expected the env's stated chart to load, got %q", loaded.RuntimeChart)
+	}
+
+	loaded.RuntimeChart = "  oci://registry.example/charts/erun-devops:1.2.3  "
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, loaded)
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+	if saved.RuntimeChart != "oci://registry.example/charts/erun-devops:1.2.3" {
+		t.Fatalf("expected the saved chart trimmed, got %q", saved.RuntimeChart)
+	}
+	if stored := store.envs["frs/local"].RuntimeChart; stored != "oci://registry.example/charts/erun-devops:1.2.3" {
+		t.Fatalf("expected the env config to record the chart, got %q", stored)
+	}
+
+	saved.RuntimeChart = ""
+	if _, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, saved); err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed clearing the chart: %v", err)
+	}
+	if stored := store.envs["frs/local"].RuntimeChart; stored != "" {
+		t.Fatalf("expected clearing the chart to reach the env config, got %q", stored)
 	}
 }
 
@@ -2962,6 +3273,7 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:               store,
 		canConnectLocalPort: func(int) bool { return true },
+		canReachMCPEndpoint: func(int) bool { return true },
 		setRemoteCloudAlias: func(_ context.Context, endpoint, _, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
 			remoteEndpoint = endpoint
 			remoteTenant = tenant
@@ -3593,6 +3905,7 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 			return newStubTerminalSession(), nil
 		},
 		canConnectLocalPort: func(int) bool { return true },
+		canReachMCPEndpoint: func(int) bool { return true },
 		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
 			return eruncommon.EnvironmentIdleStatus{
 				ManagedCloud: true,
@@ -3708,6 +4021,30 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 	}
 	if status.Markers[1].Clients != nil {
 		t.Fatalf("CLI marker should have no clients, got %+v", status.Markers[1].Clients)
+	}
+}
+
+// TestIdleStatusToUICarriesLeases pins erun#1221: idle status already resolves
+// the leases holding an environment, but the UI projection dropped them before
+// this fix — the AI tab occupancy notice and any future consumer (#1245,
+// #1241) both read this field, so a silent regression here breaks them too.
+func TestIdleStatusToUICarriesLeases(t *testing.T) {
+	now := time.Now()
+	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
+		Policy: eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Leases: []eruncommon.EnvironmentActivityLease{
+			{ID: "job-fix-1201", Name: "job-fix-1201", PID: 4242, StartedAt: now.Add(-90 * time.Second)},
+		},
+	})
+	if len(status.Leases) != 1 {
+		t.Fatalf("expected 1 lease carried through, got %+v", status.Leases)
+	}
+	lease := status.Leases[0]
+	if lease.Name != "job-fix-1201" {
+		t.Fatalf("unexpected lease name: %q", lease.Name)
+	}
+	if lease.SecondsHeld < 89 || lease.SecondsHeld > 91 {
+		t.Fatalf("expected ~90 seconds held, got %d", lease.SecondsHeld)
 	}
 }
 
@@ -4014,6 +4351,10 @@ type stubUIStore struct {
 	projectConfigs map[string]eruncommon.ProjectConfig
 	tenants        map[string]eruncommon.TenantConfig
 	envs           map[string]eruncommon.EnvConfig
+	// listTenantsErr lets a test simulate a genuinely fresh install, where
+	// ResolveListResult's ListTenantConfigs call itself fails with
+	// ErrNotInitialized rather than succeeding with zero tenants.
+	listTenantsErr error
 }
 
 func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies {
@@ -4108,6 +4449,9 @@ func (s stubUIStore) DeleteEnvConfig(tenant, environment string) error {
 }
 
 func (s stubUIStore) ListTenantConfigs() ([]eruncommon.TenantConfig, error) {
+	if s.listTenantsErr != nil {
+		return nil, s.listTenantsErr
+	}
 	tenants := make([]eruncommon.TenantConfig, 0, len(s.tenants))
 	for _, tenant := range s.tenants {
 		tenants = append(tenants, tenant)
@@ -4132,6 +4476,9 @@ type stubTerminalSession struct {
 	written       []byte
 	initialOutput []byte
 	resizes       [][2]int
+	// pid is 0 unless a test needs the session to be trackable by process — the
+	// investigation job records a pid and resolves its state from it.
+	pid int
 }
 
 // stubSessionReadyOutput is the line every newStubTerminalSession emits
@@ -4200,7 +4547,7 @@ func (s *stubTerminalSession) Wait() error {
 }
 
 func (s *stubTerminalSession) Pid() int {
-	return 0
+	return s.pid
 }
 
 func (s *stubTerminalSession) Alive() bool {
@@ -4286,7 +4633,7 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24)
+	result, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
@@ -4559,7 +4906,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
-	first, err := app.StartAISession(selection, 0, 80, 24)
+	first, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("first StartAISession failed: %v", err)
 	}
@@ -4592,7 +4939,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 		t.Fatalf("expected streamSession to drop the dead AI session from a.sessions after the cloud-context gate refused respawn")
 	}
 
-	second, err := app.StartAISession(selection, 0, 80, 24)
+	second, err := app.StartAISession(selection, 0, 80, 24, false)
 	if err != nil {
 		t.Fatalf("second StartAISession failed: %v", err)
 	}
@@ -4640,6 +4987,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 	app := NewApp(erunUIDeps{
 		store:               store,
 		canConnectLocalPort: func(int) bool { return false },
+		canReachMCPEndpoint: func(int) bool { return false },
 		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
 			return eruncommon.EnvironmentIdleStatus{}, fmt.Errorf("mcp unreachable")
 		},
@@ -4708,7 +5056,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 		ManagedCloud: true,
 		Policy:       eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
-	})
+	}, true)
 
 	if ui.CloudContextStatus != eruncommon.CloudContextStatusRunning {
 		t.Fatalf("expected CloudContextStatus=%q, got %q", eruncommon.CloudContextStatusRunning, ui.CloudContextStatus)
@@ -4756,7 +5104,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 		ManagedCloud: true,
 		Policy:       eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
-	})
+	}, true)
 
 	if ui.CloudContextStatus != eruncommon.CloudContextStatusStopped {
 		t.Fatalf("expected CloudContextStatus=%q, got %q", eruncommon.CloudContextStatusStopped, ui.CloudContextStatus)
@@ -4793,7 +5141,7 @@ func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
-	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false); err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
 

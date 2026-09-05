@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -69,6 +70,29 @@ func DesktopAppCommand(goos, executable string, args []string) *exec.Cmd {
 		cmd.Args[0] = "ERun"
 	}
 	return cmd
+}
+
+// CommandContext is Command for a child whose lifetime is bound to ctx. A
+// cancellable command still has to resolve through the ERUN_<NAME>_BIN seam,
+// otherwise it silently reaches for whatever the host happens to have installed
+// and cannot be exercised without that toolchain.
+func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := newExecCommandContext(ctx, name, args...)
+	HideConsoleWindow(cmd)
+	cmd.WaitDelay = commandWaitDelay
+	return cmd
+}
+
+func newExecCommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+	if strings.ContainsAny(name, "/\\") {
+		return exec.CommandContext(ctx, name, args...)
+	}
+	base := strings.TrimSuffix(name, ".exe")
+	envName := "ERUN_" + strings.ToUpper(strings.ReplaceAll(base, "-", "_")) + "_BIN"
+	if override := strings.TrimSpace(os.Getenv(envName)); override != "" {
+		return exec.CommandContext(ctx, override, args...)
+	}
+	return exec.CommandContext(ctx, name, args...)
 }
 
 func newExecCommand(name string, args ...string) *exec.Cmd {

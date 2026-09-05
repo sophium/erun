@@ -23,6 +23,18 @@ export interface UIClusterRegistryStatus {
   port?: number;
 }
 
+// UIHostedRegistryStatus reports whether erun's hosted container registry
+// (registry.erunpaas.com) is reachable right now, so the new-environment
+// dialog can gate its "Use erun's hosted registry" option the same way
+// UIClusterRegistryStatus gates the in-cluster one. Reason and Recovery are
+// only set when Available is false.
+export interface UIHostedRegistryStatus {
+  host: string;
+  available: boolean;
+  reason?: string;
+  recovery?: string;
+}
+
 // UIEnvironmentHealthCheck is one out-of-pod diagnostic result from the Manage
 // dialog's "Check environment" action. status is 'ok' | 'error' | 'unknown';
 // fix names the recovery action ('deploy' | 'set-registry'), empty when passing.

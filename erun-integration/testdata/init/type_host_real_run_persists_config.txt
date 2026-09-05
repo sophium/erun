@@ -1,0 +1,13 @@
+audit: erun init --confirm-environment --project-root <TMP> --set-default-tenant --type host team work
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+Loaded erun tool configuration
+Loading tenant configuration
+Adding new tenant
+Loaded tenant configuration
+Loading environment configuration
+Adding new environment
+==> Initializing team/work
+init: host environment has no pod; no devops scaffold is written
+==> Initialized team/work
+Configuration initialized OK

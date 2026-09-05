@@ -1,28 +1,31 @@
+import { cn, ErrorBoundary, ResizeHandle, TooltipProvider } from 'erun-kit';
 import * as React from 'react';
 
 import { ControllerProvider } from '@/app/ControllerContext';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { startSidebarResize } from '@/app/layoutThunks';
+import { startSidebarResize, stepSidebarResize } from '@/app/layoutThunks';
 import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
+import { computeMaxSidebarWidth, MIN_SIDEBAR_WIDTH } from '@/app/state';
 import { TerminalController } from '@/app/TerminalController';
 import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
+import { AIOccupancyPromptDialog } from '@/components/app/AIOccupancyPromptDialog';
 import { AutoStartPromptDialog } from '@/components/app/AutoStartPromptDialog';
+import { CloseConfirmDialog } from '@/components/app/CloseConfirmDialog';
+import { CreateReviewDialog } from '@/components/app/CreateReviewDialog';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
-import { ErrorBoundary } from '@/components/app/ErrorBoundary';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { MainPane } from '@/components/app/MainPane';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
 import { OrchestratorDialog } from '@/components/app/OrchestratorDialog';
 import { OutputsDialog } from '@/components/app/OutputsDialog';
+import { PinVersionDialog } from '@/components/app/PinVersionDialog';
 import { ReconnectDialog } from '@/components/app/ReconnectDialog';
 import { ReconnectStatusPanel } from '@/components/app/ReconnectStatusPanel';
-import { ResizeHandle } from '@/components/app/ResizeHandle';
+import { ReviewDetailDialog } from '@/components/app/ReviewDetailDialog';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
 import { Titlebar } from '@/components/app/Titlebar';
 import { UpgradeAllDialog } from '@/components/app/UpgradeAllDialog';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 
 const splitterClassName =
   'relative cursor-col-resize bg-transparent before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing_&]:before:bg-border';
@@ -31,6 +34,7 @@ export function App(): React.ReactElement {
   const controller = React.useMemo(() => new TerminalController(), []);
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
+  const sidebarWidth = useAppSelector((state) => state.layout.sidebarWidth);
   const activityQueueOpen = useAppSelector((state) => state.layout.activityQueueOpen);
   const terminalRootRef = React.useRef<HTMLDivElement>(null);
   const terminalPaneRef = React.useRef<HTMLElement>(null);
@@ -90,6 +94,14 @@ export function App(): React.ReactElement {
                   onMouseDown={(event) => {
                     dispatch(startSidebarResize(event));
                   }}
+                  value={{
+                    now: sidebarWidth,
+                    min: MIN_SIDEBAR_WIDTH,
+                    max: computeMaxSidebarWidth(window.innerWidth),
+                  }}
+                  onStep={(delta) => {
+                    dispatch(stepSidebarResize(delta));
+                  }}
                 />
               )}
               <MainPane
@@ -111,8 +123,13 @@ export function App(): React.ReactElement {
         <TenantDialogView />
         <UpgradeAllDialog />
         <OutputsDialog />
+        <PinVersionDialog />
         <OrchestratorDialog />
         <AutoStartPromptDialog />
+        <CloseConfirmDialog />
+        <AIOccupancyPromptDialog />
+        <ReviewDetailDialog />
+        <CreateReviewDialog />
         <ActivityQueueLauncher
           open={activityQueueOpen}
           onOpen={() => dispatch(setActivityQueueOpen(true))}

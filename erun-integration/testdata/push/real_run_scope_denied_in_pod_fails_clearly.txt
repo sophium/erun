@@ -6,6 +6,24 @@ rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing fo
 denied: token does not match expected scopes
 denied: token does not match expected scopes
 ==> Push failed after <ELAPSED>
+step timing (ordered by duration):
+  push (failed) [<ELAPSED>] — ghcr.io rejected the push: the gh-stored token lacks the write:packages scope.
+
+erun can widen the scope automatically, but that needs gh's interactive browser login, which cannot run here (this runtime pod is headless and has no browser).
+From a host shell signed in to the namespace owner's GitHub account, with a browser available, run:
+  gh auth refresh -h github.com -u sophium -s write:packages,read:packages
+  gh auth token -u sophium -h github.com | docker login ghcr.io -u sophium --password-stdin
+then re-run erun push.
+    api (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — ghcr.io rejected the push: the gh-stored token lacks the write:packages scope.
+
+erun can widen the scope automatically, but that needs gh's interactive browser login, which cannot run here (this runtime pod is headless and has no browser).
+From a host shell signed in to the namespace owner's GitHub account, with a browser available, run:
+  gh auth refresh -h github.com -u sophium -s write:packages,read:packages
+  gh auth token -u sophium -h github.com | docker login ghcr.io -u sophium --password-stdin
+then re-run erun push.
+      linux/amd64 (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — denied: token does not match expected scopes
+      linux/amd64 (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — denied: token does not match expected scopes
+timing record written to <TMP>
 ghcr.io rejected the push: the gh-stored token lacks the write:packages scope.
 
 erun can widen the scope automatically, but that needs gh's interactive browser login, which cannot run here (this runtime pod is headless and has no browser).

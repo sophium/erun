@@ -220,3 +220,191 @@ func TestReclaimRuntimeResourcesRunsTheNamedActionOnly(t *testing.T) {
 		t.Fatalf("a completed reclaim must report what it did")
 	}
 }
+
+// TestOrchestratorSnapshotRendersBusyWithoutTheEvent locks the first half of
+// the fix: orchestratorInfo carries Busy directly, so a snapshot taken
+// after the state changed reflects it even when the ai-activity event that
+// announced the change was never observed. That is the path a frontend
+// remount, a window reopen, or a listener that attached a beat late actually
+// takes in production — none of them re-run the transition, they just ask for
+// the current state, so the assertion here deliberately never looks at the
+// emitted events, only at what a fresh ListOrchestrators/runningOrchestratorInfo
+// call reports.
+func TestOrchestratorSnapshotRendersBusyWithoutTheEvent(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	started, err := app.StartOrchestrator(created.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	if started.Busy {
+		t.Fatalf("a freshly started orchestrator must not read busy before any report: %+v", started)
+	}
+
+	writeOrchestratorActivity(t, created.ID, orchestratorActivity{Busy: true, AtUnix: time.Now().Unix()})
+	app.reconcileOrchestratorActivity()
+
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || !listed[0].Busy {
+		t.Fatalf("expected the listed orchestrator to render busy from the snapshot, got %+v", listed)
+	}
+	info, ok := app.runningOrchestratorInfo(created.ID)
+	if !ok || !info.Busy {
+		t.Fatalf("expected the running snapshot to carry busy, got %+v (ok=%v)", info, ok)
+	}
+}
+
+// TestReconcileOrchestratorActivityReEmitsEveryTick locks the second half of
+// the fix: the busy signal is republished on every tick regardless of
+// whether it changed, so a dropped or mistimed ai-activity event self-heals
+// within one tick instead of staying wrong until the busy state itself next
+// changes. The old code's `if busy == r.busy { continue }` would have emitted
+// once here, not three times.
+func TestReconcileOrchestratorActivityReEmitsEveryTick(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.emitFn = emits.fn()
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	writeOrchestratorActivity(t, created.ID, orchestratorActivity{Busy: true, AtUnix: time.Now().Unix()})
+
+	app.reconcileOrchestratorActivity()
+	app.reconcileOrchestratorActivity()
+	app.reconcileOrchestratorActivity()
+
+	events := emits.events(aiActivityEvent)
+	if len(events) != 3 {
+		t.Fatalf("expected one emit per tick even with no state change, got %d: %+v", len(events), events)
+	}
+	for _, event := range events {
+		payload, ok := event.(aiActivityPayload)
+		if !ok || !payload.Busy {
+			t.Fatalf("expected every re-emit to report busy=true, got %+v", event)
+		}
+	}
+}
+
+// TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent is the shell-report
+// half of the same busy-snapshot treatment: orchestratorInfo carries
+// ShellRunning directly, so a snapshot taken after the state changed reflects
+// it even when the orchestrator-shell-activity event that announced the
+// change was never observed — the same remount/reopen/late-listener path
+// TestOrchestratorSnapshotRendersBusyWithoutTheEvent locks for the turn's own
+// busy signal, but for a fact that is independent of it: a shell can be
+// running while the turn itself already reads idle.
+func TestOrchestratorShellSnapshotRendersRunningWithoutTheEvent(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	started, err := app.StartOrchestrator(created.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	if started.ShellRunning {
+		t.Fatalf("a freshly started orchestrator must not read a running shell before any report: %+v", started)
+	}
+
+	writeOrchestratorShellActivity(t, created.ID, orchestratorShellActivity{
+		Running: true, Command: "sleep 300", TaskID: "task-1", AtUnix: time.Now().Unix(),
+	})
+	app.reconcileOrchestratorActivity()
+
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || !listed[0].ShellRunning || listed[0].ShellCommand != "sleep 300" {
+		t.Fatalf("expected the listed orchestrator to render the running shell from the snapshot, got %+v", listed)
+	}
+	info, ok := app.runningOrchestratorInfo(created.ID)
+	if !ok || !info.ShellRunning || info.ShellCommand != "sleep 300" {
+		t.Fatalf("expected the running snapshot to carry the shell state, got %+v (ok=%v)", info, ok)
+	}
+}
+
+// TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness is the
+// #1274 regression: an orchestrator id is reused across restarts, so
+// sessionAlive alone (computed per id, from whichever session is live for
+// that id right now) is not enough to trust a "running" report — the report
+// itself has to name the session that wrote it, and that name has to match
+// the session the desktop currently has recorded as live for this id.
+// Without that check, a report a dead session left behind reads as running
+// for as long as ITS SUCCESSOR keeps the id alive, which in practice is
+// indefinitely.
+func TestOrchestratorShellActivityDoesNotBorrowASuccessorSessionsLiveness(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	// The session that started the shell has since been replaced: the report
+	// names an id that is not this orchestrator's own derived conversation.
+	writeOrchestratorShellActivity(t, created.ID, orchestratorShellActivity{
+		Running: true, Command: "sleep 300", TaskID: "task-1", SessionID: "dead-session", AtUnix: time.Now().Unix(),
+	})
+
+	app.reconcileOrchestratorActivity()
+
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || listed[0].ShellRunning {
+		t.Fatalf("a report from a replaced session must not keep the indicator lit, got %+v", listed)
+	}
+}
+
+// TestReconcileOrchestratorActivityReEmitsShellStateEveryTick is the shell-report
+// half of the busy-signal re-emit lock: the shell signal is republished every
+// tick regardless of whether it changed, so a dropped or mistimed
+// orchestrator-shell-activity event self-heals within one tick.
+func TestReconcileOrchestratorActivityReEmitsShellStateEveryTick(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+	emits := newCapturedEmits()
+	app.emitFn = emits.fn()
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+
+	writeOrchestratorShellActivity(t, created.ID, orchestratorShellActivity{
+		Running: true, Command: "sleep 300", TaskID: "task-1", AtUnix: time.Now().Unix(),
+	})
+
+	app.reconcileOrchestratorActivity()
+	app.reconcileOrchestratorActivity()
+	app.reconcileOrchestratorActivity()
+
+	events := emits.events(orchestratorShellEvent)
+	if len(events) != 3 {
+		t.Fatalf("expected one emit per tick even with no state change, got %d: %+v", len(events), events)
+	}
+	for _, event := range events {
+		payload, ok := event.(orchestratorShellActivityPayload)
+		if !ok || !payload.Running || payload.Command != "sleep 300" {
+			t.Fatalf("expected every re-emit to report the running shell, got %+v", event)
+		}
+	}
+}

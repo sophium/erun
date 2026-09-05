@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -45,10 +47,38 @@ type environmentActivity struct {
 
 type environmentActivityState struct {
 	reachable bool
-	busy      bool
+	// observed records that the environment answered the idle question, as
+	// opposed to busy's false meaning nobody got an answer. The two are not the
+	// same claim, and the sidebar clears a stale desktop latch on the strength
+	// of this one — a wedged edge whose port still answers must not be able to
+	// say "idle" on the environment's behalf.
+	observed bool
+	busy     bool
+	// outage is the environment having lost the forward it had, past the point
+	// a bounded repair could bring it back — the local port free, or held by
+	// something that answers nothing. The row has to name it, because every
+	// other field here renders such an environment exactly like an idle one, or
+	// like one nobody ever opened.
+	outage bool
+	// checkFailed is outage's counterpart for the other channel this poller
+	// reads: an environment with no local forward is not left unasked just
+	// because this desktop never opened it, but the fallback check (over
+	// kubectl exec, see observeEnvironmentActivityViaPod) can itself fail to
+	// answer. That must not collapse into the same "nobody opened it" reading
+	// a never-checked environment gets — a real attempt that came back empty is
+	// its own condition, not silence.
+	checkFailed bool
 	// detail names what is keeping the environment busy, in the operator's
 	// language, so the row can say "held by gradle-build" rather than "busy".
 	detail string
+	// busyHolderOrchestrators is the sorted, comma-joined set of orchestrator
+	// IDs whose lease is keeping this environment busy right now — how
+	// orchestrator pacing (orchestrator_pacing_env.go) tells "busy on work I
+	// dispatched" from "busy on someone else's job or an operator's own
+	// session" (erun#1699). A plain []string field would not compare with ==,
+	// which emitEnvActivityIfChanged relies on to detect a transition, so this
+	// stays a single comparable string.
+	busyHolderOrchestrators string
 }
 
 func (a *App) runEnvironmentActivityPoller(stop <-chan struct{}) {
@@ -70,6 +100,36 @@ func (a *App) reconcileEnvironmentActivityOnce() {
 	for _, selection := range a.configuredSelections() {
 		a.emitEnvActivityIfChanged(a.observeEnvironmentActivity(selection))
 	}
+}
+
+// TriggerEnvironmentActivitySweep runs one sweep pass synchronously, the same
+// pass runEnvironmentActivityPoller's ticker runs on its own schedule. It
+// exists so a test can drive the sweep deterministically instead of waiting
+// on a tick it cannot see: emitEnvActivityIfChanged only emits on a
+// transition, so the very first observation of an environment this App has
+// never observed before always emits once regardless of what it finds, and a
+// test that later stages its own activity state for that environment must not
+// race that one-time emission. Calling this before staging any state consumes
+// it up front, so every later tick of the automatic ticker observes the same
+// unchanged environment and stays quiet for the rest of the test.
+func (a *App) TriggerEnvironmentActivitySweep() {
+	a.reconcileEnvironmentActivityOnce()
+}
+
+// ResetEnvironmentActivityObservations discards every cached observation so
+// the next sweep or read model treats every environment as never yet
+// observed. Exported for the headless Playwright harness only: the shared
+// seeded baseline rows (SEED_ENV_ALPHA/SEED_ENV_BETA,
+// erun-ui/playwright/fixtures/seedRoot.ts) live for a whole worker process's
+// lifetime, not one spec file, so without this a genuine observation sampled
+// during one spec (even a never-deployed env's routine "not reachable"
+// reading) renders on the next spec's hover card as if it had already been
+// checked — the mechanism behind the hover-card layout spec's zone-2 race. There is no on-disk
+// persistence to clear here, unlike ResetEnvironmentUsageObservations.
+func (a *App) ResetEnvironmentActivityObservations() {
+	a.mu.Lock()
+	a.envActivity = nil
+	a.mu.Unlock()
 }
 
 // configuredSelections lists every environment in the config store, not only the
@@ -96,22 +156,39 @@ func (a *App) configuredSelections() []uiSelection {
 	return out
 }
 
-// observeEnvironmentActivity is deliberately cheap for the common case. An
-// environment nobody opened costs one small file read and nothing else — no
-// config resolution, no dial, no HTTP — because most environments in a
-// configured store are not running at any given moment, and this sweep runs
-// forever beside the desktop's own work.
+// observeEnvironmentActivity is deliberately cheap for the common case of an
+// environment this desktop has open: one loopback dial, and an HTTP call only
+// for the ones that answer. An environment with no local forward is not the
+// common case's "leave it alone" anymore (see observeEnvironmentActivityViaPod)
+// — the activity lease this poller looks for is environment-side state, not
+// desktop-side, so a CLI- or agent-driven environment must be askable too.
 func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActivity {
 	observation := environmentActivity{selection: selection}
 	// Reachability is "a forward was established for this environment and its
 	// edge answers" — not "some process holds that port". The state file is what
 	// distinguishes the two, and `erun open` writes it whoever ran it, which is
-	// what makes a CLI-opened environment visible here at all.
-	forward, ok, err := eruncommon.LoadPortForwardState("mcp", selection.Tenant, selection.Environment)
-	if err != nil || !ok {
+	// what makes a CLI-opened environment visible here at all. Its absence only
+	// means this desktop has no local forward; it does not mean nobody is using
+	// the environment, so the fallback below still asks.
+	forward, established, err := eruncommon.LoadPortForwardState("mcp", selection.Tenant, selection.Environment)
+	if err != nil || !established {
+		a.forgetForwardRepair(selection)
+		return a.observeEnvironmentActivityViaPod(selection, observation)
+	}
+	if a.deps.canConnectLocalPort == nil {
+		// Nothing was observed, so there is nothing to diagnose. An unanswerable
+		// question must not be recorded as a bad answer.
+		a.forgetForwardRepair(selection)
 		return observation
 	}
-	if a.deps.canConnectLocalPort == nil || !a.deps.canConnectLocalPort(forward.LocalPort) {
+	if !a.deps.canConnectLocalPort(forward.LocalPort) {
+		// The dropped forward — and the reason this sweep used to stop here.
+		// Every ordinary pod replacement makes kubectl exit outright, so the
+		// port is simply free afterwards and the environment is unreachable to
+		// every client of it. Returning "not reachable" and nothing else was
+		// true and useless: it renders as an environment nobody opened, which
+		// is the one thing this environment is not.
+		observation.state.outage = a.reconcileForwardHealth(selection, forward.LocalPort, false)
 		return observation
 	}
 	observation.state.reachable = true
@@ -132,11 +209,98 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 	status, err := a.deps.loadIdleStatus(ctx, endpoint, a.mcpBearer(selection.Tenant, selection.Environment))
 	if err != nil {
 		// The port answered but the edge did not. That is not evidence of idle,
-		// so report reachable-without-a-verdict rather than inventing one.
+		// so report reachable-without-a-verdict rather than inventing one — and
+		// then find out which of the two failures it was, because they need
+		// opposite responses. An edge that replies at all (a 401 counts) is a
+		// live tunnel whose idle question failed and must be left alone; an edge
+		// that replies to nothing is a forward pointed at a pod that is gone.
+		observation.state.outage = a.reconcileForwardHealth(selection, forward.LocalPort, true)
 		return observation
 	}
+	a.forgetForwardRepair(selection)
+	observation.state.observed = true
 	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
+	observation.state.busyHolderOrchestrators = environmentLeaseHolderOrchestrators(status.Leases)
 	return observation
+}
+
+// environmentActivityPodProbeTimeout bounds the kubectl-exec fallback below.
+// It is looser than environmentActivityTimeout's loopback-dial budget because
+// a pod exec is a real round trip to the cluster's API server, not a dial to
+// this machine, but it still has to stay short enough that one wedged cluster
+// cannot stall the rest of the sweep for long.
+const environmentActivityPodProbeTimeout = 8 * time.Second
+
+// observeEnvironmentActivityViaPod is the fallback for an environment this
+// desktop has no local MCP forward for. An operator driving the environment
+// from a CLI, or an agent holding it from another machine entirely, is the
+// ordinary case erun is built for, not an error — so "no local forward" must
+// not read as "nobody is using this". The environment's own activity lease is
+// readable straight from its runtime pod, the same way runtime_activity.go
+// already reads pod state the MCP edge cannot: over kubectl exec, without
+// ever establishing a forward of its own. `erun idle --json` run inside the
+// pod answers from the pod's own local store (see erun-cli's
+// environmentTargetsItself), so this is one exec, not a repeat of the network
+// hop the desktop cannot make.
+func (a *App) observeEnvironmentActivityViaPod(selection uiSelection, observation environmentActivity) environmentActivity {
+	if a.deps.store == nil {
+		return observation
+	}
+	envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil || strings.TrimSpace(envConfig.KubernetesContext) == "" {
+		// This environment has never named a cluster it could be running in, so
+		// there is nothing to ask — "not open here" already says everything
+		// there is to say about it.
+		return observation
+	}
+	parent := a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, environmentActivityPodProbeTimeout)
+	defer cancel()
+	script := fmt.Sprintf("erun idle %s %s --json", shellQuote(selection.Tenant), shellQuote(selection.Environment))
+	output, err := a.execInRuntimePod(ctx, selection, script)
+	if err != nil {
+		// A real attempt that did not come back is not the same silence as
+		// never asking — see checkFailed's own comment.
+		observation.state.checkFailed = true
+		return observation
+	}
+	var status eruncommon.EnvironmentIdleStatus
+	if err := json.Unmarshal([]byte(output), &status); err != nil {
+		observation.state.checkFailed = true
+		return observation
+	}
+	observation.state.reachable = true
+	observation.state.observed = true
+	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
+	observation.state.busyHolderOrchestrators = environmentLeaseHolderOrchestrators(status.Leases)
+	return observation
+}
+
+// environmentLeaseHolderOrchestrators reduces the environment's held leases to
+// the distinct, sorted set of orchestrator IDs claiming one, joined into one
+// string (see environmentActivityState.busyHolderOrchestrators for why). A
+// lease with no named orchestrator holder — a plain SSH session, an operator's
+// own agent invocation — contributes nothing: it cannot be attributed to any
+// orchestrator, so it must never suppress one's pacing nudge.
+func environmentLeaseHolderOrchestrators(leases []eruncommon.EnvironmentActivityLease) string {
+	seen := make(map[string]struct{})
+	for _, lease := range leases {
+		if id := strings.TrimSpace(lease.Holder.Orchestrator); id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	if len(seen) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ",")
 }
 
 // environmentBusyFromIdleStatus reduces the environment's own markers to the one
@@ -159,30 +323,11 @@ func environmentBusyFromIdleStatus(status eruncommon.EnvironmentIdleStatus) (boo
 		if marker.Name == "working-hours" || marker.Idle {
 			continue
 		}
-		if detail := environmentBusyMarkerDetail(marker.Name); detail != "" {
+		if detail := eruncommon.EnvironmentActivityMarkerDetail(marker.Name); detail != "" {
 			return true, detail
 		}
 	}
 	return false, ""
-}
-
-func environmentBusyMarkerDetail(marker string) string {
-	switch marker {
-	case eruncommon.ActivityKindProcess:
-		return "running build or agent processes"
-	case eruncommon.ActivityKindMCP:
-		return "an agent is driving it over MCP"
-	case eruncommon.ActivityKindCodex:
-		return "an AI session is working"
-	case eruncommon.ActivityKindSSH:
-		return "an SSH session is active"
-	case eruncommon.ActivityKindAPI:
-		return "serving API traffic"
-	case eruncommon.ActivityKindCLI:
-		return "running erun commands"
-	default:
-		return "working"
-	}
 }
 
 // emitEnvActivityIfChanged publishes only transitions. Most environments in a
@@ -207,11 +352,60 @@ func (a *App) emitEnvActivityIfChanged(observation environmentActivity) {
 	a.emitEnvActivity(observation)
 }
 
+// seedEnvironmentActivitySnapshots attaches each environment's last poller
+// observation, if any, to the initial-state read model. See uiEnvironment's
+// Activity field for why this exists: emitEnvActivityIfChanged only fires on
+// a transition, so a boot that starts from a clean store (a page reload, not
+// a process restart) has no other way to learn an env is already busy.
+func (a *App) seedEnvironmentActivitySnapshots(state *uiState) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for ti := range state.Tenants {
+		tenant := &state.Tenants[ti]
+		for ei := range tenant.Environments {
+			env := &tenant.Environments[ei]
+			key := selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name})
+			observed, ok := a.envActivity[key]
+			if !ok {
+				continue
+			}
+			env.Activity = &uiEnvironmentActivitySnapshot{
+				Reachable:   observed.reachable,
+				Observed:    observed.observed,
+				Outage:      observed.outage,
+				CheckFailed: observed.checkFailed,
+				Busy:        observed.busy,
+				Detail:      observed.detail,
+			}
+		}
+	}
+}
+
+// envActivitySnapshot copies the poller's per-environment observations under
+// lock, for callers assembling a read model outside any a.mu section of their
+// own (a.mu is not reentrant, so a caller already holding it must read
+// a.envActivity directly instead of calling this).
+func (a *App) envActivitySnapshot() map[string]environmentActivityState {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.envActivity) == 0 {
+		return nil
+	}
+	out := make(map[string]environmentActivityState, len(a.envActivity))
+	for k, v := range a.envActivity {
+		out[k] = v
+	}
+	return out
+}
+
 func (a *App) emitEnvActivity(observation environmentActivity) {
 	a.emitEvent(envActivityEvent, envActivityPayload{
 		Tenant:      observation.selection.Tenant,
 		Environment: observation.selection.Environment,
 		Reachable:   observation.state.reachable,
+		Observed:    observation.state.observed,
+		Outage:      observation.state.outage,
+		CheckFailed: observation.state.checkFailed,
 		Busy:        observation.state.busy,
 		Detail:      observation.state.detail,
 	})

@@ -93,12 +93,36 @@ func seedActivitySnapshot(t *testing.T, cacheHome, tenant, environment, kind, bo
 // be running.
 func writeSampleProcess(t *testing.T, root string, pid int, comm string, cpuTicks, startTime int64) {
 	t.Helper()
+	writeSampleProcessWithTTY(t, root, pid, comm, cpuTicks, startTime, 0)
+}
+
+// writeSampleProcessWithTTY is writeSampleProcess with an explicit tty_nr
+// (column 7) and no parent, for a lone process with - or without - an
+// allocated pseudo-terminal.
+func writeSampleProcessWithTTY(t *testing.T, root string, pid int, comm string, cpuTicks, startTime, ttyNr int64) {
+	t.Helper()
+	writeSampleProcessFull(t, root, pid, 0, comm, cpuTicks, startTime, ttyNr)
+}
+
+// writeSampleProcessFull is writeSampleProcessWithTTY with an explicit ppid
+// (column 4), so a scenario can model the real shape of an SSH session: the
+// per-session "sshd: user@ptsN" process stays tty-less itself while the
+// command it forks becomes the pty's session leader.
+func writeSampleProcessFull(t *testing.T, root string, pid int, ppid int64, comm string, cpuTicks, startTime, ttyNr int64) {
+	t.Helper()
 	dir := filepath.Join(root, fmt.Sprintf("%d", pid))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	fields := []string{fmt.Sprintf("%d (%s) S", pid, comm)}
-	for i := 0; i < 10; i++ {
+	// Column 4 (ppid).
+	fields = append(fields, fmt.Sprintf("%d", ppid))
+	// Columns 5..6 (pgrp, session) are unused padding.
+	fields = append(fields, "0", "0")
+	// Column 7 (tty_nr): 0 means no controlling terminal.
+	fields = append(fields, fmt.Sprintf("%d", ttyNr))
+	// Columns 8..13 (tpgid through cmajflt) are unused padding.
+	for i := 0; i < 6; i++ {
 		fields = append(fields, "0")
 	}
 	fields = append(fields, fmt.Sprintf("%d", cpuTicks), "0")
@@ -112,7 +136,52 @@ func writeSampleProcess(t *testing.T, root string, pid int, comm string, cpuTick
 	}
 }
 
+// writeCgroupFixture lays down a cgroup v2 tree so the usage reader's verdict
+// comes from the fixture. The real /sys/fs/cgroup says something different on
+// every machine, and on a cgroup v1 host it says nothing at all.
+func writeCgroupFixture(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s/%s: %v", root, name, err)
+		}
+	}
+}
+
+// cgroupV2Fixture is the shape measured in a live runtime container: a 12-core
+// quota, a 23552Mi limit, and a high-water mark at roughly half of it.
+func cgroupV2Fixture(usageUsec, periods, throttled, peakBytes, oomKills int64) map[string]string {
+	return map[string]string{
+		"cpu.max":        "1200000 100000\n",
+		"cpu.stat":       fmt.Sprintf("usage_usec %d\nnr_periods %d\nnr_throttled %d\nthrottled_usec 0\n", usageUsec, periods, throttled),
+		"memory.max":     "24696061952\n",
+		"memory.current": "4773695488\n",
+		"memory.peak":    fmt.Sprintf("%d\n", peakBytes),
+		"memory.events":  fmt.Sprintf("low 0\nhigh 0\nmax 0\noom 0\noom_kill %d\n", oomKills),
+	}
+}
+
+// readUsageHistory reads the retained usage store. It is a side effect outside
+// the captured streams, so a golden cannot assert it.
+func readUsageHistory(t *testing.T, cacheHome, tenant, environment string) map[string]any {
+	t.Helper()
+	path := filepath.Join(cacheHome, "erun", "activity", tenant, environment, "usage-history.json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var history map[string]any
+	if err := json.Unmarshal(body, &history); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return history
+}
+
 func TestActivity(t *testing.T) {
+	t.Parallel()
 	t.Run("touch_records_cli_activity", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -698,7 +767,7 @@ func TestActivity(t *testing.T) {
 
 	t.Run("lease_help", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"activity", "lease", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "lease", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -712,13 +781,13 @@ func TestActivity(t *testing.T) {
 		// collapses it; the ttl itself is asserted from the JSON below.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "gradle-build", "--ttl", "10m"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "gradle-build", "--ttl", "10m"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if take.ExitCode != 0 {
 			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
 		}
-		list := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		release := erun.Run(t, []string{"activity", "lease", "release", "--tenant", "team", "--environment", "dev", "--id", "gradle-build"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		empty := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		list := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		release := erun.Run(t, []string{"activity", "lease", "release", "--tenant", "team", "--environment", "dev", "--id", "gradle-build"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		empty := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		golden.Equal(t, "activity/lease_take_list_and_release", normalize.Apply(
 			take.Combined+list.Combined+release.Combined+empty.Combined))
 
@@ -736,7 +805,7 @@ func TestActivity(t *testing.T) {
 		// capturing the id it must release.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent run", "--id", "agent-run", "--pid", "4242", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent run", "--id", "agent-run", "--pid", "4242", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -758,11 +827,98 @@ func TestActivity(t *testing.T) {
 		// why, which is the whole gap this exists to close.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without a name, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "activity/lease_take_requires_a_name", normalize.Apply(result.Combined))
+	})
+
+	t.Run("lease_take_exclusive_dry_run", func(t *testing.T) {
+		// erun#1245: the dry-run trace must show the exclusive claim and its
+		// resolved scope, since that is the decision the command would make.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1245", "--exclusive", "--orchestrator", "petios", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "activity/lease_take_exclusive_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("lease_take_exclusive_refuses_a_second_holder_and_names_it", func(t *testing.T) {
+		// The collision #1245 exists to close: two agent jobs in the same
+		// worktree. The second exclusive take must fail and name the first.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		first := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1201", "--id", "job-fix-1201", "--exclusive", "--orchestrator", "petios",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if first.ExitCode != 0 {
+			t.Fatalf("first take: exit %d: %s", first.ExitCode, first.Combined)
+		}
+		second := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1245", "--id", "job-fix-1245", "--exclusive", "--orchestrator", "erun",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if second.ExitCode == 0 {
+			t.Fatalf("expected the second exclusive take to be refused, got exit 0: %s", second.Combined)
+		}
+		if !strings.Contains(second.Combined, "job-fix-1201") || !strings.Contains(second.Combined, "petios") {
+			t.Fatalf("refusal must name the actual holder (id and orchestrator), got:\n%s", second.Combined)
+		}
+	})
+
+	t.Run("lease_take_exclusive_allows_a_different_scope_to_coexist", func(t *testing.T) {
+		// Two clones of the same repo in one pod is legitimate parallelism,
+		// not a collision - exclusivity must be scoped, not environment-wide.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		first := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "clone-a-job", "--id", "clone-a-job", "--exclusive", "--scope", "/git/clone-a",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if first.ExitCode != 0 {
+			t.Fatalf("first take: exit %d: %s", first.ExitCode, first.Combined)
+		}
+		second := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "clone-b-job", "--id", "clone-b-job", "--exclusive", "--scope", "/git/clone-b",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if second.ExitCode != 0 {
+			t.Fatalf("expected a different scope to succeed without conflict, got exit %d: %s", second.ExitCode, second.Combined)
+		}
+	})
+
+	t.Run("lease_release_exclusive_round_trip", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1245", "--id", "job-fix-1245", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		release := erun.Run(t, []string{
+			"activity", "lease", "release", "--tenant", "team", "--environment", "dev",
+			"--id", "job-fix-1245", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if release.ExitCode != 0 {
+			t.Fatalf("release: exit %d: %s", release.ExitCode, release.Combined)
+		}
+		// The scope is free again: a fresh exclusive take on it succeeds.
+		again := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1250", "--id", "job-fix-1250", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if again.ExitCode != 0 {
+			t.Fatalf("expected the scope free after release, got exit %d: %s", again.ExitCode, again.Combined)
+		}
 	})
 
 	t.Run("stop_ready_blocked_by_a_held_lease", func(t *testing.T) {
@@ -774,11 +930,11 @@ func TestActivity(t *testing.T) {
 		// other arm.
 		setup := env.New(t)
 		seedManagedCloudTenantEnvWithIdle(t, setup, "team", "dev", insideWorkingHoursIdleBlock)
-		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if take.ExitCode != 0 {
 			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
 		}
-		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected a leased env to refuse the stop, got exit 0:\n%s", result.Combined)
 		}
@@ -796,11 +952,11 @@ func TestActivity(t *testing.T) {
 		// working-hours branch.
 		setup := env.New(t)
 		seedManagedCloudTenantEnvWithIdle(t, setup, "team", "dev", outsideWorkingHoursIdleBlock)
-		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		take := erun.Run(t, []string{"activity", "lease", "take", "--tenant", "team", "--environment", "dev", "--name", "agent-run", "--ttl", "1h"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if take.ExitCode != 0 {
 			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
 		}
-		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected a leased env to refuse the stop outside working hours, got exit 0:\n%s", result.Combined)
 		}
@@ -818,12 +974,15 @@ func TestActivity(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		procRoot := filepath.Join(setup.Cwd, "proc")
 		writeSampleProcess(t, procRoot, 101, "java", 500, 900)
-		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot}
+		// The same tick also retains a usage reading. Point it at an absent
+		// cgroup root so this scenario stays about the process sampler and reads
+		// nothing ambient from the host that ran it.
+		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "no-cgroup")}
 
-		first := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		first := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		writeSampleProcess(t, procRoot, 101, "java", 900, 900)
-		working := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		quiet := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		working := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		quiet := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		golden.Equal(t, "activity/sample_records_activity_only_when_work_advances", normalize.Apply(
 			first.Combined+working.Combined+quiet.Combined))
 
@@ -834,9 +993,129 @@ func TestActivity(t *testing.T) {
 		}
 	})
 
+	t.Run("sample_records_ssh_activity_for_a_pty_holding_session", func(t *testing.T) {
+		// A real interactive session is an sshd child ("sshd:
+		// user@ptsN", itself tty-less) that forks a shell holding the allocated
+		// pseudo-terminal. That must read as SSH activity even though nothing
+		// crossed the host-side forward that this fixture cannot simulate.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		writeSampleProcessFull(t, procRoot, 401, 1, "sshd", 10, 900, 0)
+		writeSampleProcessFull(t, procRoot, 403, 401, "bash", 10, 901, 34816)
+		result := erun.Run(t, []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "no-cgroup")}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		body, err := os.ReadFile(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "ssh.json"))
+		if err != nil {
+			t.Fatalf("expected the pty-holding session to record ssh activity: %v", err)
+		}
+		if !strings.Contains(string(body), `"lastActivity"`) {
+			t.Errorf("expected lastActivity recorded for a real session, got:\n%s", body)
+		}
+	})
+
+	t.Run("sample_ignores_a_notty_ssh_child", func(t *testing.T) {
+		// An sshd child whose forked command never allocated a pty -
+		// the shape a port-forward re-establishment or a background sync
+		// channel takes - must never read as SSH activity, or the phantom-session
+		// bug this fixes comes back.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		writeSampleProcessFull(t, procRoot, 402, 1, "sshd", 10, 900, 0)
+		writeSampleProcessFull(t, procRoot, 404, 402, "sftp-server", 10, 901, 0)
+		result := erun.Run(t, []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "no-cgroup")}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if _, err := os.Stat(filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "ssh.json")); !os.IsNotExist(err) {
+			t.Errorf("expected no ssh activity recorded for a notty sshd child, stat err: %v", err)
+		}
+	})
+
+	t.Run("sample_retains_runtime_usage_from_cgroup_counters", func(t *testing.T) {
+		// The collection half of the sizing recommendation. The monitor's tick
+		// already runs this command, so the history accumulates with no second
+		// scheduled job.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		cgroupRoot := filepath.Join(setup.Cwd, "cgroup")
+		writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(27551234478, 376556, 0, 12742377472, 0))
+		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", cgroupRoot}
+
+		first := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(28551234478, 386556, 0, 12742377472, 0))
+		second := erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		golden.Equal(t, "activity/sample_retains_runtime_usage_from_cgroup_counters", normalize.Apply(first.Combined+second.Combined))
+
+		history := readUsageHistory(t, setup.CacheHome, "team", "dev")
+		if got := history["observedPeakMemoryBytes"]; got != float64(12742377472) {
+			t.Errorf("observedPeakMemoryBytes = %v, want the cgroup high-water 12742377472", got)
+		}
+		if got := history["observedPeriods"]; got != float64(386556) {
+			t.Errorf("observedPeriods = %v, want the first lifetime's total plus the delta", got)
+		}
+		if samples, ok := history["samples"].([]any); !ok || len(samples) != 2 {
+			t.Errorf("samples = %v, want both ticks retained", history["samples"])
+		}
+	})
+
+	t.Run("sample_retains_the_peak_across_a_container_restart", func(t *testing.T) {
+		// memory.peak resets when the container restarts, which is exactly why
+		// this is a store and not a live read: without retention the pre-restart
+		// high-water is simply gone, and an environment gets sized from whatever
+		// it happens to have done since.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		cgroupRoot := filepath.Join(setup.Cwd, "cgroup")
+		sampleArgs := []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", cgroupRoot}
+
+		writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(27551234478, 376556, 12, 22000000000, 1))
+		erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		// Every cumulative counter starts over, and the fresh peak is far below
+		// the one already observed.
+		writeCgroupFixture(t, cgroupRoot, cgroupV2Fixture(4000, 40, 0, 900000000, 0))
+		erun.Run(t, sampleArgs, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+
+		history := readUsageHistory(t, setup.CacheHome, "team", "dev")
+		if got := history["restarts"]; got != float64(1) {
+			t.Errorf("restarts = %v, want 1 inferred from the counters going backwards", got)
+		}
+		if got := history["observedPeakMemoryBytes"]; got != float64(22000000000) {
+			t.Errorf("observedPeakMemoryBytes = %v, want the pre-restart high-water 22000000000", got)
+		}
+		if got := history["observedOomKills"]; got != float64(1) {
+			t.Errorf("observedOomKills = %v, want the pre-restart kill retained", got)
+		}
+		if got := history["observedThrottledPeriods"]; got != float64(12) {
+			t.Errorf("observedThrottledPeriods = %v, want the pre-restart throttling retained", got)
+		}
+	})
+
+	t.Run("sample_records_no_usage_when_the_host_supplies_no_counters", func(t *testing.T) {
+		// cgroup v1, or a laptop. A history of empty samples could only ever
+		// support "no evidence", so nothing is written at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		procRoot := filepath.Join(setup.Cwd, "proc")
+		result := erun.Run(t, []string{"activity", "sample", "--tenant", "team", "--environment", "dev", "--proc-root", procRoot, "--cgroup-root", filepath.Join(setup.Cwd, "absent")},
+			erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("an absent cgroup must not fail the monitor tick: exit %d\n%s", result.ExitCode, result.Combined)
+		}
+		path := filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev", "usage-history.json")
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("expected no usage history without counters, stat err = %v", err)
+		}
+	})
+
 	t.Run("sample_requires_target", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"activity", "sample"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "sample"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without target flags, got 0:\n%s", result.Combined)
 		}
@@ -845,7 +1124,7 @@ func TestActivity(t *testing.T) {
 
 	t.Run("ssh_proxy_requires_tenant_and_environment", func(t *testing.T) {
 		setup := env.New(t)
-		result := erun.Run(t, []string{"activity", "ssh-proxy", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "ssh-proxy", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without tenant/environment, got 0:\n%s", result.Combined)
 		}
@@ -855,7 +1134,7 @@ func TestActivity(t *testing.T) {
 	t.Run("ssh_proxy_requires_listen_and_target", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit without addresses, got 0:\n%s", result.Combined)
 		}
@@ -866,7 +1145,7 @@ func TestActivity(t *testing.T) {
 		// A negative byte threshold is a misconfiguration, not "always idle".
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1", "--idle-traffic-bytes=-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1:0", "--target", "127.0.0.1:1", "--idle-traffic-bytes=-1"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for negative threshold, got 0:\n%s", result.Combined)
 		}
@@ -879,10 +1158,133 @@ func TestActivity(t *testing.T) {
 		// the accept loop.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "ssh-proxy", "--tenant", "team", "--environment", "dev", "--listen", "127.0.0.1", "--target", "127.0.0.1:1"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for unlistenable address, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "activity/ssh_proxy_rejects_unlistenable_address", normalize.Apply(result.Combined))
+	})
+}
+
+// TestActivityAISession exercises the ai-session verbs a tool's own
+// turn-boundary hooks report through: the structured status replacing a
+// guess made from PTY output volume. The load-bearing case is
+// awaiting_input_survives_silence_and_is_not_idle_or_exited below - a PTY
+// output-volume heuristic cannot distinguish "waiting on the human" from
+// "idle" or "gone" because both produce the same signal, no output at all.
+func TestActivityAISession(t *testing.T) {
+	t.Parallel()
+	report := func(t *testing.T, setup env.Setup, args ...string) erun.Result {
+		t.Helper()
+		full := append([]string{"activity", "ai-session", "report", "--tenant", "team", "--environment", "dev"}, args...)
+		result := erun.Run(t, full, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("report %v: exit %d: %s", args, result.ExitCode, result.Combined)
+		}
+		return result
+	}
+	statusJSON := func(t *testing.T, setup env.Setup, args ...string) []map[string]any {
+		t.Helper()
+		full := append([]string{"activity", "ai-session", "status", "--tenant", "team", "--environment", "dev", "--json"}, args...)
+		result := erun.Run(t, full, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("status %v: exit %d: %s", args, result.ExitCode, result.Combined)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal([]byte(result.Stdout), &rows); err != nil {
+			t.Fatalf("parse status --json: %v\n%s", err, result.Stdout)
+		}
+		return rows
+	}
+
+	t.Run("awaiting_input_survives_silence_and_is_not_idle_or_exited", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+
+		report(t, setup, "--session", "sess-1", "--tool", "claude", "--event", "turn-start")
+		busy := statusJSON(t, setup, "--session", "sess-1")
+		if busy[0]["state"] != "busy" {
+			t.Fatalf("after turn-start: want busy, got %v", busy[0]["state"])
+		}
+
+		// Reporting turn-end is the only thing that changes here: no further
+		// process output ever arrives for this session, exactly like a real
+		// session that is genuinely waiting on the human. A volume/silence
+		// heuristic would read this as idle; the structured status must not.
+		report(t, setup, "--session", "sess-1", "--event", "turn-end")
+		awaiting := statusJSON(t, setup, "--session", "sess-1")
+		if awaiting[0]["state"] != "awaiting-input" {
+			t.Fatalf("after turn-end with no further output: want awaiting-input, got %v", awaiting[0]["state"])
+		}
+
+		// A session that never reported anything is genuinely idle, and must
+		// read differently from the one silently awaiting input above.
+		neverStarted := statusJSON(t, setup, "--session", "never-started")
+		if neverStarted[0]["state"] != "idle" {
+			t.Fatalf("session with no recorded event: want idle, got %v", neverStarted[0]["state"])
+		}
+		if awaiting[0]["state"] == neverStarted[0]["state"] {
+			t.Fatalf("awaiting-input must not collapse into idle")
+		}
+
+		// Once the process actually exits, the state changes again and must
+		// not be confused with the awaiting-input state that preceded it.
+		report(t, setup, "--session", "sess-1", "--event", "exit", "--exit-code", "0")
+		exited := statusJSON(t, setup, "--session", "sess-1")
+		if exited[0]["state"] != "exited" {
+			t.Fatalf("after exit: want exited, got %v", exited[0]["state"])
+		}
+	})
+
+	t.Run("notify_also_resolves_to_awaiting_input", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		report(t, setup, "--session", "sess-2", "--tool", "codex", "--event", "notify")
+		status := statusJSON(t, setup, "--session", "sess-2")
+		if status[0]["state"] != "awaiting-input" {
+			t.Fatalf("after notify: want awaiting-input, got %v", status[0]["state"])
+		}
+	})
+
+	t.Run("exit_with_oom_reason_reports_oom_killed_distinct_from_plain_exit", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		report(t, setup, "--session", "oom-session", "--event", "exit", "--exit-code", "137", "--exit-reason", "oom")
+		report(t, setup, "--session", "plain-session", "--event", "exit", "--exit-code", "1")
+		oom := statusJSON(t, setup, "--session", "oom-session")
+		plain := statusJSON(t, setup, "--session", "plain-session")
+		if oom[0]["state"] != "oom-killed" {
+			t.Fatalf("exit with oom reason: want oom-killed, got %v", oom[0]["state"])
+		}
+		if plain[0]["state"] != "exited" {
+			t.Fatalf("plain exit: want exited, got %v", plain[0]["state"])
+		}
+		if oom[0]["state"] == plain[0]["state"] {
+			t.Fatalf("an OOM kill must be distinguishable from an ordinary exit")
+		}
+	})
+
+	t.Run("status_lists_every_recorded_session_when_none_named", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		report(t, setup, "--session", "b-session", "--tool", "codex", "--event", "turn-start")
+		report(t, setup, "--session", "a-session", "--tool", "claude", "--event", "turn-end")
+		rows := statusJSON(t, setup)
+		if len(rows) != 2 {
+			t.Fatalf("want 2 sessions listed, got %d: %v", len(rows), rows)
+		}
+		if rows[0]["sessionId"] != "a-session" || rows[1]["sessionId"] != "b-session" {
+			t.Fatalf("expected sessions sorted by id, got %v", rows)
+		}
+	})
+
+	t.Run("report_rejects_unsupported_event", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"activity", "ai-session", "report", "--tenant", "team", "--environment", "dev", "--session", "sess-1", "--event", "bogus"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for unsupported event, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "activity/ai_session_report_rejects_unsupported_event", normalize.Apply(result.Combined))
 	})
 }

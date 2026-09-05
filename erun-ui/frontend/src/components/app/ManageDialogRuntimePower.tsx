@@ -1,12 +1,12 @@
+import { Button } from 'erun-kit';
 import { Power } from 'lucide-react';
 import * as React from 'react';
 
 import { readError } from '@/app/errors';
 import { useAppDispatch } from '@/app/hooks';
 import { submitManageStop } from '@/app/manageEnvironmentThunks';
-import { showTerminalMessage } from '@/app/notificationThunks';
+import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
-import { Button } from '@/components/ui/button';
 
 // RuntimePowerField sits directly under Deploy because that is where the
 // operator is standing when they find the resource sliders capped: the figures
@@ -35,7 +35,7 @@ export function RuntimePowerField({
         disabled={dialog.busy || dialog.configLoading}
         onClick={() =>
           void dispatch(submitManageStop()).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
+            dispatch(showTerminalError(readError(error)));
           })
         }
       >

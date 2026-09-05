@@ -75,10 +75,16 @@ func TestProvisionRejectsInvalidEnvironment(t *testing.T) {
 }
 
 // TestProvisionWithNewClusterComposesFullPlan proves a new-cluster provision previews the full ordered plan — including cloud bootstrap — without persisting.
+// remote-agent (not runtime): the v1 single-cluster placement decision
+// (TestProvisionRejectsCrossClusterPlacementForRuntime) refuses a runtime
+// environment naming a new cluster to bootstrap, since the deploy Job it
+// would need has no mechanism to reach any cluster but the control plane's
+// own; a remote-agent environment is never server-side deployed at all, so
+// naming an unrelated context to bootstrap remains a valid preview.
 func TestProvisionWithNewClusterComposesFullPlan(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 2}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
-		"environment": {"name": "prod", "type": "runtime"},
+		"environment": {"name": "prod", "type": "remote-agent"},
 		"context": {
 			"name": "acme-prod",
 			"cloudProviderAlias": "acme-aws",
@@ -106,8 +112,55 @@ func TestProvisionWithNewClusterComposesFullPlan(t *testing.T) {
 	mustPlanLine(t, response.Plan, "context: bootstrap cluster acme-prod via alias acme-aws", "plan missing the context bootstrap header")
 	mustPlanLine(t, response.Plan, "ec2 run-instances", "plan missing the EC2 run-instances step from the InitCloudContext dry-run")
 	mustPlanLine(t, response.Plan, "namespace: would create acme-prod", "plan missing the <tenant>-<env> namespace line")
-	mustPlanLine(t, response.Plan, "register: would persist environment prod (runtime) in tenant acme referencing context acme-prod", "plan missing the register line")
+	mustPlanLine(t, response.Plan, "register: would persist environment prod (remote-agent) in tenant acme referencing context acme-prod", "plan missing the register line")
+	mustNotPlanLine(t, response.Plan, "deploy:", "a remote-agent environment is never server-side deployed, so the plan must not claim a deploy")
+}
+
+// TestProvisionRejectsCrossClusterPlacementForRuntime: the v1 single-cluster
+// placement decision applies identically here and on the executing
+// POST /v1/environments (TestCreateEnvironmentRejectsCrossClusterPlacement)
+// — both call resolveDeployPlacement, so a preview can never promise a
+// placement the real create/deploy path would then refuse.
+func TestProvisionRejectsCrossClusterPlacementForRuntime(t *testing.T) {
+	cases := map[string]string{
+		"new cluster": `{
+			"environment": {"name": "prod", "type": "runtime"},
+			"context": {"name": "acme-prod", "cloudProviderAlias": "acme-aws", "region": "eu-west-2"}
+		}`,
+		"existing kubernetes context": `{
+			"environment": {"name": "prod", "type": "runtime"},
+			"kubernetesContext": "acme-prod"
+		}`,
+	}
+	for label, body := range cases {
+		t.Run(label, func(t *testing.T) {
+			environments := &stubEnvironmentRepository{}
+			rec := postProvision(t, acmeTenant, environments, underCapQuota, body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 Bad Request", rec.Code)
+			}
+		})
+	}
+}
+
+// TestProvisionRuntimeWithNoContextDescribesSingleClusterPlacement: the only
+// valid runtime provision shape in v1 — no context named at all — previews
+// the deploy landing on the platform's own cluster.
+func TestProvisionRuntimeWithNoContextDescribesSingleClusterPlacement(t *testing.T) {
+	environments := &stubEnvironmentRepository{count: 2}
+	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
+		"environment": {"name": "prod", "type": "runtime"}
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	response := decodeProvisionResponse(t, rec)
+	mustPlanLine(t, response.Plan, "context: deploys into this platform's own cluster (v1 single-cluster placement)", "plan missing the single-cluster placement line")
+	mustPlanLine(t, response.Plan, "register: would persist environment prod (runtime) in tenant acme referencing context ", "plan missing the register line")
 	mustPlanLine(t, response.Plan, "deploy: would helm install the erun-devops runtime chart (release acme-devops) into acme-prod", "plan missing the deploy line")
+	mustPlanLine(t, response.Plan, "auth: would inject this backend's MCP-signing public key", "plan missing the auth-edge wiring line")
+	mustPlanLine(t, response.Plan, "expose: would wire mcp.acme-prod.<services zone>", "plan missing the exposure wiring line")
+	mustPlanLine(t, response.Plan, "tls: would provision a per-env wildcard certificate", "plan missing the tls provisioning line")
 }
 
 // TestProvisionReusesExistingContext proves the existing-context path emits no cloud bootstrap argv.
@@ -130,14 +183,14 @@ func TestProvisionReusesExistingContext(t *testing.T) {
 	mustNotPlanLine(t, response.Plan, "ec2 run-instances", "existing-context provision must not emit bootstrap argv")
 	mustPlanLine(t, response.Plan, "namespace: would create acme-staging", "plan missing the namespace line")
 	mustPlanLine(t, response.Plan, "register: would persist environment staging (remote-agent) in tenant acme referencing context acme-prod", "plan missing the register line")
+	mustNotPlanLine(t, response.Plan, "expose:", "a non-runtime environment is never server-side deployed, so it must plan no exposure")
 }
 
 // TestProvisionOverCapReturnsPlanWithQuotaBlocked proves over-cap provisioning still returns a 200 preview with quotaOk=false, not a 4xx.
 func TestProvisionOverCapReturnsPlanWithQuotaBlocked(t *testing.T) {
 	environments := &stubEnvironmentRepository{count: 10}
 	rec := postProvision(t, acmeTenant, environments, stubTenantQuotaRepository{maxEnvironments: 10}, `{
-		"environment": {"name": "prod", "type": "runtime"},
-		"kubernetesContext": "acme-prod"
+		"environment": {"name": "prod", "type": "runtime"}
 	}`)
 
 	if rec.Code != http.StatusOK {

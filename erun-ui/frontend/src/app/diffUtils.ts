@@ -57,6 +57,15 @@ export function chooseSelectedDiffPath(diff: DiffResult | null, currentPath: str
   return files[0]?.path ?? '';
 }
 
+// diffReviewCommitCount tells an empty-state render whether a different scope
+// would show commits this one doesn't -- the diff result carries reviewCommits
+// regardless of which scope fetched it, so an empty "current" scope can still
+// point at history waiting to be reviewed instead of asserting a flat "no
+// changes" (see DiffEmptyState).
+export function diffReviewCommitCount(diff: DiffResult | null | undefined): number {
+  return diff?.reviewCommits?.length ?? 0;
+}
+
 export function compactDiffError(message: string): string {
   if (message.includes('unknown tool "diff"')) {
     return 'Runtime MCP does not expose diff yet. Refresh after deploy finishes.';

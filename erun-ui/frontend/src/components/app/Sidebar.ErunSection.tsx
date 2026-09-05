@@ -1,22 +1,37 @@
-import { Bot, MoreHorizontal, Plus, RefreshCw, Settings, Stethoscope } from 'lucide-react';
+import { Button, cn, EmptyState, IconTooltip } from 'erun-kit';
+import {
+  BookOpen,
+  Bot,
+  Download,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Settings,
+  Stethoscope,
+} from 'lucide-react';
 import * as React from 'react';
 
+import { openDocumentation } from '@/app/documentationThunks';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startManageDoctor } from '@/app/manageEnvironmentThunks';
+import { orchestratorBusyLabel } from '@/app/orchestratorBusyLabel';
+import { orchestratorShellLabel } from '@/app/orchestratorShellLabel';
 import {
   loadOrchestrators,
   openOrchestrator,
   restartApp,
   startOrchestrator,
 } from '@/app/orchestratorThunks';
+import { openOutputs } from '@/app/outputsThunks';
+import { selectSidebarFocus } from '@/app/selectors';
+import type { OrchestratorShellActivity } from '@/app/slices/orchestratorShellActivitySlice';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
-import { EmptyState } from '@/components/app/EmptyState';
-import { IconTooltip } from '@/components/app/IconTooltip';
+import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
+import { OrchestratorHoverCard } from '@/components/app/Sidebar.OrchestratorHoverCard';
+import { OrchestratorNoticeList } from '@/components/app/Sidebar.OrchestratorNotice';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
 
 // ErunSection is the top-level "ERUN" sidebar block above ENVIRONMENTS: the
 // operator's host-side control plane. Its headline is the cross-env AI
@@ -43,6 +58,10 @@ function ErunHeader(): React.ReactElement {
     }
     return state.orchestrators.items.find((o) => o.sessionId === activeSessionId)?.id ?? '';
   });
+  // Doctor diagnoses one environment's runtime and config, so it needs a
+  // target; disable rather than silently no-op when nothing is selected
+  // (Nielsen #5, error prevention).
+  const hasSelectedEnvironment = useAppSelector((state) => state.selection.selected !== null);
   return (
     <div className="flex items-center justify-between gap-2 pr-1.5 pb-1.5 pl-3.5">
       <span className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
@@ -63,13 +82,16 @@ function ErunHeader(): React.ReactElement {
             <RefreshCw />
           </Button>
         </IconTooltip>
-        <IconTooltip label="Run doctor">
+        <IconTooltip
+          label={hasSelectedEnvironment ? 'Run doctor' : 'Select an environment to run doctor'}
+        >
           <Button
             className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
             type="button"
             variant="ghost"
             size="icon-xs"
             aria-label="Run doctor"
+            disabled={!hasSelectedEnvironment}
             onClick={() => {
               void dispatch(startManageDoctor());
             }}
@@ -91,6 +113,20 @@ function ErunHeader(): React.ReactElement {
             <Settings />
           </Button>
         </IconTooltip>
+        <IconTooltip label="Open documentation">
+          <Button
+            className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Open documentation"
+            onClick={() => {
+              dispatch(openDocumentation());
+            }}
+          >
+            <BookOpen />
+          </Button>
+        </IconTooltip>
       </div>
     </div>
   );
@@ -100,7 +136,8 @@ function OrchestratorsArea(): React.ReactElement {
   const dispatch = useAppDispatch();
   const items = useAppSelector((state) => state.orchestrators.items);
   const error = useAppSelector((state) => state.orchestrators.error);
-  const activeSessionId = useAppSelector((state) => state.terminal.sessionId);
+  const restoreNotices = useAppSelector((state) => state.orchestrators.restoreNotices);
+  const focus = useAppSelector(selectSidebarFocus);
 
   // The orchestrator a rebuild+restart returns to is restored by boot(), which
   // owns the initial pane selection; here we only load the list for the sidebar.
@@ -143,11 +180,12 @@ function OrchestratorsArea(): React.ReactElement {
             <OrchestratorRow
               key={orchestrator.id}
               orchestrator={orchestrator}
-              active={orchestrator.sessionId === activeSessionId && activeSessionId > 0}
+              active={focus.kind === 'orchestrator' && focus.sessionId === orchestrator.sessionId}
             />
           ))}
         </ul>
       )}
+      <OrchestratorNoticeList notices={restoreNotices} />
       {error ? (
         <p role="alert" className="px-3.5 pb-1 text-[11px] break-words text-destructive">
           {error}
@@ -166,33 +204,109 @@ function OrchestratorRow({
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   const running = orchestrator.status === 'running' && orchestrator.sessionId > 0;
+  // Scoped to this orchestrator's own session, so concurrent orchestrators each
+  // spin on their own row rather than on whichever one happens to be selected.
+  const busy = useAppSelector(
+    (state) =>
+      orchestrator.sessionId > 0 &&
+      state.aiActivity.aiBusyBySession[orchestrator.sessionId] === true,
+  );
+  // A background shell is independent of the turn's own busy state —
+  // it can keep running after the turn that started it goes idle, which is
+  // exactly the case that had no affordance at all before this. Shown only
+  // when the turn itself is not already spinning, so the row never carries
+  // two motion cues fighting for the same attention.
+  const shellActivity = useAppSelector((state) =>
+    orchestrator.sessionId > 0
+      ? state.orchestratorShellActivity.bySession[orchestrator.sessionId]
+      : undefined,
+  );
   return (
-    <li
-      className={cn(
-        'group mr-1 ml-1 flex h-8 items-center gap-1.5 rounded-md pr-1.5 pl-3.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-        active &&
-          'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
-      )}
-    >
-      <button
-        type="button"
+    <li>
+      {/* The row's own styling moves onto the hover card's anchor div, the way
+          EnvironmentRow does it, so the <li> keeps its list semantics inside
+          the "AI orchestrators" list while the hover surface is the whole row
+          rather than a 12px spinner icon (#1343). */}
+      <OrchestratorHoverCard
         className={cn(
-          'flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 text-left text-sm leading-[1.2] tracking-normal text-inherit',
-          active ? 'font-medium' : 'font-normal',
+          'group mr-1 ml-1 flex h-8 items-center gap-1.5 rounded-md pr-1.5 pl-3.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          active &&
+            'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
         )}
-        aria-label={`${running ? 'Open' : 'Start'} orchestrator ${orchestrator.name}`}
-        onClick={() => {
-          if (running) {
-            dispatch(openOrchestrator(orchestrator.sessionId));
-          } else {
-            void dispatch(startOrchestrator(orchestrator.id));
-          }
-        }}
+        orchestrator={orchestrator}
       >
-        <span className="min-w-0 truncate">{orchestrator.name}</span>
-      </button>
-      <OrchestratorRowActions orchestrator={orchestrator} running={running} active={active} />
+        <button
+          type="button"
+          className={cn(
+            'flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 text-left text-sm leading-[1.2] tracking-normal text-inherit',
+            active ? 'font-medium' : 'font-normal',
+          )}
+          aria-label={`${running ? 'Open' : 'Start'} orchestrator ${orchestrator.name}`}
+          aria-current={active ? 'page' : undefined}
+          onClick={() => {
+            if (running) {
+              dispatch(openOrchestrator(orchestrator.sessionId));
+            } else {
+              void dispatch(startOrchestrator(orchestrator.id));
+            }
+          }}
+        >
+          <span className="min-w-0 truncate">{orchestrator.name}</span>
+        </button>
+        {busy && (
+          <OrchestratorBusyIndicator
+            name={orchestrator.name}
+            busyAtUnix={orchestrator.busyAtUnix}
+          />
+        )}
+        {!busy && shellActivity?.running && (
+          <OrchestratorShellIndicator name={orchestrator.name} activity={shellActivity} />
+        )}
+        <OrchestratorRowActions orchestrator={orchestrator} running={running} active={active} />
+      </OrchestratorHoverCard>
     </li>
+  );
+}
+
+// OrchestratorBusyIndicator is the turn-busy sibling of OrchestratorShellIndicator
+// below, wrapped in the same IconTooltip so a working orchestrator explains
+// itself on hover exactly like every other spinner in the sidebar — the
+// aria-label alone reached only screen readers, leaving a sighted mouse user
+// with an inert spin.
+function OrchestratorBusyIndicator({
+  name,
+  busyAtUnix,
+}: {
+  name: string;
+  busyAtUnix: number | undefined;
+}): React.ReactElement {
+  const label = orchestratorBusyLabel(name, busyAtUnix, Date.now());
+  return (
+    <IconTooltip label={label}>
+      <BusyRowSpinner label={label} />
+    </IconTooltip>
+  );
+}
+
+// OrchestratorShellIndicator is BusyRowSpinner's own icon, reused rather than
+// a one-off, so a running shell reports activity identically to a working
+// turn or a busy environment (Nielsen #4, consistency). The aria-label — and
+// the hover tooltip, since elapsed time and the command are worth seeing at a
+// glance, not just to a screen reader — name what is running and for how
+// long, which is the whole point of this indicator: "1 shell" alone cannot
+// tell the operator whether it is doing something or just spinning its wheels.
+function OrchestratorShellIndicator({
+  name,
+  activity,
+}: {
+  name: string;
+  activity: OrchestratorShellActivity;
+}): React.ReactElement {
+  const label = orchestratorShellLabel(name, activity.command, activity.startedAtUnix, Date.now());
+  return (
+    <IconTooltip label={label}>
+      <BusyRowSpinner label={label} />
+    </IconTooltip>
   );
 }
 
@@ -211,23 +325,74 @@ function OrchestratorRowActions({
   running: boolean;
   active: boolean;
 }): React.ReactElement {
+  // A live session's toolset is fixed at launch (see erun#1319): re-scoping it
+  // while it runs cannot take effect until it restarts, so "running" alone
+  // would say the save already applied when it has not. The dot borrows the
+  // same shape 'failed' already uses (WCAG non-colour-only status) rather
+  // than inventing a third one, since both mean "this needs your attention."
+  const restartRequired = running && orchestrator.restartRequired;
   return (
     <>
       <span
         className="flex size-[18px] flex-none items-center justify-center"
         role="img"
         aria-label={
-          running
-            ? `Orchestrator ${orchestrator.name} is running`
-            : `Orchestrator ${orchestrator.name} is stopped`
+          restartRequired
+            ? `Orchestrator ${orchestrator.name} is running but needs a restart to apply its new environments`
+            : running
+              ? `Orchestrator ${orchestrator.name} is running`
+              : `Orchestrator ${orchestrator.name} is stopped`
         }
       >
-        <StatusDotGlyph state={running ? 'running' : 'stopped'} />
+        <StatusDotGlyph state={restartRequired ? 'failed' : running ? 'running' : 'stopped'} />
       </span>
       {!orchestrator.transient && (
-        <OrchestratorRowDetailsButton orchestrator={orchestrator} active={active} />
+        <>
+          <OrchestratorRowOutputsButton orchestrator={orchestrator} active={active} />
+          <OrchestratorRowDetailsButton orchestrator={orchestrator} active={active} />
+        </>
       )}
     </>
+  );
+}
+
+// The environment row has this same affordance for the files its agent produced
+// in the pod. An orchestrator produces its files here instead, which is why it
+// needs its own reader rather than the env one — but from the operator's side it
+// is the same question, so it is the same button and the same dialog.
+function OrchestratorRowOutputsButton({
+  orchestrator,
+  active,
+}: {
+  orchestrator: OrchestratorInfo;
+  active: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <IconTooltip label={`View and download ${orchestrator.name} outputs`}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={cn(
+          'pointer-events-none size-[26px] flex-none cursor-pointer border-0 bg-transparent text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [&_svg]:size-4',
+          active && 'pointer-events-auto opacity-100',
+        )}
+        aria-label={`Outputs for orchestrator ${orchestrator.name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          void dispatch(
+            openOutputs({
+              kind: 'orchestrator',
+              orchestratorId: orchestrator.id,
+              name: orchestrator.name,
+            }),
+          );
+        }}
+      >
+        <Download />
+      </Button>
+    </IconTooltip>
   );
 }
 

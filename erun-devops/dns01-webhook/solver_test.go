@@ -112,3 +112,75 @@ func TestLoadConfigRejectsIncomplete(t *testing.T) {
 		t.Fatal("expected an error when tokenSecretRef is missing")
 	}
 }
+
+// TestCleanUpToleratesADeletedTokenSecret is the regression test for #1174.
+// An environment delete removes the env's DNS-01 token Secret as ordinary
+// namespace content, with no ordering guarantee against cert-manager
+// finalizing a still-pending Challenge in the same namespace. If cleanup
+// errors there it errors forever -- nothing recreates the Secret -- so the
+// acme.cert-manager.io finalizer never clears and the namespace sits in
+// Terminating for its full 20-minute timeout.
+func TestCleanUpToleratesADeletedTokenSecret(t *testing.T) {
+	// No Secret at all: exactly the state namespace teardown leaves behind.
+	solver := &brokerSolver{kube: fake.NewSimpleClientset(), http: http.DefaultClient}
+	ch := &v1alpha1.ChallengeRequest{
+		ResourceNamespace: "acme-prod",
+		ResolvedFQDN:      "_acme-challenge.acme-prod.services.example.com.",
+		Key:               "challenge-value",
+		Config:            mustConfigJSON(t, "http://broker.invalid/v1/dns01"),
+	}
+
+	if err := solver.CleanUp(ch); err != nil {
+		t.Fatalf("cleanup with a deleted token secret = %v, want nil so the challenge finalizer can clear", err)
+	}
+
+	// Present must NOT tolerate it: a missing token when presenting is a real
+	// misconfiguration, and swallowing it would hand back a certificate that
+	// silently never gets a record.
+	if err := solver.Present(ch); err == nil {
+		t.Fatal("present with a missing token secret returned nil; a missing credential must surface when presenting")
+	}
+}
+
+// TestCleanUpStillFailsWhenTheSecretExistsButTheBrokerIsUnreachable holds the
+// tolerance to the one case it is for. A reachable-but-broken broker, or any
+// other cleanup failure, must keep returning an error so cert-manager retries
+// rather than dropping the record on the floor.
+func TestCleanUpStillFailsWhenTheSecretExistsButTheBrokerIsUnreachable(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "acme-prod-dns01-token", Namespace: "acme-prod"},
+		Data:       map[string][]byte{"token": []byte("env-token-xyz")},
+	}
+	solver := &brokerSolver{kube: fake.NewSimpleClientset(secret), http: http.DefaultClient}
+	ch := &v1alpha1.ChallengeRequest{
+		ResourceNamespace: "acme-prod",
+		ResolvedFQDN:      "_acme-challenge.acme-prod.services.example.com.",
+		Key:               "challenge-value",
+		Config:            mustConfigJSON(t, "http://127.0.0.1:1/v1/dns01"),
+	}
+
+	if err := solver.CleanUp(ch); err == nil {
+		t.Fatal("cleanup with a live token but an unreachable broker returned nil; that record is still in the zone")
+	}
+}
+
+// TestCleanUpDoesNotTolerateASecretMissingItsKey: a Secret that exists but has
+// no token key is a misconfiguration, not a deleted environment, so it must
+// not take the tolerance path.
+func TestCleanUpDoesNotTolerateASecretMissingItsKey(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "acme-prod-dns01-token", Namespace: "acme-prod"},
+		Data:       map[string][]byte{"not-the-token": []byte("x")},
+	}
+	solver := &brokerSolver{kube: fake.NewSimpleClientset(secret), http: http.DefaultClient}
+	ch := &v1alpha1.ChallengeRequest{
+		ResourceNamespace: "acme-prod",
+		ResolvedFQDN:      "_acme-challenge.acme-prod.services.example.com.",
+		Key:               "challenge-value",
+		Config:            mustConfigJSON(t, "http://broker.invalid/v1/dns01"),
+	}
+
+	if err := solver.CleanUp(ch); err == nil {
+		t.Fatal("cleanup with a Secret missing its token key returned nil; that is a misconfiguration and must surface")
+	}
+}

@@ -50,12 +50,28 @@ export function missingRequiredFieldReason(dialog: EnvironmentDialogState): stri
   if (!values.kubernetesContext) {
     return 'Select a Kubernetes context.';
   }
-  // The in-cluster registry needs no host string — its addresses resolve from the
-  // kube-context — so a container registry is only required when not using it.
-  if (!dialog.useClusterRegistry && !values.containerRegistry) {
-    return 'Select a container registry.';
+  return registryMissingReason(dialog, values.containerRegistry);
+}
+
+// registryMissingReason covers all three registry choices: the hosted
+// registry is disabled in the UI until its reachability probe resolves
+// available, but submit is blocked on that same condition rather than relying
+// on the control's disabled state alone. The in-cluster and hosted registries
+// need no host string — the first resolves from the kube-context, the second
+// from the tenant — so a container registry is only required otherwise.
+function registryMissingReason(
+  dialog: EnvironmentDialogState,
+  containerRegistry: string,
+): string | null {
+  if (dialog.useErunRegistry) {
+    return dialog.hostedRegistry?.available === true
+      ? null
+      : "erun's hosted registry is not available right now. Choose a different registry.";
   }
-  return null;
+  if (dialog.useClusterRegistry) {
+    return null;
+  }
+  return containerRegistry ? null : 'Select a container registry.';
 }
 
 export function rememberEnvironmentDialogSelection(selection: UISelection): void {

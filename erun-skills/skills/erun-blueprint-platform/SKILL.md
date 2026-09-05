@@ -19,7 +19,7 @@ copy them, pinned to the erun version the environment runs:
 
 This skill is for the tenant that **deploys the erun platform itself**
 (erunpaas) — its umbrellas wrap erun's *own* component charts (`erun-backend-*`,
-`erun-powerdns`, `erun-docs`). A regular tenant that only runs agent envs never
+`erun-powerdns`, `erun-zitadel`, `erun-docs`). A regular tenant that only runs agent envs never
 uses it, and it never wraps the runtime `erun-devops` chart (see What this is
 not).
 
@@ -209,6 +209,262 @@ ln -s ../common.tf    terraform-acme/prod/common.tf
 ln -s ../variables.tf terraform-acme/prod/variables.tf
 ```
 
+### Secrets Terraform produces
+
+The Cloudflare token above is a secret going **in** — the operator already holds
+it and injects it at apply time. A credential Terraform **creates** goes the
+other way: an SES SMTP password, a generated database user, an API key for a
+provisioned service. It must not leave through an operator's clipboard, and it
+must not be pasted into `<env>.tfvars` or a `values.<env>.yaml`. Terraform writes
+it to **AWS Secrets Manager** at a tenant/env-scoped path, and a sync in the
+cluster materialises it as a **Kubernetes Secret** in the tenant's namespace:
+
+```
+terraform apply
+  └─ creates the credential (e.g. aws_iam_access_key → ses_smtp_password_v4)
+  └─ writes it to AWS Secrets Manager at  <tenant>/<env>/<name>
+cluster
+  └─ a sync materialises it as a Kubernetes Secret in <tenant>-<env>
+  └─ the workload consumes the Secret; it never sees Secrets Manager
+```
+
+One authoritative store, rotatable in place, and nobody reads the value to
+retype it somewhere else.
+
+**Path convention: `<tenant>/<env>/<name>`.** Two things depend on it. A
+secret's owner is legible from its name without opening it, and an IAM policy
+can scope the reader to the prefix — which is what makes the bootstrap
+credential below narrow rather than account-wide. Derive it in `locals`, never
+inline it per resource:
+
+```hcl
+locals {
+  secret_prefix = "${var.tenant}/${var.environment}"   # e.g. acme/prod
+}
+```
+
+**The module shape.** The resource pair, and outputs that **name** the secret
+rather than emitting it:
+
+```hcl
+resource "aws_secretsmanager_secret" "ses_smtp" {
+  name = "${local.secret_prefix}/ses-smtp"
+}
+
+resource "aws_secretsmanager_secret_version" "ses_smtp" {
+  secret_id = aws_secretsmanager_secret.ses_smtp.id
+  secret_string = jsonencode({
+    host     = "email-smtp.${var.region}.amazonaws.com"
+    port     = "587"
+    username = aws_iam_access_key.ses.id
+    password = aws_iam_access_key.ses.ses_smtp_password_v4
+  })
+}
+
+output "ses_smtp_secret_name" { value = aws_secretsmanager_secret.ses_smtp.name }
+output "ses_smtp_secret_arn"  { value = aws_secretsmanager_secret.ses_smtp.arn }
+```
+
+Never add an output carrying the material. `sensitive = true` only redacts the
+CLI's own rendering — the value is still in `terraform output -json` and still
+in state (see The credential is still in state, below).
+
+**erun's clusters are not EKS, so IRSA is unavailable.** State this before
+reaching for a sync, because it invalidates the pattern almost every AWS
+document describes. There is no EKS OIDC provider to associate a ServiceAccount
+with — an erun cluster is a self-managed node, or OrbStack behind Tailscale —
+and the API server's discovery document is not publicly reachable, so the
+cluster cannot be registered as an IAM OIDC provider either. Anything beginning
+"annotate the ServiceAccount with `eks.amazonaws.com/role-arn`" cannot work
+here. Do not scaffold it and do not suggest it.
+
+Nor is the pod's own AWS identity a substitute. erun does place one in the
+runtime pod — the `erun-host` profile in `~/.aws/credentials`, refreshed from
+the operator's alias — and that is what `erun terraform apply` authenticates
+with. It is **short-lived** and lives on that env's home PVC. A controller that
+must re-read Secrets Manager hours later cannot use it.
+
+**erun installs no sync — the operator installs one, in this tree.** No erun
+chart and no published erun Terraform module deploys External Secrets Operator,
+the Secrets Store CSI driver, or any equivalent; `terraform-erun-cluster-edge`
+installs Traefik, cert-manager and the DNS-01 shim and nothing else. The one
+credential erun itself puts in an env's namespace is `erun deploy`'s
+`<release>-cloudflare` Secret, minted from the env's Cloudflare alias — that is
+Cloudflare-specific and deploy-time, not a general sync. So the sync is a tenant
+module, installed by `helm_release` exactly as the edge module installs
+cert-manager. External Secrets Operator (ESO) is the reference choice:
+
+```hcl
+resource "helm_release" "external_secrets" {
+  name             = "external-secrets"
+  repository       = "https://charts.external-secrets.io"
+  chart            = "external-secrets"
+  version          = "<pin>"        # pin explicitly, like every other dependency
+  namespace        = "external-secrets"
+  create_namespace = true
+  set {
+    name  = "installCRDs"
+    value = "true"
+  }
+}
+```
+
+**The bootstrap credential.** With IRSA unavailable, the sync authenticates with
+one long-lived IAM access key for a dedicated user that can do nothing but read
+this tenant/env prefix:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+    "Resource": "arn:aws:secretsmanager:<region>:<account>:secret:acme/prod/*"
+  }]
+}
+```
+
+The trailing `*` is required, not laziness: AWS appends a six-character suffix
+to every secret ARN, so `…:secret:acme/prod/ses-smtp-AbCdEf` is what the policy
+must match. `…:secret:*` is a different thing and is not acceptable. Do **not**
+grant `secretsmanager:ListSecrets` — it is not resource-scopable, so granting it
+hands the key a directory of every secret in the account. Name each secret
+explicitly in the `ExternalSecret` (`remoteRef`/`extract`, never a `find`) and
+the policy never needs it.
+
+Hold the key in a single Kubernetes Secret in the tenant's namespace, and point
+a **namespaced `SecretStore`** at it — not a `ClusterSecretStore`, which would
+let any namespace in the cluster read through this credential:
+
+```yaml
+apiVersion: external-secrets.io/v1beta1   # newer ESO serves external-secrets.io/v1
+kind: SecretStore
+metadata: { name: acme-prod-aws, namespace: acme-prod }
+spec:
+  provider:
+    aws:
+      service: SecretsManager
+      region: eu-west-1
+      auth:
+        secretRef:
+          accessKeyIDSecretRef:     { name: acme-prod-sm-reader, key: access-key-id }
+          secretAccessKeySecretRef: { name: acme-prod-sm-reader, key: secret-access-key }
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata: { name: acme-prod-ses-smtp, namespace: acme-prod }
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { name: acme-prod-aws, kind: SecretStore }
+  target: { name: acme-prod-ses-smtp, creationPolicy: Owner }
+  dataFrom:
+    - extract: { key: acme/prod/ses-smtp }
+```
+
+Apply the two CRs through a **tiny local chart** installed by `helm_release`
+with `depends_on` the ESO release — not `kubernetes_manifest`, which needs the
+CRD to exist at *plan* time and therefore fails on a first apply that installs
+ESO in the same run. This is the same reason erun's own cluster-edge module
+ships its Issuer as `chart-issuer/` instead of a manifest resource; copy that
+shape rather than rediscovering it.
+
+Name the trade rather than pretending it away: this is **one narrow, rotatable,
+auditable credential in place of many scattered ones** — a reduction in
+exposure, not an elimination of it. It is also the one credential this pattern
+cannot distribute, since it is the bootstrap: mint it out of band and apply the
+Secret once.
+
+**Rotation — three owners, and the third is the one that gets missed.**
+
+- *Terraform* owns the credential. `terraform apply -replace='module.mail.aws_iam_access_key.ses'`
+  mints a new key and writes a new Secrets Manager version in one apply. The
+  path does not change, so nothing downstream is re-wired. Note that
+  `aws_iam_access_key` is destroyed before it is recreated, so the old key stops
+  working the moment the apply runs — sequence the workload restart with the
+  apply, don't leave it for later.
+- *The sync* owns propagation. ESO's `refreshInterval` is the upper bound on how
+  long a rotated value takes to reach the cluster; set it deliberately.
+- *The workload* owns pickup. A Secret consumed as environment variables
+  (`envFrom`, `valueFrom.secretKeyRef`) is captured at container start and never
+  changes in a running pod — rotation needs `kubectl rollout restart`. A Secret
+  mounted as a volume is updated in place by the kubelet, but that only helps if
+  the process re-reads the file. Decide which at design time and write the
+  restart into the rotation procedure where it is needed. A secret that cannot
+  be rotated without someone remembering an undocumented redeploy is a secret
+  nobody rotates.
+
+**The credential is still in Terraform state — this pattern does not fix that.**
+If Terraform creates the IAM key, the material is in state whatever else happens
+to it; writing it to Secrets Manager adds a copy, it does not remove one. This
+solves **distribution and rotation**, not state exposure. On erun that is
+concrete: `common.tf`'s `backend "local" {}` keeps state at
+`~/.erun/terraform/<tenant>/<env>/` on the env's home PVC, unencrypted, so
+anyone who can `erun open` that env can read every credential Terraform has ever
+created there.
+
+Pick one of the two mitigations **per credential, in the scaffold** and
+record which in a comment in the module's `main.tf`. Leaving it undecided is
+not an option:
+
+1. **Terraform creates the identity, not the credential.** Manage the
+   `aws_iam_user` and its policy; mint the access key out of band and write the
+   Secrets Manager version out of band too (`aws secretsmanager put-secret-value`),
+   so Terraform manages the secret container but never its material. Nothing
+   secret enters state. This is the same stance the blueprint already takes for
+   the Zitadel masterkey, so it is a consistent extension rather than a new
+   idea — **prefer it wherever the credential allows it.** The cost is honest:
+   rotation becomes a manual out-of-band re-put, not an `apply`.
+2. **Treat the state backend as secret material** — encrypt it and
+   access-control it. On erun's default local backend that means the env's home
+   PVC and the set of people who can `erun open` the env. If that set is wider
+   than the set who may hold the credential, this mitigation is not met: either
+   move state to a backend that encrypts at rest with a restrictive key policy,
+   or take option 1.
+
+**Option 1 is unavailable for a provider-derived credential** — one the
+provider computes as a local transform on the managed resource itself, rather
+than returning it from an API. `aws_iam_access_key.ses_smtp_password_v4` is
+the worked example: it is a SigV4 transform of the secret access key that the
+AWS provider derives on the resource, not a value the IAM API returns, so no
+`data` source can yield it for a key minted out of band — that holds even
+under `terraform import`, since there is nothing on the API side to import it
+from. This is easy to mis-check: a plural `aws_iam_access_keys` data source
+does exist, but it returns access-key *metadata* only, and never the secret or
+its SMTP derivation, so it cannot substitute. For this class of credential,
+Terraform must own the resource that derives it, and the material enters
+state regardless of preference. Hand-deriving the transform to keep the key
+out-of-band anyway is not a workaround for this — don't do it.
+
+**The mitigation is a per-credential decision, not a per-tree one.** A tree
+with one credential that cannot take option 1 still applies option 1 to every
+other credential that can — don't abandon the pattern tree-wide because one
+resource requires the fallback. The common shape mixes both in the same
+module set: an IAM reader key for the ESO sync (see erun installs no sync,
+above) takes option 1 — Terraform creates the `aws_iam_user` only, the key is
+minted and applied out of band — while a provider-derived key like the SMTP
+password takes option 2, in the same tree.
+
+**When the fallback is forced, the comment must say why, not just which.**
+The "record which, in a comment" rule above still applies verbatim when
+option 1 is chosen freely. When a credential falls back to option 2 because
+option 1 is structurally unavailable, name the reason at the resource —
+the derivation, and the absence of a data source that could substitute:
+
+```hcl
+# ses_smtp_password_v4 is a local SigV4 derivation the AWS provider computes
+# on this resource; no data source can yield the secret material or its SMTP
+# derivation, so this key cannot be minted out of band (option 1). Falls back
+# to option 2: state is encrypted + access-controlled (see Secrets Terraform
+# produces, above).
+resource "aws_iam_access_key" "ses" {
+  user = aws_iam_user.ses.name
+}
+```
+
+A comment that names the reason lets a reviewer tell a considered fallback
+from an unconsidered one; "state backend is encrypted" with no reason attached
+does not.
+
 ## Step 3 — the Helm side (optional — the patch/override path)
 
 `erun deploy` installs the published component charts **by reference** from the
@@ -281,7 +537,7 @@ erun-backend-api:
 Do this for **every** platform component you deploy — one `<tenant>-<component>`
 umbrella dir per wrapped erun chart. This is the closed set of the erun
 platform's components (`erun-backend-api`, `erun-backend-postgres`,
-`erun-backend-db`, `erun-powerdns`, `erun-docs`) — **never** the runtime
+`erun-backend-db`, `erun-powerdns`, `erun-zitadel`, `erun-docs`) — **never** the runtime
 `erun-devops` chart (see What this is not). E.g. `acme-backend-api/` wraps
 `erun-backend-api`. Keep each values file to genuinely env-specific
 overrides; the published charts carry the defaults.
@@ -325,7 +581,13 @@ saved `deploy.components`. Two real cases: `<tenant>-powerdns` binds `:53` via
 in the runtime env with a ghcr pull secret, not a local agent env (orbstack has
 neither); `<tenant>-docs` is a no-op locally. For a local platform, select the
 backend trio (`--components <tenant>-backend-postgres,<tenant>-backend-db,<tenant>-backend-api`);
-add `<tenant>-powerdns` only where `:53` + the pull secret exist. The runtime
+add `<tenant>-powerdns` only where `:53` + the pull secret exist. `<tenant>-zitadel`
+is the hosted IdP and needs three things the cluster must already have — a
+32-character masterkey in an existing Secret (named to it as
+`zitadel.masterkeySecretName`; erun never generates one), a public DNS record for
+the platform's auth host, and a cert for it from the edge's DNS-01 Issuer
+(`zitadel.certManagerIssuer`) — so it belongs in the runtime env after the edge,
+never in a local agent env. The runtime
 chart deploys on its own with an empty selection, so a bare `erun deploy <tenant>
 <env>` bootstraps or heals the runtime without touching the components.
 
@@ -350,7 +612,7 @@ The override is honored on every erun-powerdns version; only the empty-value
 default differs (node IP on current erun, `0.0.0.0` on pre-hostIP pins).
 
 **Every** erun chart — the runtime `erun-devops` chart *and* every component
-chart (`erun-powerdns`, `erun-backend-*`, `erun-docs`) — publishes under the
+chart (`erun-powerdns`, `erun-zitadel`, `erun-backend-*`, `erun-docs`) — publishes under the
 registry's `/charts` path, kept separate from the same-named image repo
 (`<registry>/<component>`) so a chart never collides with its image at the same
 ref. So every dependency `repository` is `oci://<registry>/charts`, and every
@@ -397,6 +659,13 @@ terraform -chdir=terraform-acme/prod validate || true   # validate after `init` 
 readlink terraform-acme/prod/common.tf      # -> ../common.tf
 readlink terraform-acme/prod/variables.tf   # -> ../variables.tf
 
+# Produced credentials are referenced, never carried: the tree names secrets and
+# never holds their material, and no reader policy is wildcarded past its prefix.
+grep -rn 'ses_smtp_password_v4\|secret_string' terraform-acme/*/*.tfvars 2>/dev/null \
+  && echo "REFUSE: produced credential in tfvars"
+grep -rn 'secretsmanager:\*\|"secret:\*"\|ListSecrets\|ClusterSecretStore\|role-arn' terraform-acme/ \
+  && echo "REVIEW: over-broad Secrets Manager reader, or an IRSA annotation that cannot work here"
+
 # Helm umbrellas: dependencies resolve from OCI, and every chart has a values
 # file for every env it deploys to (missing one fails erun deploy — see below).
 for c in <tenant>-devops/k8s/*/; do
@@ -432,6 +701,14 @@ every Helm chart `version` — so bump them together, never piecemeal.
   `**/charts/*.tgz` entry in the repo `.gitignore`, an uncommitted
   `Chart.lock`. Add only what's missing; never clobber the project's own
   content (env-specific tfvars, values overrides, extra tenant modules).
+- **Reconcile produced-secret wiring** — where the tree creates a credential,
+  hold it to Secrets Terraform produces: a path that isn't `<tenant>/<env>/…`,
+  a reader policy widened past its prefix (or granted `ListSecrets`), a
+  `ClusterSecretStore` where a namespaced one belongs, an IRSA annotation that
+  cannot work on these clusters, an output that emits material, or no recorded
+  state decision. Narrow the policy and fix the wiring in place; a credential
+  found in a tfvars or values file is a **rotation**, not an edit — flag it,
+  because deleting the line does not un-leak it.
 - **Upgrade the pins** — re-pin **every** erun reference to `<ref>`/`<version>`:
   the terraform module `source = "…?ref=v<version>"` in each
   `modules/terraform-<tenant>-*/main.tf`, and each `<tenant>-<component>`
@@ -483,6 +760,8 @@ selection.
 | `helm dependency build` 404s on the OCI chart | That version's chart isn't published. `erun push`/`erun release` publishes image + chart together — pin to a version that has been pushed. |
 | `erun deploy` fails: `values file not found for environment "<env>": …/<component>/values.<env>.yaml` | That umbrella chart has no per-env values file for the env being deployed. Create `<component>/values.<env>.yaml` (an empty/comment-only file is valid). Remember the agent env: `values.local.yaml` is required too, since the desktop deploys `<tenant>-local`. |
 | Operator asks to put the Cloudflare token in `<env>.tfvars` | Refuse. The token is a secret injected as `TF_VAR_cloudflare_api_token` from `CLOUDFLARE_API_TOKEN` at apply time — it must not be committed. |
+| Operator asks to put a Terraform-**produced** credential (an SES SMTP password, a generated DB password, a provisioned API key) in `<env>.tfvars`, a `values.<env>.yaml`, or a chart value | Refuse, and say where it goes instead: Terraform writes it to AWS Secrets Manager at `<tenant>/<env>/<name>` and a sync materialises it as a Kubernetes Secret in the tenant's namespace (see Secrets Terraform produces). The tree carries the secret's **name**, never its material. Same refusal for an output that emits the value, and for pasting it into a console field by hand. |
+| Operator asks for IRSA / a `eks.amazonaws.com/role-arn` ServiceAccount annotation so the sync can reach Secrets Manager | Refuse — it cannot work. erun's clusters are not EKS, there is no OIDC provider to associate the ServiceAccount with, and the API server's discovery document is not publicly reachable, so the cluster cannot be registered as one either. Use the namespaced `SecretStore` with a bootstrap credential scoped to `secretsmanager:GetSecretValue` on `<tenant>/<env>/*`. |
 | An `erun-devops`/`<tenant>-devops` umbrella appears under `<tenant>-devops/k8s/` | That is the runtime chart — `erun-build-env`'s concern, not this skill's. Don't create or edit it here. A `<tenant>-devops` chart is legitimate (and **required** once the tenant ships its own components, so the runtime rides the tenant version line) and owned by `erun-build-env`; leave it to that skill. Only remove a stray one this skill created by mistake — `erun deploy` matches the runtime release name and would otherwise install a duplicate as the runtime chart. |
 
 ## Important
@@ -508,3 +787,10 @@ selection.
   together after an `erun upgrade`.
 - The Cloudflare token never lives in the tree. It is supplied in the runtime
   env and injected at apply time.
+- **A credential Terraform produces reaches the cluster through Secrets Manager,
+  never through a person.** Write it to `<tenant>/<env>/<name>`, sync it into a
+  Kubernetes Secret, and keep only the secret's *name* in the tree. **IRSA is
+  unavailable** — these are not EKS clusters — so the sync authenticates with a
+  bootstrap key scoped to `secretsmanager:GetSecretValue` on that prefix, and
+  erun ships no sync of its own: the tenant module installs one. Decide, and
+  record, how the credential is kept out of Terraform state.

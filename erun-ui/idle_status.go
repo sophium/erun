@@ -11,8 +11,8 @@ import (
 
 func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiIdleStatus{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load idle status", selection.Tenant, selection.Environment); err != nil {
+		return uiIdleStatus{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -22,7 +22,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 		return uiIdleStatus{}, err
 	}
 	mcpPort := eruncommon.MCPPortForResult(result)
-	if !a.deps.canConnectLocalPort(mcpPort) {
+	if !a.deps.canReachMCPEndpoint(mcpPort) {
 		status, err := a.loadLocalIdleStatus(result)
 		if err == nil {
 			a.maybeStopIdleCloudEnvironment(result, status.status)
@@ -43,7 +43,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	}
 	merged := a.mergeLocalIdleActivity(result, status)
 	a.maybeStopIdleCloudEnvironment(result, merged)
-	return a.idleStatusToUI(result, merged), nil
+	return a.idleStatusToUI(result, merged, true), nil
 }
 
 type resolvedUIIdleStatus struct {
@@ -51,16 +51,22 @@ type resolvedUIIdleStatus struct {
 	status eruncommon.EnvironmentIdleStatus
 }
 
+// loadLocalIdleStatus assembles the idle status from what the host itself
+// knows, taken only when the pod could not be asked (mcp unreachable, or the
+// pod call itself failed). The resulting uiIdleStatus.FromPod is always
+// false: this reading may be stale relative to whatever the pod is actually
+// doing right now.
 func (a *App) loadLocalIdleStatus(result eruncommon.OpenResult) (resolvedUIIdleStatus, error) {
 	status, err := eruncommon.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return resolvedUIIdleStatus{}, err
 	}
-	return resolvedUIIdleStatus{ui: a.idleStatusToUI(result, status), status: status}, nil
+	return resolvedUIIdleStatus{ui: a.idleStatusToUI(result, status, false), status: status}, nil
 }
 
-func (a *App) idleStatusToUI(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
+func (a *App) idleStatusToUI(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
 	ui := idleStatusToUI(status)
+	ui.FromPod = fromPod
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return ui
@@ -97,12 +103,34 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 		StopBlockedReason:   strings.TrimSpace(status.StopBlockedReason),
 		StopError:           strings.TrimSpace(status.StopError),
 		Markers:             markers,
+		Leases:              environmentLeasesToUI(status.Leases, time.Now()),
 		// The desktop only observes the pending-stop fields, never computing
 		// them, so the pill renders the same state whichever client armed the stop.
 		StopPendingSince:       strings.TrimSpace(status.StopPendingSince),
 		SecondsUntilForcedStop: status.SecondsUntilForcedStop,
 		GracePeriodSeconds:     status.GracePeriodSeconds,
 	}
+}
+
+// environmentLeasesToUI carries the held leases through to the desktop so it
+// can name the job already working in an environment — the data idle status
+// already resolves, previously dropped on the way to the UI contract.
+func environmentLeasesToUI(leases []eruncommon.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
+	if len(leases) == 0 {
+		return nil
+	}
+	out := make([]uiEnvironmentLease, 0, len(leases))
+	for _, lease := range leases {
+		entry := uiEnvironmentLease{Name: strings.TrimSpace(lease.Name)}
+		if jobID, ok := eruncommon.EnvironmentJobIDFromLeaseID(lease.ID); ok {
+			entry.JobID = jobID
+		}
+		if !lease.StartedAt.IsZero() && now.After(lease.StartedAt) {
+			entry.SecondsHeld = int64(now.Sub(lease.StartedAt) / time.Second)
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func idleMarkerClientsToUI(clients []eruncommon.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {
@@ -226,8 +254,8 @@ func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, _ erun
 // client observe it too.
 func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("cancel pending idle stop", selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
@@ -267,7 +295,7 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 			continue
 		}
 		mcpPort := eruncommon.MCPPortForResult(result)
-		if !a.deps.canConnectLocalPort(mcpPort) {
+		if !a.deps.canReachMCPEndpoint(mcpPort) {
 			// Best-effort audit: no port-forward to reach the tool, and the
 			// stop already succeeded, so skip silently.
 			continue
@@ -284,8 +312,8 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 // canonical history the in-pod monitor records rather than any local copy.
 func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return nil, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load stop history", selection.Tenant, selection.Environment); err != nil {
+		return nil, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,

@@ -1,0 +1,2 @@
+audit: erun resize --apply-recommendation --dry-run --environment dev --tenant team
+resize: no standing recommendation is available for team/dev yet — it needs retained usage history, which is only readable from inside the environment's own runtime pod (its resize tool over MCP), not from the host; run `erun usage` a few times first, or resize with explicit --cpu/--memory instead

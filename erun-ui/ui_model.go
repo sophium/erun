@@ -10,6 +10,12 @@ type uiState struct {
 	VersionSuggestions       []uiVersion             `json:"versionSuggestions,omitempty"`
 	VersionSuggestionNotices []uiVersionNotice       `json:"versionSuggestionNotices,omitempty"`
 	CloudProviders           []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
+	// ConfigUnreadable is set when one or more config files could not be read
+	// (e.g. a torn write) even after erun-common's own retries, so Tenants is
+	// empty for a reason other than "no environments configured". The
+	// sidebar must render this distinctly from a genuine empty state rather
+	// than showing "Create your first environment" for a read failure.
+	ConfigUnreadable bool `json:"configUnreadable,omitempty"`
 }
 
 type uiTenant struct {
@@ -21,15 +27,98 @@ type uiTenant struct {
 }
 
 type uiEnvironment struct {
-	Name              string `json:"name"`
-	Type              string `json:"type,omitempty"`
-	MCPURL            string `json:"mcpUrl,omitempty"`
-	APIURL            string `json:"apiUrl,omitempty"`
-	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
-	KubernetesContext string `json:"kubernetesContext,omitempty"`
-	IsActive          bool   `json:"isActive,omitempty"`
-	SSHDEnabled       bool   `json:"sshdEnabled,omitempty"`
-	AutoStart         *bool  `json:"autoStart,omitempty"`
+	Name           string `json:"name"`
+	Type           string `json:"type,omitempty"`
+	MCPURL         string `json:"mcpUrl,omitempty"`
+	APIURL         string `json:"apiUrl,omitempty"`
+	RuntimeVersion string `json:"runtimeVersion,omitempty"`
+	// RuntimeVersionLine, ErunVersion, and RuntimeImageLineMismatch mirror
+	// eruncommon.ListEnvironmentResult's own fields of the same name -- see
+	// erun-common/runtime_version_line.go and erun-common/list.go. The
+	// environment hover card is the only consumer today.
+	RuntimeVersionLine       *eruncommon.RuntimeVersionLine             `json:"runtimeVersionLine,omitempty"`
+	ErunVersion              *eruncommon.ErunVersion                    `json:"erunVersion,omitempty"`
+	RuntimeImageLineMismatch *eruncommon.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
+	KubernetesContext        string                                     `json:"kubernetesContext,omitempty"`
+	IsActive                 bool                                       `json:"isActive,omitempty"`
+	SSHDEnabled              bool                                       `json:"sshdEnabled,omitempty"`
+	AutoStart                *bool                                      `json:"autoStart,omitempty"`
+	// Activity is the environment-activity poller's last observation for this
+	// env, if any. The poller only emits a Wails event on a transition, so a
+	// Redux store that resets without the Go process restarting (e.g. the
+	// ErrorBoundary "Reload app" button) would otherwise have nothing to seed
+	// from and render a still-busy env as idle until its next transition —
+	// which for a long agent turn can be tens of minutes away, if it comes
+	// before the turn ends at all. nil means the poller has not observed this
+	// env yet.
+	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
+	// Usage is the environment-usage poller's last cached reading for this env,
+	// if any. Populated on the same "nil means not yet observed" contract as
+	// Activity, and for the same reason: a Redux reset that does not restart the
+	// Go process would otherwise have no reading to seed a hover card from until
+	// the next sweep tick.
+	Usage *uiEnvironmentUsageSnapshot `json:"usage,omitempty"`
+	// Node is the cloud node this env's cluster runs on, if it has one. nil is
+	// the definite answer "this environment is not backed by a node erun
+	// manages" — never "the node could not be read", which is Status instead.
+	Node *uiEnvironmentNodeSnapshot `json:"node,omitempty"`
+}
+
+// uiEnvironmentNodeSnapshot is the machine an environment's cluster runs on,
+// as the cloud-context poller last observed it (cloud_context_cache.go). It is
+// a fact about the NODE, kept apart from every field above, which are facts
+// about the environment: a stopped node and a stopped environment are
+// different things with different remedies, and the row that renders them must
+// not be able to conflate the two.
+type uiEnvironmentNodeSnapshot struct {
+	Name string `json:"name"`
+	// Label is the operator-facing name for the same node, falling back to Name.
+	Label string `json:"label,omitempty"`
+	// Status is the poller's cached reading: "running", "pending", "stopped",
+	// "unknown" once a known-good reading has gone stale, or "" when the poller
+	// has not observed this node yet. The last two both mean "we do not know",
+	// and neither may be rendered as stopped.
+	Status string `json:"status"`
+}
+
+// envNodePayload publishes one environment's node reading, on the same
+// transition-only cadence envActivityPayload uses. Node is nil for an
+// environment with no node erun manages, which is a state the row renders
+// (nothing about a node) rather than a reason to withhold the event.
+type envNodePayload struct {
+	Tenant      string                     `json:"tenant"`
+	Environment string                     `json:"environment"`
+	Node        *uiEnvironmentNodeSnapshot `json:"node,omitempty"`
+}
+
+// uiEnvironmentActivitySnapshot mirrors envActivityPayload's observation
+// fields, minus the tenant/environment identity envActivityPayload carries
+// for the event stream — here that identity is already the enclosing
+// uiEnvironment.
+type uiEnvironmentActivitySnapshot struct {
+	Reachable bool `json:"reachable"`
+	Observed  bool `json:"observed"`
+	Outage    bool `json:"outage"`
+	// CheckFailed mirrors environmentActivityState's own field: a real attempt
+	// to reach an environment with no local forward (over kubectl exec) that
+	// did not come back, as opposed to an environment nobody has asked about at
+	// all. Kept apart from Outage for the same reason Outage is kept apart from
+	// Reachable — the two failures name different remedies.
+	CheckFailed bool   `json:"checkFailed,omitempty"`
+	Busy        bool   `json:"busy"`
+	Detail      string `json:"detail,omitempty"`
+}
+
+// uiEnvironmentUsageSnapshot is the environment-usage poller's last cached
+// reading for this env (environment_usage.go), mirroring envUsagePayload minus
+// the tenant/environment identity the event stream carries. ObservedAtUnix and
+// StaleAfterSeconds let a renderer show the reading's age and mark it stale
+// without hardcoding the sweep interval — an unlabelled stale number is worse
+// than none.
+type uiEnvironmentUsageSnapshot struct {
+	Usage             uiRuntimeUsage `json:"usage"`
+	ObservedAtUnix    int64          `json:"observedAtUnix"`
+	StaleAfterSeconds int64          `json:"staleAfterSeconds"`
 }
 
 // uiWorkingIssue backs the sidebar hover card's "what is this env working on".
@@ -73,8 +162,34 @@ type envActivityPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Reachable   bool   `json:"reachable"`
+	// Observed separates "the environment answered, and said no work" from
+	// "nobody got an answer": busy is false in both, and the sidebar acts on
+	// the difference when deciding whether a row may stop spinning.
+	Observed bool `json:"observed"`
+	// Outage is the diagnosis behind an environment that had a forward and no
+	// longer has a working one — the local port free after kubectl exited with
+	// its pod, or held by something that replies to nothing — once
+	// re-establishing it did not help. Without it such a row renders exactly
+	// like a quiet environment or an unopened one, which is how one stayed dead
+	// for hours. It is deliberately independent of Reachable: the dropped shape
+	// is unreachable *and* diagnosed, and only the second of those is news.
+	Outage bool `json:"outage"`
+	// CheckFailed mirrors uiEnvironmentActivitySnapshot's own field; see there
+	// for why it is kept apart from both Reachable and Outage.
+	CheckFailed bool   `json:"checkFailed,omitempty"`
 	Busy        bool   `json:"busy"`
 	Detail      string `json:"detail,omitempty"`
+}
+
+// envUsagePayload is the usage-sweep counterpart to envActivityPayload: a
+// cached reading of what this environment's own runtime pod is using,
+// published on the sweep's cadence rather than per-hover (environment_usage.go).
+type envUsagePayload struct {
+	Tenant            string         `json:"tenant"`
+	Environment       string         `json:"environment"`
+	Usage             uiRuntimeUsage `json:"usage"`
+	ObservedAtUnix    int64          `json:"observedAtUnix"`
+	StaleAfterSeconds int64          `json:"staleAfterSeconds"`
 }
 
 // uiEnvironmentStopResult is what the Runtime tab's Stop control reports back.
@@ -98,11 +213,20 @@ type uiSelection struct {
 	// ClusterRegistry selects the in-cluster erun-registry (resolved from the
 	// env's kube-context) instead of the static ContainerRegistry string; the two
 	// are mutually exclusive and ClusterRegistry wins when set.
-	ClusterRegistry  bool   `json:"clusterRegistry,omitempty"`
-	Type             string `json:"type,omitempty"`
-	LocalRepoPath    string `json:"localRepoPath,omitempty"`
-	NoGit            bool   `json:"noGit,omitempty"`
-	SetDefaultTenant bool   `json:"setDefaultTenant,omitempty"`
+	ClusterRegistry bool `json:"clusterRegistry,omitempty"`
+	// ErunRegistry selects erun's hosted registry for the tenant. Mutually
+	// exclusive with both ContainerRegistry and ClusterRegistry, matching
+	// `erun init --erun-registry`.
+	ErunRegistry bool `json:"erunRegistry,omitempty"`
+	// RuntimeRegistry and ImagePullSecrets carry `erun init`'s
+	// --runtime-registry and --image-pull-secret, without which an env created
+	// here cannot pull a private runtime image.
+	RuntimeRegistry  string   `json:"runtimeRegistry,omitempty"`
+	ImagePullSecrets []string `json:"imagePullSecrets,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	LocalRepoPath    string   `json:"localRepoPath,omitempty"`
+	NoGit            bool     `json:"noGit,omitempty"`
+	SetDefaultTenant bool     `json:"setDefaultTenant,omitempty"`
 	// Components is the explicit one-shot deploy selection from the Runtime tab's
 	// "Components to deploy" checklist; empty leaves deploy to resolve the env's
 	// saved default. Values are chart directory names (plus the runtime release
@@ -160,12 +284,23 @@ type uiTenantConfig struct {
 }
 
 type uiTenantDashboardInput struct {
-	Tenant             string `json:"tenant"`
-	Environment        string `json:"environment,omitempty"`
-	APIURL             string `json:"apiUrl"`
-	MCPURL             string `json:"mcpUrl,omitempty"`
-	KubernetesContext  string `json:"kubernetesContext,omitempty"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
+	Tenant            string `json:"tenant"`
+	Environment       string `json:"environment,omitempty"`
+	MCPURL            string `json:"mcpUrl,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	// PlatformAlias optionally names which configured erun-type cloud alias's
+	// platform to read. Empty defers to the caller's sole configured erun
+	// alias; when more than one is configured the load reports every alias as
+	// a choice instead of guessing. See tenant_platform.go — the desktop
+	// resolves the platform's base URL and identity the same way `erun
+	// platform` does, never from an environment's own apiUrl.
+	PlatformAlias string `json:"platformAlias,omitempty"`
+	// ReviewFilterMine/ReviewFilterWaitingOnMe are the Reviews tab's one-click
+	// discovery filters. Both resolve to the signed-in user's own id (already
+	// known from this same load's whoami call) rather than asking the
+	// frontend to carry a user id it has no other reason to know.
+	ReviewFilterMine        bool `json:"reviewFilterMine,omitempty"`
+	ReviewFilterWaitingOnMe bool `json:"reviewFilterWaitingOnMe,omitempty"`
 
 	// mcpBearer is the per-env MCP edge token for the dashboard's MCP API-log
 	// read. Set server-side from the desktop identity, never by the frontend;
@@ -174,18 +309,231 @@ type uiTenantDashboardInput struct {
 }
 
 type uiTenantDashboard struct {
-	Tenant          string                    `json:"tenant"`
-	Environment     string                    `json:"environment,omitempty"`
-	APIURL          string                    `json:"apiUrl,omitempty"`
-	APIError        string                    `json:"apiError,omitempty"`
-	APILog          string                    `json:"apiLog,omitempty"`
-	APILogError     string                    `json:"apiLogError,omitempty"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment,omitempty"`
+	APIURL      string `json:"apiUrl,omitempty"`
+	// APIError is a whole-dashboard failure: the caller's identity could not be
+	// read, so no panel can be resolved or gated. A single panel's own failure
+	// belongs on that panel, not here.
+	APIError    string `json:"apiError,omitempty"`
+	APILog      string `json:"apiLog,omitempty"`
+	APILogError string `json:"apiLogError,omitempty"`
+	// PlatformState names why the platform identity is not ready to load, so
+	// the frontend renders the one action that resolves it instead of a
+	// generic error. "" means the platform resolved and the load proceeded
+	// (see tenantPlatformStateReady and its siblings in tenant_platform.go).
+	PlatformState string `json:"platformState,omitempty"`
+	// PlatformAliasChoices lists every configured erun-type alias when more
+	// than one exists and the caller did not name one to use.
+	PlatformAliasChoices []string `json:"platformAliasChoices,omitempty"`
+	// PlatformAlias is the erun-type cloud alias actually resolved (or that a
+	// not-signed-in/not-enrolled/no-permission state must act on).
+	PlatformAlias string `json:"platformAlias,omitempty"`
+	// PlatformURL is the platform base URL actually resolved (or that would be
+	// contacted once signed in), so the surface can name what it talked to.
+	PlatformURL string `json:"platformUrl,omitempty"`
+	// PlatformIssuer/PlatformSubject prefill an enrollment request from the
+	// identity already in hand, once a bearer minted successfully — set even
+	// when the subsequent identity read itself failed (not-enrolled).
+	PlatformIssuer  string                    `json:"platformIssuer,omitempty"`
+	PlatformSubject string                    `json:"platformSubject,omitempty"`
 	User            *uiTenantDashboardUser    `json:"user,omitempty"`
 	Reviews         []uiTenantDashboardReview `json:"reviews,omitempty"`
 	MergeQueue      []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
 	Builds          []uiTenantDashboardBuild  `json:"builds,omitempty"`
-	AuditEvents     []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
-	AuditLogMessage string                    `json:"auditLogMessage,omitempty"`
+	// GateRuns is the Gates tab's own queue: what is being gated right now,
+	// and what recent gates decided, independent of whether the change
+	// gated is an erun review at all — see erun-backend-api/AGENTS.md's
+	// "Gate Runs".
+	GateRuns    []uiGateRun              `json:"gateRuns,omitempty"`
+	AuditEvents []uiTenantDashboardAudit `json:"auditEvents,omitempty"`
+	Panels      []uiTenantDashboardPanel `json:"panels,omitempty"`
+	// CanCreateReview and CanAdvanceMergeQueue report whether the signed-in user
+	// may attempt those writes at all, so the composing actions can be hidden
+	// rather than rendered to fail on submit — the same contract CanComment
+	// already gives the reply composer.
+	CanCreateReview      bool `json:"canCreateReview"`
+	CanAdvanceMergeQueue bool `json:"canAdvanceMergeQueue"`
+	// CanOverrideMergeQueue reports whether the signed-in user may bypass the
+	// unresolved-thread gate, a distinct (usually narrower) grant from
+	// CanAdvanceMergeQueue's — see tenantDashboardWriteOverrideAdvanceMergeQueue.
+	CanOverrideMergeQueue bool `json:"canOverrideMergeQueue"`
+	// MineReviewCount/WaitingOnMeReviewCount are the Reviews tab's filter
+	// buttons' own discovery signal: how many reviews match each filter,
+	// visible before the caller clicks either one. Unset (rather than 0) when
+	// the caller cannot read reviews at all, or has no signed-in user id to
+	// filter by.
+	MineReviewCount        *int `json:"mineReviewCount,omitempty"`
+	WaitingOnMeReviewCount *int `json:"waitingOnMeReviewCount,omitempty"`
+	// Contexts/Environments are the Registration tab's two lists: the
+	// platform's own cloud contexts (managed clusters) and hosted
+	// environments — the objects `erun platform` registers, distinct from
+	// (and with no automatic link to) this machine's local tenant/env config.
+	// Each degrades independently (ContextsRestricted/ContextsError,
+	// EnvironmentsRestricted/EnvironmentsError) so a caller denied one list,
+	// or a list read that fails, does not blank the other.
+	Contexts               []uiPlatformContext     `json:"contexts,omitempty"`
+	ContextsRestricted     string                  `json:"contextsRestricted,omitempty"`
+	ContextsError          string                  `json:"contextsError,omitempty"`
+	Environments           []uiPlatformEnvironment `json:"environments,omitempty"`
+	EnvironmentsRestricted string                  `json:"environmentsRestricted,omitempty"`
+	EnvironmentsError      string                  `json:"environmentsError,omitempty"`
+	// CanCreateContext/CanRegisterEnvironment/CanDeployEnvironment/
+	// CanStopEnvironment/CanDeleteEnvironment report whether the signed-in
+	// user may attempt each registration write at all, so the composing
+	// forms/buttons can be hidden rather than rendered to fail on submit,
+	// mirroring CanCreateReview/CanAdvanceMergeQueue above. Previewing an
+	// environment (PreviewPlatformEnvironment) shares CanRegisterEnvironment's
+	// own gate — it is the same POST /v1/environments route, requested with
+	// preview:true — rather than a separate capability.
+	CanCreateContext       bool `json:"canCreateContext"`
+	CanRegisterEnvironment bool `json:"canRegisterEnvironment"`
+	CanDeployEnvironment   bool `json:"canDeployEnvironment"`
+	CanStopEnvironment     bool `json:"canStopEnvironment"`
+	CanDeleteEnvironment   bool `json:"canDeleteEnvironment"`
+	// MyInviteRequest is the caller's own most recent invite request, set
+	// whenever a bearer minted successfully (PlatformIssuer/PlatformSubject is
+	// set) regardless of whether the identity read itself succeeded — a
+	// not-enrolled caller is exactly who needs to see this. nil means either
+	// never submitted one, or the read itself failed — MyInviteRequestError
+	// distinguishes the two; a nil MyInviteRequest with no
+	// MyInviteRequestError is the genuine "never submitted" case.
+	MyInviteRequest *uiInviteRequest `json:"myInviteRequest,omitempty"`
+	// MyInviteRequestError is set when the platform round trip for
+	// MyInviteRequest failed for a reason other than "none exists" (a
+	// transport fault, a 5xx) — it must never be presented as "never
+	// requested", since the caller could already have a pending or approved
+	// request the dashboard just failed to read.
+	MyInviteRequestError string `json:"myInviteRequestError,omitempty"`
+	// InviteRequests/PendingInviteRequestCount are the operator/admin queue:
+	// every pending request naming this tenant (or, for an operations-scoped
+	// caller, every tenant). PendingInviteRequestCount is unset (rather than
+	// 0) when the caller cannot read the queue at all, mirroring
+	// MineReviewCount's degrade-by-permission contract above.
+	InviteRequests            []uiInviteRequest `json:"inviteRequests,omitempty"`
+	PendingInviteRequestCount *int              `json:"pendingInviteRequestCount,omitempty"`
+	CanApproveInviteRequests  bool              `json:"canApproveInviteRequests"`
+	CanDeclineInviteRequests  bool              `json:"canDeclineInviteRequests"`
+	// InviteRequestRateLimitWindowSeconds is the platform's current
+	// per-identity invite-request submission window, best effort (0 when it
+	// could not be read) — the request dialog uses it to show "you can submit
+	// once every N seconds" before a first attempt, not only after a 429.
+	InviteRequestRateLimitWindowSeconds int `json:"inviteRequestRateLimitWindowSeconds,omitempty"`
+}
+
+// uiPlatformContext mirrors eruncommon.PlatformContext's JSON-safe subset the
+// dashboard's Registration tab renders.
+type uiPlatformContext struct {
+	ContextID          string `json:"contextId"`
+	Name               string `json:"name"`
+	Provider           string `json:"provider"`
+	CloudProviderAlias string `json:"cloudProviderAlias,omitempty"`
+	Region             string `json:"region,omitempty"`
+	InstanceType       string `json:"instanceType,omitempty"`
+	KubernetesContext  string `json:"kubernetesContext,omitempty"`
+	Status             string `json:"status"`
+	ProvisionError     string `json:"provisionError,omitempty"`
+}
+
+// uiPlatformEnvironment mirrors eruncommon.PlatformEnvironment's JSON-safe
+// subset the dashboard's Registration tab renders.
+type uiPlatformEnvironment struct {
+	EnvironmentID     string `json:"environmentId"`
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	ContextID         string `json:"contextId,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+	Status            string `json:"status"`
+	ProvisionError    string `json:"provisionError,omitempty"`
+	DeployedVersion   string `json:"deployedVersion,omitempty"`
+	DeleteError       string `json:"deleteError,omitempty"`
+}
+
+// uiCreatePlatformContextInput registers (or, with Preview set, only
+// previews) a cloud context on the platform: the hosted managed cluster an
+// environment deploys into.
+type uiCreatePlatformContextInput struct {
+	Tenant             string `json:"tenant"`
+	Name               string `json:"name"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+	Region             string `json:"region"`
+	InstanceType       string `json:"instanceType,omitempty"`
+	DiskType           string `json:"diskType,omitempty"`
+	DiskSizeGB         int    `json:"diskSizeGb,omitempty"`
+	Preview            bool   `json:"preview,omitempty"`
+}
+
+// uiPlatformContextOutcome is CreatePlatformContext's result. Kind
+// "conflict"/"unavailable" is a refusal that is itself an expected,
+// actionable state, carried in Message verbatim from the platform — never
+// rendered as a raw error; only "accepted" carries Context (a real create) or
+// Plan (a preview).
+type uiPlatformContextOutcome struct {
+	Kind    string             `json:"kind"`
+	Context *uiPlatformContext `json:"context,omitempty"`
+	Plan    []string           `json:"plan,omitempty"`
+	Message string             `json:"message,omitempty"`
+}
+
+// uiPlatformProvisionResult mirrors eruncommon.PlatformProvisionResult:
+// always a successful preview, QuotaOk names whether the plan can actually
+// register without hitting the tenant's quota cap.
+type uiPlatformProvisionResult struct {
+	Plan    []string `json:"plan"`
+	QuotaOk bool     `json:"quotaOk"`
+}
+
+// uiRegisterPlatformEnvironmentInput registers a hosted environment, or —
+// passed to PreviewPlatformEnvironment instead of RegisterPlatformEnvironment
+// — resolves the ordered plan the exact same fields would submit without
+// creating anything: one field set backs both actions, so the plan an
+// operator previews can never diverge from what register then does. Adopt
+// records an environment that already exists — see
+// eruncommon.PlatformCreateEnvironmentParams.Adopt — instead of asking the
+// platform to provision one.
+type uiRegisterPlatformEnvironmentInput struct {
+	Tenant            string `json:"tenant"`
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	ContextID         string `json:"contextId,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+	Adopt             bool   `json:"adopt,omitempty"`
+}
+
+// uiPlatformEnvironmentActionInput is Deploy/Stop/Delete's shared input: the
+// registered environment to act on, plus an optional Version (deploy only)
+// for redeploying at an explicit published version.
+type uiPlatformEnvironmentActionInput struct {
+	Tenant        string `json:"tenant"`
+	EnvironmentID string `json:"environmentId"`
+	Version       string `json:"version,omitempty"`
+}
+
+// uiPlatformEnvironmentOutcome is the shared result for
+// RegisterPlatformEnvironment/DeployPlatformEnvironment/
+// StopPlatformEnvironment/DeletePlatformEnvironment. Kind "conflict" (a
+// quota cap, or another deploy/delete already in flight) and "unavailable"
+// (no deploy executor configured on this control plane) are expected,
+// actionable outcomes carried in Message verbatim from the platform — never
+// raw errors; only "accepted" carries Environment.
+type uiPlatformEnvironmentOutcome struct {
+	Kind        string                 `json:"kind"`
+	Environment *uiPlatformEnvironment `json:"environment,omitempty"`
+	Message     string                 `json:"message,omitempty"`
+}
+
+// uiTenantDashboardPanel is one panel's own outcome. It is what lets the tab
+// strip tell "there is nothing here" apart from "you may not look": a panel the
+// caller lacks the permission for carries Restricted and is not rendered, while
+// one that failed carries Error and does not blank its neighbours.
+type uiTenantDashboardPanel struct {
+	Tab string `json:"tab"`
+	// Restricted names the API read the caller lacks, in canonical form
+	// ("GET /v1/audit-events"), so the reason can be shown rather than inferred.
+	Restricted string `json:"restricted,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 type uiTenantDashboardUser struct {
@@ -200,12 +548,30 @@ type uiTenantDashboardUser struct {
 }
 
 type uiTenantDashboardReview struct {
-	ReviewID          string `json:"reviewId"`
-	TenantID          string `json:"tenantId"`
-	Name              string `json:"name"`
-	TargetBranch      string `json:"targetBranch"`
-	SourceBranch      string `json:"sourceBranch"`
-	Status            string `json:"status"`
+	ReviewID     string `json:"reviewId"`
+	TenantID     string `json:"tenantId"`
+	AuthorUserID string `json:"authorUserId,omitempty"`
+	// AuthorUsername is the tenant user directory's display name for
+	// AuthorUserID, resolved best-effort (see tenant_dashboard.go's
+	// tenantDashboardUsernames). Empty when it could not be resolved, so the
+	// frontend falls back to the raw id rather than showing nothing (#1378).
+	AuthorUsername string `json:"authorUsername,omitempty"`
+	Name           string `json:"name"`
+	TargetBranch   string `json:"targetBranch"`
+	SourceBranch   string `json:"sourceBranch"`
+	Status         string `json:"status"`
+	// UnresolvedThreads is the review's "still being discussed" signal at a
+	// glance, from the row rather than only inside the detail dialog. Left
+	// unset (rather than 0) when it was not computed for this listing (see
+	// tenant_dashboard.go's reviewThreadCounts) so a caller can tell "zero
+	// unresolved" apart from "not read for this row".
+	UnresolvedThreads *int `json:"unresolvedThreads,omitempty"`
+	// Blocked is AdvanceMergeQueue's own report that it refused to promote
+	// this review: the queue head still has unresolved comment threads
+	// (UnresolvedThreads then carries the count). Every other read path
+	// leaves it unset — it is not a property of the review itself, only of
+	// that one call's outcome.
+	Blocked           bool   `json:"blocked,omitempty"`
 	LastFailedBuildID string `json:"lastFailedBuildId,omitempty"`
 	LastReadyBuildID  string `json:"lastReadyBuildId,omitempty"`
 	LastMergedBuildID string `json:"lastMergedBuildId,omitempty"`
@@ -214,15 +580,39 @@ type uiTenantDashboardReview struct {
 }
 
 type uiTenantDashboardBuild struct {
-	BuildID    string `json:"buildId"`
-	TenantID   string `json:"tenantId"`
-	ReviewID   string `json:"reviewId"`
-	ReviewName string `json:"reviewName,omitempty"`
-	Successful bool   `json:"successful"`
-	CommitID   string `json:"commitId"`
-	Version    string `json:"version"`
-	CreatedAt  string `json:"createdAt,omitempty"`
-	UpdatedAt  string `json:"updatedAt,omitempty"`
+	BuildID  string `json:"buildId"`
+	TenantID string `json:"tenantId"`
+	// ReviewID is empty for a build with no review attached (erun#1954) --
+	// identified by EnvironmentID instead.
+	ReviewID        string `json:"reviewId,omitempty"`
+	ReviewName      string `json:"reviewName,omitempty"`
+	EnvironmentID   string `json:"environmentId,omitempty"`
+	EnvironmentName string `json:"environmentName,omitempty"`
+	Successful      bool   `json:"successful"`
+	CommitID        string `json:"commitId"`
+	Version         string `json:"version"`
+	CreatedAt       string `json:"createdAt,omitempty"`
+	UpdatedAt       string `json:"updatedAt,omitempty"`
+}
+
+// uiGateRun mirrors eruncommon.PlatformGateRun's JSON-safe subset the Gates
+// tab renders. FailingStep/LogRef are set only for a FAILED run; a caller
+// must never infer failure from their absence alone, since an INCONCLUSIVE
+// run (a wrapper timeout, an environment fault -- never a real verdict)
+// carries neither and must render as its own distinct state, not as red.
+type uiGateRun struct {
+	GateRunID    string `json:"gateRunId"`
+	SourceBranch string `json:"sourceBranch"`
+	TargetBranch string `json:"targetBranch"`
+	SourceCommit string `json:"sourceCommit"`
+	MergeCommit  string `json:"mergeCommit,omitempty"`
+	ReviewID     string `json:"reviewId,omitempty"`
+	ReviewName   string `json:"reviewName,omitempty"`
+	Status       string `json:"status"`
+	FailingStep  string `json:"failingStep,omitempty"`
+	LogRef       string `json:"logRef,omitempty"`
+	CreatedAt    string `json:"createdAt,omitempty"`
+	UpdatedAt    string `json:"updatedAt,omitempty"`
 }
 
 type uiTenantDashboardAudit struct {
@@ -230,6 +620,167 @@ type uiTenantDashboardAudit struct {
 	Actor     string `json:"actor,omitempty"`
 	Action    string `json:"action"`
 	CreatedAt string `json:"createdAt,omitempty"`
+}
+
+type uiReviewDetailInput struct {
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
+}
+
+// uiReviewDetail is the Reviews tab's per-row detail: the review itself, its
+// comment threads, its recorded builds, and its position in its target
+// branch's merge queue. Each sub-read degrades independently — the same
+// restricted-vs-failed-vs-empty distinction the dashboard's own panels make —
+// so one forbidden or failing read never blanks the rest of the detail.
+type uiReviewDetail struct {
+	ReviewID string `json:"reviewId"`
+	// APIError is a whole-detail failure: identity could not be read, so no
+	// capability set exists to gate the reads below honestly.
+	APIError           string                   `json:"apiError,omitempty"`
+	Restricted         string                   `json:"restricted,omitempty"`
+	Error              string                   `json:"error,omitempty"`
+	Review             *uiTenantDashboardReview `json:"review,omitempty"`
+	Comments           []uiReviewComment        `json:"comments,omitempty"`
+	CommentsRestricted string                   `json:"commentsRestricted,omitempty"`
+	CommentsError      string                   `json:"commentsError,omitempty"`
+	Builds             []uiTenantDashboardBuild `json:"builds,omitempty"`
+	BuildsRestricted   string                   `json:"buildsRestricted,omitempty"`
+	BuildsError        string                   `json:"buildsError,omitempty"`
+	// QueuePosition is 1-based; 0 means the review is not in its target
+	// branch's merge queue right now.
+	QueuePosition int `json:"queuePosition,omitempty"`
+	// UnresolvedThreads counts root comments still OPEN, valid whenever
+	// Comments loaded (CommentsRestricted and CommentsError both empty).
+	UnresolvedThreads int `json:"unresolvedThreads,omitempty"`
+	// CanComment reports whether the signed-in user may reply at all, so the
+	// composer can be hidden rather than rendered to fail on submit.
+	CanComment bool `json:"canComment"`
+	// CanClose mirrors CanComment for the close action.
+	CanClose bool `json:"canClose"`
+	// CanResolveComments mirrors CanComment for the resolve/unresolve action,
+	// gated on its own write route since resolving a thread and posting to it
+	// are different permissions on the platform.
+	CanResolveComments  bool         `json:"canResolveComments"`
+	Reviewers           []uiReviewer `json:"reviewers,omitempty"`
+	ReviewersRestricted string       `json:"reviewersRestricted,omitempty"`
+	ReviewersError      string       `json:"reviewersError,omitempty"`
+	// CanAssignReviewers mirrors CanComment for the Add reviewers action,
+	// gated on its own write route (POST .../reviewers) since assigning a
+	// reviewer is a distinct permission from every other review write.
+	CanAssignReviewers bool `json:"canAssignReviewers"`
+	// CanRemoveReviewers mirrors CanAssignReviewers for the Remove action —
+	// DELETE is a distinct route from POST, gated separately.
+	CanRemoveReviewers bool `json:"canRemoveReviewers"`
+	// AvailableReviewers lists the tenant's enrolled users the Add reviewers
+	// picker may choose from — populated only when CanAssignReviewers is set,
+	// so a caller who cannot assign never pays for the extra read. A
+	// constrained picker, not a free-text id, is the point: it is how a
+	// cross-tenant userId becomes structurally impossible to submit rather
+	// than merely refused after the fact.
+	AvailableReviewers []uiReviewer `json:"availableReviewers,omitempty"`
+}
+
+// uiReviewer is one entry in a review's assigned-reviewers list.
+// Username is resolved best-effort the same way uiTenantDashboardReview's
+// AuthorUsername is, empty when it could not be resolved.
+type uiReviewer struct {
+	UserID   string `json:"userId"`
+	Username string `json:"username,omitempty"`
+}
+
+type uiReviewComment struct {
+	CommentID     string `json:"commentId"`
+	CreatorUserID string `json:"creatorUserId,omitempty"`
+	// CreatorUsername mirrors uiTenantDashboardReview.AuthorUsername: the
+	// tenant user directory's display name for CreatorUserID, resolved
+	// best-effort, empty when it could not be resolved (#1378).
+	CreatorUsername string `json:"creatorUsername,omitempty"`
+	Status          string `json:"status"`
+	ParentCommentID string `json:"parentCommentId,omitempty"`
+	CommitID        string `json:"commitId"`
+	FilePath        string `json:"filePath"`
+	Line            int    `json:"line"`
+	Body            string `json:"body"`
+	CreatedAt       string `json:"createdAt,omitempty"`
+}
+
+// uiUpdateReviewCommentStatusInput resolves or unresolves a comment thread.
+// CommentID must be a thread's root; the frontend never offers the action on
+// a reply, so there is no reply-rejection path to surface here.
+type uiUpdateReviewCommentStatusInput struct {
+	Tenant    string `json:"tenant"`
+	ReviewID  string `json:"reviewId"`
+	CommentID string `json:"commentId"`
+}
+
+// uiCreateReviewReplyInput replies to an existing comment thread. CommitID,
+// FilePath, and Line are copied from the parent comment the frontend already
+// holds — a reply must anchor to the same line as the thread it joins — so
+// Body is the only field the operator actually authors.
+type uiCreateReviewReplyInput struct {
+	Tenant          string `json:"tenant"`
+	ReviewID        string `json:"reviewId"`
+	ParentCommentID string `json:"parentCommentId"`
+	CommitID        string `json:"commitId"`
+	FilePath        string `json:"filePath"`
+	Line            int    `json:"line"`
+	Body            string `json:"body"`
+}
+
+// uiCreateReviewInput opens a review on the platform. sourceBranch must
+// already be pushed to the remote — see ExecPush — since the review
+// references it by name.
+type uiCreateReviewInput struct {
+	Tenant       string `json:"tenant"`
+	Name         string `json:"name"`
+	TargetBranch string `json:"targetBranch"`
+	SourceBranch string `json:"sourceBranch"`
+}
+
+type uiCloseReviewInput struct {
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
+}
+
+type uiAdvanceMergeQueueInput struct {
+	Tenant       string `json:"tenant"`
+	TargetBranch string `json:"targetBranch"`
+}
+
+type uiOverrideAdvanceMergeQueueInput struct {
+	Tenant       string `json:"tenant"`
+	TargetBranch string `json:"targetBranch"`
+	// Reason is required by the platform and is recorded in its audit trail
+	// alongside the caller's identity.
+	Reason string `json:"reason"`
+}
+
+// uiAddReviewerInput assigns userId as a reviewer on a review. userId must
+// already be enrolled in the caller's own tenant.
+type uiAddReviewerInput struct {
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
+	UserID   string `json:"userId"`
+}
+
+// uiRemoveReviewerInput unassigns userId from a review's reviewers.
+type uiRemoveReviewerInput struct {
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
+	UserID   string `json:"userId"`
+}
+
+// uiCreateReviewCommentInput starts a new top-level thread anchored to a diff
+// line, as opposed to uiCreateReviewReplyInput's reply-in-an-existing-thread.
+// Every field but Body is the anchor the operator picked by clicking a line in
+// the diff panel, not a value they typed.
+type uiCreateReviewCommentInput struct {
+	Tenant   string `json:"tenant"`
+	ReviewID string `json:"reviewId"`
+	CommitID string `json:"commitId"`
+	FilePath string `json:"filePath"`
+	Line     int    `json:"line"`
+	Body     string `json:"body"`
 }
 
 type uiSSHDConfig struct {
@@ -260,6 +811,93 @@ type uiPortStatus struct {
 	Status    string `json:"status"`
 }
 
+// uiExposureList is the Ports tab's read model for an environment's public
+// exposures. Configured is false when exposure cannot apply here at all,
+// which the tab renders as "not applicable" rather than an empty list —
+// distinct from Restricted (the caller cannot see the answer) and from a
+// genuinely empty Services list (configured, nothing exposed yet). Error
+// carries a listing failure that is neither of those two named cases.
+// NotConfiguredReason names which of two distinct causes made Configured
+// false, since they call for different copy and different recovery: a host
+// environment has no cluster and can never be exposed, while a cluster-backed
+// environment whose project simply hasn't declared a platform: block yet is
+// the fixable case.
+type uiExposureList struct {
+	Configured          bool               `json:"configured"`
+	Restricted          bool               `json:"restricted"`
+	Error               string             `json:"error,omitempty"`
+	Services            []uiExposedService `json:"services"`
+	NotConfiguredReason string             `json:"notConfiguredReason,omitempty"`
+}
+
+// uiExposureNotConfiguredReason enumerates uiExposureList.NotConfiguredReason values.
+const (
+	uiExposureNotConfiguredHostEnvironment = "host-environment"
+	uiExposureNotConfiguredNoPlatformBlock = "no-platform-block"
+)
+
+// uiExposedService mirrors eruncommon.ExposedService for the Ports tab list.
+// TLSReady/TLSNotReadyReason are meaningful only when Scheme is "https": see
+// eruncommon.ExposedService for why Scheme alone cannot say whether the URL
+// is actually safe to open yet.
+type uiExposedService struct {
+	Service           string `json:"service"`
+	Hostname          string `json:"hostname"`
+	Scheme            string `json:"scheme"`
+	BackendService    string `json:"backendService,omitempty"`
+	TLSReady          bool   `json:"tlsReady,omitempty"`
+	TLSNotReadyReason string `json:"tlsNotReadyReason,omitempty"`
+}
+
+// uiEnvironmentServiceList is the Ports tab's read model for what the
+// environment is actually running — the list the operator picks from. It
+// mirrors uiExposureList's shape (Configured / Restricted / Error) so the tab
+// renders the same three states for both reads rather than inventing a second
+// vocabulary for the same conditions.
+type uiEnvironmentServiceList struct {
+	Configured          bool                   `json:"configured"`
+	Restricted          bool                   `json:"restricted"`
+	Error               string                 `json:"error,omitempty"`
+	Services            []uiEnvironmentService `json:"services"`
+	NotConfiguredReason string                 `json:"notConfiguredReason,omitempty"`
+}
+
+// uiEnvironmentService is one Service in the environment, with the exposure it
+// already has. Ports is what makes the picker able to offer a port instead of
+// asking the operator to remember one.
+type uiEnvironmentService struct {
+	Name     string                     `json:"name"`
+	Type     string                     `json:"type,omitempty"`
+	Ports    []uiEnvironmentServicePort `json:"ports,omitempty"`
+	Hostname string                     `json:"hostname,omitempty"`
+	Scheme   string                     `json:"scheme,omitempty"`
+	// ExposedAs is the logical label in the hostname, which is not necessarily
+	// the Service's own name.
+	ExposedAs string `json:"exposedAs,omitempty"`
+}
+
+type uiEnvironmentServicePort struct {
+	Name string `json:"name,omitempty"`
+	Port int    `json:"port"`
+}
+
+// uiExposeServiceInput is the Ports tab's "Expose a service" form. Service is
+// the public label; BackendService is the Service in the namespace to route
+// to, which the picker fills in from the operator's choice. Empty keeps the
+// <tenant>-<service> derivation for a caller that only knows a label.
+type uiExposeServiceInput struct {
+	Service        string `json:"service"`
+	BackendService string `json:"backendService,omitempty"`
+	TargetIP       string `json:"targetIP"`
+	Port           int    `json:"port,omitempty"`
+}
+
+// uiUnexposeResult confirms which DNS record un-exposing removed, so the
+// dialog can name it back to the operator.
+type uiUnexposeResult struct {
+	WildcardName string `json:"wildcardName"`
+}
+
 // uiContainerRegistryEntry mirrors eruncommon.ContainerRegistryEntry for the
 // desktop registry-list editor. Roles carry the value set build/from/to/deploy
 // but ride as plain strings because RegistryRole is a string alias at the Wails
@@ -284,6 +922,14 @@ type uiContainerRegistryCluster struct {
 	Label     string `json:"label"`
 }
 
+// uiDeployComponents is the Runtime tab's read model for a deploy at a chosen
+// version: the charts it would roll out, and which chart the runtime itself would
+// be installed from -- the second coordinate the version does not name.
+type uiDeployComponents struct {
+	Components   []eruncommon.DeployableComponent `json:"components"`
+	RuntimeChart uiRuntimeChartPlan               `json:"runtimeChart"`
+}
+
 type uiEnvironmentConfig struct {
 	Name                string                     `json:"name"`
 	Type                eruncommon.EnvironmentType `json:"type,omitempty"`
@@ -301,18 +947,32 @@ type uiEnvironmentConfig struct {
 	CloudAliasSlots              []uiEnvironmentCloudAlias `json:"cloudAliasSlots,omitempty"`
 	CloudContext                 *uiCloudContextStatus     `json:"cloudContext,omitempty"`
 	RuntimeVersion               string                    `json:"runtimeVersion"`
-	RuntimePod                   uiRuntimePodConfig        `json:"runtimePod"`
-	SSHD                         uiSSHDConfig              `json:"sshd"`
-	Idle                         uiIdleConfig              `json:"idle"`
-	Claude                       uiClaudeConfig            `json:"claude"`
-	ClaudeDefaults               uiClaudeDefaults          `json:"claudeDefaults"`
-	AITool                       string                    `json:"aiTool,omitempty"`
-	LocalPorts                   uiEnvironmentLocalPorts   `json:"localPorts"`
-	AutoStart                    *bool                     `json:"autoStart,omitempty"`
-	RemoteHostCredentials        bool                      `json:"remoteHostCredentials"`
-	AutoUpgrade                  bool                      `json:"autoUpgrade"`
-	UpgradeChannel               string                    `json:"upgradeChannel,omitempty"`
-	DisableBuildScript           bool                      `json:"disableBuildScript"`
+	// RuntimeChart is the chart this env's runtime is installed from, stated as an
+	// OCI reference that may carry its own version. Empty means "the chart
+	// published with the deployed version", which is right whenever the chart and
+	// the runtime image ride one release line. See EnvConfig.RuntimeChart.
+	RuntimeChart string `json:"runtimeChart,omitempty"`
+	// RuntimeRegistry is where the env resolves erun's OWN artifacts from -- the
+	// runtime chart and platform images -- as distinct from the registry this
+	// project's images are pushed to. Set it when the deploy registry holds only
+	// the project's images, so erun's chart is not there to pull.
+	RuntimeRegistry string `json:"runtimeRegistry,omitempty"`
+	// ImagePullSecrets names the Kubernetes dockerconfigjson secrets the runtime
+	// pod pulls its image with. Without one a private runtime image leaves the
+	// pod in ImagePullBackOff, which the app could previously cause and not fix.
+	ImagePullSecrets      []string                `json:"imagePullSecrets,omitempty"`
+	RuntimePod            uiRuntimePodConfig      `json:"runtimePod"`
+	SSHD                  uiSSHDConfig            `json:"sshd"`
+	Idle                  uiIdleConfig            `json:"idle"`
+	Claude                uiClaudeConfig          `json:"claude"`
+	ClaudeDefaults        uiClaudeDefaults        `json:"claudeDefaults"`
+	AITool                string                  `json:"aiTool,omitempty"`
+	LocalPorts            uiEnvironmentLocalPorts `json:"localPorts"`
+	AutoStart             *bool                   `json:"autoStart,omitempty"`
+	RemoteHostCredentials bool                    `json:"remoteHostCredentials"`
+	AutoUpgrade           bool                    `json:"autoUpgrade"`
+	UpgradeChannel        string                  `json:"upgradeChannel,omitempty"`
+	DisableBuildScript    bool                    `json:"disableBuildScript"`
 	// PlatformAccount binds the env's runtime ServiceAccount to cluster-admin so
 	// in-pod platform Terraform (the cluster edge) and component installs can
 	// manage cluster-scoped resources. See EnvConfig.PlatformAccount.
@@ -447,6 +1107,67 @@ type uiRuntimeReclaimResult struct {
 	Message string `json:"message"`
 }
 
+// uiRuntimeUsage is one live reading of the selected environment's own CPU,
+// memory and disk usage against its cgroup limits — as opposed to
+// uiRuntimeResourceStatus, which reads the node. Available is the probe's own
+// reachability; CPU/Memory/Disk each additionally state their own
+// unavailability, since cgroup v1, an unlimited limit, or an unreadable file
+// are all normal readings, not probe failures.
+type uiRuntimeUsage struct {
+	Tenant      string               `json:"tenant"`
+	Environment string               `json:"environment"`
+	Available   bool                 `json:"available"`
+	Message     string               `json:"message,omitempty"`
+	CPU         uiRuntimeCPUUsage    `json:"cpu"`
+	Memory      uiRuntimeMemoryUsage `json:"memory"`
+	Disk        []uiRuntimeDiskUsage `json:"disk,omitempty"`
+	Warnings    []string             `json:"warnings,omitempty"`
+}
+
+// uiRuntimeCPUUsage carries Available=false with Unavailable set when the
+// reader could not measure utilisation at all (no cgroup v2, or cpu.max
+// reports no quota) — never a zero utilisation, which would read as "idle"
+// rather than "unknown".
+type uiRuntimeCPUUsage struct {
+	Available          bool    `json:"available"`
+	Unavailable        string  `json:"unavailable,omitempty"`
+	QuotaCores         float64 `json:"quotaCores,omitempty"`
+	Quota              string  `json:"quota,omitempty"`
+	UtilizationPercent float64 `json:"utilizationPercent,omitempty"`
+	Utilization        string  `json:"utilization,omitempty"`
+}
+
+// uiRuntimeMemoryUsage mirrors the reader's own fail-soft shape: Unlimited is
+// a real, available reading (the container simply has no ceiling declared),
+// distinct from Unavailable (the cgroup file itself could not be read). Both
+// suppress the percent-of-limit figure, but only Unavailable is an error
+// state the panel should call out.
+type uiRuntimeMemoryUsage struct {
+	Available      bool    `json:"available"`
+	Unavailable    string  `json:"unavailable,omitempty"`
+	Unlimited      bool    `json:"unlimited,omitempty"`
+	CurrentBytes   int64   `json:"currentBytes,omitempty"`
+	Current        string  `json:"current,omitempty"`
+	PeakBytes      int64   `json:"peakBytes,omitempty"`
+	Peak           string  `json:"peak,omitempty"`
+	LimitBytes     int64   `json:"limitBytes,omitempty"`
+	Limit          string  `json:"limit,omitempty"`
+	PercentOfLimit float64 `json:"percentOfLimit,omitempty"`
+	OOMKills       int64   `json:"oomKills"`
+}
+
+type uiRuntimeDiskUsage struct {
+	Mount       string  `json:"mount"`
+	Available   bool    `json:"available"`
+	Unavailable string  `json:"unavailable,omitempty"`
+	TotalBytes  int64   `json:"totalBytes,omitempty"`
+	Total       string  `json:"total,omitempty"`
+	UsedBytes   int64   `json:"usedBytes,omitempty"`
+	Used        string  `json:"used,omitempty"`
+	PercentUsed float64 `json:"percentUsed,omitempty"`
+	Percent     string  `json:"percent,omitempty"`
+}
+
 // uiClusterRegistryStatus reports whether the selected Kubernetes context has an
 // in-cluster erun-registry deployed, so the new-environment dialog can default to
 // a resolvable cluster: registry entry instead of a hardcoded host.
@@ -458,6 +1179,19 @@ type uiClusterRegistryStatus struct {
 	Port              int    `json:"port,omitempty"`
 	Insecure          bool   `json:"insecure"`
 	Message           string `json:"message,omitempty"`
+}
+
+// uiHostedRegistryStatus reports whether erun's hosted container registry
+// (registry.erunpaas.com) is currently reachable, so the new-environment
+// dialog can gate offering it the same way uiClusterRegistryStatus gates the
+// in-cluster registry. Reason and Recovery are only set when Available is
+// false, and name the specific cause the probe observed and the action that
+// resolves it.
+type uiHostedRegistryStatus struct {
+	Host      string `json:"host"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+	Recovery  string `json:"recovery,omitempty"`
 }
 
 type uiRuntimeResourceNode struct {
@@ -587,6 +1321,25 @@ type startSessionResult struct {
 	// deploy) instead of a foreground PTY session. There is no Local tab to
 	// activate; progress and completion surface through the activity queue.
 	Orchestrated bool `json:"orchestrated,omitempty"`
+	// Occupancy lists the leases already holding the environment when an
+	// unconfirmed AI session start found it occupied: SessionID is 0 and no
+	// session was started. The caller shows who is already here and, if the
+	// user wants a second agent anyway, retries with confirmed=true.
+	Occupancy []uiEnvironmentLease `json:"occupancy,omitempty"`
+}
+
+// uiEnvironmentLease is one activity lease surfaced from
+// eruncommon.EnvironmentActivityLease so the desktop can name the job already
+// working in an environment. PID and lease ID are implementation detail, not
+// shown; SecondsHeld is precomputed so the renderer never redoes the time math.
+type uiEnvironmentLease struct {
+	Name        string `json:"name"`
+	SecondsHeld int64  `json:"secondsHeld,omitempty"`
+	// JobID is set only when the lease is held by a job, so the surface that
+	// names the occupancy can also act on it. Empty for every other holder,
+	// which is what keeps a non-job lease from rendering a cancel that cannot
+	// work.
+	JobID string `json:"jobId,omitempty"`
 }
 
 type deleteEnvironmentResult struct {
@@ -618,16 +1371,34 @@ type aiActivityPayload struct {
 	Busy        bool   `json:"busy"`
 }
 
+// orchestratorShellActivityPayload carries whether an orchestrator's
+// background shell is running, its command and when it started, so the
+// sidebar can spin and show elapsed time for a shell the orchestrator's own
+// turn may already have gone idle around. Emitted every heartbeat tick, busy
+// or not, the same re-emit-regardless-of-change treatment aiActivityPayload
+// was given earlier and for the same reason: a snapshot field
+// (orchestratorInfo.ShellRunning) carries the same signal so a missed or
+// mistimed event self-heals within one tick instead of staying wrong until
+// the state itself next changes.
+type orchestratorShellActivityPayload struct {
+	SessionID     int    `json:"sessionId"`
+	Running       bool   `json:"running"`
+	Command       string `json:"command,omitempty"`
+	StartedAtUnix int64  `json:"startedAtUnix,omitempty"`
+}
+
 type appStatusPayload struct {
 	Message string `json:"message"`
 	Busy    bool   `json:"busy"`
 }
 
-// appNotificationPayload carries a transient toast-style notification.
-// Unlike appStatusPayload, the frontend routes this through the auto-
-// dismissing notification slot, so one-shot info/success events cannot
-// go stale and outlive the state they describe. Kind matches the
-// frontend's AppNotification kinds: success | warning | error | info.
+// appNotificationPayload carries a classified notification retained in the
+// frontend's message-centre history for the session. success/info entries
+// auto-dismiss (leaving the history entry behind); warning/error persist
+// until acknowledged. Kind matches the frontend's AppNotification kinds:
+// success | warning | error | info | debug (debug is never emitted by this
+// backend today — the class exists so a future diagnostic emitter has
+// somewhere to go that isn't the operator-facing classes).
 type appNotificationPayload struct {
 	Kind    string `json:"kind"`
 	Message string `json:"message"`
@@ -639,6 +1410,16 @@ type appNotificationPayload struct {
 	Tenant      string `json:"tenant,omitempty"`
 	Environment string `json:"environment,omitempty"`
 	Source      string `json:"source,omitempty"`
+	// OrchestratorID tags a notification about a specific orchestrator so the
+	// frontend can render an action that operates on that orchestrator
+	// directly (e.g. restarting it), the orchestrator-scoped analogue of
+	// Tenant/Environment.
+	OrchestratorID string `json:"orchestratorId,omitempty"`
+	// Action names a control the frontend can render beside the message that
+	// actually performs the remedy the message names, e.g. "deploy" opens the
+	// tagged env's deploy dialog. Empty means the message carries no action the
+	// app can perform — the operator-facing text is the whole of the recovery.
+	Action string `json:"action,omitempty"`
 }
 
 // appNotificationClearPayload dismisses an env-tagged notification. The frontend
@@ -661,17 +1442,28 @@ type pastedFileResult struct {
 }
 
 type uiIdleStatus struct {
-	TimeoutSeconds      int64          `json:"timeoutSeconds"`
-	SecondsUntilStop    int64          `json:"secondsUntilStop"`
-	StopEligible        bool           `json:"stopEligible"`
-	OutsideWorkingHours bool           `json:"outsideWorkingHours"`
-	ManagedCloud        bool           `json:"managedCloud"`
-	StopBlockedReason   string         `json:"stopBlockedReason,omitempty"`
-	StopError           string         `json:"stopError,omitempty"`
-	CloudContextName    string         `json:"cloudContextName,omitempty"`
-	CloudContextStatus  string         `json:"cloudContextStatus,omitempty"`
-	CloudContextLabel   string         `json:"cloudContextLabel,omitempty"`
-	Markers             []uiIdleMarker `json:"markers,omitempty"`
+	TimeoutSeconds      int64 `json:"timeoutSeconds"`
+	SecondsUntilStop    int64 `json:"secondsUntilStop"`
+	StopEligible        bool  `json:"stopEligible"`
+	OutsideWorkingHours bool  `json:"outsideWorkingHours"`
+	ManagedCloud        bool  `json:"managedCloud"`
+	// FromPod is true only when this reading came from the pod's own idle
+	// monitor over MCP. False means it was assembled on the host because the
+	// pod could not be reached — the same moment the sidebar may be showing
+	// this environment as unreachable — so the countdown it carries is a
+	// best-effort local reconstruction, not a live observation.
+	FromPod            bool           `json:"fromPod"`
+	StopBlockedReason  string         `json:"stopBlockedReason,omitempty"`
+	StopError          string         `json:"stopError,omitempty"`
+	CloudContextName   string         `json:"cloudContextName,omitempty"`
+	CloudContextStatus string         `json:"cloudContextStatus,omitempty"`
+	CloudContextLabel  string         `json:"cloudContextLabel,omitempty"`
+	Markers            []uiIdleMarker `json:"markers,omitempty"`
+	// Leases are the work claims currently holding the environment (an
+	// orchestrator or CLI job running via job_start/AttachEnvironmentJob) — not
+	// this desktop's own interactive AI/ERun/Local sessions, which never take
+	// one. A non-empty list is a coexisting agent the AI tab does not manage.
+	Leases []uiEnvironmentLease `json:"leases,omitempty"`
 	// StopPendingSince carries the RFC3339 timestamp at which this env
 	// first became StopEligible. When set, the desktop has armed the
 	// grace-period warning and the user has SecondsUntilForcedStop

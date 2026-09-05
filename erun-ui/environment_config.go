@@ -15,8 +15,8 @@ import (
 
 func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("load environment config", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentConfig{}, err
 	}
 
 	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
@@ -32,8 +32,8 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 
 func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("save environment config", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentConfig{}, err
 	}
 
 	existing, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
@@ -75,16 +75,20 @@ func (a *App) persistEnvironmentConfig(selection uiSelection, config uiEnvironme
 }
 
 // applyContainerRegistries routes the registry list by env type: local-agent
-// envs store it in project config, where the build/deploy resolvers read it;
-// remote/runtime envs keep it on the env config because their project config
-// is not on the local machine.
+// and host envs store it in project config, where the build/deploy resolvers
+// read it (both have their project root on this machine); remote/runtime envs
+// keep it on the env config because their project config is not on the local
+// machine. A host env never actually deploys against a registry, so this only
+// matters if a project build pushes images independent of any pod.
 func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
-	if updated.ResolvedType() == eruncommon.EnvironmentTypeLocalAgent {
+	switch updated.ResolvedType() {
+	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeHost:
 		updated.ContainerRegistries = nil
 		return a.saveEnvironmentProjectRegistries(selection.Tenant, *updated, registries)
+	default:
+		updated.ContainerRegistries = registries.Clone()
+		return nil
 	}
-	updated.ContainerRegistries = registries.Clone()
-	return nil
 }
 
 // saveEnvironmentProjectRegistries writes a local-agent env's registry list to
@@ -109,8 +113,8 @@ func (a *App) saveEnvironmentProjectRegistries(tenant string, config eruncommon.
 // the desktop honors it; CLI users always run the preflight start.
 func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnvironmentConfig, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("set environment auto-start", selection.Tenant, selection.Environment); err != nil {
+		return uiEnvironmentConfig{}, err
 	}
 	value, err := parseAutoStartMode(mode)
 	if err != nil {
@@ -147,8 +151,8 @@ func parseAutoStartMode(mode string) (*bool, error) {
 
 func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current string) (string, error) {
 	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return "", fmt.Errorf("tenant and environment are required")
+	if err := errMissingTenantOrEnvironment("choose workspace-sync local folder", selection.Tenant, selection.Environment); err != nil {
+		return "", err
 	}
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
@@ -230,7 +234,7 @@ func (a *App) validateWorkspaceSyncConfig(config eruncommon.EnvConfig) error {
 	if localPath == "" {
 		return fmt.Errorf("local sync folder is required when workspace sync is enabled")
 	}
-	if err := ensureLocalWorkspaceSyncTarget(localPath); err != nil {
+	if err := eruncommon.EnsureLocalWorkspaceSyncTarget(localPath); err != nil {
 		return fmt.Errorf("local sync folder: %w", err)
 	}
 	return nil
@@ -285,6 +289,9 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		CloudProviderAliases:         environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
 		CloudAliasSlots:              environmentCloudAliasSlots(a.deps.store, config),
 		RuntimeVersion:               strings.TrimSpace(config.RuntimeVersion),
+		RuntimeChart:                 strings.TrimSpace(config.RuntimeChart),
+		RuntimeRegistry:              strings.TrimSpace(config.RuntimeRegistry),
+		ImagePullSecrets:             trimmedNonEmpty(config.ImagePullSecrets),
 		RuntimePod:                   runtimePodConfigToUI(config.RuntimePod),
 		SSHD: uiSSHDConfig{
 			Enabled:                    config.SSHD.Enabled,
@@ -589,6 +596,15 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.AutoUpgrade = config.AutoUpgrade
 	existing.DisableBuildScript = config.DisableBuildScript
+	// The chart the env rides is the operator's standing statement of one of the
+	// four deploy coordinates; a redeploy installs it, so saving it is enough --
+	// nothing derives it.
+	existing.RuntimeChart = strings.TrimSpace(config.RuntimeChart)
+	// Both are pull-time coordinates the operator states once: the registry
+	// erun's own chart comes from, and the secrets the pod pulls its image
+	// with. An empty list clears the secrets rather than keeping a stale one.
+	existing.RuntimeRegistry = strings.TrimSpace(config.RuntimeRegistry)
+	existing.ImagePullSecrets = trimmedNonEmpty(config.ImagePullSecrets)
 	existing.PlatformAccount = config.PlatformAccount
 	existing.MountSource = config.MountSource
 	existing.RepoURL = strings.TrimSpace(config.RepoURL)
@@ -603,10 +619,16 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 }
 
 func trimmedComponentNames(names []string) []string {
-	out := make([]string, 0, len(names))
-	for _, raw := range names {
-		if name := strings.TrimSpace(raw); name != "" {
-			out = append(out, name)
+	return trimmedNonEmpty(names)
+}
+
+// trimmedNonEmpty drops blanks so an omitempty field clears rather than
+// persisting a list of empty strings the operator never entered.
+func trimmedNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, raw := range values {
+		if value := strings.TrimSpace(raw); value != "" {
+			out = append(out, value)
 		}
 	}
 	if len(out) == 0 {
@@ -752,8 +774,15 @@ func idleConfigValue(value, fallback string) string {
 // longer carries Status, so a missing cache entry surfaces as Status="" that
 // callers must treat as "not yet observed," not "stopped."
 func (a *App) linkedCloudContext(config eruncommon.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
-	cloudProviderAlias := strings.TrimSpace(config.CloudProviderAlias)
-	kubernetesContext := strings.TrimSpace(config.KubernetesContext)
+	return a.linkedCloudContextFor(config.CloudProviderAlias, config.KubernetesContext)
+}
+
+// linkedCloudContextFor is the same resolution keyed on the two fields it
+// actually reads, for read-model callers that hold a list result rather than a
+// full EnvConfig.
+func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string) (eruncommon.CloudContextStatus, bool, error) {
+	cloudProviderAlias = strings.TrimSpace(cloudProviderAlias)
+	kubernetesContext = strings.TrimSpace(kubernetesContext)
 	if kubernetesContext == "" {
 		return eruncommon.CloudContextStatus{}, false, nil
 	}
@@ -781,17 +810,17 @@ func (a *App) ensureLinkedCloudContextRunning(config eruncommon.EnvConfig) (erun
 		return status, ok, err
 	}
 	if strings.TrimSpace(status.Status) == eruncommon.CloudContextStatusRunning {
-		a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
+		a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)))
 		return status, true, nil
 	}
-	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)), true)
+	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)))
 	status, err = eruncommon.StartCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
 	if err != nil {
 		return eruncommon.CloudContextStatus{}, true, err
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
 	a.setCloudContextStatusInCache(status.Name, status.Status)
-	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
+	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)))
 	return status, true, nil
 }
 

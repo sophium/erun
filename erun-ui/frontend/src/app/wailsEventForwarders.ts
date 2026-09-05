@@ -1,10 +1,19 @@
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import type { ActivityLockEvent, ActivityQueueEntry } from './activityQueueState';
-import { wailsApi } from './api/wailsApi';
 import type { AppNotificationClearPayload } from './model';
 import { setActivityLock, upsertActivityEntry } from './slices/activitySlice';
+import { openCloseGate } from './slices/closeGateSlice';
 import { dismissNotificationForEnv } from './slices/notificationSlice';
 import type { AppDispatch } from './store';
+import { handleEventsDropped } from './wailsEventThunks';
+
+// Payload shape of the "app-close-gate" event PrepareWindowClose emits (Go
+// main.uiCloseGate). Only the running list matters here: the event only
+// fires when blocked is true.
+interface AppCloseGatePayload {
+  blocked: boolean;
+  running?: ActivityQueueEntry[];
+}
 
 // attachWailsEventForwarders bridges Go runtime events into Redux with
 // page-lifetime subscriptions we never tear down. createListenerMiddleware is
@@ -29,7 +38,14 @@ export function attachWailsEventForwarders(dispatch: AppDispatch): void {
       }),
     );
   });
-  EventsOn('environments-changed', () => {
-    dispatch(wailsApi.util.invalidateTags(['AppState']));
+  EventsOn('app-close-gate', (gate: AppCloseGatePayload) => {
+    dispatch(openCloseGate(gate.running ?? []));
+  });
+  // Reserved gap marker from the headless HTTP+SSE bridge (see
+  // headlessserver.eventsDroppedName) -- see handleEventsDropped's own
+  // comment for why this tab reacts rather than reading the marker's absence
+  // from every other handler above as "nothing happened".
+  EventsOn('erun:events-dropped', (missed: number) => {
+    void dispatch(handleEventsDropped(missed));
   });
 }

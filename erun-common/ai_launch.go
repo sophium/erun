@@ -70,6 +70,12 @@ var claudeModelTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
 // cwd's existing session or starts fresh. It runs once when the dtach session
 // is created; reattaches never re-run it. Centralised so `erun open --ai` can
 // launch it pod-side and survive a disconnect.
+//
+// Never add --fork-session here: it mints a new session id on every resume,
+// which reintroduces the conversation-id drift this launch command exists to
+// avoid (an orchestrator resuming the wrong, empty conversation after a pod
+// restart). If a future resume bug looks like it needs a fresh id, that is a
+// sign the underlying id tracking is wrong, not that this flag is missing.
 func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig, tenant, environment string) string {
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		return tool

@@ -1,0 +1,38 @@
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+release: branch = main, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = stable
+release: develop branch "develop" exists = false
+<VERSION>
+audit: erun release
+==> Releasing <VERSION>
+release: branch=main mode=stable version=<VERSION>
+next version: <VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
+release: worktree clean = true
+stage: sync-remote
+stage: release
+==> Release failed after <ELAPSED>
+step timing (ordered by duration):
+  release (failed) [<ELAPSED>] — origin/main has moved since this release rebased onto it: it carries 3 commit(s) this release is not built on.
+Building now would publish <VERSION> and push its tag, and only then fail at the final push with everything already public.
+Nothing is published yet, so absorb the move and re-run:
+  git -C <TMP> pull --rebase origin main
+  erun release --force
+(--force recreates the local <VERSION> tag this run already made, which the rebase leaves behind.)
+    release [<ELAPSED>]
+    sync-remote [<ELAPSED>]
+timing record written to <TMP>
+origin/main has moved since this release rebased onto it: it carries 3 commit(s) this release is not built on.
+Building now would publish <VERSION> and push its tag, and only then fail at the final push with everything already public.
+Nothing is published yet, so absorb the move and re-run:
+  git -C <TMP> pull --rebase origin main
+  erun release --force
+(--force recreates the local <VERSION> tag this run already made, which the rebase leaves behind.)
