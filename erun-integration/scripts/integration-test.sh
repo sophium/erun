@@ -127,16 +127,26 @@ cd "$here"
 profile="$here/coverage/profile.txt"
 mkdir -p "$(dirname "$profile")"
 
+cover_dir_is_temp=0
 if [[ -n "${GOCOVERDIR:-}" ]]; then
     cover_dir="$GOCOVERDIR"
     mkdir -p "$cover_dir"
     rm -rf "$cover_dir"/*
 else
     cover_dir="$(mktemp -d "${TMPDIR:-/tmp}/erun-integration-cover.XXXXXX")"
-    trap 'rm -rf "$cover_dir"' EXIT
+    cover_dir_is_temp=1
 fi
 
 export GOCOVERDIR="$cover_dir"
+
+test_output="$(mktemp "${TMPDIR:-/tmp}/erun-integration-test-output.XXXXXX")"
+cleanup() {
+    rm -f "$test_output"
+    if [[ "$cover_dir_is_temp" -eq 1 ]]; then
+        rm -rf "$cover_dir"
+    fi
+}
+trap cleanup EXIT
 
 test_parallelism="${INTEGRATION_TEST_PARALLELISM:-$("$here/../scripts/parallel-gate.sh" width 32 "")}"
 
@@ -148,7 +158,22 @@ if [[ "$update_golden" -eq 1 ]]; then
 fi
 
 echo ">> running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)"
-go test -count=1 -parallel="$test_parallelism" ./...
+go test -count=1 -parallel="$test_parallelism" ./... 2>&1 | tee "$test_output"
+
+# A coverage meta-data emit failure (concurrent invocations racing a
+# write-then-rename into a shared GOCOVERDIR) prints this line to the losing
+# invocation's own stdout/stderr without failing the scenario that was
+# running at the time. Left undetected, that invocation's counters never
+# land and the merged total below silently under-reports coverage instead of
+# the gate ever seeing why. Fail loudly here instead of computing a total
+# that quietly omitted data.
+if grep -q "coverage meta-data emit failed" "$test_output"; then
+    echo "!! a coverage meta-data emit failed during the run (see above) -- that" >&2
+    echo "!! invocation's counters never landed, so the merged total below would" >&2
+    echo "!! silently under-report coverage rather than reflect what actually ran." >&2
+    echo "!! Refusing to report a total; re-run the suite." >&2
+    exit 1
+fi
 
 echo ">> merging coverage counters into $profile"
 go tool covdata textfmt -i="$cover_dir" -o="$profile"
