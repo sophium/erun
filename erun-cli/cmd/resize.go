@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, deployHelmChart common.HelmChartDeployerFunc, resolveOpen OpenResolver) *cobra.Command {
 	var tenant, environment, cpu, memory, dindCPU, dindMemory, orchestrator string
 	var applyRecommendation, overrideLease bool
 	cmd := &cobra.Command{
@@ -52,6 +53,7 @@ func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 				ResolveKubernetesDeployContext: resolveDeployContext,
 				Now:                            time.Now,
 				DeployHelmChart:                deployHelmChart,
+				LoadActivityLeases:             resizeActivityLeaseLoader(cmd.Context(), ctx, resolveOpen),
 			}, common.RuntimeResizeParams{
 				Tenant:      tenant,
 				Environment: environment,
@@ -85,6 +87,34 @@ func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	cmd.Flags().BoolVar(&overrideLease, "override-lease", false, "Roll the runtime pod even though the environment is currently held by another worker")
 	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on the resize's lease and on the override if one was needed")
 	return cmd
+}
+
+// resizeActivityLeaseLoader gives RunRuntimeResize's occupancy check a lease
+// reader that actually reaches the target environment. LoadEnvironmentActivityLeases
+// reads whatever filesystem the calling process itself runs on; a resize invoked
+// from the operator's own machine against a remote environment runs on a
+// different filesystem than that environment's own lease store (the same
+// "two homes" split environment_call.go documents for activity/job/idle), so
+// reading locally there always finds nothing and the guard never fires. When
+// this process is not itself the target environment, dispatch through the
+// environment's own MCP edge instead, exactly like `erun activity lease list`
+// already does off-environment.
+//
+// The dispatch runs even under --dry-run, unlike callEnvironmentTool's normal
+// dry-run behavior of only tracing the call: resize's own dry-run exists to
+// answer "would this be refused", and a stale "no leases" answer would silently
+// defeat that. Reading leases has no side effect, so forcing the real call here
+// costs nothing dry-run is meant to avoid.
+func resizeActivityLeaseLoader(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver) func(string, string, time.Time) ([]common.EnvironmentActivityLease, error) {
+	probeCtx := commandCtx
+	probeCtx.DryRun = false
+	return func(tenant, environment string, now time.Time) ([]common.EnvironmentActivityLease, error) {
+		if environmentTargetsItself() {
+			return common.LoadEnvironmentActivityLeases(tenant, environment, now)
+		}
+		leases, _, err := listLeasesInEnvironment(ctx, probeCtx, resolveOpen, tenant, environment)
+		return leases, err
+	}
 }
 
 func writeResizeResult(ctx common.Context, result common.RuntimeResizeResult) error {
