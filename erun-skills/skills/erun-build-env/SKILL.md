@@ -168,7 +168,7 @@ If neither applies — the tenant customises only the runtime image and deploys 
 components of its own (bootstrap / erun-only) — skip this step: image-only via
 `imageOverrides` (Step 5) rides the published `erun-devops` chart and adds no
 chart. Otherwise wrap the published `erun-devops` chart in a `<tenant>-devops`
-umbrella — **reference it, never fork it** — which `erun push`/`erun release`
+umbrella — **reference it, never fork it** — which `erun push`/`erun build --release`
 publishes at the tenant version alongside the component charts.
 
 Create `<tenant>-devops/k8s/<tenant>-devops/` — the dir name, the `Chart.yaml`

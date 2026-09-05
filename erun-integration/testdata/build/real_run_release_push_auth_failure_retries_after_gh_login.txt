@@ -13,7 +13,7 @@ release: develop branch "develop" exists = true
 audit: erun build --release
 ==> Building
 release: branch= mode=prerelease version=<VERSION>
-publishing image: ghcr.io/sophium/api:<VERSION>
+docker image: ghcr.io/sophium/api:<VERSION>
 git -C <TMP> status --porcelain --untracked-files=no
 release: worktree clean = true
 stage: release
@@ -34,9 +34,6 @@ git -C <TMP> rev-parse HEAD
 release tag already exists at HEAD; skipping <VERSION>
 docker builder prune -f
 release: docker root free disk space is not observable from this process; skipping the headroom check
-docker manifest inspect ghcr.io/sophium/api:<VERSION>
-docker manifest inspect ghcr.io/sophium/base:<VERSION>
-stage: publish
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64
@@ -77,25 +74,18 @@ cd <TMP> && helm push base-<VERSION> oci://ghcr.io/sophium/charts
 ==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
 helm pull oci://ghcr.io/sophium/charts/base --version <VERSION> --destination <TMP>
 ==> Verified published chart base <VERSION>
-stage: verify-publication
-docker manifest inspect ghcr.io/sophium/api:<VERSION>
-==> Verified published image ghcr.io/sophium/api:<VERSION>
-docker manifest inspect ghcr.io/sophium/base:<VERSION>
-==> Verified published image ghcr.io/sophium/base:<VERSION>
 release version: <VERSION>
 ==> Built in <ELAPSED>
 step timing (ordered by duration):
   build [<ELAPSED>]
-    publish [<ELAPSED>]
-      api (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
-        linux/amd64 (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — unauthorized: authentication required: denied: requested access to the resource is denied
-        linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
-        linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
-      base (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
-        linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
-        linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
-      chart api [<ELAPSED>]
-      chart base [<ELAPSED>]
+    api (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/amd64 (failed) (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>] — unauthorized: authentication required: denied: requested access to the resource is denied
+      linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+    base (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/amd64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+      linux/arm64 (cache miss: fingerprint image is missing for platforms [linux/amd64, linux/arm64]) [<ELAPSED>]
+    chart api [<ELAPSED>]
+    chart base [<ELAPSED>]
     release [<ELAPSED>]
-    verify-publication [<ELAPSED>]
 timing record written to <TMP>

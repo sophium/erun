@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -284,26 +283,6 @@ func TestRelease(t *testing.T) {
 		golden.Equal(t, "release/dry_run_main_with_all_packaging_artifacts_syncs_them", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_main_traces_anonymous_pullability_probe_for_terraform_referenced_image", func(t *testing.T) {
-		// A Terraform module under erun-devops/terraform-erun can reference a
-		// released image directly (terraform-erun-cluster-edge's real
-		// dns01_webhook_image is exactly this shape). verify-publication's
-		// anonymous-pullability check must discover that reference and trace
-		// probing it even in dry-run, where the real network probe is
-		// skipped -- discovery and the per-image decision are not gated on
-		// !DryRun, only the live registry call is.
-		setup := env.New(t)
-		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		fixture.SeedTerraformModuleImageReference(t, setup.Cwd, "erun-webhook")
-		fixture.RunGit(t, setup.Cwd, "add", "erun-devops")
-		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add terraform module image reference")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "release/dry_run_main_traces_anonymous_pullability_probe_for_terraform_referenced_image", normalize.Apply(result.Combined))
-	})
-
 	t.Run("dry_run_main_with_invalid_scoop_manifest_fails", func(t *testing.T) {
 		// An invalid Scoop manifest must fail the release during resolution,
 		// before any git mutation, naming every violated invariant — the guard
@@ -513,7 +492,6 @@ func TestRelease(t *testing.T) {
 esac
 `)
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "git")...)
-		envVars = append(envVars, stubPublishToolchain(t, setup)...)
 		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -546,7 +524,6 @@ esac
 			TagSHA:      releaseSHA,
 			RemoteTag:   "v1.4.2",
 		})...)
-		envVars = append(envVars, stubPublishToolchain(t, setup)...)
 
 		result := erun.Run(t, []string{"release", "--force"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -575,52 +552,6 @@ esac
 		if !strings.Contains(string(chart), "version: 1.4.2") {
 			t.Fatalf("Chart.yaml not stamped with release version:\n%s", chart)
 		}
-	})
-
-	t.Run("real_run_refuses_when_the_docker_root_is_nearly_full", func(t *testing.T) {
-		// The release that fills the node's disk is the one most likely
-		// to get evicted by it, so low headroom at the docker root refuses the
-		// release before the build spends anything — the same "known failure
-		// caught up front" shape as the registry-permission preflight. docker
-		// and df are both stubbed to report a real (if fake) low-space
-		// filesystem, exercising the conclusive refusal branch rather than the
-		// "not observable" fallback the other release scenarios take.
-		setup := env.New(t)
-		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		seedBareOrigin(t, setup)
-		dockerRoot := filepath.Join(setup.Cwd, "fake-docker-root")
-		if err := os.MkdirAll(dockerRoot, 0o755); err != nil {
-			t.Fatalf("mkdir fake docker root: %v", err)
-		}
-		stubs := filepath.Join(setup.Cwd, "stubs")
-		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
-			`case "$1 $2" in`,
-			`  "info -f") printf '%s' '` + dockerRoot + `' ;;`,
-			`  "builder prune") exit 0 ;;`,
-			`  *) exit 0 ;;`,
-			`esac`,
-		}, "\n"))
-		// 1 GiB available, well under the 20 GiB default floor.
-		fixture.StubBinaryAdvanced(t, stubs, "df", fixture.StubBinarySpec{
-			Stdout: "Filesystem     1024-blocks     Used Available Capacity Mounted on\n" +
-				"overlay          104857600 93763584   1048576      99% " + dockerRoot + "\n",
-		})
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "df")...)
-
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for low disk headroom, got 0: %s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "only 1.0 GiB free at the docker root, below the 20.0 GiB a multi-arch release build needs") {
-			t.Fatalf("expected the disk-headroom refusal in output:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "filling this disk is what evicts the pod running the release") {
-			t.Fatalf("expected the eviction-risk explanation in output:\n%s", result.Combined)
-		}
-
-		// Outside the captured streams: the refusal must leave the version
-		// file on the version it was releasing, so re-running retries it.
-		assertVersionFile(t, setup, "1.4.2\n")
 	})
 
 	t.Run("real_run_dirty_worktree_fails", func(t *testing.T) {
@@ -695,185 +626,6 @@ esac
 		}
 	})
 
-	t.Run("real_run_publishes_before_the_tag_reaches_origin", func(t *testing.T) {
-		// Regression. A release used to run only its git stages: it
-		// tagged, announced, and bumped the version without ever building or
-		// publishing an image or a chart, so the announced version was
-		// undeployable and the gap only surfaced at the next deploy's chart
-		// pull. Release now publishes between its local stages and its
-		// outward-facing ones. Real git against a bare origin proves the
-		// ordering behaviourally: the publish stage runs, the read-back
-		// verification resolves each image and chart, and only then does the
-		// tag reach origin. docker and helm are stubbed because the harness has
-		// no daemon or registry; git is real so "public" means public.
-		setup := env.New(t)
-		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		seedBareOrigin(t, setup)
-
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubPublishToolchain(t, setup)...)})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "release/real_run_publishes_before_the_tag_reaches_origin", normalize.Apply(result.Combined))
-
-		if tags := remoteTags(t, setup); !strings.Contains(tags, "refs/tags/v1.4.2") {
-			t.Fatalf("release tag did not reach origin after a successful publish:\n%s", tags)
-		}
-		assertVersionFile(t, setup, "1.4.3\n")
-	})
-
-	t.Run("real_run_publish_failure_leaves_no_public_tag", func(t *testing.T) {
-		// The other half of the same contract: when the publish cannot
-		// complete, the release must fail while nothing is public. docker fails
-		// every invocation, so the build inside the publish stage errors out.
-		// The tag must not exist on origin and VERSION must still hold the
-		// version that was being released, so re-running retries the same
-		// version rather than stranding it behind a bump.
-		setup := env.New(t)
-		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		seedBareOrigin(t, setup)
-		stubs := filepath.Join(setup.Cwd, "stubs")
-		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{Stderr: "simulated docker failure", ExitCode: 1})
-		fixture.StubBinary(t, stubs, "helm", "")
-
-		// #1201: give the registry-credential preflight a resolvable credential
-		// so this scenario still reaches the simulated docker failure it is about.
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
-		envVars = append(envVars, "GH_TOKEN=integration-test-token")
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit when the publish fails, got 0: %s", result.Combined)
-		}
-		golden.Equal(t, "release/real_run_publish_failure_leaves_no_public_tag", normalize.Apply(result.Combined))
-
-		if tags := remoteTags(t, setup); strings.Contains(tags, "refs/tags/v1.4.2") {
-			t.Fatalf("a failed release pushed its tag to origin:\n%s", tags)
-		}
-		assertVersionFile(t, setup, "1.4.2\n")
-	})
-
-	t.Run("real_run_refuses_when_the_base_branch_moved_before_the_build", func(t *testing.T) {
-		// Regression. A release established that it could fast-forward
-		// once, in sync-remote, and then spent the whole build before pushing
-		// anything; a base branch that moved in between was discovered at the
-		// final push, with everything already public. The branch is now re-read
-		// immediately before the build, and a release that cannot land refuses
-		// while nothing is published and the version file is untouched.
-		//
-		// git is stubbed so the re-read reports a moved branch deterministically:
-		// the move is what this scenario is about, and no fixture can make a real
-		// remote move between two of the release's own git calls.
-		setup := env.New(t)
-		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		stubs := filepath.Join(setup.Cwd, "stubs")
-		fixture.StubBinaryWithScript(t, stubs, "git", `case "$*" in
-  *'rev-parse --abbrev-ref HEAD'*) echo main ;;
-  *'rev-list --count HEAD..FETCH_HEAD'*) echo 3 ;;
-  *'rev-parse --short HEAD'*) echo abc1234 ;;
-  *'show-ref --verify --quiet'*) exit 1 ;;
-  *'^{}'*) exit 1 ;;
-  *) : ;;
-esac
-exit 0
-`)
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "git")...)
-		envVars = append(envVars, stubPublishToolchain(t, setup)...)
-
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit when the base branch moved before the build, got 0: %s", result.Combined)
-		}
-		golden.Equal(t, "release/real_run_refuses_when_the_base_branch_moved_before_the_build", normalize.Apply(result.Combined))
-
-		// Outside the captured streams: the refusal must leave the version file
-		// on the version it was releasing, so re-running retries that version.
-		assertVersionFile(t, setup, "1.4.2\n")
-	})
-
-	t.Run("real_run_absorbs_a_base_branch_that_moved_during_the_build", func(t *testing.T) {
-		// Regression, the other half. Releasing 1.0.176, a pull request
-		// merged to main while the release was building: the images, the charts
-		// and the tag all went public, and then the final push was rejected, so
-		// the repository carried neither the packaging commit nor the version
-		// bump and VERSION still read the version just published. The push now
-		// rebases onto the moved branch and retries.
-		//
-		// The helm stub is what moves origin. helm first runs inside the publish
-		// stage, which places the move exactly where the real one landed — after
-		// the pre-build re-check, while the version is going public.
-		setup := env.New(t)
-		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		origin := seedBareOrigin(t, setup)
-
-		// The linux release script is where the GitHub release entry is created,
-		// and it runs after the push. A marker proves a rejected push no longer
-		// strands it.
-		releaseScriptRan := filepath.Join(setup.Home, "github-release-created")
-		linuxComponentDir := filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli")
-		if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
-			t.Fatalf("mkdir linux component dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"),
-			[]byte("#!/bin/sh\n: > '"+filepath.ToSlash(releaseScriptRan)+"'\n"), 0o755); err != nil {
-			t.Fatalf("write release.sh: %v", err)
-		}
-		fixture.RunGit(t, setup.Cwd, "add", ".")
-		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add linux release script")
-		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "main")
-
-		// The checkout that stands in for the pull request, cloned once origin is
-		// at the commit the release starts from. -b main because the bare origin's
-		// HEAD still names whatever branch git init defaults to, so a plain clone
-		// would land on an unborn branch with no main to push.
-		merging := filepath.Join(setup.Home, "merging")
-		fixture.RunGit(t, setup.Home, "clone", "-q", "-b", "main", origin, merging)
-		fixture.RunGit(t, merging, "config", "user.email", "test@example")
-		fixture.RunGit(t, merging, "config", "user.name", "Test")
-
-		stubs := filepath.Join(setup.Cwd, "stubs")
-		stubDockerWithManifestTracking(t, stubs)
-		fixture.StubBinaryMergingIntoRemoteOnce(t, stubs, "helm", merging, "main", "a merged pull request")
-		fixture.StubBinary(t, stubs, "dpkg-deb", "")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
-		envVars = append(envVars,
-			// Linux package builds are what carry the GitHub release step, so the
-			// host and the tool are both declared rather than left to the runner.
-			"ERUN_HOST_OS_OVERRIDE=linux",
-			"PATH="+stubs+string(os.PathListSeparator)+setup.PathDir,
-			// #1201: give the registry-credential preflight a resolvable credential
-			// so this scenario still reaches the moved-branch-absorption it is about.
-			"GH_TOKEN=integration-test-token",
-		)
-
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		// git's push-rejection hint block is worded differently across git
-		// versions, so it cannot be part of a reviewed golden; the `! [rejected]`
-		// line and erun's own retry line are what this scenario locks.
-		combined := normalize.Apply(result.Combined, normalize.Replacement{Pattern: regexp.MustCompile(`(?m)^hint:.*\n?`), Token: ""})
-		golden.Equal(t, "release/real_run_absorbs_a_base_branch_that_moved_during_the_build", combined)
-
-		// Side effects outside the captured streams, one per contract the
-		// absorbed push has to hold: the repository records the release it
-		// published, the tag is public, the version moved past what was
-		// published, and the GitHub release step still ran.
-		remote := remoteMainSubjects(t, merging)
-		for _, want := range []string{"a merged pull request", "[skip ci] release 1.4.2", "[skip ci] prepare 1.4.3"} {
-			if !strings.Contains(remote, want) {
-				t.Fatalf("origin/main is missing %q after the absorbed push:\n%s", want, remote)
-			}
-		}
-		if tags := remoteTags(t, setup); !strings.Contains(tags, "refs/tags/v1.4.2") {
-			t.Fatalf("release tag did not reach origin after the absorbed push:\n%s", tags)
-		}
-		assertVersionFile(t, setup, "1.4.3\n")
-		if _, err := os.Stat(releaseScriptRan); err != nil {
-			t.Fatalf("the linux release script never ran, so the GitHub release entry was stranded: %v", err)
-		}
-	})
-
 	t.Run("dry_run_in_a_runtime_pod_claims_the_release_version_lease", func(t *testing.T) {
 		// Inside a runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT injected by the
 		// chart), release claims an exclusive, version-scoped activity lease
@@ -930,80 +682,41 @@ exit 0
 		assertVersionFile(t, setup, "1.4.2\n")
 	})
 
-	t.Run("dry_run_refuses_to_release_an_image_it_would_not_publish", func(t *testing.T) {
-		// Run from inside one component's build context, release resolves only
-		// that component's build but still stamps and would tag every image on
-		// the release version line. That is the shape of the original defect —
-		// a version announced for artifacts nobody publishes — so it is refused
-		// during resolution, before any stage runs.
+	t.Run("real_run_never_touches_docker_or_helm", func(t *testing.T) {
+		// Regression: erun release is version paperwork only and must never
+		// build, publish, or verify an artifact. No docker or helm binary is
+		// declared on PATH at all here
+		// (unlike releaseEnv's siblings, which never needed one either but
+		// this is the scenario that makes the absence the point) — if
+		// release regressed back to resolving a build execution and tried to
+		// invoke either, the run would fail with "executable file not found"
+		// instead of completing the plain git lifecycle.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		webDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "web")
-		if err := os.MkdirAll(webDir, 0o755); err != nil {
-			t.Fatalf("mkdir web component dir: %v", err)
+		seedBareOrigin(t, setup)
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		mustWriteFile(t, filepath.Join(webDir, "Dockerfile"), "FROM alpine:3.22\n")
-		fixture.RunGit(t, setup.Cwd, "add", ".")
-		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add web component")
-
-		componentCwd := filepath.Join(setup.Cwd, "erun-devops", "docker", "api")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: componentCwd, Env: releaseEnv(t, setup)})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for a release that cannot publish every image, got 0: %s", result.Combined)
+		for _, unwanted := range []string{"docker build", "docker push", "docker manifest", "helm package", "helm push", "helm pull", "stage: publish", "stage: verify-publication", "Verified published", "Verified anonymously pullable"} {
+			if strings.Contains(result.Combined, unwanted) {
+				t.Fatalf("erun release must never build or publish anything; found %q in output:\n%s", unwanted, result.Combined)
+			}
 		}
-		golden.Equal(t, "release/dry_run_refuses_to_release_an_image_it_would_not_publish", normalize.Apply(result.Combined))
+		if tags := remoteTags(t, setup); !strings.Contains(tags, "refs/tags/v1.4.2") {
+			t.Fatalf("release tag did not reach origin:\n%s", tags)
+		}
+		assertVersionFile(t, setup, "1.4.3\n")
 	})
 }
 
-// releaseEnv declares the docker stub every release scenario now needs: release
-// resolves the build execution that publishes the version, so it inspects the
-// local image store for fingerprint cache tags. The stub reports no local image
-// so the plan consistently shows a rebuild.
+// releaseEnv is the shared env for release scenarios. release itself never
+// touches docker (it discovers what it would build/publish by scanning the
+// filesystem, not by asking the daemon), so no docker stub is required here
+// — unlike build --release, which resolves a real build execution.
 func releaseEnv(t *testing.T, setup env.Setup) []string {
 	t.Helper()
-	return append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
-}
-
-// stubDockerWithManifestTracking declares a docker stub that succeeds on
-// everything except `manifest inspect`, which it answers from real
-// (marker-file-backed) state rather than a blanket yes: it backs both the
-// pre-publish "already published?" probe and the post-publish verify
-// step, so a stub that always answered yes would make a first-ever-release
-// scenario falsely report the image as already published before publishing
-// anything. Reporting false until `manifest push` actually runs, then true,
-// keeps the golden honest about what the scenario models.
-func stubDockerWithManifestTracking(t *testing.T, stubs string) {
-	t.Helper()
-	fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
-		`case "$1 $2" in`,
-		`  "manifest inspect")`,
-		`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
-		`    [ -f "$marker" ] && exit 0 || exit 1`,
-		`    ;;`,
-		`  "manifest push")`,
-		`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
-		`    touch "$marker"`,
-		`    exit 0`,
-		`    ;;`,
-		`  *) exit 0 ;;`,
-		`esac`,
-	}, "\n"))
-}
-
-// stubPublishToolchain declares succeeding docker and helm stubs so a real-run
-// release can execute its publish stage — build, push, manifest assembly, chart
-// publish, and the read-back verification — without a daemon or a registry.
-func stubPublishToolchain(t *testing.T, setup env.Setup) []string {
-	t.Helper()
-	stubs := filepath.Join(setup.Cwd, "stubs")
-	stubDockerWithManifestTracking(t, stubs)
-	fixture.StubBinary(t, stubs, "helm", "")
-	envVars := fixture.StubEnv(stubs, "docker", "helm")
-	// #1201: the registry-credential preflight refuses up front when no
-	// ghcr.io credential resolves at all. A real publish toolchain always has
-	// one; GH_TOKEN is the fixture-side stand-in so these scenarios keep
-	// exercising what happens once that check passes.
-	return append(envVars, "GH_TOKEN=integration-test-token")
+	return setup.Env()
 }
 
 // seedBareOrigin gives a release scenario a real remote, so "the tag is public"
@@ -1016,21 +729,6 @@ func seedBareOrigin(t *testing.T, setup env.Setup) string {
 	fixture.RunGit(t, setup.Cwd, "remote", "add", "origin", remoteRoot)
 	fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "main")
 	return remoteRoot
-}
-
-// remoteMainSubjects reads origin/main's commit subjects through a second
-// checkout, so a scenario can assert what the release actually landed on the
-// remote rather than what its own worktree believes.
-func remoteMainSubjects(t *testing.T, repoDir string) string {
-	t.Helper()
-	fixture.RunGit(t, repoDir, "fetch", "-q", "origin")
-	cmd := exec.Command("git", "log", "--format=%s", "origin/main")
-	cmd.Dir = repoDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git log origin/main: %v: %s", err, output)
-	}
-	return string(output)
 }
 
 func remoteTags(t *testing.T, setup env.Setup) string {

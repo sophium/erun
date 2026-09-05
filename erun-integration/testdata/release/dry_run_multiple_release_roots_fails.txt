@@ -1,6 +1,6 @@
+audit: erun release --dry-run
 release: resolving project root
 release: project root = <TMP>
 release: resolving release module root
 release: release module root resolution failed: multiple release roots found under project root
-audit: erun release --dry-run
 multiple release roots found under project root

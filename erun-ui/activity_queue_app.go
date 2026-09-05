@@ -381,11 +381,11 @@ var activityBuiltLineRe = regexp.MustCompile(`^==> Built\b`)
 var activityBuildFailedLineRe = regexp.MustCompile(`^==> Build failed\b`)
 
 // activityReleasing/Released/ReleaseFailed match the umbrella traces
-// RunReleaseExecution emits for a standalone `erun release` (mirrors
+// RunReleaseSpec emits for a standalone `erun release` (mirrors
 // `==> Building`). Like build they carry no tenant/env, so the handler
 // keys the activity off the session selection. `erun build --release`
-// runs the same execution but does not emit these, keeping that flow
-// under the single `==> Building` umbrella.
+// stamps and tags the same way internally but does not emit these,
+// keeping that flow under the single `==> Building` umbrella.
 var (
 	activityReleasingLineRe     = regexp.MustCompile(`^==> Releasing\b`)
 	activityReleasedLineRe      = regexp.MustCompile(`^==> Released\b`)

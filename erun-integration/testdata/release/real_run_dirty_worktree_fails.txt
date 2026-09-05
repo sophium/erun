@@ -1,3 +1,5 @@
+<VERSION>
+audit: erun release
 release: resolving project root
 release: project root = <TMP>
 release: resolving release module root
@@ -10,11 +12,9 @@ release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
 release: classified mode = candidate
 release: develop branch "develop" exists = true
-<VERSION>
-audit: erun release
 ==> Releasing <VERSION>
 release: branch=develop mode=candidate version=<VERSION>
-publishing image: ghcr.io/sophium/api:<VERSION>
+docker image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = false
 ==> Release failed after <ELAPSED>
 step timing (ordered by duration):

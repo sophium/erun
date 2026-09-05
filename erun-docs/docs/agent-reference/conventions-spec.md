@@ -164,7 +164,7 @@ The `docker/` root the algorithm scans is the convention default (`<tenant>-devo
 
 `erun build` targets `linux/amd64` + `linux/arm64` by default. Which platforms a given build actually targets is resolved once per image, in this order:
 
-1. **`--release` in effect** (`erun build --release`, or `erun push`/`erun build` as run by `erun release`): always `linux/amd64` + `linux/arm64`, unconditionally. A released artifact is published for anyone and must be deployable on any cluster, so neither `--platform` nor the config below is consulted — combining `--release` with `--platform` is rejected outright.
+1. **`--release` in effect** (`erun build --release`): always `linux/amd64` + `linux/arm64`, unconditionally. A released artifact is published for anyone and must be deployable on any cluster, so neither `--platform` nor the config below is consulted — combining `--release` with `--platform` is rejected outright.
 2. **`--platform <platform>` given** (repeatable, CLI/MCP): exactly the named platform(s), for that invocation only.
 3. **`environments.<env>.docker.platforms` configured** in the project's `.erun/config.yaml` (see [Configuration spec](/reference/configuration)): exactly the configured platform(s), for every non-release build/push in that environment — the durable pin for a cluster that can only ever run one architecture. `erun build --dry-run` traces the decision: `build: platforms configured as <platforms> (.erun/config.yaml environments.<env>.docker.platforms)`.
 4. **Neither set**: `linux/amd64` + `linux/arm64`.
@@ -174,7 +174,7 @@ The build-graph order, for the resolved platform list:
 1. Verify the local Docker daemon advertises every resolved platform. The check inspects `docker buildx inspect` for a builder supporting each. On miss → an error naming the missing platform(s) with a hint to run `docker run --privileged --rm tonistiigi/binfmt --install all`.
 2. For each image and each resolved platform, invoke `docker build --platform <platform> …` (one invocation per platform, so BuildKit drives each per-arch build in turn, sharing the build cache).
 3. After build completes, one per-arch tag exists locally per resolved platform: `<image>:<version>-<arch>`.
-4. On push (`erun push`, or the push step `erun release` runs), additionally push each per-arch tag and create a manifest list with `docker manifest create <image>:<version> --amend <image>:<version>-amd64 --amend <image>:<version>-arm64 …` (one `--amend` per resolved platform) followed by `docker manifest push`. A single-platform push still assembles a manifest list — just with one entry.
+4. On push (`erun push`, or the push step `erun build --release` runs), additionally push each per-arch tag and create a manifest list with `docker manifest create <image>:<version> --amend <image>:<version>-amd64 --amend <image>:<version>-arm64 …` (one `--amend` per resolved platform) followed by `docker manifest push`. A single-platform push still assembles a manifest list — just with one entry.
 5. A build that does not push (no `erun push`/`--release` in this run) skips step 4: no manifest list, the per-arch tag(s) stay local.
 
 A partial-arch failure aborts the whole build for that image — there is no partial-arch fallback within the resolved platform list. The contract is that an image either has every resolved architecture or has not been built.

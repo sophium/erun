@@ -19,16 +19,15 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
 			var spec eruncommon.ReleaseSpec
 			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
-				// Release resolves the same execution `erun build --release` does, so
-				// it publishes the version's images and charts before it tags them.
-				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, "", "", true, false, nil)
+				findProjectRoot := func() (string, string, error) {
+					return runtimeFindProjectRoot(runtime.Context, workDir)
+				}
+				resolved, err := eruncommon.ResolveReleaseSpec(runCtx, findProjectRoot, eruncommon.ReleaseParams{})
 				if err != nil {
 					return err
 				}
-				if resolved, ok := eruncommon.BuildExecutionReleaseSpec(execution); ok {
-					spec = resolved
-				}
-				return eruncommon.RunReleaseExecution(runCtx, execution, eruncommon.GitCommandRunner, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime))
+				spec = resolved
+				return eruncommon.RunReleaseSpec(runCtx, spec, eruncommon.GitCommandRunner, runtime.BuildScriptRunner)
 			})
 			output.Spec = &spec
 			return output, err

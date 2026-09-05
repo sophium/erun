@@ -46,7 +46,7 @@ The release cycle flows between the two branches — work integrates on `develop
 
 ## How a version is generated
 
-When `erun release` runs (or CI runs it for you), it reads the base number from `VERSION`, looks at the branch, and produces one of four kinds:
+When `erun build --release` runs (or CI runs it for you), it reads the base number from `VERSION`, looks at the branch, and produces one of four kinds. `erun release` alone resolves and classifies the same way — the version string, the branch, and which kind it is — but only `build --release` builds and publishes the images and chart the table below lists:
 
 <figure className="erun-hero-figure">
   <img src="/img/version-kinds.svg" alt="A charcoal source pill holding the VERSION base number 1.0.81 fans out via four arrows to four cyan-outlined outcomes: on main, stable 1.0.81; on develop, candidate 1.0.81-rc.commit; on a feature or bug branch, prerelease 1.0.81-pr.commit; a local build, snapshot 1.0.81-snapshot-timestamp." />
@@ -60,7 +60,7 @@ When `erun release` runs (or CI runs it for you), it reads the base number from 
 | feature / bug branch | prerelease | `1.0.81-pr.<commit>` | images + chart |
 | a plain local `build` (no release) | snapshot | `1.0.81-snapshot-<timestamp>` | only if pushed; disposable, for iterating |
 
-`<commit>` is the short commit hash; `<timestamp>` is the UTC build time. The first three come from [`erun release`](/cli/release); the snapshot is what a plain [`build`](/cli/build) mints by default when you're iterating, whatever the environment type (see the [Delivery pipeline](/pipeline)). A version is a content identity, and [`build`](/cli/build) is the only command that mints one — [`push`](/cli/push) and [`deploy`](/cli/deploy) take a version as input, they never create it.
+`<commit>` is the short commit hash; `<timestamp>` is the UTC build time. The first three come from [`erun build --release`](/cli/build) (which stamps and tags the version the same way [`erun release`](/cli/release) does internally, then builds and publishes); the snapshot is what a plain [`build`](/cli/build) mints by default when you're iterating, whatever the environment type (see the [Delivery pipeline](/pipeline)). A version is a content identity, and [`build`](/cli/build) is the only command that mints one — [`push`](/cli/push) and [`deploy`](/cli/deploy) take a version as input, they never create it.
 
 ## Where next
 

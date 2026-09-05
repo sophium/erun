@@ -1,7 +1,6 @@
+audit: erun release --dry-run
 release: resolving project root
 release: project root = <TMP>
 release: resolving release module root
 release: release module root resolution failed: version file not found for current module
-audit: erun release --dry-run
-build: this project has no <tenant>-devops build environment — ask Claude to "init erun build environment" to set one up with the erun-build-env skill
 version file not found for current module
