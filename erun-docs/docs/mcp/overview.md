@@ -171,6 +171,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `pin` | `erun pin` | The resolved plan: every erun version reference for the env, its current value and its new one, plus whether it was applied. Verifies the target is published first. Resolves the checkout to rewrite from `projectRoot`, then the server's own runtime repo path; refuses rather than scan a wider directory when neither is set — there is no cwd to fall back to the way a shell user has. `preview` returns the plan without writing. |
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block, unless `skipIfUnconfigured` turns that into a no-op. Supports preview (dry-run). |
 | `unexpose` | `erun unexpose` | Removes an environment's per-env wildcard DNS record — the DNS-side counterpart to `expose`, run at teardown. Supports preview. |
+| `e2e` | `erun e2e` | Discovers `playwright/` the way `build` discovers `docker/`, refuses (naming the cause) if the environment isn't deployed, the target service isn't exposed, or its certificate isn't ready, then runs the suite once with the resolved HTTPS URL and deployed version injected. Supports preview and background jobs (`wait: false`). |
 | `terraform` | `erun terraform` | Runs a hosted platform's per-environment Terraform (`apply`/`plan`/`destroy`). `apply`/`destroy` mutate real cloud and cluster state and require `confirm` to equal the environment name. `preview` returns the resolved commands without executing them. |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
@@ -436,6 +437,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `usage` | `erun usage` | Read |
 | *(top-level)* | `resize` | `erun resize` | Work |
 | *(top-level)* | `delete` | `erun delete` | Work |
+| *(top-level)* | `e2e` | `erun e2e` | Work |
 | exec | `exec_diff` | `erun exec diff` | Read |
 | exec | `exec_raw` | `erun exec raw` | Work |
 | exec | `exec_write` | `erun exec write` | Work |

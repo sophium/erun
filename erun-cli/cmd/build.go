@@ -31,8 +31,10 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		Long: "Build the project's container images.\n\n" +
 			"The build step of the build → release → push → deploy flow. Builds locally " +
 			"without publishing by default; --release stamps and publishes the release version " +
-			"first, and --deploy pushes the images and rolls them out — folding the later steps " +
-			"into one command so the version flows through for you.\n\n" +
+			"first, --deploy pushes the images and rolls them out, and --e2e (which implies " +
+			"--deploy) also runs the project's discovered `erun e2e` suite against the " +
+			"environment just deployed — folding the later steps into one command so the " +
+			"version flows through for you.\n\n" +
 			"Every platform erun supports builds by default. --platform narrows a local, " +
 			"non-release build to only the platform(s) named, so an environment whose cluster " +
 			"can only ever run one architecture stops paying for an emulated build of the other; " +
@@ -45,7 +47,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 			"the selected root's images. It auto-selects when exactly one entry is declared and " +
 			"is unused (falls through to paths.docker/convention) when the project declares no " +
 			"components at all.",
-		Example:       "  erun build\n  erun build --release\n  erun build --release --deploy\n  erun build --platform linux/amd64\n  erun build --component ingest-worker",
+		Example:       "  erun build\n  erun build --release\n  erun build --release --deploy\n  erun build --e2e\n  erun build --platform linux/amd64\n  erun build --component ingest-worker",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -85,12 +87,26 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 			stderr,
 		)
 	}
+	if target.E2E {
+		target.Deploy = true
+	}
 	if !target.Deploy {
 		if err := common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
 			return err
 		}
 		return ctx.WriteResult(common.NewBuildResult(execution))
 	}
+	if err := runBuildDeployAndE2E(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, execution, runBuildScript, buildWithRetry, push, deployHelmChart, cloudStore, cloudDeps); err != nil {
+		return err
+	}
+	return ctx.WriteResult(common.NewBuildResult(execution))
+}
+
+// runBuildDeployAndE2E is --deploy's (and --e2e's, which implies --deploy)
+// composed step: resolve the deploy specs, roll the build out, then, when
+// --e2e was passed, run the project's discovered e2e suite against the
+// environment just deployed.
+func runBuildDeployAndE2E(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, execution common.BuildExecutionSpec, runBuildScript common.BuildScriptRunnerFunc, buildWithRetry common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {
 	if common.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
 	}
@@ -108,7 +124,40 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 	if err := common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart, cloudStore, cloudDeps); err != nil {
 		return err
 	}
-	return ctx.WriteResult(common.NewBuildResult(execution))
+	if !target.E2E {
+		return nil
+	}
+	return runBuildE2EStep(ctx, findProjectRoot, target.Component, deploySpecs)
+}
+
+// runBuildE2EStep is --e2e's composed step: it runs after RunBuildExecutionAndDeploy
+// has already rolled the build out, taking the tenant/environment/namespace the
+// deploy just targeted rather than re-resolving them independently. The version
+// and base URL erun e2e injects still come from a fresh read of the live cluster
+// (the same as the bare `erun e2e` verb), so a suite never passes against a
+// rollout that has not actually finished landing.
+func runBuildE2EStep(ctx common.Context, findProjectRoot common.ProjectFinderFunc, component string, deploySpecs []common.DeploySpec) error {
+	if len(deploySpecs) == 0 {
+		return nil
+	}
+	suite, err := common.ResolveCurrentPlaywrightSuite(findProjectRoot, component)
+	if err != nil {
+		return err
+	}
+	if suite == nil {
+		ctx.Info("e2e: no playwright/ suite found; nothing to run")
+		return nil
+	}
+	deploy := deploySpecs[0].Deploy
+	target := common.E2ETarget{
+		Component:         component,
+		Tenant:            deploy.Tenant,
+		Environment:       deploy.Environment,
+		Namespace:         deploy.Namespace,
+		KubernetesContext: deploy.KubernetesContext,
+	}
+	_, err = common.RunE2E(ctx, *suite, target, nil)
+	return err
 }
 
 func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
@@ -323,6 +372,7 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommand
 	addPushCommandTargetFlags(cmd, target)
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the version build would mint")
 	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
+	cmd.Flags().BoolVar(&target.E2E, "e2e", false, "Run the project's e2e suite against the environment after the deploy completes (implies --deploy)")
 	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and publish the release-tagged images")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Delete and recreate conflicting release tags when combined with --release")
 	cmd.Flags().BoolVar(&target.NoIncremental, "no-incremental", false, "Disable fingerprint-based build caching and rebuild every image from scratch")
