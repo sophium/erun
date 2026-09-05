@@ -1,0 +1,9 @@
+  published version: <VERSION>
+Control planes:
+  - erun+test@erun api-url=<PLANE_API> reachable=yes version=<VERSION>
+    [advertised apiUrl mismatch: GET /v1/platform's own apiUrl (http://[2001:db8::1]:9999) resolves to a different address than erun+test@erun itself -- it may be advertising a different plane's api]
+audit: erun list --control-planes
+list: resolving the published version from erun's own registry
+list: latest published version is <VERSION>
+list: GET <PLANE_API>/v1/platform (control plane version check for erun+test@erun)
+GET <PLANE_API>/v1/platform
