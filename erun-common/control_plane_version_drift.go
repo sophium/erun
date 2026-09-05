@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 )
 
@@ -70,6 +72,18 @@ type ControlPlaneVersionStatus struct {
 	// Console is nil when the plane's own GET /v1/platform reported no
 	// consoleUrl (nothing to check), never a guessed/defaulted value.
 	Console *ConsoleVersionStatus `json:"console,omitempty"`
+	// DuplicateAliases lists other configured aliases whose own api-url
+	// resolved to the same backend address as this one -- they
+	// are folded into this single entry instead of getting their own row, so
+	// a backend behind two hostnames is reported, and counted for
+	// --fail-on-drift, exactly once.
+	DuplicateAliases []string `json:"duplicateAliases,omitempty"`
+	// AdvertisedAPIURLMismatch is set only when this plane's own GET
+	// /v1/platform names an apiUrl that resolves to a wholly different
+	// address than the one erun actually just reached -- a benign
+	// canonical/CNAME alias (the same address under a different hostname)
+	// is never flagged, only a genuinely foreign backend.
+	AdvertisedAPIURLMismatch string `json:"advertisedApiUrlMismatch,omitempty"`
 }
 
 // ControlPlaneVersionDrift is every configured erun-hosted control plane's
@@ -118,10 +132,120 @@ func ResolveControlPlaneVersionDrift(ctx Context, result ListResult, deps CloudD
 	}
 	publishedSemver, publishedOK := parseRegistryStableVersion(drift.PublishedVersion)
 
-	for _, provider := range planes {
-		drift.Planes = append(drift.Planes, resolveOneControlPlaneVersionStatus(ctx, provider, deps.FetchPlatformInfo, deps.FetchConsoleVersion, publishedSemver, publishedOK))
+	for _, group := range groupControlPlanesByBackend(ctx, planes, deps.ResolveHostAddrs) {
+		status := resolveOneControlPlaneVersionStatus(ctx, group.representative, group.endpoints, deps.FetchPlatformInfo, deps.FetchConsoleVersion, deps.ResolveHostAddrs, publishedSemver, publishedOK)
+		status.DuplicateAliases = group.duplicateAliases
+		drift.Planes = append(drift.Planes, status)
 	}
 	return drift
+}
+
+// controlPlaneGroup is every configured alias erun determined resolves to one
+// backend: representative is the first alias seen for that backend (the one
+// actually probed), duplicateAliases the rest (folded in, never probed
+// separately). endpoints is the representative's own resolved address:port
+// set, carried forward so resolveOneControlPlaneVersionStatus can reuse it for
+// the discovery-document mismatch check without re-resolving.
+type controlPlaneGroup struct {
+	representative   CloudProviderStatus
+	duplicateAliases []string
+	endpoints        []string
+}
+
+// groupControlPlanesByBackend folds configured aliases that resolve to the
+// same backend address into one group: a plane and a vanity
+// hostname that CNAMEs to it are one deployment, not two, and reporting both
+// separately double-counts every drift finding. An alias whose host cannot be
+// resolved is never folded into, or merged with, anything -- absent evidence
+// of identity, not a guess.
+func groupControlPlanesByBackend(ctx Context, planes []CloudProviderStatus, resolveHostAddrs func(Context, string) ([]string, error)) []controlPlaneGroup {
+	groups := make([]controlPlaneGroup, 0, len(planes))
+	for _, provider := range planes {
+		endpoints, err := resolveControlPlaneEndpoints(ctx, controlPlaneAPIURL(provider), resolveHostAddrs)
+		if err != nil {
+			ctx.Trace("list: could not resolve control plane " + provider.Alias + "'s own host, so it cannot be checked for duplicate-backend aliases: " + err.Error())
+			groups = append(groups, controlPlaneGroup{representative: provider})
+			continue
+		}
+		if idx := findControlPlaneGroupByEndpoints(groups, endpoints); idx >= 0 {
+			ctx.Trace("list: " + provider.Alias + " resolves to the same backend as " + groups[idx].representative.Alias + " -- reporting it once")
+			groups[idx].duplicateAliases = append(groups[idx].duplicateAliases, provider.Alias)
+			continue
+		}
+		groups = append(groups, controlPlaneGroup{representative: provider, endpoints: endpoints})
+	}
+	return groups
+}
+
+func findControlPlaneGroupByEndpoints(groups []controlPlaneGroup, endpoints []string) int {
+	for i, group := range groups {
+		if endpointsIntersect(group.endpoints, endpoints) {
+			return i
+		}
+	}
+	return -1
+}
+
+// resolveControlPlaneEndpoints resolves an api url's host to its
+// address:port pairs -- the identity groupControlPlanesByBackend and the
+// mismatch check below compare, since two hostnames naming the same backend
+// share these even when the hostnames themselves differ.
+func resolveControlPlaneEndpoints(ctx Context, apiURL string, resolveHostAddrs func(Context, string) ([]string, error)) ([]string, error) {
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		return nil, fmt.Errorf("no api url configured")
+	}
+	parsed, err := url.Parse(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse api url: %w", err)
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return nil, fmt.Errorf("api url %q has no host", apiURL)
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = defaultPortForScheme(parsed.Scheme)
+	}
+	addrs, err := resolveHostAddrs(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", host, err)
+	}
+	endpoints := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		endpoints = append(endpoints, net.JoinHostPort(addr, port))
+	}
+	return endpoints, nil
+}
+
+func defaultPortForScheme(scheme string) string {
+	if strings.EqualFold(scheme, "http") {
+		return "80"
+	}
+	return "443"
+}
+
+func endpointsIntersect(a, b []string) bool {
+	seen := make(map[string]struct{}, len(a))
+	for _, endpoint := range a {
+		seen[endpoint] = struct{}{}
+	}
+	for _, endpoint := range b {
+		if _, ok := seen[endpoint]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultResolveHostAddrs is the real DNS lookup behind CloudDependencies'
+// ResolveHostAddrs. It ignores ctx.DryRun deliberately: callers only invoke it
+// from real-run code paths (ResolveControlPlaneVersionDrift returns before
+// reaching it under --dry-run), so there is no dry-run contract for it to
+// honor here the way defaultFetchConsoleVersion's own DryRun short-circuit
+// exists for its call site alone.
+func defaultResolveHostAddrs(_ Context, host string) ([]string, error) {
+	return net.DefaultResolver.LookupHost(context.Background(), host)
 }
 
 // controlPlaneProviders filters providers down to the erun-hosted ones --
@@ -151,7 +275,7 @@ func traceControlPlaneVersionDriftDryRun(ctx Context, planes []CloudProviderStat
 	}
 }
 
-func resolveOneControlPlaneVersionStatus(ctx Context, provider CloudProviderStatus, fetchPlatformInfo func(Context, string) (PlatformInfo, error), fetchConsoleVersion func(Context, string) (string, error), publishedSemver semver, publishedOK bool) ControlPlaneVersionStatus {
+func resolveOneControlPlaneVersionStatus(ctx Context, provider CloudProviderStatus, ownEndpoints []string, fetchPlatformInfo func(Context, string) (PlatformInfo, error), fetchConsoleVersion func(Context, string) (string, error), resolveHostAddrs func(Context, string) ([]string, error), publishedSemver semver, publishedOK bool) ControlPlaneVersionStatus {
 	apiURL := controlPlaneAPIURL(provider)
 	status := ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL}
 	if apiURL == "" {
@@ -170,12 +294,38 @@ func resolveOneControlPlaneVersionStatus(ctx Context, provider CloudProviderStat
 	status.Reachable = true
 	status.Version = strings.TrimSpace(info.Version)
 	status.Behind, status.Ahead = versionVerdict(status.Version, publishedSemver, publishedOK)
+	status.AdvertisedAPIURLMismatch = detectAdvertisedAPIURLMismatch(ctx, provider.Alias, apiURL, info.APIURL, ownEndpoints, resolveHostAddrs)
 
 	if consoleURL := strings.TrimSpace(info.ConsoleURL); consoleURL != "" {
 		console := resolveConsoleVersionStatus(ctx, provider.Alias, consoleURL, fetchConsoleVersion, publishedSemver, publishedOK)
 		status.Console = &console
 	}
 	return status
+}
+
+// detectAdvertisedAPIURLMismatch answers the question a discovery document
+// with the wrong apiUrl is actually about: does this plane's own discovery document (GET /v1/platform's
+// apiUrl field) name a backend erun did not just reach? A textually different
+// apiUrl is common and benign -- a vanity hostname CNAMEing to the one erun
+// queried -- so this only flags the case that difference cannot explain: the
+// discovered hostname resolving to no address this plane's own configured
+// host shares. Resolution failure on either side, or on ownEndpoints not
+// having been resolvable at all, means no verdict rather than a guess.
+func detectAdvertisedAPIURLMismatch(ctx Context, alias, ownAPIURL, discoveredAPIURL string, ownEndpoints []string, resolveHostAddrs func(Context, string) ([]string, error)) string {
+	discoveredAPIURL = strings.TrimRight(strings.TrimSpace(discoveredAPIURL), "/")
+	ownAPIURL = strings.TrimRight(strings.TrimSpace(ownAPIURL), "/")
+	if discoveredAPIURL == "" || discoveredAPIURL == ownAPIURL || len(ownEndpoints) == 0 {
+		return ""
+	}
+	discoveredEndpoints, err := resolveControlPlaneEndpoints(ctx, discoveredAPIURL, resolveHostAddrs)
+	if err != nil {
+		ctx.Trace("list: could not resolve " + alias + "'s discovered apiUrl " + discoveredAPIURL + ", so it cannot be checked against the address actually reached: " + err.Error())
+		return ""
+	}
+	if endpointsIntersect(ownEndpoints, discoveredEndpoints) {
+		return ""
+	}
+	return "GET /v1/platform's own apiUrl (" + discoveredAPIURL + ") resolves to a different address than " + alias + " itself -- it may be advertising a different plane's api"
 }
 
 func resolveConsoleVersionStatus(ctx Context, alias, consoleURL string, fetchConsoleVersion func(Context, string) (string, error), publishedSemver semver, publishedOK bool) ConsoleVersionStatus {

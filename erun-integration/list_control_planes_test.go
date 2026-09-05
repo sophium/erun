@@ -62,6 +62,23 @@ func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httpt
 	return server
 }
 
+// controlPlaneStubWithAPIURL serves GET /v1/platform the same way
+// controlPlaneStub does, but also reports its own apiUrl field -- the
+// discovery-document field this is about. controlPlaneStub leaves it
+// empty because most scenarios have nothing to say about it; this one
+// exists for the scenarios that do.
+func controlPlaneStubWithAPIURL(t testing.TB, version, apiURL string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"version":"%s","apiUrl":"%s"}`, version, apiURL)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
 // consoleStub serves GET /version.json reporting version, standing in for a
 // deployed console (erun-devops/docker/erun-console's own static file,
 // stamped from ERUN_VERSION at image build time).
@@ -399,5 +416,94 @@ func TestListControlPlanes(t *testing.T) {
 		}
 		golden.Equal(t, "list/control_planes_fail_on_drift_dry_run_never_fails",
 			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	// Two configured aliases can resolve to the very same backend (a vanity
+	// hostname CNAMEing to the per-env one, as verified live against
+	// `api.erunpaas.com`/`api.frs-prod.services.erunpaas.com`), and a plane's
+	// own discovery document could in principle advertise an apiUrl belonging
+	// to a genuinely different plane. Both are checked by resolving hostnames
+	// to addresses, which these scenarios drive with real (loopback and
+	// reserved-block literal) addresses -- no DNS stub needed.
+
+	t.Run("real_run_dedups_two_aliases_pointing_at_the_same_backend", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStub(t, "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{
+			"erun+a-vanity@erun": plane.URL,
+			"erun+b-real@erun":   plane.URL,
+		}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "same-backend-as=erun+b-real@erun") {
+			t.Fatalf("expected the duplicate alias folded into the representative's row:\n%s", result.Combined)
+		}
+		if strings.Count(result.Combined, "api-url=") != 1 {
+			t.Fatalf("expected the two aliases reported as a single plane, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_real_run_dedups_two_aliases_pointing_at_the_same_backend",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("real_run_flags_a_foreign_advertised_apiurl", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		// The plane's own discovery document names an apiUrl resolving to an
+		// address this plane's own configured host shares nothing with --
+		// the actual misconfiguration this check exists to catch.
+		plane := controlPlaneStubWithAPIURL(t, "1.0.247", "http://[2001:db8::1]:9999")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "advertised apiUrl mismatch") {
+			t.Fatalf("expected a mismatch to be flagged:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_real_run_flags_a_foreign_advertised_apiurl",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("fail_on_drift_foreign_advertised_apiurl_exits_non_zero", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStubWithAPIURL(t, "1.0.247", "http://[2001:db8::1]:9999")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a foreign advertised apiUrl, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_fail_on_drift_foreign_advertised_apiurl_exits_non_zero",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("real_run_json_output_reports_duplicate_and_mismatch_fields", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStubWithAPIURL(t, "1.0.247", "http://[2001:db8::1]:9999")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{
+			"erun+a-vanity@erun": plane.URL,
+			"erun+b-real@erun":   plane.URL,
+		}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{`"duplicateAliases"`, `"erun+b-real@erun"`, `"advertisedApiUrlMismatch"`} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in JSON output:\n%s", want, result.Combined)
+			}
+		}
 	})
 }

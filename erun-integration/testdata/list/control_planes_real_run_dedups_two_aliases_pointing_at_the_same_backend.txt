@@ -1,0 +1,9 @@
+  published version: <VERSION>
+Control planes:
+  - erun+a-vanity@erun api-url=<PLANE_API> same-backend-as=erun+b-real@erun reachable=yes version=<VERSION>
+audit: erun list --control-planes
+list: resolving the published version from erun's own registry
+list: latest published version is <VERSION>
+list: erun+b-real@erun resolves to the same backend as erun+a-vanity@erun -- reporting it once
+list: GET <PLANE_API>/v1/platform (control plane version check for erun+a-vanity@erun)
+GET <PLANE_API>/v1/platform
