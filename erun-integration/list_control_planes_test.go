@@ -77,6 +77,23 @@ func consoleStub(t testing.TB, version string) *httptest.Server {
 	return server
 }
 
+// consoleHTMLFallbackStub serves GET /version.json with a 200 text/html SPA
+// index page instead of the expected JSON document -- the deployed nginx
+// `try_files $uri $uri/ /index.html` fallback for a route it doesn't yet
+// exact-match, reproduced here rather than assumed from reading the code.
+func consoleHTMLFallbackStub(t testing.TB) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /version.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "<!doctype html><html><body>console spa</body></html>")
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
 // seedControlPlaneConfig writes one config.yaml carrying both the erun-type
 // cloud provider aliases (each pointed at its own plane stub, or at an
 // address nothing listens on to model an unreachable plane) and the
@@ -279,6 +296,44 @@ func TestListControlPlanes(t *testing.T) {
 		}
 		golden.Equal(t, "list/control_planes_real_run_reports_an_unreachable_console_as_not_current",
 			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("real_run_reports_a_console_serving_html_as_reachable_with_unknown_version", func(t *testing.T) {
+		// A console that answers GET /version.json with 200 text/html (the
+		// SPA's own index.html, served by an nginx fallback that doesn't yet
+		// exact-match the route) must be reported reachable -- it answered
+		// -- with an unknown version and a reason naming the status code
+		// and content type, never reachable=no.
+		t.Parallel()
+		setup := env.New(t)
+		console := consoleHTMLFallbackStub(t)
+		plane := controlPlaneStub(t, "1.0.247", console.URL)
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		consoleLineIdx := strings.Index(result.Combined, "console: url=")
+		if consoleLineIdx == -1 {
+			t.Fatalf("expected a console entry:\n%s", result.Combined)
+		}
+		consoleLine := result.Combined[consoleLineIdx:]
+		if nl := strings.IndexByte(consoleLine, '\n'); nl != -1 {
+			consoleLine = consoleLine[:nl]
+		}
+		if !strings.Contains(consoleLine, "reachable=yes") {
+			t.Fatalf("expected the console to be reported reachable despite the wrong content type:\n%s", consoleLine)
+		}
+		if !strings.Contains(consoleLine, "version=unknown") {
+			t.Fatalf("expected the console's version to be reported unknown:\n%s", consoleLine)
+		}
+		if !strings.Contains(consoleLine, "/version.json returned 200 text/html (expected application/json)") {
+			t.Fatalf("expected the reason to name the status code and content type:\n%s", consoleLine)
+		}
+		golden.Equal(t, "list/control_planes_real_run_reports_a_console_serving_html_as_reachable_with_unknown_version",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
 	})
 
 	t.Run("real_run_with_no_configured_planes", func(t *testing.T) {

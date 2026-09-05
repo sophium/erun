@@ -203,6 +203,8 @@ Each plane is checked with its own unauthenticated `GET /v1/platform` — the sa
 
 That same `GET /v1/platform` response also names the plane's linked console (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias), so each reachable plane's console is checked the same way, against the same published baseline, and printed nested under it as a `console:` line — a plane can be current while its console lags behind, or vice versa, and before this there was no way to tell. A plane whose response carries no `consoleUrl` prints no `console:` line at all, rather than guessing.
 
+A console that answers `GET /version.json` but doesn't serve the expected JSON document — for example an SPA fallback page served for a route that isn't wired up yet — is never folded into `reachable=no`: it did answer, so it prints `reachable=yes version=unknown reason="..."` instead, with the reason naming the HTTP status and content type it actually served.
+
 This makes real network calls (each plane and console, plus erun's registry), so add `--dry-run` to preview which planes, consoles, and registry lookup would be checked without making any call.
 
 This report also exits `0` on its own, same as `--tenant`'s above. Add `--fail-on-drift` to make that one invocation exit non-zero when a plane or its console is behind or ahead of published, a plane or console is unreachable, or the published baseline itself couldn't be resolved — none of those confirm a plane and its console are running what erun actually published:
