@@ -1846,7 +1846,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 // requires that the current directory is a docker build context
 // (<module>/docker/<component>). Returns nil when there is no such context.
 func resolveCurrentDockerComponentBuildForDeploy(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, versionOverride string) (*DockerBuildSpec, error) {
-	_, _, resolveDockerBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
+	store, _, resolveDockerBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
 	if resolveDockerBuildContext == nil {
 		return nil, nil
 	}
@@ -1859,7 +1859,7 @@ func resolveCurrentDockerComponentBuildForDeploy(ctx Context, store DockerStore,
 		return nil, nil
 	}
 
-	build, err := newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, versionOverride, nil, "")
+	build, err := newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, nil, "")
 	if err != nil {
 		return nil, err
 	}

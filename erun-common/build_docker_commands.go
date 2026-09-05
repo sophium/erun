@@ -464,6 +464,12 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	if buildArgVersion != "" {
 		args = append(args, "--build-arg", "ERUN_VERSION="+buildArgVersion)
 	}
+	if buildInput.DindCPULimit != "" {
+		args = append(args, "--build-arg", "DIND_CPU_LIMIT="+buildInput.DindCPULimit)
+	}
+	if buildInput.DindMemoryLimitMiB != "" {
+		args = append(args, "--build-arg", "DIND_MEMORY_LIMIT_MIB="+buildInput.DindMemoryLimitMiB)
+	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
 }
