@@ -124,6 +124,21 @@ cross-repository structural gates, not production helpers.
   keep real-repository enumeration in the wiring tests. Token presence is only a
   structural lower bound, not proof of usable UI; shared UX review still applies.
 
+- **Flags are audited one level down, not only whole commands.** An own,
+  non-inherited, non-`Hidden` flag on an operator-facing command needs its own
+  operator-surface reference, because a capability delivered as new flags on a
+  command that already has a desktop surface used to clear on the command's name
+  alone — which is how review discovery's seven CLI filters shipped with no
+  filter control (erun#2141). Opt out in `erun-cli/cmd/command_tree.go`:
+  `cliOnlyAgentFacingFlags` when the flag is structurally about the CLI's own
+  invocation and no affordance could exist, or the shrink-only
+  `knownUnsurfacedFlags` baseline only for a gap predating the gate — never a
+  fresh failure. `TestCLIFlagDeclarationsNameRealFlags` fails a key that no
+  longer names a real flag. Bounded honestly: a flag whose token is also an
+  ordinary display word (`--status`, `--source-branch`) clears on unrelated UI
+  copy, so this catches a distinctly-named dimension reliably and a
+  generically-named one only sometimes.
+
 ### Baseline for pre-existing gaps: KnownUnsurfacedRoutes
 
 This is a shrink-only list of real gaps, not an internal-only exemption. Do not
