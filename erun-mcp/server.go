@@ -605,6 +605,10 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Report a review MERGED on the erun platform, for the environment a review's merge queue promoted to MERGE once it has fetched the review's target and source, gate-built the prospective squash merge (review_record-build with gate set), and pushed the result. The platform does not take this on trust: it checks buildId names an already-recorded, successful GATE build for this review, then fetches remoteUrl to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at MERGE. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewReportMergedTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "review_requeue",
+		Description: "Move a review stuck at MERGE back to READY on the erun platform, freeing its target branch's merge-queue slot so a different review can be promoted — only one review may be at MERGE per target branch at a time. For a review whose gate never reaches a terminal state, or one left at MERGE by a batched exec_gate-merge whose other members landed but were never promoted. The review rejoins the queue at the tail, not the head. Refuses, naming the review's actual status, when it is not at MERGE. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewRequeueTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "review_reviewers_list",
 		Description: "List the users assigned to review a review on the erun platform. Supports preview.",
 	}, reviewReviewersListTool(runtime))

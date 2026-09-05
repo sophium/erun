@@ -240,6 +240,33 @@ func reviewReportMergedTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 	}
 }
 
+type ReviewRequeueInput struct {
+	platformAliasInput
+	ReviewID string `json:"reviewId" jsonschema:"review id to requeue; must currently be at MERGE"`
+}
+
+// reviewRequeueTool moves a review stuck at MERGE back to READY, freeing its
+// target branch's merge-queue slot so a different review can be promoted —
+// only one review may be at MERGE per target branch at a time. It reuses
+// review_record-build/review_report-merged's own status-transition path
+// rather than a new endpoint, and refuses, naming the review's actual
+// status, when it is not at MERGE.
+func reviewRequeueTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewRequeueInput) (*mcp.CallToolResult, ReviewResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewRequeueInput) (*mcp.CallToolResult, ReviewResult, error) {
+		if strings.TrimSpace(input.ReviewID) == "" {
+			return nil, ReviewResult{}, fmt.Errorf("reviewId is required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "review_requeue"
+		review, err := eruncommon.RunReviewRequeue(ctx, runtime.Store, input.Alias, input.ReviewID, cloudDependencies())
+		if err != nil {
+			return nil, ReviewResult{}, err
+		}
+		return nil, ReviewResult{Preview: input.Preview, Review: review, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 type ReviewCommentStatusInput struct {
 	platformAliasInput
 	ReviewID  string `json:"reviewId" jsonschema:"review id the comment belongs to"`

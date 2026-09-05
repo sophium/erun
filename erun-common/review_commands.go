@@ -360,6 +360,47 @@ func RunReviewReportMerged(ctx Context, store CloudReadStore, alias, reviewID, b
 	})
 }
 
+// RunReviewRequeue moves a review stuck at MERGE back to READY, at the tail
+// of its target branch's merge queue rather than the head, freeing the
+// merge-queue slot so a different review can be promoted. This reuses the
+// exact PATCH .../status call the backend's own missed-merge-window path
+// already accepts (a bare "READY" with no buildId; see requeueMergingReview
+// in erun-backend-api) rather than adding new API surface — nothing before
+// this command could invoke it (erun#2241), even though the server has
+// always allowed it.
+//
+// The review is fetched first so a caller that is not at MERGE gets a clear
+// refusal naming its actual status, rather than the server's ambiguous 404
+// for that case (requeueMergingReview reports the same not-found error
+// whether the review doesn't exist or is simply not at MERGE).
+//
+// Unlike RunReviewMergeQueueOverrideAdvance, this bypasses no safety gate —
+// the server already treats MERGE -> READY as unconditionally valid for any
+// review at MERGE — so it takes no --reason: there is no gate to make
+// accountable, and the status endpoint has no field to persist one in.
+func RunReviewRequeue(ctx Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) (PlatformReview, error) {
+	if strings.TrimSpace(reviewID) == "" {
+		return PlatformReview{}, fmt.Errorf("review id is required")
+	}
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return PlatformReview{}, err
+	}
+	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/"+reviewID)
+	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=READY")
+	if ctx.DryRun {
+		return PlatformReview{}, nil
+	}
+	review, err := client.GetReview(context.Background(), reviewID)
+	if err != nil {
+		return PlatformReview{}, err
+	}
+	if review.Status != "MERGE" {
+		return PlatformReview{}, fmt.Errorf("review %s is %s, not MERGE; requeue only recovers a review stuck at MERGE", reviewID, review.Status)
+	}
+	return client.UpdateReviewStatus(context.Background(), reviewID, PlatformUpdateReviewStatusParams{Status: "READY"})
+}
+
 // RunReviewReviewersList lists the users assigned to review a review.
 func RunReviewReviewersList(ctx Context, store CloudReadStore, alias, reviewID string, deps CloudDependencies) ([]PlatformReviewer, error) {
 	if strings.TrimSpace(reviewID) == "" {

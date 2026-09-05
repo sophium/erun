@@ -148,7 +148,12 @@ Content-Type: application/json
 
 ## When the gate wedges {#when-the-gate-wedges}
 
-If a `MERGE` review's gate never reaches a terminal state — an operator-diagnosed stuck run — requeuing it needs a direct API call today:
+Only one review may be at `MERGE` per target branch at a time (`headOfMergeQueue` refuses to promote a second one), so a review that lands at `MERGE` and never reaches a terminal state wedges the whole queue for that branch — nothing else can be promoted until it clears. Two ways this happens in practice:
+
+- An operator-diagnosed stuck gate run: the environment promoted to `MERGE` never reports back `MERGED`/`FAILED` (crashed, evicted, hung).
+- A batched `erun exec gate-merge --source A --source B` pushes both branches' commits in one go, but the merge queue still promotes and verifies its members one review at a time. If a member that was never promoted to `MERGE` has its commit land this way, no later `report-merged` for it can ever succeed (there is no `MERGE` review to report), which permanently breaks `gatedTargetTip`'s parent check for whichever review gets promoted next — that review reaches `MERGE`, gate-builds and pushes correctly, and still refuses at `report-merged` with `MERGE_NOT_VERIFIED` because its build's parent no longer matches the platform's own record of the target tip.
+
+`PATCH /v1/reviews/{reviewId}/status` with a bare `{ "status": "READY" }` (no `buildId`) is what recovers it — the same missed-merge-window transition, whichever way the wedge happened:
 
 ```
 PATCH /v1/reviews/{reviewId}/status
@@ -157,7 +162,11 @@ Content-Type: application/json
 { "status": "READY" }
 ```
 
-Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. There is no CLI flag or desktop button for this yet; until one exists, an operator (or an Agent with API access) makes this call directly.
+Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. Refused with `404 Not Found` from any status other than `MERGE`.
+
+- **CLI:** `erun review requeue REVIEW_ID` — see [`erun review requeue`](/cli/review#review-requeue). Fetches the review first so a caller-side refusal names its actual status rather than surfacing the API's ambiguous 404.
+- **MCP:** `review_requeue` — same behaviour, `reviewId` the only input.
+- Neither takes a reason: unlike [`override-advance`](#overriding-the-gate), this transition bypasses no safety gate, so there is nothing to make accountable.
 
 ## Failure table {#failure-table}
 

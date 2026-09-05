@@ -30,6 +30,7 @@ func newReviewCmd(store common.CloudReadStore, deps common.CloudDependencies) *c
 		newReviewCloseCmd(store, &alias, deps),
 		newReviewRecordBuildCmd(store, &alias, deps),
 		newReviewReportMergedCmd(store, &alias, deps),
+		newReviewRequeueCmd(store, &alias, deps),
 		newReviewReviewersCmd(store, &alias, deps),
 		newReviewMergeQueueCmd(store, &alias, deps),
 	)
@@ -447,6 +448,42 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 	}
 	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful GATE build's id")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newReviewRequeueCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "requeue REVIEW_ID",
+		Short: "Move a review stuck at MERGE back to READY",
+		Long: "Move a review stuck at MERGE back to READY, freeing its target branch's merge-queue slot so a " +
+			"different review can be promoted (only one review may be at MERGE per target branch).\n\n" +
+			"This is for a review whose gate never reaches a terminal state, or one left at MERGE by a batched " +
+			"`erun exec gate-merge` whose other members landed but were never promoted (erun#2241). The requeued " +
+			"review rejoins the queue at the tail, not the head — it is not promoted again immediately. Refuses, " +
+			"naming the review's actual status, when it is not at MERGE.\n\n" +
+			"A real, immediate write. --dry-run traces the call without making it.",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		Example:      "  erun review requeue 018f...",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			review, err := common.RunReviewRequeue(ctx, store, *alias, args[0], deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review requeue planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if err := writeReviewLine(ctx, review); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(review)
+		},
+	}
 	addDryRunFlag(cmd)
 	return cmd
 }
