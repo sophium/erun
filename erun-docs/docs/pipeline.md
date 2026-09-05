@@ -55,7 +55,7 @@ Each component's Dockerfile is a [multi-stage build](/agent-reference/convention
   <img src="/img/build-stages.svg" alt="One Dockerfile with two stages: a builder stage that compiles the artefact and runs the tests, and a runtime stage that ships only that artefact, producing a tagged container image for amd64 and arm64." />
 </figure>
 
-Run every test that doesn't need a deployed artefact (unit tests, and integration tests against in-build fixtures) in the builder stage — because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build that marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`.
+Run every test that doesn't need a deployed artefact (unit tests, and integration tests against in-build fixtures) in the builder stage — because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build that marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`. A test that needs a container runtime of its own (an ephemeral database, say) rather than a deployment belongs in the builder stage too — see [Tests that need a container runtime](/agent-reference/conventions-spec#tests-that-need-a-container-runtime) for today's exact status.
 
 See [`erun build`](/cli/build) for flags, dry-run output, and error behaviour.
 

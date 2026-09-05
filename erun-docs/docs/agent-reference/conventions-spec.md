@@ -138,6 +138,25 @@ Whether the test step runs before or after the compile step is toolchain-specifi
 
 Tests that **do** require a running deployment — end-to-end checks against live services — cannot run in the builder stage. They run against a deployed environment after [`deploy`](/cli/deploy), not during build.
 
+### Tests that need a container runtime
+
+A test that starts its own container-runtime fixture — a Testcontainers-style ephemeral database, a compose-style sidecar — is a third category, distinct from both of the above. It needs no live cluster and no deployed version of the project under test; it only needs a docker daemon to start its own throwaway containers against.
+
+**`(Planned.)`** The [agent env](/concepts/environment-types) already runs a docker daemon of its own (the one `erun build` itself uses), reachable from a `RUN` step via BuildKit's `network.host` entitlement:
+
+```dockerfile
+RUN --network=host \
+    DOCKER_HOST=tcp://127.0.0.1:2375 \
+    go test ./... -run TestAgainstRealPostgres
+```
+
+`erun build` does not yet pass that entitlement to `docker build`, so this fails today with BuildKit's own refusal (`network.host is not allowed`) rather than a project-specific error — the daemon behind it is reachable once the entitlement is granted, but nothing grants it yet. Track this at [issue #2091](https://github.com/sophium/erun/issues/2091).
+
+Two categories never belong in the builder stage, even once the entitlement lands — both for the same reason as the deployed-environment case above, not a new rule:
+
+- a test that needs the build's **own output** (an end-to-end suite driving a built application binary, for example) — the stage producing that output is the one such a test would have to depend on, which a test stage cannot do without inverting the dependency that gates the build in the first place;
+- a test asserting a **deployed** version — that is the "requires a running deployment" case immediately above, unchanged by this.
+
 ## Docker build context resolution
 
 A Dockerfile is in the **standard layout** iff its absolute path matches:
