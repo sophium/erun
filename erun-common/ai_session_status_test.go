@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -156,7 +157,14 @@ func TestLoadAISessionStatusesListsAllRecordedSessions(t *testing.T) {
 	}
 }
 
-func TestLoadAISessionStatusesEmptyWhenNoneRecorded(t *testing.T) {
+// TestLoadAISessionStatusesEmptyWhenNoneRecordedSerializesAsEmptyArray pins
+// the JSON shape a caller actually observes, not just len(statuses) == 0: a
+// nil slice and an empty slice both report length zero, but only the empty
+// slice marshals to "[]" rather than "null". A caller doing
+// result.sessions.length or ranging over the field would otherwise have to
+// special-case null for this one tool while every sibling collection-typed
+// tool (e.g. idle_stop_history's entries) already returns "[]".
+func TestLoadAISessionStatusesEmptyWhenNoneRecordedSerializesAsEmptyArray(t *testing.T) {
 	isolateActivityCache(t)
 	statuses, err := LoadAISessionStatuses("acme", "never-touched-env")
 	if err != nil {
@@ -164,6 +172,44 @@ func TestLoadAISessionStatusesEmptyWhenNoneRecorded(t *testing.T) {
 	}
 	if len(statuses) != 0 {
 		t.Fatalf("want no sessions, got %+v", statuses)
+	}
+	if statuses == nil {
+		t.Fatalf("want a non-nil empty slice so JSON marshals to [], got a nil slice which marshals to null")
+	}
+	data, err := json.Marshal(statuses)
+	if err != nil {
+		t.Fatalf("marshal empty statuses: %v", err)
+	}
+	if string(data) != "[]" {
+		t.Fatalf("want empty statuses to marshal as [], got %s", data)
+	}
+}
+
+// TestLoadAISessionStatusesNonEmptySerializesAsArray confirms the fix above
+// does not disturb the populated case: a real listing must still marshal as
+// a JSON array of the resolved statuses.
+func TestLoadAISessionStatusesNonEmptySerializesAsArray(t *testing.T) {
+	isolateActivityCache(t)
+	tenant, environment := "acme", "dev-list-json"
+	recordAISessionEventForTest(t, AISessionEventParams{
+		Tenant: tenant, Environment: environment, SessionID: "a-session",
+		Tool: "claude", Event: AISessionEventTurnStart,
+	})
+
+	statuses, err := LoadAISessionStatuses(tenant, environment)
+	if err != nil {
+		t.Fatalf("load statuses: %v", err)
+	}
+	data, err := json.Marshal(statuses)
+	if err != nil {
+		t.Fatalf("marshal statuses: %v", err)
+	}
+	var roundTripped []AISessionStatus
+	if err := json.Unmarshal(data, &roundTripped); err != nil {
+		t.Fatalf("unmarshal statuses: %v", err)
+	}
+	if len(roundTripped) != 1 || roundTripped[0].SessionID != "a-session" {
+		t.Fatalf("want one round-tripped session a-session, got %+v", roundTripped)
 	}
 }
 

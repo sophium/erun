@@ -13,8 +13,14 @@ type AISessionsInput struct {
 	Session     string `json:"session,omitempty" jsonschema:"AI session id to resolve; omit to list every session recorded for the environment"`
 }
 
+// AISessionsResult echoes the resolved tenant/environment alongside the
+// sessions, matching idle_stop_history's shape, so an empty Sessions list
+// cannot be misread as answering for a different target than the caller
+// intended.
 type AISessionsResult struct {
-	Sessions []eruncommon.AISessionStatus `json:"sessions"`
+	Tenant      string                       `json:"tenant"`
+	Environment string                       `json:"environment"`
+	Sessions    []eruncommon.AISessionStatus `json:"sessions"`
 }
 
 // aiSessionsTool is the read side of the structured AI-session status model:
@@ -33,12 +39,12 @@ func aiSessionsTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 			if err != nil {
 				return nil, AISessionsResult{}, err
 			}
-			return nil, AISessionsResult{Sessions: []eruncommon.AISessionStatus{status}}, nil
+			return nil, AISessionsResult{Tenant: tenant, Environment: environment, Sessions: []eruncommon.AISessionStatus{status}}, nil
 		}
 		statuses, err := eruncommon.LoadAISessionStatuses(tenant, environment)
 		if err != nil {
 			return nil, AISessionsResult{}, err
 		}
-		return nil, AISessionsResult{Sessions: statuses}, nil
+		return nil, AISessionsResult{Tenant: tenant, Environment: environment, Sessions: statuses}, nil
 	}
 }
