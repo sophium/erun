@@ -37,7 +37,11 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 			"plain positional scope); --version pins one version across the set, skipping channel " +
 			"resolution. Because a roll restarts the runtime pod, each environment is refused — " +
 			"naming the holder — while it is held by another worker (a running build, deploy, or " +
-			"agent session); pass --override-lease to roll it anyway.",
+			"agent session); pass --override-lease to roll it anyway.\n\n" +
+			"Out of scope: the installed desktop app bundle (ERun.app / erun-app) is not something this " +
+			"command upgrades -- it only rolls remote runtime environments. `erun doctor` reports the " +
+			"installed bundle's version and flags drift from this CLI; there is no automated way to " +
+			"update the bundle itself today.",
 		Example: "  erun upgrade --dry-run\n  erun upgrade\n  erun upgrade team\n  erun upgrade team prod --version 1.2.3\n" +
 			"  erun upgrade team --fleet --version 1.2.3 --gate-environment build --dry-run\n" +
 			"  erun upgrade team --fleet --version 1.2.3 --gate-environment build\n" +
