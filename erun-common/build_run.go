@@ -76,6 +76,8 @@ func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
 	switch {
 	case buildInput.Promote:
 		ctx.Trace("promoting from cached fingerprint image: " + tag)
+	case buildInput.GateTestStage:
+		ctx.Trace("rebuilding " + tag + " because its Dockerfile's test stage runs the build's own gate (never promoted from a cached fingerprint)")
 	case strings.TrimSpace(buildInput.CascadeRebuildFromTag) != "":
 		ctx.Trace("rebuilding " + tag + " because dependency " + strings.TrimSpace(buildInput.CascadeRebuildFromTag) + " is rebuilding")
 	case len(buildInput.MissingFingerprintPlatforms) > 0:
@@ -160,17 +162,44 @@ func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build Do
 	return RunDockerBuilds(ctx, builds, build)
 }
 
+// gateTestStageProvenanceLines names, for each build whose Dockerfile runs
+// the project's own gate (make check, see dockerfileHasGateTestStage), whether
+// this run's docker build actually invokes that test stage or — the state
+// applyIncrementalPromotion and DockerImageBuilder should together make
+// unreachable, see erun#2090 — reused a promoted image instead. Deliberately
+// separate from the per-image incremental trace, which can carry dozens of
+// look-alike cache-hit lines: an orchestrator deciding whether to trust this
+// build's exit code should not have to find this fact buried among them.
+func gateTestStageProvenanceLines(builds []DockerBuildSpec) []string {
+	var lines []string
+	for _, buildInput := range builds {
+		if !buildInput.GateTestStage {
+			continue
+		}
+		tag := strings.TrimSpace(buildInput.Image.Tag)
+		if buildInput.Promote {
+			lines = append(lines, "test stage ("+tag+"): CACHED (skipped, previous result reused) — refusing to treat this as a passing gate")
+			continue
+		}
+		lines = append(lines, "test stage ("+tag+"): LIVE (this build invokes make check)")
+	}
+	return lines
+}
+
 // traceBuildUmbrella brackets a build with the `==> Building` / `==> Built`
 // markers the desktop's activity-queue parser keys off to drive its spinner,
 // and starts the step-timing root reported (as a duration-ordered table plus
 // a JSON record) when the bracket closes. Skipped in dry-run, which does no
 // work and must keep the integration goldens stable.
-func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
+func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*error)) {
 	if ctx.DryRun {
 		return ctx, func(*error) {}
 	}
 	started := time.Now()
 	ctx.Info("==> Building")
+	for _, line := range gateTestStageProvenanceLines(builds) {
+		ctx.Info(line)
+	}
 	root := newStepTiming("build", nil)
 	ctx.timing = root
 	return ctx, func(errp *error) {
@@ -180,6 +209,9 @@ func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
 		}
 		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
+		for _, line := range gateTestStageProvenanceLines(builds) {
+			ctx.Info(line)
+		}
 		if err != nil {
 			ctx.Info("==> Build failed after " + elapsed.String())
 		} else {
@@ -196,7 +228,7 @@ func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
 // changes its own output because reporting is unavailable).
 func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
-	ctx, finish := traceBuildUmbrella(ctx)
+	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, nil, runScript, build, push, nil)
 }
@@ -205,7 +237,7 @@ func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript Buil
 // see its doc comment for store/deps.
 func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
-	ctx, finish := traceBuildUmbrella(ctx)
+	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, deploySpecs, nil, runScript, build, push, deploy)
 }
@@ -257,7 +289,7 @@ func buildExecutionProjectRootAndEnvironment(execution BuildExecutionSpec) (stri
 // `==> Building` one. Both entrypoints share one execution so the flow cannot
 // drift between them.
 func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
-	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
+	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution), execution.dockerBuilds)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
 }

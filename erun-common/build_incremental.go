@@ -680,6 +680,16 @@ func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImag
 			continue
 		}
 		out[i].Fingerprint = fingerprint
+		if dockerfileHasGateTestStage(out[i].DockerfilePath) {
+			// The fingerprint proves the inputs are unchanged, not that the gate
+			// (make check) ever ran against them, so this Dockerfile is never
+			// eligible for promotion: it always goes through a real `docker
+			// build`, which is what actually invokes its `test` stage. See
+			// erun#2090.
+			out[i].GateTestStage = true
+			rebuildSet[strings.TrimSpace(out[i].Image.Tag)] = struct{}{}
+			continue
+		}
 		missing, err := inspectFingerprintTags(out[i], inspect)
 		if err != nil {
 			return nil, err

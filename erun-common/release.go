@@ -184,7 +184,7 @@ type ReleasePackagingSyncerFunc func(Context, ReleasePackagingSyncSpec) ([]Relea
 // when the bracket closes. `erun build --release` runs the same work under
 // its own `==> Building` umbrella instead of opening a second entry; dry-run
 // omits the markers and the timing so the release goldens stay stable.
-func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
+func traceReleaseUmbrella(ctx Context, version string, builds []DockerBuildSpec) (Context, func(*error)) {
 	if ctx.DryRun {
 		return ctx, func(*error) {}
 	}
@@ -195,6 +195,9 @@ func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 	}
 	started := time.Now()
 	ctx.Info(releasing)
+	for _, line := range gateTestStageProvenanceLines(builds) {
+		ctx.Info(line)
+	}
 	root := newStepTiming("release", nil)
 	ctx.timing = root
 	return ctx, func(errp *error) {
@@ -204,6 +207,9 @@ func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 		}
 		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
+		for _, line := range gateTestStageProvenanceLines(builds) {
+			ctx.Info(line)
+		}
 		if err != nil {
 			ctx.Info("==> Release failed after " + elapsed.String())
 		} else {

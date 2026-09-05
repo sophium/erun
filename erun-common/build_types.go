@@ -79,6 +79,13 @@ type DockerBuildSpec struct {
 	// build is skipped and the existing image is re-tagged and pushed instead of
 	// rebuilt.
 	Promote bool
+	// GateTestStage marks a Dockerfile whose builder stage depends on a `test`
+	// stage's marker (see dockerfileHasGateTestStage) — i.e. this build is the
+	// project's own merge gate. applyIncrementalPromotion never sets Promote for
+	// such a build, and DockerImageBuilder refuses outright if it ever finds the
+	// two set together, so a cached fingerprint can never stand in for the gate
+	// having actually run.
+	GateTestStage bool
 	// MissingFingerprintPlatforms lists platforms that lacked a matching
 	// fingerprint tag, so the trace can explain why a build is rebuilding rather
 	// than promoting. For non-multi-platform builds the slot is the empty string.
