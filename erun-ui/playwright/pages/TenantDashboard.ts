@@ -75,6 +75,14 @@ export class TenantDashboard {
     return this.activePanel().getByText('No gate runs yet', { exact: true });
   }
 
+  usersTable(): Locator {
+    return this.activePanel().getByRole('table');
+  }
+
+  usersRows(): Locator {
+    return this.usersTable().locator('tbody tr');
+  }
+
   reviewsTable(): Locator {
     return this.activePanel().getByRole('table');
   }

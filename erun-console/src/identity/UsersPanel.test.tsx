@@ -550,3 +550,98 @@ describe('UsersPanel', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
+
+// erun#2050: the header names the signed-in identity by its erun username
+// (whoami's own `username`) while this table used to render only the IdP's
+// own username, so an operator's own row was unrecognizable, and looked
+// entirely absent when the two names shared nothing in common. These lock
+// the fix: the row matching the caller's own erun user id is marked "You",
+// the erun username renders as the primary label with the IdP username
+// alongside it when the two diverge, and the OIDC subject -- the one value
+// that actually joins the erun and IdP directories -- is always reachable.
+describe('UsersPanel — caller identity (erun#2050)', () => {
+  it("marks the caller's own row and shows both usernames when they diverge", async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: '386994597031248060',
+            username: 'zadmin@frs.auth.example.com',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-1',
+            erunUsername: 'erun',
+          },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(
+      <UsersPanel
+        token="dev-token"
+        ownTenantId="own-tenant"
+        tenantType="OPERATIONS"
+        callerErunUserId="erun-1"
+      />,
+    );
+
+    expect(await screen.findByText('erun')).toBeInTheDocument();
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByText(/IdP username: zadmin@frs\.auth\.example\.com/)).toBeInTheDocument();
+    expect(screen.getByText(/Subject: 386994597031248060/)).toBeInTheDocument();
+  });
+
+  it("does not mark a row that is not the signed-in caller's own", async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: 'sub-someone-else',
+            username: 'someone-else@idp.example.com',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-2',
+            erunUsername: 'someone',
+          },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(
+      <UsersPanel
+        token="dev-token"
+        ownTenantId="own-tenant"
+        tenantType="OPERATIONS"
+        callerErunUserId="erun-1"
+      />,
+    );
+
+    await screen.findByText('someone');
+    expect(screen.queryByText('You')).not.toBeInTheDocument();
+  });
+
+  it('renders a single name with no redundant secondary line when the erun and IdP usernames match', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: 'sub-alice',
+            username: 'alice',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-alice',
+            erunUsername: 'alice',
+          },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
+
+    await screen.findByText('alice');
+    expect(screen.queryByText(/IdP username:/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Subject: sub-alice/)).toBeInTheDocument();
+  });
+});
