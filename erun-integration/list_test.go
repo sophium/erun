@@ -312,6 +312,30 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/runtime_version_line_undetermined_on_malformed_recorded_image", normalize.Apply(result.Combined))
 	})
 
+	t.Run("erun_version_reads_off_a_stated_runtime_chart_reference", func(t *testing.T) {
+		// When an env's runtime chart rides its own version line (rather than
+		// following runtimeversion), ResolveErunVersion reads the version off
+		// the stated runtimechart reference via SplitChartReference. The
+		// chart's version (1.0.201) must render distinctly from the runtime
+		// image's own version (1.0.0, from SeedTenantEnv's default
+		// runtimeversion).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimerunningimage: ghcr.io/sophium/erun-devops:1.0.0\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.201\n")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/erun_version_reads_off_a_stated_runtime_chart_reference", normalize.Apply(result.Combined))
+	})
+
 	// The undetermined shape (a deployed env whose deploy never recorded a
 	// resolved image -- predates this feature, or went through a repo-local
 	// runtime chart whose own values decide the image) is already covered by
