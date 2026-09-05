@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.248
+appVersion: 1.0.249-pr.023fb33b
 description: ERun platform hosted IdP (Zitadel)
 name: erun-zitadel
 type: application
-version: 1.0.248
+version: 1.0.249-pr.023fb33b
