@@ -84,20 +84,28 @@ func (c Context) TraceCommand(dir, name string, args ...string) {
 // ToolCapture wires stdout/stderr for an external tool subprocess so a clean run
 // stays silent while captured output can replay on error; at Debug verbosity or
 // higher the output also streams live to the user's terminal.
+//
+// stdout and stderr each get their own buffer rather than sharing one: os/exec
+// runs one copier goroutine per stream, and a single shared *bytes.Buffer
+// reachable from both would be written by both goroutines with no
+// synchronization (the same shape deploy.go's helmOutputCapture exists to
+// avoid for helm deploy). Output()/Apply() only read the buffers after the
+// command has finished, which is the only time every caller reads them.
 func (c Context) ToolCapture() *ToolCapture {
 	capture := &ToolCapture{verbosity: c.Verbosity}
 	if c.Verbosity >= VerbosityDebug {
-		capture.stdout = teeWriter(c.Stdout, &capture.buf)
-		capture.stderr = teeWriter(c.Stderr, &capture.buf)
+		capture.stdout = teeWriter(c.Stdout, &capture.stdoutBuf)
+		capture.stderr = teeWriter(c.Stderr, &capture.stderrBuf)
 		return capture
 	}
-	capture.stdout = &capture.buf
-	capture.stderr = &capture.buf
+	capture.stdout = &capture.stdoutBuf
+	capture.stderr = &capture.stderrBuf
 	return capture
 }
 
 type ToolCapture struct {
-	buf       bytes.Buffer
+	stdoutBuf bytes.Buffer
+	stderrBuf bytes.Buffer
 	stdout    io.Writer
 	stderr    io.Writer
 	verbosity int
@@ -107,7 +115,7 @@ func (c *ToolCapture) Stdout() io.Writer { return c.stdout }
 
 func (c *ToolCapture) Stderr() io.Writer { return c.stderr }
 
-func (c *ToolCapture) Output() string { return c.buf.String() }
+func (c *ToolCapture) Output() string { return c.stdoutBuf.String() + c.stderrBuf.String() }
 
 // Apply folds captured tool output into a returned error so a silenced run's
 // failure stays debuggable, and avoids duplicating output Debug already streamed
@@ -119,7 +127,7 @@ func (c *ToolCapture) Apply(err error) error {
 	if c.verbosity >= VerbosityDebug {
 		return err
 	}
-	output := strings.TrimSpace(c.buf.String())
+	output := strings.TrimSpace(c.Output())
 	if output == "" {
 		return err
 	}
@@ -137,6 +145,26 @@ func teeWriter(primary io.Writer, capture io.Writer) io.Writer {
 	default:
 		return io.MultiWriter(primary, capture)
 	}
+}
+
+// commandOutputCapture keeps stdout and stderr in separate buffers rather than
+// one shared *bytes.Buffer. os/exec runs one copier goroutine per stream, so a
+// single buffer reachable from both cmd.Stdout and cmd.Stderr — built via two
+// separate teeWriter/io.MultiWriter calls, which defeats os/exec's
+// same-writer dedup (interfaceEqual) even when the two calls share the same
+// underlying capture — is written by both goroutines with no synchronization.
+// This is the same shape deploy.go's helmOutputCapture exists to avoid for
+// helm deploy; build_docker_commands.go, helm_chart_publish.go, and
+// published_artifact_verify.go all had the unguarded version of it.
+// combined() must only be read after the command has finished, which is the
+// only time any caller here reads it.
+type commandOutputCapture struct {
+	stdout bytes.Buffer
+	stderr bytes.Buffer
+}
+
+func (c *commandOutputCapture) combined() string {
+	return c.stdout.String() + c.stderr.String()
 }
 
 func (c Context) EnsureKubernetesContext(contextName string) error {
