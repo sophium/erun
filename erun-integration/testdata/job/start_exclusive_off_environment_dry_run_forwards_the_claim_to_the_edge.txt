@@ -1,0 +1,3 @@
+audit: erun job start --dry-run --environment dev --exclusive --name check --tenant team work
+mcp: team/dev edge resolved to http://<LOOPBACK>:17000/mcp
+mcp tools/call http://<LOOPBACK>:17000/mcp exec_raw '{"command":["work"],"environment":"dev","exclusive":true,"leaseTtlSeconds":900,"maxOutputBytes":16777216,"name":"check","tenant":"team","wait":false}'

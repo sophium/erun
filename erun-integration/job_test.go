@@ -234,6 +234,44 @@ func TestJob(t *testing.T) {
 		}
 	})
 
+	t.Run("start_exclusive_off_environment_dry_run_forwards_the_claim_to_the_edge", func(t *testing.T) {
+		// The scenario above proves the claim once job start reaches
+		// StartEnvironmentJob directly, which only happens in-environment.
+		// Off-environment -- an operator's own machine, or any other pod,
+		// targeting this one through its MCP edge -- job start never calls
+		// that function directly: it calls the edge's exec_raw tool instead,
+		// and --exclusive never reached that call's arguments at all until
+		// this fix, so the edge enforced nothing while the caller was told
+		// the job started. No `inEnvironment` here is the point: this is the
+		// host-caller path.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "check", "--dry-run", "--exclusive",
+			"--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/start_exclusive_off_environment_dry_run_forwards_the_claim_to_the_edge", normalize.Apply(result.Combined))
+	})
+
+	t.Run("agent_start_exclusive_off_environment_dry_run_forwards_the_claim_to_the_edge", func(t *testing.T) {
+		// Same gap, the other off-environment dispatch tool: an agent job
+		// started off-environment goes through exec_agent rather than
+		// exec_raw, and it had the identical missing forward.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--exclusive", "--dry-run",
+			"--", "fix the failing tests",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/agent_start_exclusive_off_environment_dry_run_forwards_the_claim_to_the_edge", normalize.Apply(result.Combined))
+	})
+
 	t.Run("an_exclusive_job_refuses_every_other_job_start_and_names_the_holder", func(t *testing.T) {
 		// The whole point of the claim, and the asymmetry that makes it worth
 		// more than a mutex between exclusive jobs: while a gate holds the

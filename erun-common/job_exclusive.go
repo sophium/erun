@@ -372,3 +372,17 @@ func environmentJobExclusivityTakeError(params StartEnvironmentJobParams, err er
 	}
 	return environmentExclusivityConflict(fmt.Sprintf("job %q", params.ID), params.Tenant, params.Environment, conflict.Holder, true, now)
 }
+
+// DescribeExclusiveJobStartVersionSkew is describeExclusiveClaimVersionSkew
+// for job start's off-environment dispatch (exec_raw/exec_agent). A caller on
+// a release that added --exclusive can run it against an environment whose
+// edge predates the feature entirely: the flag parses fine host-side, but the
+// remote edge's own compiled schema is what actually enforces it, so the two
+// are not required to agree without this. Without this translation the edge's
+// raw schema rejection reads like a malformed call rather than the version
+// mismatch it is.
+func DescribeExclusiveJobStartVersionSkew(tenant, environment string, exclusive bool, err error) error {
+	return describeExclusiveClaimVersionSkew(tenant, environment, "job start",
+		"upgrade the environment (erun pin / erun deploy) to run this job exclusively there, or drop --exclusive to accept concurrent jobs",
+		exclusive, err)
+}
