@@ -30,3 +30,54 @@ func TestLeasesCarryTheirJobOnlyWhenAJobHoldsThem(t *testing.T) {
 		t.Fatalf("held seconds: got %d", out[0].SecondsHeld)
 	}
 }
+
+// TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt is the regression test for
+// a lease taken by hand with a name that happens to start with "job-" (the
+// CLI's own --help example is literally `--name job-fix-1245`, and no --id)
+// producing a lease id that is shape-identical to a real job's presence
+// lease, so environmentLeasesToUI's id-shape match alone reported a JobID for
+// it. The occupancy banner then rendered a "View jobs" button for a job that
+// never existed, and the Jobs tab it linked to reported "No jobs yet".
+// Without the fix this test fails because the hand-lease's candidate JobID
+// survives unverified.
+func TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt(t *testing.T) {
+	isolateJobsCache(t)
+	const tenant = "erun"
+	const environment = "ux"
+
+	if _, err := eruncommon.AttachEnvironmentJob(eruncommon.Context{}, eruncommon.AttachEnvironmentJobParams{
+		Tenant:      tenant,
+		Environment: environment,
+		ID:          "gate-9",
+		Name:        "repo gate",
+		PID:         1,
+	}); err != nil {
+		t.Fatalf("attach real job: %v", err)
+	}
+
+	app := NewApp(erunUIDeps{
+		store: jobsTestStore(t),
+		canReachMCPEndpoint: func(int) bool {
+			return false
+		},
+		canConnectLocalPort: func(int) bool {
+			return false
+		},
+	})
+
+	leases := []uiEnvironmentLease{
+		{Name: "repo gate", JobID: "gate-9"},
+		// Shape-identical candidate id ("visual-demo" strips cleanly off
+		// "job-"), but no job record exists for it -- exactly the hand-taken
+		// lease from the issue's reproduction.
+		{Name: "job-visual-demo", JobID: "visual-demo"},
+	}
+	app.verifyLeaseJobIDs(tenant, environment, leases)
+
+	if leases[0].JobID != "gate-9" {
+		t.Fatalf("a lease backed by a real job must keep its job id, got %q", leases[0].JobID)
+	}
+	if leases[1].JobID != "" {
+		t.Fatalf("a lease with no job record behind it must not offer to act on one, got %q", leases[1].JobID)
+	}
+}

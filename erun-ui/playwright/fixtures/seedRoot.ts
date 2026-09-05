@@ -635,6 +635,45 @@ export function removeHeldLease(tenant: string, environment: string, name: strin
   fs.rmSync(path.join(activityLeaseDir(tenant, environment), `${name}.json`), { force: true });
 }
 
+// environmentJobDir is the sibling of activityLeaseDir under the same
+// per-env activity directory: XDG_CACHE_HOME/erun/activity/<tenant>/<env>/jobs.
+function environmentJobDir(tenant: string, environment: string): string {
+  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment, 'jobs');
+}
+
+// writeCompletedJob stages a real, already-finished job record — the same
+// on-disk shape eruncommon.EnvironmentJob writes — so a headless spec can
+// prove a lease is genuinely backed by a job without spawning a real
+// supervisor process. A terminal state ("exited") skips the read-time
+// liveness reconciliation a "running" job would need a live PID for.
+export function writeCompletedJob(
+  tenant: string,
+  environment: string,
+  id: string,
+  name: string,
+): void {
+  const dir = environmentJobDir(tenant, environment);
+  fs.mkdirSync(dir, { recursive: true });
+  const startedAt = new Date(Date.now() - 60_000);
+  const endedAt = new Date();
+  fs.writeFileSync(
+    path.join(dir, `${id}.json`),
+    JSON.stringify({
+      id,
+      name,
+      state: 'exited',
+      succeeded: true,
+      exitCode: 0,
+      startedAt: startedAt.toISOString(),
+      endedAt: endedAt.toISOString(),
+    }),
+  );
+}
+
+export function removeCompletedJob(tenant: string, environment: string, id: string): void {
+  fs.rmSync(path.join(environmentJobDir(tenant, environment), `${id}.json`), { force: true });
+}
+
 // seedTenant writes the minimal tenant config.yaml ListTenantConfigs needs to
 // surface a tenant at all — a tenant dir with no config.yaml is skipped as
 // uninitialized. Mirrors what `erun init` writes (createTenantConfig in

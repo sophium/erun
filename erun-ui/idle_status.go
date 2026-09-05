@@ -67,6 +67,7 @@ func (a *App) loadLocalIdleStatus(result eruncommon.OpenResult) (resolvedUIIdleS
 func (a *App) idleStatusToUI(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
 	ui := idleStatusToUI(status)
 	ui.FromPod = fromPod
+	a.verifyLeaseJobIDs(result.Tenant, result.Environment, ui.Leases)
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return ui
@@ -115,6 +116,12 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 // environmentLeasesToUI carries the held leases through to the desktop so it
 // can name the job already working in an environment — the data idle status
 // already resolves, previously dropped on the way to the UI contract.
+//
+// EnvironmentJobIDFromLeaseID only recognizes the id's shape; a lease taken by
+// hand (`erun activity lease take --name job-whatever` with no explicit --id)
+// produces exactly that shape with no job behind it at all, so the JobID set
+// here is a candidate, not proof. verifyLeaseJobIDs clears it when no job
+// record actually backs it.
 func environmentLeasesToUI(leases []eruncommon.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
 	if len(leases) == 0 {
 		return nil
@@ -131,6 +138,42 @@ func environmentLeasesToUI(leases []eruncommon.EnvironmentActivityLease, now tim
 		out = append(out, entry)
 	}
 	return out
+}
+
+// verifyLeaseJobIDs clears a lease's candidate JobID when no job record
+// actually backs it, so the occupancy banner never offers a "View jobs" action
+// that the Jobs tab cannot substantiate: a hand-taken lease named like a
+// job's own lease would otherwise surface a "View jobs" button pointing at a
+// job that never existed, with the Jobs tab reporting "No jobs yet". Skips
+// the read entirely when nothing needs verifying, and fails closed (clears
+// rather than keeps) on a lookup error, since an unconfirmed claim is worse
+// than none.
+func (a *App) verifyLeaseJobIDs(tenant, environment string, leases []uiEnvironmentLease) {
+	var candidates []int
+	for i := range leases {
+		if leases[i].JobID != "" {
+			candidates = append(candidates, i)
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	jobs, err := a.LoadEnvironmentJobs(tenant, environment)
+	if err != nil {
+		for _, i := range candidates {
+			leases[i].JobID = ""
+		}
+		return
+	}
+	known := make(map[string]bool, len(jobs))
+	for _, job := range jobs {
+		known[job.ID] = true
+	}
+	for _, i := range candidates {
+		if !known[leases[i].JobID] {
+			leases[i].JobID = ""
+		}
+	}
 }
 
 func idleMarkerClientsToUI(clients []eruncommon.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {
