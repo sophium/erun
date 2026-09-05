@@ -1,5 +1,5 @@
   published version: <VERSION>
-Control planes:
+Control planes (1 backend, 1 alias):
   - erun+test@erun api-url=http://<LOOPBACK>:1 reachable=no reason=fetch erun platform info: call platform api GET /v1/platform: Get "http://<LOOPBACK>:1/v1/platform": dial tcp <LOOPBACK>:1: connect: connection refused
 audit: erun list --control-planes
 list: resolving the published version from erun's own registry

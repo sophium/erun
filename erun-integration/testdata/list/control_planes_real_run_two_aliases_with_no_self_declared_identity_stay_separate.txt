@@ -1,0 +1,11 @@
+  published version: <VERSION>
+Control planes (2 backends, 2 aliases):
+  - erun+first@erun api-url=<FIRST_API> reachable=yes version=<VERSION> [behind published -- roll it]
+  - erun+second@erun api-url=<SECOND_API> reachable=yes version=<VERSION> [behind published -- roll it]
+audit: erun list --control-planes
+list: resolving the published version from erun's own registry
+list: latest published version is <VERSION>
+list: GET <FIRST_API>/v1/platform (control plane version check for erun+first@erun)
+GET <FIRST_API>/v1/platform
+list: GET <SECOND_API>/v1/platform (control plane version check for erun+second@erun)
+GET <SECOND_API>/v1/platform

@@ -1,5 +1,5 @@
   published version: <VERSION>
-Control planes:
+Control planes (1 backend, 1 alias):
   - erun+test@erun api-url=<PLANE_API> reachable=yes version=<VERSION>
     console: url=<CONSOLE_API> reachable=yes version=<VERSION> [behind published -- roll it]
 audit: erun list --control-planes --fail-on-drift

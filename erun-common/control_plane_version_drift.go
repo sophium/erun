@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -45,12 +46,30 @@ type ConsoleVersionStatus struct {
 	Ahead  bool `json:"ahead,omitempty"`
 }
 
+// ControlPlaneAliasRef is one configured cloud-provider alias erun resolved
+// to the same backend as another configured alias's own -- see
+// ControlPlaneVersionStatus.AdditionalAliases. Pointing two aliases at one
+// plane is legitimate configuration (erun#2089); this is how the collapsed
+// report still names every alias that reaches it.
+type ControlPlaneAliasRef struct {
+	Alias  string `json:"alias"`
+	APIURL string `json:"apiUrl,omitempty"`
+}
+
 // ControlPlaneVersionStatus is one configured erun-hosted control plane's
 // deployed version, compared against the newest version erun's own registry
 // has published.
 type ControlPlaneVersionStatus struct {
 	Alias  string `json:"alias"`
 	APIURL string `json:"apiUrl,omitempty"`
+	// AdditionalAliases lists every other configured alias erun resolved to
+	// this exact same backend deployment (see controlPlaneBackendIdentity) --
+	// e.g. two DNS names that both route to one physical control plane.
+	// Reporting each as its own plane would double-count drift an operator
+	// would only ever act on once, so every alias sharing a backend is
+	// collapsed into this one entry instead of appearing as a separate plane
+	// (erun#2089).
+	AdditionalAliases []ControlPlaneAliasRef `json:"additionalAliases,omitempty"`
 	// Reachable reports whether GET /v1/platform answered at all. A plane
 	// erun cannot reach is never reported current: Version/Behind/Ahead stay
 	// unset rather than guessed from silence.
@@ -118,10 +137,24 @@ func ResolveControlPlaneVersionDrift(ctx Context, result ListResult, deps CloudD
 	}
 	publishedSemver, publishedOK := parseRegistryStableVersion(drift.PublishedVersion)
 
+	byIdentity := map[string]int{}
 	for _, provider := range planes {
-		drift.Planes = append(drift.Planes, resolveOneControlPlaneVersionStatus(ctx, provider, deps.FetchPlatformInfo, deps.FetchConsoleVersion, publishedSemver, publishedOK))
+		resolveOneControlPlaneVersionStatus(ctx, &drift, byIdentity, provider, deps.FetchPlatformInfo, deps.FetchConsoleVersion, publishedSemver, publishedOK)
 	}
 	return drift
+}
+
+// appendControlPlaneAlias is where collapsing actually happens: a backend
+// identity already seen merges this alias into the existing plane's
+// AdditionalAliases instead of appending a new plane, so drift.Planes always
+// has exactly one entry per real deployment, not per configured alias.
+func appendControlPlaneAlias(drift *ControlPlaneVersionDrift, byIdentity map[string]int, identity string, status ControlPlaneVersionStatus) {
+	if idx, ok := byIdentity[identity]; ok {
+		drift.Planes[idx].AdditionalAliases = append(drift.Planes[idx].AdditionalAliases, ControlPlaneAliasRef{Alias: status.Alias, APIURL: status.APIURL})
+		return
+	}
+	byIdentity[identity] = len(drift.Planes)
+	drift.Planes = append(drift.Planes, status)
 }
 
 // controlPlaneProviders filters providers down to the erun-hosted ones --
@@ -151,23 +184,42 @@ func traceControlPlaneVersionDriftDryRun(ctx Context, planes []CloudProviderStat
 	}
 }
 
-func resolveOneControlPlaneVersionStatus(ctx Context, provider CloudProviderStatus, fetchPlatformInfo func(Context, string) (PlatformInfo, error), fetchConsoleVersion func(Context, string) (string, error), publishedSemver semver, publishedOK bool) ControlPlaneVersionStatus {
+// resolveOneControlPlaneVersionStatus fetches one alias's GET /v1/platform
+// and either merges it into an already-seen backend's plane entry (see
+// controlPlaneBackendIdentity) or appends a new one. The identity check runs
+// before the console is ever probed, so a duplicate alias costs one wasted
+// GET /v1/platform, not a second GET /version.json for a console already
+// checked under the first alias.
+func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersionDrift, byIdentity map[string]int, provider CloudProviderStatus, fetchPlatformInfo func(Context, string) (PlatformInfo, error), fetchConsoleVersion func(Context, string) (string, error), publishedSemver semver, publishedOK bool) {
 	apiURL := controlPlaneAPIURL(provider)
-	status := ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL}
 	if apiURL == "" {
-		status.UnreachableReason = "control plane alias has no configured api url"
-		return status
+		appendControlPlaneAlias(drift, byIdentity, "no-api-url:"+provider.Alias, ControlPlaneVersionStatus{
+			Alias:             provider.Alias,
+			UnreachableReason: "control plane alias has no configured api url",
+		})
+		return
 	}
 
 	ctx.Trace("list: GET " + apiURL + "/v1/platform (control plane version check for " + provider.Alias + ")")
 	info, err := fetchPlatformInfo(ctx, apiURL)
 	if err != nil {
-		status.UnreachableReason = err.Error()
 		ctx.Trace("list: control plane " + provider.Alias + " unreachable: " + err.Error())
-		return status
+		identity := controlPlaneBackendIdentity(apiURL, "")
+		appendControlPlaneAlias(drift, byIdentity, identity, ControlPlaneVersionStatus{
+			Alias:             provider.Alias,
+			APIURL:            apiURL,
+			UnreachableReason: err.Error(),
+		})
+		return
 	}
 
-	status.Reachable = true
+	identity := controlPlaneBackendIdentity(apiURL, info.APIURL)
+	if _, alreadySeen := byIdentity[identity]; alreadySeen {
+		appendControlPlaneAlias(drift, byIdentity, identity, ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL})
+		return
+	}
+
+	status := ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL, Reachable: true}
 	status.Version = strings.TrimSpace(info.Version)
 	status.Behind, status.Ahead = versionVerdict(status.Version, publishedSemver, publishedOK)
 
@@ -175,7 +227,50 @@ func resolveOneControlPlaneVersionStatus(ctx Context, provider CloudProviderStat
 		console := resolveConsoleVersionStatus(ctx, provider.Alias, consoleURL, fetchConsoleVersion, publishedSemver, publishedOK)
 		status.Console = &console
 	}
-	return status
+	appendControlPlaneAlias(drift, byIdentity, identity, status)
+}
+
+// controlPlaneBackendIdentity is the key duplicate-alias collapsing groups
+// on: the plane's own self-declared apiUrl from GET /v1/platform when it
+// reported one -- a real identity read from the discovery document itself,
+// set once in the backend's own config regardless of which hostname a client
+// dialed to reach it, so two aliases pointed at one physical deployment
+// report the identical value. When the plane never answered, or answered
+// with no apiUrl (an older platform), erun falls back to the alias's own
+// configured URL verbatim -- never DNS. Two hostnames resolving to the same
+// address(es) is not proof of a shared backend: a multi-tenant cluster
+// commonly fronts many distinct control planes behind one shared ingress
+// IP:port, routed by hostname/SNI, so a DNS-only match can merge two
+// deployments that happen to sit behind the same load balancer. That is
+// exactly the case where collapsing is most dangerous -- it is taken only
+// when the plane is unreachable or too old to self-report, which is when
+// --fail-on-drift most needs to see it -- so an uncertain signal never
+// collapses. Reporting two rows for one backend is a cosmetic annoyance;
+// reporting one row for two backends hides a stale deployment. Deliberately
+// never keys on version either: two genuinely distinct planes can run the
+// same published release (erun#2089).
+func controlPlaneBackendIdentity(configuredAPIURL, serverReportedAPIURL string) string {
+	if normalized := normalizeControlPlaneIdentityURL(serverReportedAPIURL); normalized != "" {
+		return "url:" + normalized
+	}
+	return "url:" + normalizeControlPlaneIdentityURL(configuredAPIURL)
+}
+
+// normalizeControlPlaneIdentityURL reduces a URL to a lower-cased
+// scheme+host, dropping path/query/fragment so two aliases configured with
+// e.g. a trailing slash or path difference still compare equal. Falls back to
+// a trimmed, lower-cased copy of the raw value when it does not parse as a
+// URL with a host, rather than discarding a real (if unusual) value.
+func normalizeControlPlaneIdentityURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Host == "" {
+		return strings.ToLower(strings.TrimRight(trimmed, "/"))
+	}
+	return strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
 }
 
 func resolveConsoleVersionStatus(ctx Context, alias, consoleURL string, fetchConsoleVersion func(Context, string) (string, error), publishedSemver semver, publishedOK bool) ConsoleVersionStatus {
