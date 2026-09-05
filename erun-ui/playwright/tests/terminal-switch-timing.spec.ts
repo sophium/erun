@@ -25,10 +25,16 @@ const BULK_LINE = 'x'.repeat(400);
 const SWITCH_BUDGET_MS = 5_000;
 
 async function emitBulkOutput(app: AppShell, sessionId: number, marker: string): Promise<void> {
-  for (let i = 0; i < BULK_CHUNKS; i++) {
-    await app.terminalPane.emitOutput(sessionId, `${BULK_LINE} ${String(i)}\n`);
-  }
-  await app.terminalPane.emitOutput(sessionId, `${marker}\n`);
+  // One page.evaluate for every chunk in this loop used to cost a separate CDP
+  // round trip per chunk -- ~400 of them per call, harmless on an idle
+  // machine but ~12s of pure IPC overhead under this suite's real per-pod
+  // concurrency (#2173, #2174), enough on its own to blow the spec's global
+  // test timeout before either switch-timing measurement below even starts.
+  // emitOutputBatch keeps the same per-chunk event granularity (the app still
+  // sees BULK_CHUNKS+1 discrete terminal-output events) in one round trip.
+  const chunks = Array.from({ length: BULK_CHUNKS }, (_, i) => `${BULK_LINE} ${String(i)}\n`);
+  chunks.push(`${marker}\n`);
+  await app.terminalPane.emitOutputBatch(sessionId, chunks);
 }
 
 async function terminalAtBottom(page: Page): Promise<boolean> {
