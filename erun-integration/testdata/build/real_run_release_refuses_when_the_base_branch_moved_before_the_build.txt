@@ -10,29 +10,32 @@ release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
 release: classified mode = stable
 release: develop branch "develop" exists = false
-<VERSION>
-audit: erun release
-==> Releasing <VERSION>
+audit: erun build --release
+==> Building
 release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
-publishing image: ghcr.io/sophium/api:<VERSION>
+docker image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: sync-remote
 stage: release
-==> Release failed after <ELAPSED>
+stage: post-release-version-bump
+stage: push
+==> Build failed after <ELAPSED>
 step timing (ordered by duration):
-  release (failed) [<ELAPSED>] — origin/main has moved since this release rebased onto it: it carries 3 commit(s) this release is not built on.
-Building now would publish <VERSION> and push its tag, and only then fail at the final push with everything already public.
-Nothing is published yet, so absorb the move and re-run:
+  build (failed) [<ELAPSED>] — origin/main has moved since this release rebased onto it: it carries 3 commit(s) this release is not built on.
+The tag <VERSION> and its git refs are already public; only its images and charts are not.
+Absorb the move and re-run:
   git -C <TMP> pull --rebase origin main
-  erun release --force
+  erun build --release --force
 (--force recreates the local <VERSION> tag this run already made, which the rebase leaves behind.)
+    post-release-version-bump [<ELAPSED>]
+    push [<ELAPSED>]
     release [<ELAPSED>]
     sync-remote [<ELAPSED>]
 timing record written to <TMP>
 origin/main has moved since this release rebased onto it: it carries 3 commit(s) this release is not built on.
-Building now would publish <VERSION> and push its tag, and only then fail at the final push with everything already public.
-Nothing is published yet, so absorb the move and re-run:
+The tag <VERSION> and its git refs are already public; only its images and charts are not.
+Absorb the move and re-run:
   git -C <TMP> pull --rebase origin main
-  erun release --force
+  erun build --release --force
 (--force recreates the local <VERSION> tag this run already made, which the rebase leaves behind.)

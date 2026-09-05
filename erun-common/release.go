@@ -88,29 +88,22 @@ type ReleasePackagingSyncSpec struct {
 	MarketplacePath string `json:"marketplacePath,omitempty"`
 }
 
-// ReleaseSpec splits its stages around the publish deliberately. Stages run
-// while the release is still private and every step is recoverable;
-// PostPublishStages carry the outward-facing, irreversible steps (the tag push,
-// the branch push, and the packaging sync that depends on the public tag) and
-// are reached only once the version's images and charts are published and
-// proven resolvable.
 type ReleaseSpec struct {
-	ProjectRoot       string                   `json:"projectRoot"`
-	ReleaseRoot       string                   `json:"releaseRoot"`
-	Branch            string                   `json:"branch"`
-	Commit            string                   `json:"commit"`
-	BaseVersion       string                   `json:"baseVersion"`
-	Version           string                   `json:"version"`
-	NextVersion       string                   `json:"nextVersion,omitempty"`
-	VersionFilePath   string                   `json:"versionFilePath"`
-	Mode              ReleaseMode              `json:"mode"`
-	Force             bool                     `json:"force,omitempty"`
-	Charts            []ReleaseChartSpec       `json:"charts,omitempty"`
-	DockerImages      []ReleaseDockerImageSpec `json:"dockerImages,omitempty"`
-	Stages            []ReleaseStage           `json:"stages,omitempty"`
-	PostPublishStages []ReleaseStage           `json:"postPublishStages,omitempty"`
-	LinuxReleases     []scriptSpec
-	SkippedLinux      bool `json:"-"`
+	ProjectRoot     string                   `json:"projectRoot"`
+	ReleaseRoot     string                   `json:"releaseRoot"`
+	Branch          string                   `json:"branch"`
+	Commit          string                   `json:"commit"`
+	BaseVersion     string                   `json:"baseVersion"`
+	Version         string                   `json:"version"`
+	NextVersion     string                   `json:"nextVersion,omitempty"`
+	VersionFilePath string                   `json:"versionFilePath"`
+	Mode            ReleaseMode              `json:"mode"`
+	Force           bool                     `json:"force,omitempty"`
+	Charts          []ReleaseChartSpec       `json:"charts,omitempty"`
+	DockerImages    []ReleaseDockerImageSpec `json:"dockerImages,omitempty"`
+	Stages          []ReleaseStage           `json:"stages,omitempty"`
+	LinuxReleases   []scriptSpec
+	SkippedLinux    bool `json:"-"`
 }
 
 type releaseInputs struct {
@@ -150,28 +143,27 @@ func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProj
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
-	nextVersion, stages, postPublishStages, err := resolveReleaseStages(inputs, artifacts.FileUpdates, artifacts.PackagingSync)
+	nextVersion, stages, err := resolveReleaseStages(inputs, artifacts.FileUpdates, artifacts.PackagingSync)
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
 
 	return ReleaseSpec{
-		ProjectRoot:       inputs.ProjectRoot,
-		ReleaseRoot:       inputs.ReleaseRoot,
-		Branch:            inputs.Branch,
-		Commit:            inputs.Commit,
-		BaseVersion:       inputs.BaseVersion,
-		Version:           inputs.Version,
-		NextVersion:       nextVersion,
-		VersionFilePath:   inputs.VersionFilePath,
-		Mode:              inputs.Mode,
-		Force:             params.Force,
-		Charts:            artifacts.Charts,
-		DockerImages:      artifacts.Images,
-		Stages:            stages,
-		PostPublishStages: postPublishStages,
-		LinuxReleases:     artifacts.LinuxReleases,
-		SkippedLinux:      artifacts.SkippedLinux,
+		ProjectRoot:     inputs.ProjectRoot,
+		ReleaseRoot:     inputs.ReleaseRoot,
+		Branch:          inputs.Branch,
+		Commit:          inputs.Commit,
+		BaseVersion:     inputs.BaseVersion,
+		Version:         inputs.Version,
+		NextVersion:     nextVersion,
+		VersionFilePath: inputs.VersionFilePath,
+		Mode:            inputs.Mode,
+		Force:           params.Force,
+		Charts:          artifacts.Charts,
+		DockerImages:    artifacts.Images,
+		Stages:          stages,
+		LinuxReleases:   artifacts.LinuxReleases,
+		SkippedLinux:    artifacts.SkippedLinux,
 	}, nil
 }
 
@@ -213,7 +205,16 @@ func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 	}
 }
 
-func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher ReleasePublisher) error {
+// RunReleaseSpec is a standalone `erun release`: version paperwork only,
+// under the `==> Releasing` umbrella. It never builds or publishes anything —
+// build and publish are `erun build --release`'s and `erun push`'s job.
+func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) (err error) {
+	ctx, finish := traceReleaseUmbrella(ctx, spec.Version)
+	defer finish(&err)
+	return runReleaseSpec(ctx, spec, runGit, runScript, nil)
+}
+
+func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	if runGit == nil {
 		runGit = GitCommandRunner
 	}
@@ -227,16 +228,15 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	}
 	defer release()
 
-	return runClaimedReleaseSpec(ctx, spec, runGit, runScript, syncPackagingChecksums, publisher)
+	return runClaimedReleaseSpec(ctx, spec, runGit, runScript, syncPackagingChecksums)
 }
 
 // runClaimedReleaseSpec is the release's actual work, run only once
-// runReleaseSpec has claimed the version being released.
-func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher ReleasePublisher) error {
+// runReleaseSpec has claimed the version being released. It only ever mutates
+// git state (and package-manager metadata alongside it) -- it never builds or
+// publishes an image or a chart.
+func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	traceReleaseSpec(ctx, spec)
-	if err := ensureReleasePublishesResolvedImages(spec, publisher); err != nil {
-		return err
-	}
 	if err := ensureReleaseWorktreeClean(ctx, spec.ProjectRoot); err != nil {
 		return err
 	}
@@ -244,31 +244,11 @@ func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	if err := runReleaseStages(ctx, spec, spec.Stages, runGit, syncPackagingChecksums); err != nil {
 		return err
 	}
-	if err := ensureReleaseReadyToPublish(ctx, spec, runGit); err != nil {
-		return err
-	}
-	if err := runReleasePublication(ctx, publisher); err != nil {
-		return err
-	}
-	if err := runReleaseStages(ctx, spec, spec.PostPublishStages, runGit, syncPackagingChecksums); err != nil {
-		return err
-	}
 	if spec.SkippedLinux {
 		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
 	}
 
 	return runScriptSpecs(ctx, spec.LinuxReleases, runScript)
-}
-
-// ensureReleaseReadyToPublish runs the checks that must pass immediately
-// before the build spends anything: the base branch has not moved since
-// sync-remote re-established it, and the node has room for the build that is
-// about to start.
-func ensureReleaseReadyToPublish(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
-	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
-		return err
-	}
-	return ensureReleaseDiskHeadroom(ctx)
 }
 
 func runReleaseStages(ctx Context, spec ReleaseSpec, stages []ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
@@ -288,10 +268,8 @@ func traceReleaseSpec(ctx Context, spec ReleaseSpec) {
 	if spec.NextVersion != "" {
 		ctx.Trace("next version: " + spec.NextVersion)
 	}
-	// Named as the publish list it is: these refs are what the release pushes
-	// to the registry before it tags the version, not incidental metadata.
 	for _, image := range spec.DockerImages {
-		ctx.Trace("publishing image: " + image.Tag)
+		ctx.Trace("docker image: " + image.Tag)
 	}
 }
 
@@ -925,20 +903,16 @@ func discoverSupportedReleaseLinuxScripts(releaseRoot, version string) ([]script
 	return linuxReleases, false, nil
 }
 
-// resolveReleaseStages splits the plan at the publish: the local commit and tag
-// come first because they are recoverable, and everything that makes the version
-// public — the tag push, the packaging sync that reads the published archive,
-// the version bump, and the branch push — waits until the artifacts exist.
-func resolveReleaseStages(inputs releaseInputs, releaseFileUpdates []ReleaseFileUpdate, packagingSync *ReleasePackagingSyncSpec) (string, []ReleaseStage, []ReleaseStage, error) {
+func resolveReleaseStages(inputs releaseInputs, releaseFileUpdates []ReleaseFileUpdate, packagingSync *ReleasePackagingSyncSpec) (string, []ReleaseStage, error) {
 	stages := baseReleaseStages(inputs, releaseFileUpdates)
-	postPublishStages := stablePackagingStages(inputs, packagingSync)
+	stages = append(stages, stablePackagingStages(inputs, packagingSync)...)
 	nextVersion, stableStages, err := stablePostReleaseStages(inputs)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, err
 	}
-	postPublishStages = append(postPublishStages, stableStages...)
-	postPublishStages = append(postPublishStages, candidatePostReleaseStages(inputs)...)
-	return nextVersion, stages, postPublishStages, nil
+	stages = append(stages, stableStages...)
+	stages = append(stages, candidatePostReleaseStages(inputs)...)
+	return nextVersion, stages, nil
 }
 
 func baseReleaseStages(inputs releaseInputs, releaseFileUpdates []ReleaseFileUpdate) []ReleaseStage {

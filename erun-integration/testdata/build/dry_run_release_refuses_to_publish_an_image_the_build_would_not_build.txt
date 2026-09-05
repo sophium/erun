@@ -10,11 +10,6 @@ release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
 release: classified mode = stable
 release: develop branch "develop" exists = false
-<VERSION>
-audit: erun release --dry-run
-release: branch=main mode=stable version=<VERSION>
-next version: <VERSION>
-publishing image: ghcr.io/sophium/api:<VERSION>
-publishing image: ghcr.io/sophium/web:<VERSION>
-release <VERSION> resolved images that nothing in this run publishes: ghcr.io/sophium/web:<VERSION>
-a release publishes before it tags, so it will not announce a version the registry never receives; run `erun release` from the project root so every release image resolves to a build
+audit: erun build --dry-run --release
+release <VERSION> resolved images that this build will not publish: ghcr.io/sophium/web:<VERSION>
+run `erun build --release` from the project root so every release image resolves to a build

@@ -109,9 +109,9 @@ A successful `GATE` build has no `version` (the gate publishes nothing) and no `
 
 ## Release queue
 
-When a review reaches `MERGED`, the commit it merged on is enqueued for release: `POST /v1/releases` records the trigger and holds the idempotency contract below. Running `erun release` is the same environment-driven model as the merge queue's gate — whichever environment runs it records the version it minted as a `RECORDED` build against the review once it completes.
+When a review reaches `MERGED`, the commit it merged on is enqueued for release: `POST /v1/releases` records the trigger and holds the idempotency contract below. Running `erun build --release` (which stamps and tags the version the same way [`erun release`](/cli/release) does internally, then builds and publishes) is the same environment-driven model as the merge queue's gate — whichever environment runs it records the version it minted as a `RECORDED` build against the review once it completes.
 
-The queue runs **one release at a time per tenant**, first in, first out. This is not a throughput choice: `release` bumps a semver, writes version-bearing files, tags, and pushes, so two concurrent releases on one version line corrupt it. Two reviews accepted seconds apart produce two sequential releases, never a race.
+The queue runs **one release at a time per tenant**, first in, first out. This is not a throughput choice: releasing bumps a semver, writes version-bearing files, tags, and pushes, so two concurrent releases on one version line corrupt it. Two reviews accepted seconds apart produce two sequential releases, never a race.
 
 ### Resource shape
 
@@ -164,13 +164,13 @@ There is at most one release per `(tenant, commitId)`, so **minting a second ver
 
 ### Bounds
 
-The queue's serialisation rules — one running release per tenant, a cooldown between consecutive releases, and requeuing a failed attempt as a new one — are enforced as database contracts (a partial unique index on running rows, an idempotency key on `(tenant, commitId)`), so they hold regardless of what actually claims and runs a release. What claims a release and runs `erun release` for it is `(Planned.)`: releasing is environment-driven now, the same shift the merge queue's gate made (see [Merge queue § The gate](/collaboration/merge-queue#the-gate)), and no dedicated Job stands in for it — but the environment-driven replacement is not wired up yet. Today, `POST /v1/releases` reliably records the trigger; nothing drains the queue behind it.
+The queue's serialisation rules — one running release per tenant, a cooldown between consecutive releases, and requeuing a failed attempt as a new one — are enforced as database contracts (a partial unique index on running rows, an idempotency key on `(tenant, commitId)`), so they hold regardless of what actually claims and runs a release. What claims a release and runs `erun build --release` for it is `(Planned.)`: releasing is environment-driven now, the same shift the merge queue's gate made (see [Merge queue § The gate](/collaboration/merge-queue#the-gate)), and no dedicated Job stands in for it — but the environment-driven replacement is not wired up yet. Today, `POST /v1/releases` reliably records the trigger; nothing drains the queue behind it.
 
 ### Error behaviour
 
 | Failure mode | What happens | Recovery |
 |---|---|---|
-| Nothing runs the queued release `(Planned.)` | `status: queued` indefinitely — recorded, not run. | Run `erun release` yourself against the commit and `POST /builds` the outcome (`kind: "RECORDED"`, the `version` it minted), or trigger it again once environment-driven release execution lands. |
+| Nothing runs the queued release `(Planned.)` | `status: queued` indefinitely — recorded, not run. | Run `erun build --release` yourself against the commit and `POST /builds` the outcome (`kind: "RECORDED"`, the `version` it minted), or trigger it again once environment-driven release execution lands. |
 | The review reaches `MERGED` but enqueuing its release fails | No HTTP caller to answer — the review's own `MERGED` transition already completed, so there is nothing left in flight to return a `500` to. The review stays `MERGED`; only the release trigger did not run. | `POST /v1/releases` with the merge commit. |
 
 ## Validation rules

@@ -1,17 +1,11 @@
 Cut a release from the current branch.
 
-Resolves the release version from the version file, stamps it into the charts and package-manager metadata, and commits and tags it locally. It then builds that version's container images for both architectures and publishes them and their helm charts, reading each one back from the registry to prove it resolves. Only then does it push the tag, sync packaging checksums, prepare the next patch version, and push the branches.
+Resolves the next version, updates the version files, commits, tags, and pushes the tag to origin. It never builds or publishes an image or a chart — that is `erun build --release`'s job (and `erun push`'s, for republishing). Which branch releases as a stable version vs a prerelease comes from .erun/config.yaml.
 
-Publishing before tagging is the contract: a release that exits 0 means `erun deploy --version <version>` can pull the image and the chart, and a release that cannot publish fails while nothing is public yet.
-
-Which branch releases as a stable version vs a candidate comes from .erun/config.yaml.
-
-High blast radius: pushes tags and branches to origin and publishes images and charts to the registry, so the released version becomes public and consumable.
-
-The release step of the build → release → push → deploy flow. It composes build and push itself, so a separate `erun push` afterwards only republishes what release already put in the registry.
+The release step of the build → release → push → deploy flow.
 
 Dry-run:
-  --dry-run resolves the version, file updates, git actions, image builds, and chart publishes without executing them.
+  --dry-run resolves the version, file updates, and git actions without executing them.
 
 Usage:
   erun release [flags]

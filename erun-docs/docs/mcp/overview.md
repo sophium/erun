@@ -166,7 +166,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `push` | `erun push` | Per-component status, registry URLs, published chart ref. Requires `version`. |
 | `deploy` | `erun deploy` | Per-chart rollout status, helm release info. Requires `version`. |
 | `publish` | `erun publish` | Mirrors an already-built version's images from the FROM registry to each TO registry, without building or deploying. Requires `version`. |
-| `release` | `erun release` | Released version, tag, multi-arch confirmation, and the read-back that proves the published version resolves. |
+| `release` | `erun release` | Released version, tag. Version paperwork only — never builds or publishes. |
 | `upgrade` | `erun upgrade` | Redeploys an opted-in, lagging environment to the latest version for its release channel. High blast radius: rolls out a new runtime image and restarts pods. `preview` returns the plan (channel, current → target) without deploying. |
 | `pin` | `erun pin` | The resolved plan: every erun version reference for the env, its current value and its new one, plus whether it was applied. Verifies the target is published first. Resolves the checkout to rewrite from `projectRoot`, then the server's own runtime repo path; refuses rather than scan a wider directory when neither is set — there is no cwd to fall back to the way a shell user has. `preview` returns the plan without writing. |
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block, unless `skipIfUnconfigured` turns that into a no-op. Supports preview (dry-run). |

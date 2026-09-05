@@ -251,33 +251,73 @@ func buildExecutionProjectRootAndEnvironment(execution BuildExecutionSpec) (stri
 	return "", ""
 }
 
-// RunReleaseExecution is a standalone `erun release`: the same build → publish →
-// tag orchestration `erun build --release` performs, under the `==> Releasing`
-// umbrella the desktop activity queue expects for a release rather than the
-// `==> Building` one. Both entrypoints share one execution so the flow cannot
-// drift between them.
-func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
-	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
-	defer finish(&err)
-	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
+// prepareReleaseBuild refuses a release build that would stamp and tag a
+// version whose images this run will not publish (the guard that turns a
+// silently git-only release into a loud failure, run before anything
+// mutates), then stamps and tags `erun build --release`'s version -- a
+// failed build afterwards still leaves an honest tag naming the source it
+// tried to build -- then runs the preflights that must pass immediately
+// before the build spends anything: the base branch has not moved since
+// sync-remote re-established it, and the node has room for the multi-arch
+// build about to start.
+func prepareReleaseBuild(ctx Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) error {
+	if runGit == nil {
+		runGit = GitCommandRunner
+	}
+	spec := *execution.release
+	if err := ensureReleaseBuildPublishesResolvedImages(execution); err != nil {
+		return err
+	}
+	if err := runReleaseSpec(ctx, spec, runGit, runScript, nil); err != nil {
+		return err
+	}
+	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
+		return err
+	}
+	return ensureReleaseDiskHeadroom(ctx)
+}
+
+// ensureReleaseBuildPublishesResolvedImages refuses a release build that
+// would stamp and tag a version whose images nothing in this run publishes.
+// release resolves its own image list independently (a whole-release-root
+// scan), so running `erun build --release` from inside one component's
+// build directory can stamp and tag a version for images this particular
+// build never touches.
+func ensureReleaseBuildPublishesResolvedImages(execution BuildExecutionSpec) error {
+	if len(execution.release.DockerImages) == 0 {
+		return nil
+	}
+	publishable := make(map[string]struct{}, len(execution.dockerPushes))
+	for _, pushInput := range execution.dockerPushes {
+		publishable[strings.TrimSpace(pushInput.Image.Tag)] = struct{}{}
+	}
+	missing := make([]string, 0, len(execution.release.DockerImages))
+	for _, image := range execution.release.DockerImages {
+		tag := strings.TrimSpace(image.Tag)
+		if _, ok := publishable[tag]; !ok {
+			missing = append(missing, tag)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("release %s resolved images that this build will not publish: %s\nrun `erun build --release` from the project root so every release image resolves to a build",
+		execution.release.Version, strings.Join(missing, ", "))
 }
 
 func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if execution.release != nil {
-		// The release owns the publish rather than following it: its stages run
-		// around the build+push so the version's images and charts exist, and
-		// resolve, before the tag and branch pushes make it public.
-		publisher := newReleasePublisher(execution, deploySpecs, runScript, build, push)
-		if err := runReleaseSpec(ctx, *execution.release, runGit, runScript, nil, publisher); err != nil {
+		if err := prepareReleaseBuild(ctx, execution, runGit, runScript); err != nil {
 			return err
 		}
-	} else {
-		if execution.skippedLinux {
-			ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
-		}
-		if _, err := runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push); err != nil {
-			return err
-		}
+	} else if execution.skippedLinux {
+		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
+	}
+	if _, err := runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push); err != nil {
+		return err
+	}
+	if err := finishReleaseBuild(ctx, execution); err != nil {
+		return err
 	}
 	// build+push above already published the images and runtime chart, so
 	// these pure deploy specs only run helm.
@@ -286,29 +326,25 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 			return err
 		}
 	}
-	if execution.release != nil {
-		ctx.Info("release version: " + execution.release.Version)
-	}
 	if version := deployedVersionForSpecs(deploySpecs); version != "" {
 		ctx.Info("deployed version: " + version)
 	}
 	return nil
 }
 
-// BuildExecutionReleaseSpec exposes the release a build execution carries, for
-// transports that report the resolved plan alongside the run.
-func BuildExecutionReleaseSpec(execution BuildExecutionSpec) (ReleaseSpec, bool) {
+// finishReleaseBuild verifies a release build's newly published images that a
+// Terraform module references resolve with no credential at all, then reports
+// the released version -- the checks and the announcement that only make
+// sense once the build above has actually published something.
+func finishReleaseBuild(ctx Context, execution BuildExecutionSpec) error {
 	if execution.release == nil {
-		return ReleaseSpec{}, false
+		return nil
 	}
-	return *execution.release, true
-}
-
-func releaseExecutionVersion(execution BuildExecutionSpec) string {
-	if execution.release == nil {
-		return ""
+	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, execution.release.ProjectRoot, execution, probeAnonymousManifestPull); err != nil {
+		return err
 	}
-	return execution.release.Version
+	ctx.Info("release version: " + execution.release.Version)
+	return nil
 }
 
 func runBuildExecutionBuilds(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (map[string]struct{}, error) {

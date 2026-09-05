@@ -1,7 +1,6 @@
 package eruncommon
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,29 +51,6 @@ func VerifyPublishedHelmChart(ctx Context, ociRepo, chartName, version string) e
 	return nil
 }
 
-// VerifyPublishedDockerImage re-resolves the multi-arch manifest just pushed for
-// a tag. Nothing else proves the image half of a version exists, and a release
-// that assumed it does is how a tag gets announced for an image no deploy can
-// pull.
-func VerifyPublishedDockerImage(ctx Context, tag string, insecure bool) error {
-	tag = strings.TrimSpace(tag)
-	if tag == "" {
-		return nil
-	}
-	spec := commandSpec{Name: "docker", Args: append(dockerManifestArgs("inspect", insecure), tag)}
-	ctx.TraceCommand(spec.Dir, spec.Name, spec.Args...)
-	if ctx.DryRun {
-		return nil
-	}
-	if err := readBackPublishedArtifact(ctx, "image "+tag, func() (string, error) {
-		return runCommandCapturingOutput(ctx, spec)
-	}); err != nil {
-		return fmt.Errorf("verify published image %s: %w", tag, err)
-	}
-	ctx.Info("==> Verified published image " + tag)
-	return nil
-}
-
 func readBackPublishedArtifact(ctx Context, describe string, read func() (string, error)) error {
 	var lastErr error
 	for attempt := 1; attempt <= registryVerifyMaxAttempts; attempt++ {
@@ -112,17 +88,4 @@ func isTransientRegistryReadError(output string) bool {
 		}
 	}
 	return false
-}
-
-// runCommandCapturingOutput keeps a verification read quiet on success — the
-// manifest body is not what the operator asked for — while still surfacing the
-// tool's own diagnostics and capturing everything for failure classification.
-func runCommandCapturingOutput(ctx Context, spec commandSpec) (string, error) {
-	capture := new(bytes.Buffer)
-	cmd := Command(spec.Name, spec.Args...)
-	cmd.Dir = spec.Dir
-	cmd.Stdout = capture
-	cmd.Stderr = commandOutputWriter(ctx.Stderr, capture)
-	err := cmd.Run()
-	return capture.String(), err
 }

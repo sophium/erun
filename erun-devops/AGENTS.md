@@ -100,13 +100,12 @@ Components that run an upstream image unmodified (PostgreSQL, PowerDNS, Zitadel,
 
 ## Release Workflow
 
-- Stable release behavior for this module currently means, in this order:
+- `erun release` is version paperwork only — it never builds or publishes an image or a chart. Stable release behavior for this module currently means, in this order:
   - release chart metadata is rewritten so chart version and application version match the release
   - package-manager metadata for supported installers is updated together with the release when present
-  - the release commit and a **local** tag are created — recoverable state, nothing public yet
-  - the release-tagged Docker images and their charts are built and published, then read back from the registry to prove they resolve
-  - only then does the tag reach origin, packaging checksums sync against the now-public archive, the next patch version is prepared, and the branches push
-  - a release that cannot publish fails at the publish, leaving no public tag and `VERSION` still on the version it was releasing, so re-running retries the same version
+  - the release commit and a **local** tag are created, then the tag is pushed to origin
+  - packaging checksums sync against the now-public archive, the next patch version is prepared, and the branches push
+- Building and publishing that version's images and charts is a separate step, reached only via `erun build --release` (which stamps and tags the same way internally, then builds and publishes) or `erun push --version <v>` (to republish). A release that fails to build or publish afterwards still leaves an honest tag naming the source it tried to build — that is not corruption, and the remedy is simply to fix the issue and release again.
 - Candidate releases use candidate version tags and still rely on the same shared release/build orchestration.
 - When changing release behavior, validate the repository-wide flow, not only this subtree. At minimum run the release-sensitive suites in `erun-common`, `erun-cli`, and `erun-mcp`.
 - A non-erun tenant consumes erun's **published** charts by reference — it never forks or copies them:

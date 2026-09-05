@@ -84,7 +84,7 @@ The pipeline is the same whether a person or a machine runs it.
 - **CLI** — `erun build` / `release` / `push` / `deploy`, scriptable and headless. See the [CLI overview](/cli/overview).
 - **Desktop app** — the same commands behind buttons. See the [desktop app](/desktop/overview).
 - **MCP** — an Agent calls the `build` / `push` / `deploy` / `release` [tools](/mcp/overview), which run the identical logic and return structured results instead of stdout.
-- **CI** — before a review can be accepted, ERun's own [merge queue](/collaboration/merge-queue) builds the prospective merge of its source onto its *current* target and gates it with a real `erun build`, pushing only on green — the step that catches two reviews that are each green alone but broken together, before the target branch moves. Once a review actually merges this way, it triggers `erun release` through the [release queue](/collaboration/builds#release-queue), which runs it in an agent env with warm caches, one release at a time per tenant; a later `erun deploy --version` rolls the published version out.
+- **CI** — before a review can be accepted, ERun's own [merge queue](/collaboration/merge-queue) builds the prospective merge of its source onto its *current* target and gates it with a real `erun build`, pushing only on green — the step that catches two reviews that are each green alone but broken together, before the target branch moves. Once a review actually merges this way, it triggers `erun build --release` through the [release queue](/collaboration/builds#release-queue), which runs it in an agent env with warm caches, one release at a time per tenant; a later `erun deploy --version` rolls the published version out.
 
 ## Promotion: agent env to runtime env
 

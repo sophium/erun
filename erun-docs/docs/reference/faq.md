@@ -10,11 +10,11 @@ Yes — the desktop app and CLI are equally useful as a clean development surfac
 
 ## Does ERun replace Kubernetes? Or CI/CD? Or my IDE?
 
-No. ERun sits *alongside* them. Kubernetes is the isolation primitive ERun manages; your IDE attaches over SSH; your CI is what runs `erun release` on main. ERun's job is removing the daily friction in front of those tools — not replacing any of them.
+No. ERun sits *alongside* them. Kubernetes is the isolation primitive ERun manages; your IDE attaches over SSH; your CI is what runs `erun build --release` on main. ERun's job is removing the daily friction in front of those tools — not replacing any of them.
 
 ## Can I use my existing CI pipeline (GitHub Actions, GitLab, Buildkite, …)?
 
-Yes. The CI workflow is just `erun release` (on main) and `erun deploy` (to runtime envs). Anything that can run a binary can do that. ERun also exposes its own [build records API](/collaboration/builds) so the CI can publish build outcomes into the review/merge-queue model.
+Yes. The CI workflow is just `erun build --release` (on main) and `erun deploy` (to runtime envs). Anything that can run a binary can do that. ERun also exposes its own [build records API](/collaboration/builds) so the CI can publish build outcomes into the review/merge-queue model.
 
 ## What about Windows?
 

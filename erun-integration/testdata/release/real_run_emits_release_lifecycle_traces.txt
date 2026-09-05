@@ -1,3 +1,5 @@
+<VERSION>
+audit: erun release
 release: resolving project root
 release: project root = <TMP>
 release: resolving release module root
@@ -10,46 +12,17 @@ release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
 release: classified mode = candidate
 release: develop branch "develop" exists = true
-<VERSION>
-audit: erun release
 ==> Releasing <VERSION>
 release: branch=develop mode=candidate version=<VERSION>
-publishing image: ghcr.io/sophium/api:<VERSION>
+docker image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
 stage: sync-remote
 stage: release
-release: origin/develop could not be read; the moved-branch check is left to the push
-release: docker root free disk space is not observable from this process; skipping the headroom check
-stage: publish
-fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
-fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
-promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
-fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
-fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
-promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
-==> Publishing api <VERSION> to oci://ghcr.io/sophium/charts
-==> Verified published chart api <VERSION>
-==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
-==> Verified published chart base <VERSION>
-stage: verify-publication
-==> Verified published image ghcr.io/sophium/api:<VERSION>
-==> Verified published image ghcr.io/sophium/base:<VERSION>
 stage: push
-release version: <VERSION>
 ==> Released <VERSION> in <ELAPSED>
 step timing (ordered by duration):
   release [<ELAPSED>]
-    publish [<ELAPSED>]
-      api (cache hit) [<ELAPSED>]
-        linux/amd64 (cache hit) [<ELAPSED>]
-        linux/arm64 (cache hit) [<ELAPSED>]
-      base (cache hit) [<ELAPSED>]
-        linux/amd64 (cache hit) [<ELAPSED>]
-        linux/arm64 (cache hit) [<ELAPSED>]
-      chart api [<ELAPSED>]
-      chart base [<ELAPSED>]
     push [<ELAPSED>]
     release [<ELAPSED>]
     sync-remote [<ELAPSED>]
-    verify-publication [<ELAPSED>]
 timing record written to <TMP>

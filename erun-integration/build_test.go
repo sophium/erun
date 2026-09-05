@@ -996,7 +996,7 @@ func TestBuild(t *testing.T) {
 		// erun's own release git operations (tag/push).
 		fixture.StubBinary(t, stubs, "helm", "")
 		envVars = append(envVars, fixture.StubEnv(stubs, "git", "helm")...)
-		// #1201: give the registry-credential preflight a resolvable credential
+		// Give the registry-credential preflight a resolvable credential
 		// so this scenario still reaches the manifest-push behavior it is about.
 		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"build", "--release", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1004,6 +1004,138 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/real_run_release_pushes_multi_platform_manifest", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_release_refuses_to_publish_an_image_the_build_would_not_build", func(t *testing.T) {
+		// Run from inside one component's build context, `build --release`
+		// resolves only that component's build but release still stamps and
+		// would tag every image on the release version line. That is the
+		// shape of the original defect — a version announced for artifacts
+		// nobody publishes — so it is refused during resolution, before any
+		// stage runs.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		webDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "web")
+		if err := os.MkdirAll(webDir, 0o755); err != nil {
+			t.Fatalf("mkdir web component dir: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(webDir, "Dockerfile"), "FROM alpine:3.22\n")
+		fixture.RunGit(t, setup.Cwd, "add", ".")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add web component")
+
+		componentCwd := filepath.Join(setup.Cwd, "erun-devops", "docker", "api")
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: componentCwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a release build that cannot publish every image, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_release_refuses_to_publish_an_image_the_build_would_not_build", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_release_traces_anonymous_pullability_probe_for_terraform_referenced_image", func(t *testing.T) {
+		// A Terraform module under erun-devops/terraform-erun can reference a
+		// released image directly (terraform-erun-cluster-edge's real
+		// dns01_webhook_image is exactly this shape). The post-publish
+		// anonymous-pullability check must discover that reference and trace
+		// probing it even in dry-run, where the real network probe is
+		// skipped -- discovery and the per-image decision are not gated on
+		// !DryRun, only the live registry call is.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		fixture.SeedTerraformModuleImageReference(t, setup.Cwd, "erun-webhook")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add terraform module image reference")
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_release_traces_anonymous_pullability_probe_for_terraform_referenced_image", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_release_refuses_when_the_docker_root_is_nearly_full", func(t *testing.T) {
+		// The release build that fills the node's disk is the one most
+		// likely to get evicted by it, so low headroom at the docker root
+		// refuses the build before it spends anything — the same "known
+		// failure caught up front" shape as the registry-permission
+		// preflight. docker and df are both stubbed to report a real (if
+		// fake) low-space filesystem, exercising the conclusive refusal
+		// branch rather than the "not observable" fallback the other
+		// release-build scenarios take.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		seedBareOrigin(t, setup)
+		dockerRoot := filepath.Join(setup.Cwd, "fake-docker-root")
+		if err := os.MkdirAll(dockerRoot, 0o755); err != nil {
+			t.Fatalf("mkdir fake docker root: %v", err)
+		}
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "info -f") printf '%s' '` + dockerRoot + `' ;;`,
+			`  "builder prune") exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// 1 GiB available, well under the 20 GiB default floor.
+		fixture.StubBinaryAdvanced(t, stubs, "df", fixture.StubBinarySpec{
+			Stdout: "Filesystem     1024-blocks     Used Available Capacity Mounted on\n" +
+				"overlay          104857600 93763584   1048576      99% " + dockerRoot + "\n",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "df")...)
+
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for low disk headroom, got 0: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "only 1.0 GiB free at the docker root, below the 20.0 GiB a multi-arch release build needs") {
+			t.Fatalf("expected the disk-headroom refusal in output:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "filling this disk is what evicts the pod running the release") {
+			t.Fatalf("expected the eviction-risk explanation in output:\n%s", result.Combined)
+		}
+
+		// Outside the captured streams: release's own stages (stamp, tag,
+		// push, version bump) already ran and landed before this preflight,
+		// so the tag is real and VERSION has already moved past it -- a
+		// failed build here is not corruption, just an unbuilt tag; the
+		// remedy is to fix the issue and release again.
+		assertVersionFile(t, setup, "1.4.3\n")
+	})
+
+	t.Run("real_run_release_refuses_when_the_base_branch_moved_before_the_build", func(t *testing.T) {
+		// release's own stages (stamp, tag, push, version bump) run before
+		// this preflight, so a moved base branch is refused before the build
+		// spends anything -- but after the tag is already real and public.
+		// That is not corruption: fix the issue and release again.
+		//
+		// git is stubbed so the re-read reports a moved branch deterministically:
+		// the move is what this scenario is about, and no fixture can make a real
+		// remote move between two of the release's own git calls.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "git", `case "$*" in
+  *'rev-parse --abbrev-ref HEAD'*) echo main ;;
+  *'rev-list --count HEAD..FETCH_HEAD'*) echo 3 ;;
+  *'rev-parse --short HEAD'*) echo abc1234 ;;
+  *'show-ref --verify --quiet'*) exit 1 ;;
+  *'^{}'*) exit 1 ;;
+  *) : ;;
+esac
+exit 0
+`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "git")...)
+		envVars = append(envVars, stubPublishToolchain(t, setup)...)
+
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the base branch moved before the build, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/real_run_release_refuses_when_the_base_branch_moved_before_the_build", normalize.Apply(result.Combined))
+
+		// Outside the captured streams: release's own version bump already
+		// landed before this preflight ran, so VERSION has already moved
+		// past the tagged version.
+		assertVersionFile(t, setup, "1.4.3\n")
 	})
 
 	t.Run("dry_run_build_deploy_resolves_docker_target_deploy_specs", func(t *testing.T) {
@@ -1634,4 +1766,47 @@ func stubHelmSilent(t *testing.T, setup env.Setup) []string {
 	stubs := filepath.Join(setup.Cwd, "stubs")
 	fixture.StubBinary(t, stubs, "helm", "")
 	return fixture.StubEnv(stubs, "helm")
+}
+
+// stubDockerWithManifestTracking declares a docker stub that succeeds on
+// everything except `manifest inspect`, which it answers from real
+// (marker-file-backed) state rather than a blanket yes: it backs both the
+// pre-publish "already published?" probe and the post-publish verify
+// step, so a stub that always answered yes would make a first-ever-release
+// scenario falsely report the image as already published before publishing
+// anything. Reporting false until `manifest push` actually runs, then true,
+// keeps the golden honest about what the scenario models.
+func stubDockerWithManifestTracking(t *testing.T, stubs string) {
+	t.Helper()
+	fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+		`case "$1 $2" in`,
+		`  "manifest inspect")`,
+		`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
+		`    [ -f "$marker" ] && exit 0 || exit 1`,
+		`    ;;`,
+		`  "manifest push")`,
+		`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
+		`    touch "$marker"`,
+		`    exit 0`,
+		`    ;;`,
+		`  *) exit 0 ;;`,
+		`esac`,
+	}, "\n"))
+}
+
+// stubPublishToolchain declares succeeding docker and helm stubs so a real-run
+// `erun build --release` can execute its build+publish step — build, push,
+// manifest assembly, chart publish, and the read-back verification — without
+// a daemon or a registry.
+func stubPublishToolchain(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	stubs := filepath.Join(setup.Cwd, "stubs")
+	stubDockerWithManifestTracking(t, stubs)
+	fixture.StubBinary(t, stubs, "helm", "")
+	envVars := fixture.StubEnv(stubs, "docker", "helm")
+	// The registry-credential preflight refuses up front when no ghcr.io
+	// credential resolves at all. A real publish toolchain always has one;
+	// GH_TOKEN is the fixture-side stand-in so these scenarios keep
+	// exercising what happens once that check passes.
+	return append(envVars, "GH_TOKEN=integration-test-token")
 }
