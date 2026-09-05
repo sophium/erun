@@ -97,13 +97,24 @@ type ControlPlaneVersionDrift struct {
 // every other CloudDependencies-accepting entrypoint normalizes it, so a
 // caller passing DefaultCloudDependencies() (whose FetchPlatformInfo starts
 // nil) gets the real unauthenticated call.
-func ResolveControlPlaneVersionDrift(ctx Context, result ListResult, deps CloudDependencies, resolvePublished RuntimeRegistryVersionResolverFunc) ControlPlaneVersionDrift {
+//
+// alias, when non-empty, narrows the check to that one configured alias
+// instead of every configured erun-hosted alias (erun#2130): every sibling
+// platform-touching command (`gate list`, `platform whoami`, ...) accepts
+// --erun-alias to target one plane, but this report had no way to avoid
+// probing every configured one even when the caller only cares about a
+// single plane. An alias that is not configured, or that names a
+// non-erun-hosted provider, is an error rather than a silently empty report.
+func ResolveControlPlaneVersionDrift(ctx Context, result ListResult, alias string, deps CloudDependencies, resolvePublished RuntimeRegistryVersionResolverFunc) (ControlPlaneVersionDrift, error) {
 	deps = normalizeCloudDependencies(deps)
-	planes := controlPlaneProviders(result.CloudProviders)
+	planes, err := selectControlPlaneProviders(result.CloudProviders, alias)
+	if err != nil {
+		return ControlPlaneVersionDrift{}, err
+	}
 
 	if ctx.DryRun {
 		traceControlPlaneVersionDriftDryRun(ctx, planes)
-		return ControlPlaneVersionDrift{}
+		return ControlPlaneVersionDrift{}, nil
 	}
 
 	ctx.Trace("list: resolving the published version from erun's own registry")
@@ -121,7 +132,7 @@ func ResolveControlPlaneVersionDrift(ctx Context, result ListResult, deps CloudD
 	for _, provider := range planes {
 		drift.Planes = append(drift.Planes, resolveOneControlPlaneVersionStatus(ctx, provider, deps.FetchPlatformInfo, deps.FetchConsoleVersion, publishedSemver, publishedOK))
 	}
-	return drift
+	return drift, nil
 }
 
 // controlPlaneProviders filters providers down to the erun-hosted ones --
@@ -134,6 +145,28 @@ func controlPlaneProviders(providers []CloudProviderStatus) []CloudProviderStatu
 		}
 	}
 	return planes
+}
+
+// selectControlPlaneProviders is controlPlaneProviders narrowed to a single
+// alias when one is given, matching the error text ResolveCloudProvider and
+// ResolveERunPlatformAlias already use elsewhere so an unconfigured or
+// wrong-type --erun-alias reads the same across every command that accepts
+// it.
+func selectControlPlaneProviders(providers []CloudProviderStatus, alias string) ([]CloudProviderStatus, error) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return controlPlaneProviders(providers), nil
+	}
+	for _, provider := range providers {
+		if provider.Alias != alias {
+			continue
+		}
+		if provider.Provider != CloudProviderERun {
+			return nil, fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider)
+		}
+		return []CloudProviderStatus{provider}, nil
+	}
+	return nil, fmt.Errorf("cloud provider alias %q is not configured", alias)
 }
 
 func controlPlaneAPIURL(provider CloudProviderStatus) string {
