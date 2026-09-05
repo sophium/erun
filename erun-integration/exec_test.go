@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1951,6 +1952,43 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/report_commit_status_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
 	})
 
+	t.Run("report_commit_status_real_run_succeeds", func(t *testing.T) {
+		// Drives the real wire path (postGitHubCommitStatus) through
+		// ERUN_GITHUB_API_BASE_URL_OVERRIDE -- the same seam
+		// TestExecRulesetBypass uses -- instead of only the dry-run trace.
+		setup := env.New(t)
+		github := githubCommitStatusStubServer(t, 0)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--remote-url", "https://github.com/sophium/erun.git",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_real_run_succeeds", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
+	t.Run("report_commit_status_real_run_github_rejects", func(t *testing.T) {
+		// postGitHubCommitStatus's own non-2xx branch: the request reached
+		// GitHub but the state was refused.
+		setup := env.New(t)
+		github := githubCommitStatusStubServer(t, http.StatusUnprocessableEntity)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--remote-url", "https://github.com/sophium/erun.git",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when github rejects the status, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_real_run_github_rejects", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
 	t.Run("close_pr_help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"exec", "close-pr", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -2041,6 +2079,70 @@ func TestExec(t *testing.T) {
 			t.Fatalf("expected non-zero exit with no token available, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "exec/close_pr_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
+	})
+
+	t.Run("close_pr_real_run_no_open_pull_request_is_a_no_op", func(t *testing.T) {
+		// findAndClosePullRequest's no-pulls branch: a queued plain branch
+		// with no open pull request is legitimate, so this is a no-op result
+		// rather than an error.
+		setup := env.New(t)
+		github := githubPullRequestStubServer(t, nil)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_real_run_no_open_pull_request_is_a_no_op", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
+	t.Run("close_pr_real_run_comments_and_closes_a_matching_pull_request", func(t *testing.T) {
+		// The full mutating path: postGitHubIssueComment then
+		// closeGitHubPullRequest, once the open pull request's head matches
+		// --gated-commit.
+		setup := env.New(t)
+		github := githubPullRequestStubServer(t, &githubPullRequestStubPull{
+			Number: 42, HeadSHA: "sourcesha0000000000000000000000000000000",
+		})
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_real_run_comments_and_closes_a_matching_pull_request", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
+	t.Run("close_pr_real_run_refuses_when_head_moved", func(t *testing.T) {
+		// The open pull request's head no longer matches --gated-commit --
+		// something pushed to the branch after the gate fetched it, so
+		// closing would silently discard whatever moved it.
+		setup := env.New(t)
+		github := githubPullRequestStubServer(t, &githubPullRequestStubPull{
+			Number: 42, HeadSHA: "movedsha00000000000000000000000000000000",
+		})
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the pull request head moved, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_real_run_refuses_when_head_moved", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
 	})
 
 	t.Run("gate_run_help", func(t *testing.T) {
@@ -2478,6 +2580,58 @@ func githubStubEnv(server *httptest.Server) []string {
 		"ERUN_GITHUB_API_BASE_URL_OVERRIDE=" + server.URL + "/",
 		"GITHUB_TOKEN=gho_stub_token",
 	}
+}
+
+// githubCommitStatusStubServer answers the one call `exec
+// report-commit-status` makes in real-run mode (postGitHubCommitStatus).
+// forceStatus, when non-zero, makes the endpoint refuse instead of succeed.
+func githubCommitStatusStubServer(t testing.TB, forceStatus int) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /repos/sophium/erun/statuses/{commit}", func(w http.ResponseWriter, _ *http.Request) {
+		if forceStatus != 0 {
+			http.Error(w, `{"message":"Validation Failed"}`, forceStatus)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1,"state":"success"}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// githubPullRequestStubPull is the one open pull request `exec close-pr`
+// should find for feature/add-widget -> main, or nil for the no-open-PR
+// scenario.
+type githubPullRequestStubPull struct {
+	Number  int
+	HeadSHA string
+}
+
+// githubPullRequestStubServer answers the three calls `exec close-pr` makes
+// in real-run mode: the open-pull-requests lookup, the landing-commit
+// comment, and the close itself.
+func githubPullRequestStubServer(t testing.TB, pull *githubPullRequestStubPull) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/sophium/erun/pulls", func(w http.ResponseWriter, _ *http.Request) {
+		if pull == nil {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = fmt.Fprintf(w, `[{"number":%d,"head":{"sha":%q}}]`, pull.Number, pull.HeadSHA)
+	})
+	mux.HandleFunc("POST /repos/sophium/erun/issues/{number}/comments", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	})
+	mux.HandleFunc("PATCH /repos/sophium/erun/pulls/{number}", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"state":"closed"}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
 }
 
 // TestExecRulesetBypass drives the two ruleset-bypass commands against stub
