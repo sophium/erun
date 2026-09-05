@@ -131,4 +131,21 @@ got=$(PATH="${stub_bin}:$PATH" PARALLEL_GATE_CGROUP_ROOT="$case_dir" PARALLEL_GA
 got=$(PATH="${stub_bin}:$PATH" PARALLEL_GATE_CGROUP_ROOT="$case_dir" PARALLEL_GATE_MEMORY_LIMIT_MIB=bogus "$gate" width 6 700)
 [ "$got" = 6 ] || fail "non-numeric memory override is ignored: expected job-count cap 6, got $got"
 
+# --- PARALLEL_GATE_CPU_LIMIT overrides the CPU quota read outright, for the
+# same BuildKit RUN step shape as the memory override above: cpu.max also
+# reads "max" (unlimited) there, so cpu_quota() would otherwise fall through
+# to `nproc` -- the host node's real core count, not the dind sidecar's
+# configured limit (erun#2081). Reuse the "v2-unlimited" cgroup shape
+# (cpu.max="max") to prove the override, not the cgroup file or `nproc`, is
+# what wins.
+case_dir="${work_root}/v2-unlimited"
+got=$(PATH="${stub_bin}:$PATH" PARALLEL_GATE_CGROUP_ROOT="$case_dir" PARALLEL_GATE_CPU_LIMIT=2 "$gate" width 6 700)
+[ "$got" = 2 ] || fail "cpu override binds despite unlimited cpu.max: expected 2, got $got"
+
+# --- the CPU override is ignored when it is not a positive integer, falling
+# back to the cgroup read (or further, per the existing fallback chain, which
+# lands on the stubbed nproc=12 here, capped by the job-count of 6).
+got=$(PATH="${stub_bin}:$PATH" PARALLEL_GATE_CGROUP_ROOT="$case_dir" PARALLEL_GATE_CPU_LIMIT=bogus "$gate" width 6 700)
+[ "$got" = 6 ] || fail "non-numeric cpu override is ignored: expected job-count cap 6, got $got"
+
 echo "ok: parallel-gate.sh width"

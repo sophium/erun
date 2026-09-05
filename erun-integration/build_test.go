@@ -1045,6 +1045,77 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_build_deploy_erun_devops_component_resolves_runtime_image_memo", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_dockerfile_dind_args_resolve_configured_runtime_dind_pod", func(t *testing.T) {
+		// erun#2081: a Dockerfile that declares ARG DIND_CPU_LIMIT / ARG
+		// DIND_MEMORY_LIMIT_MIB (the erun-devops Dockerfile's own in-build gate
+		// sizing) must have those ARGs fed from the *building* environment's
+		// actual configured erun-dind sidecar resources
+		// (EnvConfig.RuntimeDindPod), not the Dockerfile's own hardcoded
+		// defaults and never the host's raw node capacity. team/dev's config
+		// sets a non-default runtimedindpod (6 CPU / 24Gi) so the golden can't
+		// be satisfied by accident from the 4-core/20Gi fallback default.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		appendEnvConfigForTest(t, setup, "team", "dev", "runtimedindpod:\n  cpu: \"6\"\n  memory: 24Gi\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"),
+			"FROM alpine:3.22\nARG DIND_CPU_LIMIT=4\nARG DIND_MEMORY_LIMIT_MIB=20480\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--build-arg DIND_CPU_LIMIT=6 --build-arg DIND_MEMORY_LIMIT_MIB=24576") {
+			t.Errorf("expected the docker build to carry the configured runtimedindpod values:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_dind_args_resolve_configured_runtime_dind_pod", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", func(t *testing.T) {
+		// erun#2081: an environment with no configured runtimedindpod must not
+		// fall back to the host node's real CPU/memory capacity (the bug this
+		// issue is about) -- it must fall back to the same small, fixed
+		// constant the sidecar's own chart default and the Dockerfile's own
+		// ARG default use (4 CPU / 20480Mi), regardless of how large the
+		// machine actually running this test is.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"),
+			"FROM alpine:3.22\nARG DIND_CPU_LIMIT=4\nARG DIND_MEMORY_LIMIT_MIB=20480\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--build-arg DIND_CPU_LIMIT=4 --build-arg DIND_MEMORY_LIMIT_MIB=20480") {
+			t.Errorf("expected the docker build to fall back to the conservative constant, not the host's real capacity:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_without_dind_args_is_unaffected", func(t *testing.T) {
+		// erun#2081: a Dockerfile that declares neither ARG must not get either
+		// build-arg, even when the building environment has a configured
+		// runtimedindpod -- the regex-gated detection in
+		// dockerfileConsumesDindCPULimit/dockerfileConsumesDindMemoryLimit
+		// must not fire for an unrelated Dockerfile.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		appendEnvConfigForTest(t, setup, "team", "dev", "runtimedindpod:\n  cpu: \"6\"\n  memory: 24Gi\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"), "FROM alpine:3.22\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "DIND_CPU_LIMIT") || strings.Contains(result.Combined, "DIND_MEMORY_LIMIT_MIB") {
+			t.Errorf("expected no DIND build-args for a Dockerfile that declares neither ARG:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_without_dind_args_is_unaffected", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_linux_package_from_component_dir", func(t *testing.T) {
 		// From inside linux/<component>, `erun build` resolves the dir's build.sh
 		// and dry-run traces its invocation with the version. ERUN_HOST_OS_OVERRIDE

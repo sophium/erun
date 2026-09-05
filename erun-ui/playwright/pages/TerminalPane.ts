@@ -78,15 +78,29 @@ export class TerminalPane {
   // Writes raw bytes to a session as if its PTY had emitted them. btoa is safe
   // only because every byte written through here is < 256.
   async emitOutput(sessionId: number, raw: string): Promise<void> {
+    await this.emitOutputBatch(sessionId, [raw]);
+  }
+
+  // Emits several chunks as discrete terminal-output events (same event
+  // granularity as one emitOutput call per chunk) from a single page.evaluate
+  // round trip. A caller that needs many chunks landing in one session should
+  // use this instead of awaiting emitOutput in a loop: each await there is a
+  // separate CDP round trip, and a few hundred of them can cost seconds on a
+  // contended machine for no reason the test cares about (see
+  // terminal-switch-timing.spec.ts, which measures switch time, not emission
+  // time).
+  async emitOutputBatch(sessionId: number, rawChunks: string[]): Promise<void> {
     await this.page.evaluate(
       (payload) => {
         const runtime = (window as unknown as { runtime: HeadlessRuntime }).runtime;
-        runtime.EventsEmit('terminal-output', {
-          sessionId: payload.sessionId,
-          data: btoa(payload.raw),
-        });
+        for (const raw of payload.rawChunks) {
+          runtime.EventsEmit('terminal-output', {
+            sessionId: payload.sessionId,
+            data: btoa(raw),
+          });
+        }
       },
-      { sessionId, raw },
+      { sessionId, rawChunks },
     );
   }
 

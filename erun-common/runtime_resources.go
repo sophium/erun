@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -149,6 +150,79 @@ func ValidateRuntimePodResources(resources RuntimePodResources) error {
 		return fmt.Errorf("runtime pod memory: %w", err)
 	}
 	return nil
+}
+
+// resolveRuntimePodResourcesForDeploy fills in the runtime container's CPU
+// and/or memory limit from the pod's own live cgroup limits when the env
+// config leaves either unset, instead of letting NormalizeRuntimePodResources
+// silently substitute its package default. The in-pod
+// projected env config never carries runtimepod at all — see
+// doctor_sync_config.go's own comment on what the injected env does and does
+// not carry — so a deploy driven from an environment's own in-pod MCP/CLI
+// edge always resolves an empty RuntimePod, and defaulting it there does not
+// mean "no size was ever chosen", it means "this side was never told". A
+// deliberately resized environment would then silently roll back to the
+// default on its next in-pod deploy.
+//
+// A configured field always wins over the cgroup read. The read only stands
+// in for a field this process was genuinely never told, and only once it can
+// prove it is reading the very pod about to be deployed: IsInRuntimeEnvironment
+// confirms ERUN_ENV_TYPE names a real chart-rendered pod (never set off-pod,
+// unlike ERUN_TENANT/ERUN_ENVIRONMENT alone — erun-integration's own
+// in-pod-shaped deploy scenarios set only the latter pair to simulate pod
+// identity without a real pod's cgroup behind it, and reading this host's
+// unrelated cgroup there would have made the resolved value depend on
+// whatever machine happened to run the test), and the tenant/environment
+// match confirms it is this pod, not some other environment's, that the
+// cgroup limits belong to. A host-side deploy (no injected identity) or a
+// deploy of a different environment leaves the configured value untouched,
+// so NormalizeRuntimePodResources' default still applies exactly as before
+// for a brand-new environment that has never been deployed, in-pod or
+// otherwise, and so has no live limits to read.
+func resolveRuntimePodResourcesForDeploy(configured RuntimePodResources, tenant, environment string, env func(string) string, cgroupRoot string) RuntimePodResources {
+	resolved := configured
+	if strings.TrimSpace(resolved.CPU) != "" && strings.TrimSpace(resolved.Memory) != "" {
+		return resolved
+	}
+	if env == nil {
+		env = os.Getenv
+	}
+	if !IsInRuntimeEnvironment(env) {
+		return resolved
+	}
+	podTenant, podEnvironment, inPod := injectedRuntimePodIdentity(env)
+	if !inPod || podTenant != strings.TrimSpace(tenant) || podEnvironment != strings.TrimSpace(environment) {
+		return resolved
+	}
+	usage := ReadLocalRuntimeUsage(cgroupRoot)
+	if strings.TrimSpace(resolved.CPU) == "" {
+		resolved.CPU = liveRuntimePodCPULimit(usage)
+	}
+	if strings.TrimSpace(resolved.Memory) == "" {
+		resolved.Memory = liveRuntimePodMemoryLimit(usage)
+	}
+	return resolved
+}
+
+// liveRuntimePodCPULimit renders a cgroup reading's CPU quota as the same
+// kind of string NormalizeRuntimePodResources expects, or "" when the quota
+// could not be read (cgroup v1, no quota set).
+func liveRuntimePodCPULimit(usage RuntimeUsage) string {
+	quota := runtimeQuotaMilli(usage.CPU.QuotaCores)
+	if quota <= 0 {
+		return ""
+	}
+	return FormatKubernetesCPUFromMilli(quota)
+}
+
+// liveRuntimePodMemoryLimit renders a cgroup reading's memory.max as a Mi
+// string, or "" when the limit could not be read or the container is
+// unlimited — an unlimited cgroup names no size to preserve.
+func liveRuntimePodMemoryLimit(usage RuntimeUsage) string {
+	if usage.Memory.Unlimited || usage.Memory.LimitBytes <= 0 {
+		return ""
+	}
+	return formatBytesAsMi(usage.Memory.LimitBytes)
 }
 
 // NormalizeRuntimeDindPodResources and ValidateRuntimeDindPodResources are

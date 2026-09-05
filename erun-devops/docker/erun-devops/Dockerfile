@@ -190,8 +190,15 @@ COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-ref
 # concurrent lint/test processes against the memory the operator actually
 # provisioned instead of silently dropping the memory term and sizing off CPU
 # quota alone (see that script's own comment on PARALLEL_GATE_MEMORY_LIMIT_MIB).
-# A tenant image built from a `<tenant>-devops` Dockerfile with a different
-# sidecar memory default should override this ARG to match.
+# `erun build` itself passes this as a real --build-arg derived from the
+# building environment's actual EnvConfig.RuntimeDindPod (applyDindResourceBuildArgs
+# in erun-common/build_dind_resources.go), so the default below is only what a
+# bare `docker build` (no erun env resolved) falls back to -- it is
+# deliberately the same conservative constant the sidecar's own chart default
+# and NormalizeRuntimeDindPodResources use, never the host node's capacity. A
+# tenant image built from a `<tenant>-devops` Dockerfile with a different
+# sidecar memory default only needs to change this fallback to match; erun's
+# own resolved value already tracks the environment.
 ARG DIND_MEMORY_LIMIT_MIB=20480
 # DIND_CPU_LIMIT is the same blind-cgroup problem as DIND_MEMORY_LIMIT_MIB
 # above, for CPU instead of memory. playwright.config.ts's own worker-count
@@ -211,9 +218,13 @@ ARG DIND_MEMORY_LIMIT_MIB=20480
 # backend *and* a headless Chromium, and they compete) to that budget instead
 # of to the unbounded node, floored at 1 and capped at 4 -- one more than the
 # config comment's own "2 workers clean on 4 cores" data point, kept as a
-# ceiling rather than raised further without new measurement. A tenant image
-# built from a `<tenant>-devops` Dockerfile with a different sidecar CPU
-# default should override this ARG to match, same as DIND_MEMORY_LIMIT_MIB.
+# ceiling rather than raised further without new measurement. Like
+# DIND_MEMORY_LIMIT_MIB above, `erun build` passes this as a real --build-arg
+# resolved from EnvConfig.RuntimeDindPod, so the default below is only the
+# bare-`docker build` fallback -- the same constant the sidecar's own chart
+# default and NormalizeRuntimeDindPodResources use, never the node's core
+# count. A tenant image with a different sidecar CPU default only needs to
+# change this fallback to match.
 ARG DIND_CPU_LIMIT=4
 # TEMPORARY, for the #2081 3x-in-a-row validation only: erun build's own
 # fingerprint promotion and BuildKit's ordinary layer cache would otherwise
@@ -230,6 +241,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
     echo "#2081 validation run ${CACHE_BUST_RUN}/3" && \
     PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
+    PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
     ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \
     make check && touch /test-ok
 

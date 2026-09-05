@@ -332,13 +332,21 @@ func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinde
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return injectedDockerBuildEnvConfig(nil)
 	}
+	return resolveDockerBuildEnvConfigForProject(store, projectRoot, target.Environment)
+}
+
+// resolveDockerBuildEnvConfigForProject is ResolveDockerBuildEnvConfig's core,
+// usable by callers that already know the resolved project root and
+// environment name directly (e.g. newDockerBuildSpec) without re-deriving them
+// through a DockerCommandTarget.
+func resolveDockerBuildEnvConfigForProject(store DockerStore, projectRoot, wantEnv string) *EnvConfig {
 	cleanRoot := filepath.Clean(projectRoot)
 
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
 		return injectedDockerBuildEnvConfig(nil)
 	}
-	wantEnv := strings.TrimSpace(target.Environment)
+	wantEnv = strings.TrimSpace(wantEnv)
 	for _, tenantConfig := range tenants {
 		envs, err := store.ListEnvConfigs(tenantConfig.Name)
 		if err != nil {

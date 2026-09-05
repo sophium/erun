@@ -1,4 +1,25 @@
 environments:
+    # code2: a persistent remote-agent env for the erun tenant, PVC-backed, whose
+    # `erun build` resolves its environment key to "code2" (not "local") —
+    # confirmed live by pinning a bogus platform here and checking the build
+    # trace picked it up. Its node is x86_64 (uname -m, docker info, `docker
+    # buildx inspect` listing arm64 only as an emulated target). A gate build
+    # here publishes nothing (no --release, no push), so building linux/arm64
+    # only pays qemu emulation cost for an artifact nobody consumes. Do not
+    # widen this back to multi-arch without re-confirming this node can
+    # actually schedule arm64 workloads — it cannot today.
+    code2:
+        docker:
+            platforms:
+                - linux/amd64
+    # local: the default environment name `erun init` assigns when none is
+    # given (see erun-common/init.go's DefaultEnvironment). Deliberately left
+    # unpinned: unlike code2 (a specific, confirmed-amd64 pod), "local" is a
+    # generic name any contributor's own machine can carry, including an
+    # arm64 laptop — hardcoding amd64 here would misdirect (or silently
+    # narrow) builds for whoever's actual "local" isn't this architecture.
+    # Pin a specific contributor/environment's own platforms locally instead
+    # of widening this shared entry.
     local:
         containerregistries:
             - registry: ghcr.io/sophium
