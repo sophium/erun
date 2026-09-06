@@ -3,6 +3,7 @@ package model
 import (
 	"time"
 
+	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/uptrace/bun"
 )
 
@@ -48,7 +49,12 @@ type Build struct {
 	// FailureDetail is the gate's own account of why a GATE build failed; a
 	// RECORDED failure's reason lives wherever the reporting caller's own CI
 	// recorded it, not here.
-	FailureDetail string    `json:"failureDetail,omitempty" bun:"failure_detail,nullzero"`
-	CreatedAt     time.Time `json:"createdAt" bun:"created_at,scanonly"`
-	UpdatedAt     time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
+	FailureDetail string `json:"failureDetail,omitempty" bun:"failure_detail,nullzero"`
+	// Profile is the bounded per-step profile the caller self-reported
+	// alongside this build's outcome (root AGENTS.md #2274) -- a
+	// duration/CPU/throttle/IO summary plus the top costliest steps, never
+	// the full step tree. NULL when the caller collected none.
+	Profile   *eruncommon.BuildProfileSummary `json:"profile,omitempty" bun:"profile,type:jsonb,nullzero"`
+	CreatedAt time.Time                       `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt time.Time                       `json:"updatedAt" bun:"updated_at,scanonly"`
 }
