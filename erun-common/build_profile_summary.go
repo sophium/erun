@@ -17,40 +17,17 @@ import "sort"
 // of how deep a future step tree grows.
 const buildProfileTopStepCount = 10
 
-// BuildCgroupProfileMetrics is one step's CPU/throttling/I/O cost. It mirrors
-// the shape a build cgroup collector reports (cpu seconds against quota,
-// throttled/total periods, read/write bytes, peak memory) -- see the
-// "Assumptions" note in this feature's PR description for why no such
-// collector exists on this branch yet: SummarizeTimingRecordForProfile has no
-// source to populate this from today, so every step summary's Cgroup is nil
-// until that collector lands and a follow-up change wires its output in
-// here. Available distinguishes "no cgroup to have an opinion about" (the
-// whole field is nil) from "a cgroup exists but its counters could not be
-// read" (Available: false, Unavailable: reason) -- a build outside a runtime
-// pod is the former, a pod-injected build whose remote read failed is the
-// latter.
-type BuildCgroupProfileMetrics struct {
-	Available         bool    `json:"available"`
-	Unavailable       string  `json:"unavailable,omitempty"`
-	CPUSeconds        float64 `json:"cpuSeconds,omitempty"`
-	CPUPercentOfQuota float64 `json:"cpuPercentOfQuota,omitempty"`
-	ThrottledPeriods  int64   `json:"throttledPeriods,omitempty"`
-	TotalPeriods      int64   `json:"totalPeriods,omitempty"`
-	ThrottledSeconds  float64 `json:"throttledSeconds,omitempty"`
-	IOReadBytes       int64   `json:"ioReadBytes,omitempty"`
-	IOWriteBytes      int64   `json:"ioWriteBytes,omitempty"`
-	PeakMemoryBytes   int64   `json:"peakMemoryBytes,omitempty"`
-}
-
 // BuildProfileStepSummary is one entry in BuildProfileSummary's bounded
 // top-N costliest-steps list. Name is the step's full path (parent > child)
 // so two same-named steps under different parents (e.g. two images both
 // building "linux/amd64") stay distinguishable once flattened out of the
-// tree.
+// tree. Cgroup reuses BuildCgroupMetrics (build_cgroup_metrics.go) directly
+// rather than a duplicate type, since the step's own JSON record already
+// carries that exact shape.
 type BuildProfileStepSummary struct {
-	Name            string                     `json:"name"`
-	DurationSeconds float64                    `json:"durationSeconds"`
-	Cgroup          *BuildCgroupProfileMetrics `json:"cgroup,omitempty"`
+	Name            string              `json:"name"`
+	DurationSeconds float64             `json:"durationSeconds"`
+	Cgroup          *BuildCgroupMetrics `json:"cgroup,omitempty"`
 }
 
 // BuildProfileSummary is the bounded profile a build self-reports alongside
@@ -59,12 +36,12 @@ type BuildProfileStepSummary struct {
 // build had few enough steps that TopSteps is the whole tree" from "steps
 // were dropped" without needing TruncatedStepCount to be nonzero.
 type BuildProfileSummary struct {
-	DurationSeconds    float64                    `json:"durationSeconds"`
-	Failed             bool                       `json:"failed,omitempty"`
-	Cgroup             *BuildCgroupProfileMetrics `json:"cgroup,omitempty"`
-	TopSteps           []BuildProfileStepSummary  `json:"topSteps,omitempty"`
-	TotalStepCount     int                        `json:"totalStepCount,omitempty"`
-	TruncatedStepCount int                        `json:"truncatedStepCount,omitempty"`
+	DurationSeconds    float64                   `json:"durationSeconds"`
+	Failed             bool                      `json:"failed,omitempty"`
+	Cgroup             *BuildCgroupMetrics       `json:"cgroup,omitempty"`
+	TopSteps           []BuildProfileStepSummary `json:"topSteps,omitempty"`
+	TotalStepCount     int                       `json:"totalStepCount,omitempty"`
+	TruncatedStepCount int                       `json:"truncatedStepCount,omitempty"`
 }
 
 // SummarizeTimingRecordForProfile flattens record's step tree (at every
@@ -82,6 +59,7 @@ func SummarizeTimingRecordForProfile(record TimingRecord) BuildProfileSummary {
 	summary := BuildProfileSummary{
 		DurationSeconds: record.DurationSeconds,
 		Failed:          record.Failed,
+		Cgroup:          record.Cgroup,
 		TotalStepCount:  len(flattened),
 	}
 	if len(flattened) > buildProfileTopStepCount {
@@ -107,6 +85,7 @@ func flattenTimingStepJSONForProfile(steps []TimingStepJSON, ancestryPath string
 		flattened = append(flattened, BuildProfileStepSummary{
 			Name:            name,
 			DurationSeconds: step.DurationSeconds,
+			Cgroup:          step.Cgroup,
 		})
 		flattened = append(flattened, flattenTimingStepJSONForProfile(step.Steps, name)...)
 	}

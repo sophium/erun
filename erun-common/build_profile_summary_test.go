@@ -76,6 +76,27 @@ func TestSummarizeTimingRecordForProfileBoundsToTopNCostliestSteps(t *testing.T)
 	}
 }
 
+func TestSummarizeTimingRecordForProfileCarriesCgroupMetricsThrough(t *testing.T) {
+	recordCgroup := &BuildCgroupMetrics{Available: true, CPUSeconds: 12.5}
+	stepCgroup := &BuildCgroupMetrics{Available: false, Unavailable: "build cgroup counters were not readable"}
+	record := TimingRecord{
+		DurationSeconds: 5,
+		Cgroup:          recordCgroup,
+		Steps: []TimingStepJSON{
+			{Name: "image", DurationSeconds: 5, Cgroup: stepCgroup},
+		},
+	}
+
+	summary := SummarizeTimingRecordForProfile(record)
+
+	if summary.Cgroup != recordCgroup {
+		t.Errorf("expected the record's own Cgroup to carry through unchanged, got %+v", summary.Cgroup)
+	}
+	if len(summary.TopSteps) != 1 || summary.TopSteps[0].Cgroup != stepCgroup {
+		t.Fatalf("expected the step's Cgroup to carry through into its flattened summary, got %+v", summary.TopSteps)
+	}
+}
+
 func TestSummarizeTimingRecordForProfileHandlesNoSteps(t *testing.T) {
 	summary := SummarizeTimingRecordForProfile(TimingRecord{DurationSeconds: 1, Failed: true})
 
