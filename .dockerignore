@@ -37,6 +37,10 @@ __debug_bin*
 /erun-integration/coverage
 /erun-integration/bin
 
+# eslint/prettier --cache output (Makefile's test-frontend target); never
+# COPYd into a build context, mirrored here only for hygiene
+/.cache/
+
 # Local packaging / release artifacts
 /packaging/apt/dist
 /erun-devops/linux/*/dist

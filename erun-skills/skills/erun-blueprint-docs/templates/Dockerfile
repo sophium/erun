@@ -14,7 +14,13 @@ COPY __MODULE__/package.json __MODULE__/yarn.lock /src/__MODULE__/
 
 WORKDIR /src/__MODULE__
 
+# YARN_CACHE_FOLDER: this stage runs as root with no HOME override, so yarn
+# classic's own default cache dir is $HOME/.cache/yarn (/root/.cache/yarn),
+# never the /usr/local/share/.cache/yarn mounted below. Redirecting via env
+# var keeps the mount target every other yarn-using Dockerfile in the repo
+# already uses.
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+    YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
 # Copy the rest and build.

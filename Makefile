@@ -266,6 +266,21 @@ test-erun-dns01-webhook:
 FRONTEND_GATE_JOB_MEMORY_MIB := 650
 FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width 3 $(FRONTEND_GATE_JOB_MEMORY_MIB))
 
+# eslint/prettier's own --cache, one shared root so the erun-devops image test
+# stage can mount it with a single BuildKit cache mount
+# (erun-devops/docker/erun-devops/Dockerfile) covering all three workspaces.
+# $(CURDIR) is the repo root whether this runs locally or inside that stage
+# (WORKDIR /src there), so no path needs threading in from the Dockerfile.
+# --cache-strategy content (not the metadata/mtime default) is load-bearing,
+# not a style choice: every COPY in that Dockerfile stamps a fresh mtime on
+# every file on every build, which makes the metadata strategy a permanent
+# cache miss under Docker -- verified empirically (eslint: 20s cold either
+# way, but 2.5s warm with content vs 20s "warm" with metadata after
+# simulating a COPY's mtime reset). Both tools key their cache on file
+# content plus their own config/version, so a real source or config change
+# still re-lints/re-formats that file; this only skips files nothing about.
+FRONTEND_LINT_CACHE_DIR := $(CURDIR)/.cache/frontend-lint
+
 test-frontend:
 	@echo ">> yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)"
 	@yarn install --frozen-lockfile
@@ -275,9 +290,9 @@ test-frontend:
 	@echo ">> generating erun-ui/frontend wailsjs bindings"
 	@./erun-ui/generate-wailsjs.sh
 	@( \
-		printf 'erun-kit\terun-kit gates\tcd erun-kit && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test\n'; \
-		printf 'erun-ui-frontend\terun-ui/frontend gates\tcd erun-ui/frontend && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test\n'; \
-		printf 'erun-console\terun-console gates\tcd erun-console && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test\n' \
+		printf 'erun-kit\terun-kit gates\tcd erun-kit && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-kit/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-kit.json && yarn build && yarn test\n'; \
+		printf 'erun-ui-frontend\terun-ui/frontend gates\tcd erun-ui/frontend && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json && yarn build && yarn test\n'; \
+		printf 'erun-console\terun-console gates\tcd erun-console && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json && yarn build && yarn test\n' \
 	) | ./scripts/parallel-gate.sh $(FRONTEND_GATE_PARALLELISM) test-frontend
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
