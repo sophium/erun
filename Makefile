@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint check-gate-early test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -464,81 +464,6 @@ integration-test:
 integration-test-gate:
 	./erun-integration/scripts/integration-test.sh
 
-# check-gate's own concurrent early phase: golangci-lint's six module runs,
-# the four independent Go test suites below (erun-ui, erun-backend-api,
-# erun-mcp, erun-devops/dns01-webhook), and the erun-app pre-build (wailsjs
-# codegen -> frontend build -> the CGO/webkit Go compile) used to run as ten
-# strictly serial steps in check-gate's own prerequisite list. That left the
-# two longest poles -- the four Go tests' combined runtime, and the erun-app
-# build chain -- starting as late as possible even though neither depends on
-# lint, on each other, or on the frontend/Windows/Playwright/helm/integration
-# steps that still run after this target. None of the eleven jobs below
-# depends on any other, so they now run as one concurrent batch instead.
-#
-# The erun-app build chain is deliberately NOT one more job in the
-# width-bounded batch below: scripts/parallel-gate.sh's job-list mode waits
-# for a whole batch of `width` jobs to finish before starting the next one,
-# so a single long job sharing a batch with short ones would stall every job
-# queued behind it for the long job's own duration -- the opposite of the
-# concurrency this exists to add. It runs instead as a genuinely independent
-# background process, built via the same --skip-lint path build.sh already
-# supports (its own typecheck/lint/format/test gate for erun-ui/frontend
-# still runs exactly once, via test-frontend below, so this is skipping a
-# redundant second pass, not the gate itself), and this target waits for it
-# and reports its failure alongside the batch's own aggregated result. A
-# fresh, non-stale binary here also means test-playwright's own run.sh finds
-# nothing to rebuild when it runs later.
-#
-# golangci-lint and go test/go build processes are safe to run concurrently
-# against the same module -- Go's module and build caches are designed for
-# concurrent access, and golangci-lint keeps its own separate result cache.
-# The `lint` target above already runs six of these concurrently against
-# each other; this just adds a go test/go build process touching one of the
-# same six modules (erun-ui) at the same time.
-#
-# CHECK_GATE_EARLY job memory reuses LINT_JOB_MEMORY_MIB's own measured
-# figure as a shared, conservative per-job estimate across all ten batched
-# jobs (a go test process is not expected to be heavier than a golangci-lint
-# module analysis). BUILD_ERUN_APP_RESERVED_MEMORY_MIB is not independently
-# measured the same way -- it is a single CGO/webkit compile plus a vite
-# frontend build, not a fan-out this Makefile already profiles elsewhere --
-# so rather than fabricate a per-job breakdown it is subtracted from the
-# ceiling up front, before the batch's own width is sized (parallel-gate.sh's
-# width mode's own reserved-mem-mib argument), so the batch never assumes
-# memory the concurrently-running build is also using.
-CHECK_GATE_EARLY_JOBS := $(shell echo $$(( $(words $(LINT_MODULES)) + 4 )))
-BUILD_ERUN_APP_RESERVED_MEMORY_MIB := 1536
-CHECK_GATE_EARLY_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_EARLY_JOBS) $(LINT_JOB_MEMORY_MIB) $(BUILD_ERUN_APP_RESERVED_MEMORY_MIB))
-
-check-gate-early:
-	@pin=$$(tr -d '\n' < GOLANGCI_LINT_VERSION); \
-	pin_num=$${pin#v}; \
-	installed=$$(golangci-lint --version 2>&1); \
-	case "$$installed" in \
-		*"version $$pin_num "*) ;; \
-		*) echo "error: golangci-lint version mismatch: pinned $$pin, found: $$installed" >&2; \
-		   echo "install the pinned version: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$pin" >&2; \
-		   exit 1 ;; \
-	esac
-	@( \
-		printf '>> pre-building erun-app (wailsjs codegen -> frontend build -> go compile)\n'; \
-		(cd erun-ui && ./build.sh --skip-lint) & \
-		build_pid=$$!; \
-		( \
-			for m in $(LINT_MODULES); do \
-				printf '%s\t%s\t%s\n' "lint-$$m" "golangci-lint $$m" "cd $$m && golangci-lint run --allow-parallel-runners --timeout $(LINT_TIMEOUT) ./..."; \
-			done; \
-			printf '%s\t%s\t%s\n' "test-erun-ui" "go test erun-ui" "cd erun-ui && go test -race -count=1 ./..."; \
-			printf '%s\t%s\t%s\n' "test-erun-backend-api" "go test erun-backend-api" "cd erun-backend/erun-backend-api && go test -count=1 ./..."; \
-			printf '%s\t%s\t%s\n' "test-erun-mcp" "go test erun-mcp" "cd erun-mcp && go test -count=1 ./..."; \
-			printf '%s\t%s\t%s\n' "test-erun-dns01-webhook" "go test erun-devops/dns01-webhook" "cd erun-devops/dns01-webhook && go test ./..."; \
-		) | ./scripts/parallel-gate.sh $(CHECK_GATE_EARLY_PARALLELISM) check-gate-early; \
-		gate_status=$$?; \
-		wait $$build_pid; build_status=$$?; \
-		if [ $$build_status -ne 0 ]; then echo "check-gate-early failed in: build-erun-app" >&2; fi; \
-		if [ $$gate_status -ne 0 ] || [ $$build_status -ne 0 ]; then exit 1; fi \
-	)
-
 # The front door. Everywhere but an agent pod this is check-gate by another
 # name: scripts/agent-gate.sh execs it directly and exits with exactly its
 # status. Inside an agent pod's own coding-agent session (ERUN_ENV_TYPE
@@ -552,12 +477,11 @@ check-gate-early:
 check:
 	./scripts/agent-gate.sh check "make check" -- $(MAKE) check-gate
 
-# The full in-build gate: check-gate-early (golangci-lint, erun-ui's own Go
-# tests, erun-backend-api's own Go tests, erun-mcp's own Go tests,
-# erun-devops/dns01-webhook's own Go tests, and the erun-app pre-build, all
-# running concurrently -- see check-gate-early's own comment above), the
-# frontend kit + desktop frontend + console gates, the erun-ui Windows
-# cross-compile check, the erun-ui/playwright desktop e2e suite, the
+# The full in-build gate: golangci-lint, erun-ui's own Go tests,
+# erun-backend-api's own Go tests, erun-mcp's own Go tests,
+# erun-devops/dns01-webhook's own Go tests, the frontend kit + desktop
+# frontend + console gates, the erun-ui Windows cross-compile check, the
+# erun-ui/playwright desktop e2e suite, the
 # erun-devops/k8s chart tests, then the integration suite + coverage. The
 # erun-devops image test stage runs this (via `check`, which is inert outside
 # an agent pod); a failure tags no image. test-postgres-restart is
@@ -578,7 +502,7 @@ check:
 # regression, never "the suite crying wolf" -- fix it in the same PR per
 # root AGENTS.md's "Fixing pre-existing issues is mandatory" rule, do not
 # revert this line.
-check-gate: check-gate-early test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
+check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the

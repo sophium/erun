@@ -119,10 +119,11 @@ PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "job-count caps an abundant e
 # --- the optional 4th arg (reserved-mem-mib) subtracts a flat amount from
 # the read memory ceiling before dividing by mem-per-job-mib, for a caller
 # sizing a job batch that runs concurrently with something else also using
-# memory on the same environment (check-gate-early's erun-app pre-build,
-# which is not itself one of the width-bounded jobs). Reuse the "mem-binds"
-# 2GiB shape: with no reservation, 2GiB/700MiB/job = 2; reserving 1024MiB
-# leaves ~1GiB, which still divides to 1 (floored, never 0).
+# memory on the same environment (the Makefile's lint/test-frontend/
+# helm-chart-tests targets each reserve room for one another, since
+# check-gate's own -j fan-out can run any of the three at once). Reuse the
+# "mem-binds" 2GiB shape: with no reservation, 2GiB/700MiB/job = 2; reserving
+# 1024MiB leaves ~1GiB, which still divides to 1 (floored, never 0).
 case_dir="${work_root}/mem-binds"
 PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-mem-mib lowers the width" 1 6 700 1024
 

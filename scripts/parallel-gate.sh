@@ -41,12 +41,13 @@
 # reserved-mem-mib (optional, defaults to 0) subtracts a flat amount from the
 # read memory ceiling before dividing by mem-per-job-mib. It exists for a
 # caller sizing a batch of jobs that runs concurrently with something *else*
-# also consuming memory on the same environment (the Makefile's
-# check-gate-early target sizes its lint/test job batch this way, reserving
-# headroom for the erun-app pre-build running alongside it as an independent
-# process, not one more job in the same width-bounded batch) -- without it,
-# the batch's own width would assume the full ceiling is available to it
-# alone and risk oversubscribing memory once the concurrent job is counted.
+# also consuming memory on the same environment (the Makefile's `lint`,
+# `test-frontend`, and `helm-chart-tests` targets each reserve room for one
+# another this way, since `check-gate`'s own `-j` fan-out can run any of the
+# three at the same time and each already sizes its own width against the
+# *entire* memory ceiling) -- without it, a batch's own width would assume
+# the full ceiling is available to it alone and risk oversubscribing memory
+# once the concurrently-running job is counted.
 #
 # CPU: cgroup v2 cpu.max (quota/period), then cgroup v1
 # cpu.cfs_quota_us/cpu.cfs_period_us, then `nproc`, then a constant. A quota
