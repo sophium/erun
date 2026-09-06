@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -164,6 +164,17 @@ lint:
 # hand as extra diligence. Measured locally: ~15s -> ~18s (roughly +15-20%
 # wall time) for this module's suite; pay it here rather than let this class
 # of bug go dark again.
+# erun-common's own Go tests. It is in LINT_MODULES, so golangci-lint already
+# covers it, but nothing ran `go test ./...` for it -- the same gap the four
+# targets below were each added to close. It is the largest shared module in
+# the repo (the build/timing/profile machinery, the platform client, the
+# release logic); erun-integration exercises some of it end to end, which is
+# not the same as running its own suite. A dropped root .dockerignore entry
+# once shipped to main with this module red because nothing here ran it.
+test-erun-common:
+	@echo ">> go test erun-common"
+	@(cd erun-common && go test -count=1 ./...)
+
 test-erun-ui:
 	@echo ">> go test erun-ui"
 	@(cd erun-ui && go test -race -count=1 ./...)
@@ -550,7 +561,7 @@ integration-test-gate:
 # ten running concurrently -- verify actual peak memory on a real
 # `make check-gate` run before trusting this width in a memory-constrained
 # environment, and narrow it with real numbers if that run shows a problem.
-CHECK_GATE_TARGET_COUNT := 10
+CHECK_GATE_TARGET_COUNT := 11
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
 check:
@@ -593,7 +604,7 @@ check:
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
 # if any of these names is missing from it.
-check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
+check-gate: lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
