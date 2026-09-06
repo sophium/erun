@@ -44,21 +44,32 @@ WORKDIR /src
 
 # dtach for erun-mcp's attach/PTY test suite (test-erun-mcp, below): those
 # tests exec a real `dtach -A` session and fail with "dtach: not found" on
-# the bare `golang` base this stage runs on. The final image already installs
-# dtach for the runtime session machinery (see the apt-get layer further
-# down); this stage needs its own copy since it is a separate, unrelated base.
+# the bare `golang` base this stage runs on. The final image gets dtach (and
+# the rest of this set) from erun-ubuntu now (see erun-ubuntu/Dockerfile);
+# this stage needs its own copy since it runs on a separate, unrelated base
+# (golang:1.26.0, not erun-ubuntu) that cannot inherit that base's packages.
 #
 # build-essential/pkg-config/libgtk-3-dev/libwebkit2gtk-4.1-dev/libsoup-3.0-dev
-# are the same Wails/webkit CGO deps the final image installs below (see that
-# layer's own comment), needed here so `test-playwright` (root Makefile) can
-# `go build -tags desktop,production,webkit2_41` erun-app in this stage.
-# Verified empirically against this exact base (golang:1.26.0, Debian
-# trixie): the package set installs cleanly with no conflicts, and the
+# are the same Wails/webkit CGO deps needed here so `test-playwright` (root
+# Makefile) can `go build -tags desktop,production,webkit2_41` erun-app in
+# this stage. Verified empirically against this exact base (golang:1.26.0,
+# Debian trixie): the package set installs cleanly with no conflicts, and the
 # resulting build succeeds and runs `--headless` with zero display (see root
 # AGENTS.md's Integration Test Gate section).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
-    rm -rf /var/lib/apt/lists/*
+#
+# Cache-mounted (rather than deduplicated into a shared base image the way
+# the final stage's copy was) because this stage's base is golang:1.26.0
+# (Debian), not erun-ubuntu (Ubuntu) -- the two images don't share a base to
+# fold the install into. The mount still turns the cost from "every build"
+# into "every build whose apt state was evicted"; removing the docker-clean
+# hook and setting Keep-Downloaded-Packages is what makes that retention
+# actually happen (see erun-ubuntu/Dockerfile's identical comment).
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
 
 # GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
 # builder stage below install from, so the repo-root pin and the image's
@@ -118,8 +129,9 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 # and succeeds on this same Debian trixie base with no unsupported-platform
 # warning (see root AGENTS.md's Integration Test Gate section).
 ARG PLAYWRIGHT_VERSION
-RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
-    rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists \
+    npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium
 
 COPY Makefile /src/Makefile
 COPY scripts /src/scripts
@@ -380,7 +392,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # instructions, so sourcing it costs a per-arch layer pull, not emulation.
 FROM golang:1.26.0 AS goroot
 
-FROM ghcr.io/sophium/erun-ubuntu:noble-20260217
+FROM ghcr.io/sophium/erun-ubuntu:noble-20260217-1
 
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.33.1
@@ -413,18 +425,25 @@ USER root
 
 # Keep external tooling installs pinned and centralized in one layer for traceability.
 #
-# build-essential + pkg-config + libgtk-3-dev + libwebkit2gtk-4.1-dev exist
-# so the in-pod contribute-mode workflow can rebuild erun-ui (the Wails
-# desktop binary) and run it in headless mode against a port-forward.
-# Wails' Go bindings link against webkit2gtk on Linux via CGO; without
-# the dev headers `go build -tags desktop,production` fails at compile.
-# Cost: roughly +400 MB on the final image. Worth it because the
+# build-essential + pkg-config + libgtk-3-dev + libwebkit2gtk-4.1-dev +
+# libsoup-3.0-dev + dtach are no longer installed here -- they live in
+# erun-ubuntu now (see that Dockerfile's own comment), so this stage already
+# has them. They exist so the in-pod contribute-mode workflow can rebuild
+# erun-ui (the Wails desktop binary) and run it in headless mode against a
+# port-forward: Wails' Go bindings link against webkit2gtk on Linux via CGO,
+# and without the dev headers `go build -tags desktop,production` fails at
+# compile. Cost: roughly +400 MB on the base image. Worth it because the
 # contribute-app browser bridge is the only way to test desktop-side
 # changes without leaving the env.
-RUN apt-get update && \
-    apt-get install -y git bash-completion bubblewrap dpkg-dev dtach iproute2 procps tini \
-        build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
-    rm -rf /var/lib/apt/lists/* && \
+#
+# Cache-mounted per the same reasoning as the test stage's own apt-get
+# above; docker-clean is already disabled and Keep-Downloaded-Packages
+# already set by erun-ubuntu, so this stage inherits that config rather than
+# repeating it.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists \
+    apt-get update && \
+    apt-get install -y git bash-completion bubblewrap dpkg-dev iproute2 procps tini && \
     # ripgrep ships a musl static build for amd64 but only a gnu build for
     # arm64 — the asymmetric triples are deliberate, not a typo.
     case "${TARGETARCH}" in \
@@ -486,10 +505,12 @@ RUN apt-get update && \
 # list. The browser binary itself is installed without root by run.sh's
 # `playwright install chromium`; only these system libs need root, so they
 # belong in the image. Kept as a separate layer (not folded into the tooling
-# layer above) because install-deps runs its own apt-get update after that
-# layer has already cleared the apt lists.
-RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
-    rm -rf /var/lib/apt/lists/* /root/.npm
+# layer above) so a Playwright version bump invalidates only this layer, not
+# the much larger tooling install above it.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists \
+    npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
+    rm -rf /root/.npm
 
 COPY --from=goroot /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
