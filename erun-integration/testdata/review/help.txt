@@ -11,6 +11,7 @@ Available Commands:
   queue         Inspect and advance a target branch's merge queue
   record-build  Record a build against a review, moving it to READY or FAILED
   report-merged Report a review MERGED after gate-building and pushing its prospective merge
+  requeue       Move a review stuck at MERGE back to READY
   resolve       Resolve a comment thread by closing its root comment
   reviewers     Assign and remove reviewers on a review
   show          Show a review, its comment threads, and its recorded builds
