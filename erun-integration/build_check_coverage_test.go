@@ -61,18 +61,18 @@ type coverageEntry struct {
 var buildCheckCoverage = map[string]coverageEntry{
 	"erun-mcp": {
 		kind:   gatedByMakeTarget,
-		target: "test-erun-mcp",
-		reason: "the Makefile's test-erun-mcp target runs `cd erun-mcp && go test ./...`",
+		target: "check-gate-early",
+		reason: "the Makefile's check-gate-early target runs `cd erun-mcp && go test ./...` concurrently with its other early-phase jobs (the test-erun-mcp target itself still exists for standalone use, but check-gate no longer lists it directly)",
 	},
 	"erun-backend/erun-backend-api": {
 		kind:   gatedByMakeTarget,
-		target: "test-erun-backend-api",
-		reason: "the Makefile's test-erun-backend-api target runs `cd erun-backend/erun-backend-api && go test ./...`",
+		target: "check-gate-early",
+		reason: "the Makefile's check-gate-early target runs `cd erun-backend/erun-backend-api && go test ./...` concurrently with its other early-phase jobs (the test-erun-backend-api target itself still exists for standalone use, but check-gate no longer lists it directly)",
 	},
 	"erun-ui": {
 		kind:   gatedByMakeTarget,
-		target: "test-erun-ui",
-		reason: "the Makefile's test-erun-ui target runs `cd erun-ui && go test -race ./...`",
+		target: "check-gate-early",
+		reason: "the Makefile's check-gate-early target runs `cd erun-ui && go test -race ./...` concurrently with its other early-phase jobs (the test-erun-ui target itself still exists for standalone use, but check-gate no longer lists it directly)",
 	},
 	"erun-integration": {
 		kind:   gatedByMakeTarget,
@@ -81,8 +81,8 @@ var buildCheckCoverage = map[string]coverageEntry{
 	},
 	"erun-devops/dns01-webhook": {
 		kind:   gatedByMakeTarget,
-		target: "test-erun-dns01-webhook",
-		reason: "the Makefile's test-erun-dns01-webhook target runs `cd erun-devops/dns01-webhook && go test ./...`",
+		target: "check-gate-early",
+		reason: "the Makefile's check-gate-early target runs `cd erun-devops/dns01-webhook && go test ./...` concurrently with its other early-phase jobs (the test-erun-dns01-webhook target itself still exists for standalone use, but check-gate no longer lists it directly)",
 	},
 	"erun-cli": {
 		kind: deliberatelyExcluded,

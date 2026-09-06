@@ -23,20 +23,30 @@
 # A second mode answers a different question -- not "run these jobs bounded
 # by a width", but "what should that width even be":
 #
-#   Usage: parallel-gate.sh width <job-count> <mem-per-job-mib>
+#   Usage: parallel-gate.sh width <job-count> <mem-per-job-mib> [reserved-mem-mib]
 #
 # Prints one integer: min(job-count, CPUs available to this environment,
-# memory available / mem-per-job-mib). Kept in this script rather than a
-# separate one because #1702 found two independent parallelism sizers in this
-# repo (this file's Makefile callers, and erun-ui/playwright/playwright.config.ts)
-# that disagreed about which resource is the ceiling; this is now the one
-# shell-side answer, read the same cgroup files with the same fallbacks the
-# TypeScript side already used for its memory ceiling. The TypeScript side
-# doesn't need a matching CPU rewrite: it already gets the CPU quota (not the
-# affinity mask) for free from Node's os.availableParallelism(), which is
-# quota-aware via libuv -- see that file's own comment. `nproc` is not
-# quota-aware (it reads sched_getaffinity), so the shell side has to read the
-# quota itself.
+# (memory available - reserved-mem-mib) / mem-per-job-mib). Kept in this
+# script rather than a separate one because #1702 found two independent
+# parallelism sizers in this repo (this file's Makefile callers, and
+# erun-ui/playwright/playwright.config.ts) that disagreed about which
+# resource is the ceiling; this is now the one shell-side answer, read the
+# same cgroup files with the same fallbacks the TypeScript side already used
+# for its memory ceiling. The TypeScript side doesn't need a matching CPU
+# rewrite: it already gets the CPU quota (not the affinity mask) for free
+# from Node's os.availableParallelism(), which is quota-aware via libuv --
+# see that file's own comment. `nproc` is not quota-aware (it reads
+# sched_getaffinity), so the shell side has to read the quota itself.
+#
+# reserved-mem-mib (optional, defaults to 0) subtracts a flat amount from the
+# read memory ceiling before dividing by mem-per-job-mib. It exists for a
+# caller sizing a batch of jobs that runs concurrently with something *else*
+# also consuming memory on the same environment (the Makefile's
+# check-gate-early target sizes its lint/test job batch this way, reserving
+# headroom for the erun-app pre-build running alongside it as an independent
+# process, not one more job in the same width-bounded batch) -- without it,
+# the batch's own width would assume the full ceiling is available to it
+# alone and risk oversubscribing memory once the concurrent job is counted.
 #
 # CPU: cgroup v2 cpu.max (quota/period), then cgroup v1
 # cpu.cfs_quota_us/cpu.cfs_period_us, then `nproc`, then a constant. A quota
@@ -159,6 +169,7 @@ if [ "${1:-}" = "width" ]; then
 	set -eu
 	job_count=$2
 	mem_per_job_mib=$3
+	reserved_mem_mib=${4:-0}
 
 	width=$job_count
 	cpu=$(cpu_quota)
@@ -167,6 +178,13 @@ if [ "${1:-}" = "width" ]; then
 	fi
 	mem_mib=$(mem_limit_mib)
 	if [ -n "$mem_mib" ] && is_positive_int "$mem_per_job_mib"; then
+		if is_positive_int "$reserved_mem_mib"; then
+			if [ "$mem_mib" -gt "$reserved_mem_mib" ]; then
+				mem_mib=$((mem_mib - reserved_mem_mib))
+			else
+				mem_mib=0
+			fi
+		fi
 		by_mem=$((mem_mib / mem_per_job_mib))
 		[ "$by_mem" -ge 1 ] || by_mem=1
 		if [ "$by_mem" -lt "$width" ]; then
