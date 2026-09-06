@@ -159,6 +159,22 @@ COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 # time to lock its -ldflags target to the real release build, so the test
 # stage needs the file even though nothing here builds the eapi image itself.
 COPY erun-devops/docker/erun-backend-api/Dockerfile /src/erun-devops/docker/erun-backend-api/Dockerfile
+# The pinned wails CLI, installed into GOPATH/bin where both callers of
+# erun-ui/generate-wailsjs.sh look for it (WAILS_BIN defaults to
+# "$(go env GOPATH)/bin/wails" in that script and in erun-ui/build.sh).
+# Without it the script falls into its fallback path, which `go install`s the
+# CLI into a temp dir and deletes it again on every single invocation --
+# measured at ~1m18s per run of test-frontend, the largest remaining step in
+# the in-build gate. Installed from erun-ui's own go.mod pin so the CLI and
+# the module it generates against cannot drift, and placed above the erun-ui
+# source COPY (same reasoning as GOLANGCI_LINT_VERSION above: stable and
+# expensive, so an ordinary source edit must not invalidate it).
+COPY erun-ui/go.mod erun-ui/go.sum /src/erun-ui/
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    WAILS_VERSION="$(cd /src/erun-ui && go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)" && \
+    go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
+
 COPY erun-ui /src/erun-ui
 COPY erun-kit /src/erun-kit
 COPY erun-console /src/erun-console
