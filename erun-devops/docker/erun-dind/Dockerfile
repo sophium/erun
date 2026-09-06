@@ -24,4 +24,4 @@ RUN apk add --no-cache iptables-legacy \
 # 20GiB floor, so BuildKit's own GC never undercuts it, while staying modest
 # against the node disk this pod's docker-state PVC shares with the other
 # environments scheduled on it.
-COPY daemon.json /etc/docker/daemon.json
+COPY erun-devops/docker/erun-dind/daemon.json /etc/docker/daemon.json
