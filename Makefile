@@ -554,6 +554,7 @@ CHECK_GATE_TARGET_COUNT := 10
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
 check:
+	@echo ">> concurrent-phase-spans: check-gate runs $(CHECK_GATE_TARGET_COUNT) targets at -j$(CHECK_GATE_PARALLELISM)"
 	./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) check-gate
 
 # The full in-build gate: golangci-lint, erun-ui's own Go tests,

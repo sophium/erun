@@ -45,6 +45,22 @@ var buildkitVertexDonePattern = regexp.MustCompile(`^#(\d+) DONE ([\d.]+)s$`)
 // dropped from the total, but the tree stays a summary rather than a log.
 const buildProgressPhasesTopN = 15
 
+// buildProgressConcurrentSentinel is the marker `make check` prints before it
+// fans check-gate out with `-j`. Phase spans are derived from the gap between
+// one `>> phase` line and the next, which measures that phase's own work only
+// while the step runs its phases one at a time. Once several targets
+// interleave their output, a span covers whatever else was running too, so
+// the rows below such a step are elapsed windows rather than per-phase cost.
+// The recipe announces the fan-out rather than the parser guessing at it: a
+// heuristic on the step command would silently go wrong the next time a
+// recipe changes how it parallelises.
+const buildProgressConcurrentSentinel = "concurrent-phase-spans"
+
+// buildProgressConcurrentSuffix marks a row whose duration is an elapsed
+// window. Callers that sum these rows would otherwise read them as exclusive
+// costs and conclude the wrong step is expensive.
+const buildProgressConcurrentSuffix = " (elapsed window, concurrent)"
+
 // buildProgressPhase is one node of the parsed phase tree, before it is
 // attached to the real *stepTiming tree via addFinishedChild.
 type buildProgressPhase struct {
@@ -175,6 +191,16 @@ func applyPhaseMarker(line string, vertices map[string]*buildKitVertex) {
 // each running from its own offset to the next marker's (or, for the last
 // one, to the step's own DONE time).
 func markerPhases(markers []buildKitPhaseMarker, vertexDoneSecs float64) []buildProgressPhase {
+	concurrent := false
+	kept := make([]buildKitPhaseMarker, 0, len(markers))
+	for _, m := range markers {
+		if strings.HasPrefix(m.name, buildProgressConcurrentSentinel) {
+			concurrent = true
+			continue
+		}
+		kept = append(kept, m)
+	}
+	markers = kept
 	sorted := make([]buildKitPhaseMarker, len(markers))
 	copy(sorted, markers)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].offsetSecs < sorted[j].offsetSecs })
@@ -189,7 +215,11 @@ func markerPhases(markers []buildKitPhaseMarker, vertexDoneSecs float64) []build
 		if dur < 0 {
 			dur = 0
 		}
-		phases = append(phases, buildProgressPhase{name: marker.name, duration: durationFromSeconds(dur)})
+		name := marker.name
+		if concurrent {
+			name += buildProgressConcurrentSuffix
+		}
+		phases = append(phases, buildProgressPhase{name: name, duration: durationFromSeconds(dur)})
 	}
 	return phases
 }

@@ -154,9 +154,15 @@ echo ">> merging coverage counters into $profile"
 go tool covdata textfmt -i="$cover_dir" -o="$profile"
 
 echo ">> coverage by function (last line is the total):"
-go tool cover -func="$profile" | tail -20
+# One `go tool cover -func` pass, reused for both the printed tail and the
+# total: the profile covers every production package, so parsing it is
+# expensive enough that doing it twice was measurably the largest single step
+# in the in-build gate. The output is line-oriented and ends with the total,
+# so tail -20 / tail -1 read the same buffer instead of re-deriving it.
+cover_func_output=$(go tool cover -func="$profile")
+printf '%s\n' "$cover_func_output" | tail -20
 
-total_line=$(go tool cover -func="$profile" | tail -1)
+total_line=$(printf '%s\n' "$cover_func_output" | tail -1)
 total_pct=$(awk '{ gsub(/%/, "", $NF); print $NF }' <<<"$total_line")
 
 awk -v got="$total_pct" -v want="$threshold" '
