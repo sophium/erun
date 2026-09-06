@@ -591,8 +591,12 @@ type uiTenantDashboardBuild struct {
 	Successful      bool   `json:"successful"`
 	CommitID        string `json:"commitId"`
 	Version         string `json:"version"`
-	CreatedAt       string `json:"createdAt,omitempty"`
-	UpdatedAt       string `json:"updatedAt,omitempty"`
+	// Profile is the bounded per-step profile this build self-reported (root
+	// AGENTS.md #2274), when it collected one -- nil for a build reported
+	// before this feature existed, or one whose caller collected none.
+	Profile   *eruncommon.BuildProfileSummary `json:"profile,omitempty"`
+	CreatedAt string                          `json:"createdAt,omitempty"`
+	UpdatedAt string                          `json:"updatedAt,omitempty"`
 }
 
 // uiGateRun mirrors eruncommon.PlatformGateRun's JSON-safe subset the Gates

@@ -327,6 +327,7 @@ func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *eruncomm
 			Successful:      build.Successful,
 			CommitID:        build.CommitID,
 			Version:         build.Version,
+			Profile:         build.Profile,
 			CreatedAt:       tenantDashboardTime(build.CreatedAt),
 			UpdatedAt:       tenantDashboardTime(build.UpdatedAt),
 		})
@@ -451,6 +452,7 @@ func fetchReviewBuildsConcurrently(ctx context.Context, client *eruncommon.Platf
 				Successful: build.Successful,
 				CommitID:   build.CommitID,
 				Version:    build.Version,
+				Profile:    build.Profile,
 				CreatedAt:  tenantDashboardTime(build.CreatedAt),
 				UpdatedAt:  tenantDashboardTime(build.UpdatedAt),
 			})
