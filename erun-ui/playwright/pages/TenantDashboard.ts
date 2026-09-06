@@ -51,6 +51,12 @@ export class TenantDashboard {
     return this.page.getByRole('tabpanel');
   }
 
+  // buildProfileButtonFor opens BuildProfileDialog for one build row in the
+  // Builds tab.
+  buildProfileButtonFor(buildId: string): Locator {
+    return this.activePanel().getByRole('button', { name: `View build profile for ${buildId}` });
+  }
+
   auditTable(): Locator {
     return this.activePanel().getByRole('table');
   }

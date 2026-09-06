@@ -357,7 +357,7 @@ var issueReferenceBaseline = map[string]int{
 	"erun-ui/tenant_review_detail_test.go":                1,
 	"erun-ui/terminal_repaint_input_test.go":              4,
 	"erun-ui/terminal_sessions.go":                        3,
-	"erun-ui/ui_model.go":                                 2,
+	"erun-ui/ui_model.go":                                 1,
 }
 
 // TestNoIssueReferenceInCode fails when a tracker reference matching

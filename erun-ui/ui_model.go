@@ -591,8 +591,12 @@ type uiTenantDashboardBuild struct {
 	Successful      bool   `json:"successful"`
 	CommitID        string `json:"commitId"`
 	Version         string `json:"version"`
-	CreatedAt       string `json:"createdAt,omitempty"`
-	UpdatedAt       string `json:"updatedAt,omitempty"`
+	// Profile is the bounded per-step profile this build self-reported, when
+	// it collected one -- nil for a build reported before this feature
+	// existed, or one whose caller collected none.
+	Profile   *eruncommon.BuildProfileSummary `json:"profile,omitempty"`
+	CreatedAt string                          `json:"createdAt,omitempty"`
+	UpdatedAt string                          `json:"updatedAt,omitempty"`
 }
 
 // uiGateRun mirrors eruncommon.PlatformGateRun's JSON-safe subset the Gates
@@ -693,7 +697,7 @@ type uiReviewComment struct {
 	CreatorUserID string `json:"creatorUserId,omitempty"`
 	// CreatorUsername mirrors uiTenantDashboardReview.AuthorUsername: the
 	// tenant user directory's display name for CreatorUserID, resolved
-	// best-effort, empty when it could not be resolved (#1378).
+	// best-effort, empty when it could not be resolved.
 	CreatorUsername string `json:"creatorUsername,omitempty"`
 	Status          string `json:"status"`
 	ParentCommentID string `json:"parentCommentId,omitempty"`

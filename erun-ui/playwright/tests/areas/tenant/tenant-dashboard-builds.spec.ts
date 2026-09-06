@@ -115,3 +115,202 @@ test.describe('tenant dashboard — builds with no review (#1954)', () => {
     }
   });
 });
+
+// The operator ask this covers: "go to builds, select builds and see exactly
+// what consumes cpu or if there has been IO bottlenecks". These cover the
+// per-build profile dialog opened from each build row's own "View profile"
+// button.
+test.describe('tenant dashboard — build profile (#2274)', () => {
+  test('a build with a full profile shows per-step duration, CPU, throttling, I/O, and peak memory', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('build-profile-full');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      await stubLoadTenantDashboard(
+        page,
+        dashboardData(environment, {
+          builds: [
+            {
+              buildId: 'build-profiled-1',
+              environmentId: 'env-1',
+              environmentName: 'ci-runner',
+              successful: true,
+              commitId: 'abc123',
+              version: '1.0.0-snapshot-20260101010101',
+              profile: {
+                durationSeconds: 199.8,
+                totalStepCount: 2,
+                topSteps: [
+                  {
+                    name: 'erun-devops',
+                    durationSeconds: 198.9,
+                    cgroup: {
+                      available: true,
+                      cpuSeconds: 11.13,
+                      cpuPercentOfQuota: 17.6,
+                      throttledPeriods: 7,
+                      totalPeriods: 102,
+                      throttledSeconds: 1.14,
+                      ioReadBytes: 921452544,
+                      ioWriteBytes: 70008832,
+                      peakMemoryBytes: 9489924096,
+                    },
+                  },
+                  {
+                    name: 'erun-devops > linux/amd64',
+                    durationSeconds: 198.6,
+                    cgroup: { available: true, cpuSeconds: 11.0, cpuPercentOfQuota: 17.5 },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Builds');
+      await app.tenantDashboard.buildProfileButtonFor('build-profiled-1').click();
+
+      await app.buildProfileDialog.waitForOpen();
+      const dialog = app.buildProfileDialog.locator();
+      await expect(dialog).toContainText('abc123');
+      await expect(dialog).toContainText('erun-devops');
+      await expect(dialog).toContainText('throttled 7/102 periods');
+      await expect(dialog).toContainText('18% of quota');
+      await expect(dialog).toContainText('878.8 MiB read');
+      await expect(dialog).toContainText('66.8 MiB written');
+      await expect(dialog).toContainText('8.84 GiB');
+      await expect(app.buildProfileDialog.stepRows()).toHaveCount(2);
+      await expect(app.buildProfileDialog.notAvailableNotice()).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('a build with no profile renders a plain empty state, not zeros', async ({ app, page }) => {
+    const environment = seedDashboardEnvironment('build-profile-none');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      await stubLoadTenantDashboard(
+        page,
+        dashboardData(environment, {
+          builds: [
+            {
+              buildId: 'build-no-profile-1',
+              environmentId: 'env-1',
+              environmentName: 'ci-runner',
+              successful: true,
+              commitId: 'def456',
+              version: '1.0.0',
+            },
+          ],
+        }),
+      );
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Builds');
+      await app.tenantDashboard.buildProfileButtonFor('build-no-profile-1').click();
+
+      await app.buildProfileDialog.waitForOpen();
+      await expect(app.buildProfileDialog.noProfileEmptyState()).toBeVisible();
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('a profile with no cgroup data says so plainly instead of implying zero usage', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('build-profile-unavailable');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      await stubLoadTenantDashboard(
+        page,
+        dashboardData(environment, {
+          builds: [
+            {
+              buildId: 'build-laptop-1',
+              environmentId: 'env-1',
+              environmentName: 'ci-runner',
+              successful: true,
+              commitId: 'ghi789',
+              version: '1.0.0',
+              profile: {
+                durationSeconds: 42,
+                totalStepCount: 1,
+                topSteps: [{ name: 'erun-devops', durationSeconds: 40 }],
+              },
+            },
+          ],
+        }),
+      );
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Builds');
+      await app.tenantDashboard.buildProfileButtonFor('build-laptop-1').click();
+
+      await app.buildProfileDialog.waitForOpen();
+      await expect(app.buildProfileDialog.notAvailableNotice()).toBeVisible();
+      // Every cgroup-derived cell (CPU, throttling, I/O, peak memory) reads
+      // "Not available" for a step with no cgroup reading -- never a zero,
+      // which would misread as "this step used no CPU".
+      await expect(app.buildProfileDialog.stepRows().getByText('Not available')).toHaveCount(4);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  test('a truncated profile names how many steps were left out', async ({ app, page }) => {
+    const environment = seedDashboardEnvironment('build-profile-truncated');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      const topSteps = Array.from({ length: 10 }, (_, i) => ({
+        name: `step-${String(i)}`,
+        durationSeconds: 10 - i,
+      }));
+      await stubLoadTenantDashboard(
+        page,
+        dashboardData(environment, {
+          builds: [
+            {
+              buildId: 'build-truncated-1',
+              environmentId: 'env-1',
+              environmentName: 'ci-runner',
+              successful: true,
+              commitId: 'jkl012',
+              version: '1.0.0',
+              profile: {
+                durationSeconds: 100,
+                totalStepCount: 15,
+                truncatedStepCount: 5,
+                topSteps,
+              },
+            },
+          ],
+        }),
+      );
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Builds');
+      await app.tenantDashboard.buildProfileButtonFor('build-truncated-1').click();
+
+      await app.buildProfileDialog.waitForOpen();
+      await expect(app.buildProfileDialog.truncatedNote()).toContainText('5 more steps');
+      await expect(app.buildProfileDialog.stepRows()).toHaveCount(10);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});

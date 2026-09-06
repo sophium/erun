@@ -28,6 +28,7 @@ import {
 } from '@/app/tenantDashboardPanels';
 import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 
+import { BuildProfileDialog, BuildProfileViewButton } from './BuildProfileDialog';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
@@ -254,6 +255,7 @@ function ReviewDetailBuilds({
 }: {
   data: NonNullable<ReviewDetailState['data']>;
 }): React.ReactElement {
+  const [selectedBuild, setSelectedBuild] = React.useState<UITenantDashboardBuild | null>(null);
   if (data.buildsRestricted) {
     return (
       <EmptyState
@@ -272,15 +274,29 @@ function ReviewDetailBuilds({
     );
   }
   return (
-    <ul className="flex flex-col gap-1.5 text-[13px]">
-      {builds.map((build) => (
-        <ReviewDetailBuildRow key={build.buildId} build={build} />
-      ))}
-    </ul>
+    <>
+      <ul className="flex flex-col gap-1.5 text-[13px]">
+        {builds.map((build) => (
+          <ReviewDetailBuildRow key={build.buildId} build={build} onSelect={setSelectedBuild} />
+        ))}
+      </ul>
+      <BuildProfileDialog
+        build={selectedBuild}
+        onClose={() => {
+          setSelectedBuild(null);
+        }}
+      />
+    </>
   );
 }
 
-function ReviewDetailBuildRow({ build }: { build: UITenantDashboardBuild }): React.ReactElement {
+function ReviewDetailBuildRow({
+  build,
+  onSelect,
+}: {
+  build: UITenantDashboardBuild;
+  onSelect: (build: UITenantDashboardBuild) => void;
+}): React.ReactElement {
   return (
     <li className="flex items-center gap-2">
       <StatusBadge
@@ -290,6 +306,7 @@ function ReviewDetailBuildRow({ build }: { build: UITenantDashboardBuild }): Rea
       <span className="text-muted-foreground">{build.commitId}</span>
       {build.version && <span className="text-muted-foreground">v{build.version}</span>}
       <RelativeTime value={build.createdAt} className="ml-auto text-muted-foreground" />
+      <BuildProfileViewButton build={build} onSelect={onSelect} />
     </li>
   );
 }
