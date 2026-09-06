@@ -770,13 +770,15 @@ Resolves tenant/environment/namespace the same way every other typed command doe
   "tenant": "myapp", "environment": "prod",
   "cpu": { "quotaCores": 1, "utilizationPercent": 12.4, "intervalSeconds": 1 },
   "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
-  "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ],
+  "disk": [ { "mount": "/home/erun", "nodeShared": true, "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0, "ownUsedBytes": 45097156608, "ownUsageObserved": true } ],
   "warnings": [],
   "excludesBuilds": true
 }
 ```
 
 `cpu.quotaCores` is `cpu.max`'s quota ÷ period; `memory.percentOfLimit` is `memory.current` ÷ `memory.max`; `disk[].percentUsed` is `df`'s used ÷ total for the watched mount (the runtime chart's `HOME`, `/home/erun`, is the only mount watched today). `warnings` is omitted (empty) unless a threshold below is crossed.
+
+**`disk[].totalBytes`/`usedBytes`/`percentUsed` describe the node, not this environment (`nodeShared: true`).** `df` statfs's the whole mount, which every environment scheduled on the same node shares — two environments on the same node report the identical total/used/percent even though only one of them may actually be filling it. `disk[].ownUsedBytes` (a `du` of the watched mount, scoped to this environment's own directory tree, bounded to 30s) is the figure this environment can actually reduce by cleaning up its own files; `ownUsageObserved` distinguishes a genuine reading from `du` timing out or being unreadable, the same pattern `memory.peak`'s `peakObserved` already uses.
 
 `excludesBuilds` is `true` whenever the environment's type carries the `erun-dind` sidecar (every type except `runtime` and `host` — `EnvironmentType.UsesDindSidecar`), omitted (false) otherwise. `cpu`/`memory` above are read from the `erun-devops` container's own cgroup alone; an image build (`erun build`/`erun release`) actually runs in `erun-dind`, a separate cgroup whose build containers are cgroup siblings rather than descendants of this one, so there is no path from inside `erun-devops` to read them. `excludesBuilds` names that gap explicitly rather than let a busy build read as an idle environment — the same disclosure the desktop's Runtime tab caption makes (`usageExcludesBuilds` in `erun-ui/frontend/src/components/app/Sidebar.helpers.ts`) and the non-JSON output states as a `Note:` line. [`erun observe`](/agent-reference/cli-flags#erun-observe) reports the sidecar's own resource limits.
 
@@ -791,6 +793,7 @@ Every field group reports its own unavailability rather than failing the whole c
 | `memory.max` is `max` (unlimited). | `memory.unlimited: true`; `memory.limitBytes`/`percentOfLimit` stay zero rather than a fabricated percentage. |
 | `memory.current` could not be read. | `memory.unavailable` names the reason. |
 | `df` reported nothing for the watched mount. | that entry's `disk[].unavailable` names the reason. |
+| `du` timed out (30s) or could not be read. | `disk[].ownUsageObserved` stays `false` and `ownUsedBytes` is omitted, independently of whether `df` succeeded. |
 
 `memory.oomKills` comes from `memory.events`' `oom_kill` counter — a real kill count, not a guess made after the fact.
 
@@ -802,7 +805,7 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 |---|---|
 | `memory.percentOfLimit` ≥ 85%. | A container this close to its limit is one build step away from an OOM kill. |
 | `memory.peak` ÷ `memory.limitBytes` ≥ 95%. | `memory.peak` is a high-water mark, so a near-limit peak matters even after current usage drops back down. |
-| any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. |
+| any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. The warning text names the node-shared scope ("shared with every environment on this node") since `percentUsed` is the node's fill level, not this environment's alone. |
 | `memory.oomKills` > 0. | Always reported: a kill already happened. |
 
 ### Error behaviour

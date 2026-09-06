@@ -24,3 +24,4 @@ usage:
   printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
   printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
   printf 'disk_workspace=%s\n' "$(df -Pk <HOME> 2>/dev/null | tail -n1 || true)"
+  printf 'disk_own_used_kb=%s\n' "$(timeout 30 du -sxk <HOME> 2>/dev/null | awk '{print $1}' || true)"

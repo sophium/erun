@@ -25,6 +25,11 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"usage cross a fixed threshold. Every field reports its own unavailability\n" +
 			"(cgroup v1, an unlimited limit, a file that could not be read) rather than\n" +
 			"failing the call, since those are normal on some clusters, not errors.\n\n" +
+			"Disk is reported for the whole mount (node, shared): every environment\n" +
+			"scheduled on the same node sees the identical total/used/percent, so cleaning\n" +
+			"up one environment may barely move it. The own-usage line beneath it (a `du`\n" +
+			"of this environment's own directory) is the figure this environment can\n" +
+			"actually act on.\n\n" +
 			"On a build-capable environment (local-agent, remote-agent), CPU and memory\n" +
 			"are scoped to this container alone: every image build actually runs in the\n" +
 			"erun-dind sidecar, a separate cgroup this reading cannot see, so a busy build\n" +

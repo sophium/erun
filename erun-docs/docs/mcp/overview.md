@@ -659,12 +659,14 @@ Reads CPU quota utilisation, memory against the container's own cgroup limit, an
   "environment": "prod",
   "cpu": { "quotaCores": 1, "utilizationPercent": 12.4, "intervalSeconds": 1 },
   "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
-  "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ],
+  "disk": [ { "mount": "/home/erun", "nodeShared": true, "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0, "ownUsedBytes": 45097156608, "ownUsageObserved": true } ],
   "excludesBuilds": true
 }
 ```
 
 Every field reports its own unavailability rather than failing the call: a cluster on cgroup v1 (or with `/sys/fs/cgroup` missing) reports `cpu.unavailable`/`memory.unavailable` with the reason instead of a fabricated zero, and an unlimited `memory.max` reports `memory.unlimited: true` rather than a percentage with no denominator. A `warnings` array appears only when a named threshold is crossed (memory ≥ 85% of its limit, `memory.peak` ≥ 95%, or a watched mount ≥ 90% used) — a heavily-loaded environment might return:
+
+**`disk[].totalBytes`/`usedBytes`/`percentUsed` are the node's, not this environment's (`nodeShared: true`).** They come from a statfs of the whole mount, which every environment scheduled on the same node shares — two environments on the same node report the identical figures regardless of which one is actually filling it. `disk[].ownUsedBytes` (a `du` of the mount, scoped to this environment's own directory tree, bounded to 30s) is the number this environment can actually reduce; `ownUsageObserved` distinguishes a genuine reading from an unreadable or timed-out `du`, mirroring `peakObserved`.
 
 `excludesBuilds` is `true` on every environment whose type carries the `erun-dind` sidecar (all but `runtime` and `host`), omitted otherwise: `cpu`/`memory` above are scoped to the `erun-devops` container alone, and an image build actually runs in `erun-dind` — a separate cgroup this reading has no path to, since its build containers are cgroup siblings rather than descendants. This names that gap rather than let a busy build read as an idle environment; `observe` reports the sidecar's own resource limits.
 

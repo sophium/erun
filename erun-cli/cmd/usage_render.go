@@ -84,20 +84,34 @@ func formatUsageOOMKills(memory common.RuntimeMemoryUsage) string {
 	return fmt.Sprintf("%d", memory.OOMKills)
 }
 
+// writeUsageDisk labels the mount's total/used/percent as "(node, shared)":
+// they come from a statfs of the whole mount, so every environment scheduled
+// on the same node reports the identical figures regardless of which of them
+// actually wrote the bytes (see RuntimeDiskUsage.NodeShared). The own-usage
+// line beneath it is the number scoped to this environment alone -- the one
+// an operator can actually reduce by cleaning up this environment.
 func writeUsageDisk(ctx common.Context, disks []common.RuntimeDiskUsage) error {
 	for _, disk := range disks {
 		if disk.Unavailable != "" {
-			if _, err := fmt.Fprintf(ctx.Stdout, "Disk %s: unavailable (%s)\n", disk.Mount, disk.Unavailable); err != nil {
+			if _, err := fmt.Fprintf(ctx.Stdout, "Disk (node, shared) %s: unavailable (%s)\n", disk.Mount, disk.Unavailable); err != nil {
 				return err
 			}
-			continue
-		}
-		if _, err := fmt.Fprintf(ctx.Stdout, "Disk %s: %s / %s (%.1f%%)\n",
+		} else if _, err := fmt.Fprintf(ctx.Stdout, "Disk (node, shared): %s %s / %s (%.1f%%)\n",
 			disk.Mount, formatUsageBytes(disk.UsedBytes), formatUsageBytes(disk.TotalBytes), disk.PercentUsed); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(ctx.Stdout, "  this environment's own usage: %s\n", formatUsageDiskOwn(disk)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func formatUsageDiskOwn(disk common.RuntimeDiskUsage) string {
+	if !disk.OwnUsageObserved {
+		return "unavailable"
+	}
+	return formatUsageBytes(disk.OwnUsedBytes)
 }
 
 func writeUsageWarnings(ctx common.Context, warnings []string) error {
