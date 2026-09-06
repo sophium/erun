@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.253
+appVersion: 1.0.254-pr.f6a87def
 description: ERun hosted web console
 name: erun-console
 type: application
-version: 1.0.253
+version: 1.0.254-pr.f6a87def
