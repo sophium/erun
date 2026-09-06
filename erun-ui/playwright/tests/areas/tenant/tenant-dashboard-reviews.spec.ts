@@ -554,3 +554,71 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
     }
   });
 });
+
+// erun#2274: a review-linked build's "View profile" button opens the same
+// BuildProfileDialog the Builds tab uses (see tenant-dashboard-builds.spec.ts
+// for the dialog's own content coverage) -- this only proves the two dialogs
+// nest correctly (ReviewDetailDialog -> BuildProfileDialog) and that closing
+// the inner one leaves the outer one open.
+test.describe('tenant dashboard — review build profile (#2274)', () => {
+  test('opens over the review detail dialog and closes back to it', async ({ app, page }) => {
+    const environment = seedDashboardEnvironment('review-build-profile');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [REVIEW],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        if (body.method === 'LoadReviewDetail') {
+          await fulfillJSON(route, {
+            ...reviewDetail([ROOT_COMMENT]),
+            builds: [
+              {
+                buildId: 'build-gate-1',
+                reviewId: REVIEW.reviewId,
+                successful: true,
+                commitId: 'abc123',
+                version: '',
+                profile: {
+                  durationSeconds: 12,
+                  totalStepCount: 1,
+                  topSteps: [{ name: 'erun-devops', durationSeconds: 11 }],
+                },
+              },
+            ],
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+      await app.tenantDashboard.openReview('Add widget');
+      await app.reviewDetailDialog.waitForOpen();
+
+      await app.reviewDetailDialog.buildProfileButtonFor('build-gate-1').click();
+      await app.buildProfileDialog.waitForOpen();
+      await expect(app.buildProfileDialog.locator()).toContainText('erun-devops');
+      // No cgroup was reported for this profile's one step, so every
+      // cgroup-derived cell must read "Not available", never a zero.
+      await expect(app.buildProfileDialog.notAvailableNotice()).toBeVisible();
+
+      await page.keyboard.press('Escape');
+      await app.buildProfileDialog.waitForClosed();
+      await expect(app.reviewDetailDialog.locator()).toBeVisible();
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});
