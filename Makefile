@@ -327,6 +327,16 @@ test-frontend:
 # exports the recipe's environment into everything it execs. See
 # erun-ui/playwright/AGENTS.md's "Area-scoped gate selection" section for the
 # area taxonomy and the selection rule.
+#
+# A real prerequisite, not just prose: run.sh builds the production-tagged
+# erun-app, which needs both erun-ui/frontend/dist (the go:embed in
+# assets_production.go) and the regenerated erun-ui/frontend/wailsjs/
+# bindings -- test-frontend produces both. Under check-gate's `-j` fan-out
+# (see check-gate's own comment) this is what stops test-playwright from
+# starting against a half-written frontend build; every other check-gate
+# prerequisite is independent and may run alongside either of these two.
+test-playwright: test-frontend
+
 test-playwright:
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh)
@@ -341,8 +351,11 @@ test-playwright:
 # this Dockerfile doesn't already have. Compile+link only: this never runs
 # the resulting binary, so it proves nothing about WebView2 runtime
 # behaviour, only that the Windows-only build-constrained source is not
-# broken. Needs erun-ui/frontend/dist (test-frontend, above) for the
-# go:embed in assets_production.go.
+# broken. Needs erun-ui/frontend/dist for the go:embed in
+# assets_production.go -- a real prerequisite on test-frontend (which
+# produces it), the same reasoning as test-playwright's own above.
+test-erun-ui-windows-build: test-frontend
+
 test-erun-ui-windows-build:
 	@echo ">> erun-ui Windows cross-compile (desktop tags)"
 	@(cd erun-ui && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
@@ -474,8 +487,32 @@ integration-test-gate:
 # result or a timeout that says to call `make check` again, either way in a
 # small, bounded number of calls. See scripts/agent-gate.sh for why this is
 # the fix and not just documentation.
+#
+# check-gate's own ten prerequisites (below) used to run back-to-back: on a
+# real release, the first seven alone (everything before test-playwright)
+# cost ~14.5 minutes, and test-playwright is the single largest of the ten by
+# itself (measured standalone at ~16.4 minutes -- more than every other
+# target combined). `-j` is what actually parallelizes them: check-gate's own
+# prerequisite line has to keep every target listed in plain, literal text
+# for erun-integration/build_check_coverage_test.go and
+# erun_ui_windows_cross_compile_test.go, which parse the Makefile's real text
+# (never execute it) to confirm each module's tests are truly wired into
+# `make check` -- so the fan-out can't be moved into a recipe body the way
+# lint/test-frontend/helm-chart-tests dispatch their own internal fan-out
+# through scripts/parallel-gate.sh (that would leave check-gate's own line
+# with no prerequisites, which is exactly the drift those gates exist to
+# catch). Standard `make` prerequisite semantics already give this the
+# ordering it needs for free -- the two `: test-frontend` lines a few lines
+# below are real edges in the same DAG `-j` schedules, not a parallel
+# bookkeeping system -- and `make`'s own job server is a true event-driven
+# scheduler (a slot is reused the instant any job frees it), which is a
+# strictly better fit here than replaying scripts/parallel-gate.sh's
+# fixed-batch model would be for ten wildly uneven-duration jobs.
+CHECK_GATE_TARGET_COUNT := 10
+CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
+
 check:
-	./scripts/agent-gate.sh check "make check" -- $(MAKE) check-gate
+	./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) check-gate
 
 # The full in-build gate: golangci-lint, erun-ui's own Go tests,
 # erun-backend-api's own Go tests, erun-mcp's own Go tests,
@@ -502,6 +539,17 @@ check:
 # regression, never "the suite crying wolf" -- fix it in the same PR per
 # root AGENTS.md's "Fixing pre-existing issues is mandatory" rule, do not
 # revert this line.
+#
+# These ten run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# `check`'s own comment above for the measured cost this replaced, why `-j`
+# rather than scripts/parallel-gate.sh is what drives it here, and where the
+# two real ordering dependencies -- test-playwright and
+# test-erun-ui-windows-build each needing test-frontend -- are declared).
+# Do not drop any of the ten from this line to move the fan-out elsewhere:
+# erun-integration/build_check_coverage_test.go and
+# erun_ui_windows_cross_compile_test.go both parse this exact line's text to
+# confirm every module's tests are really wired into `make check`, and fail
+# if any of these names is missing from it.
 check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
