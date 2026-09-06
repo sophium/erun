@@ -38,7 +38,7 @@ cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
 cd <TMP> && git fetch origin main
 cd <TMP> && git rev-list --count HEAD..FETCH_HEAD
 release: a base branch that moved since sync-remote refuses the release here, before the build spends anything
-docker builder prune -f
+docker info -f '{{.DockerRootDir}}'
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
 docker manifest inspect ghcr.io/sophium/base:<VERSION>
 stage: publish
