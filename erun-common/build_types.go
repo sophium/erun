@@ -123,13 +123,15 @@ type DockerBuildSpec struct {
 	CgroupParent string
 	// PlatformObserver, when set, is called after each platform's build (or
 	// promote+push) finishes, reporting that platform's elapsed time, error,
-	// and build-cgroup cost (nil for a promote, which runs no docker build).
-	// It lets a caller attach per-architecture timing (see Context.
+	// build-cgroup cost (nil for a promote, which runs no docker build), and
+	// (when a real `docker build` ran) its captured `--progress=plain`
+	// output, which a caller can mine for a per-Dockerfile-step timing
+	// breakdown. It lets a caller attach per-architecture timing (see Context.
 	// timingPlatformObserver in timing.go) without DockerImageBuilderFunc
 	// needing a signature change, since executeDockerBuild sets this field on
 	// the same buildInput value it hands to the builder — exactly how it already
 	// threads Verbosity through. Never marshaled: a func value has no JSON form.
-	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics) `json:"-"`
+	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) `json:"-"`
 }
 
 type DockerPushSpec struct {

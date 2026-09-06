@@ -234,7 +234,21 @@ func reportBuildExecutionOutcome(ctx Context, execution BuildExecutionSpec, stor
 		Version:       NewBuildResult(execution).Version,
 		Successful:    err == nil,
 		FailureDetail: failureDetail,
+		Profile:       buildExecutionProfile(ctx),
 	})
+}
+
+// buildExecutionProfile summarizes this run's own step-timing tree (see
+// traceBuildUmbrella, which stashes the root on ctx.timing) into the bounded
+// shape ReportBuildOutcome carries to the platform. nil when no timing root
+// is active -- a dry run, or a build that hit an error before
+// traceBuildUmbrella started one.
+func buildExecutionProfile(ctx Context) *BuildProfileSummary {
+	if ctx.timing == nil {
+		return nil
+	}
+	summary := SummarizeTimingRecordForProfile(ctx.timing.toRecord("build"))
+	return &summary
 }
 
 // buildExecutionProjectRootAndEnvironment reads the project root and

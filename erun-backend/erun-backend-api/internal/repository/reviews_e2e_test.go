@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 
@@ -406,6 +408,60 @@ func TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail(t *testing.T) 
 		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-versioned", Version: "1.0.0",
 	}); err == nil {
 		t.Fatal("a GATE build with a version was accepted, want the CHECK constraint to refuse it: the gate publishes nothing and mints no version")
+	}
+}
+
+// TestBuildProfileRoundTripsThroughCreateAndGet proves the bounded per-build
+// profile survives a real jsonb column round trip -- Get uses a hand-written
+// SELECT column list, unlike Bun's usual
+// Model(&x).Scan, so a column added to the table without a matching addition
+// to that SELECT would silently read back as the field's zero value rather
+// than failing loudly.
+func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	ctx := reviewsContext(tenantID, author)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
+
+	review := openReview(t, reviews, ctx, "build profile review", "feature/build-profile")
+
+	profile := &eruncommon.BuildProfileSummary{
+		DurationSeconds: 42.5,
+		TotalStepCount:  2,
+		TopSteps: []eruncommon.BuildProfileStepSummary{
+			{Name: "erun-devops", DurationSeconds: 40},
+			{Name: "erun-devops > linux/amd64", DurationSeconds: 39},
+		},
+	}
+	created, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true,
+		CommitID: "profile-sha", Version: "1.0.0", Profile: profile,
+	})
+	mustNoErr(t, err, "create a RECORDED build with a profile")
+	if created.Profile == nil {
+		t.Fatal("Create did not return the profile it was given")
+	}
+
+	fetched, err := builds.Get(ctx, created.BuildID)
+	mustNoErr(t, err, "get the build back")
+	if fetched.Profile == nil {
+		t.Fatal("Get did not read back a profile")
+	}
+	if fetched.Profile.DurationSeconds != 42.5 || fetched.Profile.TotalStepCount != 2 {
+		t.Fatalf("profile totals did not round-trip: got %+v", fetched.Profile)
+	}
+	if len(fetched.Profile.TopSteps) != 2 || fetched.Profile.TopSteps[0].Name != "erun-devops" {
+		t.Fatalf("profile top steps did not round-trip: got %+v", fetched.Profile.TopSteps)
+	}
+
+	noProfile, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true,
+		CommitID: "no-profile-sha", Version: "1.0.1",
+	})
+	mustNoErr(t, err, "create a RECORDED build with no profile")
+	if noProfile.Profile != nil {
+		t.Fatalf("expected a nil profile for a build that reported none, got %+v", noProfile.Profile)
 	}
 }
 

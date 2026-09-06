@@ -185,18 +185,40 @@ func (c Context) recordTimingCache(hit bool, missReason string) {
 
 // timingPlatformObserver returns a callback that records one finished
 // per-architecture child under the context's current step, tagged with the
-// same cache decision every architecture of one image build shares. It is
-// wired onto DockerBuildSpec.PlatformObserver rather than threaded through
+// same cache decision every architecture of one image build shares, and
+// breaks that child down further into the Dockerfile steps (and, inside
+// `RUN make check`, the Makefile's own phases) BuildKit's own captured
+// `--progress=plain` output already names — see build_progress_phases.go. It
+// is wired onto DockerBuildSpec.PlatformObserver rather than threaded through
 // DockerImageBuilderFunc, so builder implementations that build every
 // platform in one call (the shared default, and any test double or retry
 // wrapper around it) need no signature change to report per-platform timing.
-func (c Context) timingPlatformObserver(cache *cacheDecision) func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics) {
+func (c Context) timingPlatformObserver(cache *cacheDecision) func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) {
 	if c.timing == nil {
-		return func(string, time.Duration, error, *BuildCgroupMetrics) {}
+		return func(string, time.Duration, error, *BuildCgroupMetrics, string) {}
 	}
 	step := c.timing
-	return func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics) {
-		step.addFinishedChild(platform, elapsed, err, cache, cgroup)
+	return func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) {
+		child := step.addFinishedChild(platform, elapsed, err, cache, cgroup)
+		attachBuildProgressPhases(child, buildOutput)
+	}
+}
+
+// attachBuildProgressPhases records the parsed Dockerfile-step (and, where
+// present, make-phase) breakdown as already-finished children of a
+// platform's timing step — a phase that cannot be attributed reports
+// duration only, exactly like every other node addFinishedChild builds; there
+// is no cgroup or other metric here to omit.
+func attachBuildProgressPhases(step *stepTiming, buildOutput string) {
+	for _, phase := range buildKitProgressPhases(buildOutput) {
+		attachProgressPhase(step, phase)
+	}
+}
+
+func attachProgressPhase(parent *stepTiming, phase buildProgressPhase) {
+	child := parent.addFinishedChild(phase.name, phase.duration, nil, nil, nil)
+	for _, sub := range phase.children {
+		attachProgressPhase(child, sub)
 	}
 }
 

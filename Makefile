@@ -88,7 +88,26 @@ LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun
 # own fixed overhead (most of the 2.5GiB seen at p1) doesn't actually scale
 # per added job, but there is no measured marginal-cost figure to use instead.
 LINT_JOB_MEMORY_MIB := 700
-LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODULES)) $(LINT_JOB_MEMORY_MIB))
+
+# check-gate's own `-j` fan-out (see check-gate's own comment further below)
+# can run lint, test-frontend, and helm-chart-tests concurrently with each
+# other, and each of the three independently sizes its own width against the
+# *entire* memory ceiling via scripts/parallel-gate.sh -- three individually
+# safe widths can still sum past the box's real ceiling once check-gate runs
+# them side by side (root AGENTS.md's "Memory is the ceiling, not CPU": two
+# independent parallelism mechanisms can double-book memory even when each is
+# individually safe on its own). CHECK_GATE_FANOUT_PEAK_MEMORY_MIB is the
+# largest of the three's own already-measured peaks -- lint's own worst case,
+# every LINT_MODULES entry running at once -- and each of the three passes it
+# as parallel-gate.sh width's reserved-mem-mib argument before dividing what
+# is left among its own jobs. In a box sized like the reference build
+# environment (~20GiB, see erun-devops/AGENTS.md's dind sidecar defaults),
+# none of the three's own job-count/CPU caps are memory-bound in the first
+# place, so this reservation is a no-op there; it only narrows a width in a
+# smaller environment where memory actually binds -- exactly the case this
+# guards against.
+CHECK_GATE_FANOUT_PEAK_MEMORY_MIB := $(shell echo $$(( $(words $(LINT_MODULES)) * $(LINT_JOB_MEMORY_MIB) )))
+LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODULES)) $(LINT_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
 # Run golangci-lint across the gated modules concurrently (bounded by
 # LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
@@ -264,7 +283,9 @@ test-erun-dns01-webhook:
 # "measure, don't fabricate a slope" reasoning HELM_CHART_TEST_JOB_MEMORY_MIB's
 # comment gives.
 FRONTEND_GATE_JOB_MEMORY_MIB := 650
-FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width 3 $(FRONTEND_GATE_JOB_MEMORY_MIB))
+# Reserves room for lint/helm-chart-tests under check-gate's own concurrent
+# `-j` fan-out -- see CHECK_GATE_FANOUT_PEAK_MEMORY_MIB's own comment above.
+FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width 3 $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
@@ -327,6 +348,16 @@ test-frontend:
 # exports the recipe's environment into everything it execs. See
 # erun-ui/playwright/AGENTS.md's "Area-scoped gate selection" section for the
 # area taxonomy and the selection rule.
+#
+# A real prerequisite, not just prose: run.sh builds the production-tagged
+# erun-app, which needs both erun-ui/frontend/dist (the go:embed in
+# assets_production.go) and the regenerated erun-ui/frontend/wailsjs/
+# bindings -- test-frontend produces both. Under check-gate's `-j` fan-out
+# (see check-gate's own comment) this is what stops test-playwright from
+# starting against a half-written frontend build; every other check-gate
+# prerequisite is independent and may run alongside either of these two.
+test-playwright: test-frontend
+
 test-playwright:
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh)
@@ -341,8 +372,11 @@ test-playwright:
 # this Dockerfile doesn't already have. Compile+link only: this never runs
 # the resulting binary, so it proves nothing about WebView2 runtime
 # behaviour, only that the Windows-only build-constrained source is not
-# broken. Needs erun-ui/frontend/dist (test-frontend, above) for the
-# go:embed in assets_production.go.
+# broken. Needs erun-ui/frontend/dist for the go:embed in
+# assets_production.go -- a real prerequisite on test-frontend (which
+# produces it), the same reasoning as test-playwright's own above.
+test-erun-ui-windows-build: test-frontend
+
 test-erun-ui-windows-build:
 	@echo ">> erun-ui Windows cross-compile (desktop tags)"
 	@(cd erun-ui && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
@@ -364,7 +398,9 @@ test-erun-ui-windows-build:
 # fabricated per-job slope, since none was observed; the memory term is
 # expected to stay non-binding here and CPU/script-count to decide the width.
 HELM_CHART_TEST_JOB_MEMORY_MIB := 163
-HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(wildcard erun-devops/k8s/*_test.sh)) $(HELM_CHART_TEST_JOB_MEMORY_MIB))
+# Reserves room for lint/test-frontend under check-gate's own concurrent `-j`
+# fan-out -- see CHECK_GATE_FANOUT_PEAK_MEMORY_MIB's own comment above.
+HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(wildcard erun-devops/k8s/*_test.sh)) $(HELM_CHART_TEST_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
 # Helm-render assertions for the erun-devops/k8s charts (erun-devops,
 # erun-backend-postgres, erun-backend-db, erun-backend-api, erun-oci-registry,
@@ -474,8 +510,51 @@ integration-test-gate:
 # result or a timeout that says to call `make check` again, either way in a
 # small, bounded number of calls. See scripts/agent-gate.sh for why this is
 # the fix and not just documentation.
+#
+# check-gate's own ten prerequisites (below) used to run back-to-back: on a
+# real release, the first seven alone (everything before test-playwright)
+# cost ~14.5 minutes, and test-playwright is the single largest of the ten by
+# itself (measured standalone at ~16.4 minutes -- more than every other
+# target combined). `-j` is what actually parallelizes them: check-gate's own
+# prerequisite line has to keep every target listed in plain, literal text
+# for erun-integration/build_check_coverage_test.go and
+# erun_ui_windows_cross_compile_test.go, which parse the Makefile's real text
+# (never execute it) to confirm each module's tests are truly wired into
+# `make check` -- so the fan-out can't be moved into a recipe body the way
+# lint/test-frontend/helm-chart-tests dispatch their own internal fan-out
+# through scripts/parallel-gate.sh (that would leave check-gate's own line
+# with no prerequisites, which is exactly the drift those gates exist to
+# catch). Standard `make` prerequisite semantics already give this the
+# ordering it needs for free -- the two `: test-frontend` lines a few lines
+# below are real edges in the same DAG `-j` schedules, not a parallel
+# bookkeeping system -- and `make`'s own job server is a true event-driven
+# scheduler (a slot is reused the instant any job frees it), which is a
+# strictly better fit here than replaying scripts/parallel-gate.sh's
+# fixed-batch model would be for ten wildly uneven-duration jobs.
+# CHECK_GATE_PARALLELISM deliberately passes no mem-per-job-mib: unlike
+# lint/test-frontend/helm-chart-tests (each a uniform fan-out of near-
+# identical jobs with a real measured per-job cost), these ten targets are
+# wildly heterogeneous -- some are flat single processes, three are
+# themselves internally parallel fan-outs, and none has a comparable
+# measured per-job memory figure, so a number here would be fabricated
+# rather than measured (the same "measure, don't fabricate a slope" standard
+# HELM_CHART_TEST_JOB_MEMORY_MIB's own comment holds to). CPU/job-count alone
+# deciding the width matches that target's own precedent for the identical
+# reason. What this width does NOT bound: three of these ten
+# (lint/test-frontend/helm-chart-tests) each already run their own internal
+# fan-out sized against the full memory ceiling -- CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
+# (see lint's own comment above) is what stops those three from
+# double-booking memory against *each other* when `-j` runs them side by
+# side. It does not bound the other seven (in particular test-erun-ui's
+# `-race`, already flagged in root AGENTS.md as ~10x RSS) against any of the
+# ten running concurrently -- verify actual peak memory on a real
+# `make check-gate` run before trusting this width in a memory-constrained
+# environment, and narrow it with real numbers if that run shows a problem.
+CHECK_GATE_TARGET_COUNT := 10
+CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
+
 check:
-	./scripts/agent-gate.sh check "make check" -- $(MAKE) check-gate
+	./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) check-gate
 
 # The full in-build gate: golangci-lint, erun-ui's own Go tests,
 # erun-backend-api's own Go tests, erun-mcp's own Go tests,
@@ -502,6 +581,17 @@ check:
 # regression, never "the suite crying wolf" -- fix it in the same PR per
 # root AGENTS.md's "Fixing pre-existing issues is mandatory" rule, do not
 # revert this line.
+#
+# These ten run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# `check`'s own comment above for the measured cost this replaced, why `-j`
+# rather than scripts/parallel-gate.sh is what drives it here, and where the
+# two real ordering dependencies -- test-playwright and
+# test-erun-ui-windows-build each needing test-frontend -- are declared).
+# Do not drop any of the ten from this line to move the fan-out elsewhere:
+# erun-integration/build_check_coverage_test.go and
+# erun_ui_windows_cross_compile_test.go both parse this exact line's text to
+# confirm every module's tests are really wired into `make check`, and fail
+# if any of these names is missing from it.
 check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that

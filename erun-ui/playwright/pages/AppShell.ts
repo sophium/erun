@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 import { ActivityQueueDrawer } from './ActivityQueueDrawer';
 import { AIOccupancyPromptDialog } from './AIOccupancyPromptDialog';
 import { AutoStartPromptDialog } from './AutoStartPromptDialog';
+import { BuildProfileDialog } from './BuildProfileDialog';
 import { CloseConfirmDialog } from './CloseConfirmDialog';
 import { CreateReviewDialog } from './CreateReviewDialog';
 import { DebugPanel } from './DebugPanel';
@@ -111,6 +112,10 @@ export class AppShell {
 
   get reviewDetailDialog(): ReviewDetailDialog {
     return new ReviewDetailDialog(this.page);
+  }
+
+  get buildProfileDialog(): BuildProfileDialog {
+    return new BuildProfileDialog(this.page);
   }
 
   get createReviewDialog(): CreateReviewDialog {

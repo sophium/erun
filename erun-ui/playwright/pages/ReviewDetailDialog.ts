@@ -23,6 +23,12 @@ export class ReviewDetailDialog {
     return this.locator().getByRole('listitem');
   }
 
+  // buildProfileButtonFor opens BuildProfileDialog for one build row in this
+  // review's build list.
+  buildProfileButtonFor(buildId: string): Locator {
+    return this.locator().getByRole('button', { name: `View build profile for ${buildId}` });
+  }
+
   // commentThread locates one thread's own roving-tabindex container
   // (ReviewDetailDialog.Comments.tsx's CommentThread), by the same
   // "Comment thread by <author>" accessible name a screen reader announces.
