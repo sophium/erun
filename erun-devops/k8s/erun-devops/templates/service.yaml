@@ -581,6 +581,34 @@ spec:
               value: unix:///var/run/docker.sock
             - name: DOCKER_BUILDKIT
               value: "1"
+            {{- /* The erun-dind sidecar's cgroup is a sibling of any RUN step's
+                   own cgroup during an in-pod docker build, not an ancestor of
+                   it, so a build reading the sidecar's real limit off its own
+                   filesystem sees an unrelated/unlimited cgroup. The config
+                   store has the same blind spot from the other direction
+                   inside the pod: it carries no environment entry there, so a
+                   build that resolved the sidecar's size from the config
+                   store alone always fell back to the hardcoded default, even
+                   after `erun resize --dind-cpu`/`--dind-memory` moved the
+                   sidecar's real limit. The downward API reads the sidecar's
+                   declared limit directly from the API server, so it's
+                   correct regardless of which cgroup this container's own
+                   build process runs in. CPU rounds up to a whole core with
+                   no divisor; memory uses divisor 1Mi so the value is a plain
+                   MiB integer matching ERUN_DIND_MEMORY_LIMIT_MIB's own unit
+                   (build_dind_resources.go suffixes it with "Mi" before
+                   parsing). */}}
+            - name: ERUN_DIND_CPU_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: erun-dind
+                  resource: limits.cpu
+            - name: ERUN_DIND_MEMORY_LIMIT_MIB
+              valueFrom:
+                resourceFieldRef:
+                  containerName: erun-dind
+                  resource: limits.memory
+                  divisor: 1Mi
             {{- end }}
             - name: ERUN_REPO_PATH
               value: {{ $repoPath | quote }}

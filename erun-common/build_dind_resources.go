@@ -16,11 +16,11 @@ var (
 // chart's downward API populates on the main container from the erun-dind
 // sidecar's own resource limits (erun-devops/k8s/erun-devops/templates/service.yaml),
 // so an in-pod build can read the sidecar's real limit directly instead of
-// through the config store, which has no environment entry inside the pod
-// (erun#2276). `erun resize --dind-cpu` moved the sidecar's real limit and the
-// cgroup it lives in, but a gate build kept sizing off the config-store
-// fallback default ("4") because the in-pod config store resolves no
-// environment and envConfig was always nil in that context.
+// through the config store, which has no environment entry inside the pod.
+// `erun resize --dind-cpu` moves the sidecar's real limit and the cgroup it
+// lives in, but a gate build kept sizing off the config-store fallback
+// default ("4") because the in-pod config store resolves no environment and
+// envConfig was always nil in that context.
 const (
 	DindCPULimitEnvVar       = "ERUN_DIND_CPU_LIMIT"
 	DindMemoryLimitMiBEnvVar = "ERUN_DIND_MEMORY_LIMIT_MIB"
