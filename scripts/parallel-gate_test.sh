@@ -148,4 +148,29 @@ got=$(PATH="${stub_bin}:$PATH" PARALLEL_GATE_CGROUP_ROOT="$case_dir" PARALLEL_GA
 got=$(PATH="${stub_bin}:$PATH" PARALLEL_GATE_CGROUP_ROOT="$case_dir" PARALLEL_GATE_CPU_LIMIT=bogus "$gate" width 6 700)
 [ "$got" = 6 ] || fail "non-numeric cpu override is ignored: expected job-count cap 6, got $got"
 
+# --- `cpu-quota` mode (erun#2266) prints cpu_quota()'s result standalone, so
+# the Makefile's LINT_TIMEOUT scaling can reuse the same override chain
+# `width` already exercises above instead of re-deriving it. Cover the
+# override and the cgroup-v2 read; the rest of the fallback chain (cgroup v1,
+# nproc, constant) is already proven against the same cpu_quota() function by
+# the `width` assertions above.
+assert_cpu_quota() {
+	label="$1"
+	expected="$2"
+	shift 2
+	got=$("$gate" cpu-quota)
+	[ "$got" = "$expected" ] || fail "$label: expected cpu-quota $expected, got $got"
+}
+
+case_dir="${work_root}/v2"
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_cpu_quota "cpu-quota reads cgroup v2 cpu.max" 4
+
+got=$(PARALLEL_GATE_CPU_LIMIT=4 "$gate" cpu-quota)
+[ "$got" = 4 ] || fail "cpu-quota honors PARALLEL_GATE_CPU_LIMIT=4: got $got"
+got=$(PARALLEL_GATE_CPU_LIMIT=8 "$gate" cpu-quota)
+[ "$got" = 8 ] || fail "cpu-quota honors PARALLEL_GATE_CPU_LIMIT=8: got $got"
+got=$(PARALLEL_GATE_CPU_LIMIT=24 "$gate" cpu-quota)
+[ "$got" = 24 ] || fail "cpu-quota honors PARALLEL_GATE_CPU_LIMIT=24: got $got"
+
 echo "ok: parallel-gate.sh width"
+echo "ok: parallel-gate.sh cpu-quota"

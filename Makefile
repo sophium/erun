@@ -43,7 +43,29 @@
 # reads as a red gate and a release aborts for no finding at all. Modules with
 # their own .golangci.yml set a shorter run.timeout; this is the ceiling, not a
 # replacement for it.
-LINT_TIMEOUT ?= 15m
+#
+# 15m was calibrated against an uncapped build container, which took 22 of a
+# 24-core node before the build-container CPU cap (#2255/#2257) started
+# holding it to its declared cpu= (commonly 4). Once every module actually
+# got only that many cores, the fixed 15m stopped fitting: every module
+# reported "0 issues" and then hit the timeout anyway, turning an
+# environmental CPU shortage into a false-red gate (erun#2266). Scale the
+# timeout inversely with the same resolved CPU quota LINT_PARALLELISM already
+# reads below (scripts/parallel-gate.sh's cpu-quota mode, which honors the
+# erun-devops Dockerfile's PARALLEL_GATE_CPU_LIMIT=$DIND_CPU_LIMIT override
+# the same way LINT_PARALLELISM's width calculation does), floored at the
+# original 15m so an environment at or above the 22-core reference never gets
+# less time than before. At the reference DIND_CPU_LIMIT default of 4 this
+# resolves to 82m, comfortably past the ~24.5m (1468s) a starved run was
+# observed to take in erun#2266 before failing. LINT_TIMEOUT's `?=` keeps the
+# existing manual override: an explicit `LINT_TIMEOUT=<duration> make check`
+# (or an env var of the same name) still wins over this computed default.
+LINT_TIMEOUT_REFERENCE_CPU := 22
+LINT_TIMEOUT_BASE_MINUTES := 15
+LINT_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	m=$$(( $(LINT_TIMEOUT_BASE_MINUTES) * $(LINT_TIMEOUT_REFERENCE_CPU) / cpu )); \
+	[ "$$m" -ge $(LINT_TIMEOUT_BASE_MINUTES) ] || m=$(LINT_TIMEOUT_BASE_MINUTES); \
+	echo "$${m}m")
 
 LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api erun-ui
 
@@ -244,6 +266,21 @@ test-erun-dns01-webhook:
 FRONTEND_GATE_JOB_MEMORY_MIB := 650
 FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width 3 $(FRONTEND_GATE_JOB_MEMORY_MIB))
 
+# eslint/prettier's own --cache, one shared root so the erun-devops image test
+# stage can mount it with a single BuildKit cache mount
+# (erun-devops/docker/erun-devops/Dockerfile) covering all three workspaces.
+# $(CURDIR) is the repo root whether this runs locally or inside that stage
+# (WORKDIR /src there), so no path needs threading in from the Dockerfile.
+# --cache-strategy content (not the metadata/mtime default) is load-bearing,
+# not a style choice: every COPY in that Dockerfile stamps a fresh mtime on
+# every file on every build, which makes the metadata strategy a permanent
+# cache miss under Docker -- verified empirically (eslint: 20s cold either
+# way, but 2.5s warm with content vs 20s "warm" with metadata after
+# simulating a COPY's mtime reset). Both tools key their cache on file
+# content plus their own config/version, so a real source or config change
+# still re-lints/re-formats that file; this only skips files nothing about.
+FRONTEND_LINT_CACHE_DIR := $(CURDIR)/.cache/frontend-lint
+
 test-frontend:
 	@echo ">> yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)"
 	@yarn install --frozen-lockfile
@@ -253,9 +290,9 @@ test-frontend:
 	@echo ">> generating erun-ui/frontend wailsjs bindings"
 	@./erun-ui/generate-wailsjs.sh
 	@( \
-		printf 'erun-kit\terun-kit gates\tcd erun-kit && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test\n'; \
-		printf 'erun-ui-frontend\terun-ui/frontend gates\tcd erun-ui/frontend && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test\n'; \
-		printf 'erun-console\terun-console gates\tcd erun-console && yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test\n' \
+		printf 'erun-kit\terun-kit gates\tcd erun-kit && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-kit/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-kit.json && yarn build && yarn test\n'; \
+		printf 'erun-ui-frontend\terun-ui/frontend gates\tcd erun-ui/frontend && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json && yarn build && yarn test\n'; \
+		printf 'erun-console\terun-console gates\tcd erun-console && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json && yarn build && yarn test\n' \
 	) | ./scripts/parallel-gate.sh $(FRONTEND_GATE_PARALLELISM) test-frontend
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
@@ -280,6 +317,16 @@ test-frontend:
 # `erun exec job` in an agent env, when iterating on a fix -- it no longer
 # needs `--skip-lint`/manual wiring to get signal, but a full run still
 # costs ~20 minutes.
+#
+# `erun build` narrows what this target actually runs: it resolves a
+# PLAYWRIGHT_TEST_AREAS build-arg (applyPlaywrightAreaBuildArgs in
+# erun-common/build_playwright_areas.go) from the Playwright spec-file diff
+# against the merge base and threads it into this Dockerfile's RUN step as
+# an env var of the same name, which run.sh reads directly (see its own
+# header comment) -- no argument passing needed here since Make already
+# exports the recipe's environment into everything it execs. See
+# erun-ui/playwright/AGENTS.md's "Area-scoped gate selection" section for the
+# area taxonomy and the selection rule.
 test-playwright:
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh)
