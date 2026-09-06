@@ -354,7 +354,6 @@ WORKDIR /src/erun-cli
 
 ARG TARGETOS=linux
 ARG TARGETARCH
-ARG ERUN_VERSION
 ARG ERUN_COMMIT=""
 ARG ERUN_DATE=""
 ARG GOLANGCI_LINT_VERSION
@@ -380,6 +379,7 @@ COPY erun-mcp /src/erun-mcp
 # builder spend a full compile before discovering it.
 COPY --from=test /test-ok /tmp/erun-test-ok
 
+ARG ERUN_VERSION
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     ERUN_VERSION="${ERUN_VERSION:-$(tr -d '\n' < /src/erun-devops/VERSION)}" && \

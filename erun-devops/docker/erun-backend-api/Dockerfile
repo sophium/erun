@@ -19,7 +19,6 @@ WORKDIR /src/erun-backend/erun-backend-api
 
 ARG TARGETOS=linux
 ARG TARGETARCH
-ARG ERUN_VERSION
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -35,6 +34,7 @@ COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 # when the target is written as "main.<name>" — the full package import path
 # compiles and links with no warning but silently leaves the variable at its
 # default.
+ARG ERUN_VERSION
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
