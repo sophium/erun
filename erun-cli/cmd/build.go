@@ -61,6 +61,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 	// their builds stay sequential, so offering the knob there would advertise a
 	// control that does nothing.
 	cmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "Build this many images at once (0 resolves from the machine, 1 is sequential). Independent images build concurrently; a FROM dependency still waits for its base.")
+	cmd.AddCommand(newBuildProfileCmd())
 	return cmd
 }
 
