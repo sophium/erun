@@ -88,7 +88,26 @@ LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun
 # own fixed overhead (most of the 2.5GiB seen at p1) doesn't actually scale
 # per added job, but there is no measured marginal-cost figure to use instead.
 LINT_JOB_MEMORY_MIB := 700
-LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODULES)) $(LINT_JOB_MEMORY_MIB))
+
+# check-gate's own `-j` fan-out (see check-gate's own comment further below)
+# can run lint, test-frontend, and helm-chart-tests concurrently with each
+# other, and each of the three independently sizes its own width against the
+# *entire* memory ceiling via scripts/parallel-gate.sh -- three individually
+# safe widths can still sum past the box's real ceiling once check-gate runs
+# them side by side (root AGENTS.md's "Memory is the ceiling, not CPU": two
+# independent parallelism mechanisms can double-book memory even when each is
+# individually safe on its own). CHECK_GATE_FANOUT_PEAK_MEMORY_MIB is the
+# largest of the three's own already-measured peaks -- lint's own worst case,
+# every LINT_MODULES entry running at once -- and each of the three passes it
+# as parallel-gate.sh width's reserved-mem-mib argument before dividing what
+# is left among its own jobs. In a box sized like the reference build
+# environment (~20GiB, see erun-devops/AGENTS.md's dind sidecar defaults),
+# none of the three's own job-count/CPU caps are memory-bound in the first
+# place, so this reservation is a no-op there; it only narrows a width in a
+# smaller environment where memory actually binds -- exactly the case this
+# guards against.
+CHECK_GATE_FANOUT_PEAK_MEMORY_MIB := $(shell echo $$(( $(words $(LINT_MODULES)) * $(LINT_JOB_MEMORY_MIB) )))
+LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODULES)) $(LINT_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
 # Run golangci-lint across the gated modules concurrently (bounded by
 # LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
@@ -264,7 +283,9 @@ test-erun-dns01-webhook:
 # "measure, don't fabricate a slope" reasoning HELM_CHART_TEST_JOB_MEMORY_MIB's
 # comment gives.
 FRONTEND_GATE_JOB_MEMORY_MIB := 650
-FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width 3 $(FRONTEND_GATE_JOB_MEMORY_MIB))
+# Reserves room for lint/helm-chart-tests under check-gate's own concurrent
+# `-j` fan-out -- see CHECK_GATE_FANOUT_PEAK_MEMORY_MIB's own comment above.
+FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width 3 $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
@@ -377,7 +398,9 @@ test-erun-ui-windows-build:
 # fabricated per-job slope, since none was observed; the memory term is
 # expected to stay non-binding here and CPU/script-count to decide the width.
 HELM_CHART_TEST_JOB_MEMORY_MIB := 163
-HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(wildcard erun-devops/k8s/*_test.sh)) $(HELM_CHART_TEST_JOB_MEMORY_MIB))
+# Reserves room for lint/test-frontend under check-gate's own concurrent `-j`
+# fan-out -- see CHECK_GATE_FANOUT_PEAK_MEMORY_MIB's own comment above.
+HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(wildcard erun-devops/k8s/*_test.sh)) $(HELM_CHART_TEST_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
 # Helm-render assertions for the erun-devops/k8s charts (erun-devops,
 # erun-backend-postgres, erun-backend-db, erun-backend-api, erun-oci-registry,
@@ -508,6 +531,25 @@ integration-test-gate:
 # scheduler (a slot is reused the instant any job frees it), which is a
 # strictly better fit here than replaying scripts/parallel-gate.sh's
 # fixed-batch model would be for ten wildly uneven-duration jobs.
+# CHECK_GATE_PARALLELISM deliberately passes no mem-per-job-mib: unlike
+# lint/test-frontend/helm-chart-tests (each a uniform fan-out of near-
+# identical jobs with a real measured per-job cost), these ten targets are
+# wildly heterogeneous -- some are flat single processes, three are
+# themselves internally parallel fan-outs, and none has a comparable
+# measured per-job memory figure, so a number here would be fabricated
+# rather than measured (the same "measure, don't fabricate a slope" standard
+# HELM_CHART_TEST_JOB_MEMORY_MIB's own comment holds to). CPU/job-count alone
+# deciding the width matches that target's own precedent for the identical
+# reason. What this width does NOT bound: three of these ten
+# (lint/test-frontend/helm-chart-tests) each already run their own internal
+# fan-out sized against the full memory ceiling -- CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
+# (see lint's own comment above) is what stops those three from
+# double-booking memory against *each other* when `-j` runs them side by
+# side. It does not bound the other seven (in particular test-erun-ui's
+# `-race`, already flagged in root AGENTS.md as ~10x RSS) against any of the
+# ten running concurrently -- verify actual peak memory on a real
+# `make check-gate` run before trusting this width in a memory-constrained
+# environment, and narrow it with real numbers if that run shows a problem.
 CHECK_GATE_TARGET_COUNT := 10
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
