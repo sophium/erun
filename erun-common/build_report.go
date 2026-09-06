@@ -47,6 +47,10 @@ type ReportBuildOutcomeParams struct {
 	Version       string
 	Successful    bool
 	FailureDetail string
+	// Profile is the bounded per-step profile this build collected (root
+	// AGENTS.md #2274), when the caller has one -- nil for a build that
+	// collected none (see build_profile_summary.go).
+	Profile *BuildProfileSummary
 }
 
 // ReportBuildOutcome self-reports build's outcome to the erun platform,
@@ -137,6 +141,7 @@ func createUnattachedBuildReport(client *PlatformClient, params ReportBuildOutco
 		Version:       params.Version,
 		Successful:    params.Successful,
 		FailureDetail: params.FailureDetail,
+		Profile:       params.Profile,
 	})
 }
 
