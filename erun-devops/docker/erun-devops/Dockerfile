@@ -230,11 +230,12 @@ ARG DIND_CPU_LIMIT=4
 # (applyPlaywrightAreaBuildArgs in erun-common/build_playwright_areas.go,
 # derived from the Playwright spec-file diff against the merge base) into
 # this stage's `make test-playwright` invocation below, per the design in
-# root AGENTS.md's Playwright gate scoping: "all" or unset runs the full
-# suite, "smoke" runs only tests/smoke, "smoke,<area>,..." runs smoke plus
-# the named area directories under tests/areas/. Left at its default empty
-# string for a bare `docker build` with no erun build-arg resolution -- the
-# safe, fail-open direction is the full suite, never zero coverage.
+# erun-ui/playwright/AGENTS.md's "Area-scoped gate selection": "all" or unset
+# runs the full suite, "smoke" runs only tests/smoke, "smoke,<area>,..." runs
+# smoke plus the named area directories under tests/areas/. Left at its
+# default empty string for a bare `docker build` with no erun build-arg
+# resolution -- the safe, fail-open direction is the full suite, never zero
+# coverage.
 ARG PLAYWRIGHT_TEST_AREAS=""
 # golangci-lint's own analysis cache sat unmounted here even though the Go
 # module and build caches right above it were: HOME is /root in this stage
