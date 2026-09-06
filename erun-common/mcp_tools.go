@@ -210,6 +210,13 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"ai_sessions":      {Family: "activity", CLIPath: nil, Title: "Report structured AI-session status (busy/idle/awaiting-input/exited/oom-killed)", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"outputs_list":     {Family: "outputs", CLIPath: []string{"outputs", "list"}, Title: "List an environment's build outputs", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"outputs_download": {Family: "outputs", CLIPath: []string{"outputs", "download"}, Title: "Download a build output", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	// A build-cost investigation tool: reads the per-step CPU/throttling/I/O
+	// already recorded to ~/.erun/timing/. Its primary caller today is
+	// whoever is diagnosing build slowness -- often an agent, same as the
+	// exec_* family above -- and a desktop Builds view over the same records
+	// is deliberately deferred follow-up work, not yet built; revisit
+	// AgentFacing once that view exists.
+	"build_profile":    {Family: "build", CLIPath: []string{"build", "profile"}, Title: "Show where a past build spent its time, CPU, and I/O", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"inputs_upload":    {Family: "inputs", CLIPath: []string{"inputs", "upload"}, Title: "Upload a file into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
 	"sshd_sync":        {Family: "sshd", CLIPath: []string{"sshd", "sync"}, Title: "Sync the working tree over SSH", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
 	"contribute_clone": {Family: "contribute", CLIPath: []string{"contribute", "clone"}, Title: "Clone the erun source into the environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
