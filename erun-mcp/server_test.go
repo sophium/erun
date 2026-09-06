@@ -155,7 +155,7 @@ var wantRegisteredTools = []string{
 	// disappearing outright.
 	"activity_lease_list", "activity_lease_release", "activity_lease_take",
 	"ai_sessions",
-	"build", "cloud_clear_aws_credentials", "cloud_init_aws",
+	"build", "build_profile", "cloud_clear_aws_credentials", "cloud_init_aws",
 	"cloud_init_cloudflare", "cloud_init_erun", "cloud_inject_aws_credentials",
 	"cloud_list", "cloud_login", "cloud_oidc", "cloud_set", "commit",
 	"context_init", "context_list", "context_start", "context_stop",

@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -42,6 +43,23 @@ func TestMain(m *testing.M) {
 	// test's re-entered supervisor helper (job_alive_test.go) hooks in here too.
 	if os.Getenv(jobAliveSupervisorHelperEnv) != "" {
 		os.Exit(runJobAliveSupervisorHelper())
+	}
+	// This suite must never depend on the invoking shell's own environment:
+	// running `go test` from inside an actual runtime pod (as this repo's own
+	// agent environments do) otherwise leaves ERUN_TENANT/ERUN_ENVIRONMENT set,
+	// which makes inInjectedRuntimePod() true for every test in the package --
+	// stepTiming's cgroup sampling (build_cgroup_metrics.go) would then attempt
+	// a real `kubectl exec` per step on every timing test, turning millisecond
+	// tests into multi-second ones and making them depend on cluster access
+	// nothing here should need. Any test that means to exercise the
+	// injected-pod path sets these explicitly via t.Setenv.
+	if err := os.Unsetenv("ERUN_TENANT"); err != nil {
+		fmt.Fprintf(os.Stderr, "unsetenv ERUN_TENANT: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.Unsetenv("ERUN_ENVIRONMENT"); err != nil {
+		fmt.Fprintf(os.Stderr, "unsetenv ERUN_ENVIRONMENT: %v\n", err)
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }

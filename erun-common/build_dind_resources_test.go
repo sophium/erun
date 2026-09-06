@@ -49,13 +49,16 @@ func storeWithDindConfig(t *testing.T, projectRoot string, resources RuntimePodR
 }
 
 // clearInjectedRuntimeEnv strips the real process's own ERUN_TENANT/
-// ERUN_ENVIRONMENT so resolveDockerBuildDindPodResources' config-store
-// resolution is deterministic under `go test` regardless of whether the test
-// binary happens to run inside a real runtime pod (which sets both).
+// ERUN_ENVIRONMENT and the downward-API DindCPULimitEnvVar/
+// DindMemoryLimitMiBEnvVar so resolveDockerBuildDindPodResources' resolution
+// is deterministic under `go test` regardless of whether the test binary
+// happens to run inside a real runtime pod (which sets all four).
 func clearInjectedRuntimeEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ERUN_TENANT", "")
 	t.Setenv("ERUN_ENVIRONMENT", "")
+	t.Setenv(DindCPULimitEnvVar, "")
+	t.Setenv(DindMemoryLimitMiBEnvVar, "")
 }
 
 // Both env vars set and valid: they win even though the config store also
