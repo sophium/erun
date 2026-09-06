@@ -1734,6 +1734,43 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("expected a recorded skip for the failed report, got:\n%s", result.Combined)
 		}
 	})
+
+	t.Run("dry_run_e2e_implies_deploy_and_no_playwright_folder_is_a_clean_no_op", func(t *testing.T) {
+		// --e2e implies --deploy (no separate --deploy needed), and composes
+		// the e2e step after the deploy trace; a project with no playwright/
+		// folder makes that step a clean no-op rather than an error.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"build", "--e2e", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "e2e: no playwright/ suite found; nothing to run") {
+			t.Fatalf("expected --e2e to report a clean no-op with no playwright/ folder, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_e2e_implies_deploy_and_no_playwright_folder_is_a_clean_no_op", normalize.Apply(result.Combined))
+	})
+
+	t.Run("e2e_with_project_build_script_errors", func(t *testing.T) {
+		// --e2e implies --deploy, which cannot compose with a project build
+		// script; it must fail with the same clear message --deploy alone
+		// produces, rather than a confusing e2e-specific error.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", "build.sh")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add build script")
+		result := erun.Run(t, []string{"build", "--e2e", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --e2e with a build script, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/e2e_with_project_build_script_errors", normalize.Apply(result.Combined))
+	})
 }
 
 // stubDockerNoLocalImages makes every docker invocation a clean "No such image"

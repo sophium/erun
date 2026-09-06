@@ -236,6 +236,12 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"expose":      {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"unexpose":    {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
 	"terraform":   {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
+	// e2e has no desktop surface to reference yet -- AgentFacing here is a
+	// deliberate, temporary scope decision for this feature's CLI/MCP-first
+	// delivery, not a claim that no human ever runs it, mirroring gate_list
+	// above. A follow-up issue tracks adding a desktop "Run e2e" surface;
+	// remove AgentFacing once it exists.
+	"e2e": {Family: "", CLIPath: []string{"e2e"}, Title: "Run the project's Playwright suite against a deployed environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// job_start has no working handler: it is a removed-tool stub (see
 	// mcpRemovedTools) whose only behavior is to name the tool that took over
 	// its capability.

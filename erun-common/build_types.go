@@ -167,6 +167,12 @@ type DockerCommandTarget struct {
 	// caller — the shared resolvers never read it. See root AGENTS.md § "Command
 	// primitives vs orchestration".
 	Build bool
+	// E2E is the `erun build --e2e` operator shortcut: implies Deploy, and after
+	// the deploy completes runs the project's discovered playwright/ suite
+	// against the environment just deployed. Orchestration policy owned by the
+	// CLI caller — the shared resolvers never read it. See root AGENTS.md §
+	// "Command primitives vs orchestration".
+	E2E bool
 	// NoIncremental disables the default fingerprint-based incremental build cache.
 	NoIncremental bool
 	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
