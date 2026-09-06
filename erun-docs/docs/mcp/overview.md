@@ -316,6 +316,7 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_close` | Work (idempotent) | Close a review without merging it. |
 | `review_record-build` | Work | Record a build against a review — the only way an erun client transitions a review off `OPEN`. A successful build moves it to `READY` (and on to `MERGE` if it was already the merge queue's head); a failed one moves it to `FAILED`. There is no separate tool to set a review's status directly: a `READY` with no build is a different thing entirely (the missed-merge-window requeue). `commitId` must be the full 40-character commit hash the build ran against, and `version` the version it minted — required even when `successful` is `false`, since `release` resolves the version before the build step runs. `gate` records the merge queue's own `GATE` build kind instead: the environment a review's merge queue promoted to `MERGE` reports its own build of the prospective merge this way, and omits `version` since the gate publishes nothing. |
 | `review_report-merged` | Work | Report a review `MERGED`, for the environment a review's merge queue promoted to `MERGE` once it has fetched the review's target and source (`exec_gate-merge`), gate-built the result, recorded that as a successful `GATE` build (`review_record-build` with `gate` set), and pushed it. The platform verifies rather than trusts this: it checks `buildId` names an already-recorded, successful `GATE` build for this review, then fetches `remoteUrl` to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with 409 `MERGE_NOT_VERIFIED` and leaves the review at `MERGE`. |
+| `review_requeue` | Work (idempotent) | Move a review stuck at `MERGE` back to `READY`, freeing its target branch's merge-queue slot so a different review can be promoted — only one review may be at `MERGE` per target branch. For a review whose gate never reaches a terminal state, or one left at `MERGE` by a batched `exec_gate-merge` whose other members landed but were never promoted. The review rejoins the queue at the tail, not the head. Refuses, naming the review's actual status, when it is not at `MERGE`. See [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges). |
 | `review_reviewers_list` | Read | List the users assigned to review a review. |
 | `review_reviewers_add` | Work (idempotent) | Assign a reviewer, so an Agent can assign a peer Agent (or itself). `userId` must already be enrolled in the caller's own tenant — refused before the network call otherwise. Assigning a reviewer gates no status transition; see [merge queue](/collaboration/merge-queue) for what actually blocks a merge. |
 | `review_reviewers_remove` | Work (destructive, idempotent) | Remove a reviewer from a review. |
@@ -323,7 +324,7 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGE`, starting that review's merge-gate build — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`, and refuses with the unresolved comment thread count when the head still has open threads (resolve them with `review_resolve`, or use `review_queue_override-advance`). |
 | `review_queue_override-advance` | Work | Bypass `review_queue_advance`'s unresolved-thread gate and advance anyway. `reason` is required and is recorded in the platform's audit trail alongside the caller's identity — a deliberate, accountable escape hatch, not a routine way to advance the queue. |
 
-All fifteen support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_record-build`, `review_report-merged`, `review_reviewers_add`, `review_reviewers_remove`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
+All sixteen support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_record-build`, `review_report-merged`, `review_requeue`, `review_reviewers_add`, `review_reviewers_remove`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
 
 ### Idle & auto-stop history {#idle-stop-tools}
 
@@ -497,6 +498,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_close` | `erun review close` | Work |
 | review | `review_record-build` | `erun review record-build` | Work |
 | review | `review_report-merged` | `erun review report-merged` | Work |
+| review | `review_requeue` | `erun review requeue` | Work |
 | review | `review_reviewers_list` | `erun review reviewers list` | Read |
 | review | `review_reviewers_add` | `erun review reviewers add` | Work |
 | review | `review_reviewers_remove` | `erun review reviewers remove` | Work |
@@ -520,7 +522,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | sshd | `sshd_sync` | `erun sshd sync` | Work |
 | contribute | `contribute_clone` | `erun contribute clone` | Work |
 
-77 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
+103 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
 
 ## Why typed tools
 

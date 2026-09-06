@@ -166,7 +166,12 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// environment a review's merge queue promoted to MERGE ever calls this,
 	// after it has fetched, gate-built, and pushed the prospective merge
 	// itself — no desktop surface authors this report either.
-	"review_report-merged":          {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	// Requeue recovers a merge-queue wedge (erun#2241): a review stuck at
+	// MERGE with no desktop button to move it, only ever hit by whichever
+	// tooling drove gate-merge/the merge queue in the first place — the same
+	// agent-only shape as record-build/report-merged above.
+	"review_requeue":                {Family: "review", CLIPath: []string{"review", "requeue"}, Title: "Move a review stuck at MERGE back to READY", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
 	"review_reviewers_list":         {Family: "review", CLIPath: []string{"review", "reviewers", "list"}, Title: "List a review's assigned reviewers", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_reviewers_add":          {Family: "review", CLIPath: []string{"review", "reviewers", "add"}, Title: "Assign a reviewer to a review", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"review_reviewers_remove":       {Family: "review", CLIPath: []string{"review", "reviewers", "remove"}, Title: "Remove a reviewer from a review", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},

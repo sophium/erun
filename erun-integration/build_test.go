@@ -1116,6 +1116,57 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_dockerfile_without_dind_args_is_unaffected", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_dockerfile_cgroup_parent_applies_inside_injected_runtime_pod", func(t *testing.T) {
+		// erun#2255: DIND_CPU_LIMIT (erun#2081, above) only fixes derivations
+		// *inside* the image -- the RUN-instruction containers themselves still
+		// escape the sidecar's kubelet-declared CPU limit as sibling cgroups.
+		// Inside an injected runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT set, the
+		// same marker inInjectedRuntimePod already uses elsewhere), every docker
+		// build must carry --cgroup-parent so its RUN containers nest under the
+		// cgroup dind-entrypoint.sh mirrors this sidecar's own live cpu.max into.
+		// Applies regardless of whether the Dockerfile declares DIND_CPU_LIMIT at
+		// all, since the OS-level escape is not specific to that ARG.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"), "FROM alpine:3.22\n")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		envVars = append(envVars, stubDockerNoLocalImages(t, setup)...)
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		hostname, err := os.Hostname()
+		if err != nil || strings.TrimSpace(hostname) == "" {
+			t.Fatalf("os.Hostname(): %v", err)
+		}
+		if !strings.Contains(result.Combined, "--cgroup-parent /docker/erun-build-cpu-cap-"+hostname) {
+			t.Errorf("expected the docker build to carry --cgroup-parent for this pod:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_cgroup_parent_applies_inside_injected_runtime_pod", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_cgroup_parent_absent_outside_injected_runtime_pod", func(t *testing.T) {
+		// erun#2255: a bare host build (no ERUN_TENANT/ERUN_ENVIRONMENT injected)
+		// has no dind sidecar limit to escape, so it must not carry
+		// --cgroup-parent -- forcing one would throttle a developer's own
+		// machine for a problem that does not exist there.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"), "FROM alpine:3.22\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "--cgroup-parent") {
+			t.Errorf("expected no --cgroup-parent outside an injected runtime pod:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_cgroup_parent_absent_outside_injected_runtime_pod", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_linux_package_from_component_dir", func(t *testing.T) {
 		// From inside linux/<component>, `erun build` resolves the dir's build.sh
 		// and dry-run traces its invocation with the version. ERUN_HOST_OS_OVERRIDE
