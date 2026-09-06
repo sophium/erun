@@ -203,7 +203,7 @@ func LoadAISessionStatuses(tenant, environment string) ([]AISessionStatus, error
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []AISessionStatus{}, nil
 		}
 		return nil, err
 	}

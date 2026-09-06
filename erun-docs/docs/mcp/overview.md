@@ -566,6 +566,8 @@ The write side is the CLI verb `erun activity ai-session report`, which a tool's
 ```jsonc
 // ai_sessions { "session": "abc123" }
 {
+  "tenant": "myapp",
+  "environment": "dev",
   "sessions": [
     {
       "sessionId": "abc123",
@@ -577,6 +579,8 @@ The write side is the CLI verb `erun activity ai-session report`, which a tool's
   ]
 }
 ```
+
+`tenant`/`environment` echo the resolved target, the same way `idle_stop_history` does, so an empty `sessions` list cannot be misread as answering for a different target than the one requested. An environment with no recorded sessions returns `"sessions": []`, never `null`.
 
 An `exited` or `oom-killed` session additionally carries `exitCode` when the process reported one. `oom-killed` is reported only when the caller that recorded the exit explicitly said so (`exitReason: "oom"`) — detecting the kill itself (a cgroup `memory.events` read, a `dmesg` scan) is the reporting side's job, not this tool's.
 
