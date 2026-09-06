@@ -697,6 +697,42 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_step_timing_breaks_a_platform_build_down_into_dockerfile_steps_and_make_phases", func(t *testing.T) {
+		// A gate build renders one image as ~99% of total wall clock, so the
+		// per-platform timing row used to be the finest granularity available --
+		// it could say a build was slow, never which part. BuildKit's own
+		// --progress=plain output (already captured for the two scenarios above)
+		// carries a per-Dockerfile-step DONE line, and the Makefile's own
+		// `>> <phase>` markers ride inside the `RUN make check` step's own output
+		// lines. Both must now surface as their own rows in the step timing table
+		// instead of collapsing into the platform's one duration.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) echo "#4 [3/3] RUN make check"; echo "#4 0.10 >> golangci-lint"; echo "#4 5.00 >> go test"; echo "#4 DONE 12.00s"; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "step timing") {
+			t.Fatalf("expected the step timing table, got:\n%s", result.Combined)
+		}
+		for _, want := range []string{"RUN make check", "golangci-lint", "go test"} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected the step timing table to name %q as its own row (a Dockerfile step / make phase, not just the whole platform build), got:\n%s", want, result.Combined)
+			}
+		}
+	})
+
 	t.Run("dry_run_no_incremental_skips_fingerprint_short_circuit", func(t *testing.T) {
 		// --no-incremental forces `docker build` for every image even when a
 		// fingerprint tag exists — no `docker image inspect` short-circuit, no
