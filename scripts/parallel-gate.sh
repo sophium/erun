@@ -27,8 +27,8 @@
 #
 # Prints one integer: min(job-count, CPUs available to this environment,
 # (memory available - reserved-mem-mib) / mem-per-job-mib). Kept in this
-# script rather than a separate one because #1702 found two independent
-# parallelism sizers in this repo (this file's Makefile callers, and
+# script rather than a separate one because this repo had two independent
+# parallelism sizers (this file's Makefile callers, and
 # erun-ui/playwright/playwright.config.ts) that disagreed about which
 # resource is the ceiling; this is now the one shell-side answer, read the
 # same cgroup files with the same fallbacks the TypeScript side already used
