@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,60 @@ func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testi
 	}
 	if !strings.Contains(err.Error(), "exit status 255") {
 		t.Fatalf("error %q should still name the exit status when ssh wrote nothing to stderr", err.Error())
+	}
+}
+
+// TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode is a regression
+// test: delivery used to run the writable->extract->sign->read-only cycle
+// unconditionally for every remote
+// artifact on every pass, so an artifact whose content had not changed at all
+// still passed through the 0644 window `makeArtifactsWritable` applies before
+// re-extraction restores it -- on the majority of passes, per the issue's own
+// sampling, since delivery ran every couple of seconds. An operator invoking
+// the artifact directly from a shell during that window saw "permission
+// denied" on an otherwise-correct binary.
+//
+// This locks the fix: when the remote fingerprint (size + mtime) matches what
+// is already in the mirror, the artifact is never made writable, never
+// re-extracted, and never re-marked read-only -- its mode is untouched start to
+// finish. Deliberately configuring no tar archive stub proves this: on the old,
+// unconditional code this test fails, because the pass still tries to
+// re-fetch the "unchanged" artifact and the tar stub has nothing to serve.
+func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) {
+	stubWorkspaceSyncSSH(t, nil, nil)
+
+	artifactsLocal := t.TempDir()
+	artifact := filepath.Join(artifactsLocal, "erun-darwin-arm64")
+	if err := os.WriteFile(artifact, []byte("already built"), 0o644); err != nil {
+		t.Fatalf("seed artifact: %v", err)
+	}
+	// A settled mirror always ends a pass read-only+executable; a real artifact
+	// between passes carries exactly this mode.
+	if err := os.Chmod(artifact, 0o555); err != nil {
+		t.Fatalf("chmod artifact read-only+executable: %v", err)
+	}
+	info, err := os.Stat(artifact)
+	if err != nil {
+		t.Fatalf("stat seeded artifact: %v", err)
+	}
+
+	t.Setenv(workspaceSyncStubOutputsEnv, "erun-darwin-arm64")
+	t.Setenv(workspaceSyncStubStatEnv, fmt.Sprintf("%d %d erun-darwin-arm64\n", info.Size(), info.ModTime().Unix()))
+	// Deliberately no workspaceSyncStubArchiveEnv: an unchanged artifact must
+	// never be re-fetched, so nothing here ever asks the tar stub for bytes.
+
+	copied, _, err := syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
+	requireWorkspaceSyncNoError(t, err, "sync outputs artifacts for an unchanged artifact")
+	if copied != 1 {
+		t.Fatalf("expected 1 artifact reported present, got %d", copied)
+	}
+
+	after, err := os.Stat(artifact)
+	if err != nil {
+		t.Fatalf("stat artifact after sync: %v", err)
+	}
+	if after.Mode().Perm() != 0o555 {
+		t.Fatalf("unchanged artifact's mode was touched: got %v, want 0o555 (executable never dropped)", after.Mode().Perm())
 	}
 }
 

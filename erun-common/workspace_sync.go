@@ -182,6 +182,14 @@ const workspaceSyncStagingSubdir = ".erun-sync-staging"
 // binary cross-built in the pod reaches the host to run/debug. Returns the number
 // of artifact files delivered plus what ad-hoc signing did to them; a missing or
 // empty outputs dir is a no-op.
+//
+// Only artifacts whose remote size/mtime fingerprint actually differs from the
+// mirror go through the writable->extract->sign->read-only cycle: delivery
+// used to run that cycle unconditionally for every remote artifact on
+// every pass, so an artifact whose content had not changed in weeks still spent
+// most of its time at the 0644 mode `makeArtifactsWritable` applies before the
+// re-extract restores it — an operator invoking it directly from a shell during
+// that window saw "permission denied" on an otherwise-correct binary.
 func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, hostArtifactSigningSummary, error) {
 	var signing hostArtifactSigningSummary
 	remote, err := remoteOutputsFiles(ctx, hostAlias, outputsRemote)
@@ -192,21 +200,30 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 		if err := os.MkdirAll(artifactsLocal, 0o755); err != nil {
 			return 0, signing, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
 		}
-		// Clear the read-only bit set by the previous pass so the refreshed file
-		// can replace it (matters on Windows, where a read-only attribute
-		// otherwise blocks the rename onto it).
-		if err := makeArtifactsWritable(artifactsLocal); err != nil {
+		localMeta, err := localArtifactFileMeta(artifactsLocal)
+		if err != nil {
 			return 0, signing, err
 		}
-		if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, remote); err != nil {
-			return 0, signing, err
-		}
-		// The mirror is where a darwin artifact cross-built in the Linux pod first
-		// becomes a file the operator can run, so it is where the signature macOS
-		// demands has to come from. Sign while the files are still writable.
-		signing = signHostArtifacts(localArtifactPaths(artifactsLocal, remote))
-		if err := markArtifactsReadOnly(artifactsLocal, remote); err != nil {
-			return 0, signing, err
+		remoteMeta := remoteOutputsFileMeta(ctx, hostAlias, outputsRemote)
+		toRefresh := changedWorkspaceSyncPaths(remote, remoteMeta, localMeta)
+		if len(toRefresh) > 0 {
+			// Clear the read-only bit set by the previous pass so the refreshed file
+			// can replace it (matters on Windows, where a read-only attribute
+			// otherwise blocks the rename onto it). Only the paths being refreshed
+			// are touched, so an unchanged artifact never passes through this mode.
+			if err := makeArtifactsWritable(artifactsLocal, toRefresh); err != nil {
+				return 0, signing, err
+			}
+			if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, toRefresh); err != nil {
+				return 0, signing, err
+			}
+			// The mirror is where a darwin artifact cross-built in the Linux pod first
+			// becomes a file the operator can run, so it is where the signature macOS
+			// demands has to come from. Sign while the files are still writable.
+			signing = signHostArtifacts(localArtifactPaths(artifactsLocal, toRefresh))
+			if err := markArtifactsReadOnly(artifactsLocal, toRefresh); err != nil {
+				return 0, signing, err
+			}
 		}
 	}
 	if err := pruneLocalArtifacts(artifactsLocal, remote); err != nil {
@@ -318,21 +335,75 @@ func ListLocalArtifactFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-// makeArtifactsWritable restores the write bit on mirrored artifact files so the
-// next sync pass can overwrite them; markArtifactsReadOnly re-applies read-only
-// after the refresh. Directories stay writable throughout.
-func makeArtifactsWritable(artifactsLocal string) error {
-	files, err := ListLocalArtifactFiles(artifactsLocal)
-	if err != nil {
-		return err
-	}
-	for _, item := range files {
+// makeArtifactsWritable restores the write bit on the given mirrored artifact
+// files so this pass can overwrite them; markArtifactsReadOnly re-applies
+// read-only after the refresh. Only the listed paths are touched — an artifact
+// not being refreshed this pass must never spend time at this mode.
+func makeArtifactsWritable(artifactsLocal string, paths []string) error {
+	for _, item := range paths {
+		if !SafeWorkspaceSyncPath(item) {
+			continue
+		}
 		full := filepath.Join(artifactsLocal, filepath.FromSlash(item))
 		if err := os.Chmod(full, 0o644); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("prepare artifact for refresh %s: %w", full, err)
 		}
 	}
 	return nil
+}
+
+// localArtifactFileMeta fingerprints the mirror's artifact-lane files (size and
+// mtime), mirroring localWorkspaceSourceFileMeta for the outputs lane, so a pass
+// can tell an artifact whose content is unchanged from one that actually needs
+// refreshing.
+func localArtifactFileMeta(root string) (map[string]workspaceFileMeta, error) {
+	meta := make(map[string]workspaceFileMeta)
+	err := filepath.Walk(root, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return relErr
+		}
+		relSlash := filepath.ToSlash(rel)
+		if info.IsDir() {
+			if relSlash == workspaceSyncStagingSubdir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		meta[relSlash] = workspaceFileMeta{Size: info.Size(), MTime: info.ModTime().Unix()}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return meta, nil
+}
+
+// remoteOutputsFileMeta fingerprints the pod's outputs-dir files (size and
+// mtime), mirroring remoteWorkspaceFileMeta for the outputs lane. Best-effort
+// like its counterpart: any failure yields no fingerprint, and
+// changedWorkspaceSyncPaths then treats every remote path as changed — the
+// pass degrades to the old unconditional refresh rather than erroring.
+func remoteOutputsFileMeta(ctx context.Context, hostAlias, outputsRemote string) map[string]workspaceFileMeta {
+	// -printf '%P\0' (not a plain -print0) so paths come out relative, without a
+	// leading "./" -- matching remoteOutputsFiles's own listing format exactly.
+	// A mismatched format here (e.g. "./name" vs "name") means every path looks
+	// unknown to changedWorkspaceSyncPaths and every artifact refreshes every
+	// pass regardless of content, silently reintroducing the bug this fixes.
+	script := fmt.Sprintf("cd %s 2>/dev/null && find . -type f -printf '%%P\\0' | xargs -0 -r stat -c '%%s %%Y %%n'", shellQuote(outputsRemote))
+	cmd := CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
+	HideConsoleWindow(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return parseWorkspaceFileMeta(string(output))
 }
 
 // markArtifactsReadOnly strips the write bit from mirrored artifact files so the
