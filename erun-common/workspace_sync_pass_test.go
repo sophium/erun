@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -52,8 +53,14 @@ func TestMain(m *testing.M) {
 	// tests into multi-second ones and making them depend on cluster access
 	// nothing here should need. Any test that means to exercise the
 	// injected-pod path sets these explicitly via t.Setenv.
-	os.Unsetenv("ERUN_TENANT")
-	os.Unsetenv("ERUN_ENVIRONMENT")
+	if err := os.Unsetenv("ERUN_TENANT"); err != nil {
+		fmt.Fprintf(os.Stderr, "unsetenv ERUN_TENANT: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.Unsetenv("ERUN_ENVIRONMENT"); err != nil {
+		fmt.Fprintf(os.Stderr, "unsetenv ERUN_ENVIRONMENT: %v\n", err)
+		os.Exit(1)
+	}
 	os.Exit(m.Run())
 }
 

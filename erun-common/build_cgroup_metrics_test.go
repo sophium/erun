@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-func TestParseBuildCgroupExecOutputNormal(t *testing.T) {
-	output := "usage_usec=12345678\n" +
+func normalBuildCgroupExecOutputFixture() string {
+	return "usage_usec=12345678\n" +
 		"nr_periods=200\n" +
 		"nr_throttled=40\n" +
 		"throttled_usec=987654\n" +
@@ -17,8 +17,10 @@ func TestParseBuildCgroupExecOutputNormal(t *testing.T) {
 		"8:0 rbytes=1048576 wbytes=2097152 rios=10 wios=20 dbytes=0 dios=0\n" +
 		"253:0 rbytes=512 wbytes=1024 rios=1 wios=1 dbytes=0 dios=0\n" +
 		"io_stat_end\n"
+}
 
-	counters, ok := parseBuildCgroupExecOutput(output)
+func TestParseBuildCgroupExecOutputNormal(t *testing.T) {
+	counters, ok := parseBuildCgroupExecOutput(normalBuildCgroupExecOutputFixture())
 	if !ok {
 		t.Fatalf("expected a readable normal fixture")
 	}
@@ -33,6 +35,13 @@ func TestParseBuildCgroupExecOutputNormal(t *testing.T) {
 	}
 	if counters.quotaCores != 4 {
 		t.Errorf("quotaCores = %v, want 4", counters.quotaCores)
+	}
+}
+
+func TestParseBuildCgroupExecOutputNormalIOAndPeak(t *testing.T) {
+	counters, ok := parseBuildCgroupExecOutput(normalBuildCgroupExecOutputFixture())
+	if !ok {
+		t.Fatalf("expected a readable normal fixture")
 	}
 	if counters.ioReadBytes != 1048576+512 || counters.ioWriteBytes != 2097152+1024 {
 		t.Errorf("io = %d/%d, want summed across both device lines", counters.ioReadBytes, counters.ioWriteBytes)
@@ -132,7 +141,7 @@ func TestBuildCgroupMetricsFromSnapshotsUnavailableWhenUnreadable(t *testing.T) 
 	}
 }
 
-func TestBuildCgroupMetricsFromSnapshotsComputesDeltasAndUtilization(t *testing.T) {
+func buildCgroupDeltaAndUtilizationFixture() (buildCgroupSnapshot, buildCgroupSnapshot) {
 	before := buildCgroupSnapshot{applicable: true, ok: true, counters: buildCgroupCounters{
 		usageUsec: 1_000_000, periods: 10, throttledPeriods: 1, throttledUsec: 100_000,
 		ioReadBytes: 1000, ioWriteBytes: 2000,
@@ -141,6 +150,11 @@ func TestBuildCgroupMetricsFromSnapshotsComputesDeltasAndUtilization(t *testing.
 		usageUsec: 3_000_000, periods: 20, throttledPeriods: 5, throttledUsec: 300_000,
 		ioReadBytes: 1500, ioWriteBytes: 2500, quotaCores: 2, peakMemoryBytes: 555, peakObserved: true,
 	}}
+	return before, after
+}
+
+func TestBuildCgroupMetricsFromSnapshotsComputesDeltasAndUtilization(t *testing.T) {
+	before, after := buildCgroupDeltaAndUtilizationFixture()
 	metrics := buildCgroupMetricsFromSnapshots(before, after, time.Second)
 	if metrics == nil || !metrics.Available {
 		t.Fatalf("expected an available reading, got %+v", metrics)
@@ -156,6 +170,14 @@ func TestBuildCgroupMetricsFromSnapshotsComputesDeltasAndUtilization(t *testing.
 	}
 	if metrics.ThrottledSeconds != 0.2 {
 		t.Errorf("ThrottledSeconds = %v, want 0.2", metrics.ThrottledSeconds)
+	}
+}
+
+func TestBuildCgroupMetricsFromSnapshotsComputesIOAndPeakDeltas(t *testing.T) {
+	before, after := buildCgroupDeltaAndUtilizationFixture()
+	metrics := buildCgroupMetricsFromSnapshots(before, after, time.Second)
+	if metrics == nil || !metrics.Available {
+		t.Fatalf("expected an available reading, got %+v", metrics)
 	}
 	if metrics.IOReadBytes != 500 || metrics.IOWriteBytes != 500 {
 		t.Errorf("io deltas = %d/%d, want 500/500", metrics.IOReadBytes, metrics.IOWriteBytes)
