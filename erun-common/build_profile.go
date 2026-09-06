@@ -12,8 +12,8 @@ import (
 
 // TimingRecordSummary is one entry in a recent-builds listing -- lightweight
 // enough to build without parsing every retained record's full step tree, so
-// `erun build profile` (root AGENTS.md #2274) can list history cheaply before
-// a caller picks one record to see in full.
+// `erun build profile` can list history cheaply before a caller picks one
+// record to see in full.
 type TimingRecordSummary struct {
 	ID              string  `json:"id"`
 	StartedAt       string  `json:"startedAt"`
