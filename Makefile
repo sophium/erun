@@ -317,6 +317,16 @@ test-frontend:
 # `erun exec job` in an agent env, when iterating on a fix -- it no longer
 # needs `--skip-lint`/manual wiring to get signal, but a full run still
 # costs ~20 minutes.
+#
+# `erun build` narrows what this target actually runs: it resolves a
+# PLAYWRIGHT_TEST_AREAS build-arg (applyPlaywrightAreaBuildArgs in
+# erun-common/build_playwright_areas.go) from the Playwright spec-file diff
+# against the merge base and threads it into this Dockerfile's RUN step as
+# an env var of the same name, which run.sh reads directly (see its own
+# header comment) -- no argument passing needed here since Make already
+# exports the recipe's environment into everything it execs. See
+# erun-ui/playwright/AGENTS.md's "Area-scoped gate selection" section for the
+# area taxonomy and the selection rule.
 test-playwright:
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh)

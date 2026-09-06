@@ -470,6 +470,9 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	if buildInput.DindMemoryLimitMiB != "" {
 		args = append(args, "--build-arg", "DIND_MEMORY_LIMIT_MIB="+buildInput.DindMemoryLimitMiB)
 	}
+	if buildInput.PlaywrightTestAreas != "" {
+		args = append(args, "--build-arg", "PLAYWRIGHT_TEST_AREAS="+buildInput.PlaywrightTestAreas)
+	}
 	if buildInput.CgroupParent != "" {
 		args = append(args, "--cgroup-parent", buildInput.CgroupParent)
 	}

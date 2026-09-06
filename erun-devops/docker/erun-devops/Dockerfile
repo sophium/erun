@@ -226,6 +226,17 @@ ARG DIND_MEMORY_LIMIT_MIB=20480
 # count. A tenant image with a different sidecar CPU default only needs to
 # change this fallback to match.
 ARG DIND_CPU_LIMIT=4
+# PLAYWRIGHT_TEST_AREAS carries `erun build`'s resolved smoke+area selection
+# (applyPlaywrightAreaBuildArgs in erun-common/build_playwright_areas.go,
+# derived from the Playwright spec-file diff against the merge base) into
+# this stage's `make test-playwright` invocation below, per the design in
+# erun-ui/playwright/AGENTS.md's "Area-scoped gate selection": "all" or unset
+# runs the full suite, "smoke" runs only tests/smoke, "smoke,<area>,..." runs
+# smoke plus the named area directories under tests/areas/. Left at its
+# default empty string for a bare `docker build` with no erun build-arg
+# resolution -- the safe, fail-open direction is the full suite, never zero
+# coverage.
+ARG PLAYWRIGHT_TEST_AREAS=""
 # golangci-lint's own analysis cache sat unmounted here even though the Go
 # module and build caches right above it were: HOME is /root in this stage
 # (root user, no ENV HOME override), so the tool's default cache dir is
@@ -285,6 +296,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
     PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
     ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \
+    PLAYWRIGHT_TEST_AREAS="${PLAYWRIGHT_TEST_AREAS}" \
     make check && touch /test-ok
 
 # Pinned to BUILDPLATFORM: every RUN below cross-compiles via explicit
