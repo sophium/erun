@@ -106,6 +106,12 @@ type DockerBuildSpec struct {
 	// command is unchanged. See applyDindResourceBuildArgs.
 	DindCPULimit       string
 	DindMemoryLimitMiB string
+	// CgroupParent names the cgroup every RUN-instruction container this build
+	// creates should nest under, so it inherits a real, enforced CPU quota
+	// instead of escaping the erun-dind sidecar's own kubelet-declared limit as
+	// a sibling cgroup (erun#2255). Left empty outside an injected runtime pod.
+	// See buildContainerCPUCapCgroupParent.
+	CgroupParent string
 	// PlatformObserver, when set, is called after each platform's build (or
 	// promote+push) finishes, reporting that platform's elapsed time and error.
 	// It lets a caller attach per-architecture timing (see Context.
