@@ -170,3 +170,37 @@ func TestAttachBuildProgressPhasesIsANoOpForUnparseableOutput(t *testing.T) {
 		t.Fatalf("expected no children attached from unparseable output, got %d", len(platform.children))
 	}
 }
+
+// A step that announces its own fan-out must have its marker-derived rows
+// labelled as elapsed windows: once several targets interleave output, the
+// gap between one `>> phase` line and the next covers whatever else was
+// running, so a reader who sums those rows concludes the wrong step is
+// expensive. The sentinel itself is consumed, never rendered as a phase.
+func TestMarkerPhasesLabelsConcurrentSpansAndDropsSentinel(t *testing.T) {
+	markers := []buildKitPhaseMarker{
+		{offsetSecs: 0, name: "concurrent-phase-spans: check-gate runs 10 targets at -j10"},
+		{offsetSecs: 1, name: "lint"},
+		{offsetSecs: 5, name: "test-frontend"},
+	}
+	phases := markerPhases(markers, 9)
+	if len(phases) != 2 {
+		t.Fatalf("expected the sentinel to be consumed, got %d phases: %+v", len(phases), phases)
+	}
+	for _, p := range phases {
+		if !strings.HasSuffix(p.name, buildProgressConcurrentSuffix) {
+			t.Errorf("phase %q is not marked as an elapsed window", p.name)
+		}
+	}
+}
+
+// Without the sentinel the rows stay unlabelled: a step that runs its phases
+// one at a time still reports real per-phase cost, and suffixing those would
+// be a lie in the other direction.
+func TestMarkerPhasesLeavesSerialSpansUnlabelled(t *testing.T) {
+	phases := markerPhases([]buildKitPhaseMarker{{offsetSecs: 0, name: "lint"}, {offsetSecs: 4, name: "test"}}, 10)
+	for _, p := range phases {
+		if strings.Contains(p.name, buildProgressConcurrentSuffix) {
+			t.Errorf("serial phase %q must not be marked concurrent", p.name)
+		}
+	}
+}
