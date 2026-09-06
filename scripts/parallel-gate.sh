@@ -77,76 +77,88 @@
 # exclusively (erun#2081). The erun-devops Dockerfile threads the sidecar's
 # own configured CPU limit in through this variable the same way it does for
 # memory (see DIND_CPU_LIMIT in that Dockerfile).
+#
+# A third mode answers a narrower question than either of the above -- not a
+# job-fan-out width, just the resolved CPU quota itself:
+#
+#   Usage: parallel-gate.sh cpu-quota
+#
+# Prints cpu_quota()'s result on its own, so a caller that needs the raw
+# number (the Makefile's LINT_TIMEOUT scaling, see erun#2266) can reuse the
+# exact same override chain -- PARALLEL_GATE_CPU_LIMIT, then cgroup v2, then
+# cgroup v1, then `nproc`, then the constant fallback -- instead of
+# re-implementing cgroup reads a second time.
+cgroup_root="${PARALLEL_GATE_CGROUP_ROOT:-/sys/fs/cgroup}"
+# JS's Number.MAX_SAFE_INTEGER (2^53 - 1). cgroup v1's unlimited sentinel
+# for memory.limit_in_bytes is ~2^63, far above this, and cannot itself be
+# represented exactly as a JS number -- so this is the largest limit value
+# playwright.config.ts's parallel memory check can treat as real, and this
+# script matches it rather than trusting a v1 host's literal sentinel value.
+max_safe_int=9007199254740991
+
+is_positive_int() {
+	case "$1" in
+	'' | *[!0-9]*) return 1 ;;
+	*) [ "$1" -gt 0 ] ;;
+	esac
+}
+
+cpu_quota() {
+	if is_positive_int "${PARALLEL_GATE_CPU_LIMIT:-}"; then
+		echo "$PARALLEL_GATE_CPU_LIMIT"
+		return
+	fi
+	if [ -r "$cgroup_root/cpu.max" ]; then
+		read -r quota period <"$cgroup_root/cpu.max" 2>/dev/null || quota=""
+		if [ "${quota:-}" != "max" ] && is_positive_int "${quota:-}" && is_positive_int "${period:-}"; then
+			echo $((quota / period))
+			return
+		fi
+	fi
+	if [ -r "$cgroup_root/cpu/cpu.cfs_quota_us" ] && [ -r "$cgroup_root/cpu/cpu.cfs_period_us" ]; then
+		quota=$(cat "$cgroup_root/cpu/cpu.cfs_quota_us" 2>/dev/null) || quota=""
+		period=$(cat "$cgroup_root/cpu/cpu.cfs_period_us" 2>/dev/null) || period=""
+		if is_positive_int "$quota" && is_positive_int "$period"; then
+			echo $((quota / period))
+			return
+		fi
+	fi
+	n=$(nproc 2>/dev/null) || n=""
+	if is_positive_int "$n"; then
+		echo "$n"
+		return
+	fi
+	echo 4
+}
+
+# mem_limit_mib prints the memory ceiling in MiB, or nothing when
+# unlimited/unreadable -- an empty result means "drop the memory term",
+# not "zero memory available".
+mem_limit_mib() {
+	if is_positive_int "${PARALLEL_GATE_MEMORY_LIMIT_MIB:-}"; then
+		echo "$PARALLEL_GATE_MEMORY_LIMIT_MIB"
+		return
+	fi
+	if [ -r "$cgroup_root/memory.max" ]; then
+		val=$(cat "$cgroup_root/memory.max" 2>/dev/null) || val=""
+		if [ "$val" != "max" ] && is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
+			echo $((val / 1024 / 1024))
+			return
+		fi
+	fi
+	if [ -r "$cgroup_root/memory/memory.limit_in_bytes" ]; then
+		val=$(cat "$cgroup_root/memory/memory.limit_in_bytes" 2>/dev/null) || val=""
+		if is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
+			echo $((val / 1024 / 1024))
+			return
+		fi
+	fi
+}
+
 if [ "${1:-}" = "width" ]; then
 	set -eu
 	job_count=$2
 	mem_per_job_mib=$3
-	cgroup_root="${PARALLEL_GATE_CGROUP_ROOT:-/sys/fs/cgroup}"
-	# JS's Number.MAX_SAFE_INTEGER (2^53 - 1). cgroup v1's unlimited sentinel
-	# for memory.limit_in_bytes is ~2^63, far above this, and cannot itself be
-	# represented exactly as a JS number -- so this is the largest limit value
-	# playwright.config.ts's parallel memory check can treat as real, and this
-	# script matches it rather than trusting a v1 host's literal sentinel value.
-	max_safe_int=9007199254740991
-
-	is_positive_int() {
-		case "$1" in
-		'' | *[!0-9]*) return 1 ;;
-		*) [ "$1" -gt 0 ] ;;
-		esac
-	}
-
-	cpu_quota() {
-		if is_positive_int "${PARALLEL_GATE_CPU_LIMIT:-}"; then
-			echo "$PARALLEL_GATE_CPU_LIMIT"
-			return
-		fi
-		if [ -r "$cgroup_root/cpu.max" ]; then
-			read -r quota period <"$cgroup_root/cpu.max" 2>/dev/null || quota=""
-			if [ "${quota:-}" != "max" ] && is_positive_int "${quota:-}" && is_positive_int "${period:-}"; then
-				echo $((quota / period))
-				return
-			fi
-		fi
-		if [ -r "$cgroup_root/cpu/cpu.cfs_quota_us" ] && [ -r "$cgroup_root/cpu/cpu.cfs_period_us" ]; then
-			quota=$(cat "$cgroup_root/cpu/cpu.cfs_quota_us" 2>/dev/null) || quota=""
-			period=$(cat "$cgroup_root/cpu/cpu.cfs_period_us" 2>/dev/null) || period=""
-			if is_positive_int "$quota" && is_positive_int "$period"; then
-				echo $((quota / period))
-				return
-			fi
-		fi
-		n=$(nproc 2>/dev/null) || n=""
-		if is_positive_int "$n"; then
-			echo "$n"
-			return
-		fi
-		echo 4
-	}
-
-	# mem_limit_mib prints the memory ceiling in MiB, or nothing when
-	# unlimited/unreadable -- an empty result means "drop the memory term",
-	# not "zero memory available".
-	mem_limit_mib() {
-		if is_positive_int "${PARALLEL_GATE_MEMORY_LIMIT_MIB:-}"; then
-			echo "$PARALLEL_GATE_MEMORY_LIMIT_MIB"
-			return
-		fi
-		if [ -r "$cgroup_root/memory.max" ]; then
-			val=$(cat "$cgroup_root/memory.max" 2>/dev/null) || val=""
-			if [ "$val" != "max" ] && is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
-				echo $((val / 1024 / 1024))
-				return
-			fi
-		fi
-		if [ -r "$cgroup_root/memory/memory.limit_in_bytes" ]; then
-			val=$(cat "$cgroup_root/memory/memory.limit_in_bytes" 2>/dev/null) || val=""
-			if is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
-				echo $((val / 1024 / 1024))
-				return
-			fi
-		fi
-	}
 
 	width=$job_count
 	cpu=$(cpu_quota)
@@ -162,6 +174,12 @@ if [ "${1:-}" = "width" ]; then
 		fi
 	fi
 	echo "$width"
+	exit 0
+fi
+
+if [ "${1:-}" = "cpu-quota" ]; then
+	set -eu
+	cpu_quota
 	exit 0
 fi
 

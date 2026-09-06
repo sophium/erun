@@ -43,7 +43,29 @@
 # reads as a red gate and a release aborts for no finding at all. Modules with
 # their own .golangci.yml set a shorter run.timeout; this is the ceiling, not a
 # replacement for it.
-LINT_TIMEOUT ?= 15m
+#
+# 15m was calibrated against an uncapped build container, which took 22 of a
+# 24-core node before the build-container CPU cap (#2255/#2257) started
+# holding it to its declared cpu= (commonly 4). Once every module actually
+# got only that many cores, the fixed 15m stopped fitting: every module
+# reported "0 issues" and then hit the timeout anyway, turning an
+# environmental CPU shortage into a false-red gate (erun#2266). Scale the
+# timeout inversely with the same resolved CPU quota LINT_PARALLELISM already
+# reads below (scripts/parallel-gate.sh's cpu-quota mode, which honors the
+# erun-devops Dockerfile's PARALLEL_GATE_CPU_LIMIT=$DIND_CPU_LIMIT override
+# the same way LINT_PARALLELISM's width calculation does), floored at the
+# original 15m so an environment at or above the 22-core reference never gets
+# less time than before. At the reference DIND_CPU_LIMIT default of 4 this
+# resolves to 82m, comfortably past the ~24.5m (1468s) a starved run was
+# observed to take in erun#2266 before failing. LINT_TIMEOUT's `?=` keeps the
+# existing manual override: an explicit `LINT_TIMEOUT=<duration> make check`
+# (or an env var of the same name) still wins over this computed default.
+LINT_TIMEOUT_REFERENCE_CPU := 22
+LINT_TIMEOUT_BASE_MINUTES := 15
+LINT_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	m=$$(( $(LINT_TIMEOUT_BASE_MINUTES) * $(LINT_TIMEOUT_REFERENCE_CPU) / cpu )); \
+	[ "$$m" -ge $(LINT_TIMEOUT_BASE_MINUTES) ] || m=$(LINT_TIMEOUT_BASE_MINUTES); \
+	echo "$${m}m")
 
 LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api erun-ui
 
