@@ -116,6 +116,25 @@ echo "1200000 100000" >"${case_dir}/cpu.max"
 echo "$((64 * 1024 * 1024 * 1024))" >"${case_dir}/memory.max"
 PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "job-count caps an abundant environment" 3 3 700
 
+# --- the optional 4th arg (reserved-mem-mib) subtracts a flat amount from
+# the read memory ceiling before dividing by mem-per-job-mib, for a caller
+# sizing a job batch that runs concurrently with something else also using
+# memory on the same environment (the Makefile's lint/test-frontend/
+# helm-chart-tests targets each reserve room for one another, since
+# check-gate's own -j fan-out can run any of the three at once). Reuse the
+# "mem-binds" 2GiB shape: with no reservation, 2GiB/700MiB/job = 2; reserving
+# 1024MiB leaves ~1GiB, which still divides to 1 (floored, never 0).
+case_dir="${work_root}/mem-binds"
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-mem-mib lowers the width" 1 6 700 1024
+
+# --- reserving more than the entire ceiling floors at 1, never 0 or negative
+# -- a job list must still make forward progress.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-mem-mib exceeding the ceiling floors at 1" 1 6 700 4096
+
+# --- omitting reserved-mem-mib entirely (existing 3-arg callers) behaves
+# exactly as before this parameter was added.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "omitted reserved-mem-mib defaults to 0" 2 6 700
+
 # --- PARALLEL_GATE_MEMORY_LIMIT_MIB overrides the cgroup read outright, for
 # a BuildKit RUN step where memory.max reads "max" (unlimited) even though
 # the sidecar's chart-declared limit is real -- see the script's own header
