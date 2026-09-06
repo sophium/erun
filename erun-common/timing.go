@@ -414,10 +414,10 @@ func timingRecordFileName(command string, startedAt time.Time) string {
 }
 
 // maxTimingRecordsRetained is the number of records kept per command, so a
-// before/after comparison (root AGENTS.md's #2274 ask) is a command reading
-// two small files rather than an operator hand-copying numbers out of a log
-// before they scroll away. Pruning happens on write, best-effort: a prune
-// failure must not fail the build whose record it was about to write.
+// before/after comparison is a command reading two small files rather than
+// an operator hand-copying numbers out of a log before they scroll away.
+// Pruning happens on write, best-effort: a prune failure must not fail the
+// build whose record it was about to write.
 const maxTimingRecordsRetained = 50
 
 func writeTimingRecord(command string, root *stepTiming) (string, error) {

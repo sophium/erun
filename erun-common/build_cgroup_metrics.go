@@ -258,10 +258,10 @@ func buildCgroupMetricsFromSnapshots(before, after buildCgroupSnapshot, elapsed 
 }
 
 // buildCgroupSummary renders a step-timing table row's trailing cgroup
-// detail — cpu cost against quota, throttling (the "starved vs merely busy"
-// distinction #2266 needed), and I/O — or "" when there is nothing to add
-// (no cgroup applicable, or an unavailable read already implied by its
-// absence from the table).
+// detail — cpu cost against quota, throttling (distinguishing a step that is
+// starved by its own quota from one that is simply CPU-busy), and I/O — or
+// "" when there is nothing to add (no cgroup applicable, or an unavailable
+// read already implied by its absence from the table).
 func buildCgroupSummary(m *BuildCgroupMetrics) string {
 	if m == nil || !m.Available {
 		return ""
