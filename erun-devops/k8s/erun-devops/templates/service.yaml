@@ -132,7 +132,7 @@ emitted; type is the single source of truth.
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $devopsImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
-{{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1-1" (index $imageOverrides "erun-dind") -}}
+{{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1-2" (index $imageOverrides "erun-dind") -}}
 {{- /* The gid of the `docker` group baked into the docker:<ver>-dind base, which
        owns the daemon socket. Surfaced as a value so an env can follow the base
        if that group ever moves, rather than losing the daemon on the next
