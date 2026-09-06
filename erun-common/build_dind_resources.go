@@ -4,11 +4,26 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 var (
 	dockerfileDindCPULimitPattern    = regexp.MustCompile(`(?m)^\s*ARG\s+DIND_CPU_LIMIT\b`)
 	dockerfileDindMemoryLimitPattern = regexp.MustCompile(`(?m)^\s*ARG\s+DIND_MEMORY_LIMIT_MIB\b`)
+)
+
+// DindCPULimitEnvVar / DindMemoryLimitMiBEnvVar name the env vars the runtime
+// chart's downward API populates on the main container from the erun-dind
+// sidecar's own resource limits (erun-devops/k8s/erun-devops/templates/service.yaml),
+// so an in-pod build can read the sidecar's real limit directly instead of
+// through the config store, which has no environment entry inside the pod
+// (erun#2276). `erun resize --dind-cpu` moved the sidecar's real limit and the
+// cgroup it lives in, but a gate build kept sizing off the config-store
+// fallback default ("4") because the in-pod config store resolves no
+// environment and envConfig was always nil in that context.
+const (
+	DindCPULimitEnvVar       = "ERUN_DIND_CPU_LIMIT"
+	DindMemoryLimitMiBEnvVar = "ERUN_DIND_MEMORY_LIMIT_MIB"
 )
 
 // dockerfileConsumesDindCPULimit / dockerfileConsumesDindMemoryLimit report
@@ -60,19 +75,48 @@ func applyDindResourceBuildArgs(store DockerStore, projectRoot, environment stri
 }
 
 // resolveDockerBuildDindPodResources resolves the building environment's
-// configured erun-dind sidecar resources. When no environment matches this
-// project/environment (e.g. a bare Dockerfile build with no saved env, or a
-// store error), it falls back to NormalizeRuntimeDindPodResources' own
-// conservative constants (DefaultRuntimeDindCPU/Memory, "4"/"20Gi") — the
-// same fixed numbers the sidecar's own chart defaults to and this Dockerfile's
-// ARG defaults already hardcode — never to the host node's real capacity,
-// which is the exact bug this function exists to avoid reintroducing.
+// configured erun-dind sidecar resources. It prefers the downward-API env
+// vars (DindCPULimitEnvVar/DindMemoryLimitMiBEnvVar) field-by-field when they
+// parse as valid Kubernetes quantities, since those reflect the sidecar's
+// real, live limit and are the only source available to an in-pod build,
+// whose config store has no environment entry to read. Any field an env var
+// does not resolve (absent, or malformed) falls back to the config-store
+// lookup a host-driven build already relies on, and a field neither resolves
+// falls back further to NormalizeRuntimeDindPodResources' own conservative
+// constants (DefaultRuntimeDindCPU/Memory, "4"/"20Gi") — the same fixed
+// numbers the sidecar's own chart defaults to and this Dockerfile's ARG
+// defaults already hardcode — never to the host node's real capacity, which
+// is the exact bug this function exists to avoid reintroducing.
 func resolveDockerBuildDindPodResources(store DockerStore, projectRoot, environment string) RuntimePodResources {
-	envConfig := resolveDockerBuildEnvConfigForProject(store, projectRoot, environment)
-	if envConfig == nil {
-		return NormalizeRuntimeDindPodResources(RuntimePodResources{})
+	fallback := RuntimePodResources{}
+	if envConfig := resolveDockerBuildEnvConfigForProject(store, projectRoot, environment); envConfig != nil {
+		fallback = envConfig.RuntimeDindPod
 	}
-	return NormalizeRuntimeDindPodResources(envConfig.RuntimeDindPod)
+	return NormalizeRuntimeDindPodResources(dindPodResourcesPreferEnv(fallback))
+}
+
+// dindPodResourcesPreferEnv overrides each field of fallback with its
+// downward-API env var when the var is set and parses as a valid Kubernetes
+// quantity. A malformed or absent var leaves that field on the fallback
+// rather than masking a real config-store value (or the eventual hardcoded
+// default) with a bad literal. DindMemoryLimitMiBEnvVar carries a plain MiB
+// integer (matching the DIND_MEMORY_LIMIT_MIB build-arg it feeds), so it is
+// suffixed with "Mi" before being validated/stored as a Kubernetes memory
+// quantity.
+func dindPodResourcesPreferEnv(fallback RuntimePodResources) RuntimePodResources {
+	resources := fallback
+	if cpu := strings.TrimSpace(os.Getenv(DindCPULimitEnvVar)); cpu != "" {
+		if _, err := ParseKubernetesCPUToMilli(cpu); err == nil {
+			resources.CPU = cpu
+		}
+	}
+	if memoryMiB := strings.TrimSpace(os.Getenv(DindMemoryLimitMiBEnvVar)); memoryMiB != "" {
+		memory := memoryMiB + "Mi"
+		if _, err := ParseKubernetesMemoryToMi(memory); err == nil {
+			resources.Memory = memory
+		}
+	}
+	return resources
 }
 
 // dindResourceBuildArgValues converts RuntimePodResources into the plain
