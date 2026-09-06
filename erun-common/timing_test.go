@@ -186,9 +186,9 @@ func TestStepTimingCacheDecisionAppearsOnStepAndPlatformChildren(t *testing.T) {
 
 	cache := &cacheDecision{hit: false, missReason: "fingerprint image is missing for platform linux/amd64"}
 	clock.advance(2 * time.Second)
-	image.addFinishedChild("linux/amd64", 2*time.Second, nil, cache)
+	image.addFinishedChild("linux/amd64", 2*time.Second, nil, cache, nil)
 	clock.advance(1 * time.Second)
-	image.addFinishedChild("linux/arm64", 1*time.Second, nil, cache)
+	image.addFinishedChild("linux/arm64", 1*time.Second, nil, cache, nil)
 	image.finish(nil)
 	root.finish(nil)
 

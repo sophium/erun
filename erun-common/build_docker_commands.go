@@ -29,11 +29,14 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		started := time.Now()
+		cgroupBefore := captureBuildCgroupSnapshot()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
+		elapsed := time.Since(started)
 		if buildInput.PlatformObserver != nil {
-			buildInput.PlatformObserver(platform, time.Since(started), err)
+			cgroup := buildCgroupMetricsFromSnapshots(cgroupBefore, captureBuildCgroupSnapshot(), elapsed)
+			buildInput.PlatformObserver(platform, elapsed, err, cgroup)
 		}
 		if err != nil {
 			return err
@@ -74,7 +77,9 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 		perPlatformTags = append(perPlatformTags, platformTag)
 		err := promotePlatformImage(buildInput, platform, stdout, stderr)
 		if buildInput.PlatformObserver != nil {
-			buildInput.PlatformObserver(platform, time.Since(started), err)
+			// Promotion re-tags and pushes an already-built image; it never runs
+			// `docker build`, so there is no build-cgroup cost to attribute.
+			buildInput.PlatformObserver(platform, time.Since(started), err, nil)
 		}
 		if err != nil {
 			return err
