@@ -555,7 +555,7 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
   });
 });
 
-// erun#2274: a review-linked build's "View profile" button opens the same
+// A review-linked build's "View profile" button opens the same
 // BuildProfileDialog the Builds tab uses (see tenant-dashboard-builds.spec.ts
 // for the dialog's own content coverage) -- this only proves the two dialogs
 // nest correctly (ReviewDetailDialog -> BuildProfileDialog) and that closing

@@ -24,8 +24,8 @@ type PlatformCreateUnattachedBuildParams struct {
 	Version       string `json:"version"`
 	Successful    bool   `json:"successful"`
 	FailureDetail string `json:"failureDetail,omitempty"`
-	// Profile is the bounded per-step profile this build collected (root
-	// AGENTS.md #2274), when the caller has one.
+	// Profile is the bounded per-step profile this build collected, when the
+	// caller has one.
 	Profile *BuildProfileSummary `json:"profile,omitempty"`
 }
 

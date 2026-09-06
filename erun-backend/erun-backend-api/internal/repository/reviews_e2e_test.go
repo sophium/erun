@@ -412,8 +412,8 @@ func TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail(t *testing.T) 
 }
 
 // TestBuildProfileRoundTripsThroughCreateAndGet proves the bounded per-build
-// profile (root AGENTS.md #2274) survives a real jsonb column round trip --
-// Get uses a hand-written SELECT column list, unlike Bun's usual
+// profile survives a real jsonb column round trip -- Get uses a hand-written
+// SELECT column list, unlike Bun's usual
 // Model(&x).Scan, so a column added to the table without a matching addition
 // to that SELECT would silently read back as the field's zero value rather
 // than failing loudly.

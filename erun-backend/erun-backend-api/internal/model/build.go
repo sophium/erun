@@ -51,9 +51,9 @@ type Build struct {
 	// recorded it, not here.
 	FailureDetail string `json:"failureDetail,omitempty" bun:"failure_detail,nullzero"`
 	// Profile is the bounded per-step profile the caller self-reported
-	// alongside this build's outcome (root AGENTS.md #2274) -- a
-	// duration/CPU/throttle/IO summary plus the top costliest steps, never
-	// the full step tree. NULL when the caller collected none.
+	// alongside this build's outcome -- a duration/CPU/throttle/IO summary
+	// plus the top costliest steps, never the full step tree. NULL when the
+	// caller collected none.
 	Profile   *eruncommon.BuildProfileSummary `json:"profile,omitempty" bun:"profile,type:jsonb,nullzero"`
 	CreatedAt time.Time                       `json:"createdAt" bun:"created_at,scanonly"`
 	UpdatedAt time.Time                       `json:"updatedAt" bun:"updated_at,scanonly"`

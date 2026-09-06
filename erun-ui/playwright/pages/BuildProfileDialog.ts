@@ -1,8 +1,8 @@
 import type { Locator, Page } from '@playwright/test';
 
 // BuildProfileDialog is the "select a build, see what consumed CPU or hit an
-// I/O bottleneck" detail surface (root AGENTS.md #2274), opened from a
-// "View build profile for <buildId>" button on a build row in either the
+// I/O bottleneck" detail surface, opened from a "View build profile for
+// <buildId>" button on a build row in either the
 // tenant dashboard's Builds tab (TenantDashboard POM) or a review's own
 // build list (ReviewDetailDialog POM). It renders as a Radix Dialog named by
 // its own DialogTitle ("Build profile"), so it stays unambiguous even when

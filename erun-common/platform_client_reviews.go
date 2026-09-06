@@ -76,7 +76,7 @@ type PlatformBuild struct {
 	// failed; empty for a successful build.
 	FailureDetail string `json:"failureDetail,omitempty"`
 	// Profile is the bounded per-step profile the caller collected for this
-	// build (root AGENTS.md #2274), when it collected one.
+	// build, when it collected one.
 	Profile   *BuildProfileSummary `json:"profile,omitempty"`
 	CreatedAt time.Time            `json:"createdAt"`
 	UpdatedAt time.Time            `json:"updatedAt"`

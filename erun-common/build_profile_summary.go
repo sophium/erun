@@ -4,15 +4,15 @@ import "sort"
 
 // build_profile_summary.go bounds a build's step-timing tree down to a
 // payload small enough to carry alongside ReportBuildOutcome's self-report to
-// the erun platform (root AGENTS.md #2274) -- the operator ask was "go to
-// builds, select a build, see what consumed CPU or hit an I/O bottleneck",
-// which needs the timing tree that already lands in
-// ~/.erun/timing/build-*.json to also reach the platform the desktop reads.
+// the erun platform -- the operator ask was "go to builds, select a build,
+// see what consumed CPU or hit an I/O bottleneck", which needs the timing
+// tree that already lands in ~/.erun/timing/build-*.json to also reach the
+// platform the desktop reads.
 //
-// A gate build's step tree is small today (image -> platform), but erun#2279
-// proposes breaking erun-devops into its Dockerfile stages and `make check`
-// phases, which could be dozens of rows. Rather than carry the full tree,
-// BuildProfileSummary stores the build's own totals plus the
+// A gate build's step tree is small today (image -> platform), but breaking
+// erun-devops into its Dockerfile stages and `make check` phases has been
+// proposed and could turn that into dozens of rows. Rather than carry the
+// full tree, BuildProfileSummary stores the build's own totals plus the
 // buildProfileTopStepCount costliest steps by duration -- bounded regardless
 // of how deep a future step tree grows.
 const buildProfileTopStepCount = 10

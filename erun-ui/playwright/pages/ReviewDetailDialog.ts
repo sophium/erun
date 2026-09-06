@@ -24,7 +24,7 @@ export class ReviewDetailDialog {
   }
 
   // buildProfileButtonFor opens BuildProfileDialog for one build row in this
-  // review's build list (root AGENTS.md #2274).
+  // review's build list.
   buildProfileButtonFor(buildId: string): Locator {
     return this.locator().getByRole('button', { name: `View build profile for ${buildId}` });
   }

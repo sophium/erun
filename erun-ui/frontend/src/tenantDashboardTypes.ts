@@ -381,7 +381,7 @@ export interface UIBuildCgroupMetrics {
   // throttledPeriods/totalPeriods is the ratio to show, not cpuPercentOfQuota
   // alone: a step at 100% CPU that is not throttled is sized correctly, and
   // one at 18% that is throttled is starved -- duration and a single
-  // percentage cannot distinguish those (erun#2269).
+  // percentage cannot distinguish those.
   throttledPeriods?: number;
   totalPeriods?: number;
   throttledSeconds?: number;
@@ -401,9 +401,9 @@ export interface UIBuildProfileStep {
 }
 
 // UIBuildProfileSummary is the bounded per-build profile a build
-// self-reports alongside its outcome (root AGENTS.md #2274) -- a duration/
-// CPU/throttle/IO summary plus the top costliest steps, never the full step
-// tree, so a build with a deep step tree never grows this payload unbounded.
+// self-reports alongside its outcome -- a duration/CPU/throttle/IO summary
+// plus the top costliest steps, never the full step tree, so a build with a
+// deep step tree never grows this payload unbounded.
 // truncatedStepCount is the number of steps left out of topSteps; 0 means
 // topSteps is the whole tree.
 export interface UIBuildProfileSummary {

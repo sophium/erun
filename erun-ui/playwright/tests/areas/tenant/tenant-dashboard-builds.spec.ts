@@ -116,10 +116,10 @@ test.describe('tenant dashboard — builds with no review (#1954)', () => {
   });
 });
 
-// erun#2274: "operator should be able to go to builds, select builds and see
-// exactly what consumes cpu or if there has been IO bottlenecks". These cover
-// the per-build profile dialog opened from each build row's own "View
-// profile" button.
+// The operator ask this covers: "go to builds, select builds and see exactly
+// what consumes cpu or if there has been IO bottlenecks". These cover the
+// per-build profile dialog opened from each build row's own "View profile"
+// button.
 test.describe('tenant dashboard — build profile (#2274)', () => {
   test('a build with a full profile shows per-step duration, CPU, throttling, I/O, and peak memory', async ({
     app,

@@ -52,7 +52,7 @@ export class TenantDashboard {
   }
 
   // buildProfileButtonFor opens BuildProfileDialog for one build row in the
-  // Builds tab (root AGENTS.md #2274).
+  // Builds tab.
   buildProfileButtonFor(buildId: string): Locator {
     return this.activePanel().getByRole('button', { name: `View build profile for ${buildId}` });
   }

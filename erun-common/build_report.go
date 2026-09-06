@@ -47,9 +47,9 @@ type ReportBuildOutcomeParams struct {
 	Version       string
 	Successful    bool
 	FailureDetail string
-	// Profile is the bounded per-step profile this build collected (root
-	// AGENTS.md #2274), when the caller has one -- nil for a build that
-	// collected none (see build_profile_summary.go).
+	// Profile is the bounded per-step profile this build collected, when the
+	// caller has one -- nil for a build that collected none (see
+	// build_profile_summary.go).
 	Profile *BuildProfileSummary
 }
 

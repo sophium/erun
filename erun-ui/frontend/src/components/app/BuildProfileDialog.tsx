@@ -23,8 +23,8 @@ import type { UIBuildProfileStep, UIBuildProfileSummary, UITenantDashboardBuild 
 import { DataCell, DataTable } from './TenantDashboardMessage';
 
 // BuildProfileDialog is the Builds tab's and a review's build list's "select
-// a build, see what consumed CPU or hit an I/O bottleneck" surface (root
-// AGENTS.md #2274). It is opened from a build row's own "View profile"
+// a build, see what consumed CPU or hit an I/O bottleneck" surface. It is
+// opened from a build row's own "View profile"
 // button (BuildProfileViewButton below) -- never a bare clickable row, which
 // would fail both recognition-over-recall and keyboard operability -- and it
 // renders data the dashboard already loaded, so it needs no fetch and no
