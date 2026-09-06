@@ -226,20 +226,62 @@ ARG DIND_MEMORY_LIMIT_MIB=20480
 # count. A tenant image with a different sidecar CPU default only needs to
 # change this fallback to match.
 ARG DIND_CPU_LIMIT=4
-# TEMPORARY, for the #2081 3x-in-a-row validation only: erun build's own
-# fingerprint promotion and BuildKit's ordinary layer cache would otherwise
-# make the 2nd/3rd `erun build` skip this RUN entirely since nothing else in
-# the Dockerfile changes between them. Referencing this ARG inside the RUN
-# command forces a real cache miss (and therefore a real re-run of the gate,
-# including test-playwright) each time its value changes, without touching
-# anything upstream (COPY layers) or the BuildKit --mount cache mounts, so
-# repeated validation runs stay fast. Remove this ARG and the echo once the
-# 3 runs are recorded.
-ARG CACHE_BUST_RUN=4
+# golangci-lint's own analysis cache sat unmounted here even though the Go
+# module and build caches right above it were: HOME is /root in this stage
+# (root user, no ENV HOME override), so the tool's default cache dir is
+# /root/.cache/golangci-lint -- set explicitly rather than left to that
+# default resolving as expected. Content-hash keyed by golangci-lint itself
+# (file contents + linter/version identity), so a stale entry cannot make a
+# real finding disappear; it only skips re-analyzing files that did not
+# change. Measured on this exact cache (a single small module): cold ~32s,
+# warm ~1.2s.
+#
+# The frontend lint/format cache below is the TypeScript-side equivalent:
+# eslint/prettier's own --cache, mounted so it survives across builds. Both
+# tools are invoked (from the Makefile's test-frontend target) with
+# --cache-strategy content, not the metadata/mtime default, because every
+# COPY in this Dockerfile stamps a fresh mtime on every file on every build --
+# verified empirically that the metadata strategy is therefore a permanent
+# cache miss under Docker, while content hashing survives it (measured:
+# eslint 20s cold / 2.5s warm on one workspace after simulating a COPY's
+# mtime reset). The Makefile points both tools at $(CURDIR)/.cache/
+# frontend-lint, which resolves to /src/.cache/frontend-lint here (this
+# stage's WORKDIR), so one mount covers all three workspaces' eslint+prettier
+# caches without the Dockerfile needing to inject a path.
+#
+# test-playwright's own `playwright install chromium` (run.sh) had the same
+# unmounted-cache shape as golangci-lint: its default download target,
+# ~/.cache/ms-playwright, resolves to /root/.cache/ms-playwright here for the
+# same HOME=/root reason, and a live check of that directory on a real
+# environment found it holding ~640MB (chromium + chromium_headless_shell +
+# ffmpeg). Playwright itself decides whether to (re)download by checking the
+# already-installed revision against PLAYWRIGHT_VERSION before touching the
+# network, so a warm mount is a pure skip of an unchanged, pinned-version
+# download -- never a source of stale test behaviour, since the browser
+# binary is never what a source change here would need to invalidate.
+#
+# The yarn download cache mount itself was the same shape one layer deeper:
+# yarn classic has no ENV-driven default of its own, so it fell back to
+# $HOME/.cache/yarn (confirmed by reading yarn's own getCacheDir() and by
+# running it with HOME pointed at an owned test directory) -- /root/.cache/yarn
+# in this stage, never the /usr/local/share/.cache/yarn this RUN has always
+# mounted. YARN_CACHE_FOLDER (a real yarn classic config key yarn maps from
+# its env-var form, confirmed the same way) redirects it to the path that is
+# actually mounted, instead of moving the mount to match /root -- keeping the
+# established path every other yarn-using Dockerfile in the repo already
+# mounts. Measured with the real root workspace lockfile, cold vs. warm at
+# this exact path: yarn install 53s cold (1.5GB fetched from the registry) vs.
+# 10.7s warm. `--frozen-lockfile` resolves every package from yarn.lock
+# regardless of what the cache holds, so a cache hit only skips re-downloading
+# bytes already pinned by the lockfile; it can't change what gets installed.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.cache/golangci-lint \
+    --mount=type=cache,target=/root/.cache/ms-playwright \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    echo "#2081 validation run ${CACHE_BUST_RUN}/3" && \
+    --mount=type=cache,target=/src/.cache/frontend-lint \
+    GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint \
+    YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
     PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
     ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \

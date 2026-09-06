@@ -31,7 +31,15 @@ COPY erun-kit/package.json /src/erun-kit/
 COPY erun-console/package.json /src/erun-console/
 COPY erun-ui/frontend/package.json /src/erun-ui/frontend/
 
+# YARN_CACHE_FOLDER: this stage runs as root with no HOME override, so yarn
+# classic's own default cache dir is $HOME/.cache/yarn (/root/.cache/yarn),
+# never the /usr/local/share/.cache/yarn mounted below -- verified against
+# the repo's own yarn (getCacheDir() falls back to $HOME/.cache/yarn) and
+# reproduced live (a real yarn install with the mount target unset resolved
+# to /root/.cache/yarn). Redirecting via env var keeps the mount target that
+# every other yarn-using Dockerfile in the repo already uses.
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+    YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
 # erun-kit's package.json main points at ./src/index.ts, so the console's vite
