@@ -89,13 +89,19 @@ function AuditPanel({ data }: { data: TenantDashboardData }): React.ReactElement
   );
 }
 
+// Subject is rendered on its own column rather than folded into the
+// username display (erun#2050): it is the one value that reliably joins
+// this erun identity against the same person's row in the console's
+// identity-administration Users list, which lists IdP identities rather
+// than erun users and previously had nowhere to show it either.
 function UsersTable({ users }: { users: UITenantDashboardUser[] }): React.ReactElement {
   return (
-    <DataTable headers={['Username', 'Roles']}>
+    <DataTable headers={['Username', 'Roles', 'Subject']}>
       {users.map((user) => (
         <tr key={user.userId || (user.username ?? '') || (user.subject ?? '')}>
           <DataCell strong>{displayUsername(user)}</DataCell>
           <DataCell>{formatRoles(user.roles)}</DataCell>
+          <DataCell>{user.subject ?? '—'}</DataCell>
         </tr>
       ))}
     </DataTable>

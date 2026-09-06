@@ -26,6 +26,11 @@ export interface IdentityUser {
   isMachine: boolean;
   enrolled: boolean;
   erunUserId?: string;
+  // erunUsername is the enrolled erun user's own username (erun-backend-api's
+  // identity.go identityUserView) -- an independent string from `username`
+  // above (the IdP's own username), chosen at enrolment rather than mirrored
+  // from the IdP (erun#2050). Undefined whenever enrolled is false.
+  erunUsername?: string;
 }
 
 function asNumber(value: unknown): number {
@@ -47,6 +52,7 @@ function parseIdentityUser(raw: Record<string, unknown>): IdentityUser {
     isMachine: asBoolean(raw.isMachine),
     enrolled: asBoolean(raw.enrolled),
     erunUserId: asOptionalString(raw.erunUserId),
+    erunUsername: asOptionalString(raw.erunUsername),
   };
 }
 
