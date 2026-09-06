@@ -448,7 +448,10 @@ done
 # --- 24. A build-capable env (local-agent / remote-agent) gets the dind
 # sidecar, its docker state PVC, and the socket volume; the sidecar declares
 # explicit resource limits rather than inheriting whatever the namespace's
-# LimitRange hands an unbounded container. ---
+# LimitRange hands an unbounded container. The runtime container also reads
+# the sidecar's real cpu/memory limit back via the downward API, so an
+# in-pod build can see it without the config store the pod has no
+# environment entry in. ---
 for storage_args in "--set worktreeStorage=pvc --set worktreeRepoName=petios" "--set worktreeStorage=host --set-string worktreeHostPath=/host/git/petios"; do
     # shellcheck disable=SC2086
     rendered=$(render ${storage_args})
@@ -471,6 +474,16 @@ erun-dind" ] || fail "a build-capable env (${storage_args}) should render erun-d
         fail "the dind sidecar should declare an explicit cpu limit"
     grep -A3 '^          resources:$' "${dind_block}" | grep -q 'memory:' ||
         fail "the dind sidecar should declare an explicit memory limit"
+
+    runtime_block="${work_root}/runtime-dind-env.yaml"
+    runtime_container "${rendered}" >"${runtime_block}"
+    grep -A4 '^            - name: ERUN_DIND_CPU_LIMIT$' "${runtime_block}" | grep -q 'containerName: erun-dind' &&
+        grep -A4 '^            - name: ERUN_DIND_CPU_LIMIT$' "${runtime_block}" | grep -q 'resource: limits.cpu' ||
+        fail "the runtime container should read the dind sidecar's real cpu limit via the downward API"
+    grep -A5 '^            - name: ERUN_DIND_MEMORY_LIMIT_MIB$' "${runtime_block}" | grep -q 'containerName: erun-dind' &&
+        grep -A5 '^            - name: ERUN_DIND_MEMORY_LIMIT_MIB$' "${runtime_block}" | grep -q 'resource: limits.memory' &&
+        grep -A5 '^            - name: ERUN_DIND_MEMORY_LIMIT_MIB$' "${runtime_block}" | grep -q 'divisor: 1Mi' ||
+        fail "the runtime container should read the dind sidecar's real memory limit (in MiB) via the downward API"
 done
 
 # --- 25. A `type: runtime` env (worktreeStorage=none) never builds, so it gets
@@ -490,6 +503,9 @@ grep -q '^  name: test-docker$' "${rendered}" &&
 
 grep -q 'docker-socket' "${rendered}" &&
     fail "a runtime env should render no docker-socket volume or mount"
+
+grep -q 'ERUN_DIND_CPU_LIMIT\|ERUN_DIND_MEMORY_LIMIT_MIB' "${rendered}" &&
+    fail "a runtime env has no dind sidecar, so it should read no downward-API limit for one"
 
 init_containers_section "${rendered}" >"${init_block}"
 grep -q 'install-binfmt' "${init_block}" &&
