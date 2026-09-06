@@ -106,6 +106,15 @@ type DockerBuildSpec struct {
 	// command is unchanged. See applyDindResourceBuildArgs.
 	DindCPULimit       string
 	DindMemoryLimitMiB string
+	// PlaywrightTestAreas carries the smoke+area selection resolved from the
+	// Playwright spec-file diff against the merge base (see
+	// applyPlaywrightAreaBuildArgs) into a Dockerfile that declares a matching
+	// PLAYWRIGHT_TEST_AREAS ARG, so the in-build gate runs only the areas whose
+	// specs changed instead of the full suite on every build. Left empty for a
+	// Dockerfile that declares no such ARG, or when the selection could not be
+	// resolved (no git repo, no merge base) -- the Dockerfile's own ARG default
+	// then runs the full suite, the fail-safe direction.
+	PlaywrightTestAreas string
 	// CgroupParent names the cgroup every RUN-instruction container this build
 	// creates should nest under, so it inherits a real, enforced CPU quota
 	// instead of escaping the erun-dind sidecar's own kubelet-declared limit as

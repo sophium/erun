@@ -96,8 +96,40 @@ The default suite is inert and offline: it PATH-prepends stub `kubectl`/`helm`/`
 - **Gating:** the e2e specs live under `tests/e2e/` and are excluded from the default run via `playwright.config.ts` `testIgnore` (not per-spec `test.skip`), so the default suite never collects them. `ERUN_E2E_K3D=1` flips the un-stubbed `backendEnv()` branch (real tools + real `erun`, only `aws` stubbed via `ERUN_AWS_BIN`) and includes the dir. Keep both directions intact: the k3d branch must never leak into the default inert mode, and the inert specs (which assume stubs) must never run against the real-tool backend.
 - **Determinism still binding (#643):** cluster specs are the classic flake source. Wait on observable conditions (activity-queue trace lines, the rendered ERun tab, pod-Ready), never wall-clock; size per-spec `test.setTimeout` for the real build → push → deploy round-trip (minutes), which is far slower than any default spec.
 
-## Validation
+## Area-scoped gate selection
 
-- Run `./run.sh` (or `yarn test`) before pushing changes that touch any frontend component, slice, thunk, or controller method exposed to the React tree.
+The merge gate (`make check` → `test-playwright`, run inside the `erun-devops` Dockerfile's `test` stage) used to run the full suite unconditionally — ~21 of a ~30 minute gate at 514 tests / 2 workers. `erun build` now scopes what that gate runs, following the decision recorded on issue #2086:
+
+- **Specs are organized by area, not flat.** `tests/smoke/` holds one spec file covering every area's shallowest critical path — it always runs, on every build, regardless of selection. `tests/areas/<area>/` holds each area's full spec set. Area membership is directory position; nothing else declares it.
+- **The selection rule is driven by the Playwright *test* diff, not a source-file mapping.** A source-to-area glob map was considered and rejected (see the issue's history): it needs a glob for every new source directory and a missing one silently mis-selects. Keying on which spec files changed removes that class of bug — the signal is in the diff itself.
+  - A change that adds or edits spec files in `tests/areas/<area>/` → `erun build` runs **smoke + that area** (smoke plus every area whose specs changed, for a multi-area diff).
+  - A change that touches no spec file at all (source-only) → `erun build` runs **smoke only**.
+  - A change under `tests/fixtures/`, `tests/pages/`, `global-setup.ts`, `global-teardown.ts`, or `playwright.config.ts` affects every area at once → `erun build` runs **everything** (smoke + every area).
+  - The full suite always remains runnable on demand — `./run.sh` with no `PLAYWRIGHT_TEST_AREAS` set, `erun e2e`'s post-deploy backstop (#2092), a nightly run, or a developer iterating locally. This changes what the *gate* selects, not what exists.
+- **Fail-safe direction: an unresolvable selection runs everything, never zero.** `resolvePlaywrightTestAreaSelection` (`erun-common/build_playwright_areas.go`) returns "could not resolve" when there is no git repository or no merge base against any candidate upstream branch, and the caller leaves `PLAYWRIGHT_TEST_AREAS` unset in that case — the Dockerfile's own `ARG PLAYWRIGHT_TEST_AREAS=""` default, which `run.sh` reads as "run everything". A gap in the mapping costs time, never coverage.
+- **Mechanism:** `erun build` resolves the selection host-side (where `.git` exists — the Docker build context excludes `.git` via `.dockerignore`, so this cannot be computed inside the build) and threads it as a `--build-arg PLAYWRIGHT_TEST_AREAS=<selection>` into the `erun-devops` Dockerfile, the same way `DIND_CPU_LIMIT`/`DIND_MEMORY_LIMIT_MIB` already thread the sidecar's real resource limits in (`applyDindResourceBuildArgs`, `erun-common/build_dind_resources.go` — `applyPlaywrightAreaBuildArgs` is the sibling function). The Dockerfile's `test` stage passes the ARG through as an env var to its `RUN make check` step; `run.sh` reads `PLAYWRIGHT_TEST_AREAS` directly (see its own header comment) and narrows the default `playwright test` target to `tests/smoke` plus the named `tests/areas/<area>` directories. No Makefile plumbing is needed: Make exports a recipe's own environment into everything it execs, so the env var set on `make check` reaches `test-playwright`'s `./run.sh` call unchanged.
+- **`erun e2e` (#2092) is the backstop**, not a replacement for this gate: it runs the full suite post-deploy against the real deployment, catching a cross-area regression this change-scoped selection missed (a shared-state change that breaks an area the diff didn't touch). Landing that backstop is what makes it safe to stop running everything pre-merge.
+
+### Area taxonomy (150 spec files → 13 areas + smoke)
+
+Derived from the 44 distinct filename prefixes the flat `tests/` directory had accumulated, grouping the long tail into sensible areas rather than keeping every 1-2-file prefix as its own near-empty area:
+
+| Area | Files | Basis |
+|---|---|---|
+| `sidebar` | 31 | every `sidebar-*` spec plus `erun-section` (the ERUN sidebar section) |
+| `manage` | 27 | every `manage-*` spec plus `manage.spec.ts` |
+| `terminal` | 15 | `terminal-*`, the tab strip/respawn/remote-session specs, `close-confirm` (closing a terminal tab), and the two `ai-tab-*` specs (the AI tab is a terminal-tab kind) |
+| `tenant` | 12 | every `tenant-dashboard-*` spec |
+| `deploy` | 11 | the env-init/env-init-refresh/env-row-wait-baseline specs plus the create→deploy→open gate, deploy orchestration/failure, respawn/redeploy guard, auto-start, and idle-widget specs — the environment creation and deploy lifecycle |
+| `platform` | 9 | global config, pin-version, cloud aliases, request-invitation, outputs dialog, open/tenant-resolution errors, first-run onboarding, seeded-orchestrator config shape, local-port isolation — tenant/global-scoped platform concerns that aren't one dialog |
+| `orchestrator` | 9 | every `orchestrator-*` spec |
+| `titlebar` | 9 | `titlebar-*` plus `app-notification` and `contribute` (both titlebar-hosted controls) |
+| `shell` | 8 | layout, narrow-viewport, theme, dialog-content-overflow, tooltip rules, boot, close-environment-failure, events-dropped-resync — cross-cutting app chrome |
+| `review` | 7 | the `review-*` specs plus the `diff-*` specs (the diff panel is the review surface's viewer) |
+| `activity` | 5 | the `activity-*` specs (activity queue drawer behavior) |
+| `diagnostics` | 4 | `diagnostics-*` plus `investigate-spawn-bounds` (failure auto-investigation) |
+| `a11y` | 3 | the three `a11y-*` accessibility specs |
+
+`smoke/smoke.spec.ts` covers all 13 areas with one fast test each (open/cancel a dialog, toggle a panel, render a row) — see its own file comment for what "critical path" means per area. When the taxonomy changes (a new area, files reassigned), update this table in the same PR.
 - For changes to the desktop create → deploy → open flow or its deployed artifacts, also run the opt-in k3d e2e mode (`./run.sh --e2e-k3d`) on a Docker + k3d + binfmt host — it is the only signal that exercises the real runtime end-to-end.
 - After failures, run `yarn report` to open the HTML report. Traces and screenshots for failed tests live under `playwright-report/` and `test-results/`.

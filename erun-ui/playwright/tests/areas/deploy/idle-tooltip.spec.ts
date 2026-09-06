@@ -1,0 +1,36 @@
+import { expect, test } from '../../../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
+
+// idle-tooltip covers the titlebar idle widget's mount gate. The seeded
+// baseline envs are inert local-agent envs with no managed cloud context,
+// so the deterministic invariant here is the negative one: selecting such
+// an env must never mount the idle-status badge (and therefore no tooltip).
+// The populated tooltip (per-IP SSH client rows under the SSH marker) needs
+// a live managed cloud context plus real proxy traffic, which the isolated
+// harness cannot stage; that projection is covered by the Go unit tests
+// TestActivityIdleMarkerProjectsClientsSortedByRecency and
+// TestIdleStatusToUIProjectsMarkerClients, plus the integration scenario
+// status_json_includes_per_client_breakdown. The mocked-RPC positive path
+// of the widget itself is exercised by idle-widget-stop-protection.spec.ts.
+
+test.describe('idle tooltip', () => {
+  test('idle widget stays unmounted for an env without a managed cloud context', async ({
+    app,
+    page,
+  }) => {
+    // The widget only mounts after a LoadIdleStatus poll reports a managed
+    // cloud context. The seeded env has none, so the badge must not appear.
+    // Wait on the poll RPC (not the wall clock) so the assertion reflects a
+    // completed poll, not a poll that simply hasn't run yet — toBeHidden alone
+    // would pass instantly and prove nothing about the poll result.
+    const idlePolled = page.waitForResponse(
+      (response) =>
+        response.url().includes('/__erun_invoke') &&
+        (response.request().postData() ?? '').includes('LoadIdleStatus'),
+    );
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
+    await idlePolled;
+    const badge = app.titlebar.idleStatusBadge();
+    await expect(badge).toBeHidden();
+  });
+});

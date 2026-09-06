@@ -32,6 +32,15 @@
 #
 # Anything not matching a known flag is forwarded to `playwright test`, so
 # `./run.sh --grep sidebar` and `yarn test --grep sidebar` both work.
+#
+# Env vars:
+#   PLAYWRIGHT_TEST_AREAS  `erun build`'s resolved gate selection (see the
+#                          area-scoped-selection block below). Unset/"all"
+#                          runs everything; "smoke" or "smoke,<area>,..."
+#                          narrows the default target to tests/smoke plus the
+#                          named tests/areas/<area> directories. Ignored when
+#                          an explicit target is already given, or in
+#                          --e2e-k3d mode.
 
 set -eu
 
@@ -348,6 +357,30 @@ if [ "$E2E_K3D" -eq 1 ]; then
 	if [ -z "$PLAYWRIGHT_ARGS" ]; then
 		PLAYWRIGHT_ARGS='"tests/e2e"'
 	fi
+fi
+
+# erun build's area-scoped gate selection (root AGENTS.md's "smoke + changed
+# areas" design; PLAYWRIGHT_TEST_AREAS is the build-arg
+# applyPlaywrightAreaBuildArgs in erun-common threads from the Playwright
+# spec-file diff against the merge base). Unset or "all" runs the full suite
+# unchanged; "smoke" or "smoke,<area>,..." narrows the default target to
+# those directories under tests/. An explicit caller target -- a bare CLI
+# arg, or the e2e-k3d default above -- always wins; this only supplies a
+# default when nothing else already set one.
+if [ -z "$PLAYWRIGHT_ARGS" ] && [ "$E2E_K3D" -eq 0 ] && [ -n "${PLAYWRIGHT_TEST_AREAS:-}" ] && [ "$PLAYWRIGHT_TEST_AREAS" != "all" ]; then
+	dirs="tests/smoke"
+	old_ifs="$IFS"
+	IFS=,
+	for token in $PLAYWRIGHT_TEST_AREAS; do
+		if [ "$token" != "smoke" ] && [ -n "$token" ]; then
+			dirs="$dirs tests/areas/$token"
+		fi
+	done
+	IFS="$old_ifs"
+	for d in $dirs; do
+		PLAYWRIGHT_ARGS="$PLAYWRIGHT_ARGS \"$d\""
+	done
+	printf '>> playwright: PLAYWRIGHT_TEST_AREAS=%s -> running %s\n' "$PLAYWRIGHT_TEST_AREAS" "$dirs" >&2
 fi
 
 PLAYWRIGHT_FLAGS=""
