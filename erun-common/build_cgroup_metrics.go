@@ -21,7 +21,7 @@ const buildCgroupSysFSRoot = "/sys/fs/cgroup"
 // container in the pod that runs with the host's cgroup namespace -- this
 // process's own container has a private one, so its own view of
 // /sys/fs/cgroup/docker/... simply does not exist, confirmed empirically
-// against a real deployed pod (erun#2274): `inInjectedRuntimePod()` was true,
+// against a real deployed pod: `inInjectedRuntimePod()` was true,
 // ERUN_TENANT/ERUN_ENVIRONMENT were set, a real build ran, and the cap cgroup
 // directory was still absent from this container's own filesystem. Every
 // read below therefore goes through `kubectl exec` into this one named
