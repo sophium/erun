@@ -134,6 +134,67 @@ func TestListControlPlanes(t *testing.T) {
 		golden.Equal(t, "list/control_planes_combined_with_tenant_errors", normalize.Apply(result.Combined))
 	})
 
+	// erun#2130: every other platform-touching command (`gate list`,
+	// `platform whoami`, ...) accepts --erun-alias to narrow its work to one
+	// configured alias, but --control-planes rejected it outright and
+	// unconditionally probed every configured erun-hosted alias instead.
+
+	t.Run("erun_alias_requires_control_planes", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		result := erun.Run(t, []string{"list", "--erun-alias", "erun+test@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --erun-alias without --control-planes, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_erun_alias_requires_control_planes", normalize.Apply(result.Combined))
+	})
+
+	t.Run("erun_alias_unconfigured_errors", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStub(t, "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--erun-alias", "erun+nonexistent@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for an unconfigured --erun-alias, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, `cloud provider alias "erun+nonexistent@erun" is not configured`) {
+			t.Fatalf("expected the error to name the unconfigured alias:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_erun_alias_unconfigured_errors",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("erun_alias_narrows_the_check_to_one_configured_plane", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		planeA := controlPlaneStub(t, "1.0.247")
+		planeB := controlPlaneStub(t, "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{
+			"erun+a@erun": planeA.URL,
+			"erun+b@erun": planeB.URL,
+		}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--erun-alias", "erun+b@erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "erun+b@erun") {
+			t.Fatalf("expected the narrowed-to alias to be reported:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "erun+a@erun") {
+			t.Fatalf("expected the other configured alias to never be probed or reported:\n%s", result.Combined)
+		}
+		if strings.Count(result.Combined, "GET ") != 2 {
+			t.Fatalf("expected exactly one plane probed (its trace line plus its actual GET), got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_erun_alias_narrows_the_check_to_one_configured_plane",
+			normalize.Apply(result.Combined, stubServerRule(planeA, "<PLANE_A_API>"), stubServerRule(planeB, "<PLANE_B_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
 	t.Run("dry_run_traces_planes_and_registry_lookup_without_probing", func(t *testing.T) {
 		t.Parallel()
 		setup := env.New(t)
