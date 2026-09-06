@@ -64,6 +64,7 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			// Runs after reconcileOrchestratorActivity so session.shellRunning is
 			// this tick's fresh report before the pacing decision reads it.
 			a.reconcileOrchestratorPacing()
+			a.reconcileDesktopControlMarker()
 		}
 	}
 }
