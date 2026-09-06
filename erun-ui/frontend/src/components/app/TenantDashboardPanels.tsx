@@ -7,6 +7,7 @@ import type {
   UITenantDashboardUser,
 } from '@/types';
 
+import { BuildProfileDialog, BuildProfileViewButton } from './BuildProfileDialog';
 import { InlineAlert } from './InlineAlert';
 import {
   DataCell,
@@ -51,6 +52,7 @@ function UsersPanel({ data }: { data: TenantDashboardData }): React.ReactElement
 
 function BuildsPanel({ data }: { data: TenantDashboardData }): React.ReactElement {
   const builds = data?.builds ?? [];
+  const [selectedBuild, setSelectedBuild] = React.useState<UITenantDashboardBuild | null>(null);
   return (
     <TabsContent value="builds" className="min-h-0 overflow-auto">
       <PanelBody
@@ -63,8 +65,14 @@ function BuildsPanel({ data }: { data: TenantDashboardData }): React.ReactElemen
           />
         }
       >
-        {builds.length > 0 ? <BuildsTable builds={builds} /> : null}
+        {builds.length > 0 ? <BuildsTable builds={builds} onSelect={setSelectedBuild} /> : null}
       </PanelBody>
+      <BuildProfileDialog
+        build={selectedBuild}
+        onClose={() => {
+          setSelectedBuild(null);
+        }}
+      />
     </TabsContent>
   );
 }
@@ -114,9 +122,18 @@ function buildSourceLabel(build: UITenantDashboardBuild): string {
   return '—';
 }
 
-function BuildsTable({ builds }: { builds: UITenantDashboardBuild[] }): React.ReactElement {
+function BuildsTable({
+  builds,
+  onSelect,
+}: {
+  builds: UITenantDashboardBuild[];
+  onSelect: (build: UITenantDashboardBuild) => void;
+}): React.ReactElement {
   return (
-    <DataTable headers={['Build', 'Source', 'Result', 'Commit', 'Version', 'Created']}>
+    <DataTable
+      headers={['Build', 'Source', 'Result', 'Commit', 'Version', 'Created', '']}
+      minWidthClassName="min-w-[820px]"
+    >
       {builds.map((build) => (
         <tr key={build.buildId}>
           <DataCell strong>{build.buildId}</DataCell>
@@ -131,6 +148,9 @@ function BuildsTable({ builds }: { builds: UITenantDashboardBuild[] }): React.Re
           <DataCell>{build.version}</DataCell>
           <DataCell>
             <RelativeTime value={build.createdAt} />
+          </DataCell>
+          <DataCell>
+            <BuildProfileViewButton build={build} onSelect={onSelect} />
           </DataCell>
         </tr>
       ))}
