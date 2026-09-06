@@ -56,7 +56,6 @@ __debug_bin*
 /erun-ui/frontend/node_modules
 /erun-ui/frontend/dist
 /erun-ui/frontend/wailsjs
-/erun-ui/frontend/*.tsbuildinfo
 /erun-ui/frontend/package.json.md5
 /erun-ui/playwright/node_modules
 /erun-ui/playwright/test-results

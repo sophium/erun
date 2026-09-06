@@ -285,14 +285,37 @@ ARG PLAYWRIGHT_TEST_AREAS=""
 # 10.7s warm. `--frozen-lockfile` resolves every package from yarn.lock
 # regardless of what the cache holds, so a cache hit only skips re-downloading
 # bytes already pinned by the lockfile; it can't change what gets installed.
+#
+# /src/.cache/frontend-vite and /src/.cache/frontend-tsbuildinfo are erun-ui's
+# own incrementality: erun-ui/frontend/vite.config.ts and tsconfig.json point
+# vite's transform cache and tsc's build-info file at repo-relative paths
+# under these two dirs (`../../.cache/frontend-vite/erun-ui-frontend`,
+# `../../.cache/frontend-tsbuildinfo/erun-ui-frontend.tsbuildinfo`), which
+# resolve here since this stage's WORKDIR is /src -- no env var needed, the
+# Dockerfile only has to mount the target the source config already names.
+#
+# ERUN_WAILSJS_CACHE_DIR is erun-ui/generate-wailsjs.sh's skip-when-unchanged
+# cache (see that script's own comment): it hashes the Go source that defines
+# the bound Wails API and, on a match, restores the last-generated
+# frontend/wailsjs/ instead of re-running `wails generate module`. This is
+# what makes the second of this build's two generations a no-op -- test-frontend
+# (below) generates it once, and build.sh generates it again inside
+# test-playwright's headless erun-app build -- and what survives a COPY-layer
+# cache invalidation (e.g. an unrelated frontend source edit) that has
+# nothing to do with the bound Go API. Unset outside this Dockerfile, so a
+# bare `./generate-wailsjs.sh` still regenerates unconditionally.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/golangci-lint \
     --mount=type=cache,target=/root/.cache/ms-playwright \
     --mount=type=cache,target=/usr/local/share/.cache/yarn \
     --mount=type=cache,target=/src/.cache/frontend-lint \
+    --mount=type=cache,target=/src/.cache/frontend-vite \
+    --mount=type=cache,target=/src/.cache/frontend-tsbuildinfo \
+    --mount=type=cache,target=/root/.cache/erun-wailsjs \
     GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint \
     YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
+    ERUN_WAILSJS_CACHE_DIR=/root/.cache/erun-wailsjs \
     PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
     PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
     ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \
