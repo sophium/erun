@@ -1,26 +1,44 @@
 package eruncommon
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// buildCgroupSysFSRoot is where cgroup v2 is mounted inside the runtime pod.
-// Unlike ReadLocalRuntimeUsage (runtime_usage.go), which reads this process's
-// *own* cgroup, the build cgroup lives at a fixed, unrelated path this process
-// shares only because it runs in the same pod's cgroup namespace as the
-// erun-dind sidecar that created it (see build_cpu_cap.go).
+// buildCgroupSysFSRoot is where cgroup v2 is mounted inside the erun-dind
+// sidecar -- the container dind-entrypoint.sh actually wrote the cap cgroup
+// into (see build_cpu_cap.go).
 const buildCgroupSysFSRoot = "/sys/fs/cgroup"
 
-// buildCgroupMetricsDir resolves the filesystem directory this process can
-// read the build's own capped cgroup from -- the same deterministic path
-// buildContainerCPUCapCgroupParent hands docker as --cgroup-parent, rooted at
-// the real cgroup v2 mount rather than the bare cgroup path that flag expects.
-// Empty outside an injected runtime pod, where no such cgroup exists.
+// buildCgroupDindContainerName is the erun-dind sidecar's fixed container
+// name (erun-devops/k8s/erun-devops/templates/service.yaml). It is the only
+// container in the pod that runs with the host's cgroup namespace -- this
+// process's own container has a private one, so its own view of
+// /sys/fs/cgroup/docker/... simply does not exist, confirmed empirically
+// against a real deployed pod (erun#2274): `inInjectedRuntimePod()` was true,
+// ERUN_TENANT/ERUN_ENVIRONMENT were set, a real build ran, and the cap cgroup
+// directory was still absent from this container's own filesystem. Every
+// read below therefore goes through `kubectl exec` into this one named
+// container instead of a local file read.
+const buildCgroupDindContainerName = "erun-dind"
+
+// buildCgroupExecTimeout bounds one remote read. A build samples this at
+// every step's start and end, so a slow or hung kubectl must not compound
+// into a real delay on the build it exists to measure.
+const buildCgroupExecTimeout = 5 * time.Second
+
+// buildCgroupMetricsDir resolves the absolute path, as seen from inside the
+// erun-dind sidecar, of the build's own capped cgroup -- the same
+// deterministic path buildContainerCPUCapCgroupParent hands docker as
+// --cgroup-parent, rooted at the real cgroup v2 mount rather than the bare
+// cgroup path that flag expects. Empty outside an injected runtime pod,
+// where no such cgroup exists.
 func buildCgroupMetricsDir() string {
 	parent := buildContainerCPUCapCgroupParent()
 	if parent == "" {
@@ -29,20 +47,33 @@ func buildCgroupMetricsDir() string {
 	return filepath.Join(buildCgroupSysFSRoot, parent)
 }
 
-// buildCgroupCandidateDirs orders the directories worth sampling for one
-// build cgroup root, most-authoritative first. cgroup v2 aggregates a
-// descendant's resource accounting into every ancestor's own stat files, so
-// the cap cgroup itself (dind-entrypoint.sh's mkdir target) already reflects
-// every RUN-instruction container docker nests under it -- but that
-// aggregation depends on the parent directory having its own stat files
-// populated, which is not guaranteed on every cgroup driver/version
-// combination. "buildkit" is checked as a fallback single level down in case
-// the parent itself never gets populated.
-func buildCgroupCandidateDirs(root string) []string {
-	if root == "" {
-		return nil
-	}
-	return []string{root, filepath.Join(root, "buildkit")}
+// buildCgroupReadScriptTemplate reads one snapshot's worth of counters in a
+// single remote command: the cap cgroup aggregates every RUN-instruction
+// container docker nests under it (cgroup v2 propagates resource accounting
+// to every ancestor), but that aggregation depends on the cap directory
+// itself having populated stat files, which is not guaranteed on every
+// cgroup driver/version combination -- so the script falls back to a
+// "buildkit" child one level down, verified live against a real deployed pod
+// to hold the same counters when the parent's own do not populate. Doing the
+// fallback decision here, inside the one exec, is what keeps this to one
+// kubectl call per snapshot instead of up to eight (four files across two
+// candidate directories).
+const buildCgroupReadScriptTemplate = `set -eu
+dir="__BASE__"
+grep -q '^usage_usec ' "$dir/cpu.stat" 2>/dev/null || dir="__BASE__/buildkit"
+printf 'usage_usec=%s\n' "$(awk '$1=="usage_usec"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)"
+printf 'nr_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)"
+printf 'nr_throttled=%s\n' "$(awk '$1=="nr_throttled"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)"
+printf 'throttled_usec=%s\n' "$(awk '$1=="throttled_usec"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)"
+printf 'cpu_max=%s\n' "$(cat "$dir/cpu.max" 2>/dev/null || true)"
+printf 'memory_peak=%s\n' "$(cat "$dir/memory.peak" 2>/dev/null || true)"
+printf 'io_stat_begin\n'
+cat "$dir/io.stat" 2>/dev/null || true
+printf 'io_stat_end\n'
+`
+
+func buildCgroupReadScript(base string) string {
+	return strings.ReplaceAll(buildCgroupReadScriptTemplate, "__BASE__", base)
 }
 
 // buildCgroupCounters is one point-in-time reading of the build cgroup's
@@ -60,41 +91,63 @@ type buildCgroupCounters struct {
 	peakObserved     bool
 }
 
-// readBuildCgroupCounters reads one candidate directory's counters. It
-// succeeds only when cpu.stat's usage_usec is readable -- the minimum needed
-// to attribute any cost at all -- and degrades every other field
-// independently, matching runtimeMemoryUsageFromValues/
-// runtimeCPUUsageFromValues's per-field fail-soft posture in runtime_usage.go.
-func readBuildCgroupCounters(dir string) (buildCgroupCounters, bool) {
-	usage, ok := parseRuntimeInt64(localCgroupStatValue(filepath.Join(dir, "cpu.stat"), "usage_usec"))
+// parseBuildCgroupExecOutput parses buildCgroupReadScriptTemplate's stdout.
+// It succeeds only when usage_usec was readable -- the minimum needed to
+// attribute any cost at all -- and degrades every other field independently,
+// matching runtimeCPUUsageFromValues/runtimeMemoryUsageFromValues's
+// per-field fail-soft posture in runtime_usage.go. This is the pure parsing
+// half of the read, kept separate from the exec plumbing (sampleBuildCgroup
+// below) so it is directly unit-testable against captured/synthetic output
+// with no kubectl, cluster, or filesystem involved.
+func parseBuildCgroupExecOutput(output string) (buildCgroupCounters, bool) {
+	values := map[string]string{}
+	var ioLines []string
+	inIOStat := false
+	for _, line := range strings.Split(output, "\n") {
+		switch line {
+		case "io_stat_begin":
+			inIOStat = true
+			continue
+		case "io_stat_end":
+			inIOStat = false
+			continue
+		}
+		if inIOStat {
+			ioLines = append(ioLines, line)
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		values[key] = value
+	}
+
+	usage, ok := parseRuntimeInt64(values["usage_usec"])
 	if !ok {
 		return buildCgroupCounters{}, false
 	}
 	counters := buildCgroupCounters{usageUsec: usage}
-	counters.periods, _ = parseRuntimeInt64(localCgroupStatValue(filepath.Join(dir, "cpu.stat"), "nr_periods"))
-	counters.throttledPeriods, _ = parseRuntimeInt64(localCgroupStatValue(filepath.Join(dir, "cpu.stat"), "nr_throttled"))
-	counters.throttledUsec, _ = parseRuntimeInt64(localCgroupStatValue(filepath.Join(dir, "cpu.stat"), "throttled_usec"))
-	if quotaUsec, periodUsec, ok := parseRuntimeCPUMax(readLocalCgroupFile(filepath.Join(dir, "cpu.max"))); ok {
+	counters.periods, _ = parseRuntimeInt64(values["nr_periods"])
+	counters.throttledPeriods, _ = parseRuntimeInt64(values["nr_throttled"])
+	counters.throttledUsec, _ = parseRuntimeInt64(values["throttled_usec"])
+	if quotaUsec, periodUsec, ok := parseRuntimeCPUMax(strings.TrimSpace(values["cpu_max"])); ok {
 		counters.quotaCores = float64(quotaUsec) / float64(periodUsec)
 	}
-	counters.ioReadBytes, counters.ioWriteBytes = readBuildCgroupIOBytes(filepath.Join(dir, "io.stat"))
-	if peak, ok := parseRuntimeInt64(readLocalCgroupFile(filepath.Join(dir, "memory.peak"))); ok {
+	counters.ioReadBytes, counters.ioWriteBytes = sumBuildCgroupIOBytes(strings.Join(ioLines, "\n"))
+	if peak, ok := parseRuntimeInt64(strings.TrimSpace(values["memory_peak"])); ok {
 		counters.peakMemoryBytes = peak
 		counters.peakObserved = true
 	}
 	return counters, true
 }
 
-// readBuildCgroupIOBytes sums io.stat's rbytes/wbytes across every device
+// sumBuildCgroupIOBytes sums io.stat's rbytes/wbytes across every device
 // line -- a build touches at least the docker state device and often an
 // overlay/tmpfs mount too, and the per-step question ("how much I/O did this
 // step do") wants the total, not one device chosen arbitrarily.
-func readBuildCgroupIOBytes(path string) (readBytes, writeBytes int64) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, 0
-	}
-	for _, line := range strings.Split(string(data), "\n") {
+func sumBuildCgroupIOBytes(ioStat string) (readBytes, writeBytes int64) {
+	for _, line := range strings.Split(ioStat, "\n") {
 		for _, field := range strings.Fields(line) {
 			key, value, found := strings.Cut(field, "=")
 			if !found {
@@ -115,24 +168,26 @@ func readBuildCgroupIOBytes(path string) (readBytes, writeBytes int64) {
 	return readBytes, writeBytes
 }
 
-// sampleBuildCgroup reads the first candidate directory with a readable
-// cpu.stat, so a fallback to the "buildkit" child only happens when the
-// parent genuinely has nothing.
-func sampleBuildCgroup(root string) (buildCgroupCounters, bool) {
-	for _, dir := range buildCgroupCandidateDirs(root) {
-		if counters, ok := readBuildCgroupCounters(dir); ok {
-			return counters, true
-		}
+// sampleBuildCgroup execs buildCgroupReadScript into the erun-dind sidecar of
+// this pod (pod, from os.Hostname -- a Kubernetes pod's hostname is its own
+// pod name) and parses the result. Never fails the caller: any exec error
+// (kubectl missing, RBAC denied, the sidecar not ready, the exec timing out)
+// yields ok=false, exactly like an unreadable local file would.
+func sampleBuildCgroup(pod, base string) (buildCgroupCounters, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), buildCgroupExecTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "kubectl", "exec", pod, "-c", buildCgroupDindContainerName, "--", "sh", "-c", buildCgroupReadScript(base))
+	output, err := cmd.Output()
+	if err != nil {
+		return buildCgroupCounters{}, false
 	}
-	return buildCgroupCounters{}, false
+	return parseBuildCgroupExecOutput(string(output))
 }
 
 // buildCgroupSnapshot is one sample taken at a step's start or end.
 // applicable is false outside an injected runtime pod (no build cgroup to
 // read at all, e.g. a bare host build or a `type: runtime` env); ok is false
-// when a pod-injected build's cgroup files were not readable at this instant
-// (an older runtime image predating #2257, or the sidecar has not run its
-// mirroring step yet).
+// when a pod-injected build's remote read failed for any reason.
 type buildCgroupSnapshot struct {
 	applicable bool
 	ok         bool
@@ -140,11 +195,15 @@ type buildCgroupSnapshot struct {
 }
 
 func captureBuildCgroupSnapshot() buildCgroupSnapshot {
-	dir := buildCgroupMetricsDir()
-	if dir == "" {
+	base := buildCgroupMetricsDir()
+	if base == "" {
 		return buildCgroupSnapshot{}
 	}
-	counters, ok := sampleBuildCgroup(dir)
+	pod, err := os.Hostname()
+	if err != nil || strings.TrimSpace(pod) == "" {
+		return buildCgroupSnapshot{applicable: true, ok: false}
+	}
+	counters, ok := sampleBuildCgroup(pod, base)
 	return buildCgroupSnapshot{applicable: true, ok: ok, counters: counters}
 }
 

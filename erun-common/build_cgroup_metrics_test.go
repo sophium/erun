@@ -1,28 +1,24 @@
 package eruncommon
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestReadBuildCgroupCountersParsesNormalFixture(t *testing.T) {
-	dir := t.TempDir()
-	writeCgroupFixture(t, dir, map[string]string{
-		"cpu.stat": "usage_usec 12345678\n" +
-			"user_usec 10000000\n" +
-			"system_usec 2345678\n" +
-			"nr_periods 200\n" +
-			"nr_throttled 40\n" +
-			"throttled_usec 987654\n",
-		"cpu.max":     "400000 100000\n",
-		"io.stat":     "8:0 rbytes=1048576 wbytes=2097152 rios=10 wios=20 dbytes=0 dios=0\n253:0 rbytes=512 wbytes=1024 rios=1 wios=1 dbytes=0 dios=0\n",
-		"memory.peak": "104857600\n",
-	})
+func TestParseBuildCgroupExecOutputNormal(t *testing.T) {
+	output := "usage_usec=12345678\n" +
+		"nr_periods=200\n" +
+		"nr_throttled=40\n" +
+		"throttled_usec=987654\n" +
+		"cpu_max=400000 100000\n" +
+		"memory_peak=104857600\n" +
+		"io_stat_begin\n" +
+		"8:0 rbytes=1048576 wbytes=2097152 rios=10 wios=20 dbytes=0 dios=0\n" +
+		"253:0 rbytes=512 wbytes=1024 rios=1 wios=1 dbytes=0 dios=0\n" +
+		"io_stat_end\n"
 
-	counters, ok := readBuildCgroupCounters(dir)
+	counters, ok := parseBuildCgroupExecOutput(output)
 	if !ok {
 		t.Fatalf("expected a readable normal fixture")
 	}
@@ -46,14 +42,9 @@ func TestReadBuildCgroupCountersParsesNormalFixture(t *testing.T) {
 	}
 }
 
-func TestReadBuildCgroupCountersUnlimitedQuota(t *testing.T) {
-	dir := t.TempDir()
-	writeCgroupFixture(t, dir, map[string]string{
-		"cpu.stat": "usage_usec 500\nnr_periods 1\nnr_throttled 0\nthrottled_usec 0\n",
-		"cpu.max":  "max 100000\n",
-	})
-
-	counters, ok := readBuildCgroupCounters(dir)
+func TestParseBuildCgroupExecOutputUnlimitedQuota(t *testing.T) {
+	output := "usage_usec=500\nnr_periods=1\nnr_throttled=0\nthrottled_usec=0\ncpu_max=max 100000\n"
+	counters, ok := parseBuildCgroupExecOutput(output)
 	if !ok {
 		t.Fatalf("expected usage_usec alone to make this readable")
 	}
@@ -62,40 +53,26 @@ func TestReadBuildCgroupCountersUnlimitedQuota(t *testing.T) {
 	}
 }
 
-func TestReadBuildCgroupCountersMissingDirectory(t *testing.T) {
-	_, ok := readBuildCgroupCounters(filepath.Join(t.TempDir(), "does-not-exist"))
-	if ok {
-		t.Fatalf("expected a missing directory to be unreadable, not ok")
+func TestParseBuildCgroupExecOutputEmpty(t *testing.T) {
+	if _, ok := parseBuildCgroupExecOutput(""); ok {
+		t.Fatalf("expected empty output (e.g. a failed exec) to be unreadable")
 	}
 }
 
-func TestReadBuildCgroupCountersMalformedCPUStat(t *testing.T) {
-	dir := t.TempDir()
-	writeCgroupFixture(t, dir, map[string]string{
-		"cpu.stat": "not a keyed stat file at all\n",
-	})
-	_, ok := readBuildCgroupCounters(dir)
-	if ok {
-		t.Fatalf("expected a cpu.stat with no usage_usec key to be unreadable")
+func TestParseBuildCgroupExecOutputMissingUsageUsec(t *testing.T) {
+	output := "nr_periods=1\nnr_throttled=0\n"
+	if _, ok := parseBuildCgroupExecOutput(output); ok {
+		t.Fatalf("expected output with no usage_usec key to be unreadable")
 	}
 }
 
-func TestReadBuildCgroupCountersEmptyCPUStat(t *testing.T) {
-	dir := t.TempDir()
-	writeCgroupFixture(t, dir, map[string]string{"cpu.stat": ""})
-	_, ok := readBuildCgroupCounters(dir)
-	if ok {
-		t.Fatalf("expected an empty cpu.stat to be unreadable")
-	}
-}
-
-func TestReadBuildCgroupCountersMalformedIOStatIsSkippedNotFatal(t *testing.T) {
-	dir := t.TempDir()
-	writeCgroupFixture(t, dir, map[string]string{
-		"cpu.stat": "usage_usec 1\nnr_periods 1\nnr_throttled 0\n",
-		"io.stat":  "garbage line with no equals signs\n8:0 rbytes=notanumber wbytes=1024\n",
-	})
-	counters, ok := readBuildCgroupCounters(dir)
+func TestParseBuildCgroupExecOutputMalformedIOStatIsSkippedNotFatal(t *testing.T) {
+	output := "usage_usec=1\nnr_periods=1\nnr_throttled=0\n" +
+		"io_stat_begin\n" +
+		"garbage line with no equals signs\n" +
+		"8:0 rbytes=notanumber wbytes=1024\n" +
+		"io_stat_end\n"
+	counters, ok := parseBuildCgroupExecOutput(output)
 	if !ok {
 		t.Fatalf("expected usage_usec alone to make this readable despite malformed io.stat")
 	}
@@ -107,58 +84,35 @@ func TestReadBuildCgroupCountersMalformedIOStatIsSkippedNotFatal(t *testing.T) {
 	}
 }
 
-func TestReadBuildCgroupCountersMissingMemoryPeakIsUnobserved(t *testing.T) {
-	dir := t.TempDir()
-	writeCgroupFixture(t, dir, map[string]string{
-		"cpu.stat": "usage_usec 1\nnr_periods 1\nnr_throttled 0\n",
-	})
-	counters, ok := readBuildCgroupCounters(dir)
+func TestParseBuildCgroupExecOutputMissingMemoryPeakIsUnobserved(t *testing.T) {
+	output := "usage_usec=1\nnr_periods=1\nnr_throttled=0\n"
+	counters, ok := parseBuildCgroupExecOutput(output)
 	if !ok {
 		t.Fatalf("expected usage_usec alone to make this readable")
 	}
 	if counters.peakObserved {
-		t.Errorf("expected peakObserved=false when memory.peak is missing")
+		t.Errorf("expected peakObserved=false when memory_peak is absent from the output")
 	}
 }
 
-func TestSampleBuildCgroupFallsBackToBuildkitChild(t *testing.T) {
-	dir := t.TempDir()
-	buildkitDir := filepath.Join(dir, "buildkit")
-	if err := os.MkdirAll(buildkitDir, 0o755); err != nil {
-		t.Fatalf("mkdir buildkit child: %v", err)
-	}
-	// The parent has no readable cpu.stat at all (e.g. never populated on this
-	// cgroup driver); "buildkit" underneath it does.
-	writeCgroupFixture(t, buildkitDir, map[string]string{
-		"cpu.stat": "usage_usec 42\nnr_periods 1\nnr_throttled 0\n",
-	})
-	counters, ok := sampleBuildCgroup(dir)
+func TestParseBuildCgroupExecOutputMissingIOStatMarkersYieldsZero(t *testing.T) {
+	output := "usage_usec=1\nnr_periods=1\nnr_throttled=0\n"
+	counters, ok := parseBuildCgroupExecOutput(output)
 	if !ok {
-		t.Fatalf("expected the buildkit child fallback to be readable")
+		t.Fatalf("expected usage_usec alone to make this readable")
 	}
-	if counters.usageUsec != 42 {
-		t.Errorf("usageUsec = %d, want 42 (from the buildkit child)", counters.usageUsec)
+	if counters.ioReadBytes != 0 || counters.ioWriteBytes != 0 {
+		t.Errorf("io = %d/%d, want 0/0 with no io_stat markers present", counters.ioReadBytes, counters.ioWriteBytes)
 	}
 }
 
-func TestSampleBuildCgroupPrefersParentOverBuildkitChild(t *testing.T) {
-	dir := t.TempDir()
-	writeCgroupFixture(t, dir, map[string]string{
-		"cpu.stat": "usage_usec 100\nnr_periods 1\nnr_throttled 0\n",
-	})
-	buildkitDir := filepath.Join(dir, "buildkit")
-	if err := os.MkdirAll(buildkitDir, 0o755); err != nil {
-		t.Fatalf("mkdir buildkit child: %v", err)
+func TestBuildCgroupReadScriptEmbedsTheResolvedBaseDirectory(t *testing.T) {
+	script := buildCgroupReadScript("/sys/fs/cgroup/docker/erun-build-cpu-cap-my-pod")
+	if !strings.Contains(script, `dir="/sys/fs/cgroup/docker/erun-build-cpu-cap-my-pod"`) {
+		t.Errorf("expected the script to embed the resolved base dir, got:\n%s", script)
 	}
-	writeCgroupFixture(t, buildkitDir, map[string]string{
-		"cpu.stat": "usage_usec 999\nnr_periods 1\nnr_throttled 0\n",
-	})
-	counters, ok := sampleBuildCgroup(dir)
-	if !ok {
-		t.Fatalf("expected the parent to be readable")
-	}
-	if counters.usageUsec != 100 {
-		t.Errorf("usageUsec = %d, want 100 (the parent wins when readable)", counters.usageUsec)
+	if !strings.Contains(script, "/buildkit") {
+		t.Errorf("expected the script to carry a buildkit-child fallback, got:\n%s", script)
 	}
 }
 
