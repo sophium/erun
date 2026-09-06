@@ -43,6 +43,7 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 
 	matches := stateMatchesSSHDTarget(state, expectedState)
 	if matches && !stateHasDeprecatedLocalProxy(state) && canReachLocalSSHEndpoint(info.Port) {
+		rotatePortForwardLogIfOversized(ctx, "sshd", sshdPortForwardLogPath(statePath))
 		return info, nil
 	}
 	args := kubectlPortForwardArgs(result, info.Port)
@@ -94,6 +95,7 @@ func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected 
 	if err := saveSSHDPortForwardState(statePath, adopted); err != nil {
 		return false, fmt.Errorf("adopt SSHD port-forward (PID %d): %w", pid, err)
 	}
+	rotatePortForwardLogIfOversized(ctx, "sshd", adopted.LogPath)
 	ctx.Trace(fmt.Sprintf("sshd: adopted existing kubectl port-forward on 127.0.0.1:%d (PID %d)", info.Port, pid))
 	return true, nil
 }
@@ -131,6 +133,7 @@ func startSSHDPortForward(ctx common.Context, statePath string, expectedState ss
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return common.SSHConnectionInfo{}, err
 	}
+	rotatePortForwardLogIfOversized(ctx, "sshd", logPath)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return common.SSHConnectionInfo{}, err

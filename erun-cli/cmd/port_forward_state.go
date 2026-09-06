@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,4 +62,28 @@ func migrateLegacyPortForwardState(legacyPath, newPath string) {
 
 func portForwardLogPath(statePath string) string {
 	return strings.TrimSuffix(statePath, filepath.Ext(statePath)) + ".log"
+}
+
+// rotatePortForwardLogIfOversized bounds a forward's own kubectl log so a
+// forward that stays healthy and reused for weeks cannot grow it without
+// limit, and reclaims a log that already grew unbounded before this existed
+// (erun#2161). Called every time this env's forward is found alive --
+// serving, adopted from a foreign process, or just started -- so a long-lived
+// forward gets checked on every touch rather than only at kubectl's own
+// startup.
+//
+// Best-effort and silent on failure: rotation is diagnostics-adjacent
+// housekeeping and must never block a healthy forward from being reused.
+func rotatePortForwardLogIfOversized(ctx common.Context, kind, logPath string) {
+	if strings.TrimSpace(logPath) == "" {
+		return
+	}
+	rotated, err := common.RotateOversizedFile(logPath, common.PortForwardLogMaxBytes)
+	if err != nil {
+		ctx.Trace(fmt.Sprintf("%s: could not rotate oversized port-forward log %s: %s", kind, logPath, err.Error()))
+		return
+	}
+	if rotated {
+		ctx.Trace(fmt.Sprintf("%s: rotated oversized port-forward log %s (kept a %s.1 backup)", kind, logPath, logPath))
+	}
 }
