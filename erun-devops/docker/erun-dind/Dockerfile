@@ -22,14 +22,21 @@ RUN apk add --no-cache iptables-legacy \
 # release-time headroom check (erun-common's ensureReleaseDiskHeadroom) exists
 # to avoid on the release side.
 #
-# reservedSpace/maxUsedSpace/minFreeSpace, not defaultKeepStorage: the latter
-# is deprecated from BuildKit 0.16 and silently ignored by the docker 28 this
-# image pins. dockerd still validates a config carrying it (`dockerd
-# --validate` reports "configuration OK"), so the ceiling read as configured
-# while enforcing nothing — measured at 76-80GB of build cache per environment
-# against a nominal 32GB, on a node whose four environments then exhausted a
-# 435GB disk, tripped kubelet's ephemeral-storage eviction and took every pod
-# on it down at once.
+# reservedSpace/maxUsedSpace/minFreeSpace inside gc.policy, not the
+# deprecated top-level defaultKeepStorage: the latter is ignored by the docker
+# 28 this image pins, and the ceiling read as configured while enforcing
+# nothing — measured at 76-90GB of build cache per environment against a
+# nominal 32GB, on a node whose four environments then exhausted a 435GB disk,
+# tripped kubelet's ephemeral-storage eviction and took every pod on it down
+# at once.
+#
+# `dockerd --validate` is not evidence that any of these keys is honoured: it
+# reports "configuration OK" for a config whose gc block contains a key that
+# does not exist at all (verified against this image). That is exactly why the
+# deprecated setting survived unnoticed, and why a first attempt at this fix
+# that put the new keys at the gc top level rather than inside a policy entry
+# also read as configured while the cache stayed near 80GB. The only
+# meaningful check is watching the cache converge on a running daemon.
 #
 # The figures are sized against that node rather than picked round: four
 # environments at maxUsedSpace 40GB is 160GB of cache, which leaves room for
