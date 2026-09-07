@@ -259,9 +259,23 @@ if [ "$SKIP_LINT" -eq 1 ]; then
 	printf '>> SKIPPING typecheck/lint/format:check (--skip-lint)\n' >&2
 else
 	printf '>> playwright: typecheck + lint + format:check\n' >&2
+	# ERUN_PLAYWRIGHT_LINT_CACHE_DIR opts into eslint/prettier result caching,
+	# the same way the Makefile's three workspace gates already cache into
+	# FRONTEND_LINT_CACHE_DIR. Unset (a bare local run) keeps the previous
+	# uncached behaviour rather than scattering cache files into the tree.
+	# Content-addressed rather than mtime-based, because every COPY into the
+	# image build context resets mtimes and would defeat a timestamp check.
 	"$YARN_BIN" typecheck
-	"$YARN_BIN" lint
-	"$YARN_BIN" format:check
+	if [ -n "${ERUN_PLAYWRIGHT_LINT_CACHE_DIR:-}" ]; then
+		mkdir -p "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/eslint"
+		"$YARN_BIN" lint -- --cache --cache-strategy content \
+			--cache-location "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/eslint/playwright/"
+		"$YARN_BIN" format:check -- --cache --cache-strategy content \
+			--cache-location "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/prettier-playwright.json"
+	else
+		"$YARN_BIN" lint
+		"$YARN_BIN" format:check
+	fi
 fi
 
 # `playwright install chromium` is idempotent — it checks whether the

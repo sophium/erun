@@ -344,6 +344,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint \
     YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     ERUN_WAILSJS_CACHE_DIR=/root/.cache/erun-wailsjs \
+    ERUN_PLAYWRIGHT_LINT_CACHE_DIR=/src/.cache/frontend-lint \
     PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
     PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
     ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \
