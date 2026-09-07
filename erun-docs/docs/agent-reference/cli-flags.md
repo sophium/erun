@@ -888,7 +888,7 @@ Pushes the pacing nudge into every reachable target: every configured environmen
 
 1. If both `--tenant`/`--environment` are given, the target list is that one pair. If neither is given, list every environment across every configured tenant (`ListTenantConfigs` + `ListEnvConfigs`) — never the ambient current-directory default a bare `resolveOpen` would resolve to. Passing only one of the two errors.
 2. For each environment target: resolve its MCP edge the same way `erun idle`/`erun exec` do (a local port-forward state file `erun open` maintains while the environment is open). An edge that cannot be resolved, or whose call fails, resolves to `{decision: none, reason: "not-alive"}` — not a command failure. A resolved edge is called with `whip {preview: <ctx.DryRun>}`; the decoded `eruncommon.WhipResult` is used verbatim.
-3. Load `~/.erun/config.yaml`'s `Orchestrators` list and turn each into a candidate via `eruncommon.ListWhipOrchestratorCandidates` (always `Reachable: false`), then `eruncommon.DecideWhip` against the resolved `WhipConfig` with `explicit: true`. Every orchestrator therefore always resolves to `{decision: none, reason: "unreachable-from-transport"}` from this transport.
+3. Load the [user config](/reference/config-locations)'s `Orchestrators` list and turn each into a candidate via `eruncommon.ListWhipOrchestratorCandidates` (always `Reachable: false`), then `eruncommon.DecideWhip` against the resolved `WhipConfig` with `explicit: true`. Every orchestrator therefore always resolves to `{decision: none, reason: "unreachable-from-transport"}` from this transport.
 4. Render one line per result (`candidate.id`/name, decision, reason, and the write error if any), or the full `WhipReport` JSON with `--json`.
 
 ### `WhipReport` shape
@@ -915,7 +915,7 @@ Pushes the pacing nudge into every reachable target: every configured environmen
 
 ### Configuration: `ERunConfig.whip` {#whip-config}
 
-`~/.erun/config.yaml`'s optional `whip` section (`eruncommon.WhipConfigOverride`) overrides the pacing defaults every surface reads through `eruncommon.ResolveWhipConfig`:
+The [user config](/reference/config-locations)'s optional `whip` section (`eruncommon.WhipConfigOverride`) overrides the pacing defaults every surface reads through `eruncommon.ResolveWhipConfig`:
 
 | Key | Type | Unset behaviour |
 |---|---|---|

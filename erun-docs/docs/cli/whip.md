@@ -56,7 +56,7 @@ erun whip --dry-run
 
 ## Configuration
 
-The nudge message, the staleness threshold, and the consecutive-nudge cap are configurable in `~/.erun/config.yaml`, under a `whip` section — editable without a rebuild, and unset by default (an install that configures nothing keeps exactly today's text and bounds):
+The nudge message, the staleness threshold, and the consecutive-nudge cap are configurable in erun's user config (`config.yaml` in the [user config directory](/reference/config-locations)), under a `whip` section — editable without a rebuild, and unset by default (an install that configures nothing keeps exactly today's text and bounds):
 
 ```yaml
 whip:
