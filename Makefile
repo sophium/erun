@@ -340,9 +340,18 @@ FRONTEND_LINT_CACHE_DIR := $(CURDIR)/.cache/frontend-lint
 # lucide-react after 614s of retries, with that exact tarball sitting in
 # the cache. It stays a preference, not --offline, so a genuinely new
 # dependency still resolves instead of failing the build outright.
+#
+# --network-timeout because the fetch that remains has to survive a loaded box.
+# Yarn times a request out per-socket, and under `make -j6` the install cannot
+# get enough CPU to service the socket even though bandwidth is fine: the same
+# tarball fetches in 0.27s from a container on this very daemon when the box is
+# idle, while the in-gate install spent 275s and then failed on it. Three
+# releases died that way, each reading as a network fault (erun#2390). Raising
+# the ceiling turns a hard failure into a slow success; it does not mask a real
+# outage, which still fails once the longer window elapses.
 test-frontend:
 	@./scripts/timed-step.sh "yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)" \
-		yarn install --frozen-lockfile --prefer-offline
+		yarn install --frozen-lockfile --prefer-offline --network-timeout 600000
 	@./scripts/timed-step.sh "issue-reference gate (erun-kit, erun-ui/frontend, erun-console)" \
 		sh -c 'node --test scripts/check-issue-references.test.mjs && node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src'
 	@./scripts/timed-step.sh "generating erun-ui/frontend wailsjs bindings" \
@@ -704,7 +713,7 @@ fast-check: lint
 	@echo ">> issue-reference gate (Go, whole repo)"
 	@(cd erun-integration && go test -count=1 -run '^(TestNoIssueReferenceInCode|TestIssueReferenceBaselineIsCurrent)$$' .)
 	@echo ">> yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)"
-	@yarn install --frozen-lockfile --prefer-offline
+	@yarn install --frozen-lockfile --prefer-offline --network-timeout 600000
 	@echo ">> issue-reference gate (TypeScript: erun-kit, erun-ui/frontend, erun-console)"
 	@node --test scripts/check-issue-references.test.mjs
 	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src

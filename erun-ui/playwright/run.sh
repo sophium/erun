@@ -262,7 +262,7 @@ fi
 # is already cached, so this is cheap on warm runs.
 if [ ! -d node_modules ] || [ ! -f node_modules/.yarn-integrity ]; then
 	_step_started=$(date +%s)
-	"$YARN_BIN" install --frozen-lockfile --prefer-offline
+	"$YARN_BIN" install --frozen-lockfile --prefer-offline --network-timeout 600000
 	printf '>> playwright: yarn install [%ss]\n' "$(($(date +%s) - _step_started))" >&2
 fi
 

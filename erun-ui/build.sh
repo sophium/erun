@@ -60,7 +60,7 @@ if [ -d frontend ]; then
 	# yarn install` resolves against frontend's own stale, pre-workspaces
 	# lockfile instead, silently dropping deps the root lockfile hoists
 	# (e.g. radix-ui) from node_modules.
-	(cd "$SCRIPT_DIR/.." && "$YARN_BIN" install --frozen-lockfile --prefer-offline)
+	(cd "$SCRIPT_DIR/.." && "$YARN_BIN" install --frozen-lockfile --prefer-offline --network-timeout 600000)
 	cd frontend
 	# Gate the bundle on the same checks CI would run. `--skip-lint` escapes
 	# the gates for one invocation when iterating locally; CI never passes it.
