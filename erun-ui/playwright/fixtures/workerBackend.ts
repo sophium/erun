@@ -1,5 +1,6 @@
 import { test as base } from '@playwright/test';
 import { type ChildProcess, spawn } from 'node:child_process';
+import * as net from 'node:net';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -24,6 +25,38 @@ const BASE_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 // branch below).
 const ERUN_UI_DIR = path.join(__dirname, '..', '..');
 const BIN_PATH = path.join(ERUN_UI_DIR, isWindows ? 'bin/erun-app.exe' : 'bin/erun-app');
+
+// claimFreePort finds a port this worker can actually bind, rather than
+// assuming its assigned one is free. A gate that fails partway can leave its
+// erun-app backends running, and the next run then dies on every test in the
+// affected worker with a message that names accessibility specs rather than
+// the real cause (erun#2362):
+//
+//   listen tcp 127.0.0.1:34124: bind: address already in use
+//   Error: worker backend exited before becoming ready
+//
+// Candidates step by the worker count so each worker only ever tries ports
+// congruent to its own index: two workers racing can never land on the same
+// one, so a retry can only collide with a foreign process, never with a
+// sibling.
+async function claimFreePort(start: number, stride: number, attempts = 20): Promise<number> {
+  for (let i = 0; i < attempts; i++) {
+    const candidate = start + i * stride;
+    const free = await new Promise<boolean>((resolve) => {
+      const probe = net.createServer();
+      probe.once('error', () => resolve(false));
+      probe.once('listening', () => probe.close(() => resolve(true)));
+      probe.listen(candidate, '127.0.0.1');
+    });
+    if (free) {
+      return candidate;
+    }
+  }
+  throw new Error(
+    `no free port for this worker: tried ${String(attempts)} candidates from ${String(start)} ` +
+      `stepping by ${String(stride)}. A previous run probably left erun-app backends behind.`,
+  );
+}
 
 // waitForBackendReady polls the backend's HTTP root the same way Playwright's
 // own webServer readiness check does, but also fails fast if the child exits
@@ -102,7 +135,10 @@ export const test = base.extend<object, WorkerFixtures>({
         return;
       }
 
-      const port = BASE_PORT + workerInfo.parallelIndex;
+      const port = await claimFreePort(
+        BASE_PORT + workerInfo.parallelIndex,
+        Math.max(1, workerInfo.config.workers),
+      );
       const root = path.join(isolatedRoot(), `worker-${workerInfo.parallelIndex}`);
       fs.mkdirSync(root, { recursive: true });
       setWorkerRoot(root);
