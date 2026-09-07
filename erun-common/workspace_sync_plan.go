@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 )
 
@@ -89,9 +90,13 @@ func PreviewWorkspaceSync(ctx context.Context, params WorkspaceSyncParams) (Work
 	// that has cross-built nothing yet, so it reports zero rather than failing the
 	// preview.
 	artifacts, _ := remoteOutputsFiles(ctx, params.HostAlias, DefaultRuntimeOutputsDir)
+	artifactsLocal := filepath.Join(params.LocalPath, WorkspaceSyncArtifactsSubdir)
+	artifactsToFetch := changedOutputsPaths(artifacts,
+		remoteOutputsFileHashes(ctx, params.HostAlias, DefaultRuntimeOutputsDir, artifacts),
+		localArtifactFileHashes(artifactsLocal, artifacts))
 	return WorkspaceSyncResult{
 		FilesCopied:     len(toFetch),
 		FilesDeleted:    deletions,
-		ArtifactsCopied: len(artifacts),
+		ArtifactsCopied: len(artifactsToFetch),
 	}, nil
 }
