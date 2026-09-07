@@ -129,40 +129,42 @@ type diskHeadroomRead struct {
 	ok    bool
 }
 
-// TestEnsureDiskHeadroomWith drives the decision logic with injected
-// fakes instead of a real docker daemon, per erun-common/AGENTS.md's
-// dependency-injection-over-globals guidance (mirroring the existing
-// GitCommandRunnerFunc-injection shape ensureReleaseBaseBranchUnmoved uses).
-func TestEnsureDiskHeadroomWith(t *testing.T) {
-	const testFloor uint64 = 20 << 30 // 20 GiB
-	const belowFloor = testFloor - (1 << 30)
-	const aboveFloor = testFloor + (1 << 30)
+// diskHeadroomCase drives one pass of the decision logic. The floor is pinned
+// by env in the test body, so free-space figures here are relative to it.
+type diskHeadroomCase struct {
+	name          string
+	policy        diskHeadroomPolicy
+	dryRun        bool
+	reads         []diskHeadroomRead
+	pruneErr      error
+	wantErr       bool
+	wantErrSubstr string
+	wantPrune     bool
+}
 
-	cases := []struct {
-		name          string
-		policy        diskHeadroomPolicy
-		dryRun        bool
-		reads         []diskHeadroomRead
-		pruneErr      error
-		wantErr       bool
-		wantErrSubstr string
-		wantPrune     bool
-	}{
+const (
+	diskHeadroomTestFloor uint64 = 20 << 30 // 20 GiB
+	diskHeadroomBelow            = diskHeadroomTestFloor - (1 << 30)
+	diskHeadroomAbove            = diskHeadroomTestFloor + (1 << 30)
+)
+
+func diskHeadroomCases() []diskHeadroomCase {
+	return []diskHeadroomCase{
 		{
 			name:   "free space above floor: no prune",
 			policy: releaseDiskHeadroomPolicy,
-			reads:  []diskHeadroomRead{{free: aboveFloor, ok: true}},
+			reads:  []diskHeadroomRead{{free: diskHeadroomAbove, ok: true}},
 		},
 		{
 			name:      "free space below floor: prune runs, re-check above floor passes",
 			policy:    releaseDiskHeadroomPolicy,
-			reads:     []diskHeadroomRead{{free: belowFloor, ok: true}, {free: aboveFloor, ok: true}},
+			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
 			wantPrune: true,
 		},
 		{
 			name:          "release still below floor after pruning refuses",
 			policy:        releaseDiskHeadroomPolicy,
-			reads:         []diskHeadroomRead{{free: belowFloor, ok: true}, {free: belowFloor, ok: true}},
+			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
 			wantPrune:     true,
 			wantErr:       true,
 			wantErrSubstr: "filling this disk is what evicts the pod running the release",
@@ -172,14 +174,13 @@ func TestEnsureDiskHeadroomWith(t *testing.T) {
 			// refusing every build on a full node blocks the work that clears it.
 			name:      "build still below floor after pruning warns but proceeds",
 			policy:    buildDiskHeadroomPolicy,
-			reads:     []diskHeadroomRead{{free: belowFloor, ok: true}, {free: belowFloor, ok: true}},
+			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
 			wantPrune: true,
-			wantErr:   false,
 		},
 		{
 			name:      "a failed prune is non-fatal but the disk can still refuse afterward",
 			policy:    releaseDiskHeadroomPolicy,
-			reads:     []diskHeadroomRead{{free: belowFloor, ok: true}, {free: belowFloor, ok: true}},
+			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
 			pruneErr:  errors.New("boom"),
 			wantPrune: true,
 			wantErr:   true,
@@ -194,13 +195,19 @@ func TestEnsureDiskHeadroomWith(t *testing.T) {
 			policy: releaseDiskHeadroomPolicy,
 			dryRun: true,
 			// Never consumed: dry run must return before the first read.
-			reads: []diskHeadroomRead{{free: belowFloor, ok: true}},
+			reads: []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
 		},
 	}
+}
 
-	for _, tc := range cases {
+// TestEnsureDiskHeadroomWith drives the decision logic with injected
+// fakes instead of a real docker daemon, per erun-common/AGENTS.md's
+// dependency-injection-over-globals guidance (mirroring the existing
+// GitCommandRunnerFunc-injection shape ensureReleaseBaseBranchUnmoved uses).
+func TestEnsureDiskHeadroomWith(t *testing.T) {
+	for _, tc := range diskHeadroomCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(testFloor, 10))
+			t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
 
 			wantReads := 0
 			if !tc.dryRun {
@@ -232,8 +239,8 @@ func TestEnsureDiskHeadroomWith(t *testing.T) {
 			if gotPrune := pruneCalls > 0; gotPrune != tc.wantPrune {
 				t.Fatalf("prune called = %v, want %v (calls=%d)", gotPrune, tc.wantPrune, pruneCalls)
 			}
-			if tc.wantPrune && prunedTo != testFloor {
-				t.Fatalf("expected the prune bounded to the floor (%d), got %d", testFloor, prunedTo)
+			if tc.wantPrune && prunedTo != diskHeadroomTestFloor {
+				t.Fatalf("expected the prune bounded to the floor (%d), got %d", diskHeadroomTestFloor, prunedTo)
 			}
 			if readCalls != wantReads {
 				t.Fatalf("expected %d free-space reads, got %d", wantReads, readCalls)
