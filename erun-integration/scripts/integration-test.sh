@@ -147,19 +147,23 @@ if [[ "$update_golden" -eq 1 ]]; then
     exit 0
 fi
 
-echo ">> running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)"
-go test -count=1 -parallel="$test_parallelism" ./...
+"$here/../scripts/timed-step.sh" "running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)" \
+    go test -count=1 -parallel="$test_parallelism" ./...
 
-echo ">> merging coverage counters into $profile"
-go tool covdata textfmt -i="$cover_dir" -o="$profile"
+"$here/../scripts/timed-step.sh" "merging coverage counters into $profile" \
+    go tool covdata textfmt -i="$cover_dir" -o="$profile"
 
-echo ">> coverage by function (last line is the total):"
+cover_func_started=$(date +%s)
 # One `go tool cover -func` pass, reused for both the printed tail and the
 # total: the profile covers every production package, so parsing it is
 # expensive enough that doing it twice was measurably the largest single step
 # in the in-build gate. The output is line-oriented and ends with the total,
 # so tail -20 / tail -1 read the same buffer instead of re-deriving it.
 cover_func_output=$(go tool cover -func="$profile")
+# Self-timed like every other marker here: a marker printed before its
+# work leaves the profiler deriving a span from the gap to the next one,
+# which under `make -j` measures an elapsed window rather than work.
+echo ">> coverage by function (last line is the total): [$(($(date +%s) - cover_func_started))s]"
 printf '%s\n' "$cover_func_output" | tail -20
 
 total_line=$(printf '%s\n' "$cover_func_output" | tail -1)

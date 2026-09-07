@@ -315,13 +315,12 @@ FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND
 FRONTEND_LINT_CACHE_DIR := $(CURDIR)/.cache/frontend-lint
 
 test-frontend:
-	@echo ">> yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)"
-	@yarn install --frozen-lockfile
-	@echo ">> issue-reference gate (erun-kit, erun-ui/frontend, erun-console)"
-	@node --test scripts/check-issue-references.test.mjs
-	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src
-	@echo ">> generating erun-ui/frontend wailsjs bindings"
-	@./erun-ui/generate-wailsjs.sh
+	@./scripts/timed-step.sh "yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)" \
+		yarn install --frozen-lockfile
+	@./scripts/timed-step.sh "issue-reference gate (erun-kit, erun-ui/frontend, erun-console)" \
+		sh -c 'node --test scripts/check-issue-references.test.mjs && node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src'
+	@./scripts/timed-step.sh "generating erun-ui/frontend wailsjs bindings" \
+		./erun-ui/generate-wailsjs.sh
 	@( \
 		printf 'erun-kit-typecheck\terun-kit typecheck\tcd erun-kit && yarn typecheck\n'; \
 		printf 'erun-kit-lint\terun-kit lint\tcd erun-kit && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-kit/\n'; \
