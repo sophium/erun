@@ -2,7 +2,9 @@
   "builder": {
     "gc": {
       "enabled": true,
-      "defaultKeepStorage": "32GB"
+      "reservedSpace": "16GB",
+      "maxUsedSpace": "40GB",
+      "minFreeSpace": "30GB"
     }
   }
 }
