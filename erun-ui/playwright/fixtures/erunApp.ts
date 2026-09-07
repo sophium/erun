@@ -136,18 +136,27 @@ export async function waitForSeededRow(
   }).toPass({ timeout: timeoutMs });
 }
 
-// captureHoverCard writes a hover card's own screenshot with a bounded wait.
+// captureHoverCard writes a hover card's own screenshot, retrying a bounded
+// attempt instead of racing a single one against it.
 //
 // A hover card exists only while the pointer rests on the row that raised it,
 // and locator.screenshot() carries no timeout of its own: it waits for the
-// element to be visible and stable for as long as its caller allows. A card
-// that closes or reflows mid-capture therefore does not fail the capture, it
-// silently consumes the entire convergence budget its caller was relying on to
-// re-drive the step -- so the step never gets a second attempt and the spec
-// reports a timeout with every assertion before it having passed. Bounding the
-// capture costs one attempt instead of the whole budget.
+// element to be visible and stable for as long as its caller allows, so an
+// unbounded call risks spending a whole convergence budget on one attempt.
+// Capping a single attempt at 2s bounds that cost, but under real contention
+// the stability half of that wait -- two consecutive animation frames with an
+// unchanged bounding box -- can genuinely take longer than 2s to observe even
+// though the card is fine: a delayed frame reads as "not stable" the same way
+// a detach does ("TimeoutError: locator.screenshot: Timeout 2000ms exceeded"
+// and "Element is not attached to the DOM" are the same race from either
+// side). A single 2s attempt has no way back from either shape; retrying a
+// fresh, equally-bounded attempt -- the same convergence every other wait in
+// this file uses -- absorbs a slow frame or a momentary detach without ever
+// accepting a card that genuinely never settles.
 export async function captureHoverCard(card: Locator, filePath: string): Promise<void> {
-  await card.screenshot({ path: filePath, timeout: 2_000 });
+  await expect(async () => {
+    await card.screenshot({ path: filePath, timeout: 2_000 });
+  }).toPass({ timeout: 10_000 });
 }
 
 export { expect };
