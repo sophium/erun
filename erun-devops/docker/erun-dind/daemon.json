@@ -2,9 +2,13 @@
   "builder": {
     "gc": {
       "enabled": true,
-      "reservedSpace": "16GB",
-      "maxUsedSpace": "40GB",
-      "minFreeSpace": "30GB"
+      "policy": [
+        {
+          "reservedSpace": "16GB",
+          "maxUsedSpace": "40GB",
+          "minFreeSpace": "30GB"
+        }
+      ]
     }
   }
 }

@@ -140,7 +140,7 @@ emitted; type is the single source of truth.
        shipped and was never run. Kept as a value so the two can be reconciled
        in one place, and so an env can pin a different sidecar without
        overriding the whole image reference. */ -}}
-{{- $dindImageTag := default "28.1.1-3" .Values.dindImageTag -}}
+{{- $dindImageTag := default "28.1.1-4" .Values.dindImageTag -}}
 {{- $dindImage := default (printf "%s/erun-dind:%s" $containerRegistry $dindImageTag) (index $imageOverrides "erun-dind") -}}
 {{- /* The gid of the `docker` group baked into the docker:<ver>-dind base, which
        owns the daemon socket. Surfaced as a value so an env can follow the base
