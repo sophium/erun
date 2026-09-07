@@ -132,7 +132,16 @@ emitted; type is the single source of truth.
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $devopsImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
-{{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1-2" (index $imageOverrides "erun-dind") -}}
+{{- /* The dind sidecar's tag is its own image VERSION, not the erun release
+       version, so it cannot come from .Chart.AppVersion the way $devopsImage
+       above does. It was previously a hardcoded literal here, which drifted:
+       bumping erun-devops/docker/erun-dind/VERSION built and published the new
+       image while this line kept deploying the old one, so a daemon.json fix
+       shipped and was never run. Kept as a value so the two can be reconciled
+       in one place, and so an env can pin a different sidecar without
+       overriding the whole image reference. */ -}}
+{{- $dindImageTag := default "28.1.1-4" .Values.dindImageTag -}}
+{{- $dindImage := default (printf "%s/erun-dind:%s" $containerRegistry $dindImageTag) (index $imageOverrides "erun-dind") -}}
 {{- /* The gid of the `docker` group baked into the docker:<ver>-dind base, which
        owns the daemon socket. Surfaced as a value so an env can follow the base
        if that group ever moves, rather than losing the daemon on the next
