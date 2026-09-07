@@ -61,6 +61,15 @@ const buildProgressConcurrentSentinel = "concurrent-phase-spans"
 // costs and conclude the wrong step is expensive.
 const buildProgressConcurrentSuffix = " (elapsed window, concurrent)"
 
+// buildProgressSelfTimedPattern matches a phase marker that carries its own
+// measured duration, e.g. `>> golangci-lint erun-ui [83s]`.
+// scripts/parallel-gate.sh emits these: it replays every job's captured
+// output only after the whole batch finishes, so the interval between two of
+// its markers describes the replay rather than the work, and a span-derived
+// duration for them is meaningless. A self-reported figure is the job's own
+// wall clock and is preferred wherever present.
+var buildProgressSelfTimedPattern = regexp.MustCompile(`^(.*) \[([0-9]+)s\]$`)
+
 // buildProgressPhase is one node of the parsed phase tree, before it is
 // attached to the real *stepTiming tree via addFinishedChild.
 type buildProgressPhase struct {
@@ -216,6 +225,12 @@ func markerPhases(markers []buildKitPhaseMarker, vertexDoneSecs float64) []build
 			dur = 0
 		}
 		name := marker.name
+		if m := buildProgressSelfTimedPattern.FindStringSubmatch(name); m != nil {
+			if secs, err := strconv.ParseFloat(m[2], 64); err == nil {
+				phases = append(phases, buildProgressPhase{name: m[1], duration: durationFromSeconds(secs)})
+				continue
+			}
+		}
 		if concurrent {
 			name += buildProgressConcurrentSuffix
 		}
