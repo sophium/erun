@@ -1,2 +1,3 @@
 audit: erun build --dry-run --version <VERSION>
+docker info -f '{{.DockerRootDir}}'
 cd <TMP> && ERUN_BUILD_VERSION=<VERSION> ./build.sh

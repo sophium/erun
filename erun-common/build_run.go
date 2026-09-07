@@ -289,6 +289,12 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		if execution.skippedLinux {
 			ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
 		}
+		// A release runs this via ensureReleaseReadyToPublish; a plain build has
+		// to run it here. Builds are what actually fill the node between
+		// releases, since every one of them grows the BuildKit cache.
+		if err := ensureBuildDiskHeadroom(ctx); err != nil {
+			return err
+		}
 		if _, err := runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push); err != nil {
 			return err
 		}
