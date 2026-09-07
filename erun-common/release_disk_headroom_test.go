@@ -136,6 +136,8 @@ type diskHeadroomCase struct {
 	policy        diskHeadroomPolicy
 	dryRun        bool
 	reads         []diskHeadroomRead
+	reclaimable   uint64
+	reclaimableOK bool
 	pruneErr      error
 	wantErr       bool
 	wantErrSubstr string
@@ -156,9 +158,10 @@ func diskHeadroomCases() []diskHeadroomCase {
 			reads:  []diskHeadroomRead{{free: diskHeadroomAbove, ok: true}},
 		},
 		{
-			name:      "free space below floor: prune runs, re-check above floor passes",
-			policy:    releaseDiskHeadroomPolicy,
-			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
+			name:        "free space below floor: prune runs, re-check above floor passes",
+			policy:      releaseDiskHeadroomPolicy,
+			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
+			reclaimable: 1 << 40, reclaimableOK: true,
 			wantPrune: true,
 		},
 		{
@@ -172,18 +175,49 @@ func diskHeadroomCases() []diskHeadroomCase {
 		{
 			// A build is small enough that proceeding is usually fine, and
 			// refusing every build on a full node blocks the work that clears it.
-			name:      "build still below floor after pruning warns but proceeds",
-			policy:    buildDiskHeadroomPolicy,
-			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
+			name:        "build still below floor after pruning warns but proceeds",
+			policy:      buildDiskHeadroomPolicy,
+			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
+			reclaimable: 1 << 40, reclaimableOK: true,
 			wantPrune: true,
 		},
 		{
-			name:      "a failed prune is non-fatal but the disk can still refuse afterward",
-			policy:    releaseDiskHeadroomPolicy,
-			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
-			pruneErr:  errors.New("boom"),
+			name:        "a failed prune is non-fatal but the disk can still refuse afterward",
+			policy:      releaseDiskHeadroomPolicy,
+			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
+			pruneErr:    errors.New("boom"),
+			reclaimable: 1 << 40, reclaimableOK: true,
 			wantPrune: true,
 			wantErr:   true,
+		},
+		{
+			// --min-free-space keeps pruning until the floor is met, so a cache
+			// that cannot reach it is destroyed in full for nothing. Declining is
+			// strictly better than reclaiming everything and refusing anyway.
+			name:          "a prune that cannot reach the floor is declined, not attempted",
+			policy:        releaseDiskHeadroomPolicy,
+			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
+			reclaimable:   1 << 20,
+			reclaimableOK: true,
+			wantPrune:     false,
+			wantErr:       true,
+			wantErrSubstr: "filling this disk is what evicts the pod running the release",
+		},
+		{
+			// A build declines the same prune but still proceeds.
+			name:          "a build declines an unreachable prune and proceeds",
+			policy:        buildDiskHeadroomPolicy,
+			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
+			reclaimable:   1 << 20,
+			reclaimableOK: true,
+			wantPrune:     false,
+		},
+		{
+			// An unreadable figure is not a reason to skip the remedy.
+			name:      "an unknown reclaimable figure still prunes",
+			policy:    releaseDiskHeadroomPolicy,
+			reads:     []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
+			wantPrune: true,
 		},
 		{
 			name:   "inconclusive read: skip the check, no prune, no refusal",
@@ -220,6 +254,9 @@ func TestEnsureDiskHeadroomWith(t *testing.T) {
 				readCalls++
 				return read.free, read.total, read.ok
 			}
+			readReclaimable := func() (uint64, bool) {
+				return tc.reclaimable, tc.reclaimableOK
+			}
 			pruneCalls := 0
 			var prunedTo uint64
 			prune := func(target uint64) error {
@@ -228,7 +265,7 @@ func TestEnsureDiskHeadroomWith(t *testing.T) {
 				return tc.pruneErr
 			}
 
-			err := ensureDiskHeadroomWith(Context{DryRun: tc.dryRun}, tc.policy, readFree, prune)
+			err := ensureDiskHeadroomWith(Context{DryRun: tc.dryRun}, tc.policy, readFree, readReclaimable, prune)
 
 			if tc.wantErr != (err != nil) {
 				t.Fatalf("error = %v, wantErr = %v", err, tc.wantErr)
@@ -246,5 +283,34 @@ func TestEnsureDiskHeadroomWith(t *testing.T) {
 				t.Fatalf("expected %d free-space reads, got %d", wantReads, readCalls)
 			}
 		})
+	}
+}
+
+func TestParseDockerSize(t *testing.T) {
+	// Shapes taken from real `docker system df --format` output on a build box.
+	cases := []struct {
+		in   string
+		want uint64
+		ok   bool
+	}{
+		{"8.914GB", 8914000000, true},
+		{"0B", 0, true},
+		{"250.8MB", 250800000, true},
+		{"103.4GB", 103400000000, true},
+		{"512kB", 512000, true},
+		// Some rows carry a trailing percentage; the number is still the size.
+		{"77.29GB (100%)", 77290000000, true},
+		{"", 0, false},
+		{"not-a-size", 0, false},
+	}
+	for _, tc := range cases {
+		got, ok := parseDockerSize(tc.in)
+		if ok != tc.ok {
+			t.Errorf("parseDockerSize(%q) ok = %v, want %v", tc.in, ok, tc.ok)
+			continue
+		}
+		if ok && got != tc.want {
+			t.Errorf("parseDockerSize(%q) = %d, want %d", tc.in, got, tc.want)
+		}
 	}
 }
