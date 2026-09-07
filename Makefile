@@ -314,9 +314,16 @@ FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND
 # still re-lints/re-formats that file; this only skips files nothing about.
 FRONTEND_LINT_CACHE_DIR := $(CURDIR)/.cache/frontend-lint
 
+# --prefer-offline because a warm cache is not the same as an offline
+# install: yarn classic still reaches the registry for packages it
+# already holds, so one slow response fails a build that needed nothing
+# from the network. That cost a release: ESOCKETTIMEDOUT on
+# lucide-react after 614s of retries, with that exact tarball sitting in
+# the cache. It stays a preference, not --offline, so a genuinely new
+# dependency still resolves instead of failing the build outright.
 test-frontend:
 	@./scripts/timed-step.sh "yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)" \
-		yarn install --frozen-lockfile
+		yarn install --frozen-lockfile --prefer-offline
 	@./scripts/timed-step.sh "issue-reference gate (erun-kit, erun-ui/frontend, erun-console)" \
 		sh -c 'node --test scripts/check-issue-references.test.mjs && node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src'
 	@./scripts/timed-step.sh "generating erun-ui/frontend wailsjs bindings" \
@@ -664,7 +671,7 @@ fast-check: lint
 	@echo ">> issue-reference gate (Go, whole repo)"
 	@(cd erun-integration && go test -count=1 -run '^(TestNoIssueReferenceInCode|TestIssueReferenceBaselineIsCurrent)$$' .)
 	@echo ">> yarn install (root workspace: erun-kit, erun-console, erun-ui/frontend)"
-	@yarn install --frozen-lockfile
+	@yarn install --frozen-lockfile --prefer-offline
 	@echo ">> issue-reference gate (TypeScript: erun-kit, erun-ui/frontend, erun-console)"
 	@node --test scripts/check-issue-references.test.mjs
 	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src
