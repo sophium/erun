@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Runs a list of independent shell commands with bounded concurrency,
 # buffering each command's combined stdout/stderr so concurrent output never
 # interleaves, then emits every buffered block in input order under its own
@@ -227,9 +227,21 @@ while IFS="$tab" read -r short_name marker cmd; do
 		echo $(( $(date +%s) - job_started )) > "$tmp/$i.secs"
 	) &
 	running=$((running + 1))
+	# Start the next job as soon as ANY running job finishes, rather than
+	# draining the whole batch first. With a batch drain a single long job
+	# holds every free slot idle until it finishes, so a list whose durations
+	# are uneven costs the sum of each batch's slowest member instead of
+	# max(job). Measured on test-frontend's fifteen workspace gates at width
+	# 12: the 64s frontend test suite sat in the first batch and a ~40s
+	# console test suite was stranded behind it in the second, for ~104s where
+	# a queue would have cost ~64s.
+	#
+	# `wait -n` is why this script is bash rather than sh; POSIX wait has no
+	# way to block on "whichever finishes first". bash is present wherever
+	# this runs (the erun-devops image and developer machines alike).
 	if [ "$running" -ge "$max_parallel" ]; then
-		wait
-		running=0
+		wait -n
+		running=$((running - 1))
 	fi
 done
 wait
