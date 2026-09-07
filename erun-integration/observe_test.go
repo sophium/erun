@@ -132,6 +132,31 @@ func TestObserve(t *testing.T) {
 		golden.Equal(t, "observe/real_run_walks_certificate_failure_chain", normalize.Apply(result.Combined))
 	})
 
+	// real_run_kubectl_unreachable_reports_one_sanitized_line is erun#2392: an
+	// unreachable cluster API server made kubectl's retries emit klog's raw
+	// "Unhandled Error" frames (severity/timestamp/goroutine-id/source-location,
+	// none of it operator-relevant) straight into observe's own error, once per
+	// retry. sanitizeKubectlFailureOutput already existed for this shape
+	// (erun#1766) but observe's own kubectl error path never called it. The
+	// stub reproduces kubectl's real retry-storm shape verbatim.
+	t.Run("real_run_kubectl_unreachable_reports_one_sanitized_line", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		klogFrame := `E0907 17:02:43.157343   81639 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://10.0.0.1:6443/api?timeout=32s\": dial tcp 10.0.0.1:6443: i/o timeout"`
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+			Stderr: klogFrame + "\n" + klogFrame + "\n" + klogFrame + "\n" + klogFrame + "\n" + klogFrame + "\n" +
+				`Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"observe"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an unreachable cluster, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_kubectl_unreachable_reports_one_sanitized_line", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_secret_presence_check", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
