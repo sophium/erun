@@ -438,7 +438,7 @@ func runtimeDiskUsageFromValues(v map[string]string) RuntimeDiskUsage {
 // parseRuntimeDFUsage reads the Total/Used columns (1024-byte blocks,
 // guaranteed by -Pk) from `df`'s POSIX-format output, locating them by their
 // neighbor -- the "Capacity" percentage column -- rather than a fixed index.
-// Mirrors parseDFAvailableBytes in release_disk_headroom.go: a long
+// Mirrors parseDFDiskBytes in release_disk_headroom.go: a long
 // filesystem identifier pushes the data row's remaining columns left by one
 // when it wraps onto its own line, so a fixed index reads the wrong column on
 // exactly the inputs that most need this to work.

@@ -119,7 +119,8 @@ find "<repo-root>" -type f -path '*/k8s/*/Chart.yaml' \
 └── <tenant>-devops/
     ├── docker/
     │   └── <component>/
-    │       └── Dockerfile              # multi-stage: builder -> thin runtime
+    │       ├── Dockerfile              # multi-stage: builder -> thin runtime
+    │       └── Dockerfile.dockerignore # this component build context
     └── k8s/
         └── <component>/
             ├── Chart.yaml
@@ -131,8 +132,75 @@ find "<repo-root>" -type f -path '*/k8s/*/Chart.yaml' \
 
 Verbatim-copyable plumbing ships alongside this `SKILL.md` under
 `templates/`. Substitute the placeholders (`__COMPONENT__`, `__PORT__`,
-`__HEALTH_PATH__`, `__ENV__`) and use them as the source of truth — do not
+`__SOURCE_DIR__`, `__HEALTH_PATH__`, `__ENV__`) and use them as the source of truth — do not
 freelance the boilerplate.
+
+## Build speed
+
+The Dockerfile produced here is rebuilt for the life of the service, so its
+layer order is a standing cost rather than a one-off. The blueprint already
+encodes every practice below — what follows is the reasoning, so the shape
+survives being adapted to another toolchain.
+
+**`COPY` sources resolve at the repo root.** A Dockerfile at
+`<tenant>-devops/docker/<component>/Dockerfile` is erun’s *standard layout*,
+and a standard-layout build context is the **project root** — so every `COPY`
+names a path relative to that, never to the Dockerfile’s own directory. (Only
+a Dockerfile outside that layout falls back to a context of its own
+directory, and then cannot `COPY` from anywhere else in the tree.) So
+`COPY daemon.json /etc/` sitting right beside its own `daemon.json` fails with
+`not found`; write the full
+`COPY <tenant>-devops/docker/<component>/daemon.json /etc/`. This one has
+killed a release mid-flight.
+
+**Keep the `COPY` narrow, then ignore what remains inside it.** BuildKit
+transfers only what a `COPY` actually references, so `COPY <source-dir>/ ./`
+already keeps the rest of the repo out - a `node_modules` sibling at the repo
+root costs nothing, and the widely-repeated "the whole context gets uploaded"
+is legacy-builder behaviour, not BuildKit’s. What a narrow `COPY`
+cannot avoid is bloat *inside* the copied tree. Measured with 80 MB of
+`node_modules` and `dist` inside the source directory: **83.91 MB transferred
+on every build without an ignore file, 361 B with one**. Copy
+`templates/dockerignore` to
+`<tenant>-devops/docker/<component>/Dockerfile.dockerignore` - BuildKit reads
+an ignore file named after its Dockerfile and sitting beside it, which is what
+lets each component under the shared repo-root context carry its own instead
+of one root file trying to serve them all.
+
+**Order layers rarest-changing first.** Copy dependency manifests and resolve
+them *before* copying source, so an ordinary source edit reuses the dependency
+layer instead of re-resolving it. Measured on the template: a source-only edit
+rebuilds in **3 s against 58 s cold**, with `go mod download` cached.
+
+**Declare `ARG` as late as it is used.** An `ARG` invalidates the layers below
+it that use it. This matters more than it looks: `erun build` runs one
+`docker build --platform ...` per target architecture, sharing one build
+cache. Keep the test step *above* `ARG TARGETARCH` and it is
+architecture-independent, so the second per-arch invocation reuses the cached
+test layer; move it below and the suite runs again for every architecture.
+
+**Cache-mount every package manager.** A `--mount=type=cache` survives the
+cache-busting source change that invalidates the layer around it:
+`/go/pkg/mod` and `/root/.cache/go-build` (Go), `/root/.npm` (npm),
+`/root/.cache/pip` (pip), `/root/.m2` (Maven), `/var/cache/apt` with
+`/var/lib/apt` (apt). For apt, also delete
+`/etc/apt/apt.conf.d/docker-clean` - Debian-derived images ship it to discard
+downloaded `.deb`s, and it defeats the mount entirely. Package installation is
+routinely the single largest phase of a cold build.
+
+**Pin base images to a version.** `alpine:3.20`, never `alpine:latest`: a
+floating tag invalidates every layer beneath it the day it moves, with no
+change on your side and no way to tell from the diff.
+
+**Let independent stages stay independent.** BuildKit runs stages with no
+dependency between them concurrently, so a runtime stage needing only the
+builder’s final artefact provisions itself while the build is still running.
+Folding unrelated work into a single stage serialises it for nothing.
+
+**Cache mounts grow without bound** and are not reclaimed by
+`docker image prune`. On a long-lived builder, reclaim with
+`docker builder prune --min-free-space <bytes>`, which no-ops until free space
+is actually short.
 
 ## The deploy contract (binding)
 
@@ -218,9 +286,16 @@ Run the check above. Stop and report if the name collides elsewhere.
 
 Copy `templates/Dockerfile` to
 `<tenant>-devops/docker/<component>/Dockerfile`, substituting
-`__COMPONENT__` and `__PORT__`. Adapt the builder stage to the actual
-toolchain if it isn't Go — keep the test-then-build shape and the thin,
-non-root runtime stage.
+`__COMPONENT__`, `__PORT__`, and `__SOURCE_DIR__` (the source location from
+input 3, written relative to the repo root - that is the build context).
+Adapt the builder stage to the actual toolchain if it isn't Go — keep the
+test-then-build shape, the thin non-root runtime stage, and the layer order,
+which is load-bearing for build time (see "Build speed").
+
+Also copy `templates/dockerignore` to
+`<tenant>-devops/docker/<component>/Dockerfile.dockerignore`, substituting
+`__SOURCE_DIR__`. Without it, build outputs and dependency trees inside the
+source directory are shipped and cache-keyed on every single build.
 
 ### Step 4 — write the chart
 
