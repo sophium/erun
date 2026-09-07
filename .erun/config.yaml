@@ -10,8 +10,46 @@ environments:
     # actually schedule arm64 workloads — it cannot today.
     code2:
         docker:
+            fingerprints:
+                erun-backend-postgres: cb6d9b701f4ad75b
+                erun-powerdns: 28aba123cf9f7c73
+                erun-ubuntu: 43855fd29e16b9aa
+                erun-zitadel: 3cba9e2a8ff916f2
+                erun-zitadel-login: f3c59225f0f48170
             platforms:
                 - linux/amd64
+    # code1/code3/code4: the erun tenant's other persistent remote-agent envs.
+    # They carry the same fingerprint pins as code2 and local because a pin is
+    # a property of the published image, not of the environment reading it, and
+    # DockerFingerprintsForEnvironment resolves the environment key exactly --
+    # there is no shared or default scope to inherit from, so an environment
+    # with no entry here silently rebuilds every pinned base from source.
+    # Keep these in step with local's block; they must all name the fingerprint
+    # the current Dockerfile computes, or the fast path quietly does nothing.
+    code1:
+        docker:
+            fingerprints:
+                erun-backend-postgres: cb6d9b701f4ad75b
+                erun-powerdns: 28aba123cf9f7c73
+                erun-ubuntu: 43855fd29e16b9aa
+                erun-zitadel: 3cba9e2a8ff916f2
+                erun-zitadel-login: f3c59225f0f48170
+    code3:
+        docker:
+            fingerprints:
+                erun-backend-postgres: cb6d9b701f4ad75b
+                erun-powerdns: 28aba123cf9f7c73
+                erun-ubuntu: 43855fd29e16b9aa
+                erun-zitadel: 3cba9e2a8ff916f2
+                erun-zitadel-login: f3c59225f0f48170
+    code4:
+        docker:
+            fingerprints:
+                erun-backend-postgres: cb6d9b701f4ad75b
+                erun-powerdns: 28aba123cf9f7c73
+                erun-ubuntu: 43855fd29e16b9aa
+                erun-zitadel: 3cba9e2a8ff916f2
+                erun-zitadel-login: f3c59225f0f48170
     # local: the default environment name `erun init` assigns when none is
     # given (see erun-common/init.go's DefaultEnvironment). Deliberately left
     # unpinned: unlike code2 (a specific, confirmed-amd64 pod), "local" is a
@@ -30,7 +68,7 @@ environments:
             fingerprints:
                 erun-backend-postgres: cb6d9b701f4ad75b
                 erun-powerdns: 28aba123cf9f7c73
-                erun-ubuntu: 6ffef71a59498123
+                erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
         k8s:
