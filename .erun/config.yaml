@@ -26,6 +26,17 @@ environments:
     # with no entry here silently rebuilds every pinned base from source.
     # Keep these in step with local's block; they must all name the fingerprint
     # the current Dockerfile computes, or the fast path quietly does nothing.
+    #
+    # They also carry code2's amd64 platform pin, for the reason its own
+    # comment gives: they share that node, it is x86_64, and a build here
+    # publishes nothing, so linux/arm64 only buys qemu emulation for an
+    # artifact nobody consumes. Measured on one gate build: amd64 13m21s
+    # against arm64 10m30s, so the discarded half is ~44% of the wall clock.
+    #
+    # This narrows non-release builds only -- `erun build --release` resolves
+    # both architectures unconditionally and never consults this, so published
+    # images are unaffected. Do not widen it back without re-confirming this
+    # node can schedule arm64 workloads; it cannot today.
     code1:
         docker:
             fingerprints:
@@ -34,6 +45,8 @@ environments:
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
+            platforms:
+                - linux/amd64
     code3:
         docker:
             fingerprints:
@@ -42,6 +55,8 @@ environments:
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
+            platforms:
+                - linux/amd64
     code4:
         docker:
             fingerprints:
@@ -50,6 +65,8 @@ environments:
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
+            platforms:
+                - linux/amd64
     # local: the default environment name `erun init` assigns when none is
     # given (see erun-common/init.go's DefaultEnvironment). Deliberately left
     # unpinned: unlike code2 (a specific, confirmed-amd64 pod), "local" is a
