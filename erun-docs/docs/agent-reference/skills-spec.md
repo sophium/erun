@@ -89,7 +89,7 @@ On every entrypoint run, `initialize_claude_config` and `initialize_codex_config
 
 The install both **installs a skill when absent and refreshes it when the baked copy changed**, so a rebuilt image's updated skill reaches existing envs — while **preserving in-pod edits**. Provenance is tracked per skill by recording the baked `SKILL.md` hash in a `.erun-skill-baked-sha256` marker: a copy whose `SKILL.md` still matches its marker is unmodified since erun installed it and is refreshed to the baked version, while one that differs was edited in-pod and is left untouched (a legacy copy with no marker is treated as unmodified and adopted on the first refresh). So an un-edited skill tracks the image across upgrades, and a skill you edit inside a running env survives both pod restarts and image rebuilds.
 
-### Host orchestrator (desktop)
+### Host orchestrator (desktop) {#host-orchestrator-desktop}
 
 The desktop app installs the same canonical skills into the host's `~/.claude/skills/<name>/` for host-side orchestrator sessions, using the identical marker-based install-or-refresh — so a host orchestrator tracks the latest skill on each launch while preserving any host-side edits.
 

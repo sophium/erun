@@ -463,6 +463,12 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	if err := ensureOrchestratorSkills(); err != nil {
 		a.reportSkillsNotInstalled(err)
 	}
+	// Same contract for the reusable agents (erun-builder/erun-reviewer):
+	// installed into ~/.claude/agents so a host orchestrator can delegate to
+	// them, best-effort and reported the same way skills are.
+	if err := ensureOrchestratorAgents(); err != nil {
+		a.reportAgentsNotInstalled(err)
+	}
 	// Inject the operating contract on every session start and reopen via a
 	// SessionStart hook, so an orchestrator always operates under its current
 	// contract instead of relying on the model to invoke a skill it can skip.
@@ -727,6 +733,189 @@ func fileSHA256(path string) (string, error) {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// buildAgentsSource is the erun-skills/agents directory of the checkout this
+// binary was built from, stamped in by the desktop build scripts — the exact
+// counterpart of buildSkillsSource above, for the reusable agent definitions
+// (erun-builder/erun-reviewer) instead of skills.
+var buildAgentsSource = ""
+
+// noAgentsSourceError mirrors noSkillsSourceError for the agents source.
+type noAgentsSourceError struct {
+	stamped string
+	exeDir  string
+}
+
+func (e *noAgentsSourceError) Error() string {
+	built := "this build records no source checkout"
+	if e.stamped != "" {
+		built = "its build checkout " + e.stamped + " is not on this machine"
+	}
+	near := "the executable's own directory"
+	if e.exeDir != "" {
+		near = e.exeDir
+	}
+	return "no erun reusable agents source resolved: " + built + ", and no erun-skills/agents sits above " + near
+}
+
+// hostAgentsSource resolves the directory holding the canonical erun reusable
+// agents (erun-skills/agents/<name>.md) on the host, mirroring hostSkillsSource's
+// override → build-stamp → walk-up resolution order.
+func hostAgentsSource() (string, error) {
+	if override := strings.TrimSpace(os.Getenv("ERUN_AGENTS_DIR")); override != "" {
+		return override, nil
+	}
+	stamped := strings.TrimSpace(buildAgentsSource)
+	if isExistingDir(stamped) {
+		return stamped, nil
+	}
+	found, exeDir := agentsSourceNearExecutable()
+	if found != "" {
+		return found, nil
+	}
+	return "", &noAgentsSourceError{stamped: stamped, exeDir: exeDir}
+}
+
+// agentsSourceNearExecutable walks up from the running binary looking for an
+// erun-skills/agents directory, mirroring skillsSourceNearExecutable.
+func agentsSourceNearExecutable() (string, string) {
+	exe, err := runningExecutable()
+	if err != nil {
+		return "", ""
+	}
+	exeDir := filepath.Dir(exe)
+	dir := exeDir
+	for i := 0; i < 8; i++ {
+		if cand := filepath.Join(dir, "erun-skills", "agents"); isExistingDir(cand) {
+			return cand, exeDir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", exeDir
+}
+
+// reportAgentsNotInstalled mirrors reportSkillsNotInstalled for the agents
+// source.
+func (a *App) reportAgentsNotInstalled(cause error) {
+	log.Printf("erun-app: orchestrator agents not installed: %v", cause)
+	a.mu.Lock()
+	reported := a.agentsSourceReported
+	a.agentsSourceReported = true
+	a.mu.Unlock()
+	if !reported {
+		a.emitAppNotification("warning", orchestratorAgentsNotInstalledNotice(cause))
+	}
+}
+
+// orchestratorAgentsNotInstalledNotice mirrors orchestratorSkillsNotInstalledNotice
+// for the reusable agents (erun-builder/erun-reviewer).
+func orchestratorAgentsNotInstalledNotice(cause error) string {
+	return "Orchestrator agents were not installed or refreshed: " + cause.Error() +
+		". The orchestrator still starts, but its agents stay at whatever is already in ~/.claude/agents. " +
+		"Set ERUN_AGENTS_DIR to an erun-skills/agents directory to install from, " +
+		"or rebuild the desktop from its checkout with erun-ui/build.sh (build.ps1 on Windows)."
+}
+
+// orchestratorAgentMarker records, per installed agent, the sha256 of the
+// <name>.md erun last installed — the sidecar-file counterpart of
+// orchestratorSkillMarker, since an agent is one flat file rather than a
+// directory. Mirrors the runtime pod's agents-install.sh marker.
+const orchestratorAgentMarker = ".erun-agent-baked-sha256"
+
+// ensureOrchestratorAgents installs every erun reusable agent into
+// ~/.claude/agents so the orchestrator's Claude session can delegate to
+// erun-builder/erun-reviewer by default, with no operator install step.
+// Mirrors ensureOrchestratorSkills, adapted for flat <name>.md files instead of
+// skill directories.
+func ensureOrchestratorAgents() error {
+	root, err := hostAgentsSource()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("read agents source %s: %w", root, err)
+	}
+	home, homeErr := os.UserHomeDir()
+	if strings.TrimSpace(home) == "" {
+		if homeErr == nil {
+			homeErr = errors.New("it resolved empty")
+		}
+		return fmt.Errorf("resolve the home directory to install agents into: %w", homeErr)
+	}
+	destRoot := filepath.Join(home, ".claude", "agents")
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		if err := installOrRefreshOrchestratorAgent(filepath.Join(root, entry.Name()), filepath.Join(destRoot, entry.Name())); err != nil {
+			return fmt.Errorf("install agent %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
+}
+
+// installOrRefreshOrchestratorAgent reconciles one installed agent file against
+// its shipped source: install when absent; refresh when the installed copy is
+// still the one erun wrote (marker matches, or a legacy copy with no marker);
+// leave a copy the operator edited in place untouched. Mirrors
+// installOrRefreshOrchestratorSkill for a single file instead of a directory.
+func installOrRefreshOrchestratorAgent(src, dst string) error {
+	if _, err := os.Stat(dst); err != nil {
+		return copyOrchestratorAgent(src, dst) // absent — install
+	}
+	bakedSHA, err := fileSHA256(src)
+	if err != nil {
+		return err
+	}
+	instSHA, err := fileSHA256(dst)
+	if err != nil {
+		return err
+	}
+	marker := dst + orchestratorAgentMarker
+	if instSHA == bakedSHA {
+		// Already the shipped version; record the marker so a future upgrade can
+		// still tell this untouched copy from an edited one (also adopts a
+		// pre-marker copy that happens to match).
+		return os.WriteFile(marker, []byte(bakedSHA+"\n"), 0o644)
+	}
+	markerSHA := ""
+	if b, readErr := os.ReadFile(marker); readErr == nil {
+		markerSHA = strings.TrimSpace(string(b))
+	}
+	if markerSHA == "" || instSHA == markerSHA {
+		// Unmodified since erun installed it, or a legacy copy with no marker —
+		// refresh to the shipped version.
+		return copyOrchestratorAgent(src, dst)
+	}
+	return nil // edited in place — preserve the operator's copy
+}
+
+// copyOrchestratorAgent replaces dst with a fresh copy of src and records the
+// shipped file's hash in its sidecar marker, so a later launch can distinguish
+// an untouched copy from an edited one. Mirrors copyOrchestratorSkill for a
+// single file instead of a directory tree.
+func copyOrchestratorAgent(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return err
+	}
+	sha, err := fileSHA256(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst+orchestratorAgentMarker, []byte(sha+"\n"), 0o644)
 }
 
 // orchestratorContractFallback is printed when the shared CLAUDE.md is somehow
