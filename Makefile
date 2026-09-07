@@ -285,7 +285,19 @@ test-erun-dns01-webhook:
 FRONTEND_GATE_JOB_MEMORY_MIB := 650
 # Reserves room for lint/helm-chart-tests under check-gate's own concurrent
 # `-j` fan-out -- see CHECK_GATE_FANOUT_PEAK_MEMORY_MIB's own comment above.
-FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width 3 $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
+#
+# 15, not 3: each workspace's five gates are dispatched as their own job
+# rather than chained behind `&&`. They are independent -- typecheck, lint,
+# format:check and test all read the workspace's sources, and `build` is the
+# only writer, into `dist`, which none of the other four read. Chained, a
+# workspace cost the sum of its five; dispatched separately it costs the
+# longest. Measured on erun-ui/frontend, the workspace that gates the build:
+# typecheck 3s, lint ~5s warm, format:check 8s, build 3s, test 64s -- ~83s
+# chained against ~64s at its longest, and that workspace sits on the
+# critical path (test-frontend -> test-playwright) where the saving is
+# wall-clock rather than slack.
+FRONTEND_GATE_JOB_COUNT := 15
+FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND_GATE_JOB_COUNT) $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
@@ -311,9 +323,21 @@ test-frontend:
 	@echo ">> generating erun-ui/frontend wailsjs bindings"
 	@./erun-ui/generate-wailsjs.sh
 	@( \
-		printf 'erun-kit\terun-kit gates\tcd erun-kit && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-kit/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-kit.json && yarn build && yarn test\n'; \
-		printf 'erun-ui-frontend\terun-ui/frontend gates\tcd erun-ui/frontend && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json && yarn build && yarn test\n'; \
-		printf 'erun-console\terun-console gates\tcd erun-console && yarn typecheck && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/ && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json && yarn build && yarn test\n' \
+		printf 'erun-kit-typecheck\terun-kit typecheck\tcd erun-kit && yarn typecheck\n'; \
+		printf 'erun-kit-lint\terun-kit lint\tcd erun-kit && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-kit/\n'; \
+		printf 'erun-kit-format\terun-kit format:check\tcd erun-kit && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-kit.json\n'; \
+		printf 'erun-kit-build\terun-kit build\tcd erun-kit && yarn build\n'; \
+		printf 'erun-kit-test\terun-kit test\tcd erun-kit && yarn test\n'; \
+		printf 'erun-ui-frontend-typecheck\terun-ui/frontend typecheck\tcd erun-ui/frontend && yarn typecheck\n'; \
+		printf 'erun-ui-frontend-lint\terun-ui/frontend lint\tcd erun-ui/frontend && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/\n'; \
+		printf 'erun-ui-frontend-format\terun-ui/frontend format:check\tcd erun-ui/frontend && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json\n'; \
+		printf 'erun-ui-frontend-build\terun-ui/frontend build\tcd erun-ui/frontend && yarn build\n'; \
+		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test\n'; \
+		printf 'erun-console-typecheck\terun-console typecheck\tcd erun-console && yarn typecheck\n'; \
+		printf 'erun-console-lint\terun-console lint\tcd erun-console && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/\n'; \
+		printf 'erun-console-format\terun-console format:check\tcd erun-console && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json\n'; \
+		printf 'erun-console-build\terun-console build\tcd erun-console && yarn build\n'; \
+		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test\n' \
 	) | ./scripts/parallel-gate.sh $(FRONTEND_GATE_PARALLELISM) test-frontend
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
