@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.257
+appVersion: 1.0.258
 description: Publish the ERun documentation site to Cloudflare Pages
 name: erun-docs
 type: application
-version: 1.0.257
+version: 1.0.258
