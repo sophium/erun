@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Runs a list of independent shell commands with bounded concurrency,
 # buffering each command's combined stdout/stderr so concurrent output never
 # interleaves, then emits every buffered block in input order under its own
@@ -218,16 +218,30 @@ while IFS="$tab" read -r short_name marker cmd; do
 	printf '%s' "$short_name" > "$tmp/$i.name"
 	printf '%s' "$marker" > "$tmp/$i.marker"
 	(
+		job_started=$(date +%s)
 		if sh -c "$cmd" > "$tmp/$i.out" 2>&1; then
 			echo 0 > "$tmp/$i.rc"
 		else
 			echo 1 > "$tmp/$i.rc"
 		fi
+		echo $(( $(date +%s) - job_started )) > "$tmp/$i.secs"
 	) &
 	running=$((running + 1))
+	# Start the next job as soon as ANY running job finishes, rather than
+	# draining the whole batch first. With a batch drain a single long job
+	# holds every free slot idle until it finishes, so a list whose durations
+	# are uneven costs the sum of each batch's slowest member instead of
+	# max(job). Measured on test-frontend's fifteen workspace gates at width
+	# 12: the 64s frontend test suite sat in the first batch and a ~40s
+	# console test suite was stranded behind it in the second, for ~104s where
+	# a queue would have cost ~64s.
+	#
+	# `wait -n` is why this script is bash rather than sh; POSIX wait has no
+	# way to block on "whichever finishes first". bash is present wherever
+	# this runs (the erun-devops image and developer machines alike).
 	if [ "$running" -ge "$max_parallel" ]; then
-		wait
-		running=0
+		wait -n
+		running=$((running - 1))
 	fi
 done
 wait
@@ -236,7 +250,12 @@ total=$i
 failed=""
 j=1
 while [ "$j" -le "$total" ]; do
-	echo ">> $(cat "$tmp/$j.marker")"
+	# The job's own measured duration, not the gap to the next marker. This
+	# loop replays captured output after every job has finished, so the
+	# markers below are emitted back-to-back and carry no timing information
+	# of their own -- anything derived from the interval between them
+	# describes the replay, not the work.
+	echo ">> $(cat "$tmp/$j.marker") [$(cat "$tmp/$j.secs" 2>/dev/null || echo 0)s]"
 	cat "$tmp/$j.out"
 	if [ "$(cat "$tmp/$j.rc")" != "0" ]; then
 		failed="$failed $(cat "$tmp/$j.name")"
