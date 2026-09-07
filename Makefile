@@ -405,6 +405,20 @@ test-frontend:
 # (see check-gate's own comment) this is what stops test-playwright from
 # starting against a half-written frontend build; every other check-gate
 # prerequisite is independent and may run alongside either of these two.
+# ...and after test-erun-ui-windows-build, which embeds erun-ui/frontend/dist
+# while this target's own build.sh rewrites it. Both already depend on
+# test-frontend, so both start only once dist exists -- but that orders their
+# *starts*, not their access to the directory, and `vite build` empties dist
+# before repopulating it. The embed then reads it mid-rewrite:
+#
+#   assets_production.go:10:12: pattern all:frontend/dist:
+#     cannot embed directory frontend/dist: contains no embeddable files
+#
+# It went unnoticed while build.sh spent ~2 minutes on gates before its vite
+# build; dropping those (erun#2375) moved the rewrite early enough to collide.
+# The cross-compile is ~4s, so sequencing it first costs nothing and removes
+# the overlap outright rather than making it less likely.
+test-playwright: test-erun-ui-windows-build
 test-playwright: test-frontend
 
 test-playwright:
