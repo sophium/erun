@@ -57,6 +57,12 @@ const minDiskHeadroomPercent uint64 = 10
 // ensureDiskHeadroomWith can be unit-tested without a real docker daemon.
 type diskHeadroomFreeSpaceFunc func() (free, total uint64, ok bool)
 
+// diskHeadroomReclaimableFunc reports how much a build-cache prune could
+// plausibly free, so the caller can decline a prune that cannot close the gap.
+// ok is false when the figure is unreadable, which is treated as "prune anyway"
+// rather than "never prune": an unknown is not a reason to skip the remedy.
+type diskHeadroomReclaimableFunc func() (uint64, bool)
+
 // diskHeadroomPruneFunc bounds a build-cache prune to leave at least floor
 // bytes free. Injectable for the same reason as diskHeadroomFreeSpaceFunc.
 type diskHeadroomPruneFunc func(floor uint64) error
@@ -84,14 +90,14 @@ var (
 // is still too full afterward — rather than letting the build itself trigger
 // the eviction it cannot recover from.
 func ensureReleaseDiskHeadroom(ctx Context) error {
-	return ensureDiskHeadroomWith(ctx, releaseDiskHeadroomPolicy, dockerRootDiskBytes, runDiskHeadroomPrune)
+	return ensureDiskHeadroomWith(ctx, releaseDiskHeadroomPolicy, dockerRootDiskBytes, reclaimableBuildCacheBytes, runDiskHeadroomPrune)
 }
 
 // ensureBuildDiskHeadroom is the same preflight for an ordinary build, which
 // warns instead of refusing. It is the one that actually runs between releases,
 // where the cache growth that fills a node happens.
 func ensureBuildDiskHeadroom(ctx Context) error {
-	return ensureDiskHeadroomWith(ctx, buildDiskHeadroomPolicy, dockerRootDiskBytes, runDiskHeadroomPrune)
+	return ensureDiskHeadroomWith(ctx, buildDiskHeadroomPolicy, dockerRootDiskBytes, reclaimableBuildCacheBytes, runDiskHeadroomPrune)
 }
 
 // ensureDiskHeadroomWith holds the decision logic: read first, prune only when
@@ -102,7 +108,7 @@ func ensureBuildDiskHeadroom(ctx Context) error {
 // inconclusive read is not an answer — the same "known failure over invented
 // behavior" posture as ensureReleaseBaseBranchUnmoved — so it lets the run
 // proceed exactly as it does today, with no prune at all.
-func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree diskHeadroomFreeSpaceFunc, prune diskHeadroomPruneFunc) error {
+func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree diskHeadroomFreeSpaceFunc, readReclaimable diskHeadroomReclaimableFunc, prune diskHeadroomPruneFunc) error {
 	ctx.TraceCommand("", "docker", "info", "-f", "{{.DockerRootDir}}")
 	if ctx.DryRun {
 		return nil
@@ -119,6 +125,20 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 		return nil
 	}
 
+	// A prune that cannot reach the floor is not a smaller win, it is a pure
+	// loss: --min-free-space keeps going until the target is met, so a cache it
+	// cannot trade for enough space is destroyed in full for nothing. That
+	// happened -- 20 GB and 1248 entries reclaimed to 0B, and the release
+	// refused anyway -- because the floor is node-wide while this prune only
+	// reaches this environment's own cache (erun#2306).
+	if reclaimable, known := readReclaimable(); known && reclaimable < floor-free {
+		ctx.Trace(fmt.Sprintf(
+			"%s: a build-cache prune could free at most %s, short of the %s needed to reach the floor; "+
+				"skipping it rather than destroying a cache that cannot close the gap",
+			policy.label, formatGiB(reclaimable), formatGiB(floor-free)))
+		return diskHeadroomVerdict(ctx, policy, free, floor)
+	}
+
 	ctx.Trace(fmt.Sprintf("%s: docker root free disk is below the %s floor; pruning reclaimable build cache down to it", policy.label, formatGiB(floor)))
 	ctx.TraceCommand("", "docker", "builder", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10))
 	if err := prune(floor); err != nil {
@@ -126,19 +146,77 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 	}
 
 	free, _, ok = readFree()
-	if ok && free < floor {
-		if !policy.refuse {
-			ctx.Info(fmt.Sprintf("warning: only %s free at the docker root after pruning, below the %s floor; "+
-				"this node is close to the disk pressure that evicts pods — free up space "+
-				"(docker system prune, remove unused images) or grow the volume", formatGiB(free), formatGiB(floor)))
-			return nil
-		}
-		return fmt.Errorf("only %s free at the docker root, below the %s a multi-arch release build needs: "+
-			"free up space (docker system prune, remove unused images) or grow the volume before retrying — "+
-			"filling this disk is what evicts the pod running the release",
-			formatGiB(free), formatGiB(floor))
+	if !ok {
+		return nil
 	}
-	return nil
+	return diskHeadroomVerdict(ctx, policy, free, floor)
+}
+
+// diskHeadroomVerdict is what the caller does once no further reclaim is going
+// to happen: a release refuses, a build warns and proceeds. Shared so the
+// declined-prune path and the pruned-anyway path cannot drift apart.
+func diskHeadroomVerdict(ctx Context, policy diskHeadroomPolicy, free, floor uint64) error {
+	if free >= floor {
+		return nil
+	}
+	if !policy.refuse {
+		ctx.Info(fmt.Sprintf("warning: only %s free at the docker root, below the %s floor; "+
+			"this node is close to the disk pressure that evicts pods — free up space "+
+			"(docker system prune, remove unused images) or grow the volume", formatGiB(free), formatGiB(floor)))
+		return nil
+	}
+	return fmt.Errorf("only %s free at the docker root, below the %s a multi-arch release build needs: "+
+		"free up space (docker system prune, remove unused images) or grow the volume before retrying — "+
+		"filling this disk is what evicts the pod running the release",
+		formatGiB(free), formatGiB(floor))
+}
+
+// reclaimableBuildCacheBytes reads what `docker builder prune` could free.
+// Only the build-cache row is consulted, because that is all the prune this
+// file runs can touch — images are frequently the larger consumer and are not
+// its to reclaim.
+func reclaimableBuildCacheBytes() (uint64, bool) {
+	out, err := Command("docker", "system", "df", "--format", "{{.Type}}|{{.Reclaimable}}").Output()
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name, value, found := strings.Cut(strings.TrimSpace(line), "|")
+		if !found || !strings.EqualFold(strings.TrimSpace(name), "build cache") {
+			continue
+		}
+		return parseDockerSize(value)
+	}
+	return 0, false
+}
+
+// dockerSizeUnits are the suffixes docker renders sizes with, longest first so
+// "kB" is never matched as "B". Decimal, matching docker's own HumanSize.
+var dockerSizeUnits = []struct {
+	suffix string
+	scale  float64
+}{
+	{"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"KB", 1e3}, {"B", 1},
+}
+
+// parseDockerSize reads one docker-rendered size ("8.914GB", "0B"), ignoring
+// any trailing percentage docker appends to some rows ("77.29GB (100%)").
+func parseDockerSize(value string) (uint64, bool) {
+	value = strings.TrimSpace(value)
+	if idx := strings.Index(value, " "); idx >= 0 {
+		value = value[:idx]
+	}
+	for _, unit := range dockerSizeUnits {
+		if !strings.HasSuffix(value, unit.suffix) {
+			continue
+		}
+		number, err := strconv.ParseFloat(strings.TrimSuffix(value, unit.suffix), 64)
+		if err != nil || number < 0 {
+			return 0, false
+		}
+		return uint64(number * unit.scale), true
+	}
+	return 0, false
 }
 
 // runDiskHeadroomPrune is diskHeadroomPruneFunc's real implementation:
