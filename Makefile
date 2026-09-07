@@ -383,7 +383,7 @@ test-playwright: test-frontend
 
 test-playwright:
 	@echo ">> erun-ui/playwright suite (desktop tags)"
-	@(cd erun-ui/playwright && ./run.sh)
+	@(cd erun-ui/playwright && ./run.sh --skip-app-gates)
 
 # Cross-compiles erun-app for Windows to prove the one other platform erun-ui
 # ships to (Scoop, built from source at install time) still compiles and

@@ -69,6 +69,7 @@ PORT=34123
 PLAYWRIGHT_ARGS=""
 E2E_K3D=0
 SKIP_LINT=0
+SKIP_APP_GATES=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -78,6 +79,22 @@ while [ $# -gt 0 ]; do
 			;;
 		--skip-lint)
 			SKIP_LINT=1
+			shift
+			;;
+		--skip-app-gates)
+			# Skip only the gates build.sh runs around the desktop binary
+			# (erun-ui/frontend typecheck, lint, format:check, test, and
+			# golangci-lint erun-ui), not this suite's own. `make check`
+			# passes it because test-playwright depends on test-frontend,
+			# which has already run exactly those gates as its own parallel
+			# jobs -- build.sh would be running them a second time, and
+			# they are the largest step in the in-image gate.
+			#
+			# Deliberately not --skip-lint: that would also drop this
+			# workspace's own typecheck/lint/format:check, which
+			# test-frontend does not cover (it gates erun-kit,
+			# erun-console and erun-ui/frontend, never erun-ui/playwright).
+			SKIP_APP_GATES=1
 			shift
 			;;
 		--e2e-k3d)
@@ -227,7 +244,7 @@ fi
 
 if [ "$BUILD_NEEDED" -eq 1 ]; then
 	_step_started=$(date +%s)
-	if [ "$SKIP_LINT" -eq 1 ]; then
+	if [ "$SKIP_LINT" -eq 1 ] || [ "$SKIP_APP_GATES" -eq 1 ]; then
 		"$ERUN_UI_DIR/build.sh" --skip-lint "$BIN_PATH"
 	else
 		"$ERUN_UI_DIR/build.sh" "$BIN_PATH"
