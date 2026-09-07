@@ -121,6 +121,8 @@ Why ERun expects this:
 - **Build cache stays effective** — BuildKit `--mount=type=cache` persists across builds in the runtime pod's dind PVC.
 - **Security separation** — production images don't ship a build toolchain.
 
+The skeleton above shows the required *shape*, not an optimal layer order. Two choices dominate rebuild cost in any real Dockerfile: copy dependency manifests and resolve them **before** copying source, so an ordinary source edit reuses the dependency layer rather than re-resolving; and declare `ARG TARGETARCH` **below** any architecture-independent step such as the test run, so the per-architecture build invocations share one cached test layer instead of repeating the work per arch. The `erun-blueprint-service` skill ships a template and a "Build speed" section covering the full set.
+
 Single-stage Dockerfiles are not rejected, but the multi-arch and cache benefits don't apply.
 
 ### Tests run in the builder stage
