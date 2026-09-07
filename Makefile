@@ -109,6 +109,25 @@ LINT_JOB_MEMORY_MIB := 700
 CHECK_GATE_FANOUT_PEAK_MEMORY_MIB := $(shell echo $$(( $(words $(LINT_MODULES)) * $(LINT_JOB_MEMORY_MIB) )))
 LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODULES)) $(LINT_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
+# LINT_GOMAXPROCS bounds what each golangci-lint invocation may take, so the
+# fan-out above stops overcommitting the machine several times over.
+#
+# parallel-gate.sh sizes a width as min(job-count, CPUs, memory/job) -- one CPU
+# per job. That is right for a job that is one process, and wrong for every
+# entry here: golangci-lint is internally parallel and takes GOMAXPROCS from
+# the cgroup, so each of the LINT_PARALLELISM invocations helps itself to the
+# whole quota. In the in-image gate that is 6 invocations x 16 CPUs = 96
+# against a 16-CPU cap, and the cost is not merely queueing -- at that ratio
+# the build spent 79% of its CPU periods throttled and package downloads began
+# timing out (erun#2390), which reads as a network fault and is not.
+#
+# Divide the quota by the width instead, floored at 1 so a small environment
+# still runs. Total demand becomes about the quota rather than a multiple.
+LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(LINT_PARALLELISM) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	echo $$n)
+
 # Run golangci-lint across the gated modules concurrently (bounded by
 # LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
 # none, so it uses the default linters). Every module's combined stdout/stderr
@@ -142,7 +161,7 @@ lint:
 		   exit 1 ;; \
 	esac
 	@for m in $(LINT_MODULES); do \
-		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "cd $$m && golangci-lint run --allow-parallel-runners --timeout $(LINT_TIMEOUT) ./..."; \
+		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "cd $$m && GOMAXPROCS=$(LINT_GOMAXPROCS) golangci-lint run --allow-parallel-runners --timeout $(LINT_TIMEOUT) ./..."; \
 	done | ./scripts/parallel-gate.sh $(LINT_PARALLELISM) lint
 
 # erun-ui's own Go tests. See the LINT_MODULES comment above for why this is
