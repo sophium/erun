@@ -35,20 +35,42 @@ cd "$SCRIPT_DIR"
 # headlessserver Go packages plus every erun-common type they can reference
 # (any of it can cross into a generated TS shape), and generation itself
 # depends on the pinned wails module version (go.mod/go.sum) and wails.json.
+#
+# erun-common contributes its *declarations* rather than its file contents.
+# `wails generate module` emits TS from the bound methods' signatures and the
+# types those reach, so a change confined to a function body cannot alter the
+# output -- yet hashing whole files made every such edit a cache miss, and
+# erun-common is the shared module nearly every change touches. Measured: a
+# hit is ~0.07s and a miss ~16s.
+#
+# `go doc -all -u` is a superset of what can reach the generated TS, not a
+# heuristic: -u includes unexported declarations, so an exported field whose
+# type is an unexported struct still has that struct's shape in the hash.
+# Verified against this module -- a true body-only edit leaves the output
+# byte-identical, while adding or changing any declaration, exported or not,
+# changes it. A `go doc` failure falls back to hashing the files, so an
+# unbuildable tree degrades to the previous conservative behaviour rather
+# than to a stale cache.
 hash_wails_inputs() {
 	{
 		find "$SCRIPT_DIR" -maxdepth 1 -name '*.go' -print
 		find "$SCRIPT_DIR/headlessserver" -name '*.go' -print 2>/dev/null
-		find "$SCRIPT_DIR/../erun-common" -name '*.go' -print
 		printf '%s\n' "$SCRIPT_DIR/wails.json" "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/go.sum"
-	} | sort | xargs sha256sum | sha256sum | awk '{print $1}'
+	} | sort | xargs sha256sum
+	if ! (cd "$SCRIPT_DIR/../erun-common" && go doc -all -u . 2>/dev/null) | sha256sum; then
+		find "$SCRIPT_DIR/../erun-common" -name '*.go' -print | sort | xargs sha256sum
+	fi
+}
+
+hash_wails_inputs_digest() {
+	hash_wails_inputs | sha256sum | awk '{print $1}'
 }
 
 if [ -n "$CACHE_DIR" ]; then
 	mkdir -p "$CACHE_DIR"
 	HASH_FILE="$CACHE_DIR/hash"
 	CACHED_WAILSJS="$CACHE_DIR/wailsjs"
-	NEW_HASH=$(hash_wails_inputs)
+	NEW_HASH=$(hash_wails_inputs_digest)
 	if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$NEW_HASH" ] && [ -d "$CACHED_WAILSJS" ]; then
 		if [ ! -d frontend/wailsjs ] || [ -z "$(ls -A frontend/wailsjs 2>/dev/null)" ]; then
 			rm -rf frontend/wailsjs
