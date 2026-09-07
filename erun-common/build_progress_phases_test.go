@@ -204,3 +204,26 @@ func TestMarkerPhasesLeavesSerialSpansUnlabelled(t *testing.T) {
 		}
 	}
 }
+
+// A marker carrying its own measured duration wins over the span to the next
+// marker, and is not labelled concurrent: scripts/parallel-gate.sh replays a
+// batch's output only once every job has finished, so the interval between
+// its markers measures the replay. The self-reported figure is the job's own
+// wall clock and is the only honest number available for those rows.
+func TestMarkerPhasesPrefersSelfReportedDuration(t *testing.T) {
+	markers := []buildKitPhaseMarker{
+		{offsetSecs: 0, name: "concurrent-phase-spans: check-gate runs 11 targets at -j11"},
+		{offsetSecs: 10, name: "golangci-lint erun-ui [83s]"},
+		{offsetSecs: 11, name: "helm-chart-tests [7s]"},
+	}
+	phases := markerPhases(markers, 200)
+	if len(phases) != 2 {
+		t.Fatalf("expected 2 phases, got %d: %+v", len(phases), phases)
+	}
+	if phases[0].name != "golangci-lint erun-ui" || phases[0].duration != 83*time.Second {
+		t.Errorf("phase 0 = %q/%s, want golangci-lint erun-ui/83s", phases[0].name, phases[0].duration)
+	}
+	if phases[1].name != "helm-chart-tests" || phases[1].duration != 7*time.Second {
+		t.Errorf("phase 1 = %q/%s, want helm-chart-tests/7s", phases[1].name, phases[1].duration)
+	}
+}

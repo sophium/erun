@@ -218,11 +218,13 @@ while IFS="$tab" read -r short_name marker cmd; do
 	printf '%s' "$short_name" > "$tmp/$i.name"
 	printf '%s' "$marker" > "$tmp/$i.marker"
 	(
+		job_started=$(date +%s)
 		if sh -c "$cmd" > "$tmp/$i.out" 2>&1; then
 			echo 0 > "$tmp/$i.rc"
 		else
 			echo 1 > "$tmp/$i.rc"
 		fi
+		echo $(( $(date +%s) - job_started )) > "$tmp/$i.secs"
 	) &
 	running=$((running + 1))
 	if [ "$running" -ge "$max_parallel" ]; then
@@ -236,7 +238,12 @@ total=$i
 failed=""
 j=1
 while [ "$j" -le "$total" ]; do
-	echo ">> $(cat "$tmp/$j.marker")"
+	# The job's own measured duration, not the gap to the next marker. This
+	# loop replays captured output after every job has finished, so the
+	# markers below are emitted back-to-back and carry no timing information
+	# of their own -- anything derived from the interval between them
+	# describes the replay, not the work.
+	echo ">> $(cat "$tmp/$j.marker") [$(cat "$tmp/$j.secs" 2>/dev/null || echo 0)s]"
 	cat "$tmp/$j.out"
 	if [ "$(cat "$tmp/$j.rc")" != "0" ]; then
 		failed="$failed $(cat "$tmp/$j.name")"
