@@ -226,12 +226,13 @@ if [ "$BUILD_NEEDED" -eq 1 ] && [ "$STALE_ONLY" -eq 1 ] && [ "$EXPLICIT_SKIP_BUI
 fi
 
 if [ "$BUILD_NEEDED" -eq 1 ]; then
-	printf '>> playwright: building %s (%s)...\n' "$BIN_PATH" "$BUILD_REASON" >&2
+	_step_started=$(date +%s)
 	if [ "$SKIP_LINT" -eq 1 ]; then
 		"$ERUN_UI_DIR/build.sh" --skip-lint "$BIN_PATH"
 	else
 		"$ERUN_UI_DIR/build.sh" "$BIN_PATH"
 	fi
+	printf '>> playwright: building %s (%s) [%ss]\n' "$BIN_PATH" "$BUILD_REASON" "$(($(date +%s) - _step_started))" >&2
 fi
 
 if [ ! -x "$BIN_PATH" ]; then
@@ -243,8 +244,9 @@ fi
 # and `playwright install` short-circuits when the bundled Chromium revision
 # is already cached, so this is cheap on warm runs.
 if [ ! -d node_modules ] || [ ! -f node_modules/.yarn-integrity ]; then
-	printf '>> playwright: yarn install\n' >&2
+	_step_started=$(date +%s)
 	"$YARN_BIN" install --frozen-lockfile
+	printf '>> playwright: yarn install [%ss]\n' "$(($(date +%s) - _step_started))" >&2
 fi
 
 PLAYWRIGHT_BIN="$SCRIPT_DIR/node_modules/.bin/playwright"
@@ -258,7 +260,7 @@ fi
 if [ "$SKIP_LINT" -eq 1 ]; then
 	printf '>> SKIPPING typecheck/lint/format:check (--skip-lint)\n' >&2
 else
-	printf '>> playwright: typecheck + lint + format:check\n' >&2
+	_step_started=$(date +%s)
 	# ERUN_PLAYWRIGHT_LINT_CACHE_DIR opts into eslint/prettier result caching,
 	# the same way the Makefile's three workspace gates already cache into
 	# FRONTEND_LINT_CACHE_DIR. Unset (a bare local run) keeps the previous
@@ -276,12 +278,14 @@ else
 		"$YARN_BIN" lint
 		"$YARN_BIN" format:check
 	fi
+	printf '>> playwright: typecheck + lint + format:check [%ss]\n' "$(($(date +%s) - _step_started))" >&2
 fi
 
 # `playwright install chromium` is idempotent — it checks whether the
 # expected revision is already on disk and skips the download when it is.
-printf '>> playwright: ensuring chromium\n' >&2
+_step_started=$(date +%s)
 "$PLAYWRIGHT_BIN" install chromium >/dev/null
+printf '>> playwright: ensuring chromium [%ss]\n' "$(($(date +%s) - _step_started))" >&2
 
 ERUN_PLAYWRIGHT_PORT="$PORT"
 export ERUN_PLAYWRIGHT_PORT
@@ -402,6 +406,11 @@ if [ "$HEADED" -eq 1 ]; then
 	PLAYWRIGHT_FLAGS="--headed"
 fi
 
-printf '>> playwright: running tests on port %s\n' "$PORT" >&2
+_step_started=$(date +%s)
+_suite_status=0
 # shellcheck disable=SC2086
-eval "\"$PLAYWRIGHT_BIN\" test $PLAYWRIGHT_FLAGS $PLAYWRIGHT_ARGS"
+eval "\"$PLAYWRIGHT_BIN\" test $PLAYWRIGHT_FLAGS $PLAYWRIGHT_ARGS" || _suite_status=$?
+# Reported even on failure: a suite that burned minutes before going red
+# is exactly the one worth seeing in the profile.
+printf '>> playwright: running tests on port %s [%ss]\n' "$PORT" "$(($(date +%s) - _step_started))" >&2
+[ "$_suite_status" -eq 0 ] || exit "$_suite_status"
