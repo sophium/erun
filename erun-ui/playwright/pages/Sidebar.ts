@@ -65,8 +65,19 @@ export class Sidebar {
     await this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first().click();
   }
 
+  // Delegates to the keyboard path rather than clicking. A mouse click here
+  // hovers the row first, which opens its IconTooltip, and that popper
+  // intercepts the click that was meant for the edit button:
+  //
+  //   <div data-slot="popover-anchor" ...> intercepts pointer events
+  //   Error: locator.click: Test timeout of 30000ms exceeded
+  //
+  // Whether the popper wins the race depends on how loaded the box is, so this
+  // passed alone and failed in the gate (erun#2399). Every caller here asserts
+  // what the dialog contains, not that a mouse specifically opened it, so the
+  // click bought nothing that the race did not cost back.
   async openManageDialogFor(tenant: string, env: string): Promise<void> {
-    await this.environmentRow(tenant, env).click();
+    await this.openManageDialogViaKeyboard(tenant, env);
   }
 
   // The Outputs button stops propagation, so opening outputs never also opens the env itself.
