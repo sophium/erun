@@ -90,6 +90,10 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 		return runDoctorInRuntime(ctx, promptRunner, options)
 	}
 
+	if err := reportInstalledDesktopAppVersion(ctx); err != nil {
+		return err
+	}
+
 	if done, err := runDoctorConfigRepairs(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options, args); err != nil || done {
 		return err
 	}
