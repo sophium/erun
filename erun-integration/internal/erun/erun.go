@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -34,10 +35,11 @@ const CoverPkgs = "github.com/sophium/erun," +
 	"github.com/sophium/erun/erun-common"
 
 var (
-	buildOnce  sync.Once
-	binaryPath string
-	buildErr   error
-	coverDir   string
+	buildOnce   sync.Once
+	binaryPath  string
+	buildErr    error
+	coverDir    string
+	procCounter int64
 )
 
 // BinaryPath returns the path to the coverage-instrumented erun binary,
@@ -59,6 +61,33 @@ func CoverDir(t testing.TB) string {
 	t.Helper()
 	BinaryPath(t)
 	return coverDir
+}
+
+// PrivateCoverDir allocates a fresh subdirectory of the suite's shared
+// coverage root, exclusively owned by whichever process is about to be
+// spawned, and returns its path. Go's coverage runtime emits its meta-data
+// file at process init (before main even runs), naming a temp file with only
+// a nanosecond timestamp for uniqueness -- no PID. Every process running the
+// same instrumented binary computes the same final meta-data filename, so two
+// such processes racing to create-and-rename their own temp file into that
+// name in one shared directory can have the loser's rename fail outright
+// (the source temp file is gone by the time it runs, already renamed away by
+// the winner), silently dropping that process's coverage from the merged
+// profile without failing anything on its own. Giving every process its own
+// directory makes that race structurally impossible instead of merely rare.
+//
+// Run calls this for every subprocess it starts. A caller that spawns the
+// instrumented binary (or something that itself spawns it, like erun-mcp)
+// without going through Run must call this directly and set GOCOVERDIR in
+// that process's own environment.
+func PrivateCoverDir(t testing.TB) string {
+	t.Helper()
+	CoverDir(t) // ensures the shared coverage root is built and initialized
+	dir := filepath.Join(coverDir, fmt.Sprintf("p%d", atomic.AddInt64(&procCounter, 1)))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create private coverage dir: %v", err)
+	}
+	return dir
 }
 
 func buildBinary() (string, error) {
@@ -198,7 +227,7 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	}
 	env := make([]string, 0, len(opts.Env)+2)
 	env = append(env, opts.Env...)
-	env = append(env, CoverDirEnv+"="+coverDir)
+	env = append(env, CoverDirEnv+"="+PrivateCoverDir(t))
 	// So a SIGQUIT on timeout dumps every goroutine's stack, not just the
 	// current one — turning an opaque hang into a report of where it stuck.
 	env = append(env, "GOTRACEBACK=all")
