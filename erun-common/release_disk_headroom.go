@@ -57,10 +57,13 @@ const minDiskHeadroomPercent uint64 = 10
 // ensureDiskHeadroomWith can be unit-tested without a real docker daemon.
 type diskHeadroomFreeSpaceFunc func() (free, total uint64, ok bool)
 
-// diskHeadroomReclaimableFunc reports how much a build-cache prune could
-// plausibly free, so the caller can decline a prune that cannot close the gap.
-// ok is false when the figure is unreadable, which is treated as "prune anyway"
-// rather than "never prune": an unknown is not a reason to skip the remedy.
+// diskHeadroomReclaimableFunc reports how much build cache Docker accounts for
+// as reclaimable. Docker's accounting is a lower bound for what
+// `docker builder prune` can actually free, so a non-zero value permits the
+// caller to try the bounded prune even when the reported number is smaller
+// than the free-space gap. ok is false when the figure is unreadable, which is
+// treated as "prune anyway" rather than "never prune": an unknown is not a
+// reason to skip the remedy.
 type diskHeadroomReclaimableFunc func() (uint64, bool)
 
 // diskHeadroomPruneFunc bounds a build-cache prune to leave at least floor
@@ -125,17 +128,17 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 		return nil
 	}
 
-	// A prune that cannot reach the floor is not a smaller win, it is a pure
-	// loss: --min-free-space keeps going until the target is met, so a cache it
-	// cannot trade for enough space is destroyed in full for nothing. That
-	// happened -- 20 GB and 1248 entries reclaimed to 0B, and the release
-	// refused anyway -- because the floor is node-wide while this prune only
-	// reaches this environment's own cache (erun#2306).
-	if reclaimable, known := readReclaimable(); known && reclaimable < floor-free {
+	// Docker's `system df` build-cache total is not an upper bound on what
+	// `builder prune` can reclaim: shared and parent layers can be omitted from
+	// the summary even though the prune removes them. Treat a known, non-zero
+	// value as evidence that the bounded prune is worth trying, not as a promise
+	// that it can close the whole gap. Only a known zero means there is no
+	// reported build cache to trade for space; an unreadable value remains
+	// inconclusive and therefore takes the same prune path as before.
+	if reclaimable, known := readReclaimable(); known && reclaimable == 0 {
 		ctx.Trace(fmt.Sprintf(
-			"%s: a build-cache prune could free at most %s, short of the %s needed to reach the floor; "+
-				"skipping it rather than destroying a cache that cannot close the gap",
-			policy.label, formatGiB(reclaimable), formatGiB(floor-free)))
+			"%s: docker reports no reclaimable build cache; skipping the prune and checking the floor",
+			policy.label))
 		return diskHeadroomVerdict(ctx, policy, free, floor)
 	}
 

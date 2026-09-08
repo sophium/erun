@@ -623,6 +623,63 @@ esac
 		assertVersionFile(t, setup, "1.4.2\n")
 	})
 
+	t.Run("real_run_prunes_when_docker_df_understates_reclaimable_cache", func(t *testing.T) {
+		// Regression. `docker system df` can understate what
+		// `docker builder prune` actually reclaims, so a non-zero reported
+		// amount must still enter the bounded prune path even when it is below
+		// the free-space gap. The df stub reports 1 GiB before the prune and
+		// enough space afterward; the marker proves the release reached the
+		// prune rather than refusing from the summary alone.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		seedBareOrigin(t, setup)
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		dockerRoot := filepath.Join(setup.Cwd, "fake-docker-root")
+		if err := os.MkdirAll(dockerRoot, 0o755); err != nil {
+			t.Fatalf("mkdir fake docker root: %v", err)
+		}
+		pruned := filepath.Join(stubs, "builder-pruned")
+		manifestMarkerPrefix := filepath.Join(stubs, "manifest-published-")
+		dockerRootPath := filepath.ToSlash(dockerRoot)
+		prunedPath := filepath.ToSlash(pruned)
+		manifestMarkerPrefixPath := filepath.ToSlash(manifestMarkerPrefix)
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "info -f") printf '%s' '` + dockerRootPath + `' ;;`,
+			`  "system df") printf '%s\n' 'Build Cache|1GB' ;;`,
+			`  "builder prune") touch '` + prunedPath + `' ;;`,
+			`  "manifest inspect") marker="` + manifestMarkerPrefixPath + `$(printf '%s' "$3" | tr '/:' '__')"; [ -f "$marker" ] && exit 0 || exit 1 ;;`,
+			`  "manifest push") marker="` + manifestMarkerPrefixPath + `$(printf '%s' "$3" | tr '/:' '__')"; touch "$marker" ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		fixture.StubBinaryWithScript(t, stubs, "df", strings.Join([]string{
+			`if [ -f '` + prunedPath + `' ]; then`,
+			`  printf '%s\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on'`,
+			`  printf '%s\n' 'overlay 104857600 73400320 31457280 70% ` + dockerRootPath + `'`,
+			`else`,
+			`  printf '%s\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on'`,
+			`  printf '%s\n' 'overlay 104857600 103809024 1048576 99% ` + dockerRootPath + `'`,
+			`fi`,
+			`exit 0`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "helm", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "df", "helm")...)
+		envVars = append(envVars, "GH_TOKEN=integration-test-token")
+
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if _, err := os.Stat(pruned); err != nil {
+			t.Fatalf("expected the bounded builder prune to run: %v", err)
+		}
+		if strings.Contains(result.Combined, "a build-cache prune could free at most") {
+			t.Fatalf("release still used the old upper-bound decision:\n%s", result.Combined)
+		}
+		golden.Equal(t, "release/real_run_prunes_when_docker_df_understates_reclaimable_cache", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_dirty_worktree_fails", func(t *testing.T) {
 		// Real-run with a modified tracked file: the worktree-clean
 		// precondition (waived in dry-run so audits work anywhere) must
@@ -736,8 +793,8 @@ esac
 		fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{Stderr: "simulated docker failure", ExitCode: 1})
 		fixture.StubBinary(t, stubs, "helm", "")
 
-		// #1201: give the registry-credential preflight a resolvable credential
-		// so this scenario still reaches the simulated docker failure it is about.
+		// Give the registry-credential preflight a resolvable credential so this
+		// scenario still reaches the simulated docker failure it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 		envVars = append(envVars, "GH_TOKEN=integration-test-token")
 		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -840,8 +897,8 @@ exit 0
 			// host and the tool are both declared rather than left to the runner.
 			"ERUN_HOST_OS_OVERRIDE=linux",
 			"PATH="+stubs+string(os.PathListSeparator)+setup.PathDir,
-			// #1201: give the registry-credential preflight a resolvable credential
-			// so this scenario still reaches the moved-branch-absorption it is about.
+			// Give the registry-credential preflight a resolvable credential so this
+			// scenario still reaches the moved-branch-absorption it is about.
 			"GH_TOKEN=integration-test-token",
 		)
 
@@ -999,8 +1056,8 @@ func stubPublishToolchain(t *testing.T, setup env.Setup) []string {
 	stubDockerWithManifestTracking(t, stubs)
 	fixture.StubBinary(t, stubs, "helm", "")
 	envVars := fixture.StubEnv(stubs, "docker", "helm")
-	// #1201: the registry-credential preflight refuses up front when no
-	// ghcr.io credential resolves at all. A real publish toolchain always has
+	// The registry-credential preflight refuses up front when no ghcr.io
+	// credential resolves at all. A real publish toolchain always has
 	// one; GH_TOKEN is the fixture-side stand-in so these scenarios keep
 	// exercising what happens once that check passes.
 	return append(envVars, "GH_TOKEN=integration-test-token")

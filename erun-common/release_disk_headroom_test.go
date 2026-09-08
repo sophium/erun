@@ -191,26 +191,34 @@ func diskHeadroomCases() []diskHeadroomCase {
 			wantErr:   true,
 		},
 		{
-			// --min-free-space keeps pruning until the floor is met, so a cache
-			// that cannot reach it is destroyed in full for nothing. Declining is
-			// strictly better than reclaiming everything and refusing anyway.
-			name:          "a prune that cannot reach the floor is declined, not attempted",
+			// Docker's system-df number can be far below what builder prune
+			// actually frees. A non-zero number is therefore a lower bound,
+			// not a reason to skip the bounded prune.
+			name:          "a nonzero reported cache amount still permits the prune",
+			policy:        releaseDiskHeadroomPolicy,
+			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
+			reclaimable:   1 << 20,
+			reclaimableOK: true,
+			wantPrune:     true,
+		},
+		{
+			name:          "a known zero cache amount is declined",
 			policy:        releaseDiskHeadroomPolicy,
 			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
-			reclaimable:   1 << 20,
 			reclaimableOK: true,
 			wantPrune:     false,
 			wantErr:       true,
 			wantErrSubstr: "filling this disk is what evicts the pod running the release",
 		},
 		{
-			// A build declines the same prune but still proceeds.
-			name:          "a build declines an unreachable prune and proceeds",
+			// A build uses the same lower-bound rule and still proceeds after the
+			// bounded prune.
+			name:          "a build permits a nonzero reported cache amount",
 			policy:        buildDiskHeadroomPolicy,
-			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
+			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
 			reclaimable:   1 << 20,
 			reclaimableOK: true,
-			wantPrune:     false,
+			wantPrune:     true,
 		},
 		{
 			// An unreadable figure is not a reason to skip the remedy.
