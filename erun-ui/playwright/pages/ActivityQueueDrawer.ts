@@ -22,8 +22,12 @@ export class ActivityQueueDrawer {
     await this.locator().waitFor({ state: 'visible' });
   }
 
+  // Converge on the drawer actually having closed, mirroring open() above,
+  // instead of leaving callers to assert on it with their own fixed budget
+  // right after the click.
   async close(): Promise<void> {
     await this.closeButton().click();
+    await this.locator().waitFor({ state: 'hidden' });
   }
 
   async getEntries(): Promise<string[]> {

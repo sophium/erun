@@ -79,6 +79,9 @@ test.describe('smoke', () => {
     const toggle = page.getByRole('button', {
       name: /Contribute to ERun|Disable contribute mode/i,
     });
+    // waitFor (not expect) so this converges against the enclosing test's own
+    // budget rather than racing the click's render against expect's fixed one.
+    await toggle.first().waitFor({ state: 'visible' });
     await expect(toggle.first()).toBeVisible();
   });
 
@@ -93,11 +96,16 @@ test.describe('smoke', () => {
     const splitter = page.getByRole('slider', { name: 'Resize diff panel' });
     const initiallyVisible = await splitter.isVisible().catch(() => false);
 
+    // waitFor (not expect.poll) converges against the enclosing test's own
+    // budget instead of racing the toggle's render against expect's fixed one.
     await app.titlebar.toggleReviewPanel();
-    await expect.poll(async () => splitter.isVisible().catch(() => false)).toBe(!initiallyVisible);
+    await splitter.waitFor({ state: initiallyVisible ? 'hidden' : 'visible' });
+    await expect(splitter).toBeVisible({ visible: !initiallyVisible });
 
-    // Restore so a later test in this worker doesn't inherit an open panel.
+    // Restore so a later test in this worker doesn't inherit an open panel —
+    // converge on that too, so a slow restore can't leak into the next test.
     await app.titlebar.toggleReviewPanel();
+    await splitter.waitFor({ state: initiallyVisible ? 'visible' : 'hidden' });
   });
 
   test('deploy: the new-environment dialog opens and cancels', async ({ app }) => {
@@ -109,9 +117,17 @@ test.describe('smoke', () => {
   });
 
   test('diagnostics: the diagnostics console opens with the erun trace tab', async ({ app }) => {
+    // Converge on the panel actually having opened before asserting on a tab
+    // inside it, rather than racing the toggle's render against a flat
+    // visibility timeout (waitForOpen defers to the enclosing test's budget).
     await app.debugPanel.toggle();
+    await app.debugPanel.waitForOpen();
     await expect(app.debugPanel.tab('erun trace')).toBeVisible();
+
+    // Converge on the close too so a slow render can't leak an open panel
+    // into the next test in this worker.
     await app.debugPanel.toggle();
+    await app.debugPanel.waitForClosed();
   });
 
   test('a11y: the terminal host is a named, reachable group', async ({ app }) => {
@@ -130,15 +146,28 @@ test.describe('smoke', () => {
     await app.globalConfigDialog.waitForClosed();
   });
 
-  test('shell: the theme toggle switches the dark class', async ({ app }) => {
+  test('shell: the theme toggle switches the dark class', async ({ app, page }) => {
     const toggle = app.titlebar.themeToggleButton();
     await expect(toggle).toBeVisible();
     const wasDark = (await app.documentElement().getAttribute('class'))?.includes('dark') ?? false;
 
+    // waitForFunction (not expect) converges against the enclosing test's own
+    // budget instead of racing the toggle's render against expect's fixed
+    // one — there is no locator-level "wait for this class" primitive, so
+    // this is the class-attribute equivalent of the other tests' waitFor.
     await app.titlebar.toggleTheme();
+    await page.waitForFunction(
+      (dark) => document.documentElement.classList.contains('dark') === dark,
+      !wasDark,
+    );
     await expect(app.documentElement()).toHaveClass(wasDark ? /^(?!.*dark).*$/ : /dark/);
 
-    // Restore so a later test in this worker doesn't inherit the flipped theme.
+    // Restore so a later test in this worker doesn't inherit the flipped
+    // theme — converge on that too, so a slow restore can't leak.
     await app.titlebar.toggleTheme();
+    await page.waitForFunction(
+      (dark) => document.documentElement.classList.contains('dark') === dark,
+      wasDark,
+    );
   });
 });
