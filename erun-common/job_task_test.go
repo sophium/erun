@@ -18,12 +18,14 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 		Value string `json:"value"`
 	}
 	done := make(chan struct{})
+	release := make(chan struct{})
 	job, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "test-task",
 		Run: func(io.Writer) (any, error) {
 			defer close(done)
+			<-release
 			return taskResult{Value: "ok"}, nil
 		},
 	})
@@ -36,6 +38,7 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 	if job.Kind != EnvironmentJobKindTask {
 		t.Fatalf("job kind = %q, want %q", job.Kind, EnvironmentJobKindTask)
 	}
+	close(release)
 
 	<-done
 	waitForEnvironmentJobFinished(t, tenant, environment, job.ID)
