@@ -136,10 +136,25 @@ func (r IdentityRoutes) securityContext(w http.ResponseWriter, req *http.Request
 // here with Enrolled=false is a self-registered or otherwise unmapped IdP
 // account that cannot use erun, not a tenant member, and must not render as
 // one.
+//
+// The embedded zitadel.User's own ID is the OIDC subject (erun#2050): it is
+// the same value security.Context.ExternalUserID/model.User.ExternalUserID
+// carries for an enrolled row (mergeIdentityUsers below joins on exactly
+// that equality), and the same value GET /v1/whoami reports as `subject`
+// for the caller's own session. It is not renamed or duplicated onto a
+// second field here -- it is already the join key a client needs to
+// recognize "this is the same person" across the erun and IdP directories,
+// it was simply never rendered anywhere before this.
 type identityUserView struct {
 	zitadel.User
 	Enrolled   bool   `json:"enrolled"`
 	ErunUserID string `json:"erunUserId,omitempty"`
+	// ErunUsername is the enrolled erun user's own username (users.username)
+	// -- an independent string from the embedded zitadel.User.Username above,
+	// chosen at enrolment rather than mirrored from the IdP (erun#2050).
+	// Empty whenever Enrolled is false, since there is no erun user row to
+	// read it from.
+	ErunUsername string `json:"erunUsername,omitempty"`
 }
 
 func (r IdentityRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
@@ -180,6 +195,7 @@ func mergeIdentityUsers(idpUsers []zitadel.User, erunUsers []model.User) []ident
 		if erunUser, ok := enrolledBySubject[u.ID]; ok {
 			view.Enrolled = true
 			view.ErunUserID = erunUser.UserID
+			view.ErunUsername = erunUser.Username
 		}
 		views = append(views, view)
 	}

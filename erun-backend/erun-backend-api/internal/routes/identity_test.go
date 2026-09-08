@@ -206,6 +206,46 @@ func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 	}
 }
 
+// TestListUsersReportsErunUsernameAlongsideIdPUsername locks erun#2050's
+// backend half: an enrolled row's own erun username travels alongside the
+// IdP's own username field rather than being merged away, so a client can
+// render both when they diverge instead of rendering only the IdP one under
+// a caller who is used to seeing their erun username everywhere else
+// (whoami's own `username`, reviews, audit entries). The row's own `id` is
+// asserted too: it is the OIDC subject, the one stable value that actually
+// joins the two directories, and it must keep flowing through unrenamed for
+// a client to recognize "this is the same person" against whoami's subject.
+func TestListUsersReportsErunUsernameAlongsideIdPUsername(t *testing.T) {
+	admin := &stubIdentityAdminClient{users: []zitadel.User{
+		{ID: "sub-1", Username: "zadmin@frs.auth.example.com", Email: "admin@example.com"},
+	}}
+	erunUsers := &stubEnrolledUserLister{users: []model.User{
+		{UserID: "erun-1", Username: "erun", ExternalUserID: "sub-1"},
+	}}
+	routes := IdentityRoutes{admin: admin, erunUsers: erunUsers}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var views []identityUserView
+	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("got %d views, want 1", len(views))
+	}
+	if views[0].Username != "zadmin@frs.auth.example.com" {
+		t.Fatalf("views[0].Username = %q, want the IdP username unchanged", views[0].Username)
+	}
+	if views[0].ErunUsername != "erun" {
+		t.Fatalf("views[0].ErunUsername = %q, want the enrolled erun user's own username", views[0].ErunUsername)
+	}
+	if views[0].ID != "sub-1" {
+		t.Fatalf("views[0].ID = %q, want the OIDC subject reported so a client can join whoami's own subject against it", views[0].ID)
+	}
+}
+
 func TestCreateUserRejectsMissingFields(t *testing.T) {
 	enroller := &stubIdentityEnroller{}
 	routes := IdentityRoutes{enroller: enroller}
