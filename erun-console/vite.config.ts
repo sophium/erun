@@ -38,6 +38,13 @@ export default defineConfig({
     // loops: the whole suite still passes at 60s, where the 5s default fails
     // dozens of specs. A test that still can't finish in 60s is a real hang,
     // not gate contention, and should fail loudly.
+    //
+    // This bounds the whole test only. findBy*/waitFor use a separate timeout
+    // owned by @testing-library/dom (`asyncUtilTimeout`, default 1000ms),
+    // raised independently in src/test/setup.ts -- see the comment there for
+    // why and how it was measured. Read the two together: this is the outer
+    // bound a genuine hang trips, the other is the inner bound an async query
+    // waits against gate contention.
     testTimeout: 60000,
   },
 });
