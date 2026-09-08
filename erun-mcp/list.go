@@ -13,8 +13,12 @@ type ListInput struct {
 	Verbosity int `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 	// VersionDriftTenant, when set, additionally reports erun-version drift
 	// across this tenant's environments -- which environments run which
-	// erun version, and the newest version observed among them.
-	VersionDriftTenant string `json:"versionDriftTenant,omitempty" jsonschema:"when set, additionally report erun-version drift across this tenant's environments: which erun version each environment runs, and the newest version observed among them"`
+	// erun version, and the newest version observed among them. An
+	// environment with no version recorded locally is read live (its own
+	// deployed helm release) to tell a confirmed absence apart from a
+	// version that could not be determined at all; Preview traces that check
+	// instead of running it.
+	VersionDriftTenant string `json:"versionDriftTenant,omitempty" jsonschema:"when set, additionally report erun-version drift across this tenant's environments: which erun version each environment runs, and the newest version observed among them -- an environment with no version recorded locally is read live to tell a confirmed absence ('version' omitted, versionUnresolved false) apart from a version that could not be determined at all (versionUnresolved true, versionUnresolvedReason set, excluded from maxVersion/behindMax)"`
 	// GateEnvironment, only meaningful alongside VersionDriftTenant, names
 	// the environment driving that tenant's merge-queue gate. erun has no
 	// stored concept of which environment gates a tenant's merges (see root
@@ -29,7 +33,11 @@ type ListInput struct {
 	// network access to each plane and console, and to erun's registry;
 	// Preview traces what would be checked instead of making either call.
 	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version, and its linked console's deployed version, against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
-	Preview       bool `json:"preview,omitempty" jsonschema:"only meaningful alongside controlPlanes -- trace which planes and registry lookup would be checked without making either network call"`
+	// Preview traces every live check this call would make -- controlPlanes'
+	// plane/console/registry probes, and versionDriftTenant's per-environment
+	// helm read for any environment with no version recorded locally --
+	// without making any of them.
+	Preview bool `json:"preview,omitempty" jsonschema:"trace every live check this call would make (controlPlanes' plane/console/registry probes, versionDriftTenant's per-environment helm read for an environment with no version recorded locally) without making any of them"`
 }
 
 // ListToolResult is eruncommon.ListResult plus the optional version-drift
@@ -86,7 +94,7 @@ func buildListToolResult(ctx eruncommon.Context, result eruncommon.ListResult, c
 		toolResult.ControlPlaneVersionDrift = &drift
 	}
 	if tenant != "" {
-		drift, err := eruncommon.ResolveTenantVersionDrift(result, tenant, gateEnvironment)
+		drift, err := eruncommon.ResolveTenantVersionDrift(ctx, result, tenant, gateEnvironment)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}
