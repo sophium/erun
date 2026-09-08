@@ -3921,6 +3921,21 @@ func checkKubernetesDeploymentWithContext(ctx Context, params KubernetesDeployme
 	return false, output, fmt.Errorf("could not determine whether deployment %q is deployed (%s): %s", params.Name, detail, sanitized)
 }
 
+// kubernetesAPIServerUnreachableSignal reports whether kubectl/helm's raw
+// output signals that the Kubernetes API server itself could not be
+// reached, as opposed to any other failure (RBAC, a missing resource, a
+// malformed chart). kubernetesDeploymentCheckFailureDetail and the doctor
+// deploy diagnosis (doctor_deploy.go) both classify off this same signal so
+// "cluster unreachable" cannot drift between the two call sites.
+func kubernetesAPIServerUnreachableSignal(output string) bool {
+	message := strings.ToLower(output)
+	return strings.Contains(message, "unable to connect to the server") ||
+		strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "no such host") ||
+		strings.Contains(message, "i/o timeout") ||
+		strings.Contains(message, "no configuration has been provided")
+}
+
 // kubernetesDeploymentCheckFailureDetail names why a kubectl deployment
 // presence check failed to resolve a definite answer, distinguishing causes
 // where erun could not ask the cluster at all (no context, an unreachable
@@ -3938,11 +3953,7 @@ func kubernetesDeploymentCheckFailureDetail(output, kubectlContext string) strin
 	}
 	message := strings.ToLower(output)
 	switch {
-	case strings.Contains(message, "unable to connect to the server"),
-		strings.Contains(message, "connection refused"),
-		strings.Contains(message, "no such host"),
-		strings.Contains(message, "i/o timeout"),
-		strings.Contains(message, "no configuration has been provided"):
+	case kubernetesAPIServerUnreachableSignal(message):
 		if kubectlContext = strings.TrimSpace(kubectlContext); kubectlContext != "" {
 			return fmt.Sprintf("the kubernetes api server could not be reached (context %q)", kubectlContext)
 		}

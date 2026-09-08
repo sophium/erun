@@ -20,6 +20,15 @@ type DeployDiagnosisResult struct {
 	HelmStatus    string
 	HelmReadError string
 	Pods          string
+	// ClusterUnreachable is true when a probe above already confirmed the
+	// Kubernetes API server itself could not be reached, as opposed to any
+	// other helm/kubectl failure (a missing release, RBAC, a malformed
+	// chart). Every other doctor section that needs the runtime pod
+	// (host credentials, git push access, the docker-storage inspection)
+	// reads this instead of re-probing the same unreachable cluster and
+	// paying its own multi-minute kubectl timeout to rediscover the exact
+	// fact this diagnosis already established (erun#2394).
+	ClusterUnreachable bool
 }
 
 func helmStatusArgs(req ShellLaunchParams) []string {
@@ -41,6 +50,14 @@ func deployDiagnosisPodArgs(req ShellLaunchParams) []string {
 // RunDeployDiagnosis probes why a deploy may have failed. It is strictly
 // read-only, so it is safe to run on every `erun doctor`; a missing release or
 // unreachable cluster is itself part of the diagnosis, not a hard error.
+//
+// The pods probe is skipped once the helm status read already confirms the
+// Kubernetes API server itself is unreachable: a second kubectl call against
+// the same unreachable cluster would only pay its own multi-minute timeout to
+// rediscover the exact fact the helm read just established. ClusterUnreachable
+// carries that determination forward so every later doctor section can skip
+// its own probe the same way instead of independently rediscovering it
+// (erun#2394).
 func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResult {
 	helmArgs := helmStatusArgs(req)
 	ctx.TraceCommand("", "helm", helmArgs...)
@@ -50,10 +67,18 @@ func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResul
 		return DeployDiagnosisResult{}
 	}
 	helmStatus, helmErr := runDoctorDiagnosisCommand("helm", helmArgs)
-	pods, _ := runDoctorDiagnosisCommand("kubectl", podArgs)
-	result := DeployDiagnosisResult{HelmStatus: helmStatus, Pods: pods}
+	result := DeployDiagnosisResult{HelmStatus: helmStatus}
 	if helmErr != nil && !isHelmReleaseNotFound(helmStatus) {
 		result.HelmReadError = observeHelmReadErrorMessage(RuntimeReleaseName(req.Tenant), req.Namespace, helmStatus, helmErr)
+		result.ClusterUnreachable = kubernetesAPIServerUnreachableSignal(helmStatus)
+	}
+	if result.ClusterUnreachable {
+		return result
+	}
+	pods, podsErr := runDoctorDiagnosisCommand("kubectl", podArgs)
+	result.Pods = pods
+	if podsErr != nil {
+		result.ClusterUnreachable = kubernetesAPIServerUnreachableSignal(pods)
 	}
 	return result
 }
