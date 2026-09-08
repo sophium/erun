@@ -23,11 +23,14 @@ import (
 // scenario takes, and the resolved policy always has one (the default is
 // 08:00-20:00 in the host's zone), so a scenario that leaves it alone exercises
 // a different arm depending on the wall clock and the host's TZ. These two
-// blocks pin the arm: each is the widest window the parser accepts (start and
-// end must differ), inverted, so only the 23:59 UTC minute falls on the other
-// side. Landing on the other side there costs nothing — a held lease refuses the
-// stop identically on both arms, which is the point these scenarios make — so
-// what the pin buys is that each scenario reliably exercises the arm it names.
+// blocks pin the arm: 00:00-23:59 is the all-day span (fixed to stay inside
+// for every minute, including 23:59, since HH:MM has no way to spell
+// midnight/24:00), and 23:59-00:00 is its inversion — the narrowest
+// window the parser accepts, inside only during the 23:59 UTC minute. Landing
+// on that one minute costs the inverted block nothing — a held lease refuses
+// the stop identically on both arms, which is the point these scenarios
+// make — so what the pin buys is that each scenario reliably exercises the
+// arm it names.
 const (
 	insideWorkingHoursIdleBlock  = "idle:\n  workinghours: 00:00-23:59\n  timezone: UTC\n"
 	outsideWorkingHoursIdleBlock = "idle:\n  workinghours: 23:59-00:00\n  timezone: UTC\n"
