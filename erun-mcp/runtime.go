@@ -28,16 +28,17 @@ type runtimeStore interface {
 }
 
 type RuntimeConfig struct {
-	Context                   RuntimeContext
-	Store                     runtimeStore
-	BuildScriptRunner         eruncommon.BuildScriptRunnerFunc
-	BuildDockerImage          eruncommon.DockerImageBuilderFunc
-	PushDockerImage           eruncommon.DockerImagePusherFunc
-	DeployHelmChart           eruncommon.HelmChartDeployerFunc
-	EnsureKubernetesNamespace eruncommon.NamespaceEnsurerFunc
-	DeleteKubernetesNamespace eruncommon.NamespaceDeleterFunc
-	WaitForRemoteRuntime      eruncommon.RemoteRuntimeWaitFunc
-	RunRemoteCommand          eruncommon.RemoteCommandRunnerFunc
+	Context                        RuntimeContext
+	Store                          runtimeStore
+	BuildScriptRunner              eruncommon.BuildScriptRunnerFunc
+	BuildDockerImage               eruncommon.DockerImageBuilderFunc
+	PushDockerImage                eruncommon.DockerImagePusherFunc
+	DeployHelmChart                eruncommon.HelmChartDeployerFunc
+	EnsureKubernetesNamespace      eruncommon.NamespaceEnsurerFunc
+	DeleteKubernetesNamespace      eruncommon.NamespaceDeleterFunc
+	WaitForRemoteRuntime           eruncommon.RemoteRuntimeWaitFunc
+	RunRemoteCommand               eruncommon.RemoteCommandRunnerFunc
+	ResolveRuntimeRegistryVersions eruncommon.RuntimeRegistryVersionResolverFunc
 }
 
 type CommandOutput struct {
@@ -78,6 +79,11 @@ type CommandOutput struct {
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func normalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
+	cfg = normalizeRuntimeConfigBuildDefaults(cfg)
+	return normalizeRuntimeConfigRemoteDefaults(cfg)
+}
+
+func normalizeRuntimeConfigBuildDefaults(cfg RuntimeConfig) RuntimeConfig {
 	if cfg.Store == nil {
 		cfg.Store = eruncommon.ConfigStore{}
 	}
@@ -93,6 +99,10 @@ func normalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
 	if cfg.DeployHelmChart == nil {
 		cfg.DeployHelmChart = eruncommon.DeployHelmChart
 	}
+	return cfg
+}
+
+func normalizeRuntimeConfigRemoteDefaults(cfg RuntimeConfig) RuntimeConfig {
 	namespaceEnsurer := cfg.EnsureKubernetesNamespace
 	if namespaceEnsurer == nil {
 		namespaceEnsurer = eruncommon.EnsureKubernetesNamespace
@@ -106,6 +116,9 @@ func normalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
 	}
 	if cfg.DeleteKubernetesNamespace == nil {
 		cfg.DeleteKubernetesNamespace = eruncommon.DeleteKubernetesNamespace
+	}
+	if cfg.ResolveRuntimeRegistryVersions == nil {
+		cfg.ResolveRuntimeRegistryVersions = eruncommon.ResolveDefaultRuntimeRegistryVersions
 	}
 	return cfg
 }

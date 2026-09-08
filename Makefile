@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -238,6 +238,40 @@ test-erun-backend-api:
 test-erun-mcp:
 	@echo ">> go test erun-mcp"
 	@(cd erun-mcp && go test -count=1 ./...)
+
+# erun-common's own Go tests. LINT_MODULES above already gives this module
+# golangci-lint, but nothing ran `go test ./...` for it: erun-common is its
+# own module, and every sibling that unions it into a go.work (erun-cli,
+# erun-mcp, erun-integration) only resolves it as a build dependency -- the
+# same `go.work` blind spot documented for erun-mcp above, applied to the
+# module every other Go module in the repo depends on. 132 test files sat
+# green on every contributor's own machine and reachable by nobody's gate.
+#
+# -count=1 is load-bearing, not belt-and-braces, same reasoning as
+# test-erun-backend-api's own -count=1 above: dockerfile_copy_contract_test.go
+# globs and reads every erun-devops/docker/*/Dockerfile at run time -- files
+# in a different top-level module this test has no source dependency on --
+# so editing one of those Dockerfiles without touching erun-common's own
+# source would replay a stale cached "ok" under this module's own persistent
+# BuildKit go-build cache mount and miss a drifted COPY/ADD contract.
+#
+# -race is load-bearing too: this module owns the activity-lease,
+# job-supervisor, and workspace-sync concurrent state (root AGENTS.md's own
+# "A long-running supervisor has exactly one writer of its record" note is
+# about this code), and turning it on found a real, previously-undetected
+# data race the first time it ran here -- a task job's background goroutine
+# recorded its own outcome as finished before its heartbeat's deferred
+# ReleaseEnvironmentActivityLease call had actually completed, so a caller
+# that polled the job as finished could race that still-running cleanup
+# against a *different* test's own XDG_CACHE_HOME isolation reload of the
+# shared adrg/xdg package state. Fixed by running the heartbeat/alive-beat
+# stop explicitly before the outcome is recorded (job_task.go) rather than
+# leaving it to a defer that ran after. Measured locally: ~1m for a plain
+# `go test -count=1 ./...` run vs ~2m with `-race` added -- worth paying to
+# keep this class of bug from going undetected again.
+test-erun-common:
+	@echo ">> go test erun-common"
+	@(cd erun-common && go test -race -count=1 ./...)
 
 # erun-devops/dns01-webhook's own Go tests. This module has no entry in
 # LINT_MODULES and no test stage of its own -- its Dockerfile only builds the
@@ -665,7 +699,7 @@ check:
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
 # if any of these names is missing from it.
-check-gate: lint test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
+check-gate: lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the

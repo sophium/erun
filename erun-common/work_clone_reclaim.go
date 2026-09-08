@@ -29,6 +29,13 @@ import (
 // a fixture home directory instead of the real one.
 var workCloneUserHomeDir = os.UserHomeDir
 
+// workCloneRemoveAll is the seam a test overrides to simulate a removal
+// failure deterministically. A real filesystem-permission fixture cannot
+// exercise this path reliably: os.RemoveAll succeeds for any permission a
+// process's own uid can bypass, including root's, so a chmod'd file proves
+// nothing when the test runs as root.
+var workCloneRemoveAll = os.RemoveAll
+
 // workCloneRoot resolves the directory that holds per-task agent clones
 // (conventionally /home/erun/work), distinct from the tenant's own runtime
 // repository (/home/erun/git/<tenant>). Reclaim only ever acts on a path
@@ -396,7 +403,7 @@ func reclaimAgentJobWorkClone(job EnvironmentJob) (reclaimed bool, reason string
 	if !decision.Reclaim {
 		return false, decision.Reason
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	if err := workCloneRemoveAll(dir); err != nil {
 		return false, fmt.Sprintf("git state allowed reclaiming %s but removing it failed: %v", dir, err)
 	}
 	// os.RemoveAll returning nil is not, by itself, proof dir is gone -- it

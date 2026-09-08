@@ -77,7 +77,7 @@ func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx eruncommon.
 	// Not the MCP call's own context: an async pin runs in a background task
 	// job that outlives this call, so tying the registry lookup to a context
 	// the request already cancelled would fail it every time.
-	target, err := resolvePinToolTarget(context.Background(), input, projectRoot, tenant, environment)
+	target, err := resolvePinToolTarget(context.Background(), runtime, input, projectRoot, tenant, environment)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +149,7 @@ func resolvePinToolProjectRoot(runtime RuntimeConfig, input PinInput) (string, e
 // resolvePinToolTarget answers which version to move to, and refuses one that is
 // not published — a pin to an unpublished version only fails much later, at a
 // terraform init or a chart pull, far from the thing that caused it.
-func resolvePinToolTarget(ctx context.Context, input PinInput, workDir, tenant, environment string) (string, error) {
+func resolvePinToolTarget(ctx context.Context, runtime RuntimeConfig, input PinInput, workDir, tenant, environment string) (string, error) {
 	if input.Revert {
 		previous, ok := eruncommon.PinPrevious(workDir, tenant, environment)
 		if !ok {
@@ -157,7 +157,7 @@ func resolvePinToolTarget(ctx context.Context, input PinInput, workDir, tenant, 
 		}
 		return previous, nil
 	}
-	versions, err := eruncommon.ResolveDefaultRuntimeRegistryVersions(ctx)
+	versions, err := runtime.ResolveRuntimeRegistryVersions(ctx)
 	if err != nil {
 		return "", err
 	}
