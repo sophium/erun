@@ -191,8 +191,19 @@ type RuntimeMemoryUsage struct {
 	// OOMKillsObserved mirrors PeakObserved: memory.events' oom_kill counter
 	// can be as unreadable as memory.peak, and a caller must not read a silent
 	// zero as "no kills" when it actually means "could not tell".
-	OOMKillsObserved bool   `json:"oomKillsObserved,omitempty"`
-	Unavailable      string `json:"unavailable,omitempty"`
+	OOMKillsObserved bool `json:"oomKillsObserved,omitempty"`
+	// CeilingHits is memory.events' "max" counter: how many times this
+	// cgroup's usage hit its memory.max ceiling and the kernel reclaimed hard
+	// rather than killing outright. Distinct from OOMKills -- a container can
+	// spend a long time pinned against its ceiling under reclaim pressure
+	// while never once being OOM-killed, and that state is invisible to
+	// OOMKills alone.
+	CeilingHits int64 `json:"ceilingHits,omitempty"`
+	// CeilingHitsObserved mirrors OOMKillsObserved: a missing or unparseable
+	// counter must not collapse into a reported zero indistinguishable from
+	// a genuine "never hit the ceiling" reading.
+	CeilingHitsObserved bool   `json:"ceilingHitsObserved,omitempty"`
+	Unavailable         string `json:"unavailable,omitempty"`
 }
 
 // RuntimeDiskUsage reports usage for one watched mount (the workspace path,
@@ -250,6 +261,7 @@ printf 'memory_current=%s\n' "$(read_value $cg/memory.current)"
 printf 'memory_max=%s\n' "$(read_value $cg/memory.max)"
 printf 'memory_peak=%s\n' "$(read_value $cg/memory.peak)"
 printf 'memory_oom_kill=%s\n' "$(awk '$1=="oom_kill"{print $2}' $cg/memory.events 2>/dev/null || true)"
+printf 'memory_ceiling_hits=%s\n' "$(awk '$1=="max"{print $2}' $cg/memory.events 2>/dev/null || true)"
 printf 'cpu_max=%s\n' "$(read_value $cg/cpu.max)"
 cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
 time_before=$(date +%s%N)
@@ -315,6 +327,10 @@ func runtimeMemoryUsageFromValues(v map[string]string) RuntimeMemoryUsage {
 	if killed, ok := parseRuntimeInt64(v["memory_oom_kill"]); ok {
 		m.OOMKills = killed
 		m.OOMKillsObserved = true
+	}
+	if hits, ok := parseRuntimeInt64(v["memory_ceiling_hits"]); ok {
+		m.CeilingHits = hits
+		m.CeilingHitsObserved = true
 	}
 	maxRaw := v["memory_max"]
 	if maxRaw == "max" {
@@ -535,6 +551,7 @@ func readLocalCgroupValues(root string) map[string]string {
 		"memory_max":            readLocalCgroupFile(filepath.Join(root, "memory.max")),
 		"memory_peak":           readLocalCgroupFile(filepath.Join(root, "memory.peak")),
 		"memory_oom_kill":       localCgroupStatValue(filepath.Join(root, "memory.events"), "oom_kill"),
+		"memory_ceiling_hits":   localCgroupStatValue(filepath.Join(root, "memory.events"), "max"),
 		"cpu_max":               readLocalCgroupFile(filepath.Join(root, "cpu.max")),
 		"cpu_usage_after":       localCgroupStatValue(filepath.Join(root, "cpu.stat"), "usage_usec"),
 		"cpu_periods":           localCgroupStatValue(filepath.Join(root, "cpu.stat"), "nr_periods"),

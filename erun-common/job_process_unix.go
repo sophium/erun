@@ -27,9 +27,19 @@ func detachEnvironmentJobSupervisor(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setsid = true
 }
 
-// detachEnvironmentJobChild gives the work its own process group, so cancelling
-// a job reaches everything the work spawned and nothing else — in particular not
-// the supervisor, which has to outlive the cancel to record its outcome.
+// detachEnvironmentJobChild gives the work its own process group and its own
+// session, so cancelling a job reaches everything the work spawned and
+// nothing else — in particular not the supervisor, which has to outlive the
+// cancel to record its outcome. Setsid alone gives both: a session leader's
+// sid and pgid are both its own pid by construction, and Setpgid is
+// deliberately not also set alongside it -- setpgid(2) refuses outright on a
+// process that is already a session leader (EPERM, "pid is a session
+// leader"), so setting both flags together makes every job start fail. The
+// pgid this produces is what environmentJobProcessGroupSurvivors already
+// compared against; the sid is the wider boundary
+// environmentJobSessionSurvivors now also compares against, owing nothing to
+// whatever ambient session happens to be running the supervisor that spawned
+// it. See that function for why the process group alone is not enough.
 func detachEnvironmentJobChild(cmd *exec.Cmd) {
 	if cmd == nil {
 		return
@@ -37,7 +47,7 @@ func detachEnvironmentJobChild(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.Setpgid = true
+	cmd.SysProcAttr.Setsid = true
 }
 
 // signalEnvironmentJobProcessGroup signals a recorded pid's whole process group.
@@ -134,6 +144,69 @@ func psProcessGroupHasLiveMember(pgid int) (bool, bool) {
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) < 3 || fields[1] != target {
+			continue
+		}
+		if !strings.Contains(fields[2], "Z") {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// environmentJobSessionSurvivors reports whether any *live* process remains
+// in the session led by sid (the job's own childPID, which
+// detachEnvironmentJobChild's Setsid makes a session leader in its own
+// right, exactly as it already is a process-group leader), after the job's
+// own tracked child has already been waited on.
+//
+// environmentJobProcessGroupSurvivors above cannot see everything this needs
+// to catch: a process the work itself backgrounds into a *further* fresh
+// process group of its own (an agent tool's Bash tool backgrounding a
+// command precisely so it survives the turn that started it) escapes that
+// narrower process-group scope. It does not escape the session, though,
+// because nothing about ordinary job-control backgrounding calls setsid —
+// and a session id is sticky even once the process is later reparented to
+// init, which is what let a real leftover process observed in production
+// still carry its session's original sid after losing its original parent.
+func environmentJobSessionSurvivors(sid int) bool {
+	if sid <= 0 {
+		return false
+	}
+	deadline := time.Now().Add(environmentJobProcessGroupSurvivorSettleWindow)
+	for {
+		alive := environmentJobSessionHasLiveMember(sid)
+		if !alive || !time.Now().Before(deadline) {
+			return alive
+		}
+		time.Sleep(environmentJobProcessGroupSurvivorSettlePoll)
+	}
+}
+
+func environmentJobSessionHasLiveMember(sid int) bool {
+	alive, ok := psSessionHasLiveMember(sid)
+	return ok && alive
+}
+
+// psSessionHasLiveMember is psProcessGroupHasLiveMember's session-scoped
+// twin: same zombie handling via the STAT column, but keyed on the session
+// id rather than the process group. The session leader itself (pid == sid)
+// is excluded, matching the pgid check's exclusion of the group it is asked
+// to signal — it is the job's own tracked child, already reaped by the time
+// this runs.
+func psSessionHasLiveMember(sid int) (bool, bool) {
+	out, err := exec.Command("ps", "-axo", "pid=,sess=,stat=").Output()
+	if err != nil {
+		return false, false
+	}
+	target := strconv.Itoa(sid)
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 3 || fields[1] != target {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid == sid {
 			continue
 		}
 		if !strings.Contains(fields[2], "Z") {
