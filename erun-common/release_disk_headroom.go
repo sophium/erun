@@ -57,10 +57,13 @@ const minDiskHeadroomPercent uint64 = 10
 // ensureDiskHeadroomWith can be unit-tested without a real docker daemon.
 type diskHeadroomFreeSpaceFunc func() (free, total uint64, ok bool)
 
-// diskHeadroomReclaimableFunc reports how much a build-cache prune could
-// plausibly free, so the caller can decline a prune that cannot close the gap.
-// ok is false when the figure is unreadable, which is treated as "prune anyway"
-// rather than "never prune": an unknown is not a reason to skip the remedy.
+// diskHeadroomReclaimableFunc reports whether a build-cache prune has
+// anything at all to free, so the caller can decline a prune that would be a
+// pure no-op. The reported figure is a lower bound, not a size estimate — see
+// reclaimableBuildCacheBytes — so it is only trusted to say "zero", never to
+// say "not enough". ok is false when the figure is unreadable, which is
+// treated as "prune anyway" rather than "never prune": an unknown is not a
+// reason to skip the remedy.
 type diskHeadroomReclaimableFunc func() (uint64, bool)
 
 // diskHeadroomPruneFunc bounds a build-cache prune to leave at least floor
@@ -125,17 +128,21 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 		return nil
 	}
 
-	// A prune that cannot reach the floor is not a smaller win, it is a pure
-	// loss: --min-free-space keeps going until the target is met, so a cache it
-	// cannot trade for enough space is destroyed in full for nothing. That
-	// happened -- 20 GB and 1248 entries reclaimed to 0B, and the release
-	// refused anyway -- because the floor is node-wide while this prune only
-	// reaches this environment's own cache (erun#2306).
-	if reclaimable, known := readReclaimable(); known && reclaimable < floor-free {
+	// The reported figure is only ever trusted to detect "nothing to
+	// reclaim", never to size whether a prune can close the gap: docker's own
+	// accounting for build cache has understated what a real prune frees by
+	// several times over on a real node, and declining on a figure that
+	// understates in that direction refuses releases a prune would have
+	// rescued. That is a worse failure than the one the opposite bound
+	// guards against — a prune that destroys a real, sizeable cache and still
+	// leaves the release below the floor (the floor is node-wide; this prune
+	// only reaches this environment's own cache) ends in the same refusal it
+	// would have ended in anyway, just after spending the cache. So skip the
+	// prune only when it is confidently a no-op.
+	if reclaimable, known := readReclaimable(); known && reclaimable == 0 {
 		ctx.Trace(fmt.Sprintf(
-			"%s: a build-cache prune could free at most %s, short of the %s needed to reach the floor; "+
-				"skipping it rather than destroying a cache that cannot close the gap",
-			policy.label, formatGiB(reclaimable), formatGiB(floor-free)))
+			"%s: a build-cache prune has nothing reclaimable; skipping it rather than running a no-op",
+			policy.label))
 		return diskHeadroomVerdict(ctx, policy, free, floor)
 	}
 
@@ -175,6 +182,13 @@ func diskHeadroomVerdict(ctx Context, policy diskHeadroomPolicy, free, floor uin
 // Only the build-cache row is consulted, because that is all the prune this
 // file runs can touch — images are frequently the larger consumer and are not
 // its to reclaim.
+//
+// Treat the returned figure as a lower bound only, never an estimate of the
+// true yield: measured on a real node, `docker system df`'s reclaimable
+// figure for build cache undercounted what `docker builder prune -a`
+// actually freed by 4.4x (22.57GB reported, 98.27GB freed). The exact
+// accounting gap behind that understatement is not confirmed, so callers
+// must not assume a particular cause — only that the number can be short.
 func reclaimableBuildCacheBytes() (uint64, bool) {
 	out, err := Command("docker", "system", "df", "--format", "{{.Type}}|{{.Reclaimable}}").Output()
 	if err != nil {

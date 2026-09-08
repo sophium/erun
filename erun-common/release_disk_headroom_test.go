@@ -191,24 +191,35 @@ func diskHeadroomCases() []diskHeadroomCase {
 			wantErr:   true,
 		},
 		{
-			// --min-free-space keeps pruning until the floor is met, so a cache
-			// that cannot reach it is destroyed in full for nothing. Declining is
-			// strictly better than reclaiming everything and refusing anyway.
-			name:          "a prune that cannot reach the floor is declined, not attempted",
+			// docker system df understated real reclaimable build cache by 4.4x
+			// on a real node (erun#2431): a small-but-nonzero reported figure must
+			// not be read as "the prune can't help" — it is only a lower bound, so
+			// the prune still runs, and here it turns out to close the gap.
+			name:        "reclaimable understated but non-zero: prunes instead of refusing on the stale figure",
+			policy:      releaseDiskHeadroomPolicy,
+			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
+			reclaimable: 1 << 20, reclaimableOK: true,
+			wantPrune: true,
+		},
+		{
+			// Zero, unlike a small positive figure, is trusted: there is
+			// genuinely nothing a build-cache prune could do, so skip it rather
+			// than run a real no-op.
+			name:          "reclaimable genuinely zero: declined, not attempted",
 			policy:        releaseDiskHeadroomPolicy,
 			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
-			reclaimable:   1 << 20,
+			reclaimable:   0,
 			reclaimableOK: true,
 			wantPrune:     false,
 			wantErr:       true,
 			wantErrSubstr: "filling this disk is what evicts the pod running the release",
 		},
 		{
-			// A build declines the same prune but still proceeds.
-			name:          "a build declines an unreachable prune and proceeds",
+			// A build declines the same no-op prune but still proceeds.
+			name:          "a build declines a genuinely empty prune and proceeds",
 			policy:        buildDiskHeadroomPolicy,
 			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
-			reclaimable:   1 << 20,
+			reclaimable:   0,
 			reclaimableOK: true,
 			wantPrune:     false,
 		},
