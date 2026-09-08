@@ -38,6 +38,14 @@ type ActivityLeaseResult struct {
 	Environment string                                `json:"environment"`
 	Lease       *eruncommon.EnvironmentActivityLease  `json:"lease,omitempty"`
 	Held        []eruncommon.EnvironmentActivityLease `json:"held"`
+	// Released is set only by activity_lease_release: true when a held claim
+	// actually existed under the given id (and scope, for an exclusive claim)
+	// and this call removed it, false when there was nothing there to remove.
+	// Both are a successful call — releasing an absent or already-expired
+	// lease is idempotent — but collapsing them into the same unconditional
+	// success is what let a release aimed at the wrong store (erun#2414: an
+	// exclusive claim released without exclusive=true) go unnoticed.
+	Released *bool `json:"released,omitempty"`
 }
 
 func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseTakeInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
@@ -88,7 +96,7 @@ func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
-		return activityLeaseResult(tenant, environment, &lease)
+		return activityLeaseResult(tenant, environment, &lease, nil)
 	}
 }
 
@@ -143,22 +151,27 @@ func activityLeaseReleaseTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		if strings.TrimSpace(input.ID) == "" {
 			return nil, ActivityLeaseResult{}, fmt.Errorf("lease id is required")
 		}
+		var outcome eruncommon.EnvironmentActivityLeaseReleaseOutcome
 		if input.Exclusive {
-			if err := eruncommon.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID); err != nil {
+			outcome, err = eruncommon.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID)
+			if err != nil {
 				return nil, ActivityLeaseResult{}, err
 			}
-			return activityLeaseResult(tenant, environment, nil)
+		} else {
+			outcome, err = eruncommon.ReleaseEnvironmentActivityLease(tenant, environment, input.ID)
+			if err != nil {
+				return nil, ActivityLeaseResult{}, err
+			}
 		}
-		if err := eruncommon.ReleaseEnvironmentActivityLease(tenant, environment, input.ID); err != nil {
-			return nil, ActivityLeaseResult{}, err
-		}
-		return activityLeaseResult(tenant, environment, nil)
+		released := outcome == eruncommon.EnvironmentActivityLeaseReleased
+		return activityLeaseResult(tenant, environment, nil, &released)
 	}
 }
 
 // activityLeaseResult always returns what is still held, so a caller sees the
 // environment's whole claim set rather than only the lease it just moved.
-func activityLeaseResult(tenant, environment string, lease *eruncommon.EnvironmentActivityLease) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+// released is non-nil only for a release call; take and list pass nil.
+func activityLeaseResult(tenant, environment string, lease *eruncommon.EnvironmentActivityLease, released *bool) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	held, err := eruncommon.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return nil, ActivityLeaseResult{}, err
@@ -166,7 +179,7 @@ func activityLeaseResult(tenant, environment string, lease *eruncommon.Environme
 	if held == nil {
 		held = []eruncommon.EnvironmentActivityLease{}
 	}
-	return nil, ActivityLeaseResult{Tenant: tenant, Environment: environment, Lease: lease, Held: held}, nil
+	return nil, ActivityLeaseResult{Tenant: tenant, Environment: environment, Lease: lease, Held: held, Released: released}, nil
 }
 
 // ActivityLeaseListInput selects the environment to read.
@@ -181,6 +194,6 @@ func activityLeaseListTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
-		return activityLeaseResult(tenant, environment, nil)
+		return activityLeaseResult(tenant, environment, nil, nil)
 	}
 }

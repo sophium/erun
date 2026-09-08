@@ -143,7 +143,14 @@ func newActivityLeaseReleaseCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "release",
 		Short: "Release a held lease so the environment can go idle again",
-		Long:  "Releasing a lease that was never taken, or has already expired, succeeds — so a\nwrapper's exit trap never fails a job that finished cleanly.\n\nPass --exclusive and the same --scope used at take time to release an\nexclusive claim; only the id that took it can release it.",
+		Long: "Releasing a lease that was never taken, or has already expired, succeeds — so a\n" +
+			"wrapper's exit trap never fails a job that finished cleanly — but the report\n" +
+			"says whether anything was actually held, so a caller can tell the two apart\n" +
+			"instead of reading the same success either way.\n\n" +
+			"Pass --exclusive and the same --scope used at take time to release an\n" +
+			"exclusive claim. Only the id that took it can release it: if the scope is held\n" +
+			"by a different id, the release fails and names the actual holder rather than\n" +
+			"silently leaving it in place.",
 		Example: "  erun activity lease release --tenant team --environment dev --id gradle-build\n" +
 			"  erun activity lease release --tenant team --environment dev --id job-fix-1245 --exclusive",
 		Args: cobra.NoArgs,
@@ -167,18 +174,32 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 		return fmt.Errorf("lease id is required")
 	}
 	ctx := commandContext(cmd)
-	resolved, err := releaseLease(cmd.Context(), ctx, resolveOpen, tenant, environment, id, scope, exclusive)
+	outcome, resolved, err := releaseLease(cmd.Context(), ctx, resolveOpen, tenant, environment, id, scope, exclusive)
 	if err != nil {
 		return err
 	}
 	if !resolved {
 		return nil
 	}
-	_, err = fmt.Fprintf(ctx.Stdout, "lease released: %s\n", strings.TrimSpace(id))
+	_, err = fmt.Fprintf(ctx.Stdout, "%s\n", releaseLeaseSummary(outcome, id))
 	return err
 }
 
-func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (bool, error) {
+// releaseLeaseSummary reports what the release actually did. A caller that
+// cannot tell "removed" apart from "there was nothing there" has no way to
+// notice a release aimed at the wrong store (erun#2414: an exclusive claim
+// released without --exclusive reported the same "lease released" line as a
+// real release, while the exclusive claim it never touched stayed held for
+// its full TTL).
+func releaseLeaseSummary(outcome common.EnvironmentActivityLeaseReleaseOutcome, id string) string {
+	trimmed := strings.TrimSpace(id)
+	if outcome == common.EnvironmentActivityLeaseReleased {
+		return fmt.Sprintf("lease released: %s", trimmed)
+	}
+	return fmt.Sprintf("lease not held: %s", trimmed)
+}
+
+func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (common.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
 	if !environmentTargetsItself() {
 		return releaseLeaseInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id, scope, exclusive)
 	}
@@ -189,18 +210,20 @@ func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen Op
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
 		}
-		return false, nil
+		return common.EnvironmentActivityLeaseNotHeld, false, nil
 	}
 	if exclusive {
-		if err := common.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id); err != nil {
-			return false, err
+		outcome, err := common.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
+		if err != nil {
+			return common.EnvironmentActivityLeaseNotHeld, false, err
 		}
-		return true, nil
+		return outcome, true, nil
 	}
-	if err := common.ReleaseEnvironmentActivityLease(tenant, environment, id); err != nil {
-		return false, err
+	outcome, err := common.ReleaseEnvironmentActivityLease(tenant, environment, id)
+	if err != nil {
+		return common.EnvironmentActivityLeaseNotHeld, false, err
 	}
-	return true, nil
+	return outcome, true, nil
 }
 
 func newActivityLeaseListCmd(resolveOpen OpenResolver) *cobra.Command {
