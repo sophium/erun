@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -180,14 +182,16 @@ const workspaceSyncStagingSubdir = ".erun-sync-staging"
 // read-only host mirror. Artifacts live outside the git worktree, so they escape
 // the gitignore that hides *.exe from the source mirror — this is how a Windows
 // binary cross-built in the pod reaches the host to run/debug. Returns the number
-// of artifact files delivered plus what ad-hoc signing did to them; a missing or
-// empty outputs dir is a no-op.
+// of artifact files actually transferred this pass plus what ad-hoc signing did
+// to them; a missing or empty outputs dir is a no-op, and a pass whose content is
+// unchanged since the last one transfers nothing.
 func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, hostArtifactSigningSummary, error) {
 	var signing hostArtifactSigningSummary
 	remote, err := remoteOutputsFiles(ctx, hostAlias, outputsRemote)
 	if err != nil {
 		return 0, signing, err
 	}
+	copied := 0
 	if len(remote) > 0 {
 		if err := os.MkdirAll(artifactsLocal, 0o755); err != nil {
 			return 0, signing, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
@@ -198,8 +202,22 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 		if err := makeArtifactsWritable(artifactsLocal); err != nil {
 			return 0, signing, err
 		}
-		if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, remote); err != nil {
-			return 0, signing, err
+		// Fetch only what actually changed by content: outputs are agent
+		// deliverables, and an agent can rewrite one byte-for-byte identical to
+		// what is already mirrored (e.g. rerunning a cross-compile) — that still
+		// bumps mtime, the same effect a Docker COPY has on a build context (see
+		// the content-addressed-vs-mtime precedent in
+		// erun-ui/playwright/run.sh's ERUN_PLAYWRIGHT_LINT_CACHE_DIR comment), so
+		// mtime cannot tell "rewritten" from "identical" the way it can for the
+		// source lane's own tar-preserved fetch.
+		remoteHashes := remoteOutputsFileHashes(ctx, hostAlias, outputsRemote, remote)
+		localHashes := localArtifactFileHashes(artifactsLocal, remote)
+		toFetch := changedOutputsPaths(remote, remoteHashes, localHashes)
+		copied = len(toFetch)
+		if len(toFetch) > 0 {
+			if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, toFetch); err != nil {
+				return 0, signing, err
+			}
 		}
 		// The mirror is where a darwin artifact cross-built in the Linux pod first
 		// becomes a file the operator can run, so it is where the signature macOS
@@ -212,7 +230,81 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 	if err := pruneLocalArtifacts(artifactsLocal, remote); err != nil {
 		return 0, signing, err
 	}
-	return len(remote), signing, nil
+	return copied, signing, nil
+}
+
+// remoteOutputsFileHashes fingerprints the given pod outputs files by content
+// (sha256) rather than size or mtime, for the reason in syncOutputsArtifacts's
+// comment above. Best-effort like remoteWorkspaceFileMeta: any failure yields no
+// fingerprints, so changedOutputsPaths degrades to treating every path as
+// changed rather than trusting a read that did not happen.
+func remoteOutputsFileHashes(ctx context.Context, hostAlias, outputsRemote string, paths []string) map[string]string {
+	if len(paths) == 0 {
+		return nil
+	}
+	script := fmt.Sprintf("cd %s && xargs -0 -r sha256sum --zero", shellQuote(outputsRemote))
+	cmd := CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
+	HideConsoleWindow(cmd)
+	cmd.Stdin = bytes.NewReader(encodeWorkspaceSyncPathList(paths))
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return parseOutputsFileHashes(output)
+}
+
+// parseOutputsFileHashes reads `sha256sum --zero` NUL-terminated records
+// (`<64-hex-hash><space><text/binary flag><filename>`). A malformed record is
+// skipped, which folds into remoteOutputsFileHashes's best-effort contract.
+func parseOutputsFileHashes(output []byte) map[string]string {
+	const hashLen = 64
+	hashes := make(map[string]string)
+	for _, record := range bytes.Split(output, []byte{0}) {
+		if len(record) < hashLen+2 || record[hashLen] != ' ' {
+			continue
+		}
+		path := string(record[hashLen+2:])
+		if !SafeWorkspaceSyncPath(path) {
+			continue
+		}
+		hashes[path] = string(record[:hashLen])
+	}
+	return hashes
+}
+
+// localArtifactFileHashes reads and hashes only the given mirror-relative
+// paths, so a path the mirror does not have yet (a first-ever pass, or one
+// pruned since) is simply absent from the result rather than an error;
+// changedOutputsPaths then treats an absent local hash as changed.
+func localArtifactFileHashes(root string, paths []string) map[string]string {
+	hashes := make(map[string]string, len(paths))
+	for _, item := range paths {
+		if !SafeWorkspaceSyncPath(item) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(item)))
+		if err != nil {
+			continue
+		}
+		sum := sha256.Sum256(data)
+		hashes[item] = hex.EncodeToString(sum[:])
+	}
+	return hashes
+}
+
+// changedOutputsPaths returns, in remotePaths order, the paths a pass must
+// fetch: those missing locally, changed (content hash differs), or whose
+// fingerprint is unknown on either side (fetch when unsure).
+func changedOutputsPaths(remotePaths []string, remoteHashes, localHashes map[string]string) []string {
+	changed := make([]string, 0, len(remotePaths))
+	for _, path := range remotePaths {
+		remoteHash, remoteKnown := remoteHashes[path]
+		localHash, localKnown := localHashes[path]
+		if !remoteKnown || !localKnown || remoteHash != localHash {
+			changed = append(changed, path)
+		}
+	}
+	return changed
 }
 
 // localArtifactPaths resolves mirror-relative artifact paths against the mirror
