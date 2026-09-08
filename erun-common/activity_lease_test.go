@@ -28,6 +28,19 @@ func isolateActivityCache(t *testing.T) {
 func alwaysAlive(int) bool { return true }
 func neverAlive(int) bool  { return false }
 
+// expectReleaseOutcome checks a release call's error and outcome together, so
+// the tests exercising the outcome reporting don't each repeat the same two
+// branches inline.
+func expectReleaseOutcome(t *testing.T, context string, outcome EnvironmentActivityLeaseReleaseOutcome, err error, want EnvironmentActivityLeaseReleaseOutcome) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", context, err)
+	}
+	if outcome != want {
+		t.Errorf("%s: expected outcome %v, got %v", context, want, outcome)
+	}
+}
+
 // TestEnvironmentActivityDirDoesNotCreateDirectory pins the same dry-run
 // purity contract erun#1907 fixed for the config tree: resolving the
 // activity directory is a pure read (job_supervisor.go's environmentJobDir
@@ -70,9 +83,8 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 		t.Fatalf("expected the lease to be held, got %+v", held)
 	}
 
-	if err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build"); err != nil {
-		t.Fatalf("release: %v", err)
-	}
+	outcome, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
+	expectReleaseOutcome(t, "release", outcome, err, EnvironmentActivityLeaseReleased)
 	held, err = loadEnvironmentActivityLeases("team", "dev", now.Add(time.Minute), alwaysAlive)
 	if err != nil {
 		t.Fatalf("load after release: %v", err)
@@ -84,10 +96,16 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 
 func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
 	// A wrapper's exit trap must not fail a job that already finished, so
-	// releasing a lease that was never taken is success.
+	// releasing a lease that was never taken is success -- but the outcome
+	// must say nothing was actually held, not the same Released a real
+	// release reports.
 	isolateActivityCache(t)
-	if err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build"); err != nil {
+	outcome, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
+	if err != nil {
 		t.Errorf("releasing an absent lease must succeed, got %v", err)
+	}
+	if outcome != EnvironmentActivityLeaseNotHeld {
+		t.Errorf("expected releasing an absent lease to report NotHeld, got %v", outcome)
 	}
 }
 
@@ -415,33 +433,45 @@ func TestExclusiveLeaseReleaseOnlyDropsItsOwnClaim(t *testing.T) {
 	}
 
 	// A caller that never held the scope releasing by scope name alone must
-	// not be able to drop the real holder's claim out from under them.
-	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "somebody-else"); err != nil {
-		t.Fatalf("mismatched release must be a no-op, not an error: %v", err)
+	// not be able to drop the real holder's claim out from under them -- and
+	// must be told, rather than quietly succeeding, that the scope is held by
+	// someone else -- a release that could not remove the claim must name the
+	// holder, exactly as a conflicting take already does.
+	_, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "somebody-else")
+	expectHolderNamedInConflict(t, err, "job-fix-1201")
+	requireHeldCount(t, "erun", "ux", now, 1, "expected the real holder's claim to survive a mismatched release")
+
+	outcome, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201")
+	expectReleaseOutcome(t, "release", outcome, err, EnvironmentActivityLeaseReleased)
+	requireHeldCount(t, "erun", "ux", now, 0, "expected the scope free after its own holder released it")
+
+	// Releasing an already-vacated scope is success, matching the shared
+	// lease's idempotence, but reports NotHeld rather than Released.
+	outcome, err = ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201")
+	expectReleaseOutcome(t, "release of a vacated scope", outcome, err, EnvironmentActivityLeaseNotHeld)
+}
+
+// expectHolderNamedInConflict asserts err is an EnvironmentActivityLeaseConflictError naming wantHolderID.
+func expectHolderNamedInConflict(t *testing.T, err error, wantHolderID string) {
+	t.Helper()
+	var conflict *EnvironmentActivityLeaseConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("expected a mismatched release to fail naming the holder, got %v", err)
 	}
-	held, err := loadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute), alwaysAlive)
+	if conflict.Holder.ID != wantHolderID {
+		t.Errorf("expected the conflict to name the real holder, got %+v", conflict.Holder)
+	}
+}
+
+// requireHeldCount asserts the number of leases held a minute after now.
+func requireHeldCount(t *testing.T, tenant, environment string, now time.Time, want int, context string) {
+	t.Helper()
+	held, err := loadEnvironmentActivityLeases(tenant, environment, now.Add(time.Minute), alwaysAlive)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if len(held) != 1 {
-		t.Fatalf("expected the real holder's claim to survive a mismatched release, got %+v", held)
-	}
-
-	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201"); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	held, err = loadEnvironmentActivityLeases("erun", "ux", now.Add(time.Minute), alwaysAlive)
-	if err != nil {
-		t.Fatalf("load after release: %v", err)
-	}
-	if len(held) != 0 {
-		t.Fatalf("expected the scope free after its own holder released it, got %+v", held)
-	}
-
-	// Releasing an already-vacated scope is success, matching the shared
-	// lease's idempotence.
-	if err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201"); err != nil {
-		t.Fatalf("expected releasing a vacated scope to succeed, got %v", err)
+	if len(held) != want {
+		t.Fatalf("%s, got %+v", context, held)
 	}
 }
 

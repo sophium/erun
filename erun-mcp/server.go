@@ -314,7 +314,7 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, activityLeaseTakeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_release",
-		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds. Pass exclusive=true and the same scope to release an exclusive claim; only the id that took it can release it.",
+		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds, and the result's released field reports whether anything was actually held rather than reading the same success either way. Pass exclusive=true and the same scope to release an exclusive claim; only the id that took it can release it, and if a different id holds that scope the call fails naming the actual holder instead of silently leaving it in place.",
 	}, activityLeaseReleaseTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_list",

@@ -473,7 +473,7 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 			return fmt.Errorf("upgrade: %s/%s: %w", item.Tenant, item.Environment, err)
 		}
 		defer func() {
-			_ = ReleaseExclusiveEnvironmentActivityLease(item.Tenant, item.Environment, lease.Scope, lease.ID)
+			_, _ = ReleaseExclusiveEnvironmentActivityLease(item.Tenant, item.Environment, lease.Scope, lease.ID)
 		}()
 
 		return deploy(ctx, item)
