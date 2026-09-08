@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+
+import { test } from 'vitest';
 
 import { openOrchestrator } from './orchestratorThunks';
 import { setSelected } from './slices/selectionSlice';

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, mock, test } from 'node:test';
+
+import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import {
   dismissNotification,
@@ -113,11 +114,11 @@ function installWindow(): void {
 
 beforeEach(() => {
   installWindow();
-  mock.timers.enable({ apis: ['setTimeout'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 });
 
 afterEach(() => {
-  mock.timers.reset();
+  vi.useRealTimers();
 });
 
 test('showNotification auto-dismisses a success entry after the shared transient duration', () => {
@@ -131,7 +132,7 @@ test('showNotification auto-dismisses a success entry after the shared transient
     'must not dismiss before the timer fires',
   );
 
-  mock.timers.tick(TRANSIENT_DISMISS_MS);
+  vi.advanceTimersByTime(TRANSIENT_DISMISS_MS);
 
   const dismissed = actions.find((action) => action.type === dismissNotificationAction.type);
   assert.ok(dismissed, 'expected an auto-dismiss after the transient duration');
@@ -142,7 +143,7 @@ test('showNotification auto-dismisses a success entry after the shared transient
 test('showNotification never auto-dismisses a warning or an error', () => {
   for (const kind of ['warning', 'error'] as const) {
     const actions = collectDispatched(showNotification(kind, 'Deploy of frs/dev failed.'));
-    mock.timers.tick(TRANSIENT_DISMISS_MS * 2);
+    vi.advanceTimersByTime(TRANSIENT_DISMISS_MS * 2);
     assert.equal(
       actions.some((action) => action.type === dismissNotificationAction.type),
       false,

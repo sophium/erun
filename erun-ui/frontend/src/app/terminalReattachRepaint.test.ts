@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, mock, test } from 'node:test';
 
 import { noop } from 'erun-kit';
+import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import { TerminalReattachRepaint } from './terminalReattachRepaint';
 
@@ -98,11 +98,13 @@ function harness(
 beforeEach(() => {
   resizeCalls.length = 0;
   installWindow();
-  mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  vi.useFakeTimers({
+    toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'],
+  });
 });
 
 afterEach(() => {
-  mock.timers.reset();
+  vi.useRealTimers();
 });
 
 test('a keystroke restores the shrunken geometry at once, not mid-line 650ms later', () => {
@@ -110,7 +112,7 @@ test('a keystroke restores the shrunken geometry at once, not mid-line 650ms lat
   repaint.schedule(7);
 
   // The poller fires and shrinks. This is the window the operator hit.
-  mock.timers.tick(1300);
+  vi.advanceTimersByTime(1300);
   assert.equal(terminal.rows, 26, 'expected the shrink to be applied');
   assert.deepEqual(lastResizeCall(), [7, 120, 26]);
 
@@ -126,7 +128,7 @@ test('a keystroke restores the shrunken geometry at once, not mid-line 650ms lat
   // (legitimate, separately covered) next poll cycle once the quiet window
   // elapses.
   const afterInput = terminal.resizes.length;
-  mock.timers.tick(700);
+  vi.advanceTimersByTime(700);
   assert.equal(terminal.resizes.length, afterInput, 'the cancelled hold must not fire');
   assert.equal(fitCount, 1, 'the cancelled hold must not re-fit again');
 });
@@ -138,7 +140,7 @@ test('input defers the cycle through the quiet window but does not disarm it', (
 
   // A tick landing inside the 1500ms quiet window must not resize a pane the
   // operator is actively typing into.
-  mock.timers.tick(1300);
+  vi.advanceTimersByTime(1300);
   assert.deepEqual(terminal.resizes, [], 'a tick within the quiet window must not resize');
 
   // Once the quiet window elapses with the screen still blank, the poller must
@@ -147,7 +149,7 @@ test('input defers the cycle through the quiet window but does not disarm it', (
   // permanently disarming on the first keystroke left the pane blank for the
   // rest of the session -- exactly the defect behind the operator's blind,
   // concatenated retype (#1330 follow-up).
-  mock.timers.tick(1300);
+  vi.advanceTimersByTime(1300);
   assert.equal(terminal.rows, 26, 'a still-blank pane must be repainted once typing pauses');
   assert.deepEqual(lastResizeCall(), [7, 120, 26]);
 });
@@ -160,7 +162,7 @@ test('a repainted (now visible) pane is left alone even after the quiet window e
   // The screen becomes visible while the operator is still within the quiet
   // window -- e.g. the program redrew on its own after the keystroke.
   terminal.setContent('visible content');
-  mock.timers.tick(3000);
+  vi.advanceTimersByTime(3000);
 
   assert.deepEqual(terminal.resizes, [], 'a pane with visible content must never be resized');
 });
@@ -169,9 +171,9 @@ test('without input the cycle still completes, so the repaint is not simply disa
   const { terminal, repaint } = harness();
   repaint.schedule(7);
 
-  mock.timers.tick(1300);
+  vi.advanceTimersByTime(1300);
   assert.equal(terminal.rows, 26);
-  mock.timers.tick(650);
+  vi.advanceTimersByTime(650);
   assert.equal(terminal.rows, 40, 'the hold must restore on its own when nobody types');
   assert.equal(fitCount, 1);
 });
@@ -186,9 +188,9 @@ test('restore skips fit() when the container is momentarily unmeasurable, but st
   );
   repaint.schedule(7);
 
-  mock.timers.tick(1300);
+  vi.advanceTimersByTime(1300);
   assert.equal(terminal.rows, 26, 'expected the shrink to be applied');
-  mock.timers.tick(650);
+  vi.advanceTimersByTime(650);
 
   // term.resize(cols, rows) already restores the pre-shrink geometry directly,
   // independent of fit(); the guard only stops the *extra* re-measure from
