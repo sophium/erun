@@ -140,6 +140,66 @@ func TestResolvePlaywrightTestAreaSelectionUncommittedAndUntrackedFilesCount(t *
 	}
 }
 
+func TestResolvePlaywrightTestAreaSelectionRunShChangeRunsEverything(t *testing.T) {
+	dir := newPlaywrightAreaTestRepo(t)
+	writeFileForTest(t, dir, "erun-ui/playwright/run.sh", "# run.sh changed\n")
+	runGitForTest(t, dir, "add", ".")
+	runGitForTest(t, dir, "commit", "-q", "-m", "harness change")
+
+	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	if !ok {
+		t.Fatalf("expected selection to resolve")
+	}
+	if selection != "all" {
+		t.Fatalf("expected \"all\" for a run.sh change, got %q", selection)
+	}
+}
+
+func TestResolvePlaywrightTestAreaSelectionPackageJSONChangeRunsEverything(t *testing.T) {
+	dir := newPlaywrightAreaTestRepo(t)
+	writeFileForTest(t, dir, "erun-ui/playwright/package.json", "{}\n")
+	runGitForTest(t, dir, "add", ".")
+	runGitForTest(t, dir, "commit", "-q", "-m", "harness manifest change")
+
+	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	if !ok {
+		t.Fatalf("expected selection to resolve")
+	}
+	if selection != "all" {
+		t.Fatalf("expected \"all\" for a package.json change, got %q", selection)
+	}
+}
+
+func TestResolvePlaywrightTestAreaSelectionAgentsMarkdownChangeStaysSmokeOnly(t *testing.T) {
+	dir := newPlaywrightAreaTestRepo(t)
+	writeFileForTest(t, dir, "erun-ui/playwright/AGENTS.md", "# docs changed\n")
+	runGitForTest(t, dir, "add", ".")
+	runGitForTest(t, dir, "commit", "-q", "-m", "docs change")
+
+	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	if !ok {
+		t.Fatalf("expected selection to resolve")
+	}
+	if selection != "smoke" {
+		t.Fatalf("expected a markdown-only change to stay smoke-only, got %q", selection)
+	}
+}
+
+func TestResolvePlaywrightTestAreaSelectionSmokeSpecChangeStaysSmokeOnly(t *testing.T) {
+	dir := newPlaywrightAreaTestRepo(t)
+	writeFileForTest(t, dir, "erun-ui/playwright/tests/smoke/smoke.spec.ts", "// smoke changed\n")
+	runGitForTest(t, dir, "add", ".")
+	runGitForTest(t, dir, "commit", "-q", "-m", "smoke spec change")
+
+	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	if !ok {
+		t.Fatalf("expected selection to resolve")
+	}
+	if selection != "smoke" {
+		t.Fatalf("expected a smoke-spec-only change to stay smoke-only (it always runs already), got %q", selection)
+	}
+}
+
 func TestResolvePlaywrightTestAreaSelectionNoMergeBaseFailsSafe(t *testing.T) {
 	dir := t.TempDir()
 	runGitForTest(t, dir, "init", "-q", "-b", "solo")
