@@ -755,7 +755,7 @@ stub_erun "${case_dir}/bin"
 	fi
 )
 
-# --- a genuine orphan (erun#2437): the job exited 0 but left unsupervised
+# --- a genuine orphan: the job exited 0 but left unsupervised
 # background work running, so `job await` reports it nonzero (state
 # "abandoned" is never Succeeded, see environmentJobSucceeded in
 # erun-common/job.go) exactly like a real failure would. The wrapper must
