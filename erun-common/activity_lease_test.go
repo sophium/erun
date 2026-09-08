@@ -29,8 +29,8 @@ func alwaysAlive(int) bool { return true }
 func neverAlive(int) bool  { return false }
 
 // expectReleaseOutcome checks a release call's error and outcome together, so
-// the tests exercising the new erun#2414 outcome reporting don't each repeat
-// the same two branches inline.
+// the tests exercising the outcome reporting don't each repeat the same two
+// branches inline.
 func expectReleaseOutcome(t *testing.T, context string, outcome EnvironmentActivityLeaseReleaseOutcome, err error, want EnvironmentActivityLeaseReleaseOutcome) {
 	t.Helper()
 	if err != nil {
@@ -98,7 +98,7 @@ func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
 	// A wrapper's exit trap must not fail a job that already finished, so
 	// releasing a lease that was never taken is success -- but the outcome
 	// must say nothing was actually held, not the same Released a real
-	// release reports (erun#2414).
+	// release reports.
 	isolateActivityCache(t)
 	outcome, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
 	if err != nil {
@@ -435,8 +435,8 @@ func TestExclusiveLeaseReleaseOnlyDropsItsOwnClaim(t *testing.T) {
 	// A caller that never held the scope releasing by scope name alone must
 	// not be able to drop the real holder's claim out from under them -- and
 	// must be told, rather than quietly succeeding, that the scope is held by
-	// someone else (erun#2414: a release that could not remove the claim must
-	// name the holder, exactly as a conflicting take already does).
+	// someone else -- a release that could not remove the claim must name the
+	// holder, exactly as a conflicting take already does.
 	_, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "somebody-else")
 	expectHolderNamedInConflict(t, err, "job-fix-1201")
 	requireHeldCount(t, "erun", "ux", now, 1, "expected the real holder's claim to survive a mismatched release")

@@ -925,8 +925,8 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("lease_release_reports_not_held_for_an_unknown_id", func(t *testing.T) {
-		// erun#2414: a release that removed nothing must say so, not report the
-		// same "lease released" line as a real release. Nothing was ever taken
+		// A release that removed nothing must say so, not report the same
+		// "lease released" line as a real release. Nothing was ever taken
 		// under this id.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -940,9 +940,9 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("lease_release_exclusive_wrong_scope_reports_not_held", func(t *testing.T) {
-		// erun#2414's actual reproduction: an exclusive claim released against a
-		// scope it was never taken on (here, a mismatched --scope; the reported
-		// bug omitted --exclusive entirely, which lands on this same "nothing at
+		// The actual reproduction: an exclusive claim released against a scope
+		// it was never taken on (here, a mismatched --scope; the reported bug
+		// omitted --exclusive entirely, which lands on this same "nothing at
 		// this key" outcome) must report NotHeld and must leave the real claim
 		// untouched, not silently report the same success as a real release.
 		setup := env.New(t)
@@ -969,10 +969,10 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("lease_release_exclusive_held_by_another_id_names_the_holder", func(t *testing.T) {
-		// erun#2414: a release that could not remove the claim because a
-		// different id holds it must fail and name that holder, exactly as a
-		// conflicting take already does - not quietly report success for a
-		// claim it never touched.
+		// A release that could not remove the claim because a different id
+		// holds it must fail and name that holder, exactly as a conflicting
+		// take already does - not quietly report success for a claim it never
+		// touched.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		take := erun.Run(t, []string{

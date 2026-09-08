@@ -408,9 +408,9 @@ func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) 
 // EnvironmentActivityLeaseReleaseOutcome distinguishes what a release actually
 // did, so a caller — and the report it prints — can tell "a held claim was
 // removed" from "there was nothing there to remove" instead of both reading as
-// the same bare success (erun#2414). Both are still success from the release
-// call's own point of view: a wrapper's exit trap must never fail a job that
-// already finished cleanly just because it releases twice.
+// the same bare success. Both are still success from the release call's own
+// point of view: a wrapper's exit trap must never fail a job that already
+// finished cleanly just because it releases twice.
 type EnvironmentActivityLeaseReleaseOutcome int
 
 const (

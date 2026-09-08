@@ -43,8 +43,8 @@ type ActivityLeaseResult struct {
 	// and this call removed it, false when there was nothing there to remove.
 	// Both are a successful call — releasing an absent or already-expired
 	// lease is idempotent — but collapsing them into the same unconditional
-	// success is what let a release aimed at the wrong store (erun#2414: an
-	// exclusive claim released without exclusive=true) go unnoticed.
+	// success is what let a release aimed at the wrong store -- an exclusive
+	// claim released without exclusive=true -- go unnoticed.
 	Released *bool `json:"released,omitempty"`
 }
 

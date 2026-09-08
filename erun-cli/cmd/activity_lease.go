@@ -187,10 +187,10 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 
 // releaseLeaseSummary reports what the release actually did. A caller that
 // cannot tell "removed" apart from "there was nothing there" has no way to
-// notice a release aimed at the wrong store (erun#2414: an exclusive claim
-// released without --exclusive reported the same "lease released" line as a
-// real release, while the exclusive claim it never touched stayed held for
-// its full TTL).
+// notice a release aimed at the wrong store -- an exclusive claim released
+// without --exclusive reported the same "lease released" line as a real
+// release, while the exclusive claim it never touched stayed held for its
+// full TTL.
 func releaseLeaseSummary(outcome common.EnvironmentActivityLeaseReleaseOutcome, id string) string {
 	trimmed := strings.TrimSpace(id)
 	if outcome == common.EnvironmentActivityLeaseReleased {
