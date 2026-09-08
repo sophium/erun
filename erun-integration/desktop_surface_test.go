@@ -17,6 +17,7 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-integration/internal/desktopsurface"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // repoRoot resolves the checkout root from this file's own location rather
@@ -161,6 +162,123 @@ func cliOnlyCapabilities(t testing.TB) []desktopsurface.Capability {
 	walk(cmd.CommandTreeForAudit(), nil, false)
 	sort.Slice(capabilities, func(i, j int) bool { return capabilities[i].Name < capabilities[j].Name })
 	return capabilities
+}
+
+// operatorFacingCommandPaths walks the same tree cliOnlyCapabilities does and
+// returns every command path whose *command* the gate holds to needing an
+// operator entry point -- runnable, not Hidden or Deprecated, and not
+// declared agent-facing on either the MCP or the CLI side. Those are exactly
+// the commands whose flags are worth auditing: a flag on a command nobody is
+// expected to reach from the desktop needs no affordance either.
+//
+// The tree is auditCommandTree()'s, not CommandTreeForAudit()'s directly, so
+// build/push's flags are enumerated the same way regardless of the working
+// directory the test binary runs from (see auditCommandTree in
+// cli_help_flag_drift_test.go).
+func operatorFacingCommandPaths() []string {
+	covered := mcpCoveredCLIPaths()
+	agentFacingTool := make(map[string]bool)
+	for _, name := range eruncommon.MCPToolNames() {
+		descriptor, ok := eruncommon.MCPToolDescriptorFor(name)
+		if !ok || len(descriptor.CLIPath) == 0 || !descriptor.AgentFacing {
+			continue
+		}
+		agentFacingTool[strings.Join(descriptor.CLIPath, " ")] = true
+	}
+
+	var paths []string
+	var walk func(c *cobra.Command, path []string, hidden bool)
+	walk = func(c *cobra.Command, path []string, hidden bool) {
+		for _, child := range c.Commands() {
+			childPath := append(append([]string{}, path...), child.Name())
+			childHidden := hidden || child.Hidden
+			full := strings.Join(childPath, " ")
+			agentFacingCommand := agentFacingTool[full] ||
+				(!covered[full] && cmd.IsAgentFacingCLIOnlyCommand(full))
+			operatorFacing := child.Runnable() && !childHidden &&
+				child.Deprecated == "" && !agentFacingCommand
+			if operatorFacing {
+				paths = append(paths, full)
+			}
+			walk(child, childPath, childHidden)
+		}
+	}
+	walk(auditCommandTree(), nil, false)
+	sort.Strings(paths)
+	return paths
+}
+
+// camelCaseFlagName renders a kebab-case flag name the way a frontend request
+// model spells the same field ("waiting-on-me" -> "waitingOnMe"), which is the
+// other half of how a flag's dimension shows up in operator-surface source.
+func camelCaseFlagName(name string) string {
+	parts := strings.Split(name, "-")
+	var sb strings.Builder
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		if i == 0 {
+			sb.WriteString(part)
+			continue
+		}
+		sb.WriteString(strings.ToUpper(part[:1]))
+		sb.WriteString(part[1:])
+	}
+	return sb.String()
+}
+
+// cliFlagCapabilities returns one Capability per flag on an operator-facing
+// command -- the granularity the gate was missing when it reasoned only about
+// whole commands. A capability delivered as new flags on a command that
+// already has a desktop surface used to pass unexamined, so a filter or
+// selection dimension could ship CLI-only with nothing noticing.
+//
+// Only a command's own flags count: an inherited persistent flag belongs to
+// the ancestor that registered it and would otherwise be re-audited once per
+// descendant. Hidden flags are skipped for the same reason Hidden commands
+// are -- the marker is already explicit at the registration site.
+func cliFlagCapabilities() []desktopsurface.Capability {
+	root := auditCommandTree()
+	var capabilities []desktopsurface.Capability
+	for _, path := range operatorFacingCommandPaths() {
+		command := resolveCommandPath(root, path)
+		if command == nil {
+			continue
+		}
+		inherited := make(map[string]bool)
+		command.InheritedFlags().VisitAll(func(f *pflag.Flag) { inherited[f.Name] = true })
+		command.LocalFlags().VisitAll(func(f *pflag.Flag) {
+			if f.Hidden || inherited[f.Name] {
+				return
+			}
+			key := cmd.CLIFlagKey(path, f.Name)
+			capabilities = append(capabilities, desktopsurface.Capability{
+				Name:            key,
+				Source:          "CLI flag",
+				Tokens:          []string{f.Name, camelCaseFlagName(f.Name)},
+				AgentFacing:     cmd.IsAgentFacingCLIOnlyFlag(path, f.Name),
+				KnownGap:        cmd.IsKnownUnsurfacedFlag(path, f.Name),
+				DeclarationHint: fmt.Sprintf("erun-cli/cmd/command_tree.go's cliOnlyAgentFacingFlags map (add %q with a comment explaining why no affordance could correspond to it)", key),
+				BaselineHint:    fmt.Sprintf("erun-cli/cmd/command_tree.go's knownUnsurfacedFlags map (remove %q)", key),
+			})
+		})
+	}
+	sort.Slice(capabilities, func(i, j int) bool { return capabilities[i].Name < capabilities[j].Name })
+	return capabilities
+}
+
+// resolveCommandPath walks a space-joined command path down from root.
+func resolveCommandPath(root *cobra.Command, path string) *cobra.Command {
+	current := root
+	for _, name := range strings.Fields(path) {
+		next := commandChild(current, name)
+		if next == nil {
+			return nil
+		}
+		current = next
+	}
+	return current
 }
 
 // httpMethodConstants maps the net/http method constant names used at every
@@ -423,13 +541,15 @@ func operatorConfigCapabilities() []desktopsurface.Capability {
 }
 
 // TestDesktopSurfaceGate fails when a user-facing CLI command, MCP tool, API
-// route, or operator-settable config field has no way in from an operator
-// surface -- erun-ui/frontend or erun-console (erun AGENTS.md § "Smooth,
-// Seamless, No Dead Ends", failure mode 3). See erun-integration/AGENTS.md,
+// route, operator-settable config field, or flag on an operator-facing
+// command has no way in from an operator surface -- erun-ui/frontend or
+// erun-console (erun AGENTS.md § "Smooth, Seamless, No Dead Ends", failure
+// mode 3). See erun-integration/AGENTS.md,
 // erun-common/mcp_tools.go's AgentFacing field, erun-cli/cmd/command_tree.go's
-// cliOnlyAgentFacingCommands, erun-backend-api/internal/routes/route_audit.go's
-// InternalAPIRoutes, and erun-common/operator_settable_config.go's
-// OperatorSettableConfigFields for the four declaration mechanisms.
+// cliOnlyAgentFacingCommands and cliOnlyAgentFacingFlags,
+// erun-backend-api/internal/routes/route_audit.go's InternalAPIRoutes, and
+// erun-common/operator_settable_config.go's OperatorSettableConfigFields for
+// the declaration mechanisms.
 func TestDesktopSurfaceGate(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
@@ -441,6 +561,7 @@ func TestDesktopSurfaceGate(t *testing.T) {
 	capabilities := append(mcpCapabilities(), cliOnlyCapabilities(t)...)
 	capabilities = append(capabilities, apiRouteCapabilities(t, root)...)
 	capabilities = append(capabilities, operatorConfigCapabilities()...)
+	capabilities = append(capabilities, cliFlagCapabilities()...)
 	if len(capabilities) == 0 {
 		t.Fatal("found zero capabilities to audit -- the enumeration is broken, not the desktop surface")
 	}
@@ -453,6 +574,81 @@ func TestDesktopSurfaceGate(t *testing.T) {
 	stale := desktopsurface.FindStaleBaselineEntries(capabilities, operatorSurface)
 	for _, s := range stale {
 		t.Errorf("%s", s.Message())
+	}
+}
+
+// capabilityNamed returns the enumerated capability with the given name, or
+// fails the test -- a name that no longer resolves means the enumeration
+// changed under the test, not that the assertion below is satisfied.
+func capabilityNamed(t testing.TB, capabilities []desktopsurface.Capability, name string) desktopsurface.Capability {
+	t.Helper()
+	for _, c := range capabilities {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("no capability named %q in the real enumeration", name)
+	return desktopsurface.Capability{}
+}
+
+// TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand is the
+// regression test for the granularity the gate used to work at. Against an
+// operator surface that references the command `erun review list` but nothing
+// about its --status filter, command granularity reports no gap at all, and
+// flag granularity reports the filter -- so a capability shipped as new flags
+// on a command that already has a desktop surface can no longer pass
+// unexamined. Review discovery's filters are the live instance that motivated
+// this: the CLI grew seven of them while the gate kept asking only whether
+// `review list` had a surface.
+func TestDesktopSurfaceGateSeesAFilterDimensionOnAnAlreadySurfacedCommand(t *testing.T) {
+	t.Parallel()
+
+	const flagName = "review list --status"
+	commandCapabilities := append(mcpCapabilities(), cliOnlyCapabilities(t)...)
+	command := capabilityNamed(t, commandCapabilities, "review_list")
+	flag := capabilityNamed(t, cliFlagCapabilities(), flagName)
+	if flag.AgentFacing || flag.KnownGap {
+		t.Fatalf("%q is declared exempt, so it cannot demonstrate the granularity change", flagName)
+	}
+
+	// References the command the way the desktop's reviews panel does, and
+	// says nothing about a status filter.
+	surface := desktopsurface.FrontendSource("export function ReviewsPanel() { return reviewList() }")
+
+	if missing := desktopsurface.FindMissingDesktopSurface([]desktopsurface.Capability{command}, surface); len(missing) != 0 {
+		t.Fatalf("command granularity must clear here -- that is the gap being fixed; got %+v", missing)
+	}
+
+	missing := desktopsurface.FindMissingDesktopSurface([]desktopsurface.Capability{command, flag}, surface)
+	if len(missing) != 1 || missing[0].Capability.Name != flagName {
+		t.Fatalf("want flag granularity to flag %q, got %+v", flagName, missing)
+	}
+}
+
+// TestCLIFlagDeclarationsNameRealFlags fails when either flag registry names a
+// flag the command tree no longer has. A declaration nobody can invalidate
+// rots into fiction: a renamed or deleted flag would leave an exemption
+// standing that silently covers nothing, and the next flag to take that name
+// would inherit it.
+func TestCLIFlagDeclarationsNameRealFlags(t *testing.T) {
+	t.Parallel()
+	real := make(map[string]bool)
+	for _, c := range cliFlagCapabilities() {
+		real[c.Name] = true
+	}
+	if len(real) == 0 {
+		t.Fatal("found zero CLI flag capabilities -- the enumeration is broken, not the registries")
+	}
+	stale := make([]string, 0)
+	for _, key := range cmd.CLIFlagDeclarationKeys() {
+		if !real[key] {
+			stale = append(stale, key)
+		}
+	}
+	sort.Strings(stale)
+	for _, key := range stale {
+		t.Errorf("erun-cli/cmd/command_tree.go declares %q, but no operator-facing command registers that flag.\n"+
+			"    Remove the entry, or fix the key if the flag or its command was renamed.", key)
 	}
 }
 
