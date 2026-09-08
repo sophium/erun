@@ -171,6 +171,15 @@ test.describe('review diff/tree consistency', () => {
     page,
     seededEnv,
   }) => {
+    // This spec renders 30 tall files -- far more than the default single-file
+    // case the suite's global 30s per-test timeout is tuned for -- and then
+    // runs two sequential convergence waits on top of that render (the scroll
+    // retry and the tree auto-scroll poll below), so the legitimate cost of
+    // this spec alone can approach the default budget before either wait
+    // starts (root AGENTS.md's "no flaky tests" gate needs this to be a real
+    // budget increase, not a race against the whole-test clock the bounded
+    // retries below would still lose).
+    test.setTimeout(120_000);
     // Enough tall files that the tree overflows its container and the active
     // node would otherwise scroll out of view.
     const big = Array.from({ length: 30 }, (_, i) => `pkg/f${String(i).padStart(2, '0')}.ts`);
@@ -185,28 +194,49 @@ test.describe('review diff/tree consistency', () => {
     const review = app.reviewPanel;
     await expect.poll(() => review.diffSectionPaths().then((paths) => paths.length)).toBe(30);
 
+    // The panel keeps reloading its diff on a timer (see nextDiffRefresh's own
+    // comment above); anchor to the quiet window right after one of those
+    // reloads before driving the scroll below, the same reasoning the filter
+    // test already applies to its own fill.
+    await nextDiffRefresh(page);
+
     // Scrolling the diff drives the scrollspy to a late file; the tree must
     // follow to keep that node visible. The diff section can still re-render as
     // it settles (30 tall files), so the last node may detach between resolving
     // it and scrolling on a loaded host — retry so the locator re-resolves
     // against the current DOM rather than scrolling a stale, detached node.
+    // scrollIntoViewIfNeeded has no timeout of its own (it waits for as long as
+    // the caller allows), so bound each attempt and let toPass supply the
+    // retries — an unbounded attempt racing the same re-render can otherwise
+    // spend the whole retry budget waiting out one detach instead of costing
+    // one retry.
     await expect(async () => {
-      await page.locator('.diff-file[data-path]').last().scrollIntoViewIfNeeded();
-    }).toPass();
+      await page.locator('.diff-file[data-path]').last().scrollIntoViewIfNeeded({ timeout: 2_000 });
+    }).toPass({ timeout: 30_000 });
 
     const node = review.currentTreeNode();
     await expect(node).toBeVisible();
     // The auto-scroll guarantee: without it the active node would sit below the
-    // tree container once the diff scrolls to the bottom.
+    // tree container once the diff scrolls to the bottom. boundingBox() also
+    // has no timeout of its own, so the same reasoning applies: bound each
+    // read so a node that is momentarily missing its aria-current (mid
+    // scrollspy re-render) fails fast and the poll gets another attempt,
+    // rather than one attempt consuming the whole convergence window.
     await expect
-      .poll(async () => {
-        const nb = await node.boundingBox();
-        const cb = await review.changedFilesTree().boundingBox();
-        if (!nb || !cb) {
-          return false;
-        }
-        return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
-      })
+      .poll(
+        async () => {
+          const nb = await node.boundingBox({ timeout: 2_000 }).catch(() => null);
+          const cb = await review
+            .changedFilesTree()
+            .boundingBox({ timeout: 2_000 })
+            .catch(() => null);
+          if (!nb || !cb) {
+            return false;
+          }
+          return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
+        },
+        { timeout: 40_000 },
+      )
       .toBe(true);
   });
 
