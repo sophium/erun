@@ -56,6 +56,56 @@ func TestStepTimingSiblingsCanonicalizeToNameOrder(t *testing.T) {
 				"    push [<ELAPSED>]\n",
 		},
 		{
+			// A failed step renders its error after the duration, so the row
+			// no longer ends at the bracket. That shape used to fall out of
+			// the canonicalizer entirely, which ended the block at it and left
+			// every sibling after it in the order the run measured — the whole
+			// point of this normalization, silently off in exactly the
+			// scenarios that induce a failure on purpose.
+			"a failed row's error suffix does not stop the canonicalization",
+			"  push [9s]\n" +
+				"    base (cache miss: x) [4s]\n" +
+				"      linux/arm64 (cache miss: x) [2s]\n" +
+				"      linux/amd64 (cache miss: x) [1s]\n" +
+				"    api (cache miss: x) [5s]\n" +
+				"      linux/arm64 (cache miss: x) [3s]\n" +
+				"      linux/amd64 (failed) (cache miss: x) [2s] — unauthorized: denied\n" +
+				"      linux/amd64 (cache miss: x) [1s]\n" +
+				"    chart base [1s]\n" +
+				"    chart api [1s]\n",
+			"  push [<ELAPSED>]\n" +
+				"    api (cache miss: x) [<ELAPSED>]\n" +
+				"      linux/amd64 (cache miss: x) [<ELAPSED>]\n" +
+				"      linux/amd64 (failed) (cache miss: x) [<ELAPSED>] — unauthorized: denied\n" +
+				"      linux/arm64 (cache miss: x) [<ELAPSED>]\n" +
+				"    base (cache miss: x) [<ELAPSED>]\n" +
+				"      linux/amd64 (cache miss: x) [<ELAPSED>]\n" +
+				"      linux/arm64 (cache miss: x) [<ELAPSED>]\n" +
+				"    chart api [<ELAPSED>]\n" +
+				"    chart base [<ELAPSED>]\n",
+		},
+		{
+			// An error can run to several lines (the missing-binfmt refusal
+			// ends with a command on its own line). Those lines are part of
+			// the row above them and have to travel with it when siblings are
+			// reordered, not be read as rows of their own.
+			"a multi-line error stays attached to the row it belongs to",
+			"  build (failed) [9s] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"    base (failed) [5s] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"    api (failed) [4s] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"timing record written to somewhere\n",
+			"  build (failed) [<ELAPSED>] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"    api (failed) [<ELAPSED>] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"    base (failed) [<ELAPSED>] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"timing record written to somewhere\n",
+		},
+		{
 			"a single root with one child is untouched beyond redaction",
 			"step timing (ordered by duration):\n  deploy [2.1s]\n    the-release [1.9s]\n",
 			"step timing (ordered by duration):\n  deploy [<ELAPSED>]\n    the-release [<ELAPSED>]\n",
