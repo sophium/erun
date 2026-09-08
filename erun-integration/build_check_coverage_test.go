@@ -91,10 +91,9 @@ var buildCheckCoverage = map[string]coverageEntry{
 			"is deleted, not carried alongside it",
 	},
 	"erun-common": {
-		kind: deliberatelyExcluded,
-		reason: "erun-common/AGENTS.md's Validation section: erun-common behavior is gated end-to-end by this suite, " +
-			"not by this module's own unit tests -- a unit test overlapping an integration scenario is deleted, not " +
-			"carried alongside it",
+		kind:   gatedByMakeTarget,
+		target: "test-erun-common",
+		reason: "the Makefile's test-erun-common target runs `cd erun-common && go test -race ./...`",
 	},
 	"erun-kit": {
 		kind:   gatedByMakeTarget,
