@@ -317,12 +317,10 @@ const deployDiagnosisGuidance = "If the release is stuck pending or an image fai
 
 // runDeployDiagnosis reports helm release status and pods, read-only, so the
 // reader sees why a deploy failed before deciding on the destructive recovery
-// actions.
+// actions. It runs under --dry-run too: the flag withholds mutations, not
+// reads, and this diagnosis is the whole reason an operator reaches for it.
 func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) (common.DeployDiagnosisResult, error) {
 	diagnosis := common.RunDeployDiagnosis(ctx, req)
-	if ctx.DryRun {
-		return diagnosis, nil
-	}
 	if err := writeDeployDiagnosis(ctx, diagnosis); err != nil {
 		return diagnosis, err
 	}

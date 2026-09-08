@@ -13,6 +13,7 @@ kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
 kubectl-context-configure: subprocess
 
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 == Runtime image release line ==
 runtimeimage names the erun release line, but this env's last confirmed deploy actually ran the team line (recorded as runtimerunningimage).
 The next deploy that does not explicitly restate --runtime-image or --runtime-chart reads runtimeimage back to pick the pod's image; if that still resolves to a real, existing tag on the erun line, the deploy would succeed and silently move the environment off the team line it is actually running. Realign it with `erun deploy team dev --runtime-image <the team image>` (or --runtime-chart), which records the choice explicitly.
