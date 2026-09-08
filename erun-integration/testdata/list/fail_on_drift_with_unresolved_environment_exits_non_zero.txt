@@ -1,0 +1,8 @@
+Version drift for tenant erun:
+  max version: <VERSION>
+  environments:
+    - build version=<VERSION>
+    - petios version=undetermined [excluded from drift] -- could not read the deployed release: observe: could not read helm release "erun-devops" in namespace "erun-petios": Error: Kubernetes cluster unreachable: dial tcp <VERSION>.5:6443: i/o timeout
+audit: erun list --fail-on-drift --tenant erun
+list: erun/petios's runtime version is not recorded locally -- checking its deployed release live
+version drift for tenant erun: 1 environment(s) excluded from drift because their version could not be determined: petios
