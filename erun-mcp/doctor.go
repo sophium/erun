@@ -339,12 +339,10 @@ func firstNonBlank(values ...string) string {
 }
 
 // writeDoctorDeployDiagnosis reports helm release status and runtime pods so an
-// agent can see why a deploy failed before any cleanup runs. Read-only.
+// agent can see why a deploy failed before any cleanup runs. Read-only, so it
+// runs under preview/dry-run too — that mode withholds mutations, not reads.
 func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) error {
 	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
-	if runCtx.DryRun {
-		return nil
-	}
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
 			return err

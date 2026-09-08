@@ -13,11 +13,15 @@ kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
 kubectl-context-configure: subprocess
 
-If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
-== Runtime image registry ==
-runtimeimage resolves to registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com, but runtimeregistry is ghcr.io/sophium.
-The deploy that installs this env sets imageOverrides.erun-devops from 123456789012.dkr.ecr.eu-west-2.amazonaws.com while runtimeRegistry stays ghcr.io/sophium; the runtime pod can only pull if a credential for 123456789012.dkr.ecr.eu-west-2.amazonaws.com also resolves where `erun deploy`/`erun open --deploy` runs (the same AWS/docker session that can push to it). If the pod is failing to pull, confirm that credential is available there, or realign the two with `erun init team dev --runtime-registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com` to match the image.
+== Helm release status ==
+NAME: team-devops
+STATUS: failed
 
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 No cleanup actions selected.
 audit: erun doctor --dry-run team dev
 trace-log: would append the full trace to <TMP>

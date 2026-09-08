@@ -8,9 +8,10 @@ import (
 )
 
 // TestRecommendedDeployRecovery locks the diagnosis → single-recovery mapping.
-// The classifier only runs on a real `erun doctor` (dry-run produces an empty
-// diagnosis because the helm/kubectl probes are traced, not executed), so it is
-// unreachable from the dry-run integration subprocess and is covered here.
+// `erun doctor --dry-run` never reaches this classifier -- the recovery
+// prompt itself is skipped outright under --dry-run, since recommending and
+// running a recovery are both mutating concerns -- so it is unreachable from
+// the dry-run integration subprocess and is covered here.
 func TestRecommendedDeployRecovery(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -135,6 +136,21 @@ func TestRunDeployDiagnosisMissingReleaseHasNoReadError(t *testing.T) {
 	}
 	if action, ok := RecommendedDeployRecovery(diagnosis); ok {
 		t.Fatalf("recommended action = %q, ok = true; want no recovery recommended for a missing release", action)
+	}
+}
+
+// TestRunDeployDiagnosisPopulatesUnderDryRun is the regression test for
+// erun#2403: --dry-run scopes itself to mutations, and this diagnosis is
+// strictly read-only, so it must populate HelmStatus/Pods under --dry-run
+// exactly as it does on a real run instead of returning an empty result.
+func TestRunDeployDiagnosisPopulatesUnderDryRun(t *testing.T) {
+	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: failed\nREVISION: 5", "", 0)
+	writeKubectlStub(t, "", 0)
+
+	diagnosis := RunDeployDiagnosis(testTraceContext(true), ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+
+	if !strings.Contains(diagnosis.HelmStatus, "STATUS: failed") {
+		t.Fatalf("expected --dry-run to still populate HelmStatus, got %q", diagnosis.HelmStatus)
 	}
 }
 
