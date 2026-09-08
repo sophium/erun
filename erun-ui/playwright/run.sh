@@ -345,27 +345,57 @@ cleanup_isolated_home() {
 # not the leader (this pgid predates this script, e.g. a caller's shell with
 # job control off), this is a no-op rather than a guess at what else shares
 # that group.
+#
+# The group is enumerated via `ps` exactly once, excluding zombies (completed
+# work nobody has reaped yet, not abandoned background work -- the same
+# reasoning the Go supervisor's own check applies in job_process_unix.go) and
+# the `ps`/`awk` pair this one scan itself forks, which otherwise show up as
+# members of the very group they are scanning (a live scan necessarily
+# includes whatever is running it) and never disappear from a *repeated*
+# scan -- that self-sighting used to burn this function's whole settle budget
+# on every single run, clean or not, and left it returning with no actual
+# confirmation the group was empty. Convergence after that is checked with
+# the `kill -0` builtin against the exact pids just captured, which forks
+# nothing and so cannot rediscover its own noise.
 reap_process_group() {
 	own_pgid=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
 	if [ -z "$own_pgid" ] || [ "$own_pgid" != "$$" ]; then
 		return 0
 	fi
-	survivors() {
-		ps -axo pid=,pgid= 2>/dev/null | awk -v pg="$own_pgid" -v me="$$" '$2==pg && $1!=me {print $1}'
-	}
-	pids=$(survivors)
+	pids=$(ps -axo pid=,pgid=,stat=,comm= 2>/dev/null | awk -v pg="$own_pgid" -v me="$$" \
+		'$1!=me && $2==pg && $3 !~ /Z/ && $4!="ps" && $4!="awk" {print $1}')
 	[ -n "$pids" ] || return 0
 	# shellcheck disable=SC2086
 	kill -TERM $pids 2>/dev/null || true
+	still_alive() {
+		alive=""
+		for pid in $pids; do
+			if kill -0 "$pid" 2>/dev/null; then
+				alive="$alive $pid"
+			fi
+		done
+		pids="$alive"
+	}
 	settle_attempts=0
 	while [ "$settle_attempts" -lt 20 ]; do
-		pids=$(survivors)
+		still_alive
 		[ -z "$pids" ] && return 0
 		sleep 0.05
 		settle_attempts=$((settle_attempts + 1))
 	done
 	# shellcheck disable=SC2086
 	kill -KILL $pids 2>/dev/null || true
+	# Confirm the kill actually took effect before returning -- SIGKILL's
+	# delivery is not instantaneous under load, and returning without checking
+	# is exactly the gap that could leave a real straggler alive the instant
+	# the supervisor samples this group.
+	settle_attempts=0
+	while [ "$settle_attempts" -lt 20 ]; do
+		still_alive
+		[ -z "$pids" ] && return 0
+		sleep 0.05
+		settle_attempts=$((settle_attempts + 1))
+	done
 }
 
 trap 'reap_process_group; cleanup_isolated_home' EXIT
