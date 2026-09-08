@@ -166,7 +166,10 @@ type App struct {
 	// skillsSourceReported latches the one warning a run posts when the shipped
 	// skills cannot be resolved. The condition is a property of this build, so
 	// restating it on every orchestrator launch would be noise.
-	skillsSourceReported      bool
+	skillsSourceReported bool
+	// agentsSourceReported is skillsSourceReported's counterpart for the
+	// reusable agents (erun-builder/erun-reviewer).
+	agentsSourceReported      bool
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
 	activityStatusPoller      func(activityQueueEntry)

@@ -67,6 +67,18 @@ On every entrypoint run, `initialize_claude_config` runs `erun-install-agents` (
 
 The install both **installs an agent when absent and refreshes it when the baked copy changed**, while **preserving in-pod edits** — identical policy to skills, adapted for a single file: provenance is tracked in a sidecar marker (`~/.claude/agents/<name>.md.erun-agent-baked-sha256`) holding the baked file's hash. An installed copy whose content still matches its marker is unmodified since erun installed it and is refreshed to the baked version; one that differs was edited in-pod and is left untouched (a legacy copy with no marker is treated as unmodified and adopted on the first refresh) — see [Skills spec § Deployment mechanism](/agent-reference/skills-spec#deployment-mechanism) for the identical policy skills already ship.
 
+### Host orchestrator (desktop)
+
+The desktop app installs the same canonical agents into the host's `~/.claude/agents/<name>.md` for host-side orchestrator sessions, using the identical marker-based install-or-refresh — so a host orchestrator can delegate to `erun-builder`/`erun-reviewer` on each launch while preserving any host-side edits. This is the same mechanism, over the same file, that installs [skills for a host orchestrator](/agent-reference/skills-spec#host-orchestrator-desktop) — a desktop that resolves one source resolves the other identically, just against `erun-skills/agents` instead of `erun-skills/skills`.
+
+The source it installs from resolves in this order, first match wins:
+
+1. `ERUN_AGENTS_DIR`, if set — taken **verbatim, with no fallback**, so pointing it at an empty directory installs nothing rather than silently resolving something else.
+2. The `erun-skills/agents` directory of the checkout the desktop binary was built from, stamped into the binary by `erun-ui/build.sh` / `build.ps1`. This is what keeps a desktop that runs from outside its checkout — the usual case, since the built bundle is copied elsewhere to run — installing the agents its own build ships.
+3. `erun-skills/agents` found by walking up (max 8 levels) from the running executable, for a binary that was built without the stamp but sits inside a checkout.
+
+If none resolves, the orchestrator still launches and the agents already installed are left alone — but the condition is **reported, not silent**: a warning notification naming the checkout that was expected, where the executable looked, and the two recoveries (set `ERUN_AGENTS_DIR`, or rebuild with `erun-ui/build.sh` / `build.ps1`) is posted once per desktop run, and every occurrence is logged. A build that silently stopped refreshing agents is indistinguishable from one where the agent had not changed. A desktop installed from a package manager carries no checkout, so `ERUN_AGENTS_DIR` is its only source.
+
 ### Laptop (plugin marketplace)
 
 `.claude-plugin/marketplace.json` at the repo root already publishes `erun-skills/` as the `erun-tools` plugin via `git-subdir` (see [Skills spec § Marketplace distribution](/agent-reference/skills-spec#marketplace)). Claude Code's plugin loader discovers a plugin's own `agents/` directory automatically, at the lowest of its three lookup priorities (project `.claude/agents/` beats user `~/.claude/agents/` beats a plugin's `agents/`) — so `erun-skills/agents/` needs no new marketplace wiring: installing `erun-tools@sophium/erun` already carries `erun-builder` and `erun-reviewer` alongside every skill.
