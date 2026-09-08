@@ -3,9 +3,12 @@ package eruncommon
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -57,6 +60,64 @@ func TestEnvironmentJobThatBackgroundsWorkAndExitsIsNotReportedAsSuccess(t *test
 	}
 	if job.State != EnvironmentJobStateAbandoned {
 		t.Fatalf("State = %q, want %q", job.State, EnvironmentJobStateAbandoned)
+	}
+}
+
+// The actual reproduction: a background process that escapes into a
+// *fresh* process group of its own -- exactly what an agent tool's Bash tool
+// does when it backgrounds a command so it survives the turn that started it
+// -- rather than staying in the immediate child's own group the way the test
+// above's plain `cmd &` does. `set -m` is what forces bash's job control to
+// give the backgrounded sleep its own pgid instead of sharing the script's;
+// environmentJobProcessGroupSurvivors alone cannot see it once it lands
+// there, which is exactly the false `succeeded: true` this issue reported.
+func TestEnvironmentJobThatBackgroundsWorkIntoAFreshProcessGroupIsNotReportedAsSuccess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process-group/session survivor detection is POSIX-only")
+	}
+	isolateActivityCache(t)
+
+	const tenant = "abandoned-contract"
+	const environment = "bg-fresh-pgid-test"
+	const id = "job"
+	backgroundLog := filepath.Join(t.TempDir(), "background.log")
+
+	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		Tenant:      tenant,
+		Environment: environment,
+		ID:          id,
+		Name:        id,
+		Command:     []string{"bash", "-c", fmt.Sprintf("set -m; sleep 5 </dev/null >%s 2>&1 & exit 0", backgroundLog)},
+	}); err != nil {
+		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
+	}
+	t.Cleanup(func() { killProcessesMatching(backgroundLog) })
+
+	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
+	if err != nil {
+		t.Fatalf("LoadEnvironmentJob: %v", err)
+	}
+
+	if job.Succeeded {
+		t.Fatalf("job reported success (state=%q, exitCode=%v) even though it left a background process running outside its own process group: %+v", job.State, job.ExitCode, job)
+	}
+	if job.State != EnvironmentJobStateAbandoned {
+		t.Fatalf("State = %q, want %q", job.State, EnvironmentJobStateAbandoned)
+	}
+}
+
+// killProcessesMatching kills every process whose command line names path,
+// for a background process that escaped the job's own process group (so
+// signalEnvironmentJobProcessGroup on the job's ChildPID cannot reach it).
+func killProcessesMatching(path string) {
+	out, err := exec.Command("pgrep", "-f", path).Output()
+	if err != nil {
+		return
+	}
+	for _, field := range strings.Fields(string(out)) {
+		if pid, err := strconv.Atoi(field); err == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
 	}
 }
 

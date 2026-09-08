@@ -68,3 +68,9 @@ func environmentJobExitSignal(state *os.ProcessState) string { return "" }
 // Windows fall back to reporting whatever the immediate process's exit status
 // says.
 func environmentJobProcessGroupSurvivors(pgid int) bool { return false }
+
+// environmentJobSessionSurvivors always reports false on Windows, for the
+// same reason as environmentJobProcessGroupSurvivors above: no POSIX-style
+// session/signal-0 probe exists here to distinguish an abandoned background
+// child from a clean exit.
+func environmentJobSessionSurvivors(sid int) bool { return false }

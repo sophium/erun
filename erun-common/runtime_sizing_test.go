@@ -442,7 +442,7 @@ func TestReadLocalRuntimeUsageReadsCgroupV2(t *testing.T) {
 		"memory.max":     "24696061952\n",
 		"memory.current": "4773695488\n",
 		"memory.peak":    "12742377472\n",
-		"memory.events":  "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n",
+		"memory.events":  "low 0\nhigh 0\nmax 21292\noom 0\noom_kill 0\n",
 	})
 	usage := ReadLocalRuntimeUsage(root)
 	if got := runtimeQuotaMilli(usage.CPU.QuotaCores); got != 12000 {
@@ -450,6 +450,9 @@ func TestReadLocalRuntimeUsageReadsCgroupV2(t *testing.T) {
 	}
 	if usage.Memory.LimitBytes != 24696061952 || usage.Memory.PeakBytes != 12742377472 {
 		t.Fatalf("memory = %+v", usage.Memory)
+	}
+	if !usage.Memory.CeilingHitsObserved || usage.Memory.CeilingHits != 21292 {
+		t.Fatalf("memory.events' max counter (ceiling hits) = %+v, want observed=true value=21292", usage.Memory)
 	}
 	if usage.CPU.Periods != 376556 || usage.CPU.ThrottledPeriods != 0 {
 		t.Fatalf("cpu = %+v", usage.CPU)

@@ -129,6 +129,57 @@ func TestReconcileEnvironmentJobChecksContainerRestartOnSamePod(t *testing.T) {
 	})
 }
 
+// A supervisor gone with nothing else to explain why should carry
+// this pod's own cgroup resource state, so a reader can tell resource
+// exhaustion apart from a genuine erun bug instead of reading an
+// unactionable "could not be determined". The cgroup read itself is
+// injected via environmentJobResourceStateSummaryFunc rather than depending
+// on this test process's own live cgroup, which was never given the limits
+// a real runtime pod has.
+func TestReconcileEnvironmentJobSupervisorGoneIncludesInjectedResourceState(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(0, 0)
+
+	const injected = "Environment resource state: memory 4.02/6.00 GiB, ceiling reached 21292 times, 0 OOM kill(s); CPU throttled in 28% of periods (100837/363659)"
+	original := environmentJobResourceStateSummaryFunc
+	environmentJobResourceStateSummaryFunc = func() string { return injected }
+	t.Cleanup(func() { environmentJobResourceStateSummaryFunc = original })
+
+	job := EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Hostname: "same-pod-abc123"}
+	runner := fakeKubectlPodRunner(t, `{"status":{"containerStatuses":[{"name":"erun-devops","restartCount":0}]}}`, nil)
+	resolved := reconcileEnvironmentJobWithRestartCheck(dir, job, now, neverAlive, "same-pod-abc123", runner)
+
+	if resolved.UnknownReasonKind != UnknownReasonSupervisorGone {
+		t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonSupervisorGone)
+	}
+	if !strings.Contains(resolved.Reason, injected) {
+		t.Fatalf("Reason = %q, want it to include the injected resource state %q", resolved.Reason, injected)
+	}
+	if !strings.Contains(resolved.Reason, "could not be determined") {
+		t.Errorf("Reason = %q, must still say the cause itself could not be determined -- the resource state is evidence, not a claimed cause", resolved.Reason)
+	}
+}
+
+// A pod replacement is a *different* pod: reading this process's own cgroup
+// there would report the wrong container's resource state, so the resource
+// summary must only ever be appended to the same-pod, cause-unknown case
+// above.
+func TestReconcileEnvironmentJobPodReplacedDoesNotIncludeResourceState(t *testing.T) {
+	original := environmentJobResourceStateSummaryFunc
+	environmentJobResourceStateSummaryFunc = func() string { return "Environment resource state: should never appear here" }
+	t.Cleanup(func() { environmentJobResourceStateSummaryFunc = original })
+
+	job := EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Hostname: "old-pod-abc123"}
+	resolved := reconcileEnvironmentJob(t.TempDir(), job, time.Unix(0, 0), neverAlive, "new-pod-def456")
+
+	if resolved.UnknownReasonKind != UnknownReasonPodReplaced {
+		t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonPodReplaced)
+	}
+	if strings.Contains(resolved.Reason, "Environment resource state") {
+		t.Errorf("Reason = %q, must not report this pod's own resource state for a job that ran on a different, replaced pod", resolved.Reason)
+	}
+}
+
 func TestReconcileEnvironmentJobComputesAliveAgeMsOnEveryRead(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
