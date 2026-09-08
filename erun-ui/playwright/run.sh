@@ -58,18 +58,73 @@ set -eu
 # what let a fully-passing `make check-gate` run (not just a standalone suite
 # run) record as abandoned.
 #
-# setsid gives this invocation a fresh, genuinely private session+group up
+# setsid gives the real work a fresh, genuinely private session+group up
 # front, unconditionally, so reap_process_group always has one it provably
-# owns regardless of nesting depth. Skipped when already the leader (the
-# ordinary standalone path) to avoid an unnecessary extra layer, and when
-# setsid is unavailable (macOS has no util-linux setsid by default) -- there
-# this falls back to today's leader-or-no-op behavior, not a regression.
+# owns regardless of nesting depth. This invocation stays behind rather than
+# exec'ing into setsid: exec'ing would replace this exact pid's image while
+# leaving its pid and (crucially) its process-group membership untouched at
+# the OS level -- except setsid(2) itself then moves that same pid into a
+# brand-new session/group as its leader, which silently walks it out of
+# whatever group a job supervisor recorded for cancellation. A cancel sent to
+# that recorded group afterwards reaches only the ancestors still sharing it
+# (make, the wrapping sh) and never this process or anything it spawns.
+# Backgrounding the setsid'd reinvocation instead keeps this process a member
+# of its original group, where a cancel still finds it, and forwards the
+# signal into the child's own private group so the reach is restored.
+#
+# Skipped when already the leader (the ordinary standalone path) to avoid an
+# unnecessary extra layer, and when setsid is unavailable (macOS has no
+# util-linux setsid by default) -- there this falls back to today's
+# leader-or-no-op behavior, not a regression.
 if [ -z "${RUN_SH_OWN_GROUP:-}" ] && command -v setsid >/dev/null 2>&1; then
 	own_pgid_at_start=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
 	if [ -z "$own_pgid_at_start" ] || [ "$own_pgid_at_start" != "$$" ]; then
 		RUN_SH_OWN_GROUP=1
 		export RUN_SH_OWN_GROUP
-		exec setsid -w "$0" "$@"
+		# `-w` makes setsid itself block for the real work's exit and relay
+		# its status, so `$!` names a pid that stays put in THIS group (it
+		# only forks the actual session leader) and can be `wait`-ed on here.
+		setsid -w "$0" "$@" &
+		child=$!
+		# The real private session belongs to setsid's own forked child, not
+		# to setsid itself -- resolve its pgid by ppid rather than assuming a
+		# fixed pid offset from $child.
+		child_pgid=$(ps -axo pid=,ppid=,pgid= 2>/dev/null | awk -v p="$child" '$2==p {print $3; exit}')
+		forward_signal() {
+			if [ -n "$child_pgid" ]; then
+				kill -s "$1" "-$child_pgid" 2>/dev/null || true
+			else
+				# No resolved group to target -- signalling "-" with nothing
+				# after it would fall through to an unintended default
+				# (potentially this process's own group). Fall back to the
+				# single pid we do know about rather than guess at a group.
+				kill -s "$1" "$child" 2>/dev/null || true
+			fi
+		}
+		trap 'forward_signal TERM' TERM
+		trap 'forward_signal INT' INT
+		trap 'forward_signal HUP' HUP
+		# A signal delivered while `wait` is blocked interrupts it before the
+		# child has actually exited (POSIX: an interrupted wait returns a
+		# status greater than 128, distinct from a real exit status), so the
+		# first return can be that interruption rather than the child's own
+		# code. Guard it with `if` -- a bare `wait` whose nonzero interrupted
+		# return trips `set -e` would abort this script right here, before
+		# the loop below gets a chance to re-wait for the real, final status
+		# once the child has genuinely exited.
+		if wait "$child"; then
+			status=0
+		else
+			status=$?
+		fi
+		while kill -0 "$child" 2>/dev/null; do
+			if wait "$child"; then
+				status=0
+			else
+				status=$?
+			fi
+		done
+		exit "$status"
 	fi
 fi
 
@@ -90,6 +145,113 @@ if [ -z "${AGENT_GATE_DETACHED:-}" ] && [ "${RUN_SH_AGENT_GATED:-0}" != "1" ]; t
 	export RUN_SH_AGENT_GATED
 	exec "$ERUN_UI_DIR/../scripts/agent-gate.sh" ui-playwright "erun-ui/playwright/run.sh $*" -- "$SCRIPT_DIR/run.sh" "$@"
 fi
+
+# From here on this is the real work: build, lint, and the suite itself, now
+# running in its own private session/group (see the setsid block above). Wire
+# up cancellation and cleanup before any of that starts, not just before the
+# suite invocation at the bottom of the file -- a cancel during the build or
+# yarn-install phase deserves the same reach as one during the suite run.
+#
+# cleanup_isolated_home removes the throwaway HOME the isolated config root
+# below creates. Defined here, ahead of that section, so an early cancel can
+# still call it safely; ERUN_PLAYWRIGHT_HOME_CREATED defaults to 0 below for
+# the same reason -- referencing it before the isolated-root section has run
+# must not be an unset-variable error under `set -u`.
+ERUN_PLAYWRIGHT_HOME_CREATED=0
+cleanup_isolated_home() {
+	if [ "${ERUN_PLAYWRIGHT_HOME_CREATED:-0}" -eq 1 ]; then
+		rm -rf "$ERUN_PLAYWRIGHT_HOME"
+	fi
+}
+
+# reap_process_group kills anything still alive in this script's own process
+# group before it exits. The seeded PATH stub for `erun open` (fixtures/
+# seedRoot.ts) execs `sleep` to hold a tab's session open for the life of the
+# suite, and that child is never explicitly waited on or killed by anything
+# that tears the suite down -- stopping the headless backend it belongs to
+# only waits for the backend's own process to exit, not its children. Left
+# alone, that orphan stays a member of this script's process group long after
+# this script itself is done, and a supervisor watching this script for
+# exactly that shape (background work started and never waited for) records
+# a fully passing run as abandoned.
+#
+# Only ever acts when this script's own pid is the process group's own
+# leader: that is true whenever something gave this invocation a fresh group
+# (a supervisor's Setpgid, or ordinary job-control launching it as its own
+# foreground job), and in that case every other member is provably this
+# script's own descendant -- nothing it would be unsafe to signal. When it is
+# not the leader (this pgid predates this script, e.g. a caller's shell with
+# job control off), this is a no-op rather than a guess at what else shares
+# that group.
+#
+# The group is enumerated via `ps` exactly once, excluding zombies (completed
+# work nobody has reaped yet, not abandoned background work -- the same
+# reasoning the Go supervisor's own check applies in job_process_unix.go) and
+# the `ps`/`awk` pair this one scan itself forks, which otherwise show up as
+# members of the very group they are scanning (a live scan necessarily
+# includes whatever is running it) and never disappear from a *repeated*
+# scan -- that self-sighting used to burn this function's whole settle budget
+# on every single run, clean or not, and left it returning with no actual
+# confirmation the group was empty. Convergence after that is checked with
+# the `kill -0` builtin against the exact pids just captured, which forks
+# nothing and so cannot rediscover its own noise.
+reap_process_group() {
+	own_pgid=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
+	if [ -z "$own_pgid" ] || [ "$own_pgid" != "$$" ]; then
+		return 0
+	fi
+	pids=$(ps -axo pid=,pgid=,stat=,comm= 2>/dev/null | awk -v pg="$own_pgid" -v me="$$" \
+		'$1!=me && $2==pg && $3 !~ /Z/ && $4!="ps" && $4!="awk" {print $1}')
+	[ -n "$pids" ] || return 0
+	# shellcheck disable=SC2086
+	kill -TERM $pids 2>/dev/null || true
+	still_alive() {
+		alive=""
+		for pid in $pids; do
+			if kill -0 "$pid" 2>/dev/null; then
+				alive="$alive $pid"
+			fi
+		done
+		pids="$alive"
+	}
+	settle_attempts=0
+	while [ "$settle_attempts" -lt 20 ]; do
+		still_alive
+		[ -z "$pids" ] && return 0
+		sleep 0.05
+		settle_attempts=$((settle_attempts + 1))
+	done
+	# shellcheck disable=SC2086
+	kill -KILL $pids 2>/dev/null || true
+	# Confirm the kill actually took effect before returning -- SIGKILL's
+	# delivery is not instantaneous under load, and returning without checking
+	# is exactly the gap that could leave a real straggler alive the instant
+	# the supervisor samples this group.
+	settle_attempts=0
+	while [ "$settle_attempts" -lt 20 ]; do
+		still_alive
+		[ -z "$pids" ] && return 0
+		sleep 0.05
+		settle_attempts=$((settle_attempts + 1))
+	done
+}
+
+trap 'reap_process_group; cleanup_isolated_home' EXIT
+
+# A cancel signals this whole private group at once (see the setsid block
+# above), which includes whatever this script currently has running in the
+# foreground -- that sibling dying from the same broadcast is what lets this
+# shell's own blocked wait return promptly. But without a trap of its own for
+# the signal, the shell's default disposition for TERM/INT/HUP is to
+# terminate immediately, which does NOT run the EXIT trap above (verified: a
+# signal death with no trap installed for that signal skips the EXIT trap
+# entirely in both dash and bash). Converting the signal into an explicit
+# `exit` is what makes the EXIT trap -- and so reap_process_group and
+# cleanup_isolated_home -- actually run on a real cancel, not just on a clean
+# finish.
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
 
 FORCE_BUILD=0
 EXPLICIT_SKIP_BUILD=0
@@ -340,94 +502,14 @@ export ERUN_PLAYWRIGHT_PORT
 # child process run against a throwaway HOME, so the suite never reads or
 # writes the developer's real ~/.erun / ~/.config/erun. playwright.config.ts
 # points the webServer's HOME/XDG_* at this root, global-setup seeds the
-# deterministic baseline, and global-teardown removes it. The EXIT trap
-# below covers aborted runs; a caller-provided ERUN_PLAYWRIGHT_HOME is
-# respected and never deleted by the trap.
-ERUN_PLAYWRIGHT_HOME_CREATED=0
+# deterministic baseline, and global-teardown removes it. cleanup_isolated_home
+# (registered on the EXIT trap near the top of this script) covers aborted
+# runs; a caller-provided ERUN_PLAYWRIGHT_HOME is respected and never deleted.
 if [ -z "${ERUN_PLAYWRIGHT_HOME:-}" ]; then
 	ERUN_PLAYWRIGHT_HOME=$(mktemp -d "${TMPDIR:-/tmp}/erun-playwright-home.XXXXXX")
 	ERUN_PLAYWRIGHT_HOME_CREATED=1
 fi
 export ERUN_PLAYWRIGHT_HOME
-cleanup_isolated_home() {
-	if [ "$ERUN_PLAYWRIGHT_HOME_CREATED" -eq 1 ]; then
-		rm -rf "$ERUN_PLAYWRIGHT_HOME"
-	fi
-}
-
-# reap_process_group kills anything still alive in this script's own process
-# group before it exits. The seeded PATH stub for `erun open` (fixtures/
-# seedRoot.ts) execs `sleep` to hold a tab's session open for the life of the
-# suite, and that child is never explicitly waited on or killed by anything
-# that tears the suite down -- stopping the headless backend it belongs to
-# only waits for the backend's own process to exit, not its children. Left
-# alone, that orphan stays a member of this script's process group long after
-# this script itself is done, and a supervisor watching this script for
-# exactly that shape (background work started and never waited for) records
-# a fully passing run as abandoned.
-#
-# Only ever acts when this script's own pid is the process group's own
-# leader: that is true whenever something gave this invocation a fresh group
-# (a supervisor's Setpgid, or ordinary job-control launching it as its own
-# foreground job), and in that case every other member is provably this
-# script's own descendant -- nothing it would be unsafe to signal. When it is
-# not the leader (this pgid predates this script, e.g. a caller's shell with
-# job control off), this is a no-op rather than a guess at what else shares
-# that group.
-#
-# The group is enumerated via `ps` exactly once, excluding zombies (completed
-# work nobody has reaped yet, not abandoned background work -- the same
-# reasoning the Go supervisor's own check applies in job_process_unix.go) and
-# the `ps`/`awk` pair this one scan itself forks, which otherwise show up as
-# members of the very group they are scanning (a live scan necessarily
-# includes whatever is running it) and never disappear from a *repeated*
-# scan -- that self-sighting used to burn this function's whole settle budget
-# on every single run, clean or not, and left it returning with no actual
-# confirmation the group was empty. Convergence after that is checked with
-# the `kill -0` builtin against the exact pids just captured, which forks
-# nothing and so cannot rediscover its own noise.
-reap_process_group() {
-	own_pgid=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
-	if [ -z "$own_pgid" ] || [ "$own_pgid" != "$$" ]; then
-		return 0
-	fi
-	pids=$(ps -axo pid=,pgid=,stat=,comm= 2>/dev/null | awk -v pg="$own_pgid" -v me="$$" \
-		'$1!=me && $2==pg && $3 !~ /Z/ && $4!="ps" && $4!="awk" {print $1}')
-	[ -n "$pids" ] || return 0
-	# shellcheck disable=SC2086
-	kill -TERM $pids 2>/dev/null || true
-	still_alive() {
-		alive=""
-		for pid in $pids; do
-			if kill -0 "$pid" 2>/dev/null; then
-				alive="$alive $pid"
-			fi
-		done
-		pids="$alive"
-	}
-	settle_attempts=0
-	while [ "$settle_attempts" -lt 20 ]; do
-		still_alive
-		[ -z "$pids" ] && return 0
-		sleep 0.05
-		settle_attempts=$((settle_attempts + 1))
-	done
-	# shellcheck disable=SC2086
-	kill -KILL $pids 2>/dev/null || true
-	# Confirm the kill actually took effect before returning -- SIGKILL's
-	# delivery is not instantaneous under load, and returning without checking
-	# is exactly the gap that could leave a real straggler alive the instant
-	# the supervisor samples this group.
-	settle_attempts=0
-	while [ "$settle_attempts" -lt 20 ]; do
-		still_alive
-		[ -z "$pids" ] && return 0
-		sleep 0.05
-		settle_attempts=$((settle_attempts + 1))
-	done
-}
-
-trap 'reap_process_group; cleanup_isolated_home' EXIT
 
 # Opt-in k3d e2e mode (issue #647): un-stub the backend (real docker/kubectl/
 # helm + the real erun CLI), register binfmt for the mandatory multi-arch build,
