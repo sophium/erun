@@ -8,26 +8,30 @@ test.describe('sidebar env hover card', () => {
   test('hovering an env row opens a card with version, working issue, and activity', async ({
     app,
   }) => {
-    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+    // Hover and every read live inside one retryable block: SEED_ENV_ALPHA is
+    // the default-landing env, whose boot-time auto-open (still settling
+    // after reboot() returns control) and the periodic activity/usage sweep
+    // can both re-render the row and drop the card while the pointer still
+    // rests on it (erun-ui/playwright/AGENTS.md's hover-card bullet).
+    let workingOn = '';
+    await app.sidebar.readEnvHoverCard(SEED_TENANT, SEED_ENV_ALPHA, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
 
-    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect(card).toBeVisible();
+      await expect(card.getByText('Version', { exact: true })).toBeVisible({ timeout: 1_000 });
+      await expect(card.getByText('Working on', { exact: true })).toBeVisible({
+        timeout: 1_000,
+      });
+      await expect(card.getByText('Activity', { exact: true })).toBeVisible({ timeout: 1_000 });
 
-    await expect(card.getByText('Version', { exact: true })).toBeVisible();
-    await expect(card.getByText('Working on', { exact: true })).toBeVisible();
-    await expect(card.getByText('Activity', { exact: true })).toBeVisible();
-
-    // dd(1) is the Erun version row, always present once the seeded env has a
-    // runtime version; Working on is dd(2).
-    await expect
-      .poll(async () => (await card.locator('dd').nth(2).textContent())?.trim() ?? '')
-      .not.toBe('');
+      // dd(1) is the Erun version row, always present once the seeded env has
+      // a runtime version; Working on is dd(2).
+      workingOn = (await card.locator('dd').nth(2).textContent({ timeout: 1_000 })) ?? '';
+      expect(workingOn.trim()).not.toBe('');
+    });
 
     // Whatever it resolves to, it is never the implementation
     // excuse the card used to print for remote envs.
-    expect((await card.locator('dd').nth(2).textContent()) ?? '').not.toContain(
-      'worktree lives in the pod',
-    );
+    expect(workingOn).not.toContain('worktree lives in the pod');
   });
 
   // A never-opened env has no pod, so Activity must say "Not open" (never
@@ -39,18 +43,21 @@ test.describe('sidebar env hover card', () => {
   }) => {
     const { tenant, environment } = seededEnv;
 
-    await app.sidebar.hoverEnvironmentRow(tenant, environment);
-    const card = app.sidebar.envHoverCard(tenant, environment);
-    await expect(card).toBeVisible();
+    // Hover and every read live inside one retryable block; see the
+    // preceding test for why.
+    let workingOn = '';
+    await app.sidebar.readEnvHoverCard(tenant, environment, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
 
-    // dd(1) is the Erun version row, always present once the seeded env has a
-    // runtime version; Activity is dd(3), Working on is dd(2).
-    const activity = card.locator('dd').nth(3);
-    await expect(activity).toHaveText('Not open');
+      // dd(1) is the Erun version row, always present once the seeded env has
+      // a runtime version; Activity is dd(3), Working on is dd(2).
+      const activity = card.locator('dd').nth(3);
+      await expect(activity).toHaveText('Not open', { timeout: 1_000 });
 
-    const workingOn = card.locator('dd').nth(2);
-    await expect.poll(async () => (await workingOn.textContent())?.trim() ?? '').not.toBe('');
-    expect((await workingOn.textContent()) ?? '').not.toContain('worktree lives in the pod');
+      workingOn = (await card.locator('dd').nth(2).textContent({ timeout: 1_000 })) ?? '';
+      expect(workingOn.trim()).not.toBe('');
+    });
+    expect(workingOn).not.toContain('worktree lives in the pod');
   });
 
   // An open env whose real state is stopped must say "Stopped", never "Idle".

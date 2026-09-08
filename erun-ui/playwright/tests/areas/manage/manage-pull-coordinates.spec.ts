@@ -26,6 +26,11 @@ test.describe('manage dialog pull coordinates', () => {
   });
 
   test('saves both coordinates and reloads them', async ({ app, seededEnv }) => {
+    // Opens the dialog twice (save, cancel, reopen), each open going through
+    // openManageDialogViaKeyboard's own toPass retry -- a single slow open
+    // under contention can consume most of the default 30s budget on its
+    // own, leaving nothing for the second.
+    test.setTimeout(60_000);
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
 
@@ -36,6 +41,10 @@ test.describe('manage dialog pull coordinates', () => {
     await app.manageDialog.pullSecretInput(1).fill('ghcr-pull');
 
     await app.manageDialog.save();
+    // Dot clearing confirms the save round-tripped before the dialog closes,
+    // so the reopen below reads back what this save actually persisted
+    // instead of racing the write.
+    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('General')).toBe(false);
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
 
@@ -56,16 +65,25 @@ test.describe('manage dialog pull coordinates', () => {
     app,
     seededEnv,
   }) => {
+    // Opens the dialog twice (save, cancel, reopen), each open going through
+    // openManageDialogViaKeyboard's own toPass retry -- a single slow open
+    // under contention can consume most of the default 30s budget on its
+    // own, leaving nothing for the second.
+    test.setTimeout(60_000);
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
 
     await app.manageDialog.addPullSecretButton().click();
     await app.manageDialog.pullSecretInput(0).fill('wrong-secret');
     await app.manageDialog.save();
+    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('General')).toBe(false);
 
     await app.manageDialog.removePullSecretButton(0).click();
     await expect(app.manageDialog.pullSecretInput(0)).toHaveCount(0);
     await app.manageDialog.save();
+    // Dot clearing confirms this second save round-tripped before the dialog
+    // closes, so the reopen below reads back the removal instead of racing it.
+    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('General')).toBe(false);
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
 

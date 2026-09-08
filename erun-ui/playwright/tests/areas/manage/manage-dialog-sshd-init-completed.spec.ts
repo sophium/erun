@@ -45,6 +45,9 @@ test.describe('SSH access last-run outcome (#1276)', () => {
       },
       { tenant: seededEnv.tenant, environment: seededEnv.environment },
     );
+    // Converge on the render the event triggers before asserting on it,
+    // rather than racing that render against a bare expect's fixed timeout.
+    await lastRun.waitFor({ state: 'visible' });
     await expect(lastRun).toBeVisible();
 
     await page.evaluate(
@@ -63,6 +66,7 @@ test.describe('SSH access last-run outcome (#1276)', () => {
       },
       { tenant: seededEnv.tenant, environment: seededEnv.environment },
     );
+    await lastRunFailed.waitFor({ state: 'visible' });
     await expect(lastRunFailed).toBeVisible();
 
     await app.manageDialog.cancel();

@@ -109,6 +109,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await runtime.click();
     await expect(saveDefault).toBeEnabled();
     await saveDefault.click();
+    await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
     await expect(saveDefault).toBeDisabled();
   });

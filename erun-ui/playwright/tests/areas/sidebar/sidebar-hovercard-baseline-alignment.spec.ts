@@ -35,51 +35,55 @@ interface RowGeometry {
 // line's baseline; this is a standard DOM technique, not an approximation
 // from font metrics.
 async function rowGeometry(card: Locator, label: string): Promise<RowGeometry> {
-  return card.evaluate((root, label) => {
-    function contentAnchor(start: Element): Element {
-      let el = start;
-      for (let i = 0; i < 5; i += 1) {
-        const kids = Array.from(el.childNodes).filter(
-          (node) => !(node.nodeType === Node.TEXT_NODE && !node.textContent?.trim()),
-        );
-        const first = kids[0];
-        if (!first || first.nodeType !== Node.ELEMENT_NODE) {
-          break;
+  return card.evaluate(
+    (root, label) => {
+      function contentAnchor(start: Element): Element {
+        let el = start;
+        for (let i = 0; i < 5; i += 1) {
+          const kids = Array.from(el.childNodes).filter(
+            (node) => !(node.nodeType === Node.TEXT_NODE && !node.textContent?.trim()),
+          );
+          const first = kids[0];
+          if (!first || first.nodeType !== Node.ELEMENT_NODE) {
+            break;
+          }
+          const display = window.getComputedStyle(first as Element).display;
+          if (display !== 'block' && display !== 'grid' && display !== 'flex') {
+            break;
+          }
+          el = first as Element;
         }
-        const display = window.getComputedStyle(first as Element).display;
-        if (display !== 'block' && display !== 'grid' && display !== 'flex') {
-          break;
-        }
-        el = first as Element;
+        return el;
       }
-      return el;
-    }
-    function baselineTop(el: Element): number {
-      const anchor = contentAnchor(el);
-      const marker = document.createElement('span');
-      marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
-      anchor.appendChild(marker);
-      const top = marker.getBoundingClientRect().top;
-      marker.remove();
-      return top;
-    }
-    const dt = Array.from(root.querySelectorAll('dt')).find(
-      (element) => element.textContent?.trim() === label,
-    );
-    if (!dt) {
-      throw new Error(`no dt labeled "${label}"`);
-    }
-    const dd = dt.nextElementSibling;
-    if (!dd || dd.tagName !== 'DD') {
-      throw new Error(`dt labeled "${label}" has no dd sibling`);
-    }
-    return {
-      dtBottom: dt.getBoundingClientRect().bottom,
-      ddTop: dd.getBoundingClientRect().top,
-      dtBaseline: baselineTop(dt),
-      ddBaseline: baselineTop(dd),
-    };
-  }, label);
+      function baselineTop(el: Element): number {
+        const anchor = contentAnchor(el);
+        const marker = document.createElement('span');
+        marker.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+        anchor.appendChild(marker);
+        const top = marker.getBoundingClientRect().top;
+        marker.remove();
+        return top;
+      }
+      const dt = Array.from(root.querySelectorAll('dt')).find(
+        (element) => element.textContent?.trim() === label,
+      );
+      if (!dt) {
+        throw new Error(`no dt labeled "${label}"`);
+      }
+      const dd = dt.nextElementSibling;
+      if (!dd || dd.tagName !== 'DD') {
+        throw new Error(`dt labeled "${label}" has no dd sibling`);
+      }
+      return {
+        dtBottom: dt.getBoundingClientRect().bottom,
+        ddTop: dd.getBoundingClientRect().top,
+        dtBaseline: baselineTop(dt),
+        ddBaseline: baselineTop(dd),
+      };
+    },
+    label,
+    { timeout: 1_000 },
+  );
 }
 
 const RUNNING_SESSION_ID = 4242;
@@ -197,13 +201,15 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     );
     await app.reboot();
 
-    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
-    const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
-    await expect(card).toBeVisible();
-    await expect(card).toContainText('Working, for');
-
-    const geometry = await rowGeometry(card, 'Doing');
-    expect(Math.abs(geometry.dtBaseline - geometry.ddBaseline)).toBeLessThan(1.5);
+    // Hover and every read live inside one retryable block; see the env-card
+    // tests above for why.
+    let geometry: RowGeometry | undefined;
+    await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      await expect(card).toContainText('Working, for', { timeout: 1_000 });
+      geometry = await rowGeometry(card, 'Doing');
+    });
+    expect(Math.abs(geometry!.dtBaseline - geometry!.ddBaseline)).toBeLessThan(1.5);
   });
 
   test('the orchestrator card aligns a stacked, multi-line value to the label baseline', async ({
@@ -222,16 +228,19 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     );
     await app.reboot();
 
-    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
-    const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
-    await expect(card).toBeVisible();
-    await expect(card).toContainText('Working, for');
-    await expect(card).toContainText('Shell running');
+    // Hover and every read live inside one retryable block; see the env-card
+    // tests above for why.
+    let geometry: RowGeometry | undefined;
+    await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      await expect(card).toContainText('Working, for', { timeout: 1_000 });
+      await expect(card).toContainText('Shell running', { timeout: 1_000 });
 
-    // The "Doing" dd now stacks two lines (busy + shell). Baseline alignment
-    // applies to the row's first line, not the value's own bottom edge.
-    const geometry = await rowGeometry(card, 'Doing');
-    expect(Math.abs(geometry.dtBaseline - geometry.ddBaseline)).toBeLessThan(1.5);
+      // The "Doing" dd now stacks two lines (busy + shell). Baseline alignment
+      // applies to the row's first line, not the value's own bottom edge.
+      geometry = await rowGeometry(card, 'Doing');
+    });
+    expect(Math.abs(geometry!.dtBaseline - geometry!.ddBaseline)).toBeLessThan(1.5);
   });
 
   test('the orchestrator card keeps the wide Environments row stacked, not baseline-shoved', async ({
@@ -246,16 +255,19 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     );
     await app.reboot();
 
-    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
-    const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
-    await expect(card).toBeVisible();
-    await expect(card).toContainText(SEED_ENV_ALPHA);
+    // Hover and every read live inside one retryable block; see the env-card
+    // tests above for why.
+    let geometry: RowGeometry | undefined;
+    await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      await expect(card).toContainText(SEED_ENV_ALPHA, { timeout: 1_000 });
 
-    // The "wide" variant col-spans both dt and dd, so they land in separate
-    // grid rows rather than sharing one -- items-baseline has no sibling to
-    // align them against, and the label must still render fully above the
-    // value it labels.
-    const geometry = await rowGeometry(card, 'Environments');
-    expect(geometry.dtBottom).toBeLessThanOrEqual(geometry.ddTop + 1);
+      // The "wide" variant col-spans both dt and dd, so they land in separate
+      // grid rows rather than sharing one -- items-baseline has no sibling to
+      // align them against, and the label must still render fully above the
+      // value it labels.
+      geometry = await rowGeometry(card, 'Environments');
+    });
+    expect(geometry!.dtBottom).toBeLessThanOrEqual(geometry!.ddTop + 1);
   });
 });

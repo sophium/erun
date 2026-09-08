@@ -47,19 +47,23 @@ async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
 // resolved size), but callers still disable it for consistency with the
 // other bounding-rect reads in this file.
 async function measureLabelColumnWidth(label: Locator): Promise<{ actual: number; tenCh: number }> {
-  return label.evaluate((el) => {
-    const font = window.getComputedStyle(el).font;
-    const probe = document.createElement('span');
-    probe.style.position = 'fixed';
-    probe.style.visibility = 'hidden';
-    probe.style.whiteSpace = 'nowrap';
-    probe.style.font = font;
-    probe.style.width = '10ch';
-    document.body.appendChild(probe);
-    const tenCh = probe.getBoundingClientRect().width;
-    probe.remove();
-    return { actual: el.getBoundingClientRect().width, tenCh };
-  });
+  return label.evaluate(
+    (el) => {
+      const font = window.getComputedStyle(el).font;
+      const probe = document.createElement('span');
+      probe.style.position = 'fixed';
+      probe.style.visibility = 'hidden';
+      probe.style.whiteSpace = 'nowrap';
+      probe.style.font = font;
+      probe.style.width = '10ch';
+      document.body.appendChild(probe);
+      const tenCh = probe.getBoundingClientRect().width;
+      probe.remove();
+      return { actual: el.getBoundingClientRect().width, tenCh };
+    },
+    undefined,
+    { timeout: 1_000 },
+  );
 }
 
 async function emitEnvUsage(
@@ -119,12 +123,18 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     page,
   }) => {
     await disablePopoverEntranceAnimation(page);
-    const plainCard = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect(plainCard).toBeVisible();
-    const plainLabelWidth = await plainCard
-      .locator('dt:text-is("Version")')
-      .evaluate((el) => el.getBoundingClientRect().width);
+    // Hover and every read live inside one retryable block: a re-render
+    // (e.g. the boot-time auto-open of SEED_ENV_ALPHA, or the periodic
+    // activity/usage sweep on either row) can drop the card while the
+    // pointer still rests on it (erun-ui/playwright/AGENTS.md's hover-card
+    // bullet).
+    let plainLabelWidth = 0;
+    await app.sidebar.readEnvHoverCard(SEED_TENANT, SEED_ENV_ALPHA, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      plainLabelWidth = await card
+        .locator('dt:text-is("Version")')
+        .evaluate((el) => el.getBoundingClientRect().width, undefined, { timeout: 1_000 });
+    });
 
     const environment = uniqueEnvironmentName('line-mismatch-width');
     seedEnvironmentWithRuntimeVersions(SEED_TENANT, environment, {
@@ -134,13 +144,16 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     });
     try {
       await waitForSeededRow(app, SEED_TENANT, environment);
-      const mismatchCard = app.sidebar.envHoverCard(SEED_TENANT, environment);
-      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, environment);
-      await expect(mismatchCard).toBeVisible();
-      await expect(mismatchCard.getByText('Line mismatch', { exact: true })).toBeVisible();
-      const mismatchLabelWidth = await mismatchCard
-        .locator('dt:text-is("Version")')
-        .evaluate((el) => el.getBoundingClientRect().width);
+      let mismatchLabelWidth = 0;
+      await app.sidebar.readEnvHoverCard(SEED_TENANT, environment, async (card) => {
+        await expect(card).toBeVisible({ timeout: 1_000 });
+        await expect(card.getByText('Line mismatch', { exact: true })).toBeVisible({
+          timeout: 1_000,
+        });
+        mismatchLabelWidth = await card
+          .locator('dt:text-is("Version")')
+          .evaluate((el) => el.getBoundingClientRect().width, undefined, { timeout: 1_000 });
+      });
 
       // Same fixed ch-based column (HOVER_CARD_GRID_CLASS) regardless of which
       // conditional rows this particular card happens to render.
@@ -151,33 +164,41 @@ test.describe('sidebar env hover card layout (#1901)', () => {
   });
 
   test('the card renders two zones, separated by a visible boundary', async ({ app }) => {
-    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect(card).toBeVisible();
+    let secondZoneBorder = '';
+    let firstZoneBorder = '';
+    // Hover and every read live inside one retryable block; see the
+    // preceding test for why.
+    await app.sidebar.readEnvHoverCard(SEED_TENANT, SEED_ENV_ALPHA, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
 
-    // Zone 1 (Version .. Working on) and zone 2 (Activity .. Cloud node) are
-    // two separate `dl`s sharing the same grid template -- not one `dl` with
-    // a spanning divider row -- so the count itself is part of the contract.
-    const zones = card.locator('dl');
-    await expect(zones).toHaveCount(2);
+      // Zone 1 (Version .. Working on) and zone 2 (Activity .. Cloud node) are
+      // two separate `dl`s sharing the same grid template -- not one `dl` with
+      // a spanning divider row -- so the count itself is part of the contract.
+      const zones = card.locator('dl');
+      await expect(zones).toHaveCount(2, { timeout: 1_000 });
 
-    const secondZoneBorder = await zones
-      .nth(1)
-      .evaluate((el) => window.getComputedStyle(el).borderTopWidth);
+      secondZoneBorder = await zones
+        .nth(1)
+        .evaluate((el) => window.getComputedStyle(el).borderTopWidth, undefined, {
+          timeout: 1_000,
+        });
+      firstZoneBorder = await zones
+        .nth(0)
+        .evaluate((el) => window.getComputedStyle(el).borderTopWidth, undefined, {
+          timeout: 1_000,
+        });
+
+      // Live-state rows -- Activity, Usage, Cloud node -- live in the second
+      // zone; identity rows -- Version, Working on -- live in the first.
+      await expect(zones.nth(0)).toContainText('Version', { timeout: 1_000 });
+      await expect(zones.nth(0)).toContainText('Working on', { timeout: 1_000 });
+      await expect(zones.nth(1)).toContainText('Activity', { timeout: 1_000 });
+      await expect(zones.nth(1)).toContainText('Usage', { timeout: 1_000 });
+      await expect(zones.nth(1)).toContainText('Cloud node', { timeout: 1_000 });
+    });
+
     expect(Number.parseFloat(secondZoneBorder)).toBeGreaterThan(0);
-
-    const firstZoneBorder = await zones
-      .nth(0)
-      .evaluate((el) => window.getComputedStyle(el).borderTopWidth);
     expect(Number.parseFloat(firstZoneBorder)).toBe(0);
-
-    // Live-state rows -- Activity, Usage, Cloud node -- live in the second
-    // zone; identity rows -- Version, Working on -- live in the first.
-    await expect(zones.nth(0)).toContainText('Version');
-    await expect(zones.nth(0)).toContainText('Working on');
-    await expect(zones.nth(1)).toContainText('Activity');
-    await expect(zones.nth(1)).toContainText('Usage');
-    await expect(zones.nth(1)).toContainText('Cloud node');
   });
 
   test('adding the conditional Line mismatch row changes only zone 1, not zone 2', async ({
@@ -203,23 +224,27 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     });
     try {
       await waitForSeededRow(app, SEED_TENANT, plainEnvironment);
-      const plainCard = app.sidebar.envHoverCard(SEED_TENANT, plainEnvironment);
-      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, plainEnvironment);
-      await expect(plainCard).toBeVisible();
-      const plainZone2Height = await plainCard
-        .locator('dl')
-        .nth(1)
-        .evaluate((el) => el.getBoundingClientRect().height);
+      let plainZone2Height = 0;
+      await app.sidebar.readEnvHoverCard(SEED_TENANT, plainEnvironment, async (card) => {
+        await expect(card).toBeVisible({ timeout: 1_000 });
+        plainZone2Height = await card
+          .locator('dl')
+          .nth(1)
+          .evaluate((el) => el.getBoundingClientRect().height, undefined, { timeout: 1_000 });
+      });
 
       await waitForSeededRow(app, SEED_TENANT, environment);
-      const mismatchCard = app.sidebar.envHoverCard(SEED_TENANT, environment);
-      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, environment);
-      await expect(mismatchCard).toBeVisible();
-      await expect(mismatchCard.getByText('Line mismatch', { exact: true })).toBeVisible();
-      const mismatchZone2Height = await mismatchCard
-        .locator('dl')
-        .nth(1)
-        .evaluate((el) => el.getBoundingClientRect().height);
+      let mismatchZone2Height = 0;
+      await app.sidebar.readEnvHoverCard(SEED_TENANT, environment, async (card) => {
+        await expect(card).toBeVisible({ timeout: 1_000 });
+        await expect(card.getByText('Line mismatch', { exact: true })).toBeVisible({
+          timeout: 1_000,
+        });
+        mismatchZone2Height = await card
+          .locator('dl')
+          .nth(1)
+          .evaluate((el) => el.getBoundingClientRect().height, undefined, { timeout: 1_000 });
+      });
 
       expect(mismatchZone2Height).toBeCloseTo(plainZone2Height, 0);
     } finally {
@@ -235,21 +260,27 @@ test.describe('sidebar env hover card layout (#1901)', () => {
   // build-capable environment).
   test('a stale usage reading renders degraded, not as an amber warning', async ({ app, page }) => {
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    const usageValue = card.locator('dt:text-is("Usage") + dd');
+    let color = '';
+    // Every read -- including the two that used to run after this block --
+    // lives inside the one retryable attempt: the ongoing usage sweep can
+    // re-emit and re-render the row between the card converging and a
+    // subsequent un-retried read, dropping the card the same way a bare
+    // sequence of asserts after a single hover would.
     await expect(async () => {
       await emitStaleEnvUsage(page, SEED_TENANT, SEED_ENV_ALPHA);
       await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(card).toBeVisible({ timeout: 1_000 });
       await expect(card).toContainText('Stale', { timeout: 1_000 });
+      // No alert icon -- a stale reading is not a warning.
+      await expect(usageValue.locator('svg')).toHaveCount(0, { timeout: 1_000 });
+      color = await usageValue
+        .locator('span')
+        .first()
+        .evaluate((el) => window.getComputedStyle(el).color, undefined, { timeout: 1_000 });
     }).toPass({ timeout: 20_000 });
 
-    const usageValue = card.locator('dt:text-is("Usage") + dd');
-    // No alert icon -- a stale reading is not a warning.
-    await expect(usageValue.locator('svg')).toHaveCount(0);
-    const color = await usageValue
-      .locator('span')
-      .first()
-      .evaluate((el) => window.getComputedStyle(el).color);
     // amber-700/amber-400 both render with a non-trivial red/green gap from
     // blue; the degraded muted-foreground token is a desaturated grey. Assert
     // the absence of amber rather than a hard-coded token, so a theme edit
@@ -271,20 +302,22 @@ test.describe('sidebar env hover card layout (#1901)', () => {
 test.describe('sidebar hover card label column narrowed to 10ch (#1958)', () => {
   test('the env card label column resolves to 10ch, not the old 13ch', async ({ app, page }) => {
     await disablePopoverEntranceAnimation(page);
-    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect(card).toBeVisible();
-    const { actual, tenCh } = await measureLabelColumnWidth(card.locator('dt:text-is("Version")'));
-    expect(actual).toBeCloseTo(tenCh, 0);
+    let measured = { actual: 0, tenCh: 0 };
+    await app.sidebar.readEnvHoverCard(SEED_TENANT, SEED_ENV_ALPHA, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      measured = await measureLabelColumnWidth(card.locator('dt:text-is("Version")'));
+    });
+    expect(measured.actual).toBeCloseTo(measured.tenCh, 0);
   });
 
   test('the orchestrator card shares the same 10ch label column', async ({ app, page }) => {
     await disablePopoverEntranceAnimation(page);
-    const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
-    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
-    await expect(card).toBeVisible();
-    const { actual, tenCh } = await measureLabelColumnWidth(card.locator('dt:text-is("Status")'));
-    expect(actual).toBeCloseTo(tenCh, 0);
+    let measured = { actual: 0, tenCh: 0 };
+    await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      measured = await measureLabelColumnWidth(card.locator('dt:text-is("Status")'));
+    });
+    expect(measured.actual).toBeCloseTo(measured.tenCh, 0);
   });
 });
 
