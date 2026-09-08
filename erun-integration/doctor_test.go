@@ -58,6 +58,24 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_prune_images_traces_dind_exec", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_deploy_diagnosis", func(t *testing.T) {
+		// Regression coverage for erun#2403: --dry-run withholds mutations,
+		// not reads, so the helm/kubectl diagnosis reads must still run and
+		// their sections must still print -- the same content a real run
+		// would show -- instead of the diagnosis being silently suppressed.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "failed")
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_deploy_diagnosis", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_unaffected_by_kubectl_deployment_wait_library_execution_mode", func(t *testing.T) {
 		// Locks the dry-run/audit contract for kubectl-deployment-wait: the
 		// kubectl trace lines must stay byte-identical to the

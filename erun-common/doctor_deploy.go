@@ -39,16 +39,15 @@ func deployDiagnosisPodArgs(req ShellLaunchParams) []string {
 }
 
 // RunDeployDiagnosis probes why a deploy may have failed. It is strictly
-// read-only, so it is safe to run on every `erun doctor`; a missing release or
+// read-only, so it is safe to run on every `erun doctor`, including under
+// `--dry-run` — that flag scopes itself to mutations (root AGENTS.md
+// "Command primitives vs orchestration"), and a missing release or
 // unreachable cluster is itself part of the diagnosis, not a hard error.
 func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResult {
 	helmArgs := helmStatusArgs(req)
 	ctx.TraceCommand("", "helm", helmArgs...)
 	podArgs := deployDiagnosisPodArgs(req)
 	ctx.TraceCommand("", "kubectl", podArgs...)
-	if ctx.DryRun {
-		return DeployDiagnosisResult{}
-	}
 	helmStatus, helmErr := runDoctorDiagnosisCommand("helm", helmArgs)
 	pods, _ := runDoctorDiagnosisCommand("kubectl", podArgs)
 	result := DeployDiagnosisResult{HelmStatus: helmStatus, Pods: pods}
