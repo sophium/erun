@@ -301,7 +301,7 @@ func ResolveLocalOutputs(params RuntimeOutputsParams) (RuntimeOutputsListResult,
 	if err != nil {
 		return RuntimeOutputsListResult{}, err
 	}
-	result := RuntimeOutputsListResult{Dir: dir}
+	result := RuntimeOutputsListResult{Dir: dir, Entries: []OutputEntry{}}
 	dirEntries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
