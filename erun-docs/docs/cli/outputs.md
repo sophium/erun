@@ -53,7 +53,17 @@ The same rule applies to the desktop's Agent outputs download, to the `outputs_d
 
 ## Dry run
 
-Both subcommands support `--dry-run`: it resolves the pod, traces the exact `kubectl exec` that would run and the listing/transfer script, and (for `download`) the local destination — without listing or transferring anything.
+Both subcommands support `--dry-run`: it resolves the pod, traces the exact `kubectl exec` that would run and the listing/transfer scripts, and (for `download`) the local destination — without listing or transferring anything.
+
+## Large files arrive in pieces
+
+A `kubectl exec` stream does not fail at a size — it fails more and more often the more one transfer carries, so pulling a whole large file through a single stream breaks probabilistically and a real cross-built binary essentially never arrives that way. `erun outputs download` therefore asks the pod what it is about to send, then reads the payload in bounded ranges, one exec each, and checks the reassembled bytes against the digest the pod computed before anything moved. A range whose stream breaks is re-read rather than costing the download.
+
+Three consequences worth knowing:
+
+- **A file of any size the pod can produce transfers.** A 66 MB cross-built binary is an ordinary download, not a gamble.
+- **A download either lands whole or fails saying how far it got.** No partial file is written, and the error names the number of bytes already transferred and the total — so a failure points at the connection rather than reading like an unexplained tunnel fault.
+- **A folder is archived in the pod first.** The `tar.gz` is staged there so its bytes stay fixed while they are read, and the staging file is removed afterwards either way.
 
 ## Size limit
 

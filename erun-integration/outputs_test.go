@@ -1,8 +1,13 @@
 package integration
 
 import (
+	"archive/tar"
 	"bytes"
-	"encoding/base64"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,10 +45,65 @@ var (
 	javaClassPayload      = append([]byte{0xCA, 0xFE, 0xBA, 0xBE, 0x00, 0x00, 0x00, 0x34}, []byte("not a mach-o")...)
 )
 
-// stubKubectlDownloads answers the download exec with one file payload.
-func stubKubectlDownloads(t *testing.T, stubs string, payload []byte) {
+// podOutputsDir is where the pod keeps agent outputs. The emulator resolves a
+// pod path under a stand-in filesystem root, so a scenario stages its payload
+// at exactly the path erun will ask the pod for.
+const podOutputsDir = "home/erun/.erun/outputs"
+
+// stubPodExecDownload stages one payload inside a stand-in pod filesystem and
+// routes erun's kubectl at the emulator that serves it. A fixed-stdout stub
+// cannot answer a download: it asks the pod what it would send, then reads the
+// payload one bounded range at a time.
+func stubPodExecDownload(t *testing.T, setup env.Setup, stubs, name string, payload []byte, spec fixture.PodExecStubSpec) []string {
 	t.Helper()
-	stubKubectlPrints(t, stubs, "file\n"+base64.StdEncoding.EncodeToString(payload)+"\n")
+	spec.Root = filepath.Join(setup.Cwd, "pod")
+	staged := filepath.Join(spec.Root, filepath.FromSlash(podOutputsDir), name)
+	if err := os.MkdirAll(filepath.Dir(staged), 0o755); err != nil {
+		t.Fatalf("stage the pod outputs directory: %v", err)
+	}
+	if err := os.WriteFile(staged, payload, 0o644); err != nil {
+		t.Fatalf("stage the pod payload: %v", err)
+	}
+	fixture.StubPodExec(t, stubs, spec)
+	return fixture.StubEnv(stubs, "kubectl")
+}
+
+// stubPodExecDownloadDir stages a folder rather than a file, so the download
+// takes the branch that archives it in the pod first.
+func stubPodExecDownloadDir(t *testing.T, setup env.Setup, stubs, name string, files map[string]string) []string {
+	t.Helper()
+	root := filepath.Join(setup.Cwd, "pod")
+	staged := filepath.Join(root, filepath.FromSlash(podOutputsDir), name)
+	if err := os.MkdirAll(staged, 0o755); err != nil {
+		t.Fatalf("stage the pod outputs folder: %v", err)
+	}
+	for file, body := range files {
+		if err := os.WriteFile(filepath.Join(staged, file), []byte(body), 0o644); err != nil {
+			t.Fatalf("stage %s: %v", file, err)
+		}
+	}
+	fixture.StubPodExec(t, stubs, fixture.PodExecStubSpec{Root: root})
+	return fixture.StubEnv(stubs, "kubectl")
+}
+
+// incompressiblePayload is the shape the bug report probed with: bytes gzip
+// cannot shrink, so a range's stream carries its full base64 expansion and the
+// transfer has no compression to hide behind.
+func incompressiblePayload(size int) []byte {
+	payload := make([]byte, size)
+	source := rand.NewChaCha8([32]byte{'e', 'r', 'u', 'n'})
+	_, _ = source.Read(payload)
+	return payload
+}
+
+func fileSHA256(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // localCodesignIdentity and localCodesignKeychainFile mirror the constants
@@ -83,6 +143,34 @@ func requireDownloadedFile(t *testing.T, path string, want []byte) os.FileInfo {
 		t.Fatalf("stat downloaded file: %v", err)
 	}
 	return info
+}
+
+func requireArchiveEntries(t *testing.T, path string, want []string) {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open the downloaded archive: %v", err)
+	}
+	defer func() { _ = file.Close() }()
+	zip, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatalf("read the downloaded archive: %v", err)
+	}
+	reader := tar.NewReader(zip)
+	var names []string
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("walk the downloaded archive: %v", err)
+		}
+		names = append(names, header.Name)
+	}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("archive entries = %v, want %v", names, want)
+	}
 }
 
 func readCodesignCalls(t *testing.T, logPath string) string {
@@ -188,8 +276,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlPrints(t, stubs, "file\n"+base64.StdEncoding.EncodeToString([]byte("hello"))+"\n")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		envVars := append(setup.Env(), stubPodExecDownload(t, setup, stubs, "report.pdf", []byte("hello"), fixture.PodExecStubSpec{})...)
 		result := erun.Run(t, []string{"outputs", "download", "report.pdf"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -208,15 +295,14 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlPrints(t, stubs, "dir\n"+base64.StdEncoding.EncodeToString([]byte("tarball-bytes"))+"\n")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		envVars := append(setup.Env(), stubPodExecDownloadDir(t, setup, stubs, "results", map[string]string{"summary.txt": "done\n"})...)
 		result := erun.Run(t, []string{"outputs", "download", "results"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if _, err := os.Stat(filepath.Join(setup.Cwd, "results.tar.gz")); err != nil {
-			t.Fatalf("expected results.tar.gz to be written: %v", err)
-		}
+		// The archive is what proves the pod staged the folder and the download
+		// read that staged copy, not the folder itself.
+		requireArchiveEntries(t, filepath.Join(setup.Cwd, "results.tar.gz"), []string{"results/", "results/summary.txt"})
 		golden.Equal(t, "outputs/download_real_run_dir", normalize.Apply(result.Combined))
 	})
 
@@ -228,7 +314,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, machOPayload)
+		stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", machOPayload, fixture.PodExecStubSpec{})
 		codesignLog := fixture.StubCodesign(t, stubs, fixture.CodesignStubSpec{})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "codesign")...)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
@@ -257,7 +343,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, machOPayload)
+		stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", machOPayload, fixture.PodExecStubSpec{})
 		codesignLog := fixture.StubCodesign(t, stubs, fixture.CodesignStubSpec{})
 		fixture.StubBinaryWithScript(t, stubs, "security", "exit 0")
 		keychain := seedLocalCodesignIdentity(t, setup.Home)
@@ -284,7 +370,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, machOPayload)
+		stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", machOPayload, fixture.PodExecStubSpec{})
 		codesignLog := filepath.Join(stubs, "codesign-calls.log")
 		fixture.StubBinaryWithScript(t, stubs, "codesign",
 			"printf '%s\\n' \"$*\" >> '"+filepath.ToSlash(codesignLog)+"'\n"+
@@ -311,7 +397,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, universalMachOPayload)
+		stubPodExecDownload(t, setup, stubs, "erun-darwin-universal", universalMachOPayload, fixture.PodExecStubSpec{})
 		codesignLog := fixture.StubCodesign(t, stubs, fixture.CodesignStubSpec{})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "codesign")...)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
@@ -330,7 +416,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, machOPayload)
+		stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", machOPayload, fixture.PodExecStubSpec{})
 		codesignLog := fixture.StubCodesign(t, stubs, fixture.CodesignStubSpec{AlreadySigned: true})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "codesign")...)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
@@ -357,7 +443,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, javaClassPayload)
+		stubPodExecDownload(t, setup, stubs, "Report.class", javaClassPayload, fixture.PodExecStubSpec{})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
 		result := erun.Run(t, []string{"outputs", "download", "Report.class"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -377,7 +463,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, machOPayload)
+		stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", machOPayload, fixture.PodExecStubSpec{})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
 		result := erun.Run(t, []string{"outputs", "download", "erun-darwin-arm64"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -397,7 +483,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, machOPayload)
+		stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", machOPayload, fixture.PodExecStubSpec{})
 		fixture.StubCodesign(t, stubs, fixture.CodesignStubSpec{
 			SignExitCode: 1,
 			SignStderr:   "codesign: erun-darwin-arm64: no identity found",
@@ -418,7 +504,7 @@ func TestOutputs(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		stubs := setup.Cwd + "/stubs"
-		stubKubectlDownloads(t, stubs, machOPayload)
+		stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", machOPayload, fixture.PodExecStubSpec{})
 		fixture.StubCodesign(t, stubs, fixture.CodesignStubSpec{})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "codesign")...)
 		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
@@ -427,6 +513,101 @@ func TestOutputs(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "outputs/download_darwin_signs_unsigned_macho_json", normalize.Apply(result.Combined))
+	})
+
+	// The regression this file exists to hold: a single exec stream breaks as the
+	// volume it carries grows, so a whole-file transfer of a real cross-built
+	// binary never completes. Measured on the reporting host, a 12 MB payload
+	// transferred 6/6 and a 14 MB one 1/4, so the emulator refuses to carry more
+	// than 12 MiB in one call — the largest amount observed to be reliable. A 20
+	// MB payload (0/6 there) therefore cannot arrive in one stream and can only
+	// arrive at all if the download reads it in bounded ranges.
+	t.Run("download_large_file_arrives_when_one_stream_cannot_carry_it", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		payload := incompressiblePayload(20 * 1000 * 1000)
+		envVars := append(setup.Env(), stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", payload, fixture.PodExecStubSpec{
+			MaxStreamBytes: 12 * 1024 * 1024,
+		})...)
+		result := erun.Run(t, []string{"outputs", "download", "erun-darwin-arm64"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// Normalization collapses the digest the command prints, so the file's
+		// own hash is the only thing that can prove the bytes are the pod's.
+		want := sha256.Sum256(payload)
+		if got := fileSHA256(t, filepath.Join(setup.Cwd, "erun-darwin-arm64")); got != hex.EncodeToString(want[:]) {
+			t.Fatalf("downloaded sha256 = %s, want %s", got, hex.EncodeToString(want[:]))
+		}
+		golden.Equal(t, "outputs/download_large_file_arrives_when_one_stream_cannot_carry_it", normalize.Apply(result.Combined))
+	})
+
+	// A broken stream is a transport fault, not a fact about the bytes, so the
+	// range is re-read rather than the download lost. The emulator breaks the
+	// first read of the second range only, which no single-stream transfer could
+	// have recovered from at all.
+	t.Run("download_retries_a_range_whose_stream_breaks", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		payload := incompressiblePayload(10 * 1000 * 1000)
+		envVars := append(setup.Env(), stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", payload, fixture.PodExecStubSpec{
+			MaxStreamBytes: 12 * 1024 * 1024,
+			FailOnceAt:     []int64{8 * 1024 * 1024},
+		})...)
+		result := erun.Run(t, []string{"outputs", "download", "erun-darwin-arm64"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		want := sha256.Sum256(payload)
+		if got := fileSHA256(t, filepath.Join(setup.Cwd, "erun-darwin-arm64")); got != hex.EncodeToString(want[:]) {
+			t.Fatalf("downloaded sha256 = %s, want %s", got, hex.EncodeToString(want[:]))
+		}
+		golden.Equal(t, "outputs/download_retries_a_range_whose_stream_breaks", normalize.Apply(result.Combined))
+	})
+
+	// The reported failure was silent about its cause: a bare stream EOF reads
+	// like a stale tunnel and sends an operator to diagnose the wrong thing. A
+	// range that never arrives must therefore say how much of the transfer had
+	// already succeeded, and must not leave a partial file behind.
+	t.Run("download_reports_how_far_it_got_when_a_range_never_arrives", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		envVars := append(setup.Env(), stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", incompressiblePayload(10*1000*1000), fixture.PodExecStubSpec{
+			FailAlwaysAt: []int64{8 * 1024 * 1024},
+		})...)
+		result := erun.Run(t, []string{"outputs", "download", "erun-darwin-arm64"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit when a range never arrives:\n%s", result.Combined)
+		}
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "erun-darwin-arm64")); !os.IsNotExist(err) {
+			t.Fatalf("a failed download must leave no partial file, stat gave %v", err)
+		}
+		golden.Equal(t, "outputs/download_reports_how_far_it_got_when_a_range_never_arrives", normalize.Apply(result.Combined))
+	})
+
+	// The pod says how it encoded each range, so a pod without gzip still serves
+	// a download — it just sends more bytes for the same payload.
+	t.Run("download_large_file_arrives_from_a_pod_without_gzip", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		payload := incompressiblePayload(10 * 1000 * 1000)
+		envVars := append(setup.Env(), stubPodExecDownload(t, setup, stubs, "erun-darwin-arm64", payload, fixture.PodExecStubSpec{
+			MaxStreamBytes: 12 * 1024 * 1024,
+			RawEncoding:    true,
+		})...)
+		result := erun.Run(t, []string{"outputs", "download", "erun-darwin-arm64"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		want := sha256.Sum256(payload)
+		if got := fileSHA256(t, filepath.Join(setup.Cwd, "erun-darwin-arm64")); got != hex.EncodeToString(want[:]) {
+			t.Fatalf("downloaded sha256 = %s, want %s", got, hex.EncodeToString(want[:]))
+		}
+		golden.Equal(t, "outputs/download_large_file_arrives_from_a_pod_without_gzip", normalize.Apply(result.Combined))
 	})
 
 	t.Run("download_traversal_neutralized", func(t *testing.T) {
