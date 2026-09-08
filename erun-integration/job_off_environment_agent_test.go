@@ -82,12 +82,19 @@ esac
 	// ERUN_REPO_REMOTE=true (the *nested* gate job start is genuinely
 	// running inside the environment, unlike the outer host call below).
 	// Auth left unset is mcpAuthConfigFromEnv's documented loopback-only mode.
+	// emcp itself never sets GOCOVERDIR through erun.Run (it isn't spawned
+	// that way), so without a private coverage directory of its own it would
+	// have none at all -- and everything it re-execs (the supervisor, the
+	// nested gate jobs) inherits whatever it has. PrivateCoverDir gives this
+	// whole chain the same exclusive-directory treatment Run gives its own
+	// subprocesses.
 	emcpEnv := append(append([]string{}, setup.Env()...), fixture.StubEnv(stubs, "claude", "gatefail", "gateok")...)
 	emcpEnv = append(emcpEnv,
 		"ERUN_ERUN_BIN="+bin,
 		"ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP=2s",
 		"ERUN_JOB_GATE_INCOMPLETE_POLL=20ms",
 		"ERUN_REPO_REMOTE=true",
+		erun.CoverDirEnv+"="+erun.PrivateCoverDir(t),
 	)
 
 	emcpBin := emcpBinaryPath(t)
