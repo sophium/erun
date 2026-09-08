@@ -52,6 +52,25 @@ async function whipCountLabel(app: import('../../../pages/index.js').AppShell): 
   return `Whip ${String(checked)} target${checked === 1 ? '' : 's'}`;
 }
 
+// nextWhipNowResponse resolves on the real WhipNow round-trip completing --
+// every test below but the first drives the real, un-mocked backend rather
+// than a page.route stub, so their outcome content is gated on an actual
+// call rather than an instantly-fulfilled mock. Waiting for that response
+// (rather than leaving the whole round-trip to the content assertion's own
+// `expect` timeout) is the same real-event convergence every other
+// polled-RPC wait in this suite uses.
+function nextWhipNowResponse(
+  page: import('@playwright/test').Page,
+): Promise<import('@playwright/test').Response> {
+  return page.waitForResponse((response) => {
+    if (!response.url().includes('/__erun_invoke')) {
+      return false;
+    }
+    const body = JSON.parse(response.request().postData() ?? '{}') as { method?: string };
+    return body.method === 'WhipNow';
+  });
+}
+
 async function mockWhipReport(
   page: import('@playwright/test').Page,
   gate: Promise<void>,
@@ -126,7 +145,13 @@ test('the whip control renders a pending state and then every target with its ow
   // The picker preselects the just-opened environment, so the primary action
   // is already enabled with no further selection needed.
   await expect(app.titlebar.whipRunButton()).toHaveText('Whip 1 target');
+
+  // The WhipNow response is deliberately gated (released below), so this
+  // must converge on the report replacing the picker -- a synchronous state
+  // flip on click -- rather than on the RPC itself, which has not resolved
+  // yet at this point in the test.
   await app.titlebar.whipRunButton().click();
+  await app.titlebar.waitForWhipReportOpen();
 
   const body = app.titlebar.whipReportBody();
   await expect(body.getByText('Whipping the selected targets')).toBeVisible();
@@ -163,7 +188,7 @@ test('the whip action renders outside the scrollable target list and states the 
   // the structure directly (not just that it's visible today, which would
   // also pass with the old, buggy layout at this small seeded population).
   await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
   await expect(app.titlebar.whipRunButton()).toHaveText('Whip 1 target');
 
   const scrollRegion = app.titlebar.whipPanel().locator('.overflow-y-auto').first();
@@ -194,7 +219,7 @@ test('defaults to the currently focused environment, with no other target presel
   // one target -- neither the sibling seeded environments nor the seeded
   // orchestrator -- and state the count on the primary action before it acts.
   await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
   await expect(app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeChecked();
   await expect(
     app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_BETA}`),
@@ -207,11 +232,13 @@ test('individually checking another target widens the selection and the report n
   app,
 }) => {
   await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
   await app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR).check();
   await expect(app.titlebar.whipRunButton()).toHaveText('Whip 2 targets');
 
+  const whipped = nextWhipNowResponse(app.page);
   await app.titlebar.whipRunButton().click();
+  await whipped;
   const body = app.titlebar.whipReportBody();
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeVisible();
   await expect(body.getByText(SEED_ORCHESTRATOR)).toBeVisible();
@@ -229,7 +256,7 @@ test('the nothing-focused case starts from an empty selection, not everything', 
   // regression).
   await app.sidebar.openTenantDashboard(SEED_TENANT);
 
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
   await expect(
     app.page.getByText('Nothing is focused right now. Choose one or more targets below.'),
   ).toBeVisible();
@@ -246,7 +273,7 @@ test('the nothing-focused case starts from an empty selection, not everything', 
 
 test('select all orchestrators whips only the orchestrator population', async ({ app }) => {
   await app.sidebar.openTenantDashboard(SEED_TENANT);
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
 
   await app.titlebar.selectAllOrchestratorsButton().click();
   await expect(app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR)).toBeChecked();
@@ -258,7 +285,9 @@ test('select all orchestrators whips only the orchestrator population', async ({
   // orchestrator behind (playwright/AGENTS.md's worker-shared backend state).
   await expect(app.titlebar.whipRunButton()).toHaveText(await whipCountLabel(app));
 
+  const whipped = nextWhipNowResponse(app.page);
   await app.titlebar.whipRunButton().click();
+  await whipped;
   const body = app.titlebar.whipReportBody();
   await expect(body.getByText(SEED_ORCHESTRATOR)).toBeVisible();
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toHaveCount(0);
@@ -268,7 +297,7 @@ test('select all orchestrators whips only the orchestrator population', async ({
 
 test('select all environments whips only the environment population', async ({ app }) => {
   await app.sidebar.openTenantDashboard(SEED_TENANT);
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
 
   // The seeded baseline carries three environments (alpha, beta, gamma);
   // environments are per-test-worker config, not cross-spec live state, so
@@ -280,7 +309,9 @@ test('select all environments whips only the environment population', async ({ a
   await expect(app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR)).not.toBeChecked();
   await expect(app.titlebar.whipRunButton()).toHaveText('Whip 3 targets');
 
+  const whipped = nextWhipNowResponse(app.page);
   await app.titlebar.whipRunButton().click();
+  await whipped;
   const body = app.titlebar.whipReportBody();
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeVisible();
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_BETA}`)).toBeVisible();
@@ -290,7 +321,7 @@ test('select all environments whips only the environment population', async ({ a
 
 test('select all whips the whole population', async ({ app }) => {
   await app.sidebar.openTenantDashboard(SEED_TENANT);
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
 
   await app.titlebar.selectAllButton().click();
   await expect(app.titlebar.whipTargetCheckbox(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeChecked();
@@ -299,7 +330,9 @@ test('select all whips the whole population', async ({ app }) => {
   await expect(app.titlebar.whipTargetCheckbox(SEED_ORCHESTRATOR)).toBeChecked();
   await expect(app.titlebar.whipRunButton()).toHaveText(await whipCountLabel(app));
 
+  const whipped = nextWhipNowResponse(app.page);
   await app.titlebar.whipRunButton().click();
+  await whipped;
   const body = app.titlebar.whipReportBody();
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeVisible();
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_BETA}`)).toBeVisible();
@@ -315,6 +348,7 @@ test('the selection surface is operable end to end without a mouse', async ({ ap
   // in a spec.
   await app.titlebar.whipButton().focus();
   await app.page.keyboard.press('Enter');
+  await app.titlebar.whipPanel().waitFor({ state: 'visible' });
   await expect(app.titlebar.whipRunButton()).toBeVisible();
 
   await app.titlebar.selectAllButton().focus();
@@ -333,13 +367,15 @@ test('the selection surface is operable end to end without a mouse', async ({ ap
   await expect(app.titlebar.whipRunButton()).toHaveText(await whipCountLabel(app));
   await expect(app.titlebar.whipRunButton()).not.toHaveText(selectedAll);
 
+  const whipped = nextWhipNowResponse(app.page);
   await app.titlebar.whipRunButton().focus();
   await app.page.keyboard.press('Enter');
+  await whipped;
   await expect(app.titlebar.whipReportBody()).toBeVisible();
 });
 
 test('renders correctly in both light and dark theme', async ({ app }) => {
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
   await expect(app.titlebar.whipRunButton()).toBeVisible();
   // animations: 'disabled' finishes the popover's own open transition (and any
   // other running CSS animation/transition) before capturing, so the shot is
@@ -384,7 +420,7 @@ test('a whip pass refreshes the orchestrator list so the hover card is not left 
   app,
 }) => {
   await app.sidebar.openTenantDashboard(SEED_TENANT);
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
   await app.titlebar.selectAllOrchestratorsButton().click();
 
   const refreshed = nextOrchestratorListRefresh(app.page);
@@ -402,9 +438,11 @@ test('an un-mocked pass names the seeded, never-opened environment and orchestra
   // skipped, named, with a reason -- never silently omitted. This is the
   // real backend call, unmocked, proving the button is actually wired to
   // erun-ui/whip.go's WhipNow rather than only rendering mocked data.
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
   await app.titlebar.selectAllButton().click();
+  const whipped = nextWhipNowResponse(app.page);
   await app.titlebar.whipRunButton().click();
+  await whipped;
   await expect(app.titlebar.whipReportHeading()).toBeVisible();
   const body = app.titlebar.whipReportBody();
   await expect(body.getByText(`${SEED_TENANT}/${SEED_ENV_ALPHA}`)).toBeVisible();

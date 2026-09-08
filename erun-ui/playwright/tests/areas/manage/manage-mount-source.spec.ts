@@ -32,6 +32,7 @@ test.describe('manage dialog mount-source toggle (#736)', () => {
 
     await app.manageDialog.save();
     await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
+    await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
 
     await app.manageDialog.cancel();

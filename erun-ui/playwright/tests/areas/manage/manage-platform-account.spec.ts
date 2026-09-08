@@ -30,6 +30,7 @@ test.describe('manage dialog platform-account toggle (#804)', () => {
     await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
     // Deploy-relevant change → the pending-redeploy banner tells the operator the
     // grant takes effect on the next deploy (visibility of system status).
+    await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
 
     // Reopen: the grant persisted to the env config.
