@@ -276,7 +276,34 @@ rendered=$(render \
 container "${rendered}" oidc-bootstrap | grep -q 'https://console.example.test\\",\\"https://console2.example.test' ||
     fail "additionalConsoleRedirectUris must register alongside consoleRedirectUri, not replace it"
 
-# --- 17b. The mobile app's redirect URI has no default (#1105): a mobile
+# --- 17a. platform.baseDomain also registers the bare apex and "www."
+#          hosts as console redirect URIs -- the erun-console chart
+#          301-redirects those same two hosts to the canonical console
+#          origin by default, but that redirect lives in a separate Helm
+#          release this chart cannot see, so a visitor who ever reaches the
+#          console app directly on either host must still be able to sign
+#          in there instead of hitting an unregistered-redirect-uri dead
+#          end ---
+rendered=$(render \
+    --set-string platform.consoleUrl=https://console.example.test \
+    --set-string platform.baseDomain=example.test)
+container "${rendered}" oidc-bootstrap | grep -q 'https://console.example.test\\",\\"https://example.test/\\",\\"https://www.example.test/' ||
+    fail "platform.baseDomain must register https://<baseDomain>/ and https://www.<baseDomain>/ as console redirect URIs, alongside platform.consoleUrl"
+
+rendered=$(render --set-string platform.baseDomain=example.test)
+container "${rendered}" oidc-bootstrap | grep -q 'value: "\[\\"https://example.test/\\",\\"https://www.example.test/\\"\]"' ||
+    fail "the apex/www redirect URIs must register even when platform.consoleUrl is unset"
+
+# --- 17b. An operator can opt out, for a platform whose apex/www genuinely
+#          serve something other than the console ---
+rendered=$(render \
+    --set-string platform.consoleUrl=https://console.example.test \
+    --set-string platform.baseDomain=example.test \
+    --set zitadel.oidc.baseDomainRedirectUrisEnabled=false)
+container "${rendered}" oidc-bootstrap | grep -q 'value: "\[\\"https://console.example.test\\"\]"' ||
+    fail "zitadel.oidc.baseDomainRedirectUrisEnabled=false must suppress the apex/www redirect URIs"
+
+# --- 17c. The mobile app's redirect URI has no default (#1105): a mobile
 #          client's custom URL scheme belongs to whatever app actually ships,
 #          so this platform mints no erun-mobile client until an operator
 #          names one via zitadel.oidc.mobileRedirectUris ---
