@@ -150,7 +150,7 @@ mkdir -p "$(dirname "$profile")"
 cleanup_dirs=()
 cleanup() {
     local d
-    for d in "${cleanup_dirs[@]}"; do
+    for d in ${cleanup_dirs[@]+"${cleanup_dirs[@]}"}; do
         rm -rf "$d"
     done
 }
@@ -183,7 +183,8 @@ fi
 # subdirectory of $cover_dir (see the note above on why). Enumerate them and
 # fail loudly if any is empty rather than let a merge step quietly absorb a
 # lost emit into a lower, but still plausible-looking, percentage.
-mapfile -t proc_cover_dirs < <(find "$cover_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+proc_cover_dirs=()
+while IFS= read -r d; do proc_cover_dirs+=("$d"); done < <(find "$cover_dir" -mindepth 1 -maxdepth 1 -type d | sort)
 if [[ "${#proc_cover_dirs[@]}" -eq 0 ]]; then
     echo "!! no per-process coverage directories were created under $cover_dir; the suite's coverage wiring is broken" >&2
     exit 1
