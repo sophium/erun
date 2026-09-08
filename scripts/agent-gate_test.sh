@@ -755,6 +755,92 @@ stub_erun "${case_dir}/bin"
 	fi
 )
 
+# --- a genuine orphan: the job exited 0 but left unsupervised
+# background work running, so `job await` reports it nonzero (state
+# "abandoned" is never Succeeded, see environmentJobSucceeded in
+# erun-common/job.go) exactly like a real failure would. The wrapper must
+# still tell them apart by re-reading the job record: this must PASS (exit 0)
+# with a named, unmissable warning, not fail like a real red.
+case_dir="${work_root}/abandoned-clean-exit-passes"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='abandoned 0: make check (background work left running: pid 4242 chromium)'
+	export STUB_AWAIT_STATUS=1
+	export STUB_JOB_OUTPUT='job output line'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "abandoned clean exit: expected exit 0 (pass), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"job output line"*) ;;
+	*) fail "abandoned clean exit: expected the job's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"WARNING"*"left background work running behind it"*) ;;
+	*) fail "abandoned clean exit: expected a named, unmissable orphan warning, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"pid 4242 chromium"*) ;;
+	*) fail "abandoned clean exit: warning must name the actual leftover work, got: $OUT" ;;
+	esac
+)
+
+# --- a genuine failure (real nonzero gate exit) must still fail. This is the
+# case the fix above must never widen: only a clean exit (0) with leftover
+# work passes, not every nonzero await outcome.
+case_dir="${work_root}/genuine-failure-still-fails"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='exited 1: make check'
+	export STUB_AWAIT_STATUS=1
+	export STUB_JOB_OUTPUT='job output line'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 1 ] || fail "genuine failure: expected exit 1 (fail), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"WARNING"*) fail "genuine failure: must never print the orphan-pass warning for a real failure, got: $OUT" ;;
+	*) ;;
+	esac
+)
+
+# --- an abandoned job whose gated command itself exited nonzero must still
+# fail: leftover work never turns a real failure into a pass, only a clean
+# (exit 0) abandoned run does.
+case_dir="${work_root}/abandoned-nonzero-exit-still-fails"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='abandoned 2: make check (background work left running: pid 4242 chromium)'
+	export STUB_AWAIT_STATUS=1
+	export STUB_JOB_OUTPUT='job output line'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 1 ] || fail "abandoned nonzero exit: expected exit 1 (fail), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"WARNING"*) fail "abandoned nonzero exit: must never print the orphan-pass warning when the gate itself failed, got: $OUT" ;;
+	*) ;;
+	esac
+)
+
 # --- erun missing from PATH: degrade to running the command directly rather
 # than failing outright.
 case_dir="${work_root}/no-erun"

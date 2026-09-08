@@ -55,6 +55,13 @@
 # other than success has no value. Only a stale pass could plausibly be
 # mistaken for a real one, and only for that case does the tree+command key
 # above have to carry the whole safety burden.
+#
+# This script's own exit code distinguishes three outcomes, not two: 0 for a
+# clean pass, 0 (with a named warning on stderr) for a pass that exited 0 but
+# left unsupervised background work running behind it, and nonzero only for a
+# genuine gate failure. See root AGENTS.md's gate-verdict guidance next to the
+# other long-gate rules for why the two pass cases must never collapse into
+# the same signal as a real failure.
 
 set -eu
 
@@ -243,8 +250,31 @@ if [ "$await_status" -eq 124 ]; then
 	exit 124
 fi
 
+# `job await`'s own exit status collapses two different outcomes into the same
+# nonzero code: a genuinely failed gate, and a gate that exited 0 but left
+# unsupervised work running behind it (state "abandoned" -- see
+# environmentJobSucceeded in erun-common/job.go, which treats both as
+# "not Succeeded"). The job record itself still tells them apart, so re-read
+# it once here instead of propagating that collapse into this script's own
+# exit code. A real orphan still matters -- it means work this gate started
+# never reached its own verdict -- so it is surfaced as a loud, named warning,
+# never silently. See root AGENTS.md's gate-verdict guidance next to the other
+# long-gate rules.
+final_status="$await_status"
+if [ "$await_status" -ne 0 ]; then
+	final_status_line=$(erun exec job status \
+		--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+		--id "$resolved_job_id" 2>/dev/null) || final_status_line=""
+	case "$final_status_line" in
+	"abandoned 0:"*)
+		printf 'agent-gate: WARNING -- %s exited 0 but left background work running behind it: %s -- treating this as PASS, not a failure, but that leftover work never reached a verdict of its own and still needs investigating.\n' "$job_name" "$final_status_line" >&2
+		final_status=0
+		;;
+	esac
+fi
+
 erun exec job output \
 	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
 	--id "$resolved_job_id" --max-bytes 16777216
 
-exit "$await_status"
+exit "$final_status"
