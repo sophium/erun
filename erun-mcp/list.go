@@ -29,7 +29,12 @@ type ListInput struct {
 	// network access to each plane and console, and to erun's registry;
 	// Preview traces what would be checked instead of making either call.
 	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version, and its linked console's deployed version, against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
-	Preview       bool `json:"preview,omitempty" jsonschema:"only meaningful alongside controlPlanes -- trace which planes and registry lookup would be checked without making either network call"`
+	// Alias, only meaningful alongside ControlPlanes, narrows the control
+	// plane check to one configured erun-hosted alias instead of every
+	// configured one (erun#2130) -- the same --erun-alias every other
+	// platform-touching command already accepts.
+	Alias   string `json:"erunAlias,omitempty" jsonschema:"only meaningful alongside controlPlanes -- narrow the check to this one configured erun-hosted alias instead of every configured one"`
+	Preview bool   `json:"preview,omitempty" jsonschema:"only meaningful alongside controlPlanes -- trace which planes and registry lookup would be checked without making either network call"`
 }
 
 // ListToolResult is eruncommon.ListResult plus the optional version-drift
@@ -49,7 +54,8 @@ func listTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 
 		tenant := strings.TrimSpace(input.VersionDriftTenant)
 		gateEnvironment := strings.TrimSpace(input.GateEnvironment)
-		if err := validateListInput(input.ControlPlanes, tenant, gateEnvironment); err != nil {
+		alias := strings.TrimSpace(input.Alias)
+		if err := validateListInput(input.ControlPlanes, tenant, gateEnvironment, alias); err != nil {
 			return nil, ListToolResult{}, err
 		}
 
@@ -65,24 +71,30 @@ func listTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			return nil, ListToolResult{}, err
 		}
 
-		return buildListToolResult(ctx, result, input.ControlPlanes, tenant, gateEnvironment)
+		return buildListToolResult(ctx, result, input.ControlPlanes, tenant, gateEnvironment, alias)
 	}
 }
 
-func validateListInput(controlPlanes bool, tenant, gateEnvironment string) error {
+func validateListInput(controlPlanes bool, tenant, gateEnvironment, alias string) error {
 	if gateEnvironment != "" && tenant == "" {
 		return fmt.Errorf("gateEnvironment requires versionDriftTenant")
 	}
 	if controlPlanes && (tenant != "" || gateEnvironment != "") {
 		return fmt.Errorf("controlPlanes cannot be combined with versionDriftTenant/gateEnvironment")
 	}
+	if alias != "" && !controlPlanes {
+		return fmt.Errorf("erunAlias requires controlPlanes")
+	}
 	return nil
 }
 
-func buildListToolResult(ctx eruncommon.Context, result eruncommon.ListResult, controlPlanes bool, tenant, gateEnvironment string) (*mcp.CallToolResult, ListToolResult, error) {
+func buildListToolResult(ctx eruncommon.Context, result eruncommon.ListResult, controlPlanes bool, tenant, gateEnvironment, alias string) (*mcp.CallToolResult, ListToolResult, error) {
 	toolResult := ListToolResult{ListResult: result}
 	if controlPlanes {
-		drift := eruncommon.ResolveControlPlaneVersionDrift(ctx, result, cloudDependencies(), eruncommon.ResolveDefaultRuntimeRegistryVersions)
+		drift, err := eruncommon.ResolveControlPlaneVersionDrift(ctx, result, alias, cloudDependencies(), eruncommon.ResolveDefaultRuntimeRegistryVersions)
+		if err != nil {
+			return nil, ListToolResult{}, err
+		}
 		toolResult.ControlPlaneVersionDrift = &drift
 	}
 	if tenant != "" {

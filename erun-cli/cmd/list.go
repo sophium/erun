@@ -14,30 +14,32 @@ func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc
 	var gateEnvironment string
 	var controlPlanes bool
 	var failOnDrift bool
+	var erunAlias string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured tenants and environments",
 		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
 			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
-			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
+			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. Add --erun-alias to narrow the check to one configured erun-hosted alias instead of probing every configured one. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
 			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, controlPlanes, failOnDrift)
+			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, erunAlias, controlPlanes, failOnDrift)
 		},
 	}
 	cmd.Flags().StringVar(&versionDriftTenant, "tenant", "", "Report erun-version drift across this tenant's environments instead of the full listing")
 	cmd.Flags().StringVar(&gateEnvironment, "gate-environment", "", "With --tenant, name the environment driving that tenant's merge-queue gate and flag whether it is behind any environment it gates")
 	cmd.Flags().BoolVar(&controlPlanes, "control-planes", false, "Report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published, instead of the full listing")
 	cmd.Flags().BoolVar(&failOnDrift, "fail-on-drift", false, "With --tenant or --control-planes, exit non-zero when the report finds drift instead of always exiting 0")
+	cmd.Flags().StringVar(&erunAlias, "erun-alias", "", "With --control-planes, narrow the check to this one configured erun-hosted alias instead of every configured one (defaults to checking all)")
 	addDryRunFlag(cmd)
-	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --tenant erun --fail-on-drift\n  erun list --control-planes\n  erun list --control-planes --dry-run\n  erun list --control-planes --fail-on-drift"
+	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --tenant erun --fail-on-drift\n  erun list --control-planes\n  erun list --control-planes --dry-run\n  erun list --control-planes --fail-on-drift\n  erun list --control-planes --erun-alias erun+api.acme.services.erunpaas.com@erun"
 	return cmd
 }
 
-func validateListFlags(controlPlanes, failOnDrift bool, versionDriftTenant, gateEnvironment string) error {
+func validateListFlags(controlPlanes, failOnDrift bool, versionDriftTenant, gateEnvironment, erunAlias string) error {
 	if gateEnvironment != "" && versionDriftTenant == "" {
 		return fmt.Errorf("--gate-environment requires --tenant")
 	}
@@ -47,14 +49,22 @@ func validateListFlags(controlPlanes, failOnDrift bool, versionDriftTenant, gate
 	if failOnDrift && versionDriftTenant == "" && !controlPlanes {
 		return fmt.Errorf("--fail-on-drift requires --tenant or --control-planes")
 	}
+	return validateListControlPlaneAliasFlag(controlPlanes, erunAlias)
+}
+
+func validateListControlPlaneAliasFlag(controlPlanes bool, erunAlias string) error {
+	if erunAlias != "" && !controlPlanes {
+		return fmt.Errorf("--erun-alias requires --control-planes")
+	}
 	return nil
 }
 
-func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment string, controlPlanes, failOnDrift bool) error {
+func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
 	ctx.TraceCommand("", "erun", "list")
 	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
-	if err := validateListFlags(controlPlanes, failOnDrift, versionDriftTenant, gateEnvironment); err != nil {
+	erunAlias = strings.TrimSpace(erunAlias)
+	if err := validateListFlags(controlPlanes, failOnDrift, versionDriftTenant, gateEnvironment, erunAlias); err != nil {
 		return err
 	}
 
@@ -67,7 +77,7 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 	}
 
 	if controlPlanes {
-		return runListControlPlanes(ctx, result, failOnDrift)
+		return runListControlPlanes(ctx, result, erunAlias, failOnDrift)
 	}
 
 	if versionDriftTenant != "" {
@@ -95,8 +105,11 @@ func runListVersionDrift(ctx common.Context, result common.ListResult, versionDr
 	return versionDriftExitError(drift)
 }
 
-func runListControlPlanes(ctx common.Context, result common.ListResult, failOnDrift bool) error {
-	drift := common.ResolveControlPlaneVersionDrift(ctx, result, common.DefaultCloudDependencies(), common.ResolveDefaultRuntimeRegistryVersions)
+func runListControlPlanes(ctx common.Context, result common.ListResult, erunAlias string, failOnDrift bool) error {
+	drift, err := common.ResolveControlPlaneVersionDrift(ctx, result, erunAlias, common.DefaultCloudDependencies(), common.ResolveDefaultRuntimeRegistryVersions)
+	if err != nil {
+		return err
+	}
 	if ctx.Output == common.OutputJSON {
 		if err := ctx.WriteResult(drift); err != nil {
 			return err

@@ -1,0 +1,2 @@
+audit: erun list --control-planes --erun-alias erun+nonexistent@erun
+cloud provider alias "erun+nonexistent@erun" is not configured
