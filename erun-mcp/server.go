@@ -692,6 +692,10 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. The Ingress references a per-env wildcard TLS Secret by default; nothing populates it unless dns01TokenFile, dns01BrokerUrl, and acmeEmail are also set, in which case it also provisions a namespaced cert-manager Issuer + Certificate through erun's DNS-01 broker. Supports preview.",
 	}, exposeTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "e2e",
+		Description: "Discover this project's playwright/ folder the way build discovers docker/ and deploy discovers k8s/, then run it once against this server's own resolved environment. Refuses before Playwright starts, naming the cause, when the environment is not deployed, the target service is not exposed, or its certificate is not yet issued; also refuses a suite that sets ignoreHTTPSErrors or hardcodes its own baseURL. The suite receives the resolved HTTPS base URL and the environment's deployed version as ERUN_E2E_BASE_URL / ERUN_E2E_VERSION -- both derived from the live environment, never declared by the suite. A project with no playwright/ folder is a clean no-op. Supports preview.",
+	}, e2eTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "unexpose",
 		Description: "Remove an environment's per-env wildcard DNS record — the DNS-side counterpart to expose, run at environment teardown so records don't accumulate for environments that no longer exist. Touches only the platform DNS zone; the Ingress that referenced the record lives in the environment's own namespace and is torn down with it. Requires a platform block in .erun/config.yaml unless servicesZone and platformNamespace are both set. Supports preview.",
 	}, unexposeTool(runtime))

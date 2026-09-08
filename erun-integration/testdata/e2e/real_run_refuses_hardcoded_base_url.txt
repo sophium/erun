@@ -1,0 +1,2 @@
+audit: erun e2e
+erun e2e: <TMP> hardcodes baseURL; erun e2e injects the resolved URL via the ERUN_E2E_BASE_URL environment variable and refuses a literal that would silently ignore it

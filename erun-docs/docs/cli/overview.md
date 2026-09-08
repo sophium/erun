@@ -30,6 +30,7 @@ The `build → release → push → deploy` commands form ERun's delivery pipeli
 | [`erun release`](/cli/release) | Cut a release: stamp the version, publish its images and charts, then tag it. |
 | [`erun push`](/cli/push) | Push built images to the configured container registry. |
 | [`erun deploy`](/cli/deploy) | Roll a version out to an environment (build · push · helm upgrade). |
+| [`erun e2e`](/cli/e2e) | Run the project's Playwright suite against a deployed environment, with its resolved URL and version injected. |
 | [`erun publish`](/cli/publish) | Mirror a built version's images to the shared registry (`from`→`to`), no build or deploy. |
 | [`erun expose`](/cli/expose) | Expose an env's Service at a public hostname under the platform's services zone. |
 | [`erun cloud`](/cli/cloud) | Set up and manage cloud provider aliases (AWS SSO), and refresh an environment's host AWS credentials. |

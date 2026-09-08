@@ -55,9 +55,19 @@ Each component's Dockerfile is a [multi-stage build](/agent-reference/convention
   <img src="/img/build-stages.svg" alt="One Dockerfile with two stages: a builder stage that compiles the artefact and runs the tests, and a runtime stage that ships only that artefact, producing a tagged container image for amd64 and arm64." />
 </figure>
 
-Run every test that doesn't need a deployed artefact (unit tests, and integration tests against in-build fixtures) in the builder stage — because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build that marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`.
+Run every test that doesn't need a deployed artefact (unit tests, and integration tests against in-build fixtures) in the builder stage — because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build that marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`, via [`erun e2e`](#what-e2e-does) below.
 
 See [`erun build`](/cli/build) for flags, dry-run output, and error behaviour.
+
+## What `e2e` does {#what-e2e-does}
+
+`build`/`push`/`deploy` prove an image builds and installs; they cannot prove the thing it installed actually serves — a stale rollout can look identical to a fresh one from the outside. [`erun e2e`](/cli/e2e) is the step that closes that gap: it discovers a `playwright/` folder the same way `build` discovers `docker/`, then runs it once against an already-deployed environment with two values injected that the suite never declares itself — the resolved HTTPS base URL and the version the environment is actually running. The suite's first assertion is that the served surface reports that version, so a green run against a stale deployment is no longer indistinguishable from a real pass.
+
+`erun e2e` refuses before a browser starts, naming the cause, when the environment isn't deployed, the target service isn't exposed, or its certificate isn't issued yet — the three conditions that otherwise surface as an opaque connection timeout or TLS error deep inside a Playwright run. It also refuses a suite that sets `ignoreHTTPSErrors` or hardcodes its own `baseURL`, since both would silently defeat the guarantee above. A project with no `playwright/` folder makes it a clean no-op.
+
+It is a separate step with its own exit code — `erun deploy` never runs it as a side effect. `erun build --e2e` is the everyday shortcut for the branch flow: it composes build → push → deploy → e2e, the same way `build --deploy` already composes build → push → deploy.
+
+See [`erun e2e`](/cli/e2e) and [Conventions spec · Playwright suite discovery](/agent-reference/conventions-spec#playwright-suite-discovery).
 
 ## Two ways to ship
 
@@ -93,6 +103,7 @@ The fullest shape of the pipeline is promoting a change from where you build it 
 ## Where next
 
 - **[Versioning](/versioning)** — how snapshot and release versions are generated.
+- **[`erun e2e`](/cli/e2e)** — post-deploy verification against a real, deployed environment.
 - **[CLI overview](/cli/overview)** — every command, grouped by what it's for.
 - **[Build a small app](/getting-started/build-an-app)** — the pipeline end to end, from a blank directory.
 - **[Environment types](/concepts/environment-types)** — agent envs build; runtime envs receive.
