@@ -1,0 +1,12 @@
+Resolve the same smoke+area Playwright test selection `erun build` computes for the gate's PLAYWRIGHT_TEST_AREAS build-arg, from the current git diff against the merge base (erun-ui/playwright/AGENTS.md's "Area-scoped gate selection"). Always exits 0 and prints "all" when the selection cannot be resolved (no git repository, or no merge base against any candidate upstream branch) -- the fail-safe direction, matching the Dockerfile's own unset-PLAYWRIGHT_TEST_AREAS default of running everything.
+
+Usage:
+  erun exec resolve-playwright-areas [flags]
+
+Flags:
+  -h, --help   help for resolve-playwright-areas
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

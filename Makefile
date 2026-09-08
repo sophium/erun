@@ -464,6 +464,25 @@ test-frontend:
 test-playwright: test-erun-ui-windows-build
 test-playwright: test-frontend
 
+# A plain local `make check`/`make test-playwright` never goes through `erun
+# build`'s own resolution above, so PLAYWRIGHT_TEST_AREAS stayed unset here
+# and this target always ran the full suite (~21-23 minutes) while the gate
+# that actually protects `main` ran in tens of seconds -- backwards, since a
+# local run is supposed to be a cheaper preview of the same gate, not a
+# stricter one. Resolve the identical selection here too, via `erun exec
+# resolve-playwright-areas` (a thin CLI wrapper around the same
+# erun-common.ResolvePlaywrightTestAreaSelection function `erun build` calls
+# above), so a developer or agent iterating locally pays the same cost the
+# gate does. This is a target-specific variable (scoped to test-playwright
+# and whatever depends on it) using `?=`, so it is only evaluated when the
+# caller has not already supplied PLAYWRIGHT_TEST_AREAS -- the Dockerfile
+# test stage's own build-arg thread, including its empty-string "run
+# everything" default, is left untouched. `export` (no value) marks the
+# variable for export to the recipe's environment whenever it does get a
+# value, from either source.
+test-playwright: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
+export PLAYWRIGHT_TEST_AREAS
+
 test-playwright:
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh --skip-app-gates)
