@@ -44,6 +44,35 @@
 
 set -eu
 
+# reap_process_group (below) can only ever safely act when this script is
+# its own process group's leader -- when it is not, every other member is a
+# stranger it has no business signaling, so it correctly no-ops. Whether that
+# holds depends entirely on how this script was reached: `erun exec job
+# start`'s Setpgid already makes a standalone `./run.sh` invocation the
+# leader, but nothing gives it a fresh group when a Makefile recipe runs it
+# nested inside another job's own process tree (test-playwright inside `make
+# check-gate`, itself already detached with AGENT_GATE_DETACHED=1 set) -- there
+# it is just an ordinary child sharing that ancestor's group, its own reap is
+# a correct no-op, and nothing else in that tree reaps the sleep-stub session
+# orphans it spawns either. That gap, not a flaw in the reap logic itself, is
+# what let a fully-passing `make check-gate` run (not just a standalone suite
+# run) record as abandoned.
+#
+# setsid gives this invocation a fresh, genuinely private session+group up
+# front, unconditionally, so reap_process_group always has one it provably
+# owns regardless of nesting depth. Skipped when already the leader (the
+# ordinary standalone path) to avoid an unnecessary extra layer, and when
+# setsid is unavailable (macOS has no util-linux setsid by default) -- there
+# this falls back to today's leader-or-no-op behavior, not a regression.
+if [ -z "${RUN_SH_OWN_GROUP:-}" ] && command -v setsid >/dev/null 2>&1; then
+	own_pgid_at_start=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
+	if [ -z "$own_pgid_at_start" ] || [ "$own_pgid_at_start" != "$$" ]; then
+		RUN_SH_OWN_GROUP=1
+		export RUN_SH_OWN_GROUP
+		exec setsid -w "$0" "$@"
+	fi
+fi
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ERUN_UI_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 BIN_PATH="$ERUN_UI_DIR/bin/erun-app"
