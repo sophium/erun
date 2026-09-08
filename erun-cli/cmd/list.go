@@ -245,7 +245,7 @@ func writeVersionDriftEnvironments(ctx common.Context, environments []common.Env
 // distinguishing "none" (a confirmed absence -- nothing is deployed) from
 // "undetermined" (VersionUnresolved -- neither its cached config nor a live
 // check of its cluster could tell) rather than collapsing both into the same
-// bare token (erun#2400).
+// bare token.
 func versionDriftVersionValue(env common.EnvironmentVersionStatus) string {
 	if env.VersionUnresolved {
 		return "undetermined"

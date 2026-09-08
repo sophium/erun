@@ -104,8 +104,8 @@ func TestList(t *testing.T) {
 
 	t.Run("version_drift_gate_environment_version_unresolved", func(t *testing.T) {
 		// The gate environment has never recorded a resolved runtime image, so
-		// its own erun version cannot be read from config alone. erun#2400:
-		// that gap now falls back to a live helm read rather than assuming
+		// its own erun version cannot be read from config alone -- that gap
+		// now falls back to a live helm read rather than assuming
 		// "none" -- stubbed here as a confirmed absence (no release at all),
 		// so behind must still read "unknown" naming why, never a silent "no"
 		// that would misreport an unknown gate as safely current.
@@ -122,8 +122,8 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/version_drift_gate_environment_version_unresolved", normalize.Apply(result.Combined))
 	})
 
-	// erun#2400: `version=none` used to collapse three distinct situations --
-	// nothing deployed, a release deployed but this config never learned its
+	// `version=none` used to collapse three distinct situations -- nothing
+	// deployed, a release deployed but this config never learned its
 	// version, and a cluster erun could not even reach -- and dropped all
 	// three from the drift verdict silently. These four scenarios lock each
 	// rendering plus the dry-run trace that makes the live check auditable.

@@ -12,8 +12,8 @@ type EnvironmentVersionStatus struct {
 	// Version is the environment's resolved erun version: read from its own
 	// cached config (ResolveErunVersion) when that names one, or from a live
 	// read of the environment's own deployed helm release when it does not
-	// (erun#2400 -- a config that never learned about a deploy run elsewhere
-	// must not be reported as a confirmed absence). Empty means either a
+	// (a config that never learned about a deploy run elsewhere must not be
+	// reported as a confirmed absence). Empty means either a
 	// confirmed absence (VersionUnresolved false) or that neither source
 	// could tell (VersionUnresolved true) -- never conflate the two.
 	Version string `json:"version,omitempty"`
@@ -215,8 +215,8 @@ type environmentVersionResolution struct {
 // ResolveListResult), falling back to a live read of its deployed helm
 // release only when that cache has nothing to say. The cache alone cannot
 // distinguish "never deployed" from "deployed by a process whose config
-// never learned about it" (erun#2400) -- both look identical to the config
-// reader, and only asking the cluster directly can tell them apart.
+// never learned about it" -- both look identical to the config reader, and
+// only asking the cluster directly can tell them apart.
 func resolveEnvironmentVersionForDrift(ctx Context, tenant string, env ListEnvironmentResult) environmentVersionResolution {
 	if version := erunVersionString(env); version != "" {
 		return environmentVersionResolution{Version: version}
