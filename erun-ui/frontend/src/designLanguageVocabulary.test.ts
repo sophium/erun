@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { test } from 'vitest';
 
 // erun-ui/AGENTS.md § "Design-Language Decision Record" names two collisions
 // this repository decided to close for good: a second component named

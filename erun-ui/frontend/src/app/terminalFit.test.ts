@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+
+import { test } from 'vitest';
 
 import { MIN_FIT_COLS, MIN_FIT_ROWS, safeFit } from './terminalFit';
 
