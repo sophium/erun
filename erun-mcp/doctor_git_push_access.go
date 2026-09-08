@@ -13,10 +13,16 @@ import (
 // healthy right up to the moment an agent tries to push a branch or use gh --
 // the worst possible time to discover there is no credential. Runs only for
 // an environment whose worktree actually lives in a pod; a local-agent env
-// pushes from the operator's own machine.
-func writeDoctorGitPushAccess(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams) error {
+// pushes from the operator's own machine. When an earlier section already
+// confirmed the cluster is unreachable (diagnosis.ClusterUnreachable), this
+// reports the same skip instead of paying its own kubectl exec timeout to
+// rediscover it (erun#2394).
+func writeDoctorGitPushAccess(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams, diagnosis eruncommon.DeployDiagnosisResult) error {
 	if !target.EnvConfig.RemoteWorktree() {
 		return nil
+	}
+	if diagnosis.ClusterUnreachable {
+		return writeDoctorPodUnreachableSkip(runCtx, "Git push access")
 	}
 	status, err := eruncommon.InspectGitPushAccess(runCtx, nil, req, target.RepoPath)
 	if err != nil || runCtx.DryRun || status.RemoteURL == "" {

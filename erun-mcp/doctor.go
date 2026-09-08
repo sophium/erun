@@ -181,19 +181,34 @@ func runDoctorTenantEnvActions(runtime RuntimeConfig, input DoctorInput, runCtx 
 		return err
 	}
 	req := eruncommon.ShellLaunchParamsFromResult(target)
-	if err := writeDoctorDeployDiagnosis(runCtx, req); err != nil {
+	diagnosis, err := writeDoctorDeployDiagnosis(runCtx, req)
+	if err != nil {
 		return err
 	}
-	if err := writeDoctorGitPushAccess(runCtx, target, req); err != nil {
+	if err := writeDoctorGitPushAccess(runCtx, target, req, diagnosis); err != nil {
 		return err
 	}
 	if err := runDoctorRecoveryToolActions(runCtx, input, req); err != nil {
+		return err
+	}
+	if diagnosis.ClusterUnreachable {
+		if err := writeDoctorPodUnreachableSkip(runCtx, "Docker storage"); err != nil {
+			return err
+		}
+		if !anyDoctorActionRequested(input) {
+			return nil
+		}
+		_, err := fmt.Fprintln(runCtx.Stdout, "Skipping the requested prune action(s) for the same reason.")
 		return err
 	}
 	if err := writeDoctorInspection(runCtx, target, req); err != nil {
 		return err
 	}
 	return runDoctorToolActions(runCtx, input, req)
+}
+
+func anyDoctorActionRequested(input DoctorInput) bool {
+	return input.PruneImages || input.PruneBuildCache || input.PruneContainers
 }
 
 // onlyRootConfigDoctorInput mirrors the CLI's doctorOnlyRepairConfig: when the
@@ -339,23 +354,41 @@ func firstNonBlank(values ...string) string {
 }
 
 // writeDoctorDeployDiagnosis reports helm release status and runtime pods so an
-// agent can see why a deploy failed before any cleanup runs. Read-only.
-func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) error {
+// agent can see why a deploy failed before any cleanup runs. Read-only. The
+// returned diagnosis carries ClusterUnreachable forward so every later
+// section that needs the runtime pod (git push access, docker storage) can
+// skip its own probe instead of independently rediscovering the same
+// unreachable cluster (erun#2394).
+func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) (eruncommon.DeployDiagnosisResult, error) {
 	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
 	if runCtx.DryRun {
-		return nil
+		return diagnosis, nil
 	}
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
-			return err
+			return diagnosis, err
 		}
+	}
+	if diagnosis.ClusterUnreachable {
+		return diagnosis, writeDoctorPodUnreachableSkip(runCtx, "Pods")
 	}
 	if pods := strings.TrimSpace(diagnosis.Pods); pods != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Pods ==\n%s\n\n", pods); err != nil {
-			return err
+			return diagnosis, err
 		}
 	}
-	return nil
+	return diagnosis, nil
+}
+
+// writeDoctorPodUnreachableSkip reports a doctor section skipped because an
+// earlier section already confirmed the cluster is unreachable
+// (eruncommon.DeployDiagnosisResult.ClusterUnreachable), instead of paying
+// another multi-minute kubectl timeout to rediscover the same fact
+// (erun#2394). Mirrors the CLI's reportPodSkippedUnreachable
+// (erun-cli/cmd/doctor_pod_diagnosis.go).
+func writeDoctorPodUnreachableSkip(runCtx eruncommon.Context, header string) error {
+	_, err := fmt.Fprintf(runCtx.Stdout, "== %s ==\nskipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header)
+	return err
 }
 
 func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams) error {

@@ -1612,6 +1612,29 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_clear_pending_helm_via_prompt_then_prune_containers", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", func(t *testing.T) {
+		// erun#2394: once the helm release status read confirms the
+		// Kubernetes API server itself is unreachable, doctor must not
+		// rediscover that fact in the Pods, Host AWS credentials, Git push
+		// access, or Docker storage sections -- before the fix each paid its
+		// own multi-minute kubectl timeout to relearn what the helm read
+		// already established (~8 minutes and 17 klog frames across the four
+		// sections in the reported run). kubectl is deliberately left
+		// unstubbed (absent from fixture.StubEnv below): if any of the four
+		// sections still probes for real, erun.Run's own
+		// "executable file not found" detection fails this test outright.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithAWSAlias(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatusUnreachable(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_storage_unhealthy_diagnostic_error", func(t *testing.T) {
 		// kubectl wait fails with a disk i/o error: doctor must fold the
 		// stderr into the storage-unhealthy diagnostic
@@ -2063,6 +2086,24 @@ func stubDoctorHelmStatus(t *testing.T, stubsDir, releaseStatus string) {
 	script := strings.Join([]string{
 		`case "$1" in`,
 		`  status) printf '%s\n' 'NAME: team-devops' 'STATUS: ` + releaseStatus + `' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "helm", script)
+}
+
+// stubDoctorHelmStatusUnreachable stubs `helm status` to fail with the
+// unreachable-API-server error a real cluster reports (erun#2394's trigger),
+// matching the reported run's exact wording. No other helm command is
+// expected to run once this fails.
+func stubDoctorHelmStatusUnreachable(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$1" in`,
+		`  status)`,
+		`    echo 'Error: kubernetes cluster unreachable: Get "https://198.51.100.10:6443/version?timeout=32s": dial tcp 198.51.100.10:6443: i/o timeout' >&2`,
+		`    exit 1`,
+		`    ;;`,
 		`esac`,
 		`exit 0`,
 	}, "\n")

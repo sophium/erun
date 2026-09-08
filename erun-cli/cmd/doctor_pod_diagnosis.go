@@ -17,6 +17,16 @@ func reportPodUnreachable(ctx common.Context, header string, err error) error {
 	return ferr
 }
 
+// reportPodSkippedUnreachable mirrors reportPodUnreachable for a section that
+// never attempts its own probe because an earlier section already confirmed
+// the cluster is unreachable (common.DeployDiagnosisResult.ClusterUnreachable,
+// erun#2394) -- skipping here is what turns four independent multi-minute
+// kubectl timeouts rediscovering the same fact into one immediate line each.
+func reportPodSkippedUnreachable(ctx common.Context, header string) error {
+	_, err := fmt.Fprintf(ctx.Stdout, "== %s ==\nskipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header)
+	return err
+}
+
 // reportRuntimeImageRegistryMismatch names a runtime image pinned to a
 // registry other than the env's own runtimeregistry, before any pod-dependent
 // check runs — the config alone is enough to tell, so this never execs and

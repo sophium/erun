@@ -17,9 +17,15 @@ import (
 // The read execs into the runtime pod, which is exactly the state doctor most
 // needs to diagnose when it is down — reading it must degrade to a clear
 // "could not read" report rather than aborting the rest of doctor's checks.
-func reportHostCredentials(ctx common.Context, store common.ConfigStore, result common.OpenResult) error {
+// When an earlier section already confirmed the cluster is unreachable
+// (diagnosis.ClusterUnreachable), this reports the same skip instead of
+// paying its own kubectl exec timeout to rediscover it (erun#2394).
+func reportHostCredentials(ctx common.Context, store common.ConfigStore, result common.OpenResult, diagnosis common.DeployDiagnosisResult) error {
 	if !result.EnvConfig.HasAWSCloudAlias() {
 		return nil
+	}
+	if diagnosis.ClusterUnreachable {
+		return reportPodSkippedUnreachable(ctx, "Host AWS credentials")
 	}
 	status, err := common.InspectHostAWSCredentials(ctx, nil, store, result)
 	if err != nil {

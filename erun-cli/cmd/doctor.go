@@ -144,10 +144,10 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if err := reportRuntimeImageLineMismatch(ctx, result); err != nil {
 		return err
 	}
-	if err := reportHostCredentials(ctx, configStore, result); err != nil {
+	if err := reportHostCredentials(ctx, configStore, result, diagnosis); err != nil {
 		return err
 	}
-	if err := reportGitPushAccess(ctx, result); err != nil {
+	if err := reportGitPushAccess(ctx, result, diagnosis); err != nil {
 		return err
 	}
 	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {
@@ -264,6 +264,9 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 	if err := runDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis); err != nil {
 		return err
 	}
+	if diagnosis.ClusterUnreachable {
+		return reportDoctorCleanupSkippedUnreachable(ctx, options)
+	}
 	inspection, err := common.RunDoctorInspection(ctx, nil, req)
 	if err != nil {
 		return reportDoctorInspectionUnreachable(ctx, options, err)
@@ -296,6 +299,22 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 // skipped rather than attempting it and failing with the same cause again.
 func reportDoctorInspectionUnreachable(ctx common.Context, options doctorOptions, err error) error {
 	if repErr := reportPodUnreachable(ctx, "Docker storage", err); repErr != nil {
+		return repErr
+	}
+	if !anyDoctorActionRequested(options.pruneImages, options.pruneBuildCache, options.pruneContainers) {
+		return nil
+	}
+	_, ferr := fmt.Fprintln(ctx.Stdout, "Skipping the requested prune action(s) for the same reason.")
+	return ferr
+}
+
+// reportDoctorCleanupSkippedUnreachable mirrors reportDoctorInspectionUnreachable
+// for the case where an earlier section already confirmed the cluster is
+// unreachable (erun#2394): it reports the same skip and the same "no prune
+// action ran" outcome without paying a second kubectl exec timeout to
+// rediscover what the helm release status section already proved.
+func reportDoctorCleanupSkippedUnreachable(ctx common.Context, options doctorOptions) error {
+	if repErr := reportPodSkippedUnreachable(ctx, "Docker storage"); repErr != nil {
 		return repErr
 	}
 	if !anyDoctorActionRequested(options.pruneImages, options.pruneBuildCache, options.pruneContainers) {
@@ -393,6 +412,9 @@ func writeDeployDiagnosis(ctx common.Context, diagnosis common.DeployDiagnosisRe
 		if _, err := fmt.Fprintf(ctx.Stdout, "== Helm release status ==\n%s\n\n", diagnosis.HelmStatus); err != nil {
 			return err
 		}
+	}
+	if diagnosis.ClusterUnreachable {
+		return reportPodSkippedUnreachable(ctx, "Pods")
 	}
 	if strings.TrimSpace(diagnosis.Pods) != "" {
 		if _, err := fmt.Fprintf(ctx.Stdout, "== Pods ==\n%s\n\n", diagnosis.Pods); err != nil {
