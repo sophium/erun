@@ -24,6 +24,9 @@ func TestResolveConfiguredRuntimeRegistryVersionsListsPrivateRegistry(t *testing
 	restore := dockerConfigDir
 	dockerConfigDir = func() string { return t.TempDir() }
 	defer func() { dockerConfigDir = restore }()
+	restoreECR := runECRLoginPassword
+	runECRLoginPassword = func(string) (string, bool) { return "", false }
+	t.Cleanup(func() { runECRLoginPassword = restoreECR })
 
 	versions, err := ResolveConfiguredRuntimeRegistryVersions(context.Background(), RuntimeRegistryConfig{
 		Namespace:  "020362606330.dkr.ecr.eu-west-2.amazonaws.com",
@@ -37,7 +40,7 @@ func TestResolveConfiguredRuntimeRegistryVersionsListsPrivateRegistry(t *testing
 		t.Fatalf("listed %q, want the registry's own v2 tags endpoint", gotPath)
 	}
 	if gotAuth != "" {
-		t.Fatalf("sent %q with no credential available", gotAuth)
+		t.Fatal("sent authorization with no credential available")
 	}
 	if versions.LatestStable != "1.0.178" {
 		t.Fatalf("latest stable %q, want 1.0.178", versions.LatestStable)

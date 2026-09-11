@@ -43,7 +43,7 @@ type EnvironmentVersionStatus struct {
 // release.
 //
 // GateEnvironment, when set, additionally answers a question erun itself has
-// no stored concept of (root AGENTS.md's release-cadence policy, erun#1985
+// no stored concept of (the backend API guide's Release cadence policy
 // records the design and the gap): whether the environment driving this
 // tenant's merge-queue gate is running an older erun version than an
 // environment it gates. A gate older than the code it gates can pass a

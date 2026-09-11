@@ -1,56 +1,144 @@
 # AGENTS.md
 
-Module-specific guidance for `erun-kit`. Follow the repository root `AGENTS.md` first, then apply this file for work in this subtree.
+Shared frontend guidance. Follow root `AGENTS.md`. Desktop and console also
+apply the shared workflow and UX sections here.
 
 ## Module role
 
-- `erun-kit` is the shared frontend foundation for ERun's two React apps — the desktop (`erun-ui/frontend`) and the hosted console (`erun-console`). It plays the same role on the frontend side that `erun-common` plays on the Go side: the transport-agnostic core both transports depend on, never the other way around (see root `AGENTS.md` § "Command primitives vs orchestration" for the Go-side analogue of this boundary).
-- **The kit is transport-agnostic, with no exceptions.** Nothing here may import Wails bindings, `fetch`, a base query, or a Redux store. Widgets take props and emit callbacks; nothing here reaches into an app's state. A widget that needs `useAppSelector`/`useAppDispatch` or a `wailsjs` import is not ready to move here.
-- Consumed via Yarn workspaces (root `package.json`), resolved by both apps as the `erun-kit` package. Both apps also register a `@kit/*` path alias (tsconfig `paths` + Vite `resolve.alias`) pointing at `erun-kit/src` — this is **not** for importing the kit's public API (use the bare `erun-kit` specifier for that); it exists because the kit's own shadcn-managed primitives resolve each other and `cn` through `@kit/...`, and that alias has to resolve identically regardless of which app's Vite/tsc instance is processing the file (a bundler alias is global to its own config, not scoped to the file that uses it — an app's own `@/*` alias would otherwise silently point kit-internal imports at the wrong tree). Hand-written kit code (the tier-2 widgets) uses plain relative imports instead, since nothing regenerates them and there's no reason to add alias surface for files under full manual control.
+- Own transport-neutral tokens, primitives, widgets, and genuinely shared models.
+  Never import Wails, fetch, a concrete base query, an app store, or app hooks.
+  Widgets take props and emit callbacks; endpoint factories accept a base query.
+- Apps consume the TypeScript source through Yarn workspaces and the bare
+  `erun-kit` public export. Both apps must resolve `@kit/*` identically for
+  generated primitive imports. Hand-written kit code uses relative imports.
 
 ## What belongs here
 
-- **Tier 1 — tokens and primitives.** `src/styles/theme.css` (the shadcn/Tailwind 4 token scale, light and dark) and `src/lib/utils.ts` (`cn`), plus the shadcn primitives under `src/components/ui/`.
-- **Tier 2 — generic widgets.** App-agnostic components with zero app-state imports: `StatusBadge` (+ helpers), `EmptyState`, `IconTooltip`, `FieldLabel`, `SelectField`, `EditableComboField` (+ helpers), `ErrorBoundary`, `ResizeHandle`, `FileIcon`.
-- **Tier 3 — erun-domain widgets**, moved as the console actually needs them rather than speculatively: `VersionField`, `KubernetesContextSelect`, `ContainerRegistriesField`. These encode erun concepts, so a second implementation would be a second opinion about erun, not just a duplicated control. None have moved yet — the console has no caller for them.
-- **Tier 4 — shared models and RTK Query endpoint definitions.** `src/models/platformConfig.ts` is the `GET /v1/config` wire model (`Tenant`, `Environment`, `CloudContext`, `TenantConfigView`) plus its lenient parsers — this is erun-backend-api's own contract, not a console-only concept, so any transport that talks to the hosted platform API shares it. `src/api/platformConfigEndpoints.ts` is the one RTK Query endpoint definition (`buildPlatformConfigEndpoints`) parameterized over a `BaseQuery` rather than a concrete one, so it injects into any app's own `createApi` instance: erun-console's `platformApi` (`src/app/api/platformApi.ts`) wires it to a real `httpBaseQuery`; erun-ui/frontend's own suite (`src/app/api/platformConfigEndpoints.test.ts`) wires the identical factory to its real `wailsQueryFn`, proving the same definition produces the same model over both transports.
-- Of erun#1211's phase-7 list (tenants, environments, selection, notifications, request counters, collaboration state), only the piece above has moved. The rest stayed put deliberately: the desktop's `tenantsSlice`/`selectionSlice`/`requestCountersSlice` hold desktop-only shapes (`UITenant`, Wails-bound selection, PTY-flow counters) with no console equivalent to share, and console's own environments/provisioning/identity/mcp reads became RTK Query endpoints and slices local to `erun-console/src/app/` rather than kit widgets, since nothing about their state is shared with the desktop today. Move a slice here only when a second real transport needs the same shape — not ahead of that caller.
+- Tokens in `src/styles/theme.css`, `cn`, and generated shadcn primitives.
+- Generic state-free widgets, including status, empty state, field, tooltip,
+  resizing, and error-boundary components.
+- Domain widgets/models only when a second real transport needs the same shape.
+  `platformConfig.ts` and `buildPlatformConfigEndpoints` are shared already;
+  desktop selection/PTY state and console-local workflows are not.
 
 ## What does not belong here
 
-- Anything desktop-only: `TerminalPane`, `TerminalTabStrip`, `Titlebar.*`, `ReviewPanel.*`, `DiffList`, `ManageDialog*`, `OrchestratorDialog`, `DebugPanel`, `ReconnectDialog`, and their slices/thunks. These depend on Wails, a PTY, or a pod.
-- Anything console-only: `ConfigView`, `ProvisionPanel`, `MCPAccessPanel`, `EnvironmentsPanel`, `UsersPanel`, `OrgSettingsPanel`, and the app shell (`shell/AppShell`, `ConsoleSidebar`, `ConsoleHeader`, `PreShellScreens`, `CenteredCard`, `BrandMark`, `sections.ts`, `theme.ts`) — the shell composes kit primitives with console-specific navigation and IA, it is not itself a generic widget.
-- A base query, a `fetch` call, or a store. If a widget needs one, it isn't a widget — it's app wiring, and it stays in the app.
+App shells, transport clients/stores, terminal lifecycles, desktop review controls,
+and console provisioning/identity panels stay in their owning apps.
 
 ## Adding a widget
 
-1. Confirm it has zero app-state imports (no `useAppSelector`/`useAppDispatch`/`@/app/*`) in its current home before moving it — that's what makes tier 2 safe to share as-is.
-2. `git mv` it into `src/components/`, rewrite its internal imports to plain relative paths (not `@/...` — see "Module role" above for why), and re-export it from `src/index.ts`.
-3. Update the moving app's imports to `from 'erun-kit'`, run `yarn typecheck && yarn lint && yarn format:check && yarn build` in the app, and add the widget to the harness (`harness/Harness.tsx`) so it renders in every state the harness covers.
-4. Run this module's own gates (below) before the app's.
+1. Verify it has no app-state/transport imports, move it as one responsibility,
+   use relative internal imports, and export it through `src/index.ts`.
+2. Change consumer imports to `erun-kit`; add all relevant states to
+   `harness/Harness.tsx`.
+3. Validate kit and every affected consumer. Organizational sharing must preserve
+   existing rendered behavior; do not edit desktop specs merely to hide a regression.
 
 ## Adding or updating a shadcn primitive
 
-- Run `yarn shadcn ...` from this directory, not from either app — the primitives, `components.json`, and `src/styles/theme.css` live here now. Running `yarn shadcn add ...` for real (not `shadcn:check`) does mutate this workspace's `node_modules` and root `yarn.lock` — that is expected here, since you are about to commit the regenerated output anyway.
-- After adding or updating a primitive, run `yarn shadcn:check`; it regenerates the pinned set and fails the build if the committed output differs from what the pinned CLI produces.
-- `shadcn:check` (`scripts/check-shadcn-drift.mjs`) runs the regeneration and the `reapply-dialog-clamp.mjs` step against a scratch copy of the workspace under the system temp directory, then diffs that copy against the committed `src/components/ui`, `src/lib/utils.ts`, `src/styles/theme.css`, `components.json`, and `package.json` — never against the real tree. `shadcn add --overwrite`'s own dependency-install step has been observed to prune a declared dependency (`node_modules/radix-ui`) and rewrite the root `yarn.lock` (dropping the exact-version key the `resolutions` field pins) when run for real; `yarn install --frozen-lockfile` afterwards reports "Already up-to-date" without restoring the pruned package, so the check must never let that install step run against this workspace's own `node_modules`/`yarn.lock`. The scratch copy absorbs that mutation and is deleted after the diff, so `shadcn:check` never touches this workspace's `node_modules` or `yarn.lock`, and does not compare `yarn.lock` for drift (its content is a package-manager resolution artifact, not primitive-template output). If you ever need the real regeneration's install-step side effect on purpose (e.g. to pick up a new primitive's dependency), run `yarn shadcn add <component> --overwrite` for real, not `shadcn:check`.
-- Do not hand-edit generated primitive output under `src/components/ui/`. If a primitive needs to change, change it through the CLI and re-run `shadcn:check`.
-- **Exception: `dialog.tsx` carries three deliberate, permanent classes that stock shadcn does not emit** — `grid-cols-1` on the content, and `min-w-0` on the header and footer. Stock `DialogContent` is `display: grid` with no explicit `grid-template-columns`, so the browser sizes the implicit single column to the max-content width of its widest descendant: one unbroken string (a long file path, a UUID) with no `min-w-0` above it drags that column, and every sibling grid item with it, past the card's own clamped box, while the card's background and border still paint at the correct width. These are **not** hand-edits to live with: `scripts/reapply-dialog-clamp.mjs` reapplies them after `shadcn add --overwrite`, and `shadcn:check` runs it between regeneration and the diff, so the check stays green and still catches every other drift. The script asserts each stock string is present before replacing it, so if upstream changes this primitive it fails loudly rather than masking the change — re-derive the clamp against the new output and update the script, never delete it.
+- Run the pinned `yarn shadcn` CLI here, not in an app. Never hand-edit generated
+  primitives. Real regeneration may change dependencies and root `yarn.lock`;
+  review those changes.
+- `yarn shadcn:check` regenerates in a scratch workspace, not this workspace's
+  node_modules/lockfile. Keep that isolation; the CLI's install can prune packages.
+- Preserve `scripts/reapply-dialog-clamp.mjs`: after regeneration it adds
+  `grid-cols-1` to dialog content and `min-w-0` to header/footer. These prevent
+  unbroken content from widening an implicit grid beyond the dialog.
+  Fail when upstream shapes change; re-derive the patch, never suppress the check.
+
+## Shared frontend workflow
+
+- Use Yarn, strict TypeScript, ESLint, and Prettier; keep their checked-in
+  configurations authoritative instead of copying numeric limits into guidance.
+- Edit source contracts and regenerate bindings/models/primitives. If the generator
+  fails, fix or report it; never hand-write generated output to satisfy a check.
+- Discover existing kit widgets and app wrappers before creating controls.
+  Reuse the closest interaction or extract a prop-driven component.
+- Use Tailwind utilities and semantic theme tokens for component styling. Keep
+  global CSS for resets, integration hooks, and runtime CSS variables; place app
+  theme extensions in app CSS, not the generated theme.
+- Apps must include kit sources in Tailwind scanning and resolve the class-based
+  `.dark` theme consistently: saved preference first, OS preference otherwise.
+- Keep workflow/state owners separate from view adapters and pure model types.
+  Persist values at the owning transition; preserve timers, retries, focus,
+  notifications, and busy-state behavior during refactors.
+
+## Professional UX
+
+- Before non-trivial UI work, record the user task, decision/recovery, chosen
+  control, relevant states, and the UX principles supporting that choice.
+  Apply this to backend/lifecycle changes with visible effects too.
+- Use known-option controls for known values; free text is for authored values.
+  Compute derived values and load configured choices. Save only edited fields.
+- Present user/domain concepts rather than provider, transport, cache, or process
+  internals. Show object state and the likely action where the user acts.
+- Distinguish blockers from attempted failures, and render actionable reasons
+  inline. Supplemental tooltips must be accessible and bounded/wrapping; native
+  `title` is only for non-essential truncation hints.
+- Make effects explicit: rendering or opening settings must not silently login,
+  deploy, delete, or publish. Preserve cancellation before commitment and visible
+  progress/result afterward.
+- Use semantic labels/buttons, keyboard access, visible focus, sufficient contrast,
+  non-color-only status, and field-associated errors. Empty states are not inputs.
+- Validate rendered empty, populated, loading, error, disabled, and narrow states
+  where affected; verify the original user question is visibly answered.
+- For non-trivial changes, read/apply the relevant standards and name the principle
+  behind non-obvious decisions, not merely the fact a reference was consulted:
+  [Nielsen heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/),
+  [WCAG 2.2](https://www.w3.org/TR/WCAG22/),
+  [Material empty states](https://m1.material.io/patterns/empty-states.html), and
+  [Material dialogs](https://m1.material.io/components/dialogs.html).
+
+## UX Impact Review Checklist
+
+Record in the PR (or small-change commit body):
+
+1. Affected user-triggered paths, or explicitly no user-triggered path.
+2. User-visible sequence, including what renders each state change.
+3. Any state mutation without a visible affordance; remove or surface it.
+4. Persistent progress visible outside dialogs that close during work.
+5. Recognizable success/failure and an actionable recovery without reading raw logs.
+6. Comparable existing flow and consistency with its feedback.
+7. Each of the ten Nielsen heuristics: applies/pass, issue, or explicitly inapplicable.
+8. Owning app's test coverage in the same PR. Stage config-shaped state rather
+   than skip it; disclose live-infrastructure gaps and cover the nearest observable
+   invariant plus the underlying branch in its owning suite.
+
+## Design-Language Decision Record
+
+- Use kit `StatusBadge` and domain-named mappings to its five tones:
+  success, warning, destructive, in-progress, muted.
+- Use `InlineAlert` (`role="alert"`) for attempted failures and
+  `PermissionNotice` (`role="status"`) for restricted access. Expected blocks
+  are status, not faults; avoid bespoke unlabelled feedback.
+- Render outcomes beside controls that remain visible. For outcomes arriving
+  after navigation, use one-off notifications plus a durable activity list,
+  not an unrelated toast vocabulary.
+- Confirm destructive/access-revoking actions: Cancel first, action second,
+  controls disabled and action spinning in flight. Unrecoverable deletion
+  additionally requires the object's name.
+- Use real dialog/drawer primitives with focus trap/restore and narrow transition
+  announcements; never focus controls inside `aria-hidden` content.
+- Keep shared activity and condition indicators consistent across row types.
+  Departures from these decisions require an explicit reason in the UX note.
+
+### Permission degradation
+
+- Gate on effective capabilities, not role names. Centralize mapping from the
+  shared capability contract to app surfaces; do not invent per-component tests.
+- Do not issue forbidden reads or present unusable actions. Keep the missing
+  access visible somewhere, and preserve independently accessible panels.
+- Distinguish no objects, no filter matches, and no permission. A restricted
+  list must never look empty. Tenant-type eligibility is a separate constraint.
 
 ## Validation
 
-Run all of these from `erun-kit/` for any change to this module:
-
-```bash
-yarn typecheck      # tsc --noEmit
-yarn lint            # eslint .
-yarn format:check    # prettier --check .
-yarn build           # vite build of harness/ — the kit's own demo app
-yarn test            # node --test src/**/*.test.ts
-yarn shadcn:check    # regenerate the pinned primitives, diff against committed output
-```
-
-- `yarn build` builds `harness/`, a small Vite app that renders every widget in the states it's given (default, disabled, empty, with/without an action, every `StatusBadge` tone) and a light/dark toggle. It is the kit's own reviewable artifact — run `yarn dev` to preview it locally. It is not how the two apps consume the kit; they import `erun-kit`'s TypeScript source directly (see "Module role"), so nothing here needs a published build output.
-- All five of the above except `shadcn:check` are also gated centrally: the repo root `make check` (via its `test-frontend` target) runs them against this module, alongside `erun-ui/frontend` and `erun-console`. `shadcn:check` stays a local-only check (see "Adding or updating a shadcn primitive" above for why).
-- After any change, also validate every app that consumes the changed surface: `erun-ui/frontend` (`yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test`, plus `./playwright/run.sh` specs covering the changed widget — see `erun-ui/playwright/AGENTS.md`) and `erun-console` (`yarn typecheck && yarn lint && yarn format:check && yarn build && yarn test`) if it has adopted the changed surface.
-- The desktop's Playwright suite is the regression gate that proves a kit change is byte- and behaviour-identical for its existing consumer: it must stay green with **no spec edits**. A spec edited to keep it passing after a kit change is a regression in the kit, not a test update.
+- Code changes: `yarn typecheck && yarn lint && yarn format:check && yarn build &&
+yarn test && yarn shadcn:check` from this module.
+- `yarn build` produces the review harness, not a package apps must build/import.
+  Preview with `yarn dev`; check light/dark and affected widget states.
+- Root `test-frontend` gates the first five commands; shadcn drift is a separate
+  local check. Validate affected consumers with their five frontend commands and
+  their required browser tests.
+- Guidance-only changes follow root validation scope.

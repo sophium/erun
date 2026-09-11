@@ -758,9 +758,15 @@ func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {
 	if dir != orchestratorsRoot() {
 		t.Fatalf("expected the shared orchestrators root %q, got %q", orchestratorsRoot(), dir)
 	}
-	// Calling again is idempotent and resolves to the same single workspace — there
-	// is no per-orchestrator folder.
-	if again, _ := app.ensureOrchestratorWorkspace(); again != dir {
+	// Launching again refreshes stale instructions in the same shared workspace.
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("stale instructions\n"), 0o644); err != nil {
+		t.Fatalf("seed stale instructions: %v", err)
+	}
+	again, err := app.ensureOrchestratorWorkspace()
+	if err != nil {
+		t.Fatalf("refresh orchestrator workspace: %v", err)
+	}
+	if again != dir {
 		t.Fatalf("expected one shared workspace, got %q then %q", dir, again)
 	}
 
@@ -768,10 +774,8 @@ func TestOrchestratorWorkspaceIsSharedRootWithOneClaudeMd(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("read CLAUDE.md: %v", readErr)
 	}
-	for _, want := range []string{"erun-orchestrate", "Never write into a review directory", "local-agent", "uninterrupted", "end-to-end", "`<tenant>-<env>`", "already operating under this contract", "ERUN_ORCHESTRATOR_ID"} {
-		if !strings.Contains(string(data), want) {
-			t.Fatalf("shared orchestrator CLAUDE.md missing %q:\n%s", want, data)
-		}
+	if string(data) != orchestratorClaudeMd {
+		t.Fatal("provisioned orchestrator instructions differ from the canonical template")
 	}
 	// The shared CLAUDE.md is generic — no per-orchestrator "Linked environments" list.
 	if strings.Contains(string(data), "## Linked environments") {
