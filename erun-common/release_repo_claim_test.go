@@ -25,13 +25,9 @@ func newTestClaimContext() Context {
 func cloneRepoForTest(t *testing.T, remote string) string {
 	t.Helper()
 	dir := t.TempDir()
-	runGitForTest(t, filepath.Dir(dir), "clone", "-q", remote, dir)
+	runGitForTest(t, filepath.Dir(dir), "clone", "-q", "--branch", "main", remote, dir)
 	runGitForTest(t, dir, "config", "user.email", "test@example.com")
 	runGitForTest(t, dir, "config", "user.name", "Test")
-	// The bare remote's own HEAD symref still names whatever
-	// init.defaultBranch produced, not "main", so a fresh clone checks out
-	// nothing; check out the branch this suite actually pushes explicitly.
-	runGitForTest(t, dir, "checkout", "-q", "-b", "main", "--track", "origin/main")
 	return dir
 }
 

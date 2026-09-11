@@ -21,8 +21,8 @@ type ListInput struct {
 	VersionDriftTenant string `json:"versionDriftTenant,omitempty" jsonschema:"when set, additionally report erun-version drift across this tenant's environments: which erun version each environment runs, and the newest version observed among them -- an environment with no version recorded locally is read live to tell a confirmed absence ('version' omitted, versionUnresolved false) apart from a version that could not be determined at all (versionUnresolved true, versionUnresolvedReason set, excluded from maxVersion/behindMax)"`
 	// GateEnvironment, only meaningful alongside VersionDriftTenant, names
 	// the environment driving that tenant's merge-queue gate. erun has no
-	// stored concept of which environment gates a tenant's merges (see root
-	// AGENTS.md's release-cadence policy), so the caller states it.
+	// stored concept of which environment gates a tenant's merges (see the
+	// backend API guide's Release cadence policy), so the caller states it.
 	GateEnvironment string `json:"gateEnvironment,omitempty" jsonschema:"requires versionDriftTenant; the environment driving that tenant's merge-queue gate -- flags whether it runs an older erun version than any environment it gates, since a stale gate can pass a change that would fail on current code"`
 	// ControlPlanes, when set, additionally reports every configured
 	// erun-hosted control plane's deployed version (GET /v1/platform)

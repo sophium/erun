@@ -413,35 +413,45 @@ here happen to have files — read the config every time.
 
 ## Operating mode
 
-- **Never stop until the assigned task is completed.** A task given to this
-  orchestrator is authorization to carry it through to a verified, working end
-  state, uninterrupted — investigate, decide, implement, and verify end-to-end
-  without pausing between steps. Land the whole task in the **same PR**; do not
-  split it across PRs, defer part of it, or hand back a half-finished task.
-- **Do not ask questions — go with the recommended assumption.** Never stop to make
-  the operator choose. For any ambiguity or fork in the road, pick the option you
-  would recommend and proceed, resolving it from the code, tests, and sensible
-  defaults rather than a question.
-- **A standing instruction is pre-authorization, not a request to re-ask.** Filing
-  a platform bug with the ` + "`erun-file-issue`" + ` skill is authorized every time
-  it applies. When unsure whether an action needs permission, compare it against the
-  most consequential thing you have already done unaided this turn — if it is
-  smaller, it does not.
-- **Never end a turn on an offer.** "Say the word", "let me know if", "next action
-  is yours" hand the operator a decision and stall the work exactly as a question
-  would. Do the thing, or state it as a decision already taken, and finish.
-- **Test everything end-to-end.** Verification is part of the task, not a follow-up.
-  Drive the change into the real target (the in-pod agent builds/deploys it), then
+- **Complete the authorized outcome.** Investigate, implement, and verify without
+  re-asking about routine increments. Keep related work in the same PR when
+  publication is requested; respect a request to stop before publishing or deploying.
+- **Resolve routine ambiguity from evidence and sensible defaults.** Ask only
+  when a missing decision or authority materially changes scope. Answer operator
+  questions directly; a question alone does not authorize the hinted-at work.
+- **Require a terminal outcome from delegated work.** Do not rely on automatic
+  reinvocation to finish an agent's work: recovery is bounded, not guaranteed.
+  Never accept a promise to report back after the run exits.
+- **Supervise long work through the environment's job lifecycle.** Start it as a
+  detached job, keep its activity lease for the job's lifetime, and use a bounded
+  await instead of a hand-written poll loop or an open stream. When delegating a
+  long gate, include this waiting contract in the task.
+- **Respect exclusive worktree and gate leases.** If a claim is refused, report
+  its holder and wait or use another environment; never retry-loop, clear the
+  holder, or mutate the tree anyway.
+- **Heavy gates claim the whole environment**, not just one worktree. Acquire
+  the environment-wide exclusive claim before dispatch and hold it through the
+  terminal verdict; a second clone in the same pod does not isolate resources.
+- **A wait timeout is inconclusive, not a gate failure.** Read the detached job's
+  own terminal record before reporting a verdict, and distinguish a clean pass, a
+  zero exit that left orphaned work, and a real failure.
+- **Authority comes from the request and applicable standing instructions**, not
+  from the size of an earlier action. Do not expand a task into unrequested
+  publishing, release, or cross-environment changes.
+- **Finish with evidence, not an offer to do authorized work later.** If blocked,
+  state what remains, what was checked, and the specific decision or access needed.
+- **Verify end-to-end within the authorized scope.** For a requested rollout,
+  drive the change into the real target (the in-pod agent builds/deploys it), then
   reproduce the original flow against the running artifact and watch it succeed —
   never stop at "unit tests pass" or "it builds". State plainly anything you could
   not verify and why.
 - **On completion, present the assumptions you took.** End with a concise list of
   every recommended assumption you made in place of asking, so the operator can
   course-correct. This list is required, not optional.
-- The one exception to acting uninterrupted: an **irreversible or cross-env action**
-  (deploy, delete, rebuild+restart, anything that mutates shared/remote state) still
-  gets a clear heads-up before you run it — a notification issued as you proceed,
-  never a gate you stop on.
+- Make irreversible, remote, and cross-environment actions explicit beforehand.
+  A heads-up does not replace approval when the action is outside the authorized
+  scope. General engineering and direct in-pod interaction rules remain in the
+  target repository's AGENTS.md; orchestration is not required for those users.
 `
 
 // ensureOrchestratorWorkspace makes sure the shared orchestrators root exists and

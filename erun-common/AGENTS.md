@@ -1,110 +1,188 @@
 # AGENTS.md
 
-Module-specific guidance for `erun-common`. Follow the repository root `AGENTS.md` first, then apply this file.
-
-`erun-common` holds the shared, transport-agnostic core types and logic for the whole solution, and it is the **canonical home for the shared Go conventions** used across the Go modules (`erun-cli`, `erun-common`, `erun-mcp`). `erun-cli/AGENTS.md` and `erun-mcp/AGENTS.md` inherit everything in this file and add only their transport-specific rules.
+Shared Go engineering guidance. Follow root `AGENTS.md`; CLI and MCP also read
+this file for the conventions below.
 
 ## Module Role And Boundaries
 
-- Keep `erun-common` small and focused on reusable core types and logic, not module-specific orchestration.
-- Move code into `erun-common` only when it is genuinely shared across modules and remains transport-agnostic.
-- Do not move code into `erun-common` just because it is reused once; prefer a specific shared package only when a stable cross-module abstraction exists.
-- Keep `erun-common` usable as a standalone library for third parties. Shared code placed there must be transport-agnostic and should not depend on Cobra, the MCP SDK, or module-specific orchestration.
-- When sharing operation contracts across modules, prefer transport-neutral names such as plan, request, result, or input/output. Do not put MCP-only wrapper types in `erun-common` unless they are intentionally generic library contracts.
-- Prefer reusing a shared struct over creating a transport-local duplicate with the same shape. When one shared struct is the canonical contract for both CLI and MCP, transport-specific annotations such as `json` tags are acceptable in `erun-common` to avoid structure duplication.
+- Keep this a standalone, transport-neutral library. Extract a stable shared
+  responsibility, not a transport wrapper or a speculative abstraction.
+- Reuse canonical contracts across callers, with neutral plan/params/result
+  names. JSON tags are acceptable; Cobra and MCP SDK dependencies are not.
+- Root "Command primitives vs orchestration" owns primitive policy. Shared
+  resolution, execution, preview plans, and result assembly belong here;
+  prompts, schemas, terminal formatting, and server wiring belong to transports.
 
 ## Preferred Direction
 
-- Prioritize maintainability and clarity over performance optimizations by default.
-- Prefer established repository patterns over introducing new command, config, testing, or documentation styles. Extend the existing shape first and only add a new pattern when the current one is clearly inadequate.
-- Organize shared command logic by command name when practical. If `build`, `open`, `init`, or `deploy` is shared, prefer files and types that mirror that command shape across `erun-common`, `erun-cli/cmd`, and `erun-mcp`.
-- Keep `build`/`push`/`deploy`/`open` as pure primitives in the shared layer: their resolution and execution must not branch on environment type or env name. `build` mints the version (a snapshot unless `--release`/override); `push`/`deploy` take the version as explicit input and never synthesize one; chart publishing rides with `push`. Env-type decisions are the caller's policy — keep them out of `erun-common`. See root `AGENTS.md` § "Command primitives vs orchestration".
-- Add new code directly to the file or module that owns the behavior. Do not use a large file, facade, or transport entrypoint as a temporary staging area.
-- Keep files organized around cohesive responsibilities: contracts, planning, execution, discovery, formatting, persistence, and transport adaptation should not be mixed just because they belong to the same command.
-- When a command has multiple responsibilities, split by stable behavior boundaries rather than by incidental implementation details.
-- Keep public entrypoints thin. They should adapt inputs, call focused logic, and render or return results instead of accumulating domain behavior.
-- Treat large source files as a signal to clarify ownership, not as a goal to reduce line counts mechanically.
-- Move related code together only when it forms a stable responsibility with a clear name and a clear caller. Do not create temporary holding files or vague utility buckets.
-- Preserve public behavior during organization work. Keep output text, defaults, flags, JSON shapes, errors, ordering, and side effects unchanged unless the user explicitly asks for a behavior change.
-- Prefer moving complete contracts, workflow steps, or pure helpers over moving isolated lines. A moved unit should be understandable without reading the old large file first.
-- Keep boundary files as facades only when they are real composition or transport boundaries. A facade should wire dependencies, enforce the public contract, and delegate to focused owners.
-- Put behavior beside the state it owns. If a workflow owns busy flags, request state, retries, timers, or persistence, keep the state transitions in that workflow rather than scattering them across callers.
-- Separate composition from operations. Files that construct applications, commands, transports, or runtimes should not also own read models, config mutation, process/session lifecycle, or domain workflows.
-- Keep transport contracts separate from workflow execution. JSON, CLI, or MCP-facing contract types may live together, but should not be mixed with long-running operations, process management, or domain conversion logic.
-- Keep read-model assembly separate from state mutation. Listing, status aggregation, version suggestions, and display conversion should not be mixed with save/delete/start/stop workflows.
-- Keep helper modules behavior-specific and dependency-light. Prefer pure helpers for normalization, formatting, classification, selection, and ordering.
-- After moving code, remove obsolete wrappers, stale comments, unused helpers, and test-only production shims.
-- Keep CLI and MCP layers thin. Flags, prompts, terminal rendering, MCP schemas, and transport setup belong in the transport modules; shared planning and execution logic belongs in `erun-common`.
-- Do not make one transport invoke the other for shared behavior. If CLI and MCP need the same operation logic, extract it into `erun-common` so third parties can use it directly as a library.
-- Keep trace and preview policy shared, but keep rendering transport-specific. `erun-common` may own plans, command specs, and feedback rules; CLI owns terminal trace formatting and MCP owns structured tool output.
-- When the same status or resolved-plan data must be shown in both CLI and MCP, extract the transport-neutral result assembly into `erun-common`. Let CLI format it for humans and MCP return it as structured output.
-- Prefer immutable value-style inputs and resolved plans over mutating shared state in place.
-- Prefer explicit runtime structs over package globals.
-- Keep mutable state local to one CLI execution or one MCP tool invocation.
-- Default to local execution and local integrations. Any remote or hosted transport should be additive, not the baseline behavior.
-- Prefer dependency injection in tests instead of replacing globals.
-- Prefer pure functions with no side effects for core logic.
-- Keep config and domain types simple and easy to copy safely.
-- Keep business logic reusable so the CLI and MCP layers can share it.
-- Design MCP-facing handlers as non-interactive operations with explicit inputs and structured outputs.
-- Keep tenant DevOps runtime scaffolding shared. When `init` creates project-local runtime assets, prefer generating the tenant-specific `<tenant>-devops` module from shared templates in `erun-common` so CLI and MCP flows stay aligned.
-- Assume tenant-specific DevOps modules use the shared `erun` runtime image as their base. Prefer thin tenant wrappers that extend the canonical runtime image over duplicating Dockerfiles, entrypoints, prompt scripts, or tool installation logic per tenant module.
-- Keep generated runtime asset identity explicit. Prefer rendering stable, intentional names into generated assets over deriving runtime identity indirectly from release metadata when the generated module already knows what it is.
-- Treat runtime startup code and deployment templates as one contract. If runtime initialization depends on specific context values, pass them explicitly through deployment inputs instead of relying on ambient process state or cwd detection inside the container.
-- Keep transport entrypoints responsible for wiring required runtime initialization values into shared deployment plans. Deployment templates should declare required startup inputs, and shared execution should pass them concretely so the same contract holds across CLI and MCP flows.
-- **Never put a process name erun ships into a path that lands in another process's command line.** Session sockets lived at `/tmp/erun-app/<...>.dtach`, so the `dtach` command line holding an operator's terminal contained `erun-app` — and `pkill -f erun-app`, the natural way to free the desktop binary before a rebuild, killed those terminals and their agent sessions. `eruncommon.DesktopAppName` is the name to keep out of such paths; `TestSessionSocketPathCannotCollideWithTheDesktopBinary` pins the property rather than the literal path, because the literal is what drifts.
-- **When a tool erun wraps only reports on exit, wrap its streaming mode and normalize the events — do not expose the vendor's shape.** A detached `claude -p` job sat at zero captured bytes for its whole life, so every orchestrator hand-rolled a scraper over the tool's private transcript. `erun-common/job_agent.go` is the pattern: erun builds the streaming invocation, folds the events into one tool-agnostic view (`AgentJobProgress`), and only the per-tool parsers know a vendor's event names. A vendor reshaping its stream must change what erun parses, never what a caller reads.
-- **A lease that only reports presence cannot coordinate anything, and the scope that fixes it is the environment, not the resource.** The activity lease answers "is something here"; it was never able to answer "may I start", so a second gate batch and a set of probe jobs went into a pod already running one and turned a 7-minute green gate into a 17-minute one plus two reds on tests that pass standalone. `job_exclusive.go` adds the missing claim, and two of its choices are the load-bearing ones: the scope is `EnvironmentActivityLeaseScopeEnvironment`, not the pre-existing `"worktree"` default, because what a gate contends for is the pod's CPU and memory and no worktree boundary divides those; and the claim refuses **ordinary** job starts as well as other exclusive ones, because a gate needs protecting less from another gate than from everything else scheduled beside it. Keep both properties if this is ever generalised — a per-resource, exclusive-vs-exclusive-only lock would have permitted every run that produced the measurement above. The lineage exemption (`environmentJobIsSelfOrDescendantOf`, walking `StartedByJobID`) is equally load-bearing in the other direction: without it a gate detached from inside an agent job is refused by its own ancestor's claim, and a safeguard that blocks its own beneficiary gets removed rather than fixed. A caller whose hold cannot be expressed as one job — a multi-process drive — declares its claim explicitly (`EnsureEnvironmentNotExclusivelyHeld`'s `underLeaseID`) rather than being refused by itself.
-- **A long-running supervisor has exactly one writer of its record.** When a periodic poll and the work's own milestones both persist state, route both through one mutex-guarded owner (`jobRecorder`) — two independent writers of the same file will eventually let a progress tick overwrite the outcome the wait just captured.
-- **A failure's reason has to survive in the durable record, not only in the stream that carried it.** A failed `docker build` returns nothing but `exit status 1`, which is sufficient only while a human is watching the output it also printed — and useless in the case that matters, a gate running detached in a merge queue whose `~/.erun/timing/build-*.json` is read long after the stream is gone. Every one of erun#1886's three failures recorded exactly `exit status 1`, so nothing about them was recoverable afterwards. `dockerBuildFailureReason` (`build_failure_reason.go`) therefore extracts the failing step's own last words out of BuildKit's output and `runDockerBuildOnce` wraps them in `DockerBuildStepError`, whose `Error()` **is** that reason (the raw output was already streamed) while `errors.Unwrap` keeps the process error reachable for exit-code matching. Apply the same rule to any other long, detachable operation: if the only place a reason exists is stdout, it does not exist.
-- **Diagnose from evidence, and stay silent without it.** `dockerBuildNetworkDiagnosis` (`build_network_mtu.go`) blames the pod's MTU only when a network-stall signature in the build output *coincides* with a mismatch it actually measured — the daemon's own bridge MTU read back from `docker network inspect`, against the MTU of the interface this process egresses through. Neither half is evidence alone: a CNI that clamps MSS masks the mismatch, and a stall has plenty of other causes. It is also gated to in-pod, the only place those two numbers share a network namespace and are therefore comparable at all. For the same reason it **warns and does not refuse**: the mismatch makes failure likely, not certain, and a fully-cached build never touches the network — refusing there would fail builds that would have succeeded, which for a required merge gate is the same disease as the bug being warned about. Refusal-grade certainty exists only once a step has actually stalled. Keep the marker set about the *transport* giving up (reset, receive failure, handshake timeout) and never about a server's answer: a 404 on a pinned download URL is a real defect in the build and must never be attributed to the network.
-- **Some subprocesses will never be promoted onto the switchable execution mode, and the reason is here so nobody re-derives it.** `execution_mode.go`'s mechanism exists to move a *replaceable* CLI call onto an equivalent library call while the rendered command stays the audit contract. An operation qualifies only when a library can reproduce the tool's own semantics closely enough that a later run of the real tool cannot tell the difference (see `kubectl-secret-apply`'s client-side-vs-server-side finding — reproducing the write is the bar, not matching the end state). These do not qualify, and adding a key for them is a defect rather than the next increment:
-  - **`git merge --squash` and its conflict handling** (`exec_gate_merge.go`). go-git's merge is not git's: it has no equivalent of the strategy resolution, rename detection, and conflict-marker output the merge queue's gate decides on. This is the one git path where being subtly different changes what gets merged into `main`.
-  - **`dtach`** (`open.go`'s reattach, `whip_environment.go`). No library exists. Replacing it means reimplementing detachable PTY sessions and the owner-id/exit-75/76 takeover contract — large risk, no payoff. Independently reconfirmed when Claude Code's own background-session lifecycle was evaluated as a replacement and rejected (see the bullet below).
-  - **`aws sso login` and `aws configure set`.** One drives a real browser SSO flow; the other writes the shared `~/.aws/config` ini file. Neither is an AWS API call, so there is nothing for an SDK path to be equivalent *to*.
-  - **The `helm upgrade` rollout** (`runHelmDeployWithPodWatch`). Not a helm call erun waits on — a supervised subprocess it *interrupts then kills* when the concurrent pod watcher sees an early container failure, so a bad image fails fast instead of waiting out the timeout. `action.Upgrade` offers no equivalent of that mid-flight interrupt, and helm is not vendored at all (only client-go and aws-sdk-go-v2 are), so this would also be the repo's largest new dependency. The issue that scoped this work ranked helm "cleanest of all"; in erun's actual use it is the opposite, and that ranking should not be acted on.
-  - **`docker build`.** The fingerprint/BuildKit cache behaviour has to be preserved exactly, and `dockerBuildFailureReason` parses BuildKit's own output for the failure reason the durable record depends on. A BuildKit-client port owns both of those outright.
-- **The pod's config belongs to the pod: a host-side push may seed it, never overwrite it.** `open`'s remote bootstrap wrote its own `EnvConfig` snapshot over `~/.config/erun/<tenant>/<env>/config.yaml`, and that snapshot has no source for the fields the chart injects — the marked registries, the runtime registry, the build-script policy. Opening a shell therefore reverted `disablebuildscript` and the in-pod build silently took the `build.sh` path the operator had turned off. `seedRemoteConfigLines` writes only what is missing; reconciling an existing config against the injected environment belongs to `erun doctor --sync-config`, which already knows which keys the environment owns.
-- **Claude Code's native background-session lifecycle (`--bg`, `agents`, `attach`, `stop`, `respawn`, `logs`, `rm`) was investigated (issue #1697) as a replacement for the dtach-based session machinery (`open.go`'s reattach, `whip.go`/`whip_environment.go`, `session_heartbeat.go`) and rejected for now — keep dtach. Verified against the actually-installed `claude` (2.1.222, not the 2.1.251 the finding was measured against): `--bg` runs fine with no controlling terminal, and the short id genuinely survives a full process/daemon restart — killing every process and wiping `/tmp` (ephemeral) left `attach`/`respawn`/`stop`/`rm` still working against the id, self-healing from `~/.claude/daemon/roster.json` and `~/.claude/sessions/*.json`, which live on the persistent `/home/erun` PVC. That is the one property the whole finding rests on, and it holds. But three things this version does not deliver block adoption: (1) `logs` does not behave as documented — headless (no tty, matching an agent's own non-interactive invocation) it hangs indefinitely rather than printing and exiting, and under a real tty it opens a live interactive attach instead of a passive dump, so it cannot back the read-only status/observability role the finding proposed for it; (2) there is no documented non-interactive input channel — feeding text into a live session only works by piping stdin into an interactive `attach` under an allocated pty (the same shape as `whip`'s `dtach -a` trick, not an improvement on it), and the one live test of it delivered garbled content, not a clean message; (3) Codex has no equivalent lifecycle at all (only `resume`/`fork` of interactive conversations), so binding orchestrator addressing to this API would fork the two agent paths onto different lifecycle mechanisms, which the dtach layer deliberately treats uniformly today. The concurrent-attach/takeover guarantee not tested here either, and adopting the id as identity would intersect the conversation resolution `orchestrator_live_conversation.go` (`erun-ui`) just landed (#1733) — attached → anchor — for real work. `/usr/local/bin/claude`'s wrapper (`erun-devops/docker/erun-devops/claude-wrapper.sh`) needed its own independent fix regardless of this decision: it injected `--continue` ahead of any of these subcommands from a reused cwd, so `claude logs <id>` silently became a resume of that cwd's most recent conversation — confirmed live against this very investigation's own session before the fix landed. Revisit this decision if a newer `claude` fixes `logs` and documents a real input channel; until then `AISessionLaunchCommand` (`ai_launch.go`) is still the one place a launch command is built, and it never adds `--fork-session`, which mints a new session id on every resume and would reintroduce the drift this file's dtach layer exists to avoid.
-- **A bounded automatic reinvocation for a one-shot agent job (issue #1881) turned out not to need the background-session lifecycle above at all — its three blockers are about a different, richer feature and do not carry over.** `--bg`/`attach`/`logs`/`rm` model a *live, addressable, long-lived* session; what a one-shot `job_supervisor.go` job needs on its own finish path is only "run non-interactively, capture the session id, later run non-interactively resumed by that id" — exactly the shape `job_agent.go`'s existing `AgentJobCommand` (`claude -p`, `codex exec`) already uses, with no pty and no live attach anywhere. Concretely: blocker (1) (`logs` hangs headless) does not apply — nothing here ever calls `logs`/`--bg`/`attach`. Blocker (2) (no non-interactive input channel) does not apply either — `-p`'s own prompt argument *is* the non-interactive input channel this needs; the problem `--bg` had was feeding text into an already-running session, which this design never does. Blocker (3) (no Codex equivalent) is the one that materially changed: `codex exec resume <thread-id> <prompt>` — distinct from the interactive-only `codex resume`/`codex fork` the #1697 finding checked — is a dedicated non-interactive resume subcommand that exists today, built on the same on-disk rollout/thread-id persistence `codex exec --json`'s own `thread.started` event already exposes.
-  - **Session continuation genuinely carries real conversation context, verified live for Claude, architecturally-only for Codex.** `claude -p --session-id <uuid> "remember X"` followed by a wholly separate process `claude -p --resume <uuid> "what was X?"` correctly answered from the first process's own context — proof this is real continuation, not a self-contained restatement of task facts, and proof a re-invocation does not need to carry the original task in its own prompt (the resumed session already has it) — it only needs to add the *new* fact the original turn could not have known (what its started work's outcome actually was). Codex's `exec resume` could not be verified the same way in the environment this was designed in: `codex login status` reports "Not logged in" and every real request 401s at `wss://api.openai.com`/`https://api.openai.com` before any content reaches a model, so there is no authenticated Codex to prove context round-trips through it the way Claude's did. The implementation (`erun-common/job_agent.go`'s `AgentJobResumeCommand`, `AgentJobProgress.SessionID` captured from Claude's per-event `session_id` and Codex's `thread.started` event's `thread_id`) is symmetric across both tools on the strength of the documented, dedicated non-interactive resume subcommand existing for both — but Codex's context-survival-on-resume is an unverified assumption, not a proven one, and should be confirmed against a real authenticated Codex before being trusted the way the Claude half now is.
-  - **The bound has to be a hard, observable cap on the job's own record, not a policy decision left to the resumed turn.** `job_supervisor.go`'s `decideEnvironmentJobReinvocation` triggers only for an agent job whose own finish check (`resolveEnvironmentJobOutcome`, #1784) found the job it started incomplete or failed — never a plain nonzero exit with no started work involved, which would be a materially different and riskier general auto-retry feature. `EnvironmentJob.ReinvocationCount`, `EnvironmentJobMaxReinvocations` (default 2, `ERUN_JOB_MAX_REINVOCATIONS` override) and `EnvironmentJobReinvocationBudget` (default 30m wall-clock, `ERUN_JOB_REINVOCATION_BUDGET` override) live on that one job's own record, so a chain of reinvocations can never spawn a new job, a new supervisor process, or a new lease, and can never lengthen its own bound by starting more work — whatever a reinvoked turn itself starts is evaluated against the same counter and the same deadline the next time the loop runs. `job status`/`exec_job_status` surface `reinvocationCount` (and `job status`'s "resumed N/M" line) precisely so the bound is visible to a caller, not just enforced in code — see root `AGENTS.md` § "One Agent Job Is One Run".
-- **A command that refuses off-environment with "go run this from inside the pod" is a dead end for anything that cannot open an interactive shell (#1910).** `erun terraform`'s refusal named `erun open` as the remedy, but `erun open` itself needs a TTY to hand back a shell — so a host-side orchestrator, a script, or a CI job had no path through either command. `resolveTerraformTargetEnvironment` (`terraform.go`) now returns a `NeedsDispatch` decision instead of erroring outright, and `dispatchTerraform` runs the equivalent `erun terraform <op> --tenant --environment` non-interactively inside the target's own pod via plain `kubectl exec` (`RunRemoteCommand`, no `-it`) — the same primitive `doctor`/`outputs`/`sshd` already use, not a new one. This is deliberately not gated behind an opt-in flag the way `build --deploy`/`open --deploy` are (root `AGENTS.md` § "Command primitives vs orchestration"): dispatch doesn't chain other primitives or decide policy, it only routes the one primitive's own execution to the one place its state is real — the same shape `job_environment.go`'s `startCommandJobInEnvironment` already uses for `job start`. What *does* stay gated is the mutation: `apply`/`destroy` dispatch through the exact same `TerraformConfirmFunc` the local path already calls before its own apply step, so a host invocation with no `--confirm-environment` and no TTY reads empty stdin and refuses before anything reaches the pod, while a real terminal gets the same interactive prompt it would have gotten inside the pod. Only once that confirmation has already succeeded does the dispatched script embed `--confirm-environment <env>` itself — the in-pod process has no stdin to prompt on, so it must never need to.
-- **A `kubectl exec` stream is not a transport you may hand an arbitrary amount of payload to, and the bound is per-stream volume rather than file size (#2108).** `outputs download` read a whole entry through one exec, which measured 6/6 successful at 12 MB and 1/4 at 14 MB on the reporting host, 0/6 at 20 MB, and 0/2 at 66 MB — the size every Go binary in this repo exceeds, so the one documented way to get a cross-built artifact onto an operator's machine could not deliver the artifacts it exists for. `outputs_download.go` reads the payload in bounded ranges instead (`tail -c +N | head -c L`), and three of its choices are the load-bearing ones. The constant bounds the *payload*, not the wire: base64 expands by a third, so 8 MiB of payload is ~11 MiB of stream, which is what has to stay inside the reliable band — raise the constant and you are spending that margin, not just going faster. The probe carries the payload's first range with its metadata because a remote exec's cost is almost entirely fixed: measured on a `remote-agent` pod, `kubectl exec -- /bin/true` is ~1.8s, `/bin/sh -c true` ~1.8s, `/bin/sh -lc true` ~9.0s, and 4/8/12 MiB of payload add only 0.6/1.4/2.2s on top — so the login shell every remote exec runs through costs ~7.5s of the ~9s, and an extra round trip for a small download would have doubled its latency for nothing. That measurement is also why `kubectlRemoteExecArgs` was **not** switched to `sh -c` here: it would cut a chunked 66 MB transfer from ~160s to well under a minute, but the profile is what puts erun's own tooling on the pod's PATH for every other remote script, and a download must not be the change that discovers which of them depended on it. Finally, the pod reports the payload's digest *before* the transfer starts and the reassembled bytes are checked against it, because a transfer split into pieces is exactly the kind that can silently assemble a plausible-looking file.
-- **`computeBuildFingerprint` and the real `docker build` derive their file sets by two independent mechanisms, and anything that makes them disagree lets a file enter the image without moving the fingerprint that decides whether it rebuilds (#1461) — the nested-`.gitignore`-vs-root-`.dockerignore` asymmetry (`dockerignore_build_context_test.go`) was one instance of this class, not the whole of it.** Auditing the rest of the class (`build_incremental.go`): the parts derived *from* the Dockerfile are safe — `dockerfileCopySources` re-parses every `COPY` instruction on each build, so adding or removing one is caught immediately, and the Dockerfile's own bytes are always hashed as one of its sources, so any text edit (including a base image tag bump) changes the fingerprint. Three structural blind spots exist alongside that, none exercised today but each silent and permanent the moment they are: an `ADD` instruction's local source is never parsed (`parseDockerfileCopyInstructions` matches only `COPY`); a glob in a `COPY` source resolves via `os.Lstat` on the literal string, which reports not-found and is silently skipped while the real build expands and copies the matches; and `COPY --from=<ref>` is treated unconditionally as a build-stage reference and dropped from the fingerprint (`filterDockerfileCopyArgs`), so a `--from` that actually named an external image would be invisible to it. `TestDockerfilesNeverUseAddForLocalContent`, `TestDockerfileCopySourcesContainNoGlobs`, and `TestDockerfileCopyFromReferencesOnlyLocalStages` (`dockerfile_copy_contract_test.go`) lock today's zero-usage of all three so introducing one is a reviewed decision, not a silent regression. `.git/info/exclude` and the global `core.excludesFile` are moot — `loadContextIgnoreSet`/`loadNestedGitignores` never read them, only `.dockerignore` and `.gitignore` files by explicit path, so neither can cause the fingerprint to exclude something the real build ships. A base image *tag* moving is the one sub-case a static test cannot close: the fingerprint hashes the tag string, not the digest it resolves to, so a mutable upstream tag (a registry republishing e.g. `alpine:3.20` under the same tag) drifts underneath an already-cached fingerprint with nothing to catch it — and because a fingerprint-matched build promotes (retags/pushes a previously-built image) without ever invoking `docker build` again, that drift ships with no rebuild at all. Resolving every base image's live digest on every build would close it fully, but costs a network round-trip this repo's caching model exists to avoid paying (root `AGENTS.md`'s ~9-minute figure) — so the accepted mitigation stays pinned-tag discipline (root `AGENTS.md` § "Release Rules"), and `TestDockerfileBaseImagesUseExplicitPinnedTags` is what keeps that discipline from regressing silently rather than a claim that it closes the underlying risk.
+- Organize around cohesive responsibilities: contracts, planning, execution,
+  discovery, formatting, and persistence. Mirror command names across transports
+  when useful; do not use entrypoints or vague utility files as staging areas.
+- Keep real composition boundaries thin. Separate read-model assembly from
+  mutation, and contract types from long-running operations. Keep workflow state
+  and its transitions together.
+- Prefer pure functions, immutable plans, explicit runtime structs, and injected
+  dependencies over globals. Mutable state belongs to one invocation.
+- Local execution remains the default; remote/hosted transports are additive.
+- Generate tenant runtime wrappers from shared templates. Keep them thin over the
+  canonical runtime image; render stable identity explicitly and thread startup
+  values through deployment plans rather than infer them from cwd or ambient state.
+- Follow root "Refactoring Rules" for behavior preservation, ownership moves,
+  visibility, and removal of obsolete wrappers.
+
+### Process, job, and deployment contracts
+
+- Paths passed to other processes must not contain the desktop executable's name:
+  process-name matching must not kill unrelated sessions. Keep
+  `TestSessionSocketPathCannotCollideWithTheDesktopBinary`.
+- Wrap agent streaming modes and normalize vendor events into `AgentJobProgress`
+  (`job_agent.go`). Callers must not scrape vendor transcripts or depend on vendor
+  event names. Persist useful failure reasons, not only exit codes; retain the
+  underlying error for exit-code matching (`build_failure_reason.go`).
+- `job_exclusive.go` protects gates with an environment-wide claim, refusing
+  ordinary jobs as well as exclusive ones. Worktree scope alone cannot isolate
+  CPU/memory. Preserve self/descendant exemptions through `StartedByJobID` and
+  explicit `underLeaseID` for a multi-process owner; neither may bypass another
+  owner's claim. A presence lease is not an exclusive claim.
+- A supervisor has one mutex-guarded record writer (`jobRecorder`), including
+  progress ticks and terminal outcomes. Never let a late progress write replace
+  the final result. Lease renewal, expiry, supervisor reconciliation, and the
+  maximum lifetime must remain bounded.
+- Agent reinvocation is bounded recovery, not a general retry loop:
+  `decideEnvironmentJobReinvocation` accepts only an agent with a captured session
+  ID whose started work was incomplete or failed. Reuse the same job, supervisor,
+  lease, counter, and deadline; never reset bounds when the resumed turn starts
+  more work. Defaults are two resumptions and 30 minutes
+  (`EnvironmentJobMaxReinvocations` / `EnvironmentJobReinvocationBudget`).
+  Surface the count in status. A plain nonzero exit without started work is not
+  eligible. Claude continuation was verified live; Codex context survival remains
+  a disclosed live-verification gap, not a reason to remove its resume support.
+- Keep dtach for interactive sessions. The evaluated native background lifecycle
+  lacked reliable passive logs, non-interactive input, and cross-tool takeover
+  parity; revisit only when those guarantees are verified. This decision does not
+  prohibit non-interactive job resume. Build launch commands in
+  `AISessionLaunchCommand`; do not add `--fork-session` on reattach.
+- Host bootstrap may seed missing pod config, never overwrite existing values.
+  Environment-owned reconciliation belongs to `doctor --sync-config`.
+- Route an off-environment operation to where its state lives without requiring
+  an interactive shell. Remote dispatch is routing, not convenience orchestration.
+  Confirm mutations before dispatch, then pass the resolved confirmation to the
+  non-interactive child (`terraform.go`).
+- Chunk downloads across exec streams, accounting for base64 expansion in the
+  payload bound; carry the first range with metadata and verify the reassembled
+  digest against the pre-transfer digest (`outputs_download.go`). Do not remove
+  login-shell initialization globally to optimize one transfer path.
+- Network diagnosis needs both a matching transport-stall signature and a measured
+  mismatch in the same namespace (`build_network_mtu.go`). A server response such
+  as 404 is not network evidence. Warn on risk; refuse only on established failure.
+
+### Execution-mode exceptions
+
+Library replacement must preserve the real tool's semantics and audit trace,
+not merely a similar final state. Keep these subprocesses until equivalence is
+demonstrated:
+
+- `git merge --squash`: strategy, rename, and conflict-marker semantics.
+- `dtach`: detachable PTY and owner/takeover outcomes.
+- `aws sso login` / `aws configure set`: browser flow and shared config writes,
+  not ordinary SDK requests.
+- `helm upgrade`: watcher-driven interruption and kill on early container failure.
+- `docker build`: fingerprint/cache semantics and BuildKit failure output.
+
+### Build fingerprints
+
+- The fingerprint's input set must match the real Docker context. Changes to
+  ignore handling and Dockerfile parsing require regression coverage for both.
+- Local `ADD`, globbed `COPY` sources, and external-image `COPY --from` are
+  unsupported fingerprint inputs. Keep the prohibitions in
+  `dockerfile_copy_contract_test.go` until support is implemented, not merely
+  until a new Dockerfile needs them.
+- Explicit pinned base tags are required. They mitigate, but do not eliminate,
+  mutable-tag drift: the fingerprint hashes the tag, not its live registry digest.
+  Do not claim the static tests prove digest stability.
+
+## Gate execution and verdicts
+
+- Long routine validation uses `scripts/agent-gate.sh`: direct execution outside
+  agent pods, tracked detachment plus bounded await inside them. Keep inner
+  check-gate prerequisites on the underlying targets so they do not detach twice.
+  Extend by runtime needs, not target name. Release callers supervise their own
+  jobs; release is not automatically wrapped. Run `scripts/agent-gate_test.sh`
+  when changing the wrapper.
+- `scripts/parallel-gate.sh` owns quota/memory-aware fan-out sizing. Independent
+  fan-outs must budget aggregate memory, including race-enabled test overhead,
+  not each reserve the whole ceiling. Run its script tests when changing it.
+- Batch gate-merge takes ordered sources, fetches once, and composes them on one
+  prospective tree. On a squash conflict, restore the batch's last committed
+  state, record skipped files/reason, and continue. Refuse an all-empty batch.
+  Do not loop single-source invocations that reset away earlier work.
+- Keep one gate_run per batch and preserve ordered landed/skipped composition
+  in its log artifact. Mapping one batch build to multiple review acceptances
+  remains an API design question, not an execution shortcut.
+- `gate_run_failure_classifier.go` owns infrastructure signatures. Start/report
+  inspect failure text and bounded local log content, visibly reclassifying known
+  infrastructure failures as INCONCLUSIVE. A failed review GATE build with the
+  same signature must be refused instead of changing the review to FAILED;
+  its boolean success field cannot represent a non-verdict. Test both records.
+- Release cadence/coalescing is an unwired design in
+  `erun-backend/erun-backend-api/AGENTS.md` § "Release cadence policy".
+  Do not treat drift reporting as an automated release drainer.
+- Preserve the gate wrapper's distinction between a clean pass, an exit-zero
+  process that left unsupervised work (reported with an explicit warning and job
+  ID), and a genuine failure. The orphan warning is not proof of completed work;
+  callers must inspect the job's own record. A wrapper's bounded-wait timeout is
+  also not the underlying gate verdict (`scripts/agent-gate.sh`).
+
+## Release recovery
+
+- Preserve disk-headroom preflight before expensive work: reclaimable build-cache
+  pruning and refusal on a measured shortage, but no invented refusal when the
+  daemon's filesystem cannot be observed. The default/tuning live in
+  `release_disk_headroom.go`.
+- Report already-published target artifacts before rebuilding with a single probe;
+  reporting must not replace fingerprint-based promotion or imply a new resume engine.
+- Refuse an existing release tag at a different HEAD. If it is an unpushed,
+  unincorporated interrupted-run tag, name that diagnosis and the explicit remedy;
+  never automatically delete it. Preserve retryable version state.
+- Recheck the remote branch before building and reconcile a later move through
+  bounded final-push recovery. Human scheduling cannot replace those checks.
+- Distinguish pod replacement from a missing supervisor in the same pod using
+  the recorded pod identity (`EnvironmentJob.UnknownReasonKind`), not exit-code
+  guesses. Preserve that cause through status and recovery reporting.
 
 ## Dependency Wiring
 
-- Apply KISS to dependency wiring. Do not introduce abstractions or injection layers unless they solve an immediate problem in the current code.
-- Do not pass a dependency into a function unless that function actually uses it in its own body. Passing it through to another function does not count as usage.
-- Prefer wiring concrete dependencies at the boundary and then passing only the specific values needed by the next function.
-- If a function only needs already-built subcommands, handlers, or services, pass those directly instead of the larger set of dependencies used to construct them.
-- Prefer direct use of an existing concrete function such as `common.FindProjectRoot` when it is only needed once. Do not create a local alias just to forward it.
-- If a dependency value is used multiple times in the same function, binding it to a local is acceptable when that improves readability.
-- Keep default wiring local to the real composition boundary, usually `Execute()` or the transport entrypoint, rather than spreading default-resolution helpers throughout production code.
-- Test-only convenience wiring helpers are acceptable, but keep them in `_test.go` files and name them clearly as test helpers so they do not read like production APIs.
+- Wire concrete defaults at the real composition boundary. Pass only values a
+  function uses, not a dependency bundle it merely forwards.
+- Pass already-built handlers/services/subcommands directly. Do not add a local
+  alias for one concrete call; a local binding is useful only when reused.
+- Keep test-only wiring in clearly named `_test.go` helpers.
 
 ## Visibility
 
-- Default functions, types, and variables to package-private. Export only when they are actually used outside the package today.
-- Do not keep functions exported only for tests in the same package. Lower them and let same-package tests call them directly.
-- When refactoring removes the last external use of an exported symbol, lower it unless there is a clear current external caller that still needs it.
+- Default to package-private; export only for a current external caller, not
+  same-package tests. Lower a symbol when its last external use disappears.
 
 ## Naming
 
-- Do not use a `Service` suffix in local variable names when a more direct noun exists. Prefer names such as `deployer`, `builder`, `opener`, or `bootstrapper` over names such as `deployService`.
-- Use `Service` in type names only when the abstraction is genuinely a stable service concept in the domain. Do not add the suffix by default.
-- Do not call small input structs `Request` when they are just direct function inputs with a small number of fields.
-- For function input structs with fewer than 5 top-level fields, prefer a `Params` suffix over `Request`.
-- Reserve `Request` and `Response` naming for transport-facing contracts or shapes that are meaningfully request/response objects rather than simple local parameters.
+- Prefer direct nouns over a default `Service` suffix; reserve that type suffix
+  for a real domain service.
+- Use `Params` for local input structs with fewer than five top-level fields.
+  Reserve `Request`/`Response` for transport or genuine request/response contracts.
 
 ## Go Safety Notes
 
-- Go is memory-safe by default, but practical failures still come from shared mutable state, data races, resource leaks, and `unsafe`.
-- Copying is a good default only for plain value data. Slices, maps, pointers, channels, and structs containing them still share underlying state unless explicitly cloned.
-- Favor clear ownership over incidental sharing. If callers must not mutate returned data, return a copy.
+- Value copies of slices, maps, pointers, channels, or containing structs still
+  share state. Clone when callers must not mutate the owner's data.
+- Keep resource lifetimes and concurrency ownership explicit. Root boundary-data
+  and applied-state rules also apply to shared plans and persisted results.
 
 ## Validation
 
-- Run `go test -race ./...` from this module after Go changes. The Makefile's `test-erun-common` target runs this same command (`-count=1 -race`) as a `check-gate` prerequisite, so this module's own unit tests are no longer only a manual, by-hand check — `-race` is load-bearing here because this module owns the activity-lease, job-supervisor, and workspace-sync concurrent state, and it caught a real, previously-undetected data race the first time it ran (see the target's own comment in the root `Makefile`).
-- CLI/MCP-reachable `erun-common` behavior is still gated end-to-end by the integration suite, not by a unit test that duplicates it (root `AGENTS.md` § "Integration Test Gate"; `erun-integration/AGENTS.md`). Add or update integration scenarios for new behavior reachable from the compiled binary; a unit test that overlaps an integration scenario should be deleted, not kept. This module's own unit tests remain the right place for behavior no CLI or MCP path can reach at all — see `erun-integration/AGENTS.md`'s "Known integration coverage gaps" for what falls in that category (desktop/MCP-only APIs, live-network code with no seam, and the like) — and those are exactly what `test-erun-common` now runs on every `make check`.
+- After Go changes run `go test -count=1 -race ./...`. The root
+  `test-erun-common` target runs it in `check-gate`; race coverage is essential
+  for leases, job supervisors, and workspace sync.
+- Exercise binary-reachable behavior through integration scenarios; remove unit
+  tests duplicating those scenarios. Keep focused tests for otherwise unreachable
+  behavior and concurrency. See `erun-integration/AGENTS.md` § "Known integration
+  coverage gaps" for accepted limitations.
