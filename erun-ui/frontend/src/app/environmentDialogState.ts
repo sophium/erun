@@ -1,6 +1,8 @@
 import type { UISelection } from '@/types';
 
+import { environmentTypeIsHost } from './environmentType';
 import type { NormalizedEnvironmentDialogValues } from './model';
+import { runtimeResourceLimitMessage } from './runtimeResources';
 import type { EnvironmentDialogState } from './state';
 import {
   rememberPastContainerRegistry,
@@ -8,6 +10,21 @@ import {
   rememberPastTenant,
 } from './storage';
 import { normalizeDialogValue } from './versionSuggestions';
+
+// environmentDialogResourceLimitMessage is the runtime-capacity requirement as
+// this dialog asks it, exempting a host env. That exemption is the whole point
+// of the helper: a host env has no pod to size, and createHostEnvConfig records
+// no runtime resources at all, so a message here would refuse a Create that the
+// host form offers no field to satisfy — a dead end whose only exit is closing
+// the dialog. Both the submit gate's runtimeCapacityBlocker and
+// submitEnvironmentDialog call this, so what the Create button offers and what
+// submit accepts cannot disagree about it.
+export function environmentDialogResourceLimitMessage(dialog: EnvironmentDialogState): string {
+  if (environmentTypeIsHost(dialog.envType)) {
+    return '';
+  }
+  return runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus);
+}
 
 export function normalizedEnvironmentDialogValues(
   dialog: EnvironmentDialogState,

@@ -7,17 +7,14 @@ import {
   refreshKubernetesContexts,
 } from './dialogContextsThunks';
 import {
+  environmentDialogResourceLimitMessage,
   missingRequiredFieldReason,
   normalizedEnvironmentDialogValues,
   rememberEnvironmentDialogSelection,
 } from './environmentDialogState';
 import { readError } from './errors';
 import { showTerminalError } from './notificationThunks';
-import {
-  runtimePodConfigToKubernetes,
-  runtimeResourceLimitMessage,
-  unavailableRuntimeResourceStatus,
-} from './runtimeResources';
+import { runtimePodConfigToKubernetes, unavailableRuntimeResourceStatus } from './runtimeResources';
 import { startInitSelection } from './sessionThunks';
 import { patchEnvironmentDialog, setEnvironmentDialog } from './slices/environmentDialogSlice';
 import {
@@ -160,7 +157,12 @@ export const submitEnvironmentDialog =
       form.reportValidity();
       return;
     }
-    const resourceError = runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus);
+    // Asked through the same helper the submit gate uses, so a host env is
+    // exempt here exactly as it is there: the gate enables Create for a host env
+    // by skipping the cluster-shaped blockers, and a resource check that still
+    // fired here would refuse that Create with a message the host form renders no
+    // field to clear.
+    const resourceError = environmentDialogResourceLimitMessage(dialog);
     if (resourceError) {
       dispatch(patchEnvironmentDialog({ error: resourceError }));
       return;

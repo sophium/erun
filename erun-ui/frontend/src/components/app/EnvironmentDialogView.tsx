@@ -14,7 +14,10 @@ import {
 import { FolderPlus, LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
-import { missingRequiredFieldReason } from '@/app/environmentDialogState';
+import {
+  environmentDialogResourceLimitMessage,
+  missingRequiredFieldReason,
+} from '@/app/environmentDialogState';
 import {
   closeEnvironmentDialog,
   selectEnvironmentVersionSuggestion,
@@ -26,7 +29,6 @@ import { environmentTypeIsHost } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { showTerminalError } from '@/app/notificationThunks';
-import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { loadSavedPastEnvironments, loadSavedPastTenants } from '@/app/storage';
 import { useController } from '@/app/useController';
@@ -393,7 +395,7 @@ function runtimeCapacityBlocker(dialog: EnvironmentDialog): string | null {
     const fallback = dialog.resourceStatus?.message?.trim() ?? '';
     return fallback || 'Runtime capacity is unavailable.';
   }
-  const limitMessage = runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus);
+  const limitMessage = environmentDialogResourceLimitMessage(dialog);
   return limitMessage || null;
 }
 

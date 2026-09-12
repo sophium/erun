@@ -61,8 +61,9 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-disablebuildscript');
   }
 
-  // The "Platform account" toggle binds the env's runtime SA to cluster-admin;
-  // env-type agnostic, so it renders for every environment type.
+  // The "Platform account" toggle binds the env's runtime SA to cluster-admin,
+  // so it renders for every pod-backed type. A host env has no runtime SA to
+  // bind, and its Runtime tab offers only the build-script opt-out below.
   platformAccountCheckbox(): Locator {
     return this.locator().locator('#environment-config-platformaccount');
   }

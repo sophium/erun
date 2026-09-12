@@ -39,23 +39,39 @@ type ManageDialog = AppState['manageDialog'];
 export function RuntimeTab(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
-  // Every control this tab renders is a pod or cluster concept, and a host env
-  // has no pod and no cluster contact of any kind — EnvConfig.HasPod is false
+  // The runtime controls this tab renders are pod or cluster concepts, and a host
+  // env has no pod and no cluster contact of any kind — EnvConfig.HasPod is false
   // for host alone. There is no runtime image to install, no chart to resolve,
   // no pod to size or idle-stop, and neither Pin nor Deploy could succeed:
   // erun pin, erun deploy and erun terraform each refuse a host env outright,
-  // and the deploy planner panics rather than build a plan for one. So the tab
-  // states the fact instead of offering actions that can only fail, the same
-  // treatment the Ports tab's Public access section gives this type. Keep the
-  // heading identical to that one: it is the shared wording for "this control
-  // has no referent for this environment type".
+  // and the deploy planner panics rather than build a plan for one. So those
+  // controls are replaced by a statement of the fact, the same treatment the
+  // Ports tab's Public access section gives this type. Keep the heading
+  // identical to that one: it is the shared wording for "this control has no
+  // referent for this environment type".
+  //
+  // The build-script opt-out is the one control here that is NOT a pod or
+  // cluster concept, so it is rendered for a host env too: erun build resolves
+  // its Docker/release contexts from any env whose builds run in that env's own
+  // directory (ResolveDockerBuildEnvConfig matches on project root, with no
+  // environment-type guard), and this dialog is the only desktop surface that
+  // sets it. Returning before it would leave the setting reachable only by
+  // hand-editing config.yaml.
   if (environmentTypeIsHost(dialog.config.type)) {
     return (
-      <EmptyState
-        icon={<Ban aria-hidden="true" />}
-        heading="Not available for this environment type"
-        body="A host environment is a directory on this machine — it has no pod and no cluster, so there is no runtime here to size, pin, or deploy. Build and release run in that directory directly."
-      />
+      <>
+        <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+          <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+            Build
+          </div>
+          <BuildScriptField dialog={dialog} />
+        </div>
+        <EmptyState
+          icon={<Ban aria-hidden="true" />}
+          heading="Not available for this environment type"
+          body="A host environment is a directory on this machine — it has no pod and no cluster, so there is no runtime here to size, pin, or deploy. Build and release run in that directory directly."
+        />
+      </>
     );
   }
   // Dialog-owned (not the shared tenants slice): this dialog resolves versions for
@@ -231,16 +247,7 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           }}
         />
       )}
-      <CheckboxField
-        id="environment-config-disablebuildscript"
-        label="Ignore project build.sh"
-        helper="erun build resolves Docker/release contexts directly instead of running a project build.sh in this environment."
-        checked={config.disableBuildScript}
-        disabled={dialog.busy || dialog.configLoading}
-        onChange={(disableBuildScript) => {
-          dispatch(updateManageConfig({ disableBuildScript }));
-        }}
-      />
+      <BuildScriptField dialog={dialog} />
       <PlatformAccountField dialog={dialog} />
       <MountSourceFields dialog={dialog} />
     </div>
@@ -253,6 +260,27 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
 // agnostic — a hosted runtime platform env or a cluster-provisioning agent env
 // can both be a platform account — so it renders for every type. Extracted to
 // keep IdleStopFields within its size/complexity budget.
+// BuildScriptField is the build.sh opt-out on its own, so the host branch of
+// RuntimeTab can offer it while the pod and cluster controls are replaced by
+// their unavailable notice: `erun build` honours this setting for any env whose
+// builds run in that env's own directory, a host env included. It is a separate
+// component rather than an inline field so both call sites cannot drift.
+function BuildScriptField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <CheckboxField
+      id="environment-config-disablebuildscript"
+      label="Ignore project build.sh"
+      helper="erun build resolves Docker/release contexts directly instead of running a project build.sh in this environment."
+      checked={dialog.config.disableBuildScript}
+      disabled={dialog.busy || dialog.configLoading}
+      onChange={(disableBuildScript) => {
+        dispatch(updateManageConfig({ disableBuildScript }));
+      }}
+    />
+  );
+}
+
 function PlatformAccountField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const config = dialog.config;
