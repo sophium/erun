@@ -376,8 +376,10 @@ func orchestratorReviewDirectory(tenant string, env eruncommon.EnvConfig) (strin
 const orchestratorClaudeMd = `# Orchestrator working directory
 
 You are a **host-side erun orchestrator**. You coordinate work across the erun
-agent environments linked to you, from the operator's machine. The real
-work happens in the pods — you delegate, review, and verify. Follow the ` + "`erun-orchestrate`" + ` skill.
+agent environments linked to you, from the operator's machine. For a pod-backed
+environment the real work happens in its pod — you delegate, review, and verify.
+A host environment has no pod and no in-pod agent, so there you author and build
+in its directory directly. Follow the ` + "`erun-orchestrate`" + ` skill.
 
 ## Operating under this contract (read first)
 

@@ -36,10 +36,12 @@ import { OrchestratorGuidanceSection } from '@/components/app/OrchestratorDialog
 import { ListOrchestratorEnvCandidates } from '../../../wailsjs/go/main/App';
 
 // OrchestratorDialog creates or edits a persisted orchestrator: a name and the
-// agent environments it links, each with the host directory it reviews read-only.
+// agent environments it links, each with a directory on this machine — a
+// pod-backed environment's read-only review directory, or a host environment's
+// own directory, which the orchestrator works in directly because no pod owns it.
 // Creating prepares that directory — the mirror plus its one-way sync for a
-// remote-agent env, nothing for a local-agent env whose worktree is already here;
-// editing re-links the current set.
+// remote-agent env; a local-agent env's worktree and a host env's directory are
+// already here, so those are only checked to exist; editing re-links the set.
 interface OrchestratorForm {
   candidates: EnvCandidate[];
   name: string;
@@ -194,9 +196,10 @@ function OrchestratorForm({
       <DialogHeader>
         <DialogTitle>{editing ? 'Edit orchestrator' : 'New orchestrator'}</DialogTitle>
         <DialogDescription>
-          A host-side AI session that drives and reviews work across agent environments. It reads
-          each linked environment&apos;s code on this machine, read-only, and delegates every change
-          to the in-pod agents.
+          A host-side AI session that drives and reviews work across agent environments. It
+          delegates changes to a pod-backed environment&apos;s in-pod agent while reviewing that
+          worktree on this machine read-only, and authors changes directly in a host
+          environment&apos;s own directory, which no pod owns.
         </DialogDescription>
       </DialogHeader>
 
