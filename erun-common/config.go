@@ -45,9 +45,22 @@ type ERunConfig struct {
 // it reviews a pod-backed environment in a host directory read-only, and works a
 // host environment in its own directory directly, since no pod owns it.
 type OrchestratorConfig struct {
-	ID           string                  `yaml:"id" json:"id"`
-	Name         string                  `yaml:"name" json:"name"`
-	Environments []OrchestratorEnvConfig `yaml:"environments,omitempty" json:"environments,omitempty"`
+	ID           string                        `yaml:"id" json:"id"`
+	Name         string                        `yaml:"name" json:"name"`
+	Environments []OrchestratorEnvConfig       `yaml:"environments,omitempty" json:"environments,omitempty"`
+	Directories  []OrchestratorDirectoryConfig `yaml:"directories,omitempty" json:"directories,omitempty"`
+}
+
+// OrchestratorDirectoryConfig is one directory the orchestrator operates in,
+// named by path alone. It is deliberately not an environment: it carries no
+// tenant, no environment name, no runtime version or image, and no role, because
+// none of those describe a directory with no pod, no cluster, and no lifecycle
+// behind it. It exists so an orchestrator can be pointed at a directory on this
+// machine without registering an environment for it first; the orchestrator
+// authors and builds there directly, the same way it does in a host
+// environment's own directory.
+type OrchestratorDirectoryConfig struct {
+	Directory string `yaml:"directory" json:"directory"`
 }
 
 // OrchestratorEnvConfig links one agent environment to the orchestrator's window

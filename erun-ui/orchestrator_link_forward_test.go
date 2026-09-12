@@ -96,7 +96,7 @@ func TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen(t *testing.T) {
 
 	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv(t *testing.T) {
 
 	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv(t *testing.T) {
 	if _, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "dev"},
 		{Tenant: "frs", Environment: "laptop"},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 
 	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
@@ -194,7 +194,7 @@ func TestLinkingAnEnvironmentSurfacesAForwardOpenFailure(t *testing.T) {
 
 	if _, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "dev"},
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 

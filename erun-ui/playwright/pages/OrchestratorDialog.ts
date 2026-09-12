@@ -74,6 +74,30 @@ export class OrchestratorDialog {
     });
   }
 
+  // The orchestrator's own directories: paths it works in that belong to no
+  // environment. "Add directory…" opens the native picker; each row carries its
+  // own remove button, labelled with the path it removes. Mode-aware like the
+  // footer controls, since a directory is read back in Edit mode.
+  directoriesAddButton(
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode).getByRole('button', { name: 'Add directory…' });
+  }
+
+  directoryRow(
+    directory: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode).getByText(directory, { exact: true });
+  }
+
+  directoryRemoveButton(
+    directory: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode).getByRole('button', { name: `Remove ${directory}` });
+  }
+
   // The role SelectField's trigger, present only for a checked (linked) env --
   // id matches OrchestratorDialog.Environments.helpers.ts's envRoleFieldId.
   envRoleTrigger(tenant: string, environment: string): Locator {

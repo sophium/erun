@@ -15,7 +15,7 @@ func createTestOrchestrator(t *testing.T, app *App) string {
 	t.Helper()
 	info, err := app.CreateOrchestrator("laptop agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "laptop"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}

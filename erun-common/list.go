@@ -28,6 +28,10 @@ type ListOrchestratorResult struct {
 	ID           string                      `json:"id"`
 	Name         string                      `json:"name"`
 	Environments []ListOrchestratorEnvResult `json:"environments,omitempty"`
+	// Directories are the orchestrator's own: paths it works in that belong to
+	// no environment at all. Reported so an orchestrator pointed only at
+	// directories does not read as having no scope.
+	Directories []string `json:"directories,omitempty"`
 }
 
 // ListOrchestratorEnvResult is the read-model view of one
@@ -441,10 +445,17 @@ func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
 		for _, env := range orchestrator.Environments {
 			envs = append(envs, ListOrchestratorEnvResult(env))
 		}
+		directories := make([]string, 0, len(orchestrator.Directories))
+		for _, dir := range orchestrator.Directories {
+			if path := strings.TrimSpace(dir.Directory); path != "" {
+				directories = append(directories, path)
+			}
+		}
 		results = append(results, ListOrchestratorResult{
 			ID:           orchestrator.ID,
 			Name:         orchestrator.Name,
 			Environments: envs,
+			Directories:  directories,
 		})
 	}
 	return results, nil

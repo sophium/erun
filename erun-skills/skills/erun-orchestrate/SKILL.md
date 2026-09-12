@@ -35,6 +35,12 @@ missing authority or external blockers with the evidence and required action.
   keep orchestration tools and build outputs outside every pod-backed review
   directory — a host environment's own directory is where you build, not a
   surface to keep clean of your own work.
+- Your definition may also name **directories of your own** (`directories:` on your
+  `orchestrators:` entry): paths that belong to no environment at all — no tenant,
+  no pod, no version, no role. They are yours to author, build, and review in
+  directly, on the same terms as a host environment's directory, and nothing syncs,
+  mounts, or else owns them. There is no MCP edge for one either, so you reach it
+  with your own file and shell tools.
 - Treat host-machine and pod configuration as different state stores. Diagnose
   host identity/lifecycle on the host machine; pod calls answer only about pod state.
   Read-only mirrors cannot establish live runtime version: use the MCP version tool.

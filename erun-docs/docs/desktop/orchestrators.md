@@ -21,6 +21,8 @@ Each orchestrator runs under two layers of guidance, and the dialog opens either
 
 For the exact files behind these two layers and how they're injected into a session, see [Agent reference · Skills spec](/agent-reference/skills-spec#host-orchestrator-desktop).
 
+**Your own directories.** An orchestrator can also be pointed at directories that belong to no environment at all — a scratch checkout, a folder of notes, a second copy of a repo you build natively. They carry no tenant, no runtime version or image, and no role, because none of those describe a path with no pod behind it: nothing is registered for one, no deploy applies, and nothing else owns it, so the orchestrator authors and builds in it directly, exactly as it does in a host environment's own directory. **Add directory…** opens a folder picker, and each row carries its own remove control. A directory is a complete definition on its own: an orchestrator that names only directories and links no environment at all is valid, which is what makes this the way to point an orchestrator at a path without registering an environment for it first. Unlike the linked environments, changing them raises no restart notice — nothing a session resolved at launch is keyed on a directory, so the change is picked up the next time the orchestrator reads its own definition.
+
 ## The conversation an orchestrator comes back to {#orchestrator-conversations}
 
 An orchestrator keeps one long conversation, and starting it — after a quit, a reboot, a crash, or a rebuild-and-restart — resumes that conversation rather than beginning a new one. ERun follows the conversation the session itself reports being in, so a session that ends up in a conversation of its own is still the one you get back.
