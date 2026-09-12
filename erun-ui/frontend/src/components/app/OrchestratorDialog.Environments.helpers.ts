@@ -23,8 +23,10 @@ export interface EnvCandidate {
   // its path is derived from the env, not chosen here.
   mirrored: boolean;
   // requiredRole is the one role this candidate may be linked with, absent
-  // (the Go side omits it — omitempty) when any role, including undeclared,
-  // works. A runtime environment sets this to 'runtime': it has no worktree
+  // (the Go side omits it — omitempty) when no single role is required. Absent
+  // does not mean every role works: the picker still offers only the roles the
+  // environment's type allows, so a host candidate's absent requiredRole still
+  // excludes runtime. A runtime environment sets this to 'runtime': it has no worktree
   // to review and no in-pod agent to delegate to, so it carries no directory
   // (defaultDirectory is '' and mirrored is false) and the role picker
   // offers only that one choice instead of the mirror/worktree directory

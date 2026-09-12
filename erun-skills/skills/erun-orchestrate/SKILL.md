@@ -32,7 +32,9 @@ missing authority or external blockers with the evidence and required action.
   owns; a local-agent worktree is still that environment's, not yours.
 - Mirrors are read/delivery surfaces, not build directories. Sync deletes files
   absent in the pod. Read authoritative pod diffs and received artifacts there;
-  keep orchestration tools and build outputs outside every review directory.
+  keep orchestration tools and build outputs outside every pod-backed review
+  directory — a host environment's own directory is where you build, not a
+  surface to keep clean of your own work.
 - Treat host-machine and pod configuration as different state stores. Diagnose
   host identity/lifecycle on the host machine; pod calls answer only about pod state.
   Read-only mirrors cannot establish live runtime version: use the MCP version tool.

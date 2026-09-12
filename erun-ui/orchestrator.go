@@ -146,10 +146,12 @@ type orchestratorEnvInput struct {
 // RequiredRole names the one role (eruncommon.OrchestratorEnvRoleRuntime) it
 // must be linked with — the dialog uses this to offer that role directly
 // instead of the mirror/worktree directory controls, which have nothing to
-// show for a link with no review directory. RequiredRole is "" when any role,
-// including undeclared, already works. An ineligible env carries no
-// directory — IneligibleReason explains, in operator language, why it cannot
-// be linked at all.
+// show for a link with no review directory. RequiredRole is "" when no single
+// role is required, which is every type but runtime — the picker still offers
+// only the roles that type allows, so a host env's "" excludes runtime rather
+// than meaning "any role". An ineligible env carries no directory —
+// IneligibleReason explains, in operator language, why it cannot be linked at
+// all.
 type orchestratorEnvCandidate struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
@@ -1722,10 +1724,11 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 				Environment:     env.Name,
 				EnvironmentType: env.ResolvedType(),
 				// A candidate is eligible if it can be linked under whatever
-				// role requiredRole names ("" for "any role, including
-				// undeclared" on an agent/host env; the runtime role for a
+				// role requiredRole names ("" when no single role is required,
+				// which is every type but runtime; the runtime role for a
 				// runtime env) — the role picker enforces the specific choice
-				// once the operator selects the environment.
+				// once the operator selects the environment, including the
+				// runtime role a host env is refused.
 				Eligible: orchestratableEnv(env, requiredRole),
 			}
 			if candidate.Eligible {

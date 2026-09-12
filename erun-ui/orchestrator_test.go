@@ -111,14 +111,15 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 // env is still listed, disabled, with a reason rather than dropped without
 // trace.
 // TestOrchestratableEnvCoversHost locks in that a host env links like
-// local-agent and remote-agent — the issue's own recommendation (#1380): a
-// host env's worktree is already the operator's own checkout, so the
-// orchestrator reviews it in place, the same as a local-agent worktree, never
-// a synced mirror (which only makes sense for a pod whose worktree lives
-// somewhere else). Every role, including undeclared, works for these three
-// types; a runtime env is the odd one out and is covered by its own test
-// below (TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole) since its answer
-// depends on the role, not just the type.
+// local-agent and remote-agent: a host env's worktree is already the operator's
+// own checkout, so the orchestrator works it in place, the same as a
+// local-agent worktree, never a synced mirror (which only makes sense for a pod
+// whose worktree lives somewhere else). None of these three types requires a
+// particular role, so all three are eligible undeclared; a host env is still
+// refused the runtime role when one is chosen, but that is the shared gate's
+// question, not eligibility's. A runtime env is the odd one out and is covered
+// by its own test below (TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole)
+// since its answer depends on the role, not just the type.
 func TestOrchestratableEnvCoversHost(t *testing.T) {
 	cases := []struct {
 		envType eruncommon.EnvironmentType

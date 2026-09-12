@@ -468,7 +468,7 @@ var issueReferenceBaseline = map[string]int{
 	"erun-ui/orchestrator_role_file_test.go":              1,
 	"erun-ui/orchestrator_shell_activity.go":              1,
 	"erun-ui/orchestrator_shell_activity_test.go":         1,
-	"erun-ui/orchestrator_test.go":                        6,
+	"erun-ui/orchestrator_test.go":                        5,
 	"erun-ui/orchestrator_whip_test.go":                   1,
 	"erun-ui/restart_control_test.go":                     1,
 	"erun-ui/session_heartbeat_test.go":                   1,
