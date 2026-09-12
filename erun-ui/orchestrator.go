@@ -21,16 +21,21 @@ import (
 
 // An orchestrator is a host-side AI session that is NOT scoped to a single
 // environment: it runs the AI harness on the operator's machine with the erun
-// CLI on PATH, so it can drive the agent environments it links. The real work
-// happens in the pods — the orchestrator delegates edits and builds to the
-// in-pod agents, reviews each env's worktree on the host read-only, and runs
-// host-native build artifacts to verify. It may build locally to help, but never
-// writes into a review directory: the in-pod agent owns the worktree.
+// CLI on PATH, so it can drive the environments it links. For a POD-BACKED
+// environment the real work happens in the pod — the orchestrator delegates edits
+// and builds to the in-pod agent, reviews that env's worktree on the host
+// read-only, and runs host-native build artifacts to verify. It may build locally
+// to help, but never writes into a pod-backed environment's review directory: the
+// in-pod agent owns that worktree. A host environment has no pod, so there is no
+// in-pod agent to delegate to and no other owner of its directory — the
+// orchestrator authors and builds in it directly (see orchestratorClaudeMd).
 //
-// An orchestrator is a persisted definition (root config): a set of linked agent
-// environments, each with a host review directory. A remote-agent env's is the
-// one-way mirror its workspace sync fills; a local-agent env's is the worktree
-// itself, already on this machine because the pod hostPath-mounts it. The set
+// An orchestrator is a persisted definition (root config): a set of linked
+// environments, each with a host review directory of one of three kinds (see
+// orchestratorReviewDirectory). A remote-agent env's is the one-way mirror its
+// workspace sync fills; a local-agent env's is the worktree itself, already on
+// this machine because the pod hostPath-mounts it. A host env's is the
+// environment — the same plain directory, with nothing between the two. The set
 // reappears across restarts; the running session is ephemeral.
 
 // orchestratorSession is a live orchestrator PTY. Persisted orchestrators are
@@ -132,9 +137,11 @@ type orchestratorEnvInput struct {
 }
 
 // orchestratorEnvCandidate is an env the operator considered linking, eligible
-// or not. Mirrored distinguishes the two kinds of review directory an eligible
-// env carries: a workspace-sync mirror the operator may place anywhere, or the
-// env's own worktree on this machine, whose path is derived and fixed. Neither
+// or not. Mirrored distinguishes the kinds of review directory an eligible env
+// carries: a workspace-sync mirror the operator may place anywhere, or the env's
+// own directory on this machine, whose path is derived and fixed (both a
+// local-agent worktree and a host environment's directory derive it this way).
+// Neither
 // applies to a runtime env: DefaultDirectory is "" and Mirrored is false, and
 // RequiredRole names the one role (eruncommon.OrchestratorEnvRoleRuntime) it
 // must be linked with — the dialog uses this to offer that role directly
@@ -144,8 +151,14 @@ type orchestratorEnvInput struct {
 // directory — IneligibleReason explains, in operator language, why it cannot
 // be linked at all.
 type orchestratorEnvCandidate struct {
-	Tenant           string                         `json:"tenant"`
-	Environment      string                         `json:"environment"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	// EnvironmentType is the env's resolved type, carried so the dialog can
+	// reason about the candidate the way the shared gate does instead of
+	// re-deriving it: it decides which roles the picker offers (a host env
+	// takes no runtime role) and which words describe the directory row (a
+	// host env's is its own directory, with no pod mounting it).
+	EnvironmentType  eruncommon.EnvironmentType     `json:"environmentType"`
 	Eligible         bool                           `json:"eligible"`
 	DefaultDirectory string                         `json:"defaultDirectory"`
 	Mirrored         bool                           `json:"mirrored"`
@@ -307,12 +320,12 @@ func defaultOrchestratorDirectory(tenant, environment string) string {
 // gate and the CLI's SetOrchestratorEnvRole both consult so neither can drift
 // from the other on what a role is allowed to be. A local-agent or
 // remote-agent env has a worktree to review and an in-pod agent to delegate
-// to, so any role is fine; a host env has no pod, but its worktree is already
-// the operator's own checkout — the orchestrator still does not edit it, and
-// the env's own agent does, exactly as for a local-agent env (see
-// orchestratorReviewDirectory), so it links the same way. A runtime env has
-// neither, so only the runtime role — operate, not review or delegate — may
-// be declared for it.
+// to, so any role is fine; a host env has no pod and so no in-pod agent, but it
+// does carry a real directory on this machine (see
+// orchestratorReviewDirectory), so code, build and undeclared are fine for it —
+// while the runtime role is not, since "operate directly" has no referent
+// without a pod. A runtime env is the mirror image, so only the runtime role
+// may be declared for it.
 func orchestratableEnv(env eruncommon.EnvConfig, role eruncommon.OrchestratorEnvRole) bool {
 	return eruncommon.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)
 }
@@ -326,15 +339,24 @@ func orchestratorIneligibilityReason(env eruncommon.EnvConfig, role eruncommon.O
 }
 
 // orchestratorReviewDirectory resolves where an orchestrator reviews an env on
-// this machine, and whether that directory is a synced mirror. It applies the
-// same policy as hostWorkspacePath — a local-agent or host worktree is already
-// here, so it is reviewed in place (for host, the review directory and the
-// worktree are the very same path, since there is no pod to mount it into) —
-// yields the mirror path a remote-agent env would be wired to rather than ""
-// when its sync is not on yet, and answers explicitly for a runtime env: it
-// has no worktree and no mirror, so there is no review directory at all,
-// rather than falling through to the mirror default meant for an env that
-// does have a pod to sync from.
+// this machine, and whether that directory is a synced mirror. Three kinds, one
+// per the answer it gives:
+//
+//   - A remote-agent env gets the mirror its workspace sync fills — the default
+//     path below, which is what Mirrored=true reports.
+//   - A local-agent env's worktree is already here, because the pod
+//     hostPath-mounts it, so it is reviewed in place. The pod's in-pod agent
+//     owns that tree (see orchestratorClaudeMd), not the orchestrator.
+//   - A host env has no pod and no cluster at all, so there is nothing to
+//     mount, sync, or delegate to: the review directory and the environment are
+//     the very same path, and the orchestrator authors and builds in it. Same
+//     derivation as a local-agent env, entirely different relationship to it.
+//
+// It yields the mirror path a remote-agent env would be wired to rather than ""
+// when its sync is not on yet, and answers explicitly for a runtime env: it has
+// no worktree and no mirror, so there is no review directory at all, rather than
+// falling through to the mirror default meant for an env that does have a pod to
+// sync from.
 func orchestratorReviewDirectory(tenant string, env eruncommon.EnvConfig) (string, bool) {
 	switch env.ResolvedType() {
 	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeHost:
@@ -375,11 +397,21 @@ here happen to have files — read the config every time.
 ## Rules
 
 - Your **review directory** for an environment is the ` + "`directory`" + ` on its
-  ` + "`orchestrators:`" + ` entry, and it is one of two kinds. A ` + "`<tenant>-<env>`" + `
-  subdirectory here is a one-way **mirror** of a remote-agent environment's worktree,
-  kept in sync from its pod. A path outside this root is a **local-agent
-  environment's own worktree**, which lives on this machine and is hostPath-mounted
-  into its pod. The environment's ` + "`type`" + ` tells you which kind you have.
+  ` + "`orchestrators:`" + ` entry, and it is one of three kinds. The environment's
+  ` + "`type`" + ` tells you which. A ` + "`<tenant>-<env>`" + ` subdirectory here is a one-way
+  **mirror** of a remote-agent environment's worktree, kept in sync from its pod. A
+  path outside this root is a **local-agent environment's own worktree**, which lives
+  on this machine and is hostPath-mounted into its pod. A **host environment** is a
+  plain directory on this machine with no pod and no cluster behind it at all:
+  nothing syncs it, nothing mounts it, and nothing else owns it — its review
+  directory *is* the environment.
+- A **host** environment has no pod, so nothing runs the erun MCP edge for it and it
+  has **no MCP tools at all**: no ` + "`exec_*`" + `, no ` + "`job_*`" + `, no ` + "`activity_lease_*`" + `.
+  That is the type working as designed, not a link that failed to wire, and no restart
+  will produce those tools. Reach it the way you reach any other directory on this
+  machine — your own file and shell tools, in its ` + "`directory`" + `. ` + "`erun build`" + ` and
+  ` + "`erun release`" + ` run there directly; ` + "`deploy`" + `, ` + "`pin`" + `, ` + "`open`" + `, ` + "`terraform`" + ` and
+  ` + "`upgrade`" + ` all refuse a host environment, because there is no pod for them to act on.
 - An entry whose ` + "`role`" + ` is ` + "`runtime`" + ` is a different relationship: you
   **operate** that environment — deploy, pin, observe — rather than review or
   delegate to it. It has no worktree to review and no in-pod agent to delegate to,
@@ -387,23 +419,31 @@ here happen to have files — read the config every time.
   rules below apply to it: drive it directly through ` + "`erun`" + ` (` + "`deploy`" + `,
   ` + "`pin`" + `, ` + "`platform env`" + `, and equivalent commands) or the platform API,
   never through a directory on this host.
-- **Never write into a review directory**, whichever kind it is. In a mirror the edit
-  is simply lost — the next sync overwrites it. In a local-agent worktree it is worse:
-  the edit *does* reach the pod, so it silently competes with the in-pod agent that
-  owns that tree, in what is also the operator's own checkout.
-- To change code, **ask the in-pod agent** in the relevant environment to do it
-  (drive it via ` + "`erun`" + ` / the env's MCP). Never patch the directory yourself.
-- **Review** changes on the host, read-only. A mirror is a one-way plain-directory
-  copy of the pod's working tree with no git of its own, so read the synced files and
-  take the authoritative diff of uncommitted work from the pod (the desktop app's
-  Review, or ask the in-pod agent to run ` + "`git diff`" + `). A local-agent worktree
-  *is* a real checkout, so ` + "`git -C <dir> diff`" + ` here is already authoritative.
+- **Never write into a mirror or a local-agent worktree** — the two review-directory
+  kinds a pod owns. In a mirror the edit is simply lost — the next sync overwrites it.
+  In a local-agent worktree it is worse: the edit *does* reach the pod, so it silently
+  competes with the in-pod agent that owns that tree, in what is also the operator's
+  own checkout. A **host** environment is the third kind and the one exception, for
+  exactly the reason that rule gives: it has no pod, so there is no sync to lose the
+  edit to and no in-pod agent to contend with. There you author, build, and review in
+  the directory directly — that is what the link is for. Keep it pointed at a directory
+  nothing else owns: a local-agent worktree is still that environment's, not yours.
+- To change code in a **pod-backed** environment, **ask the in-pod agent** to do it
+  (drive it via ` + "`erun`" + ` / the env's MCP). Never patch that directory yourself. A host
+  environment has no in-pod agent to ask, so there you make the change yourself.
+- **Review** changes on the host, read-only, for a pod-backed environment. A mirror is a
+  one-way plain-directory copy of the pod's working tree with no git of its own, so read
+  the synced files and take the authoritative diff of uncommitted work from the pod (the
+  desktop app's Review, or ask the in-pod agent to run ` + "`git diff`" + `). A local-agent
+  worktree *is* a real checkout, so ` + "`git -C <dir> diff`" + ` here is already authoritative
+  — as it is in a host environment's directory, which is your own working state rather
+  than a peer's.
 - **Verify** by running host-native build artifacts (e.g. a Windows ` + "`.exe`" + ` the pod
   cross-built) — the pod can't run a foreign-OS binary. A mirror carries them under
   its read-only ` + "`.erun-outputs/`" + `; a local-agent environment has no mirror, so
   pull them with that env's ` + "`outputs_list`" + `/` + "`outputs_download`" + ` (or the
-  desktop's Outputs) first. You may build locally to help, but never edit a review
-  directory.
+  desktop's Outputs) first. You may build locally to help, but never edit a pod-backed
+  environment's review directory.
 - **This directory is shared with every other orchestrator**, so anything here that is
   yours alone carries your id in its name. The return note you leave before a
   rebuild+restart is the one that matters most: erun reads it back as
@@ -422,10 +462,12 @@ here happen to have files — read the config every time.
 - **Require a terminal outcome from delegated work.** Do not rely on automatic
   reinvocation to finish an agent's work: recovery is bounded, not guaranteed.
   Never accept a promise to report back after the run exits.
-- **Supervise long work through the environment's job lifecycle.** Start it as a
-  detached job, keep its activity lease for the job's lifetime, and use a bounded
-  await instead of a hand-written poll loop or an open stream. When delegating a
-  long gate, include this waiting contract in the task.
+- **Supervise long work in a pod-backed environment through its job lifecycle.** Start
+  it as a detached job, keep its activity lease for the job's lifetime, and use a
+  bounded await instead of a hand-written poll loop or an open stream. When delegating
+  a long gate, include this waiting contract in the task. A host environment has no
+  job lifecycle to supervise — there is no MCP edge to start a job on — so long work
+  there is a process you run and wait on yourself.
 - **Respect exclusive worktree and gate leases.** If a claim is refused, report
   its holder and wait or use another environment; never retry-loop, clear the
   holder, or mutate the tree anyway.
@@ -441,8 +483,9 @@ here happen to have files — read the config every time.
 - **Finish with evidence, not an offer to do authorized work later.** If blocked,
   state what remains, what was checked, and the specific decision or access needed.
 - **Verify end-to-end within the authorized scope.** For a requested rollout,
-  drive the change into the real target (the in-pod agent builds/deploys it), then
-  reproduce the original flow against the running artifact and watch it succeed —
+  drive the change into the real target (in a pod-backed environment the in-pod agent
+  builds and deploys it; in a host environment you build it in its own directory),
+  then reproduce the original flow against the running artifact and watch it succeed —
   never stop at "unit tests pass" or "it builds". State plainly anything you could
   not verify and why.
 - **On completion, present the assumptions you took.** End with a concise list of
@@ -1656,8 +1699,9 @@ func (a *App) findOrchestratorConfig(id string) (eruncommon.OrchestratorConfig, 
 // silently dropped: an operator who knows an env exists must be able to see
 // that it was considered. An eligible env also carries the host directory the
 // orchestrator reviews it in: a mirror the sync fills for a remote-agent env,
-// or the worktree itself for a local-agent env, which is already on this
-// machine because the pod hostPath-mounts it.
+// or the env's own directory for a local-agent or host env, which is already on
+// this machine — because the pod hostPath-mounts it in the local-agent case, and
+// because there is no pod at all in the host one.
 func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error) {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
@@ -1672,8 +1716,9 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 		for _, env := range envs {
 			requiredRole := eruncommon.OrchestratorEnvRoleRequiredFor(env.ResolvedType())
 			candidate := orchestratorEnvCandidate{
-				Tenant:      tenant.Name,
-				Environment: env.Name,
+				Tenant:          tenant.Name,
+				Environment:     env.Name,
+				EnvironmentType: env.ResolvedType(),
 				// A candidate is eligible if it can be linked under whatever
 				// role requiredRole names ("" for "any role, including
 				// undeclared" on an agent/host env; the runtime role for a
@@ -1806,9 +1851,29 @@ func (a *App) linkOrchestratorEnvironments(refs []eruncommon.OrchestratorEnvConf
 		if err := a.wireEnvironmentReview(ref); err != nil {
 			return err
 		}
+		// A host env has no pod and no runtime to ensure — its worktree is
+		// already this machine's own directory, so there is nothing to forward
+		// to and nothing to start. Ensuring anyway would fail on an env that was
+		// never going to have a runtime, and surface that failure as a
+		// runtime-unreachable warning about a working environment.
+		if a.orchestratorRefNamesHostEnv(ref) {
+			continue
+		}
 		a.ensureEnvRuntimeOnce(uiSelection{Tenant: ref.Tenant, Environment: ref.Environment})
 	}
 	return nil
+}
+
+// orchestratorRefNamesHostEnv reports whether a linked ref names a host
+// environment. A ref whose env config no longer loads answers false, so the
+// caller's ensure path still runs and surfaces that failure rather than this
+// silently absorbing it.
+func (a *App) orchestratorRefNamesHostEnv(ref eruncommon.OrchestratorEnvConfig) bool {
+	env, _, err := a.deps.store.LoadEnvConfig(ref.Tenant, ref.Environment)
+	if err != nil {
+		return false
+	}
+	return env.ResolvedType() == eruncommon.EnvironmentTypeHost
 }
 
 func orchestratorDisplayName(name string, envs []eruncommon.OrchestratorEnvConfig) string {
@@ -2098,6 +2163,7 @@ type orchestratorSpawn struct {
 // than "failed to wire".
 func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.OrchestratorEnvConfig) string {
 	path, skipped, unreachable, err := a.writeOrchestratorMCPConfig(id, envs)
+	hostEnvs, problems := splitOrchestratorMCPHostSkips(skipped)
 	for _, skip := range skipped {
 		log.Printf("erun-app: orchestrator %s: no MCP tools for %s: %s", id, skip.Label, skip.Reason)
 	}
@@ -2106,8 +2172,16 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 		a.emitOrchestratorNotification("warning", id, orchestratorMCPUnwiredNotice(name, err), orchestratorMCPUnwiredAction(err))
 		return ""
 	}
-	if len(skipped) > 0 {
-		a.emitAppNotification("warning", orchestratorMCPPartialNotice(name, len(envs)-len(skipped), skipped))
+	// A host env is not a wiring problem -- it never had an MCP edge to lose --
+	// so it stays out of problems and gets the informational line below rather
+	// than a warning prescribing a restart that fixes nothing. It is still
+	// counted in the partial notice's denominator, and named there, so the count
+	// cannot describe a smaller orchestrator than the one that is linked.
+	if len(problems) > 0 {
+		a.emitAppNotification("warning", orchestratorMCPPartialNotice(name, len(envs)-len(skipped), len(envs), hostEnvs, problems))
+	}
+	if len(hostEnvs) > 0 {
+		a.emitAppNotification("info", orchestratorMCPHostEnvNotice(name, hostEnvs))
 	}
 	// An unreachable edge is wired anyway: the proxy already recovers a
 	// transient outage per call, so this is reported, never treated as a skip.

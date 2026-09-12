@@ -89,6 +89,22 @@ export class OrchestratorDialog {
     await this.page.getByRole('option', { name: role, exact: true }).click();
   }
 
+  // The roles the trigger offers for a linked env, by their visible words, in
+  // the order the control renders them. Opened and dismissed in one call so a
+  // spec can assert on the offered SET without leaving the popup covering the
+  // row it is about to drive. Read as a list rather than probed one role at a
+  // time because the property under test is which roles are absent (a host env
+  // must not be offered Runtime) alongside which ones are still present —
+  // a single-role probe cannot tell "not offered" from "the list never opened".
+  async envRoleOptionNames(tenant: string, environment: string): Promise<string[]> {
+    await this.envRoleTrigger(tenant, environment).click();
+    const options = this.page.getByRole('option');
+    await options.first().waitFor({ state: 'visible' });
+    const names = await options.allInnerTexts();
+    await this.page.keyboard.press('Escape');
+    return names.map((name) => name.trim());
+  }
+
   // An ineligible env (an unrecognized type) is still listed, disabled, with
   // its reason as a first-class line under the checkbox row rather than a
   // tooltip. The checkbox carries an accessible name naming both the env and

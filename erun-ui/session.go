@@ -409,7 +409,12 @@ func buildInitArgs(selection uiSelection) []string {
 	}
 	args := []string{"init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--type=" + envType}
 	args = appendInitOptionalFlags(args, selection)
-	if envType == "local-agent" {
+	// local-agent and host both resolve their worktree from a directory on this
+	// machine, so both pass it through as --project-root; init refuses a host
+	// create outright when it has no directory to use. remote-agent checks out
+	// its own worktree on a cluster PVC and runtime has no worktree at all, so
+	// neither takes the flag.
+	if envType == "local-agent" || envType == "host" {
 		if localRepoPath := strings.TrimSpace(selection.LocalRepoPath); localRepoPath != "" {
 			args = append(args, "--project-root", localRepoPath)
 		}

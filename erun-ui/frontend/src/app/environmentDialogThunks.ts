@@ -194,9 +194,11 @@ function environmentDialogSelection(
     return null;
   }
   const values = normalizedEnvironmentDialogValues(dialog);
-  // noGit only affects the remote-worktree init path; local-agent has no
+  // noGit only affects the remote-worktree init path; local-agent and host both
+  // resolve their worktree from a directory on this machine and so have no
   // remote repo, so ignore any stale noGit left by a previous type selection.
-  const noGit = dialog.envType === 'local-agent' ? false : dialog.noGit;
+  const noGit =
+    dialog.envType === 'local-agent' || dialog.envType === 'host' ? false : dialog.noGit;
   return {
     tenant: values.tenant,
     environment: values.environment,
@@ -212,7 +214,10 @@ function environmentDialogInitFields(
   values: ReturnType<typeof normalizedEnvironmentDialogValues>,
 ): Partial<UISelection> {
   const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
-  const isLocalAgent = dialog.envType === 'local-agent';
+  // Both local-agent and host carry the directory the env lives in. A host env
+  // is that directory outright rather than a pod's mount of it, but init takes
+  // it through the same --project-root and refuses the create without it.
+  const carriesLocalRepoPath = dialog.envType === 'local-agent' || dialog.envType === 'host';
   // When the in-cluster registry is chosen, seed a resolvable cluster: entry and
   // omit the static container-registry string (the two are mutually exclusive).
   // useErunRegistry only takes effect once the reachability probe has actually
@@ -231,7 +236,7 @@ function environmentDialogInitFields(
     clusterRegistry: useClusterRegistry,
     erunRegistry: useErunRegistry,
     type: dialog.envType,
-    localRepoPath: isLocalAgent ? values.localRepoPath : undefined,
+    localRepoPath: carriesLocalRepoPath ? values.localRepoPath : undefined,
     setDefaultTenant: dialog.setDefaultTenant,
   };
 }

@@ -4,9 +4,11 @@ import * as React from 'react';
 
 import type { OrchestratorEnvRef, OrchestratorEnvRole } from '@/app/slices/orchestratorsSlice';
 import {
+  candidateDirectoryLabel,
   type EnvCandidate,
   envKey,
   envRoleFieldId,
+  orchestratorEnvRoleOptions,
 } from '@/components/app/OrchestratorDialog.Environments.helpers';
 
 import { ChooseLocalRepoPath } from '../../../wailsjs/go/main/App';
@@ -203,17 +205,8 @@ function EnvironmentRowRole({
       <SelectField
         id={envRoleFieldId(candidate.tenant, candidate.environment)}
         label="Role"
-        // Radix's Select.Item rejects an empty-string value, so undeclared
-        // (OrchestratorEnvRole's own '') is represented here as the
-        // sentinel "none" and translated back at the boundary -- the
-        // option list and the round-trip below are the only two places
-        // that need to know about it.
         value={selectedRef.role === '' ? 'none' : selectedRef.role}
-        options={[
-          { value: 'none', label: 'Not declared' },
-          { value: 'code', label: 'Code' },
-          { value: 'build', label: 'Build' },
-        ]}
+        options={orchestratorEnvRoleOptions(candidate, selectedRef.role)}
         helper={orchestratorEnvRoleHelper(selectedRef.role)}
         onChange={(value) => {
           onRoleChange(selectedRef, (value === 'none' ? '' : value) as OrchestratorEnvRole);
@@ -254,11 +247,7 @@ function EnvironmentRow({
         />
         {candidate.tenant} / {candidate.environment}
         <span className="text-xs text-muted-foreground">
-          {requiredRole
-            ? 'operated directly — no review directory'
-            : candidate.mirrored
-              ? 'synced mirror'
-              : 'worktree on this machine'}
+          {candidateDirectoryLabel(candidate, requiredRole !== undefined)}
         </span>
       </label>
       {selectedRef && !requiredRole ? (

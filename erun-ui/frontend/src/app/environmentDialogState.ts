@@ -42,10 +42,21 @@ export function missingRequiredFieldReason(dialog: EnvironmentDialogState): stri
   if (!/^[a-z0-9]{1,63}$/.test(values.tenant)) {
     return 'Tenant name must use only lowercase letters and digits (no hyphens or uppercase).';
   }
-  // local-agent envs mount a host directory into the agent pod; the path
-  // is required and free-text (the user picks where their project lives).
-  if (values.envType === 'local-agent' && !values.localRepoPath) {
-    return 'Local repo path is required for local-agent envs.';
+  // local-agent and host envs both resolve their worktree from a directory on
+  // this machine, so the path is required for either; they differ only in
+  // whether an agent pod mounts that directory. It is free-text rather than a
+  // pick-list because the user chooses where their project lives.
+  if (values.envType === 'local-agent' || values.envType === 'host') {
+    if (!values.localRepoPath) {
+      return 'Local repo path is required — this environment is a directory on this machine.';
+    }
+    // A host env has no pod and no cluster at all, so it needs neither a
+    // kubernetes context nor a container registry. Neither field is rendered
+    // for it, so requiring either would block Create with a reason naming a
+    // control the user cannot see or fill (a dead end).
+    if (values.envType === 'host') {
+      return null;
+    }
   }
   if (!values.kubernetesContext) {
     return 'Select a Kubernetes context.';

@@ -22,6 +22,7 @@ import {
   submitEnvironmentDialog,
   updateEnvironmentDialog,
 } from '@/app/environmentDialogThunks';
+import { environmentTypeIsHost } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { showTerminalError } from '@/app/notificationThunks';
@@ -361,10 +362,16 @@ function environmentDialogSubmitGate(dialog: EnvironmentDialog): EnvironmentSubm
   // select. missingRequiredFieldReason then covers the value requirements —
   // including a context that is available but not yet selected — so the button's
   // enabled state matches exactly what submitEnvironmentDialog will accept.
+  // A host env has no pod and no cluster at all, so neither cluster-shaped
+  // blocker applies to it: each would report the absence of a cluster as the
+  // reason Create is disabled, naming a field that is not rendered for this
+  // type. Its own requirements (tenant, environment, directory) are covered by
+  // missingRequiredFieldReason.
+  const isHost = environmentTypeIsHost(dialog.envType);
   const blocker =
-    kubernetesContextBlocker(dialog) ??
+    (isHost ? null : kubernetesContextBlocker(dialog)) ??
     missingRequiredFieldReason(dialog) ??
-    runtimeCapacityBlocker(dialog);
+    (isHost ? null : runtimeCapacityBlocker(dialog));
   return blocker ? { disabled: true, reason: blocker } : { disabled: false, reason: '' };
 }
 

@@ -460,7 +460,7 @@ var issueReferenceBaseline = map[string]int{
 	"erun-ui/orchestrator_guidance_test.go":               1,
 	"erun-ui/orchestrator_live_conversation.go":           2,
 	"erun-ui/orchestrator_live_conversation_test.go":      3,
-	"erun-ui/orchestrator_mcp.go":                         2,
+	"erun-ui/orchestrator_mcp.go":                         1,
 	"erun-ui/orchestrator_mcp_test.go":                    2,
 	"erun-ui/orchestrator_pacing.go":                      9,
 	"erun-ui/orchestrator_pacing_env.go":                  3,

@@ -1,9 +1,10 @@
-import { Button, SelectField } from 'erun-kit';
-import { Plus, Rocket } from 'lucide-react';
+import { Button, EmptyState, SelectField } from 'erun-kit';
+import { Ban, Plus, Rocket } from 'lucide-react';
 import * as React from 'react';
 
 import {
   environmentTypeBuildsHereLocally,
+  environmentTypeIsHost,
   environmentTypeIsRemoteWorktree,
   environmentTypeIsRuntime,
 } from '@/app/environmentType';
@@ -38,6 +39,25 @@ type ManageDialog = AppState['manageDialog'];
 export function RuntimeTab(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
+  // Every control this tab renders is a pod or cluster concept, and a host env
+  // has no pod and no cluster contact of any kind — EnvConfig.HasPod is false
+  // for host alone. There is no runtime image to install, no chart to resolve,
+  // no pod to size or idle-stop, and neither Pin nor Deploy could succeed:
+  // erun pin, erun deploy and erun terraform each refuse a host env outright,
+  // and the deploy planner panics rather than build a plan for one. So the tab
+  // states the fact instead of offering actions that can only fail, the same
+  // treatment the Ports tab's Public access section gives this type. Keep the
+  // heading identical to that one: it is the shared wording for "this control
+  // has no referent for this environment type".
+  if (environmentTypeIsHost(dialog.config.type)) {
+    return (
+      <EmptyState
+        icon={<Ban aria-hidden="true" />}
+        heading="Not available for this environment type"
+        body="A host environment is a directory on this machine — it has no pod and no cluster, so there is no runtime here to size, pin, or deploy. Build and release run in that directory directly."
+      />
+    );
+  }
   // Dialog-owned (not the shared tenants slice): this dialog resolves versions for
   // its own env; boot/env-change deltas rewrite the tenants slice for the selected
   // env and must not clobber this picker.
