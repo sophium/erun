@@ -5,7 +5,7 @@ import { test } from 'vitest';
 
 import type { UIEnvironmentConfig, UISelection, UITenant } from '@/types';
 
-import { openSelection } from './sessionThunks';
+import { ensureDefaultEnvTabs, openSelection } from './sessionThunks';
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 import orchestratorsReducer, { setOrchestrators } from './slices/orchestratorsSlice';
 import selectionReducer, { setSelected } from './slices/selectionSlice';
@@ -267,4 +267,77 @@ test('openSelection is a no-op when an orchestrator session already owns the ter
   } finally {
     thunkExtra.controller = null;
   }
+});
+
+function hostTenant(): UITenant {
+  return {
+    name: 'acme',
+    environments: [{ name: 'alpha', type: 'host' }],
+  };
+}
+
+// A host env has no pod, so two of the three default tabs have nothing to attach
+// to: `erun open` refuses the env outright ("it has no pod and no cluster to open
+// a shell into"), and an AI tab has no pod to run its harness in. Spawning them
+// would leave a refused tab plus a runtime-ensure warning about an environment
+// that will never have a runtime, so opening a host env yields the Local tab --
+// the same thing resolveAutoStartGate decides.
+test('a host environment spawns only its Local tab, never the pod-shaped ERun tab', async () => {
+  let startSessionCalls = 0;
+  let startLocalCalls = 0;
+  stubWailsBridge({
+    StartLocalSession: () => {
+      startLocalCalls += 1;
+      return Promise.resolve({ sessionId: 7, slot: 0 });
+    },
+    StartSession: () => {
+      startSessionCalls += 1;
+      return Promise.resolve({ sessionId: 8, slot: 0 });
+    },
+  });
+
+  const store = buildTestStore();
+  const dispatch = store.dispatch as unknown as AppDispatch;
+  store.dispatch(setTenants([hostTenant()]));
+  thunkExtra.controller = {
+    fitTerminal: () => undefined,
+    terminalSize: () => ({ cols: 80, rows: 24 }),
+  } as unknown as TerminalController | null;
+
+  await dispatch(
+    ensureDefaultEnvTabs({ tenant: 'acme', environment: 'alpha' }, 'acme/alpha', 80, 24),
+  );
+
+  assert.equal(startSessionCalls, 0, 'a host env must not spawn the ERun tab');
+  assert.equal(startLocalCalls, 1, 'a host env opens its Local tab');
+});
+
+test('a pod-backed environment still spawns its ERun tab beside Local', async () => {
+  let startSessionCalls = 0;
+  let startLocalCalls = 0;
+  stubWailsBridge({
+    StartLocalSession: () => {
+      startLocalCalls += 1;
+      return Promise.resolve({ sessionId: 7, slot: 0 });
+    },
+    StartSession: () => {
+      startSessionCalls += 1;
+      return Promise.resolve({ sessionId: 8, slot: 0 });
+    },
+  });
+
+  const store = buildTestStore();
+  const dispatch = store.dispatch as unknown as AppDispatch;
+  store.dispatch(setTenants([localAgentTenant()]));
+  thunkExtra.controller = {
+    fitTerminal: () => undefined,
+    terminalSize: () => ({ cols: 80, rows: 24 }),
+  } as unknown as TerminalController | null;
+
+  await dispatch(
+    ensureDefaultEnvTabs({ tenant: 'acme', environment: 'alpha' }, 'acme/alpha', 80, 24),
+  );
+
+  assert.equal(startSessionCalls, 1, 'a pod-backed env still spawns its ERun tab');
+  assert.equal(startLocalCalls, 1, 'and its Local tab');
 });
