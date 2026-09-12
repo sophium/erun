@@ -36,13 +36,16 @@ import { OrchestratorGuidanceSection } from '@/components/app/OrchestratorDialog
 
 import { ListOrchestratorEnvCandidates } from '../../../wailsjs/go/main/App';
 
-// OrchestratorDialog creates or edits a persisted orchestrator: a name and the
-// agent environments it links, each with a directory on this machine — a
-// pod-backed environment's read-only review directory, or a host environment's
-// own directory, which the orchestrator works in directly because no pod owns it.
-// Creating prepares that directory — the mirror plus its one-way sync for a
-// remote-agent env; a local-agent env's worktree and a host env's directory are
-// already here, so those are only checked to exist; editing re-links the set.
+// OrchestratorDialog creates or edits a persisted orchestrator: a name, the agent
+// environments it links — each with a directory on this machine, either a
+// pod-backed environment's read-only review directory or a host environment's own
+// directory, which the orchestrator works in directly because no pod owns it — and
+// the directories it works in that belong to no environment at all, which are
+// picked rather than derived and registered nowhere. Creating prepares each linked
+// environment's directory — the mirror plus its one-way sync for a remote-agent
+// env; a local-agent env's worktree and a host env's directory are already here, so
+// those are only checked to exist — and a directory of its own only has to exist;
+// editing re-links the set.
 interface OrchestratorForm {
   candidates: EnvCandidate[];
   name: string;
