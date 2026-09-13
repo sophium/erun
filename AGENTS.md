@@ -111,13 +111,42 @@ operators may interact directly with in-pod agents without an orchestrator.
   published version. `release` is the contracted build/publish/tag
   orchestrator and must verify publication before exposing release metadata.
 
+## Answering The Operator's Questions
+
+- The operator's questions are never rhetorical. When the operator asks a
+  question -- "how is it done if it is not done?", "why X?", "is Y finished?",
+  "nothing changed?", or pushes back with a question instead of a statement --
+  the question is a genuine request for an answer. Answer it directly and
+  completely as the first thing your reply does, before anything else.
+- A question is not authorization to act. Do not respond to a question by
+  launching a workflow, editing files, running commands, or "helpfully" starting
+  the work the question hints at. Answer first; then wait for an explicit
+  instruction to proceed, or ask what the operator wants. Acting on a question
+  instead of answering it is a defect.
+- Answer honestly, including when the honest answer is "it is not done", "I was
+  wrong", or "that does not work yet". Do not reframe a question as
+  already-handled, do not bury the answer under a wall of planned actions, and do
+  not substitute activity for an answer. If the operator had to ask, the prior
+  reply was probably overclaiming -- treat the question as a signal to correct
+  the record, not to push forward.
+- A question that exposes a contradiction (something claimed done that visibly is
+  not) takes priority over momentum. Stop, state the real situation plainly, and
+  resume work only once the operator has confirmed the direction.
+- Self-check before sending a reply to a question: the first sentence must state
+  the answer. If the reply opens with anything that is _not_ the answer --
+  announcing what you read or are about to do ("Reading ...", "Let me ..."),
+  agreeing or framing first ("You're right", "Good question"), restating the
+  question, a meta-apology about your own conduct, or an unsolicited "want me to
+  do X?" -- delete that opening and lead with the answer. Answer, then stop;
+  propose next steps only when asked. Repeated re-asking of the same question
+  means the earlier replies buried the answer -- treat that as the defect to fix,
+  not a prompt to explain yourself further.
+
 ## Working Rules
 
 - Before a non-trivial change, present the smallest coherent outcome, affected
   modules, user-visible result, documentation impact, and validation needed;
   obtain confirmation before multi-module or public-surface changes.
-- Answer operator questions directly in the first sentence. A question is not
-  authorization to act. Correct contradictions plainly before resuming work.
 - Prefer evidence from reproduced behavior, tests, and visible results. Keep
   changes focused and solve cross-module problems at the lowest owning layer.
 - Make destructive, remote, publishing, and shared-environment actions explicit
@@ -137,13 +166,43 @@ operators may interact directly with in-pod agents without an orchestrator.
 - Attribute failures using a clean, comparable baseline and an established
   cause. Identical failure counts can reproduce an environmental fault just as
   reliably as a product defect; counts alone do not establish causality.
-- Fix every test, lint, formatting, or gate failure encountered. Do not skip,
-  suppress, weaken, or dismiss failures as pre-existing or flaky. Defer only
-  when a required design decision or genuinely separate large effort has been
-  explicitly accepted and tracked.
+- **Fixing a pre-existing issue is mandatory, not optional.** A failing test,
+  lint finding, or other violation you encounter is yours to investigate and
+  fix, even when your change did not cause it. "It was already broken", "not
+  caused by me", "out of scope", and "pre-existing" are never reasons to skip,
+  ignore, suppress, defer, or bypass it -- no `--no-verify`, no `//nolint`, no
+  `t.Skip`, no `test.fixme`, no commenting-out, no threshold bump, and no
+  reclassifying it as someone else's problem. The pre-commit hook lints the whole
+  module, so touching any file in a module makes every pre-existing finding in
+  that module yours to resolve. Fix it in the same PR: that is the default and
+  the expectation, not a fallback.
+- **A flaky test is a failing test.** One that passes only sometimes is not
+  evidence of anything, and "pre-existing flakiness" is never a reason to wave it
+  through. Make it deterministic -- wait on observable conditions, never
+  wall-clock sleeps or retries-until-green -- or fix what makes it race. Never
+  skip it, mark it `fixme`, or dismiss it.
+- Deferring to a tracking issue is a narrow exception, permitted only when the
+  fix genuinely cannot land in this PR: it needs a design decision the operator
+  must make, or it is a distinct large effort they have been told about and have
+  explicitly agreed to defer. File and link the issue _before_ proceeding, and
+  never present the deferral as routine. Surfacing a failure as "pre-existing" or
+  "out of scope" without either fixing it or clearing an explicit deferral is the
+  defect this rule exists to prevent -- treat the temptation to punt as a signal
+  to fix.
 - Once a body of work is authorized, carry it through completion without
   seeking approval between routine increments. Stop only for genuine blockers
   or scope-expanding decisions.
+
+- Treat repeated user corrections as signal that the interaction model is wrong,
+  not just the implementation detail. Revisit the flow and simplify it around
+  what the user is trying to accomplish.
+- Avoid duplicating investigation. Once a cause is established, update the
+  relevant shared guidance, tests, or abstractions so future work can start from
+  that knowledge.
+- Clarify design and trade-offs in prose conversation; do not batch shaping
+  decisions into rigid question-forms.
+- When delegating analysis to sub-agents, use a capable model -- not a
+  lightweight locator model -- for substantive reasoning.
 
 ## Smooth, Seamless, No Dead Ends
 
@@ -159,6 +218,33 @@ operators may interact directly with in-pod agents without an orchestrator.
   must act, what they must do, and provide exact copyable values.
 - For desktop changes, perform the impact review required by
   `erun-ui/AGENTS.md`.
+
+## One Agent Job Is One Run (Mandatory)
+
+**An in-pod agent job is one non-interactive run. There is no "later."** No
+scheduler wakes it back up, no monitor watches it, and nothing notifies anyone
+when a backgrounded process it started finishes. When the job's own process
+exits, the run is over -- for good -- whatever is still executing underneath it.
+This is the same dead-end failure mode as § "Smooth, Seamless, No Dead Ends"
+above (silence that reads as success), applied to the one surface an agent fully
+controls: its own final turn.
+
+- **Run gates in the foreground, with an explicit timeout.** No `&`, no `nohup`,
+  no background shell task, no "I'll report back when it finishes." If a gate
+  needs to outlive one command, start it as a nested detached job (e.g.
+  `erun job start`) and block on it -- `job await` / `job status` -- in the same
+  run, not a promise to check later.
+- **A result not in the final message does not exist.** The orchestrator reads
+  the job's recorded outcome, not the agent's intentions. Work reported only as a
+  plan to check back on it is work nobody will ever see reported.
+- **Never end a turn asking a question or offering an option.** Nobody is there
+  to answer. A final message that waits on a reply is a dead end exactly like a
+  UI screen with no next action: the run is stopped, and nothing will ever
+  unstick it.
+- This has already cost real work in this repository: agents that backgrounded a
+  gate and ended their turn reported `exitCode: 0` while the work sat unfinished,
+  uncommitted, or unrecovered, and the orchestrator believed it because nothing
+  in the job's own status said otherwise (erun#1374).
 
 ## Documentation
 
@@ -183,6 +269,12 @@ operators may interact directly with in-pod agents without an orchestrator.
 - Keep `make integration-test` green for changes affecting CLI/common behavior,
   runtime entrypoints, chart deployment, or integration goldens. Never skip a
   scenario, and preserve complete `--dry-run` traces.
+- `make integration-test` must be green on `main` at all times. Do not merge a
+  PR that leaves any scenario red, including scenarios that were already failing
+  before your branch: if you find a pre-existing red, fix it in the same PR, or
+  file a tracking issue and land that fix before merging anything else that
+  touches the suite. "Some tests were already broken" is not a licence to add
+  more.
 - Run the full `make check` gate before merging. This repository uses its own
   build and merge queue; do not add GitHub Actions for build or test gating.
 - Structural tests that read sibling modules, directory trees, or generated
