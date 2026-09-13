@@ -139,4 +139,49 @@ test.describe('the orchestrator dialog can bind a directory of its own', () => {
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  // The combination the reported failure was in: a RUNNING orchestrator, edited
+  // to add a directory. The running path answers from the live session rather
+  // than from the persisted definition, so this is the one shape where the two
+  // could disagree and make a save look like it did nothing.
+  test('adding a directory to a running orchestrator saves and reads back', async ({
+    app,
+    page,
+  }) => {
+    const directory = makeDirectory();
+    await stubDirectoryPicker(page, directory);
+    const name = 'directories-running-test';
+
+    try {
+      await app.sidebar.newOrchestratorButton().click();
+      await app.orchestratorDialog.waitForOpen();
+      await app.orchestratorDialog.toggleEnv(SEED_TENANT, SEED_ENV_ALPHA);
+      await app.orchestratorDialog.create(name);
+      await app.orchestratorDialog.waitForClosed();
+
+      // Running before the edit, which is the state the report came from.
+      await app.sidebar.openOrchestratorSession(name);
+      await expect(app.sidebar.orchestratorStatusDot(name, 'running')).toBeVisible();
+
+      await app.sidebar.openOrchestratorDialog(name);
+      await app.orchestratorDialog.directoriesAddButton('Edit orchestrator').click();
+      await expect(
+        app.orchestratorDialog.directoryRow(directory, 'Edit orchestrator'),
+      ).toBeVisible();
+      await app.orchestratorDialog.save();
+      await app.orchestratorDialog.waitForClosed('Edit orchestrator');
+
+      // The Edit form is populated from this payload, so a directory missing here
+      // is indistinguishable from a save that never happened.
+      await app.sidebar.openOrchestratorDialog(name);
+      await expect(
+        app.orchestratorDialog.directoryRow(directory, 'Edit orchestrator'),
+      ).toBeVisible();
+      await app.orchestratorDialog.cancel('Edit orchestrator');
+      await app.orchestratorDialog.waitForClosed('Edit orchestrator');
+    } finally {
+      removeOrchestrator(name);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

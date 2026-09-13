@@ -170,3 +170,33 @@ func TestUpdateOrchestratorAddsADirectoryWhileRunning(t *testing.T) {
 		t.Fatalf("expected the added directory on a running orchestrator, got %+v", updated.Directories)
 	}
 }
+
+// The Edit form is populated from the list payload, so a directory that is saved
+// while the orchestrator runs has to appear there immediately: a definition whose
+// directory is on disk but missing from the payload reads as a save that did not
+// happen, and the operator re-adds it on every edit.
+func TestAJustSavedDirectoryIsReportedByARunningOrchestrator(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	dir := t.TempDir()
+	if _, err := app.UpdateOrchestrator(
+		created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{dir}); err != nil {
+		t.Fatalf("UpdateOrchestrator failed: %v", err)
+	}
+
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 {
+		t.Fatalf("expected one orchestrator, got %+v", listed)
+	}
+	if len(listed[0].Directories) != 1 || listed[0].Directories[0] != dir {
+		t.Fatalf("a directory saved while running must be reported back, got %+v", listed[0].Directories)
+	}
+}
