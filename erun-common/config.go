@@ -41,9 +41,11 @@ type ERunConfig struct {
 }
 
 // OrchestratorConfig is a persisted host-side AI orchestrator definition. An
-// orchestrator drives one or more agent environments from the operator's machine:
-// it reviews a pod-backed environment in a host directory read-only, and works a
-// host environment in its own directory directly, since no pod owns it.
+// orchestrator drives agent environments from the operator's machine — it reviews
+// a pod-backed environment in a host directory read-only, and works a host
+// environment in its own directory directly, since no pod owns it — and may
+// instead, or as well, name directories of its own, which belong to no environment
+// at all. A definition needs at least one of the two; neither alone is required.
 type OrchestratorConfig struct {
 	ID           string                        `yaml:"id" json:"id"`
 	Name         string                        `yaml:"name" json:"name"`

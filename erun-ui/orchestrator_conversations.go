@@ -259,6 +259,7 @@ func (a *App) restartOrchestratorOnConversation(def eruncommon.OrchestratorConfi
 		id:             def.ID,
 		name:           def.Name,
 		envs:           a.refreshLinkedEnvDirectories(def.Environments),
+		dirs:           def.Directories,
 		conversationID: conversationID,
 		cols:           cols,
 		rows:           rows,

@@ -32,11 +32,13 @@ import (
 //
 // An orchestrator is a persisted definition (root config): a set of linked
 // environments, each with a host review directory of one of three kinds (see
-// orchestratorReviewDirectory). A remote-agent env's is the one-way mirror its
+// orchestratorReviewDirectory) — a remote-agent env's is the one-way mirror its
 // workspace sync fills; a local-agent env's is the worktree itself, already on
-// this machine because the pod hostPath-mounts it. A host env's is the
-// environment — the same plain directory, with nothing between the two. The set
-// reappears across restarts; the running session is ephemeral.
+// this machine because the pod hostPath-mounts it; a host env's is the
+// environment, the same plain directory with nothing between the two — plus the
+// directories it names for itself, which belong to no environment at all and are
+// picked by path rather than derived from one. The set reappears across restarts;
+// the running session is ephemeral.
 
 // orchestratorSession is a live orchestrator PTY. Persisted orchestrators are
 // keyed by their config ID; transient ones (Investigate) carry their own display
@@ -1980,8 +1982,9 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs 
 	return orchestratorInfoFor(id, displayName, refs, dirRefs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
 }
 
-// UpdateOrchestrator edits an existing orchestrator's linked environments and
-// name, re-wiring sync for the current set.
+// UpdateOrchestrator edits an existing orchestrator's linked environments, the
+// directories it names for itself, and its name, re-wiring sync for the current
+// set.
 func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, dirs []string) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
@@ -2084,6 +2087,7 @@ func (a *App) startPersistedOrchestrator(id, conversationID, resumePrompt string
 		id:             def.ID,
 		name:           def.Name,
 		envs:           a.refreshLinkedEnvDirectories(def.Environments),
+		dirs:           def.Directories,
 		conversationID: conversationID,
 		resumePrompt:   resumePrompt,
 		cols:           cols,
@@ -2127,6 +2131,7 @@ func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, 
 		id:   def.ID,
 		name: def.Name,
 		envs: a.refreshLinkedEnvDirectories(def.Environments),
+		dirs: def.Directories,
 		cols: cols,
 		rows: rows,
 	})

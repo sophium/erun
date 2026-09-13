@@ -116,3 +116,32 @@ func TestOrchestratorClaudeMdTeachesItsOwnDirectories(t *testing.T) {
 		}
 	}
 }
+
+// The running path reads its scope from the session snapshot rather than from the
+// persisted config, so a directory that is saved is not automatically one that is
+// reported back. This is the case that was missed: the Edit form is populated from
+// what a running orchestrator reports, and a definition that reported none would be
+// saved back with none.
+func TestARunningOrchestratorStillReportsItsOwnDirectories(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	dir := t.TempDir()
+	created, err := app.CreateOrchestrator("scratch", nil, []string{dir})
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	started, err := app.StartOrchestrator(created.ID, 80, 24)
+	if err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	if len(started.Directories) != 1 || started.Directories[0] != dir {
+		t.Fatalf("a running orchestrator must report its own directories, got %+v", started.Directories)
+	}
+	// And through the list read model, which is what the sidebar and the dialog
+	// are populated from.
+	listed := app.ListOrchestrators()
+	if len(listed) != 1 || len(listed[0].Directories) != 1 || listed[0].Directories[0] != dir {
+		t.Fatalf("a running orchestrator's directories must survive into the list, got %+v", listed)
+	}
+}
