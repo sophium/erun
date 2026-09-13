@@ -145,3 +145,28 @@ func TestARunningOrchestratorStillReportsItsOwnDirectories(t *testing.T) {
 		t.Fatalf("a running orchestrator's directories must survive into the list, got %+v", listed)
 	}
 }
+
+// The operator's case: the orchestrator is running when the directory is added.
+// The running path answers from the live session snapshot rather than from the
+// persisted config, so an update has to keep working there too.
+func TestUpdateOrchestratorAddsADirectoryWhileRunning(t *testing.T) {
+	app := orchestratorTestApp(t)
+	defer app.shutdown(context.Background())
+
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
+		t.Fatalf("StartOrchestrator failed: %v", err)
+	}
+	dir := t.TempDir()
+	updated, err := app.UpdateOrchestrator(
+		created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{dir})
+	if err != nil {
+		t.Fatalf("UpdateOrchestrator while running failed: %v", err)
+	}
+	if len(updated.Directories) != 1 || updated.Directories[0] != dir {
+		t.Fatalf("expected the added directory on a running orchestrator, got %+v", updated.Directories)
+	}
+}

@@ -104,4 +104,39 @@ test.describe('the orchestrator dialog can bind a directory of its own', () => {
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  // Adding a directory to an EXISTING orchestrator and saving is its own path:
+  // UpdateOrchestrator replaces the whole definition, and the form has to send the
+  // directory it just added rather than only the ones it read back.
+  test('adding a directory to an existing orchestrator saves', async ({ app, page }) => {
+    const directory = makeDirectory();
+    await stubDirectoryPicker(page, directory);
+    const name = 'directories-add-edit-test';
+
+    try {
+      await app.sidebar.newOrchestratorButton().click();
+      await app.orchestratorDialog.waitForOpen();
+      await app.orchestratorDialog.toggleEnv(SEED_TENANT, SEED_ENV_ALPHA);
+      await app.orchestratorDialog.create(name);
+      await app.orchestratorDialog.waitForClosed();
+
+      await app.sidebar.openOrchestratorDialog(name);
+      await app.orchestratorDialog.directoriesAddButton('Edit orchestrator').click();
+      await expect(
+        app.orchestratorDialog.directoryRow(directory, 'Edit orchestrator'),
+      ).toBeVisible();
+      await app.orchestratorDialog.save();
+      await app.orchestratorDialog.waitForClosed('Edit orchestrator');
+
+      await app.sidebar.openOrchestratorDialog(name);
+      await expect(
+        app.orchestratorDialog.directoryRow(directory, 'Edit orchestrator'),
+      ).toBeVisible();
+      await app.orchestratorDialog.cancel('Edit orchestrator');
+      await app.orchestratorDialog.waitForClosed('Edit orchestrator');
+    } finally {
+      removeOrchestrator(name);
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
