@@ -85,7 +85,15 @@ function orchestratorSnapshot(): unknown {
       { tenant: SEED_TENANT, environment: SEED_ENV_BETA, directory: '/tmp/orch-beta' },
     ],
     tenants: [SEED_TENANT],
-    directories: ['/tmp/orch-alpha', '/tmp/orch-beta'],
+    // Empty, not absent: this orchestrator has only its linked environments, and
+    // the diff panel renders one section per directory an orchestrator works in
+    // itself, so naming fictional paths here would add a failing section -- and
+    // its error alert -- to every test in this file, which are all about the
+    // per-environment sections. A directory an orchestrator really has is covered
+    // by review-directory-target.spec.ts, against a real one. Empty is also what
+    // the desktop itself sends: directoryPaths builds with make, so the field is
+    // an array even when there is nothing in it.
+    directories: [],
     sessionId: RUNNING_SESSION_ID,
     status: 'running',
     busy: false,
