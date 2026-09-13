@@ -41,18 +41,35 @@ type ERunConfig struct {
 }
 
 // OrchestratorConfig is a persisted host-side AI orchestrator definition. An
-// orchestrator drives one or more agent environments from the operator's machine,
-// reviewing each in a host directory read-only.
+// orchestrator drives agent environments from the operator's machine — it reviews
+// a pod-backed environment in a host directory read-only, and works a host
+// environment in its own directory directly, since no pod owns it — and may
+// instead, or as well, name directories of its own, which belong to no environment
+// at all. A definition needs at least one of the two; neither alone is required.
 type OrchestratorConfig struct {
-	ID           string                  `yaml:"id" json:"id"`
-	Name         string                  `yaml:"name" json:"name"`
-	Environments []OrchestratorEnvConfig `yaml:"environments,omitempty" json:"environments,omitempty"`
+	ID           string                        `yaml:"id" json:"id"`
+	Name         string                        `yaml:"name" json:"name"`
+	Environments []OrchestratorEnvConfig       `yaml:"environments,omitempty" json:"environments,omitempty"`
+	Directories  []OrchestratorDirectoryConfig `yaml:"directories,omitempty" json:"directories,omitempty"`
 }
 
-// OrchestratorEnvConfig links one agent environment to the orchestrator's
-// read-only review window on the host: the directory a remote-agent env's
-// workspace sync mirrors into, or a local-agent env's own worktree, which is
-// already on this machine because its pod hostPath-mounts it.
+// OrchestratorDirectoryConfig is one directory the orchestrator operates in,
+// named by path alone. It is deliberately not an environment: it carries no
+// tenant, no environment name, no runtime version or image, and no role, because
+// none of those describe a directory with no pod, no cluster, and no lifecycle
+// behind it. It exists so an orchestrator can be pointed at a directory on this
+// machine without registering an environment for it first; the orchestrator
+// authors and builds there directly, the same way it does in a host
+// environment's own directory.
+type OrchestratorDirectoryConfig struct {
+	Directory string `yaml:"directory" json:"directory"`
+}
+
+// OrchestratorEnvConfig links one agent environment to the orchestrator's window
+// on the host: the directory a remote-agent env's workspace sync mirrors into
+// (read-only), a local-agent env's own worktree, which is already on this machine
+// because its pod hostPath-mounts it (also read-only), or a host env's own
+// directory, which no pod owns and the orchestrator authors in directly.
 type OrchestratorEnvConfig struct {
 	Tenant      string `yaml:"tenant" json:"tenant"`
 	Environment string `yaml:"environment" json:"environment"`
@@ -102,15 +119,22 @@ func (r OrchestratorEnvRole) IsValid() bool {
 // to an environment of envType -- the single decision the CLI's
 // SetOrchestratorEnvRole and the desktop's link/edit gate both consult, so
 // neither can drift from the other on what a role is allowed to be. A
-// local-agent, remote-agent, or host environment has a worktree to review and
-// an in-pod agent to delegate to, so any role -- including undeclared -- is
-// fine. A runtime environment has neither, so only OrchestratorEnvRoleRuntime
-// may be declared for it; code and build, which both presuppose what it
-// lacks, are refused, the same as any type this function does not recognize.
+// local-agent or remote-agent environment has a worktree to review and an
+// in-pod agent to delegate to, so any role -- including undeclared -- is fine.
+// A host environment has a real worktree on this machine too, so code, build,
+// and undeclared are equally fine -- but not the runtime role: that one means
+// operate the environment directly (deploy, pin, observe), and every one of
+// those refuses a host environment, which has no pod for them to act on. A
+// runtime environment is the mirror image -- no worktree to review and no
+// in-pod agent to delegate to -- so only OrchestratorEnvRoleRuntime may be
+// declared for it; code and build, which both presuppose what it lacks, are
+// refused, the same as any type this function does not recognize.
 func OrchestratorEnvRoleAllowed(envType EnvironmentType, role OrchestratorEnvRole) bool {
 	switch envType {
-	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeHost:
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent:
 		return true
+	case EnvironmentTypeHost:
+		return role != OrchestratorEnvRoleRuntime
 	case EnvironmentTypeRuntime:
 		return role == OrchestratorEnvRoleRuntime
 	default:
@@ -120,7 +144,9 @@ func OrchestratorEnvRoleAllowed(envType EnvironmentType, role OrchestratorEnvRol
 
 // OrchestratorEnvRoleRequiredFor returns the one role a link to an
 // environment of envType must declare for OrchestratorEnvRoleAllowed to
-// accept it, or "" when every role -- including undeclared -- already works.
+// accept it, or "" when nothing must be declared -- which is not the same as
+// every role being allowed: a host environment requires no role while still
+// refusing one, so "" here means "undeclared is legal", not "anything goes".
 // Only a runtime environment constrains this today.
 func OrchestratorEnvRoleRequiredFor(envType EnvironmentType) OrchestratorEnvRole {
 	if envType == EnvironmentTypeRuntime {
@@ -138,10 +164,15 @@ func OrchestratorEnvRoleIneligibilityReason(envType EnvironmentType, role Orches
 	if OrchestratorEnvRoleAllowed(envType, role) {
 		return ""
 	}
-	if envType == EnvironmentTypeRuntime {
+	switch envType {
+	case EnvironmentTypeRuntime:
 		return "Runtime environments have no worktree to review and no in-pod agent to delegate to, " +
 			"so they can't be linked to an orchestrator with the code or build role. Link with the " +
 			"runtime role instead to operate it directly."
+	case EnvironmentTypeHost:
+		return "A host environment is a directory on this machine with no pod, so there is nothing for " +
+			"the runtime role to deploy, pin, or observe. Link it with the code or build role, or " +
+			"leave the role undeclared."
 	}
 	return "This environment's type isn't recognized, so it can't be linked to an orchestrator."
 }

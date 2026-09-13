@@ -90,14 +90,14 @@ export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch)
 };
 
 // createOrchestrator persists a new orchestrator linking the chosen agent
-// environments (each with the host directory it is reviewed in) and closes the
-// dialog.
+// environments (each with the host directory it is reviewed in) plus the
+// directories of its own, and closes the dialog.
 export const createOrchestrator =
-  (name: string, envs: OrchestratorEnvRef[]): AppThunk<Promise<void>> =>
+  (name: string, envs: OrchestratorEnvRef[], directories: string[]): AppThunk<Promise<void>> =>
   async (dispatch) => {
     dispatch(setOrchestratorsBusy(true));
     try {
-      await CreateOrchestrator(name, envs);
+      await CreateOrchestrator(name, envs, directories);
       dispatch(closeOrchestratorDialog());
       await dispatch(loadOrchestrators());
       dispatch(setOrchestratorsBusy(false));
@@ -106,13 +106,19 @@ export const createOrchestrator =
     }
   };
 
-// updateOrchestrator edits an existing orchestrator's linked environments and name.
+// updateOrchestrator edits an existing orchestrator's linked environments, its
+// own directories, and its name.
 export const updateOrchestrator =
-  (id: string, name: string, envs: OrchestratorEnvRef[]): AppThunk<Promise<void>> =>
+  (
+    id: string,
+    name: string,
+    envs: OrchestratorEnvRef[],
+    directories: string[],
+  ): AppThunk<Promise<void>> =>
   async (dispatch) => {
     dispatch(setOrchestratorsBusy(true));
     try {
-      await UpdateOrchestrator(id, name, envs);
+      await UpdateOrchestrator(id, name, envs, directories);
       dispatch(closeOrchestratorDialog());
       await dispatch(loadOrchestrators());
       dispatch(setOrchestratorsBusy(false));

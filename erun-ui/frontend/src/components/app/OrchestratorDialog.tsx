@@ -26,6 +26,7 @@ import {
   type OrchestratorInfo,
 } from '@/app/slices/orchestratorsSlice';
 import { OrchestratorConversationsSection } from '@/components/app/OrchestratorDialog.Conversations';
+import { DirectoriesField } from '@/components/app/OrchestratorDialog.Directories';
 import { EnvironmentsField } from '@/components/app/OrchestratorDialog.Environments';
 import {
   type EnvCandidate,
@@ -35,11 +36,16 @@ import { OrchestratorGuidanceSection } from '@/components/app/OrchestratorDialog
 
 import { ListOrchestratorEnvCandidates } from '../../../wailsjs/go/main/App';
 
-// OrchestratorDialog creates or edits a persisted orchestrator: a name and the
-// agent environments it links, each with the host directory it reviews read-only.
-// Creating prepares that directory — the mirror plus its one-way sync for a
-// remote-agent env, nothing for a local-agent env whose worktree is already here;
-// editing re-links the current set.
+// OrchestratorDialog creates or edits a persisted orchestrator: a name, the agent
+// environments it links — each with a directory on this machine, either a
+// pod-backed environment's read-only review directory or a host environment's own
+// directory, which the orchestrator works in directly because no pod owns it — and
+// the directories it works in that belong to no environment at all, which are
+// picked rather than derived and registered nowhere. Creating prepares each linked
+// environment's directory — the mirror plus its one-way sync for a remote-agent
+// env; a local-agent env's worktree and a host env's directory are already here, so
+// those are only checked to exist — and a directory of its own only has to exist;
+// editing re-links the set.
 interface OrchestratorForm {
   candidates: EnvCandidate[];
   name: string;
@@ -48,12 +54,18 @@ interface OrchestratorForm {
   toggle: (candidate: EnvCandidate, checked: boolean) => void;
   setDirectory: (ref: OrchestratorEnvRef, directory: string) => void;
   setRole: (ref: OrchestratorEnvRef, role: OrchestratorEnvRole) => void;
+  directories: string[];
+  addDirectory: (directory: string) => void;
+  removeDirectory: (directory: string) => void;
+  submit: () => void;
 }
 
 function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): OrchestratorForm {
+  const dispatch = useAppDispatch();
   const [candidates, setCandidates] = React.useState<EnvCandidate[]>([]);
   const [name, setName] = React.useState('');
   const [selected, setSelected] = React.useState<OrchestratorEnvRef[]>([]);
+  const [directories, setDirectories] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     if (!open) {
@@ -61,6 +73,7 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     }
     setName(editing?.name ?? '');
     setSelected(editing ? editing.environments.map((env) => ({ ...env })) : []);
+    setDirectories(editing ? [...editing.directories] : []);
     void ListOrchestratorEnvCandidates().then((list) => {
       // The Wails binding types requiredRole as a plain string (Go's
       // OrchestratorEnvRole erases to that on the wire); loadOrchestrators
@@ -115,7 +128,39 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     );
   };
 
-  return { candidates, name, setName, selected, toggle, setDirectory, setRole };
+  // Adding the same directory twice is one row, matching the backend's own
+  // dedupe, so the form cannot show a duplicate the saved definition will not have.
+  const addDirectory = (directory: string): void => {
+    setDirectories((current) => (current.includes(directory) ? current : [...current, directory]));
+  };
+  const removeDirectory = (directory: string): void => {
+    setDirectories((current) => current.filter((entry) => entry !== directory));
+  };
+
+  // The hook owns submitting as well as the fields: what the dialog sends is
+  // exactly the form it collected, and keeping the two in one place is what stops
+  // a new field from being rendered but never sent.
+  const submit = (): void => {
+    if (editing) {
+      void dispatch(updateOrchestrator(editing.id, name, selected, directories));
+    } else {
+      void dispatch(createOrchestrator(name, selected, directories));
+    }
+  };
+
+  return {
+    candidates,
+    name,
+    setName,
+    selected,
+    toggle,
+    setDirectory,
+    setRole,
+    directories,
+    addDirectory,
+    removeDirectory,
+    submit,
+  };
 }
 
 // OrchestratorDialog is the single management surface for an orchestrator,
@@ -167,6 +212,14 @@ export function OrchestratorDialog(): React.ReactElement {
   );
 }
 
+// orchestratorScopeIsEmpty reports an orchestrator definition with nothing to
+// operate on. A directory of its own counts: an orchestrator pointed only at a
+// directory is a complete definition, which is why this is not simply "no
+// environments linked".
+function orchestratorScopeIsEmpty(selected: OrchestratorEnvRef[], directories: string[]): boolean {
+  return selected.length === 0 && directories.length === 0;
+}
+
 function OrchestratorForm({
   open,
   editing,
@@ -179,24 +232,18 @@ function OrchestratorForm({
   const dispatch = useAppDispatch();
   const busy = useAppSelector((state) => state.orchestrators.busy);
   const error = useAppSelector((state) => state.orchestrators.error);
-  const { candidates, name, setName, selected, toggle, setDirectory, setRole } =
-    useOrchestratorForm(open, editing);
-  const submit = (): void => {
-    if (editing) {
-      void dispatch(updateOrchestrator(editing.id, name, selected));
-    } else {
-      void dispatch(createOrchestrator(name, selected));
-    }
-  };
+  const form = useOrchestratorForm(open, editing);
+  const { candidates, name, selected, toggle, setDirectory, setRole, directories } = form;
 
   return (
     <>
       <DialogHeader>
         <DialogTitle>{editing ? 'Edit orchestrator' : 'New orchestrator'}</DialogTitle>
         <DialogDescription>
-          A host-side AI session that drives and reviews work across agent environments. It reads
-          each linked environment&apos;s code on this machine, read-only, and delegates every change
-          to the in-pod agents.
+          A host-side AI session that drives and reviews work across agent environments. It
+          delegates changes to a pod-backed environment&apos;s in-pod agent while reviewing that
+          worktree on this machine read-only, and authors changes directly in a host
+          environment&apos;s own directory, which no pod owns.
         </DialogDescription>
       </DialogHeader>
 
@@ -208,7 +255,7 @@ function OrchestratorForm({
             value={name}
             placeholder="Optional — defaults from the tenants"
             onChange={(event) => {
-              setName(event.target.value);
+              form.setName(event.target.value);
             }}
           />
         </div>
@@ -219,6 +266,12 @@ function OrchestratorForm({
           onToggle={toggle}
           onDirectoryChange={setDirectory}
           onRoleChange={setRole}
+        />
+        <DirectoriesField
+          directories={directories}
+          disabled={busy}
+          onAdd={form.addDirectory}
+          onRemove={form.removeDirectory}
         />
         {editing && !editing.transient ? (
           <>
@@ -253,7 +306,11 @@ function OrchestratorForm({
           >
             Cancel
           </Button>
-          <Button type="button" disabled={busy || selected.length === 0} onClick={submit}>
+          <Button
+            type="button"
+            disabled={busy || orchestratorScopeIsEmpty(selected, directories)}
+            onClick={form.submit}
+          >
             {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
             {editing ? 'Save' : 'Create'}
           </Button>

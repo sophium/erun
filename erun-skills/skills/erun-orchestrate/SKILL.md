@@ -1,6 +1,6 @@
 ---
 name: erun-orchestrate
-description: Operate as a host-side erun orchestrator that drives and reviews work across agent environments without editing their code locally. Use when asked to "orchestrate erun environments", "drive the remote agents", "coordinate work across environments", "review what the agents changed", "review changes across envs", "run the built app to verify", or "delegate this to the environment's agent".
+description: Operate as a host-side erun orchestrator that drives and reviews work across the environments it links — delegating pod work to the in-pod Agent, and working a host environment's own directory directly. Use when asked to "orchestrate erun environments", "drive the remote agents", "coordinate work across environments", "review what the agents changed", "review changes across envs", "run the built app to verify", or "delegate this to the environment's agent".
 ---
 
 # erun-orchestrate
@@ -24,13 +24,25 @@ missing authority or external blockers with the evidence and required action.
   not populated directories or naming conventions. A linked empty mirror may
   simply await sync; an undeclared role is not permission to guess.
 - Remote-agent review directories are one-way pod mirrors; local-agent directories
-  are the pod-mounted worktrees themselves. Both are read-only to the orchestrator.
-  Host edits are either overwritten by sync or collide with the owning Agent.
+  are the pod-mounted worktrees themselves. Both are read-only to the orchestrator —
+  an edit to either is lost to the next sync or collides with the Agent that owns the
+  tree. A **host** environment is the third kind: a plain directory with no pod, no
+  sync, and no owning in-pod Agent, so it is the one review directory you author,
+  build, and review in directly. Keep that link pointed at a directory nothing else
+  owns; a local-agent worktree is still that environment's, not yours.
 - Mirrors are read/delivery surfaces, not build directories. Sync deletes files
   absent in the pod. Read authoritative pod diffs and received artifacts there;
-  keep orchestration tools and build outputs outside every review directory.
-- Treat host and pod configuration as different state stores. Diagnose host
-  identity/lifecycle on the host; pod calls answer only about pod state.
+  keep orchestration tools and build outputs outside every pod-backed review
+  directory — a host environment's own directory is where you build, not a
+  surface to keep clean of your own work.
+- Your definition may also name **directories of your own** (`directories:` on your
+  `orchestrators:` entry): paths that belong to no environment at all — no tenant,
+  no pod, no version, no role. They are yours to author, build, and review in
+  directly, on the same terms as a host environment's directory, and nothing syncs,
+  mounts, or else owns them. There is no MCP edge for one either, so you reach it
+  with your own file and shell tools.
+- Treat host-machine and pod configuration as different state stores. Diagnose
+  host identity/lifecycle on the host machine; pod calls answer only about pod state.
   Read-only mirrors cannot establish live runtime version: use the MCP version tool.
 
 ## Roles and workflow
@@ -43,7 +55,11 @@ missing authority or external blockers with the evidence and required action.
    They have no worktree or in-pod Agent to delegate code work to.
 5. Review each environment's authoritative diff read-only; send corrections back
    through that environment, never patch its mirror.
-6. Have the pod cross-build host-native artifacts into its outputs directory;
+6. Work a **host** environment in its own directory. It has no pod, so there is no
+   MCP edge, no job lifecycle, and no in-pod Agent to delegate to — you edit and
+   build there yourself. `erun build` and `erun release` run against it; deploy,
+   pin, open, terraform, and upgrade all refuse it, because each needs a pod.
+7. Have the pod cross-build host-native artifacts into its outputs directory;
    receive them through mirror artifacts or explicit download, then run them on
    the matching host OS/architecture. A Linux pod cannot verify a foreign-OS binary.
    Native desktop GUI compilation is the explicit host-build exception below.
@@ -56,6 +72,9 @@ other machine may address an empty, unrelated state.
 
 - Reach pod work through its erun MCP, not kubectl exec, SSH, or direct Helm.
   Use the host erun CLI for lifecycle and authoritative environment shape.
+- A host environment has no MCP edge at all — an absent one is the type working as
+  designed, not a link that failed to wire, and restarting changes nothing. Reach it
+  with your own file and shell tools in its directory.
 - A bound forwarding port is not proof of a working MCP channel. Test end to end.
   Job status/await, idle, and MCP calls/tools already self-heal one unreachable hop;
   channel exit 126 is not the delegated job's result.
@@ -189,9 +208,10 @@ and refactoring rules stay in the repository root, not this workflow.
 - Follow the tool's configured source pointer; verify commit before build and the
   actual running process/version afterward. A restart-shaped message is not proof:
   inspect process identity/start time.
-- When the native GUI toolchain requires a host build, use a copy outside every
-  mirror/mounted review tree with separate outputs; code is still authored in-pod.
-  Keep the previous executable for recovery.
+- When the native GUI toolchain requires a host-machine build, use a copy outside
+  every pod-backed review tree with separate outputs; for a pod-backed environment
+  code is still authored in-pod. A host environment is already exactly such a copy,
+  so build it there. Keep the previous executable for recovery.
 
 ## Completion
 

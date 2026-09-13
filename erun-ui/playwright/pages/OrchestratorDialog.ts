@@ -74,6 +74,30 @@ export class OrchestratorDialog {
     });
   }
 
+  // The orchestrator's own directories: paths it works in that belong to no
+  // environment. "Add directory…" opens the native picker; each row carries its
+  // own remove button, labelled with the path it removes. Mode-aware like the
+  // footer controls, since a directory is read back in Edit mode.
+  directoriesAddButton(
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode).getByRole('button', { name: 'Add directory…' });
+  }
+
+  directoryRow(
+    directory: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode).getByText(directory, { exact: true });
+  }
+
+  directoryRemoveButton(
+    directory: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode).getByRole('button', { name: `Remove ${directory}` });
+  }
+
   // The role SelectField's trigger, present only for a checked (linked) env --
   // id matches OrchestratorDialog.Environments.helpers.ts's envRoleFieldId.
   envRoleTrigger(tenant: string, environment: string): Locator {
@@ -87,6 +111,22 @@ export class OrchestratorDialog {
   ): Promise<void> {
     await this.envRoleTrigger(tenant, environment).click();
     await this.page.getByRole('option', { name: role, exact: true }).click();
+  }
+
+  // The roles the trigger offers for a linked env, by their visible words, in
+  // the order the control renders them. Opened and dismissed in one call so a
+  // spec can assert on the offered SET without leaving the popup covering the
+  // row it is about to drive. Read as a list rather than probed one role at a
+  // time because the property under test is which roles are absent (a host env
+  // must not be offered Runtime) alongside which ones are still present —
+  // a single-role probe cannot tell "not offered" from "the list never opened".
+  async envRoleOptionNames(tenant: string, environment: string): Promise<string[]> {
+    await this.envRoleTrigger(tenant, environment).click();
+    const options = this.page.getByRole('option');
+    await options.first().waitFor({ state: 'visible' });
+    const names = await options.allInnerTexts();
+    await this.page.keyboard.press('Escape');
+    return names.map((name) => name.trim());
   }
 
   // An ineligible env (an unrecognized type) is still listed, disabled, with

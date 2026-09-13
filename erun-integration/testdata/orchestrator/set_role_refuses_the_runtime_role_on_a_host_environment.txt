@@ -1,0 +1,2 @@
+audit: erun orchestrator set-role --role runtime eng-1 frs workstation
+orchestrator eng-1: frs/workstation is a "host" environment, so it cannot take role "runtime" -- A host environment is a directory on this machine with no pod, so there is nothing for the runtime role to deploy, pin, or observe. Link it with the code or build role, or leave the role undeclared.

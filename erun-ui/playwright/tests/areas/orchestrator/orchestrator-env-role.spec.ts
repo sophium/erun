@@ -131,6 +131,76 @@ test.describe("the orchestrator dialog can set a linked environment's role", () 
     }
   });
 
+  // A host environment — a directory on the operator's own machine
+  // with no pod and no cluster at all — had no way into this picker. It is now
+  // checkable like any other env, and it is reviewed in place rather than in a
+  // pod's worktree. What it must NOT offer is the runtime role: that role means
+  // "operated directly — deploy, pin, observe", and every one of those verbs
+  // refuses a host env outright. Offering it would promise a relationship the
+  // link cannot deliver, and the mismatch would surface only later, in the
+  // orchestrator session, as an environment tool that never works. The shared
+  // gate both this picker and the CLI validate against is covered by
+  // TestSetOrchestratorEnvRoleRefusesRuntimeForAHostEnvironment in
+  // erun-common/orchestrator_env_role_test.go; this spec drives the rendering
+  // and the persistence that Go test cannot reach.
+  test('a host environment is linkable, reviewed in place, and offered no runtime role', async ({
+    app,
+    seededHostEnv,
+  }) => {
+    const name = 'host-role-test';
+    const { tenant, environment } = seededHostEnv;
+
+    try {
+      await app.sidebar.newOrchestratorButton().click();
+      await app.orchestratorDialog.waitForOpen();
+
+      // Checkable, not greyed out with a reason — the fix's whole point.
+      await expect(app.orchestratorDialog.envCheckbox(tenant, environment)).toBeEnabled();
+      await app.orchestratorDialog.toggleEnv(tenant, environment);
+
+      // Named a directory, not a worktree: in this dialog a worktree is a
+      // pod's, hostPath-mounted into it, and a host env has no pod at all, so
+      // the same word would describe two different relationships.
+      await expect(app.orchestratorDialog.envBlock(tenant, environment)).toContainText(
+        'directory on this machine',
+      );
+
+      // No mirror to place: a host env's directory is derived from its own
+      // repository path and shown read-only rather than offered for editing.
+      await expect(app.orchestratorDialog.envDirectoryInput(tenant, environment)).toHaveCount(0);
+
+      // A host env carries more than one legal role, so it gets the real Select
+      // — unlike a runtime env, which states its one role as a plain fact.
+      await expect(app.orchestratorDialog.envRoleTrigger(tenant, environment)).toBeVisible();
+      expect(
+        await app.orchestratorDialog.envRoleOptionNames(tenant, environment),
+        'Runtime must not be offerable for a host environment',
+      ).toEqual(['Not declared', 'Code', 'Build']);
+
+      // It persists as a host link carrying the chosen role, across a real
+      // CreateOrchestrator round trip rather than only this render's state.
+      await app.orchestratorDialog.setEnvRole(tenant, environment, 'Build');
+      await app.orchestratorDialog.create(name);
+      await app.orchestratorDialog.waitForClosed();
+
+      await app.sidebar.openOrchestratorDialog(name);
+      await expect(
+        app.orchestratorDialog.envCheckbox(tenant, environment, 'Edit orchestrator'),
+      ).toBeChecked();
+      await expect(app.orchestratorDialog.envRoleTrigger(tenant, environment)).toContainText(
+        'Build',
+      );
+      expect(
+        await app.orchestratorDialog.envRoleOptionNames(tenant, environment),
+        'the reopened link must stay free of the runtime role',
+      ).toEqual(['Not declared', 'Code', 'Build']);
+
+      await app.orchestratorDialog.cancel('Edit orchestrator');
+    } finally {
+      removeOrchestrator(name);
+    }
+  });
+
   test('the role control appears only for a checked environment', async ({ app }) => {
     await app.sidebar.newOrchestratorButton().click();
     await app.orchestratorDialog.waitForOpen();
