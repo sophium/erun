@@ -551,6 +551,26 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/with_orchestrator_pairing_invalid_before_the_role_gate_existed", normalize.Apply(result.Combined))
 	})
 
+	t.Run("with_orchestrator_directories", func(t *testing.T) {
+		// An orchestrator may be pointed at directories of its own and link no
+		// environment at all -- that is a complete definition, not an empty one.
+		// `erun list` has to report them, or an orchestrator working only in
+		// directories reads as having no scope.
+		setup := env.New(t)
+		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
+			{
+				id:          "scratch",
+				name:        "Scratch",
+				directories: []string{"/opt/operator/notes", "/opt/operator/scratch"},
+			},
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/with_orchestrator_directories", normalize.Apply(result.Combined))
+	})
+
 	t.Run("corrupted_env_config_errors", func(t *testing.T) {
 		// A corrupted env config.yaml must fail list outright, not be silently skipped.
 		setup := env.New(t)
@@ -1087,6 +1107,10 @@ type orchestratorSeed struct {
 	id           string
 	name         string
 	environments []orchestratorEnvSeed
+	// directories are the orchestrator's own: paths that belong to no environment.
+	// A seed may carry these and no environment at all, which is a complete
+	// definition.
+	directories []string
 }
 
 // seedOrchestratorsWithEnvRoles appends a persisted orchestrators list,
@@ -1111,13 +1135,21 @@ func seedOrchestratorsWithEnvRoles(t testing.TB, setup env.Setup, orchestrators 
 	for _, orchestrator := range orchestrators {
 		sb.WriteString("  - id: " + orchestrator.id + "\n")
 		sb.WriteString("    name: " + orchestrator.name + "\n")
-		sb.WriteString("    environments:\n")
-		for _, e := range orchestrator.environments {
-			sb.WriteString("      - tenant: " + e.tenant + "\n")
-			sb.WriteString("        environment: " + e.environment + "\n")
-			sb.WriteString("        directory: " + e.directory + "\n")
-			if e.role != "" {
-				sb.WriteString("        role: " + e.role + "\n")
+		if len(orchestrator.environments) > 0 {
+			sb.WriteString("    environments:\n")
+			for _, e := range orchestrator.environments {
+				sb.WriteString("      - tenant: " + e.tenant + "\n")
+				sb.WriteString("        environment: " + e.environment + "\n")
+				sb.WriteString("        directory: " + e.directory + "\n")
+				if e.role != "" {
+					sb.WriteString("        role: " + e.role + "\n")
+				}
+			}
+		}
+		if len(orchestrator.directories) > 0 {
+			sb.WriteString("    directories:\n")
+			for _, directory := range orchestrator.directories {
+				sb.WriteString("      - directory: " + directory + "\n")
 			}
 		}
 	}
