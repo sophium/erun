@@ -190,14 +190,25 @@ export function OrchestratorDialog(): React.ReactElement {
         }
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        // Bound the panel to the viewport and let the field region scroll, so the
+        // footer — and with it Save — stays reachable on a short window. The form
+        // carries the linked environments, the orchestrator's own directories, its
+        // conversations and its guidance, which together outgrow a window; without
+        // this the dialog simply grew past the bottom edge and the Save button sat
+        // half off-screen, where it reads as a save that does nothing. Same
+        // treatment, and the same reason, as EnvironmentDialogView.
+        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg"
+      >
         {editing && confirmingDelete ? (
-          <OrchestratorDeleteConfirm
-            editing={editing}
-            onCancel={() => {
-              setConfirmingDelete(false);
-            }}
-          />
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-6">
+            <OrchestratorDeleteConfirm
+              editing={editing}
+              onCancel={() => {
+                setConfirmingDelete(false);
+              }}
+            />
+          </div>
         ) : (
           <OrchestratorForm
             open={open}
@@ -237,17 +248,19 @@ function OrchestratorForm({
 
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>{editing ? 'Edit orchestrator' : 'New orchestrator'}</DialogTitle>
-        <DialogDescription>
-          A host-side AI session that drives and reviews work across agent environments. It
-          delegates changes to a pod-backed environment&apos;s in-pod agent while reviewing that
-          worktree on this machine read-only, and authors changes directly in a host
-          environment&apos;s own directory, which no pod owns.
-        </DialogDescription>
-      </DialogHeader>
+      <div className="shrink-0 px-6 pt-6 pb-4">
+        <DialogHeader>
+          <DialogTitle>{editing ? 'Edit orchestrator' : 'New orchestrator'}</DialogTitle>
+          <DialogDescription>
+            A host-side AI session that drives and reviews work across agent environments. It
+            delegates changes to a pod-backed environment&apos;s in-pod agent while reviewing that
+            worktree on this machine read-only, and authors changes directly in a host
+            environment&apos;s own directory, which no pod owns.
+          </DialogDescription>
+        </DialogHeader>
+      </div>
 
-      <div className="space-y-4">
+      <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-1">
         <div className="space-y-1.5">
           <Label htmlFor="orchestrator-name">Name</Label>
           <Input
@@ -286,36 +299,38 @@ function OrchestratorForm({
         ) : null}
       </div>
 
-      <DialogFooter className="sm:justify-between">
-        {editing && !editing.transient ? (
-          <OrchestratorManageActions
-            editing={editing}
-            busy={busy}
-            onRequestDelete={onRequestDelete}
-          />
-        ) : (
-          <span />
-        )}
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              dispatch(closeOrchestratorDialog());
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            disabled={busy || orchestratorScopeIsEmpty(selected, directories)}
-            onClick={form.submit}
-          >
-            {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
-            {editing ? 'Save' : 'Create'}
-          </Button>
-        </div>
-      </DialogFooter>
+      <div className="shrink-0 border-t px-6 pt-4 pb-6">
+        <DialogFooter className="sm:justify-between">
+          {editing && !editing.transient ? (
+            <OrchestratorManageActions
+              editing={editing}
+              busy={busy}
+              onRequestDelete={onRequestDelete}
+            />
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                dispatch(closeOrchestratorDialog());
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={busy || orchestratorScopeIsEmpty(selected, directories)}
+              onClick={form.submit}
+            >
+              {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : null}
+              {editing ? 'Save' : 'Create'}
+            </Button>
+          </div>
+        </DialogFooter>
+      </div>
     </>
   );
 }
