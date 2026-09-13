@@ -54,3 +54,47 @@ if (typeof window.matchMedia === 'undefined') {
 if (typeof Element.prototype.scrollIntoView === 'undefined') {
   Element.prototype.scrollIntoView = (): undefined => undefined;
 }
+
+// The jsdom library implements both Storage APIs, but this environment does not
+// expose them: a bare `new JSDOM('', {url})` has window.localStorage, while under
+// this runner window.localStorage is undefined and every component that reads a
+// persisted preference throws on mount. In-memory is enough for a test -- nothing
+// here reloads a page, so persistence across navigations is not observable in a
+// component test, and nothing is shared between test files.
+class MemoryStorage implements Storage {
+  private readonly entries = new Map<string, string>();
+
+  get length(): number {
+    return this.entries.size;
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+
+  getItem(key: string): string | null {
+    return this.entries.get(key) ?? null;
+  }
+
+  key(index: number): string | null {
+    return [...this.entries.keys()][index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    this.entries.delete(key);
+  }
+
+  setItem(key: string, value: string): void {
+    this.entries.set(key, value);
+  }
+}
+
+if (typeof window.localStorage === 'undefined') {
+  Object.defineProperty(window, 'localStorage', { value: new MemoryStorage(), configurable: true });
+}
+if (typeof window.sessionStorage === 'undefined') {
+  Object.defineProperty(window, 'sessionStorage', {
+    value: new MemoryStorage(),
+    configurable: true,
+  });
+}
