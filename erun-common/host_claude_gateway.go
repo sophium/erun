@@ -78,22 +78,70 @@ func GatewayCredentialFromEnv(env map[string]string) (string, bool) {
 	return "", false
 }
 
-// HostClaudeGatewayCredential returns the gateway credential this machine's own
-// Claude Code authenticates with, and whether it found one.
+// hostClaudeGatewayCredential describes what this machine's own Claude Code
+// holds: the credential it authenticates with, if any, and the gateway it is
+// pointed at, if any.
 //
-// It is where a catalog's credential starts. An operator who already runs Claude
-// Code against a gateway has the key on this machine, so asking them to paste it
-// again would be asking for something erun can read.
+// One read answers both, so a caller deciding whether a key may be reused — and
+// a caller explaining why it may not — cannot reach two different conclusions
+// about the same settings file.
+func hostClaudeGatewayCredential() (token, endpoint string) {
+	env, err := HostClaudeSettingsEnv()
+	if err != nil {
+		return "", ""
+	}
+	token, _ = GatewayCredentialFromEnv(env)
+	return token, strings.TrimSpace(env["ANTHROPIC_BASE_URL"])
+}
+
+// HostClaudeGatewayEndpoint reports the gateway this machine's own Claude Code
+// routes through, or "" when it routes through none.
+//
+// It exists to name the mismatch: a key that will not be reused should say which
+// endpoint it belongs to rather than reading as no key at all.
+func HostClaudeGatewayEndpoint() string {
+	_, endpoint := hostClaudeGatewayCredential()
+	return endpoint
+}
+
+// HostClaudeGatewayCredentialFor returns the credential this machine's own
+// Claude Code authenticates with, and whether it may be reused for the gateway
+// at baseURL.
+//
+// The endpoint must match, and that check is the whole point of this function.
+// A credential is scoped to the service it was issued for, so reusing the host's
+// key against a different gateway would hand a credential minted for one service
+// to another: an operator whose Claude Code authenticates directly against
+// Anthropic carries an ANTHROPIC_API_KEY in these very settings, and delivering
+// that as a gateway's bearer token would disclose it to that gateway. The
+// fallback therefore covers exactly the case it was written for — an operator
+// already running Claude Code through this same gateway — and declines every
+// other, leaving the operator to save the gateway's own key.
 //
 // Every failure reads as "no credential" rather than an error: this supplies a
 // default, and a settings file that is absent or unreadable is the unconfigured
 // case here, not a fault worth failing a deploy over. The value is returned to
 // whoever stores or delivers it and never lands in config.yaml, a chart value,
 // or a launch command.
-func HostClaudeGatewayCredential() (string, bool) {
-	env, err := HostClaudeSettingsEnv()
-	if err != nil {
+func HostClaudeGatewayCredentialFor(baseURL string) (string, bool) {
+	token, endpoint := hostClaudeGatewayCredential()
+	if token == "" || !sameGatewayEndpoint(endpoint, baseURL) {
 		return "", false
 	}
-	return GatewayCredentialFromEnv(env)
+	return token, true
+}
+
+// sameGatewayEndpoint reports whether two addresses name the same gateway.
+//
+// Matching is deliberately strict — only surrounding whitespace, a trailing
+// slash, and case differ freely — because the permissive direction is the unsafe
+// one: a looser comparison would reuse a credential across endpoints that merely
+// look alike. A gateway spelled differently enough to fail this simply declines
+// the fallback, and the operator saves its key instead.
+func sameGatewayEndpoint(a, b string) bool {
+	normalize := func(value string) string {
+		return strings.ToLower(strings.TrimRight(strings.TrimSpace(value), "/"))
+	}
+	left, right := normalize(a), normalize(b)
+	return left != "" && left == right
 }

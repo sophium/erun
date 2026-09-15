@@ -46,13 +46,6 @@ export interface UIHostGatewayDefaults {
   baseUrl?: string;
   model?: string;
   context?: number;
-  // Whether these settings carry a gateway credential erun can deliver, so the
-  // catalog can say one will be picked up rather than asking for one that is
-  // already here.
-  hasCredential?: boolean;
-  // The credential's last few characters, for telling one key from another. The
-  // value itself never reaches the UI.
-  credentialHint?: string;
 }
 
 // UIGatewayCredentialStatus is which credential a deploy would deliver, and
@@ -61,10 +54,15 @@ export interface UIHostGatewayDefaults {
 export interface UIGatewayCredentialStatus {
   ref: string;
   // 'saved' is a value stored in ERun settings; 'host' is this machine's own
-  // Claude Code key; absent means neither exists and a deploy cannot
-  // authenticate. A plain string because the Go side is one: the generated
-  // binding cannot carry a union, so the two values are named here rather than
-  // narrowed into a type the bridge would reject.
+  // Claude Code key, reused because it is already pointed at this same gateway;
+  // absent means no key can be delivered and a deploy cannot authenticate. A
+  // plain string because the Go side is one: the generated binding cannot carry
+  // a union, so the two values are named here rather than narrowed into a type
+  // the bridge would reject.
   source?: string;
   hint?: string;
+  // The gateway this machine's own Claude Code is pointed at, when it is. Set
+  // alongside an absent source, it is what lets the panel say the key belongs to
+  // another gateway rather than claiming there is none.
+  hostEndpoint?: string;
 }

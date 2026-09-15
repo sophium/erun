@@ -70,7 +70,7 @@ export function GatewayCredentialFields({
           </Button>
         </div>
         <div className="text-[12px] leading-[1.4] text-muted-foreground">
-          {credentialHelperText()}
+          {credentialHelperText(status)}
         </div>
       </div>
     );
@@ -81,7 +81,7 @@ export function GatewayCredentialFields({
       <Label>Gateway key</Label>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm" data-gateway-credential-source={source ?? 'none'}>
-          {credentialSummary(source, status?.hint)}
+          {credentialSummary(status)}
         </span>
         <Button
           type="button"
@@ -94,7 +94,7 @@ export function GatewayCredentialFields({
         >
           {source === undefined ? 'Set a key' : 'Use a different key'}
         </Button>
-        {/* Only offered when it would change something: with nothing saved, this
+        {/* Only offered when it would change something: with nothing saved, the
             machine's own key is already what a deploy delivers. */}
         {source === 'saved' ? (
           <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClear}>
@@ -103,7 +103,7 @@ export function GatewayCredentialFields({
         ) : null}
       </div>
       <div className="text-[12px] leading-[1.4] text-muted-foreground">
-        {credentialHelperText()}
+        {credentialHelperText(status)}
       </div>
     </div>
   );
@@ -111,19 +111,32 @@ export function GatewayCredentialFields({
 
 // credentialSummary names the key in play without revealing it. The hint is a
 // suffix, so two keys can be told apart and neither can be used.
-function credentialSummary(source: string | undefined, hint: string | undefined): string {
-  const suffix = hint === undefined || hint === '' ? '' : ` ${hint}`;
-  if (source === 'saved') {
+//
+// A key that exists but belongs to another gateway is its own case. Reporting it
+// as "no key found" would contradict what the operator can see in their own
+// Claude Code settings, so the summary says which situation they are in.
+function credentialSummary(status: UIGatewayCredentialStatus | undefined): string {
+  const suffix = status?.hint ? ` ${status.hint}` : '';
+  if (status?.source === 'saved') {
     return `Saved in ERun settings${suffix}`;
   }
-  if (source === 'host') {
+  if (status?.source === 'host') {
     return `This machine's Claude Code key${suffix}`;
+  }
+  if (status?.hostEndpoint) {
+    return 'No key for this gateway';
   }
   return 'No gateway key found';
 }
 
-// credentialHelperText says what happens to the key, whichever field is shown:
-// the delivery is the part an operator cannot see for themselves.
-function credentialHelperText(): string {
-  return 'ERun delivers this key into every environment that uses the gateway. Its value never enters a chart value, a saved config, or a launch command.';
+// credentialHelperText says what happens to the key, whichever state is shown:
+// the delivery, and the reason a key on this machine is not reused, are both
+// things an operator cannot see for themselves.
+function credentialHelperText(status: UIGatewayCredentialStatus | undefined): string {
+  const delivery =
+    'ERun delivers this key into every environment that uses the gateway. Its value never enters a chart value, a saved config, or a launch command.';
+  if (status?.source === undefined && status?.hostEndpoint) {
+    return `This machine's Claude Code key belongs to ${status.hostEndpoint}, so it is not reused here — a key is only ever sent to the gateway it was issued for. Save this gateway's own key. ${delivery}`;
+  }
+  return delivery;
 }

@@ -55,7 +55,7 @@ func applyGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) erro
 	if ctx.DryRun {
 		return nil
 	}
-	authToken, err := gatewayCredentialForDeploy(gateway.AuthTokenRefName())
+	authToken, err := gatewayCredentialForDeploy(gateway)
 	if err != nil {
 		return err
 	}
@@ -64,8 +64,8 @@ func applyGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) erro
 }
 
 // gatewayCredentialForDeploy resolves the credential to deliver: the value saved
-// under ref in erun's own operator secret store, or — when none is saved — the
-// key this machine's Claude Code already authenticates with.
+// in erun's own operator secret store, or — when none is saved — the key this
+// machine's Claude Code already authenticates with *for this same gateway*.
 //
 // The fallback is what makes a catalog work the moment it is configured. An
 // operator running Claude Code against a gateway has its key on this machine
@@ -73,21 +73,25 @@ func applyGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) erro
 // something erun can read. A saved value wins over the fallback, so an operator
 // who wants a key other than their own saves one; deleting it restores the
 // fallback rather than leaving the gateway unauthenticated.
-func gatewayCredentialForDeploy(ref string) (string, error) {
+func gatewayCredentialForDeploy(gateway *OpenRouterConfig) (string, error) {
 	store, err := DefaultCloudSecretStore()
 	if err != nil {
 		return "", fmt.Errorf("resolve cloud secret store: %w", err)
 	}
-	return resolveGatewayCredential(store, ref)
+	return resolveGatewayCredential(store, gateway.AuthTokenRefName(), gateway.Endpoint())
 }
 
 // resolveGatewayCredential is the decision itself, separated from the store's
 // construction so it can be exercised against a store a test owns.
-func resolveGatewayCredential(store CloudSecretStore, ref string) (string, error) {
+//
+// baseURL is the gateway the credential is destined for. It is what scopes the
+// host fallback: a credential is issued for one service, so the host's own key
+// is reused only when the host is already pointed at this same endpoint.
+func resolveGatewayCredential(store CloudSecretStore, ref, baseURL string) (string, error) {
 	saved, loadErr := store.LoadCloudSecret(ref)
 	switch {
 	case loadErr == nil && strings.TrimSpace(saved) != "":
-		return saved, nil
+		return strings.TrimSpace(saved), nil
 	case loadErr != nil && !errors.Is(loadErr, os.ErrNotExist):
 		// A store that cannot be read might hold a value that should win, so
 		// this stops rather than quietly delivering a different credential than
@@ -95,11 +99,35 @@ func resolveGatewayCredential(store CloudSecretStore, ref string) (string, error
 		// case, which the host key below answers.
 		return "", fmt.Errorf("load gateway credential %q: %w", ref, loadErr)
 	}
-	if hostToken, ok := HostClaudeGatewayCredential(); ok {
+	hostToken, hostEndpoint := hostClaudeGatewayCredential()
+	if hostToken != "" && sameGatewayEndpoint(hostEndpoint, baseURL) {
 		return hostToken, nil
 	}
-	return "", fmt.Errorf(
-		"no gateway credential: nothing is saved under %q and this machine's Claude Code settings carry none",
-		ref,
-	)
+	return "", noGatewayCredentialError(ref, baseURL, hostToken, hostEndpoint)
+}
+
+// noGatewayCredentialError says which refusal this is.
+//
+// Whatever the host does hold is named rather than folded into "no credential".
+// The operator can see their own settings, so an error reporting that none
+// exists when one plainly does would send them hunting a fault that is not
+// there — and "it will not be sent here" is what they actually need to know.
+func noGatewayCredentialError(ref, baseURL, hostToken, hostEndpoint string) error {
+	switch {
+	case hostToken != "" && hostEndpoint != "":
+		return fmt.Errorf(
+			"no gateway credential: nothing is saved under %q, and this machine's Claude Code key belongs to %s — not to %s; save this gateway's own key",
+			ref, hostEndpoint, strings.TrimSpace(baseURL),
+		)
+	case hostToken != "":
+		return fmt.Errorf(
+			"no gateway credential: nothing is saved under %q, and this machine's Claude Code authenticates directly rather than through a gateway, so its key is not sent to one; save this gateway's own key",
+			ref,
+		)
+	default:
+		return fmt.Errorf(
+			"no gateway credential: nothing is saved under %q and this machine's Claude Code settings carry none",
+			ref,
+		)
+	}
 }

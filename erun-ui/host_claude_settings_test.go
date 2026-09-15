@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,17 +25,12 @@ func TestHostGatewayDefaultsFromEnvReads(t *testing.T) {
 	if got.Context != 1048576 {
 		t.Fatalf("context = %d, want 1048576", got.Context)
 	}
-	// The credential is reported, not carried: the catalog says which key is in
-	// play so an operator is not asked for one they already have, and a suffix is
-	// all that crosses into the read model.
-	if !got.HasCredential {
-		t.Fatal("a settings block carrying a credential must report one")
-	}
-	if got.CredentialHint != "…ried" {
-		t.Fatalf("hint = %q, want the last four characters", got.CredentialHint)
-	}
-	if strings.Contains(got.CredentialHint, "sk-or-v1") {
-		t.Fatalf("the hint revealed more than a suffix: %q", got.CredentialHint)
+	// The credential is not carried here at all. Whether a key on this machine
+	// can be reused depends on which gateway it belongs to, so that answer lives
+	// behind LoadGatewayCredentialStatus — which applies the endpoint check —
+	// rather than in a second, ungated claim about the same file.
+	if strings.Contains(fmt.Sprintf("%+v", got), "sk-or-v1") {
+		t.Fatalf("a credential value reached the defaults read model: %+v", got)
 	}
 }
 

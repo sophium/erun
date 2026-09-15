@@ -50,15 +50,21 @@ function stubGatewayModels(page: Page, models: Record<string, unknown>[]): void 
 // whether saving, re-reading, and reporting actually agree.
 function stubGatewayCredential(
   page: Page,
-  host: { hint?: string } | null,
+  host: { hint?: string; endpoint?: string; reusable?: boolean } | null,
   saved: { hint?: string } | null,
 ): void {
-  let source = saved === null ? (host === null ? undefined : 'host') : 'saved';
-  let hint = saved?.hint ?? host?.hint;
+  // reusable models the backend's own decision: a key is only reported as this
+  // gateway's when the host's settings already point at it. `reusable: false` is
+  // the mismatch — a key is present, for somewhere else.
+  const hostUsable = host !== null && host.reusable !== false;
+  let source = saved === null ? (hostUsable ? 'host' : undefined) : 'saved';
+  let hint = saved?.hint ?? (hostUsable ? host?.hint : undefined);
   const answer = async (route: Route): Promise<void> =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ data: { ref: 'claude-gateway', source, hint } }),
+      body: JSON.stringify({
+        data: { ref: 'claude-gateway', source, hint, hostEndpoint: host?.endpoint },
+      }),
     });
   void page.route('**/__erun_invoke', async (route: Route, request: Request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string; args?: unknown[] };
@@ -75,8 +81,8 @@ function stubGatewayCredential(
       return;
     }
     if (body.method === 'ClearGatewayCredential') {
-      source = host === null ? undefined : 'host';
-      hint = host?.hint;
+      source = hostUsable ? 'host' : undefined;
+      hint = hostUsable ? host?.hint : undefined;
       await answer(route);
       return;
     }
@@ -144,6 +150,41 @@ test.describe('erun-level gateway catalog', () => {
     await expect(app.globalConfigDialog.openRouterCredentialSummary()).toContainText('…a1b2');
     // Nothing is saved, so offering to switch back to the machine's key would
     // offer the state it is already in.
+    await expect(app.globalConfigDialog.openRouterClearKeyButton()).toHaveCount(0);
+
+    await restoreCatalog(app.globalConfigDialog);
+  });
+
+  test('says a key on this machine belongs to another gateway, rather than that none exists', async ({
+    app,
+    page,
+  }) => {
+    // The operator can see their own Claude Code key, so a panel reading "no key
+    // found" would contradict it. What they need to know is that the key is not
+    // sent here — a credential is only ever sent to the gateway it was issued
+    // for — and which endpoint it does belong to.
+    stubGatewayCredential(
+      page,
+      { endpoint: 'https://gateway.example.com/anthropic', reusable: false },
+      null,
+    );
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+    await app.globalConfigDialog.setOpenRouterBaseURL('https://openrouter.ai/api');
+
+    await expect(app.globalConfigDialog.openRouterCredentialSummary()).toHaveAttribute(
+      'data-gateway-credential-source',
+      'none',
+    );
+    await expect(app.globalConfigDialog.openRouterCredentialSummary()).toContainText(
+      'No key for this gateway',
+    );
+    // The other endpoint is named, so the operator can tell which key is which.
+    await expect(app.globalConfigDialog.locator()).toContainText(
+      'https://gateway.example.com/anthropic',
+    );
+    // Nothing is saved, so there is no "switch back" to offer.
     await expect(app.globalConfigDialog.openRouterClearKeyButton()).toHaveCount(0);
 
     await restoreCatalog(app.globalConfigDialog);

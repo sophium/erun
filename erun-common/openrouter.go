@@ -104,6 +104,19 @@ func (c *OpenRouterConfig) AuthTokenRefName() string {
 	return DefaultOpenRouterAuthTokenRef
 }
 
+// Endpoint returns the gateway's base URL, trimmed, or "" for a nil catalog.
+//
+// It exists so a caller holding a catalog that may be nil — the desktop's
+// credential status, which reads one before deciding what to show — reaches the
+// address through the same nil-safe surface as every other accessor here rather
+// than dereferencing the struct.
+func (c *OpenRouterConfig) Endpoint() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.BaseURL)
+}
+
 // Configured reports whether the catalog names a usable gateway. A base URL
 // with no models still routes Claude at the gateway; the model then comes from
 // the environment's own selection or is typed at launch.

@@ -23,13 +23,11 @@ type uiHostGatewayDefaults struct {
 	// Context is the window the settings declare for Model. Zero means they
 	// declare none, so the catalog leaves the field to the operator.
 	Context int `json:"context,omitempty"`
-	// HasCredential reports whether these settings carry a gateway credential
-	// erun can deliver, so the catalog can say one will be picked up rather than
-	// asking for one that is already here.
-	HasCredential bool `json:"hasCredential,omitempty"`
-	// CredentialHint is the credential's last few characters, so an operator can
-	// tell which key is in play without the value crossing into the UI.
-	CredentialHint string `json:"credentialHint,omitempty"`
+	// There is deliberately nothing about the credential here. Whether a key can
+	// be reused depends on which gateway it belongs to, and this type describes
+	// a gateway being *offered* — so a second, ungated claim about the key would
+	// be a second source of truth. The catalog asks
+	// LoadGatewayCredentialStatus, which applies the endpoint check.
 }
 
 // LoadHostGatewayDefaults reports the gateway this machine's Claude Code already
@@ -60,13 +58,6 @@ func hostGatewayDefaultsFromEnv(env map[string]string) uiHostGatewayDefaults {
 		if context, err := strconv.Atoi(strings.TrimSpace(env["CLAUDE_CODE_MAX_CONTEXT_TOKENS"])); err == nil && context > 0 {
 			out.Context = context
 		}
-	}
-	// Read from this same env block rather than re-reading the file, so the
-	// gateway and the key it will be used with can never come from two different
-	// snapshots of the settings.
-	if token, ok := eruncommon.GatewayCredentialFromEnv(env); ok {
-		out.HasCredential = true
-		out.CredentialHint = credentialHint(token)
 	}
 	return out
 }
