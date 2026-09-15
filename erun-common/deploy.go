@@ -201,7 +201,13 @@ type HelmDeploySpec struct {
 	ResetDatabase                bool
 	Idle                         EnvironmentIdleConfig
 	Claude                       EnvironmentClaudeConfig
-	RuntimePod                   RuntimePodResources
+	// OpenRouter is the erun-level gateway catalog stamped from root config (see
+	// openrouter.go). It is deliberately not read from EnvConfig: the catalog is
+	// one list the operator maintains and every environment selects from it. Nil
+	// renders no gateway values at all, so an unconfigured install deploys
+	// byte-for-byte as before.
+	OpenRouter *OpenRouterConfig
+	RuntimePod RuntimePodResources
 	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
 	// mirroring RuntimePod but for the sidecar container that runs the actual
 	// docker builds. Zero normalizes to DefaultRuntimeDindCPU/Memory, so an env
@@ -1764,6 +1770,11 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 	}
 	deployInput.ManagedCloud = managedCloud
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
+	gateway, err := ResolveOpenRouterConfig(store)
+	if err != nil {
+		return err
+	}
+	deployInput.OpenRouter = gateway
 	applyCloudProviderDeployMetadata(store, target.EnvConfig, deployInput)
 	applyCloudflareDeployMetadata(store, target.EnvConfig, deployInput)
 	if managedCloud {
@@ -2670,7 +2681,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "runtime.dind.resources.limits.cpu="+NormalizeRuntimeDindPodResources(d.RuntimeDindPod).CPU,
 		"--set-string", "runtime.dind.resources.limits.memory="+NormalizeRuntimeDindPodResources(d.RuntimeDindPod).Memory,
 	)
-	args = append(args, helmClaudeSetArgs(d.Claude)...)
+	args = append(args, helmClaudeSetArgs(d.Claude, d.OpenRouter)...)
 	// When the chart is an umbrella wrapping a canonical erun-<base> chart, every
 	// --set targets the wrapped subchart's value scope, so prefix each key with
 	// the subchart key. No-op (empty prefix) for a chart installed directly.
@@ -3003,8 +3014,8 @@ func helmRegistryCredentialSecretSetArgs(name string) []string {
 	return []string{"--set-string", "registryCredentialSecretName=" + name}
 }
 
-func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
-	args := make([]string, 0, 8)
+func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) []string {
+	args := make([]string, 0, 12)
 	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(resolveClaudeBool(config.UseMantle, DefaultClaudeUseMantle)))
 	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(resolveClaudeBool(config.UseBedrock, DefaultClaudeUseBedrock)))
 	if models := formatClaudeModels(config.Models); models != "" {
@@ -3012,6 +3023,29 @@ func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
 	}
 	if config.MaxOutputTokens != nil {
 		args = append(args, "--set-string", "claude.maxOutputTokens="+strconv.Itoa(*config.MaxOutputTokens))
+	}
+	// The gateway is erun-level, so these render for every environment that
+	// selects from the catalog. Only the credential's Secret name travels here;
+	// its value never passes through helm.
+	if gateway.Configured() {
+		args = append(args, "--set-string", "claude.openRouterBaseURL="+escapeHelmSetValue(strings.TrimSpace(gateway.BaseURL)))
+		if ids := formatClaudeModels(gateway.ModelIDs()); ids != "" {
+			args = append(args, "--set-string", "claude.openRouterAvailableModels="+escapeHelmSetValue(ids))
+		}
+		// The pod-wide default, so Claude invoked outside the AI tab (an exec
+		// agent job) does not fall back to a model the gateway may not serve.
+		if model := gateway.ResolveDefaultModel(); model != "" {
+			args = append(args, "--set-string", "claude.openRouterModel="+escapeHelmSetValue(model))
+			if context := gateway.ContextFor(model); context > 0 {
+				args = append(args, "--set-string", "claude.openRouterModelContext="+strconv.Itoa(context))
+			}
+		}
+		if secret := strings.TrimSpace(gateway.AuthTokenSecret); secret != "" {
+			args = append(args, "--set-string", "claude.openRouterAuthTokenSecret="+escapeHelmSetValue(secret))
+		}
+		if key := strings.TrimSpace(gateway.AuthTokenKey); key != "" {
+			args = append(args, "--set-string", "claude.openRouterAuthTokenKey="+escapeHelmSetValue(key))
+		}
 	}
 	return args
 }

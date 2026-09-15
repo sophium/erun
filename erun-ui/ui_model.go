@@ -272,6 +272,28 @@ type uiERunConfig struct {
 	DefaultTenant  string                  `json:"defaultTenant"`
 	CloudProviders []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
 	CloudContexts  []uiCloudContextStatus  `json:"cloudContexts,omitempty"`
+	// OpenRouter is the erun-level gateway catalog. It lives in root config
+	// because it is one list the operator maintains and every environment
+	// selects from it, rather than a per-environment setting.
+	OpenRouter *uiOpenRouterConfig `json:"openRouter,omitempty"`
+}
+
+// uiOpenRouterModel is one selectable gateway model id and the context window
+// Claude Code must assume for it, since a gateway id carries none of its own.
+type uiOpenRouterModel struct {
+	ID      string `json:"id"`
+	Context int    `json:"context,omitempty"`
+}
+
+// uiOpenRouterConfig is the gateway an environment's Claude Code is routed
+// through and the models selectable from it. The credential is a Secret
+// reference, never a value, so config.yaml stays safe to back up and share.
+type uiOpenRouterConfig struct {
+	BaseURL         string              `json:"baseUrl,omitempty"`
+	AuthTokenSecret string              `json:"authTokenSecret,omitempty"`
+	AuthTokenKey    string              `json:"authTokenKey,omitempty"`
+	DefaultModel    string              `json:"defaultModel,omitempty"`
+	Models          []uiOpenRouterModel `json:"models,omitempty"`
 }
 
 type uiTenantConfig struct {

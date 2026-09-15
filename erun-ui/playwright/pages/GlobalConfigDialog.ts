@@ -130,6 +130,76 @@ export class GlobalConfigDialog {
     await this.page.getByRole('button', { name: 'Refresh cloud contexts' }).click();
   }
 
+  // --- Gateway catalog ---
+  //
+  // The erun-level OpenRouter catalog: one list every environment selects from.
+  // Rows carry a data-openrouter-model index so a spec addresses the row it
+  // added rather than whichever one happens to be first.
+
+  openRouterBaseURLInput(): Locator {
+    return this.page.locator('#global-config-openrouter-baseurl');
+  }
+
+  openRouterSecretInput(): Locator {
+    return this.page.locator('#global-config-openrouter-secret');
+  }
+
+  openRouterSecretKeyInput(): Locator {
+    return this.page.locator('#global-config-openrouter-secret-key');
+  }
+
+  openRouterDefaultModelTrigger(): Locator {
+    return this.page.locator('#global-config-openrouter-default-model');
+  }
+
+  openRouterAddModelButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Add model', exact: true });
+  }
+
+  openRouterModelRows(): Locator {
+    return this.locator().locator('[data-openrouter-model]');
+  }
+
+  openRouterModelRow(index: number): Locator {
+    return this.locator().locator(`[data-openrouter-model="${String(index)}"]`);
+  }
+
+  openRouterModelIdInput(index: number): Locator {
+    return this.openRouterModelRow(index).getByLabel(`Model id ${String(index + 1)}`);
+  }
+
+  openRouterModelContextInput(index: number): Locator {
+    return this.openRouterModelRow(index).getByLabel(
+      `Context window for model ${String(index + 1)}`,
+    );
+  }
+
+  openRouterRemoveModelButton(index: number): Locator {
+    return this.openRouterModelRow(index).getByRole('button', {
+      name: `Remove model ${String(index + 1)}`,
+    });
+  }
+
+  async setOpenRouterBaseURL(value: string): Promise<void> {
+    await this.openRouterBaseURLInput().fill(value);
+  }
+
+  async setOpenRouterCredential({ secret, key }: { secret: string; key?: string }): Promise<void> {
+    await this.openRouterSecretInput().fill(secret);
+    if (key !== undefined) {
+      await this.openRouterSecretKeyInput().fill(key);
+    }
+  }
+
+  async addOpenRouterModel({ id, context }: { id: string; context?: number }): Promise<void> {
+    await this.openRouterAddModelButton().click();
+    const index = (await this.openRouterModelRows().count()) - 1;
+    await this.openRouterModelIdInput(index).fill(id);
+    if (context !== undefined) {
+      await this.openRouterModelContextInput(index).fill(String(context));
+    }
+  }
+
   async cancel(): Promise<void> {
     const button = this.locator().getByRole('button', { name: 'Cancel', exact: true });
     await button.scrollIntoViewIfNeeded();

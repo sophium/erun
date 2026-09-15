@@ -6,6 +6,7 @@ import { updateManageClaudeConfig } from '@/app/manageEnvironmentThunks';
 import type { AppState } from '@/app/state';
 import { CheckboxField } from '@/components/app/ManageDialog.fields';
 import { isClaudeOverridden, isValidClaudeTokens } from '@/components/app/ManageDialog.helpers';
+import { ClaudeAddModelField } from '@/components/app/ManageDialogAIClaudeModels';
 import type { UIEnvironmentConfig } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
@@ -318,6 +319,14 @@ function ClaudeModelsField({
           ? `Overridden. Default: ${defaults.models.join(', ') || 'none'}.`
           : `Using default (${defaults.models.join(', ') || 'none'}).`}
       </div>
+      <ClaudeAddModelField
+        value={value}
+        known={known}
+        defaults={defaults}
+        overridden={overridden}
+        disabled={disabled}
+        onChange={onChange}
+      />
     </div>
   );
 }

@@ -17,7 +17,7 @@ For exact file paths see [Config locations](/reference/config-locations). For th
 
 ## Per-user config
 
-### `ERunConfig` (`~/.config/erun/config.yaml`)
+### `ERunConfig` (`~/.config/erun/config.yaml`) {#erunconfig}
 
 Global defaults that apply across all tenants.
 
@@ -31,6 +31,29 @@ Global defaults that apply across all tenants.
 | `runtimeregistry.baseurl` | string | same as above | Registry HTTP endpoint. Defaults differ for Docker Hub vs GHCR. |
 | `runtimeregistry.tokenurl` | string | same as above | GHCR token endpoint. Only used on the GHCR flow. |
 | `execution.modes.<operation>` | string | Operations with a library alternative (see [Execution modes](#execution-modes)) | `"library"` switches that operation from its CLI subprocess to an equivalent Go library call; anything else (including unset) keeps the subprocess. |
+| `openrouter.baseurl` | URL | `erun deploy`, the in-pod runtime | The gateway every environment's Claude Code is routed through, such as `https://openrouter.ai/api`. Unset leaves each environment on its own Claude sign-in. Set, it renders `ANTHROPIC_BASE_URL` on **every** environment regardless of cloud provider — see [Environment variables](/reference/env-vars). |
+| `openrouter.authtokensecret` | string | `erun deploy`, the in-pod runtime | Name of a Kubernetes Secret, in each environment's own namespace, holding the gateway credential. A reference and never the token itself, so this file stays safe to back up and share; the operator provisions the Secret by whatever means they already use for secrets in the cluster. |
+| `openrouter.authtokenkey` | string | `erun deploy` | Key within `openrouter.authtokensecret` holding the token. Empty uses `token`. |
+| `openrouter.defaultmodel` | string | The desktop's AI tab, `erun open --ai` | The catalog entry an environment selects when it has not chosen one. Ignored when it names no catalog entry, so a stale value cannot route an environment at a model the gateway no longer serves. |
+| `openrouter.models[].id` | string | The desktop's AI tab, `erun open --ai` | One selectable gateway model id. The list is what each environment's AI tab offers; an id the catalog omits can still be typed into that tab. |
+| `openrouter.models[].context` | int | `erun deploy`, the launcher | The context window Claude Code must assume for that id. A gateway id carries none of its own and the real windows differ between models, so this is deliberately per model rather than one environment-wide value. Use the **provider-level** figure, which can be smaller than an advertised maximum: declaring the larger headline lets a conversation grow past what the serving provider accepts, so the request fails with a too-long error instead of compacting cleanly. Empty leaves Claude Code's own assumption in place. |
+
+The gateway catalog is one list the operator maintains and every environment selects from, rather than a per-environment setting:
+
+```yaml
+# ~/.config/erun/config.yaml
+openrouter:
+  baseurl: https://openrouter.ai/api
+  authtokensecret: erun-claude-gateway
+  defaultmodel: deepseek/deepseek-v4.1-flash
+  models:
+    - id: deepseek/deepseek-v4.1-flash
+      context: 1048576
+    - id: openai/gpt-6-astra
+      context: 1050000
+```
+
+Choosing a model for one environment is separate from the catalog: the environment's `claude.defaultmodel` selects which entry its AI tab starts on, and the AI tab can also add a model id the catalog does not list.
 
 ### `TenantConfig` (`~/.config/erun/<tenant>/tenant.yaml`)
 
@@ -268,6 +291,8 @@ Helm gives `--set` precedence over `-f`, so for every key erun manages the overl
 ### `claude.*` model and Bedrock tuning {#advanced-claude-values}
 
 Each value renders as an env var on the runtime container, and the pod's entrypoint relays it into the Agent's `~/.claude/settings.json`. Both steps are AWS-gated: the chart renders this env block only when the env's cloud provider is `aws` (`cloudContext.provider`), and the entrypoint relay runs only when Bedrock configuration is active — an AWS provider, or `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_MANTLE` set, with a resolvable region.
+
+An erun-level gateway ([`openrouter`](#erunconfig)) is the exception: it routes Claude through a provider the environment config selects rather than through an AWS service, so its variables render for every environment regardless of cloud provider and its own values are `--set` by erun rather than set through this overlay.
 
 | Chart value | Env var | Default | Effect |
 |---|---|---|---|

@@ -5,6 +5,7 @@ import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
 import type { UIEnvironmentNodeSnapshot } from './uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
+import type { UIOpenRouterConfig } from './uiOpenRouterTypes';
 import type {
   UIErunVersion,
   UIRuntimeImageLineMismatch,
@@ -300,6 +301,9 @@ export interface UIERunConfig {
   defaultTenant: string;
   cloudProviders?: UICloudProviderStatus[];
   cloudContexts?: UICloudContextStatus[];
+  // The erun-level gateway catalog. It lives in root config because it is one
+  // list the operator maintains and every environment selects from it.
+  openRouter?: UIOpenRouterConfig;
 }
 
 export interface UICloudProviderStatus {

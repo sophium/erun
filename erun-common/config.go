@@ -38,6 +38,11 @@ type ERunConfig struct {
 	// overrides (see execution_mode.go). Absent keeps every operation on the
 	// subprocess path it has always used.
 	Execution ExecutionConfig `yaml:"execution,omitempty" json:"execution,omitempty"`
+	// OpenRouter holds the operator's erun-level gateway catalog (see
+	// openrouter.go): the gateway an environment's Claude Code is routed
+	// through, and the models an environment may select from it. Nil keeps an
+	// install that has not configured a gateway on exactly today's behaviour.
+	OpenRouter *OpenRouterConfig `yaml:"openrouter,omitempty" json:"openRouter,omitempty"`
 }
 
 // OrchestratorConfig is a persisted host-side AI orchestrator definition. An
