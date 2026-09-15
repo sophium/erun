@@ -1,5 +1,20 @@
-import { Button, Input, Label, SelectField } from 'erun-kit';
-import { LoaderCircle, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  Button,
+  cn,
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  Input,
+  Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  SelectField,
+} from 'erun-kit';
+import { Check, ChevronsUpDown, LoaderCircle, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
 import { useLoadGatewayModelsMutation } from '@/app/api/globalConfigApi';
@@ -325,26 +340,20 @@ function OpenRouterModelRow({
 }): React.ReactElement {
   const id = model.id.trim();
   const invalid = id !== '' && !isClaudeModelToken(id);
-  const known = candidates.some((candidate) => candidate.id === id);
-  // A gateway that reported its list bounds the choice to it; a stored id the
-  // list no longer carries stays selectable so it can be seen and changed.
-  const options = [
-    ...(id !== '' && !known ? [{ value: id, label: `${id} (not offered by the gateway)` }] : []),
-    ...candidates.map((candidate) => ({
-      value: candidate.id,
-      // A gateway that sends no display name leaves the id as the only label.
-      label: candidate.displayName ? `${candidate.displayName} — ${candidate.id}` : candidate.id,
-    })),
-  ];
   return (
     <div
       data-openrouter-model={index}
       className="grid gap-2 sm:grid-cols-[1fr_10rem_auto] sm:items-start"
     >
       <div className="grid gap-1">
-        {candidates.length === 0 ? (
+        <div className="relative">
+          {/* The field stays typeable as well as pickable: a gateway serves ids
+              it does not list, and refusing one would leave no way to reach it.
+              The list is searched rather than scrolled, because a gateway can
+              serve hundreds of models. */}
           <Input
             aria-label={`Model id ${String(index + 1)}`}
+            className={candidates.length > 0 ? 'pr-10' : undefined}
             autoComplete="off"
             value={model.id}
             disabled={disabled}
@@ -354,25 +363,23 @@ function OpenRouterModelRow({
               onSetModel(index, { id: event.target.value });
             }}
           />
-        ) : (
-          <SelectField
-            id={`global-config-openrouter-model-${String(index)}`}
-            label=""
-            value={id}
-            options={options}
-            emptyLabel="Select a model"
-            disabled={disabled}
-            onChange={(next) => {
-              // Choosing from the gateway's list fills in the window it reports;
-              // one that reports none leaves whatever is there for the operator.
-              const picked = candidates.find((candidate) => candidate.id === next);
-              onSetModel(index, {
-                id: next,
-                ...(picked?.context ? { context: picked.context } : {}),
-              });
-            }}
-          />
-        )}
+          {candidates.length > 0 ? (
+            <GatewayModelChoices
+              index={index}
+              selectedId={id}
+              candidates={candidates}
+              disabled={disabled}
+              onPick={(candidate) => {
+                // A window the gateway reports comes with the pick; one that
+                // reports none leaves whatever is there.
+                onSetModel(index, {
+                  id: candidate.id,
+                  ...(candidate.context ? { context: candidate.context } : {}),
+                });
+              }}
+            />
+          ) : null}
+        </div>
         {invalid ? (
           <div className="text-[12px] leading-[1.4] text-destructive">
             A model id may contain only letters, digits, and . _ : / -
@@ -409,5 +416,95 @@ function OpenRouterModelRow({
         <Trash2 className="size-3.5" />
       </Button>
     </div>
+  );
+}
+
+// GatewayModelChoices is the searchable list of what the gateway serves. It is
+// searched rather than scrolled because a gateway can serve hundreds of models,
+// and a flat list of them is unusable.
+function GatewayModelChoices({
+  index,
+  selectedId,
+  candidates,
+  disabled,
+  onPick,
+}: {
+  index: number;
+  selectedId: string;
+  candidates: UIGatewayModel[];
+  disabled?: boolean;
+  onPick: (candidate: UIGatewayModel) => void;
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          className="absolute right-1 top-1 size-7 text-muted-foreground"
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`Show gateway models for model ${String(index + 1)}`}
+          disabled={disabled === true}
+        >
+          <ChevronsUpDown />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-96 p-0" align="start" collisionPadding={12}>
+        <Command>
+          <CommandInput placeholder="Search models..." />
+          <CommandList>
+            <CommandEmpty>No model matches.</CommandEmpty>
+            <CommandGroup>
+              {candidates.map((candidate) => (
+                <GatewayModelItem
+                  key={candidate.id}
+                  candidate={candidate}
+                  selected={candidate.id === selectedId}
+                  onSelect={() => {
+                    setOpen(false);
+                    onPick(candidate);
+                  }}
+                />
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// GatewayModelItem is one searchable choice: the name the gateway gives it, the
+// id it actually launches with, and the window that comes with the pick. The
+// entry's value carries both name and id so a search matches either — an
+// operator may know the model by its name and the launch needs the id.
+function GatewayModelItem({
+  candidate,
+  selected,
+  onSelect,
+}: {
+  candidate: UIGatewayModel;
+  selected: boolean;
+  onSelect: () => void;
+}): React.ReactElement {
+  const name =
+    candidate.displayName === '' ? candidate.id : (candidate.displayName ?? candidate.id);
+  return (
+    <CommandItem
+      className="min-w-0"
+      value={`${candidate.displayName ?? ''} ${candidate.id}`}
+      onSelect={onSelect}
+    >
+      <Check className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')} />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm font-medium leading-tight">{name}</span>
+        <span className="truncate text-xs leading-tight text-muted-foreground">
+          {candidate.context
+            ? `${candidate.id} | ${String(candidate.context)} tokens`
+            : candidate.id}
+        </span>
+      </span>
+    </CommandItem>
   );
 }

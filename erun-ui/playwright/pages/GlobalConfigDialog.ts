@@ -204,19 +204,26 @@ export class GlobalConfigDialog {
     return this.locator().getByRole('button', { name: /Load from gateway|Reload from gateway/ });
   }
 
-  openRouterModelSelect(index: number): Locator {
-    return this.page.locator(`#global-config-openrouter-model-${String(index)}`);
+  openRouterModelChoicesButton(index: number): Locator {
+    return this.locator().getByRole('button', {
+      name: `Show gateway models for model ${String(index + 1)}`,
+    });
+  }
+
+  openRouterModelSearchInput(): Locator {
+    return this.page.getByPlaceholder('Search models...');
   }
 
   async loadGatewayModels(): Promise<void> {
     await this.openRouterLoadModelsButton().click();
   }
 
-  // Choosing from the gateway's list replaces the typed id with a picker; the
-  // option's accessible name carries the display name and the id, so the id
-  // identifies it without depending on the display name a gateway supplies.
-  async selectOpenRouterModel(index: number, id: string): Promise<void> {
-    await this.openRouterModelSelect(index).click();
+  // The choice is searched, not scrolled: a gateway can serve hundreds of
+  // models. The option's accessible name carries the display name and the id,
+  // so the id identifies it without depending on a name a gateway may omit.
+  async selectOpenRouterModel(index: number, id: string, search = id): Promise<void> {
+    await this.openRouterModelChoicesButton(index).click();
+    await this.openRouterModelSearchInput().fill(search);
     await this.page.getByRole('option', { name: id }).click();
   }
 

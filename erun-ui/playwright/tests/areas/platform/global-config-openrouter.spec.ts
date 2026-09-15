@@ -160,10 +160,19 @@ test.describe('erun-level gateway catalog', () => {
     await expect(app.globalConfigDialog.openRouterModelIdInput(0)).toBeVisible();
 
     await app.globalConfigDialog.loadGatewayModels();
-    await expect(app.globalConfigDialog.openRouterModelSelect(0)).toBeVisible();
-    await app.globalConfigDialog.selectOpenRouterModel(0, 'openai/gpt-6-astra');
 
-    await expect(app.globalConfigDialog.openRouterModelSelect(0)).toContainText(
+    // The choice is searched rather than scrolled, which is the whole point:
+    // a gateway can serve hundreds of models. Searching by the display name
+    // finds the entry that launches with a different id.
+    await app.globalConfigDialog.openRouterModelChoicesButton(0).click();
+    await app.globalConfigDialog.openRouterModelSearchInput().fill('GPT-6');
+    await expect(app.page.getByRole('option', { name: 'openai/gpt-6-astra' })).toBeVisible();
+    await expect(
+      app.page.getByRole('option', { name: 'deepseek/deepseek-v4.1-flash' }),
+    ).toBeHidden();
+    await app.page.getByRole('option', { name: 'openai/gpt-6-astra' }).click();
+
+    await expect(app.globalConfigDialog.openRouterModelIdInput(0)).toHaveValue(
       'openai/gpt-6-astra',
     );
     await expect(app.globalConfigDialog.openRouterModelContextInput(0)).toHaveValue('1050000');
