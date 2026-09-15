@@ -3040,7 +3040,10 @@ func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig
 				args = append(args, "--set-string", "claude.openRouterModelContext="+strconv.Itoa(context))
 			}
 		}
-		if secret := strings.TrimSpace(gateway.AuthTokenSecret); secret != "" {
+		// The name always resolves, defaulting when the catalog does not name
+		// one: one catalog means one Secret name, so it is not an entry the
+		// operator must supply for the gateway to work.
+		if secret := gateway.AuthTokenSecretName(); secret != "" {
 			args = append(args, "--set-string", "claude.openRouterAuthTokenSecret="+escapeHelmSetValue(secret))
 		}
 		if key := strings.TrimSpace(gateway.AuthTokenKey); key != "" {

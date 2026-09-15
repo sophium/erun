@@ -2,6 +2,14 @@ package eruncommon
 
 import "strings"
 
+// DefaultOpenRouterAuthTokenSecret is the Secret name a catalog that names none
+// resolves to. The catalog is erun-level, so there is one Secret name for every
+// environment rather than one per environment — which makes it something to
+// default rather than a required entry the operator has to invent. A catalog
+// naming its own Secret still wins, so an operator who already manages the
+// credential under their own naming keeps using it.
+const DefaultOpenRouterAuthTokenSecret = "erun-claude-gateway"
+
 // OpenRouterConfig is the operator's erun-level catalog of gateway models and
 // the gateway that serves them. It is deliberately root config rather than a
 // per-environment setting: the catalog is one list the operator maintains, and
@@ -39,6 +47,20 @@ type OpenRouterConfig struct {
 type OpenRouterModel struct {
 	ID      string `yaml:"id" json:"id"`
 	Context int    `yaml:"context,omitempty" json:"context,omitempty"`
+}
+
+// AuthTokenSecretName returns the Secret the credential is read from: the one
+// the catalog names, or the conventional default when it names none. It returns
+// "" only for a catalog that is not configured at all, so a caller can tell
+// "no gateway" from "gateway with the default Secret".
+func (c *OpenRouterConfig) AuthTokenSecretName() string {
+	if !c.Configured() {
+		return ""
+	}
+	if name := strings.TrimSpace(c.AuthTokenSecret); name != "" {
+		return name
+	}
+	return DefaultOpenRouterAuthTokenSecret
 }
 
 // Configured reports whether the catalog names a usable gateway. A base URL

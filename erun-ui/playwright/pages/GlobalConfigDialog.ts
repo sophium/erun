@@ -180,7 +180,23 @@ export class GlobalConfigDialog {
     });
   }
 
+  openRouterGatewayTrigger(): Locator {
+    return this.page.locator('#global-config-openrouter-gateway');
+  }
+
+  // A known gateway is chosen from the list; anything else is a self-hosted
+  // address, so the field is revealed before it is typed into.
   async setOpenRouterBaseURL(value: string): Promise<void> {
+    await this.openRouterGatewayTrigger().click();
+    if (value === '') {
+      await this.page.getByRole('option', { name: 'Not configured' }).click();
+      return;
+    }
+    if (value === 'https://openrouter.ai/api') {
+      await this.page.getByRole('option', { name: /OpenRouter/ }).click();
+      return;
+    }
+    await this.page.getByRole('option', { name: 'Self-hosted (enter a URL)' }).click();
     await this.openRouterBaseURLInput().fill(value);
   }
 

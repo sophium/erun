@@ -51,7 +51,10 @@ test.describe('erun-level gateway catalog', () => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
-    await expect(app.globalConfigDialog.openRouterBaseURLInput()).toBeVisible();
+    // The gateway is chosen, so the URL field only appears for a self-hosted
+    // address; an unconfigured install shows the selector at Not configured.
+    await expect(app.globalConfigDialog.openRouterGatewayTrigger()).toContainText('Not configured');
+    await expect(app.globalConfigDialog.openRouterBaseURLInput()).toBeHidden();
     await expect(app.globalConfigDialog.openRouterSecretInput()).toBeVisible();
     await expect(app.globalConfigDialog.openRouterSecretKeyInput()).toBeVisible();
     // An unconfigured install offers no rows until the operator adds one.
@@ -133,7 +136,7 @@ test.describe('erun-level gateway catalog', () => {
 
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
-    await expect(app.globalConfigDialog.openRouterBaseURLInput()).toHaveValue(
+    await expect(app.globalConfigDialog.openRouterGatewayTrigger()).toContainText(
       'https://openrouter.ai/api',
     );
     await expect(app.globalConfigDialog.openRouterSecretInput()).toHaveValue('pw-claude-gateway');

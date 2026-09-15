@@ -39,6 +39,33 @@ func TestOpenRouterConfigConfigured(t *testing.T) {
 	}
 }
 
+func TestOpenRouterConfigAuthTokenSecretName(t *testing.T) {
+	// One erun-level catalog means one Secret name for every environment, so a
+	// catalog that names none still has a working name rather than leaving the
+	// operator to invent one.
+	defaulted := &OpenRouterConfig{BaseURL: "https://x"}
+	if got := defaulted.AuthTokenSecretName(); got != DefaultOpenRouterAuthTokenSecret {
+		t.Fatalf("unnamed Secret = %q, want the default", got)
+	}
+
+	// An operator who already manages the credential under their own name keeps
+	// using it.
+	named := &OpenRouterConfig{BaseURL: "https://x", AuthTokenSecret: "  my-existing-secret  "}
+	if got := named.AuthTokenSecretName(); got != "my-existing-secret" {
+		t.Fatalf("named Secret = %q, want the trimmed name", got)
+	}
+
+	// A catalog that names no gateway resolves to no Secret at all, so "no
+	// gateway" stays distinguishable from "gateway with the default Secret".
+	var unconfigured *OpenRouterConfig
+	if got := unconfigured.AuthTokenSecretName(); got != "" {
+		t.Fatalf("unconfigured Secret = %q, want empty", got)
+	}
+	if got := (&OpenRouterConfig{}).AuthTokenSecretName(); got != "" {
+		t.Fatalf("catalog without a base URL Secret = %q, want empty", got)
+	}
+}
+
 func TestOpenRouterConfigModelIDs(t *testing.T) {
 	c := &OpenRouterConfig{BaseURL: "https://x", Models: []OpenRouterModel{
 		{ID: "b"}, {ID: "  "}, {ID: "a"}, {ID: "b"}, {ID: " c "},

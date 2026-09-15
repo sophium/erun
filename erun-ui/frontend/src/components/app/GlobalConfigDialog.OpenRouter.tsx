@@ -17,6 +17,19 @@ import type { UIGatewayModel } from '@/uiOpenRouterTypes';
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
 const DEFAULT_TOKEN_KEY = 'token';
+// Mirrors erun-common's DefaultOpenRouterAuthTokenSecret: one catalog means one
+// Secret name for every environment, so it is defaulted rather than required.
+const DEFAULT_TOKEN_KEY_SECRET = 'erun-claude-gateway';
+
+// Known Anthropic-compatible gateway endpoints. The operator picks one rather
+// than recalling a URL, and a self-hosted gateway stays reachable through the
+// other option, because its address is genuinely theirs to supply.
+const gatewayPresets: readonly { value: string; label: string }[] = [
+  { value: 'https://openrouter.ai/api', label: 'OpenRouter' },
+];
+
+const gatewayNotConfigured = '__not_configured__';
+const gatewayCustom = '__custom__';
 
 // OpenRouterSection edits the erun-level gateway catalog: one list the operator
 // maintains, which every environment then selects from. A credential is named
@@ -109,42 +122,81 @@ function GatewayEndpointFields({
   disabled?: boolean;
   patch: (values: Partial<UIOpenRouterConfig>) => void;
 }): React.ReactElement {
+  const baseUrl = (gateway.baseUrl ?? '').trim();
+  const preset = gatewayPresets.find((entry) => entry.value === baseUrl);
+  // Self-hosted is held in state as well as derived, because choosing it clears
+  // the URL: without this the selection would fall back to Not configured the
+  // moment the operator picked it, taking the field away mid-entry.
+  const [selfHosted, setSelfHosted] = React.useState(false);
+  const selection =
+    baseUrl === ''
+      ? selfHosted
+        ? gatewayCustom
+        : gatewayNotConfigured
+      : (preset?.value ?? gatewayCustom);
+
   return (
     <>
       <div className="grid gap-2">
-        <Label htmlFor="global-config-openrouter-baseurl">Gateway base URL</Label>
-        <Input
-          id="global-config-openrouter-baseurl"
-          autoComplete="off"
-          value={gateway.baseUrl ?? ''}
+        <SelectField
+          id="global-config-openrouter-gateway"
+          label="Gateway"
+          value={selection}
+          options={[
+            { value: gatewayNotConfigured, label: 'Not configured' },
+            ...gatewayPresets.map((entry) => ({
+              value: entry.value,
+              label: `${entry.label} — ${entry.value}`,
+            })),
+            { value: gatewayCustom, label: 'Self-hosted (enter a URL)' },
+          ]}
+          helper="The Anthropic-compatible endpoint every environment's Claude Code is routed through. Not configured keeps environments on their own Claude sign-in."
           disabled={disabled}
-          placeholder="https://openrouter.ai/api"
-          onChange={(event) => {
-            patch({ baseUrl: event.target.value });
+          onChange={(next) => {
+            if (next === gatewayCustom) {
+              setSelfHosted(true);
+              // Cleared so the operator types their own rather than editing the
+              // preset they just moved away from.
+              patch({ baseUrl: '' });
+              return;
+            }
+            setSelfHosted(false);
+            patch({ baseUrl: next === gatewayNotConfigured ? '' : next });
           }}
         />
-        <div className="text-[12px] leading-[1.4] text-muted-foreground">
-          The Anthropic-compatible endpoint every environment&apos;s Claude Code is routed through.
-          Leave empty to keep environments on their own Claude sign-in.
-        </div>
       </div>
+      {selection === gatewayCustom ? (
+        <div className="grid gap-2">
+          <Label htmlFor="global-config-openrouter-baseurl">Gateway base URL</Label>
+          <Input
+            id="global-config-openrouter-baseurl"
+            autoComplete="off"
+            value={gateway.baseUrl ?? ''}
+            disabled={disabled}
+            placeholder="https://gateway.example.com/anthropic"
+            onChange={(event) => {
+              patch({ baseUrl: event.target.value });
+            }}
+          />
+        </div>
+      ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="grid gap-2">
-          <Label htmlFor="global-config-openrouter-secret">Credential Secret</Label>
+          <Label htmlFor="global-config-openrouter-secret">Credential Secret (optional)</Label>
           <Input
             id="global-config-openrouter-secret"
             autoComplete="off"
             value={gateway.authTokenSecret ?? ''}
             disabled={disabled}
-            placeholder="erun-claude-gateway"
+            placeholder={DEFAULT_TOKEN_KEY_SECRET}
             onChange={(event) => {
               patch({ authTokenSecret: event.target.value });
             }}
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="global-config-openrouter-secret-key">Secret key</Label>
+          <Label htmlFor="global-config-openrouter-secret-key">Secret key (optional)</Label>
           <Input
             id="global-config-openrouter-secret-key"
             autoComplete="off"
@@ -158,8 +210,10 @@ function GatewayEndpointFields({
         </div>
       </div>
       <div className="text-[12px] leading-[1.4] text-muted-foreground">
-        A Kubernetes Secret in each environment&apos;s namespace holding the gateway token. The
-        value is never stored in config, and leaving the key empty uses {DEFAULT_TOKEN_KEY}.
+        A Kubernetes Secret in each environment&apos;s namespace holding the gateway token. One
+        catalog means one name, so leaving either field empty uses {DEFAULT_TOKEN_KEY_SECRET} and
+        its {DEFAULT_TOKEN_KEY} key — name them only to reuse a Secret you already manage. The value
+        itself is never stored in config.
       </div>
     </>
   );
