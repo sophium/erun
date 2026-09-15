@@ -276,6 +276,12 @@ type uiERunConfig struct {
 	// because it is one list the operator maintains and every environment
 	// selects from it, rather than a per-environment setting.
 	OpenRouter *uiOpenRouterConfig `json:"openRouter,omitempty"`
+	// OpenRouterDefaults is the gateway this machine's own Claude Code already
+	// routes through, so a catalog can be offered pre-filled from it rather than
+	// asking the operator to retype what they configured once already. It is a
+	// starting point, not stored config: nothing here is persisted until the
+	// operator saves the catalog.
+	OpenRouterDefaults *uiHostGatewayDefaults `json:"openRouterDefaults,omitempty"`
 }
 
 // uiOpenRouterModel is one selectable gateway model id and the context window

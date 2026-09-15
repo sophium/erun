@@ -5,7 +5,7 @@ import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
 import type { UIEnvironmentNodeSnapshot } from './uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
-import type { UIOpenRouterConfig } from './uiOpenRouterTypes';
+import type { UIHostGatewayDefaults, UIOpenRouterConfig } from './uiOpenRouterTypes';
 import type {
   UIErunVersion,
   UIRuntimeImageLineMismatch,
@@ -304,6 +304,10 @@ export interface UIERunConfig {
   // The erun-level gateway catalog. It lives in root config because it is one
   // list the operator maintains and every environment selects from it.
   openRouter?: UIOpenRouterConfig;
+  // The gateway this machine's own Claude Code already routes through, offered
+  // as the catalog's starting point. It is read from the operator's user
+  // settings and is never stored until they save the catalog.
+  openRouterDefaults?: UIHostGatewayDefaults;
 }
 
 export interface UICloudProviderStatus {

@@ -1,7 +1,29 @@
 import type { Request, Route } from '@playwright/test';
 
 import { test, expect } from '../../../fixtures/erunApp.js';
+import { SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import type { GlobalConfigDialog } from '../../../pages/GlobalConfigDialog.js';
+
+// stubERunConfig answers the config read, so a spec can stage the machine's own
+// gateway defaults without touching the developer's real user settings.
+function stubERunConfig(
+  page: import('@playwright/test').Page,
+  config: Record<string, unknown>,
+): void {
+  void page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+    const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+    if (body.method !== 'LoadERunConfig') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: { cloudProviders: [], cloudContexts: [], ...config },
+      }),
+    });
+  });
+}
 
 // stubGatewayModels answers the gateway model-list read with a fixed catalog, so
 // the picker can be exercised without a live gateway. It stands in for the
@@ -60,6 +82,34 @@ test.describe('erun-level gateway catalog', () => {
     // An unconfigured install offers no rows until the operator adds one.
     await expect(app.globalConfigDialog.openRouterModelRows()).toHaveCount(0);
 
+    await app.globalConfigDialog.cancel();
+    await app.globalConfigDialog.waitForClosed();
+  });
+
+  test('opens pre-filled from this machine’s own gateway', async ({ app, page }) => {
+    // A catalog that is not yet configured starts from what this machine's
+    // Claude Code already runs, so an endpoint and model configured once are not
+    // typed again. Nothing is stored by opening it — the operator still saves.
+    stubERunConfig(page, {
+      defaultTenant: SEED_TENANT,
+      openRouterDefaults: {
+        baseUrl: 'https://openrouter.ai/api',
+        model: 'deepseek/deepseek-v4.1-flash',
+        context: 1048576,
+      },
+    });
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+    await expect(app.globalConfigDialog.openRouterGatewayTrigger()).toContainText(
+      'https://openrouter.ai/api',
+    );
+    await expect(app.globalConfigDialog.openRouterModelIdInput(0)).toHaveValue(
+      'deepseek/deepseek-v4.1-flash',
+    );
+    await expect(app.globalConfigDialog.openRouterModelContextInput(0)).toHaveValue('1048576');
+
+    // Cancelling leaves nothing stored, which is the contract for a pre-fill.
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
   });

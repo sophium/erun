@@ -281,7 +281,21 @@ func (a *App) erunConfigToUI(config eruncommon.ERunConfig) uiERunConfig {
 		CloudProviders: cloudProviderStatusesToUI(a.statusesForCloudProviders(config.CloudProviders)),
 		CloudContexts:  cloudContextStatusesToUI(statusesForCloudContexts(config.CloudContexts)),
 		OpenRouter:     openRouterConfigToUI(config.OpenRouter),
+		// Best-effort: a machine with no user settings file has no gateway to
+		// offer, and an unreadable one must not stop the settings dialog opening.
+		OpenRouterDefaults: a.hostGatewayDefaults(),
 	}
+}
+
+// hostGatewayDefaults reports this machine's own Claude Code gateway, or nil
+// when there is none to offer. The read is best-effort by design: it supplies a
+// pre-fill, and a pre-fill that cannot be read is the unconfigured case.
+func (a *App) hostGatewayDefaults() *uiHostGatewayDefaults {
+	defaults, err := a.LoadHostGatewayDefaults()
+	if err != nil || defaults.BaseURL == "" {
+		return nil
+	}
+	return &defaults
 }
 
 func openRouterConfigToUI(config *eruncommon.OpenRouterConfig) *uiOpenRouterConfig {

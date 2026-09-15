@@ -37,3 +37,14 @@ export interface UIGatewayModel {
   // gateway that does not volunteer it.
   context?: number;
 }
+
+// UIHostGatewayDefaults is the gateway this machine's own Claude Code already
+// routes through, read from the operator's user settings. It is offered as the
+// catalog's starting point so a gateway already configured once is not typed
+// again. It carries no credential: settings hold a token value, while the
+// catalog names a Secret the pod resolves.
+export interface UIHostGatewayDefaults {
+  baseUrl?: string;
+  model?: string;
+  context?: number;
+}
