@@ -1,5 +1,29 @@
+import type { Request, Route } from '@playwright/test';
+
 import { test, expect } from '../../../fixtures/erunApp.js';
 import type { GlobalConfigDialog } from '../../../pages/GlobalConfigDialog.js';
+
+// stubGatewayModels answers the gateway model-list read with a fixed catalog, so
+// the picker can be exercised without a live gateway. It stands in for the
+// backend method, so it returns that method's own result shape — the parsed
+// {id, displayName, context} — not the gateway's wire shape, which the Go side
+// parses and covers in its own tests.
+function stubGatewayModels(
+  page: import('@playwright/test').Page,
+  models: Record<string, unknown>[],
+): void {
+  void page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+    const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+    if (body.method !== 'LoadGatewayModels') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: models }),
+    });
+  });
+}
 
 // restoreCatalog clears everything these specs set. They mutate the suite's
 // global config rather than an environment, and the worker's backend is shared
@@ -58,6 +82,38 @@ test.describe('erun-level gateway catalog', () => {
         .locator()
         .getByText('A model id may contain only letters, digits, and . _ : / -'),
     ).toBeHidden();
+
+    await restoreCatalog(app.globalConfigDialog);
+  });
+
+  test('picks a model from the gateway and fills in the window it reports', async ({
+    app,
+    page,
+  }) => {
+    // The gateway publishes what it serves, so the id is chosen rather than
+    // typed — and the window comes with the pick, because retyping a figure the
+    // gateway already reported is exactly the kind of entry this avoids. The
+    // second entry carries no display name, so both label shapes are exercised.
+    stubGatewayModels(page, [
+      { id: 'deepseek/deepseek-v4.1-flash', displayName: 'DeepSeek V4.1 Flash', context: 1048576 },
+      { id: 'openai/gpt-6-astra', context: 1050000 },
+    ]);
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+    await app.globalConfigDialog.setOpenRouterBaseURL('https://openrouter.ai/api');
+    await app.globalConfigDialog.openRouterAddModelButton().click();
+    // Before the list is loaded the row accepts a typed id.
+    await expect(app.globalConfigDialog.openRouterModelIdInput(0)).toBeVisible();
+
+    await app.globalConfigDialog.loadGatewayModels();
+    await expect(app.globalConfigDialog.openRouterModelSelect(0)).toBeVisible();
+    await app.globalConfigDialog.selectOpenRouterModel(0, 'openai/gpt-6-astra');
+
+    await expect(app.globalConfigDialog.openRouterModelSelect(0)).toContainText(
+      'openai/gpt-6-astra',
+    );
+    await expect(app.globalConfigDialog.openRouterModelContextInput(0)).toHaveValue('1050000');
 
     await restoreCatalog(app.globalConfigDialog);
   });

@@ -184,6 +184,26 @@ export class GlobalConfigDialog {
     await this.openRouterBaseURLInput().fill(value);
   }
 
+  openRouterLoadModelsButton(): Locator {
+    return this.locator().getByRole('button', { name: /Load from gateway|Reload from gateway/ });
+  }
+
+  openRouterModelSelect(index: number): Locator {
+    return this.page.locator(`#global-config-openrouter-model-${String(index)}`);
+  }
+
+  async loadGatewayModels(): Promise<void> {
+    await this.openRouterLoadModelsButton().click();
+  }
+
+  // Choosing from the gateway's list replaces the typed id with a picker; the
+  // option's accessible name carries the display name and the id, so the id
+  // identifies it without depending on the display name a gateway supplies.
+  async selectOpenRouterModel(index: number, id: string): Promise<void> {
+    await this.openRouterModelSelect(index).click();
+    await this.page.getByRole('option', { name: id }).click();
+  }
+
   async setOpenRouterCredential({ secret, key }: { secret: string; key?: string }): Promise<void> {
     await this.openRouterSecretInput().fill(secret);
     if (key !== undefined) {

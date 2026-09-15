@@ -24,3 +24,16 @@ export interface UIOpenRouterConfig {
   defaultModel?: string;
   models?: UIOpenRouterModel[];
 }
+
+// UIGatewayModel is one model the configured gateway advertises, read from the
+// same /v1/models endpoint Claude Code's own model discovery uses, so the
+// catalog can offer ids instead of asking the operator to type them.
+export interface UIGatewayModel {
+  id: string;
+  displayName?: string;
+  description?: string;
+  // The window the gateway reports for this id, when it reports one at all.
+  // The standard discovery response carries none, so this is absent for a
+  // gateway that does not volunteer it.
+  context?: number;
+}
