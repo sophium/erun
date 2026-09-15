@@ -209,7 +209,7 @@ export class GlobalConfigDialog {
   }
 
   openRouterSecretChoicesButton(): Locator {
-    return this.locator().getByRole('button', { name: 'Show Credential Secret (optional)' });
+    return this.locator().getByRole('button', { name: 'Show Credential Secret' });
   }
 
   // The Secret name is picked from what the environment namespaces hold, so it

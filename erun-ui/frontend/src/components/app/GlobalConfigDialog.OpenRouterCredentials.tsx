@@ -18,7 +18,24 @@ import * as React from 'react';
 
 import type { UIGatewayCredentialCandidate, UIOpenRouterConfig } from '@/uiOpenRouterTypes';
 
+const DEFAULT_SECRET_NAME = 'erun-claude-gateway';
 const DEFAULT_TOKEN_KEY = 'token';
+
+// effectiveGatewayCredentials resolves the names the gateway will actually read.
+// An unset field therefore shows the default rather than a blank that silently
+// means one. The stored value stays empty until the operator picks something,
+// which is already what the gateway treats as "use the default".
+function effectiveGatewayCredentials(gateway: UIOpenRouterConfig): {
+  secret: string;
+  secretKey: string;
+} {
+  const secret = gateway.authTokenSecret ?? '';
+  const secretKey = gateway.authTokenKey ?? '';
+  return {
+    secret: secret === '' ? DEFAULT_SECRET_NAME : secret,
+    secretKey: secretKey === '' ? DEFAULT_TOKEN_KEY : secretKey,
+  };
+}
 
 // GatewayCredentialFields names the Secret the gateway token is read from.
 //
@@ -45,7 +62,7 @@ export function GatewayCredentialFields({
   onFindCandidates: () => void;
   patch: (values: Partial<UIOpenRouterConfig>) => void;
 }): React.ReactElement {
-  const secret = gateway.authTokenSecret ?? '';
+  const { secret, secretKey } = effectiveGatewayCredentials(gateway);
   const selected = candidates.find((candidate) => candidate.name === secret);
   return (
     <div className="grid gap-2">
@@ -69,9 +86,9 @@ export function GatewayCredentialFields({
       <div className="grid gap-2 sm:grid-cols-2">
         <ChoiceField
           id="global-config-openrouter-secret"
-          label="Credential Secret (optional)"
+          label="Credential Secret"
           value={secret}
-          placeholder="erun-claude-gateway"
+          placeholder={DEFAULT_SECRET_NAME}
           options={candidates.map((candidate) => candidate.name)}
           disabled={disabled}
           onValueChange={(next) => {
@@ -80,8 +97,8 @@ export function GatewayCredentialFields({
         />
         <ChoiceField
           id="global-config-openrouter-secret-key"
-          label="Secret key (optional)"
-          value={gateway.authTokenKey ?? ''}
+          label="Key inside that Secret"
+          value={secretKey}
           placeholder={DEFAULT_TOKEN_KEY}
           // The keys come from the Secret that is actually selected, so the key
           // is picked from what that Secret carries rather than guessed.
@@ -108,15 +125,16 @@ export function GatewayCredentialFields({
   );
 }
 
-// credentialHelperText says what was found and what an empty field means. An
-// empty result still names the default, so the field is never a dead end.
+// credentialHelperText says what each field names and what was found. It spells
+// out that the second field names an entry rather than holding the credential,
+// because "token" beside a Secret name reads as the token itself.
 function credentialHelperText(found: number, namespaces: number): string {
-  const fallback = `Leaving an empty name uses erun-claude-gateway and its ${DEFAULT_TOKEN_KEY} key.`;
+  const fields = `The Secret's data entry holds your gateway key; the second field names that entry, it is not the credential. Left unset: ${DEFAULT_SECRET_NAME} with an entry named ${DEFAULT_TOKEN_KEY}.`;
   if (found === 0) {
-    return `A Secret in each environment's namespace. ${fallback} Find the Secrets that already exist to pick one.`;
+    return `A Secret in each environment's namespace. ${fields} Find the Secrets that already exist to pick one.`;
   }
   const where = namespaces === 1 ? 'namespace' : 'namespaces';
-  return `Found ${String(found)} in ${String(namespaces)} environment ${where}. ${fallback}`;
+  return `Found ${String(found)} in ${String(namespaces)} environment ${where}, with each one's own entry names. ${fields}`;
 }
 
 // ChoiceField is a field that is both typeable and pickable from a searched

@@ -99,6 +99,14 @@ test.describe('erun-level gateway catalog', () => {
     await expect(app.globalConfigDialog.openRouterBaseURLInput()).toBeHidden();
     await expect(app.globalConfigDialog.openRouterSecretInput()).toBeVisible();
     await expect(app.globalConfigDialog.openRouterSecretKeyInput()).toBeVisible();
+    // An unset credential reads as the default the gateway will actually use,
+    // rather than a blank field that silently means one. Nothing is stored by
+    // rendering it; the operator still saves.
+    await expect(app.globalConfigDialog.openRouterSecretInput()).toHaveValue('erun-claude-gateway');
+    await expect(app.globalConfigDialog.openRouterSecretKeyInput()).toHaveValue('token');
+    // Both fields carry a usable value, so neither is labelled optional.
+    await expect(app.page.getByText('Credential Secret (optional)')).toHaveCount(0);
+    await expect(app.page.getByText('Secret key (optional)')).toHaveCount(0);
     // An unconfigured install offers no rows until the operator adds one.
     await expect(app.globalConfigDialog.openRouterModelRows()).toHaveCount(0);
 
