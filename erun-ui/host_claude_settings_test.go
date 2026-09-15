@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -11,10 +12,8 @@ func TestHostGatewayDefaultsFromEnvReads(t *testing.T) {
 		"ANTHROPIC_BASE_URL":             "https://openrouter.ai/api",
 		"ANTHROPIC_MODEL":                "deepseek/deepseek-v4.1-flash",
 		"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1048576",
-		// The credential is present in a real file and must not be carried into
-		// the catalog: settings hold a value, while the catalog names a Secret.
-		"ANTHROPIC_AUTH_TOKEN": "must-not-be-copied",
-		"ANTHROPIC_API_KEY":    "",
+		"ANTHROPIC_AUTH_TOKEN":           "sk-or-v1-must-not-be-carried",
+		"ANTHROPIC_API_KEY":              "",
 	})
 	if got.BaseURL != "https://openrouter.ai/api" {
 		t.Fatalf("base URL = %q", got.BaseURL)
@@ -24,6 +23,28 @@ func TestHostGatewayDefaultsFromEnvReads(t *testing.T) {
 	}
 	if got.Context != 1048576 {
 		t.Fatalf("context = %d, want 1048576", got.Context)
+	}
+	// The credential is reported, not carried: the catalog says which key is in
+	// play so an operator is not asked for one they already have, and a suffix is
+	// all that crosses into the read model.
+	if !got.HasCredential {
+		t.Fatal("a settings block carrying a credential must report one")
+	}
+	if got.CredentialHint != "…ried" {
+		t.Fatalf("hint = %q, want the last four characters", got.CredentialHint)
+	}
+	if strings.Contains(got.CredentialHint, "sk-or-v1") {
+		t.Fatalf("the hint revealed more than a suffix: %q", got.CredentialHint)
+	}
+}
+
+func TestCredentialHintWithholdsShortValues(t *testing.T) {
+	// A value short enough that a suffix would be most of it yields no hint at
+	// all, rather than one that gives the credential away.
+	for _, value := range []string{"", "  ", "abc", "abcd"} {
+		if got := credentialHint(value); got != "" {
+			t.Fatalf("credentialHint(%q) = %q, want empty", value, got)
+		}
 	}
 }
 
@@ -79,7 +100,7 @@ func withSettingsDir(t *testing.T, body string) {
 			t.Fatalf("write settings: %v", err)
 		}
 	}
-	t.Setenv(claudeSettingsDirEnv, dir)
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 }
 
 func TestLoadHostGatewayDefaultsReadsSettingsFile(t *testing.T) {

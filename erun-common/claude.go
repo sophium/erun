@@ -39,13 +39,13 @@ type EnvironmentClaudeConfig struct {
 	// erun-level list, so without this an environment could only be moved onto
 	// the gateway by moving every environment onto it.
 	UseGateway *bool `yaml:"usegateway,omitempty" json:"useGateway,omitempty"`
-	// GatewayAuthTokenSecret overrides the Secret this environment reads the
-	// gateway credential from. Empty uses the catalog's own name. It exists for
-	// the case the catalog cannot express: an environment whose credential is
-	// managed separately, such as a per-tenant Secret.
-	GatewayAuthTokenSecret string   `yaml:"gatewayauthtokensecret,omitempty" json:"gatewayAuthTokenSecret,omitempty"`
-	Models                 []string `yaml:"models,omitempty" json:"models,omitempty"`
-	MaxOutputTokens        *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
+	// There is deliberately no credential field here. The gateway credential is
+	// one erun-level value in the operator's secret store, delivered by deploy
+	// into this environment's namespace — so a per-environment reference would
+	// be a second way to say the same thing, and the wrong one when the catalog
+	// is global.
+	Models          []string `yaml:"models,omitempty" json:"models,omitempty"`
+	MaxOutputTokens *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
 	// Effort is the per-env Claude Code session effort level, one of
 	// low|medium|high|xhigh|max|ultracode. ultracode is not an --effort value:
 	// it enables xhigh effort plus standing workflow orchestration. Unset means
@@ -61,7 +61,10 @@ type EnvironmentClaudeConfig struct {
 }
 
 func (c EnvironmentClaudeConfig) IsZero() bool {
-	return c.UseMantle == nil && c.UseBedrock == nil && len(c.Models) == 0 &&
+	// UseGateway counts: an environment whose only claude setting is opting out
+	// of the erun-level gateway has a configuration, and reporting it as zero
+	// would drop that override on the next normalize.
+	return c.UseMantle == nil && c.UseBedrock == nil && c.UseGateway == nil && len(c.Models) == 0 &&
 		c.MaxOutputTokens == nil && c.Effort == nil && c.DefaultModel == nil && !c.VerboseDebug
 }
 

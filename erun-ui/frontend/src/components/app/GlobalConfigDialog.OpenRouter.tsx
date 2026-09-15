@@ -17,8 +17,12 @@ import {
 import { Check, ChevronsUpDown, LoaderCircle, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
-import { useLoadGatewayModelsMutation } from '@/app/api/globalConfigApi';
-import { useLoadGatewayCredentialCandidatesMutation } from '@/app/api/globalConfigApi';
+import {
+  useClearGatewayCredentialMutation,
+  useGetGatewayCredentialStatusQuery,
+  useLoadGatewayModelsMutation,
+  useSaveGatewayCredentialMutation,
+} from '@/app/api/globalConfigApi';
 import { readError } from '@/app/errors';
 import { updateGlobalConfig } from '@/app/globalConfigThunks';
 import { useAppDispatch } from '@/app/hooks';
@@ -28,12 +32,7 @@ import {
   selectableClaudeModelIds,
 } from '@/components/app/claudeModels.helpers';
 import { GatewayCredentialFields } from '@/components/app/GlobalConfigDialog.OpenRouterCredentials';
-import type {
-  UIGatewayCredentialCandidate,
-  UIGatewayModel,
-  UIOpenRouterConfig,
-  UIOpenRouterModel,
-} from '@/uiOpenRouterTypes';
+import type { UIGatewayModel, UIOpenRouterConfig, UIOpenRouterModel } from '@/uiOpenRouterTypes';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
@@ -48,8 +47,10 @@ const gatewayNotConfigured = '__not_configured__';
 const gatewayCustom = '__custom__';
 
 // OpenRouterSection edits the erun-level gateway catalog: one list the operator
-// maintains, which every environment then selects from. A credential is named
-// by Secret rather than typed in, so no token value lands in config.
+// maintains, which every environment then selects from. The credential is one
+// erun-level value too — this machine's own Claude Code key unless the operator
+// sets a different one — so no token value lands in config, and erun delivers
+// it into each environment that uses the gateway.
 export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const disabled = dialog.busy || dialog.configLoading;
@@ -60,29 +61,13 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
   const [candidates, setCandidates] = React.useState<UIGatewayModel[]>([]);
   const [modelsError, setModelsError] = React.useState('');
 
-  const [loadCredentialCandidates, { isLoading: credentialsLoading }] =
-    useLoadGatewayCredentialCandidatesMutation();
-  const [credentialCandidates, setCredentialCandidates] = React.useState<
-    UIGatewayCredentialCandidate[]
-  >([]);
-  const [credentialProblems, setCredentialProblems] = React.useState<string[]>([]);
-  const [credentialNamespaces, setCredentialNamespaces] = React.useState(0);
-
-  // Read on demand rather than on open: it walks every environment namespace,
-  // and an operator editing a base URL should not pay for that unasked.
-  const findCredentialCandidates = async () => {
-    setCredentialProblems([]);
-    try {
-      const result = await loadCredentialCandidates(undefined).unwrap();
-      setCredentialCandidates(result.candidates);
-      setCredentialProblems(result.problems ?? []);
-      setCredentialNamespaces(result.namespaces);
-    } catch (error) {
-      setCredentialCandidates([]);
-      setCredentialProblems([readError(error)]);
-      setCredentialNamespaces(0);
-    }
-  };
+  // Read rather than inferred: the catalog reports the key a deploy would
+  // actually deliver, which is this machine's own when nothing else is saved.
+  const { data: credentialStatus } = useGetGatewayCredentialStatusQuery(undefined);
+  const [saveGatewayCredential, { isLoading: savingCredential }] =
+    useSaveGatewayCredentialMutation();
+  const [clearGatewayCredential, { isLoading: clearingCredential }] =
+    useClearGatewayCredentialMutation();
 
   const patch = (values: Partial<UIOpenRouterConfig>) => {
     dispatch(updateGlobalConfig({ openRouter: { ...gateway, ...values } }));
@@ -117,21 +102,27 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
   // Only ids that are usable as a launched model are offered as the default:
   // defaulting to a blank or malformed row would launch an id the guard drops.
   const selectable = selectableClaudeModelIds(models);
+  const gatewayConfigured = (gateway.baseUrl ?? '').trim() !== '';
 
   return (
     <div className="grid gap-3">
       <GatewayEndpointFields gateway={gateway} disabled={disabled} patch={patch} />
 
-      <GatewayCredentialFields
-        gateway={gateway}
-        candidates={credentialCandidates}
-        problems={credentialProblems}
-        namespaces={credentialNamespaces}
-        disabled={disabled}
-        loading={credentialsLoading}
-        onFindCandidates={() => void findCredentialCandidates()}
-        patch={patch}
-      />
+      {/* Only once a gateway is chosen: a key for a gateway that does not exist
+          is a field that changes nothing. */}
+      {gatewayConfigured ? (
+        <GatewayCredentialFields
+          status={credentialStatus}
+          disabled={disabled}
+          busy={savingCredential || clearingCredential}
+          onSave={(token) => {
+            void saveGatewayCredential(token);
+          }}
+          onClear={() => {
+            void clearGatewayCredential(undefined);
+          }}
+        />
+      ) : null}
 
       <OpenRouterModelsField
         models={models}

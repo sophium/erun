@@ -16,11 +16,11 @@ export interface UIOpenRouterModel {
 
 export interface UIOpenRouterConfig {
   baseUrl?: string;
-  // The credential is a Kubernetes Secret name and key, never a value, so
-  // config stays safe to back up and share and nothing sensitive reaches helm
-  // argv or a launch command.
-  authTokenSecret?: string;
-  authTokenKey?: string;
+  // The operator secret store ref the gateway credential is saved under. A ref,
+  // not a value: the token lives in erun's own operator secret store, so config
+  // stays safe to back up and share and nothing sensitive reaches helm argv or
+  // a launch command.
+  authTokenRef?: string;
   defaultModel?: string;
   models?: UIOpenRouterModel[];
 }
@@ -41,27 +41,30 @@ export interface UIGatewayModel {
 // UIHostGatewayDefaults is the gateway this machine's own Claude Code already
 // routes through, read from the operator's user settings. It is offered as the
 // catalog's starting point so a gateway already configured once is not typed
-// again. It carries no credential: settings hold a token value, while the
-// catalog names a Secret the pod resolves.
+// again.
 export interface UIHostGatewayDefaults {
   baseUrl?: string;
   model?: string;
   context?: number;
+  // Whether these settings carry a gateway credential erun can deliver, so the
+  // catalog can say one will be picked up rather than asking for one that is
+  // already here.
+  hasCredential?: boolean;
+  // The credential's last few characters, for telling one key from another. The
+  // value itself never reaches the UI.
+  credentialHint?: string;
 }
 
-// UIGatewayCredentialCandidate is a Secret the gateway credential could come
-// from, so the catalog offers the names that exist instead of asking for one to
-// be invented. Only names are carried; a Secret's value is never read.
-export interface UIGatewayCredentialCandidate {
-  name: string;
-  namespaces?: string[];
-  keys?: string[];
-}
-
-export interface UIGatewayCredentialCandidates {
-  candidates: UIGatewayCredentialCandidate[];
-  // Namespaces that could not be read: a Secret that exists but whose access is
-  // denied must not read as a Secret that is missing.
-  problems?: string[];
-  namespaces: number;
+// UIGatewayCredentialStatus is which credential a deploy would deliver, and
+// where it comes from. It identifies the value rather than revealing it: the
+// desktop has no use for a live token.
+export interface UIGatewayCredentialStatus {
+  ref: string;
+  // 'saved' is a value stored in ERun settings; 'host' is this machine's own
+  // Claude Code key; absent means neither exists and a deploy cannot
+  // authenticate. A plain string because the Go side is one: the generated
+  // binding cannot carry a union, so the two values are named here rather than
+  // narrowed into a type the bridge would reject.
+  source?: string;
+  hint?: string;
 }

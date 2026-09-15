@@ -1,223 +1,129 @@
-import {
-  Button,
-  cn,
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  Input,
-  Label,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from 'erun-kit';
-import { Check, ChevronsUpDown, LoaderCircle, RefreshCw } from 'lucide-react';
+import { Button, Input, Label } from 'erun-kit';
 import * as React from 'react';
 
-import type { UIGatewayCredentialCandidate, UIOpenRouterConfig } from '@/uiOpenRouterTypes';
+import type { UIGatewayCredentialStatus } from '@/uiOpenRouterTypes';
 
-const DEFAULT_SECRET_NAME = 'erun-claude-gateway';
-const DEFAULT_TOKEN_KEY = 'token';
-
-// effectiveGatewayCredentials resolves the names the gateway will actually read.
-// An unset field therefore shows the default rather than a blank that silently
-// means one. The stored value stays empty until the operator picks something,
-// which is already what the gateway treats as "use the default".
-function effectiveGatewayCredentials(gateway: UIOpenRouterConfig): {
-  secret: string;
-  secretKey: string;
-} {
-  const secret = gateway.authTokenSecret ?? '';
-  const secretKey = gateway.authTokenKey ?? '';
-  return {
-    secret: secret === '' ? DEFAULT_SECRET_NAME : secret,
-    secretKey: secretKey === '' ? DEFAULT_TOKEN_KEY : secretKey,
-  };
-}
-
-// GatewayCredentialFields names the Secret the gateway token is read from.
+// GatewayCredentialFields shows which gateway credential a deploy will deliver,
+// and lets the operator replace it.
 //
-// The Secret lives per environment, so the names that exist are read from the
-// environment namespaces and offered as choices — inventing a name the cluster
-// does not carry is the failure this avoids. Both fields stay typeable, because
-// a Secret may legitimately not exist yet when the catalog is first configured.
+// There is no Secret to name and no entry within one to pick: the credential is
+// one erun-level value, and erun delivers it into every environment's namespace
+// itself. What is left for an operator to care about is which key is in play —
+// so that is what this shows, identified by its last few characters rather than
+// by its value.
 export function GatewayCredentialFields({
-  gateway,
-  candidates,
-  problems,
-  namespaces,
+  status,
   disabled,
-  loading,
-  onFindCandidates,
-  patch,
+  busy,
+  onSave,
+  onClear,
 }: {
-  gateway: UIOpenRouterConfig;
-  candidates: UIGatewayCredentialCandidate[];
-  problems: string[];
-  namespaces: number;
+  status: UIGatewayCredentialStatus | undefined;
   disabled?: boolean;
-  loading: boolean;
-  onFindCandidates: () => void;
-  patch: (values: Partial<UIOpenRouterConfig>) => void;
+  busy: boolean;
+  onSave: (token: string) => void;
+  onClear: () => void;
 }): React.ReactElement {
-  const { secret, secretKey } = effectiveGatewayCredentials(gateway);
-  const selected = candidates.find((candidate) => candidate.name === secret);
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
+  const source = status?.source;
+
+  if (editing) {
+    return (
+      <div className="grid gap-2">
+        <Label htmlFor="global-config-openrouter-token">Gateway key</Label>
+        <div className="flex items-center gap-2">
+          <Input
+            id="global-config-openrouter-token"
+            autoComplete="off"
+            type="password"
+            value={draft}
+            disabled={disabled}
+            placeholder="sk-or-v1-..."
+            onChange={(event) => {
+              setDraft(event.target.value);
+            }}
+          />
+          <Button
+            type="button"
+            size="sm"
+            disabled={disabled === true || busy || draft.trim() === ''}
+            onClick={() => {
+              onSave(draft);
+              setDraft('');
+              setEditing(false);
+            }}
+          >
+            Save key
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              setDraft('');
+              setEditing(false);
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+        <div className="text-[12px] leading-[1.4] text-muted-foreground">
+          {credentialHelperText()}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Label>Credential</Label>
+      <Label>Gateway key</Label>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm" data-gateway-credential-source={source ?? 'none'}>
+          {credentialSummary(source, status?.hint)}
+        </span>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={disabled === true || loading}
-          onClick={onFindCandidates}
+          disabled={disabled === true || busy}
+          onClick={() => {
+            setEditing(true);
+          }}
         >
-          {loading ? (
-            <LoaderCircle className="size-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="size-3.5" />
-          )}
-          {candidates.length > 0 ? 'Reload Secrets' : 'Find Secrets'}
+          {source === undefined ? 'Set a key' : 'Use a different key'}
         </Button>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <ChoiceField
-          id="global-config-openrouter-secret"
-          label="Credential Secret"
-          value={secret}
-          placeholder={DEFAULT_SECRET_NAME}
-          options={candidates.map((candidate) => candidate.name)}
-          disabled={disabled}
-          onValueChange={(next) => {
-            patch({ authTokenSecret: next });
-          }}
-        />
-        <ChoiceField
-          id="global-config-openrouter-secret-key"
-          label="Key inside that Secret"
-          value={secretKey}
-          placeholder={DEFAULT_TOKEN_KEY}
-          // The keys come from the Secret that is actually selected, so the key
-          // is picked from what that Secret carries rather than guessed.
-          options={selected?.keys ?? []}
-          disabled={disabled}
-          onValueChange={(next) => {
-            patch({ authTokenKey: next });
-          }}
-        />
-      </div>
-      <div className="text-[12px] leading-[1.4] text-muted-foreground">
-        {credentialHelperText(candidates.length, namespaces)}
-      </div>
-      {/* Named rather than swallowed: a Secret that exists and cannot be read
-          must not look like a Secret that is missing. */}
-      {problems.length === 0 ? null : (
-        <ul className="grid gap-1 text-[12px] leading-[1.4] text-destructive">
-          {problems.map((problem) => (
-            <li key={problem}>{problem}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-// credentialHelperText says what each field names and what was found. It spells
-// out that the second field names an entry rather than holding the credential,
-// because "token" beside a Secret name reads as the token itself.
-function credentialHelperText(found: number, namespaces: number): string {
-  const fields = `The Secret's data entry holds your gateway key; the second field names that entry, it is not the credential. Left unset: ${DEFAULT_SECRET_NAME} with an entry named ${DEFAULT_TOKEN_KEY}.`;
-  if (found === 0) {
-    return `A Secret in each environment's namespace. ${fields} Find the Secrets that already exist to pick one.`;
-  }
-  const where = namespaces === 1 ? 'namespace' : 'namespaces';
-  return `Found ${String(found)} in ${String(namespaces)} environment ${where}, with each one's own entry names. ${fields}`;
-}
-
-// ChoiceField is a field that is both typeable and pickable from a searched
-// list. A Secret name may not exist yet, and a key may be one the operator adds
-// later, so neither can be a closed list.
-function ChoiceField({
-  id,
-  label,
-  value,
-  placeholder,
-  options,
-  disabled,
-  onValueChange,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  placeholder: string;
-  options: string[];
-  disabled?: boolean;
-  onValueChange: (value: string) => void;
-}): React.ReactElement {
-  const [open, setOpen] = React.useState(false);
-  return (
-    <div className="grid gap-1">
-      <Label htmlFor={id}>{label}</Label>
-      <div className="relative">
-        <Input
-          id={id}
-          className={options.length > 0 ? 'pr-10' : undefined}
-          autoComplete="off"
-          value={value}
-          disabled={disabled}
-          placeholder={placeholder}
-          onChange={(event) => {
-            onValueChange(event.target.value);
-          }}
-        />
-        {options.length > 0 ? (
-          <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                className="absolute right-1 top-1 size-7 text-muted-foreground"
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label={`Show ${label}`}
-                disabled={disabled === true}
-              >
-                <ChevronsUpDown />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-80 p-0" align="start" collisionPadding={12}>
-              <Command>
-                <CommandInput placeholder="Search..." />
-                <CommandList>
-                  <CommandEmpty>No match.</CommandEmpty>
-                  <CommandGroup>
-                    {options.map((option) => (
-                      <CommandItem
-                        key={option}
-                        value={option}
-                        onSelect={() => {
-                          setOpen(false);
-                          onValueChange(option);
-                        }}
-                      >
-                        <Check
-                          className={cn(
-                            'size-4 shrink-0',
-                            option === value ? 'opacity-100' : 'opacity-0',
-                          )}
-                        />
-                        <span className="truncate text-sm">{option}</span>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
+        {/* Only offered when it would change something: with nothing saved, this
+            machine's own key is already what a deploy delivers. */}
+        {source === 'saved' ? (
+          <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onClear}>
+            Use this machine&apos;s key
+          </Button>
         ) : null}
       </div>
+      <div className="text-[12px] leading-[1.4] text-muted-foreground">
+        {credentialHelperText()}
+      </div>
     </div>
   );
+}
+
+// credentialSummary names the key in play without revealing it. The hint is a
+// suffix, so two keys can be told apart and neither can be used.
+function credentialSummary(source: string | undefined, hint: string | undefined): string {
+  const suffix = hint === undefined || hint === '' ? '' : ` ${hint}`;
+  if (source === 'saved') {
+    return `Saved in ERun settings${suffix}`;
+  }
+  if (source === 'host') {
+    return `This machine's Claude Code key${suffix}`;
+  }
+  return 'No gateway key found';
+}
+
+// credentialHelperText says what happens to the key, whichever field is shown:
+// the delivery is the part an operator cannot see for themselves.
+function credentialHelperText(): string {
+  return 'ERun delivers this key into every environment that uses the gateway. Its value never enters a chart value, a saved config, or a launch command.';
 }

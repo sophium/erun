@@ -18,7 +18,6 @@ const claudeOverrideResetValues: Partial<UIEnvironmentConfig['claude']> = {
   useMantle: undefined,
   useBedrock: undefined,
   useGateway: undefined,
-  gatewayAuthTokenSecret: undefined,
   models: [],
   maxOutputTokens: undefined,
   effort: undefined,

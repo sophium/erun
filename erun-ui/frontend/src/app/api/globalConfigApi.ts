@@ -1,11 +1,13 @@
 import type { UIERunConfig } from '@/types';
-import type { UIGatewayCredentialCandidates, UIGatewayModel } from '@/uiOpenRouterTypes';
+import type { UIGatewayCredentialStatus, UIGatewayModel } from '@/uiOpenRouterTypes';
 
 import {
+  ClearGatewayCredential,
   LoadERunConfig,
-  LoadGatewayCredentialCandidates,
+  LoadGatewayCredentialStatus,
   LoadGatewayModels,
   SaveERunConfig,
+  SaveGatewayCredential,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
@@ -28,12 +30,24 @@ export const globalConfigApi = wailsApi.injectEndpoints({
     loadGatewayModels: builder.mutation<UIGatewayModel[], string>({
       queryFn: wailsQueryFn<string, UIGatewayModel[]>((baseURL) => LoadGatewayModels(baseURL)),
     }),
-    // Reads the environment namespaces, so the catalog offers Secret names that
-    // exist rather than asking for one that has to be invented.
-    loadGatewayCredentialCandidates: builder.mutation<UIGatewayCredentialCandidates, NoValue>({
-      queryFn: wailsQueryFn<NoValue, UIGatewayCredentialCandidates>(() =>
-        LoadGatewayCredentialCandidates(),
+    // Which credential a deploy would deliver: a value saved in ERun settings,
+    // or this machine's own Claude Code key. Read rather than inferred, so the
+    // catalog reports the key that will actually be used.
+    getGatewayCredentialStatus: builder.query<UIGatewayCredentialStatus, NoValue>({
+      queryFn: wailsQueryFn<NoValue, UIGatewayCredentialStatus>(() =>
+        LoadGatewayCredentialStatus(),
       ),
+      providesTags: ['GlobalConfig'],
+    }),
+    saveGatewayCredential: builder.mutation<UIGatewayCredentialStatus, string>({
+      queryFn: wailsQueryFn<string, UIGatewayCredentialStatus>((token) =>
+        SaveGatewayCredential(token),
+      ),
+      invalidatesTags: ['GlobalConfig'],
+    }),
+    clearGatewayCredential: builder.mutation<UIGatewayCredentialStatus, NoValue>({
+      queryFn: wailsQueryFn<NoValue, UIGatewayCredentialStatus>(() => ClearGatewayCredential()),
+      invalidatesTags: ['GlobalConfig'],
     }),
   }),
 });
@@ -43,5 +57,7 @@ export const {
   useLazyGetERunConfigQuery,
   useSaveERunConfigMutation,
   useLoadGatewayModelsMutation,
-  useLoadGatewayCredentialCandidatesMutation,
+  useGetGatewayCredentialStatusQuery,
+  useSaveGatewayCredentialMutation,
+  useClearGatewayCredentialMutation,
 } = globalConfigApi;

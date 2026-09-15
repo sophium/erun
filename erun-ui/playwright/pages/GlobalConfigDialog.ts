@@ -140,12 +140,34 @@ export class GlobalConfigDialog {
     return this.page.locator('#global-config-openrouter-baseurl');
   }
 
-  openRouterSecretInput(): Locator {
-    return this.page.locator('#global-config-openrouter-secret');
+  // The gateway credential is reported, not typed into a field: erun delivers
+  // one erun-level value, so what an operator picks from is which key is in play.
+  // The summary carries its source so a spec asserts on the state rather than on
+  // a sentence that may be reworded.
+  openRouterCredentialSummary(): Locator {
+    return this.locator().locator('[data-gateway-credential-source]');
   }
 
-  openRouterSecretKeyInput(): Locator {
-    return this.page.locator('#global-config-openrouter-secret-key');
+  openRouterSetKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: /Set a key|Use a different key/ });
+  }
+
+  openRouterClearKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: "Use this machine's key" });
+  }
+
+  openRouterTokenInput(): Locator {
+    return this.page.locator('#global-config-openrouter-token');
+  }
+
+  openRouterSaveKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Save key', exact: true });
+  }
+
+  async setOpenRouterCredential(token: string): Promise<void> {
+    await this.openRouterSetKeyButton().click();
+    await this.openRouterTokenInput().fill(token);
+    await this.openRouterSaveKeyButton().click();
   }
 
   openRouterDefaultModelTrigger(): Locator {
@@ -204,21 +226,6 @@ export class GlobalConfigDialog {
     return this.locator().getByRole('button', { name: /Load from gateway|Reload from gateway/ });
   }
 
-  openRouterFindSecretsButton(): Locator {
-    return this.locator().getByRole('button', { name: /Find Secrets|Reload Secrets/ });
-  }
-
-  openRouterSecretChoicesButton(): Locator {
-    return this.locator().getByRole('button', { name: 'Show Credential Secret' });
-  }
-
-  // The Secret name is picked from what the environment namespaces hold, so it
-  // does not have to be invented.
-  async selectOpenRouterSecret(name: string): Promise<void> {
-    await this.openRouterSecretChoicesButton().click();
-    await this.page.getByRole('option', { name }).click();
-  }
-
   openRouterModelChoicesButton(index: number): Locator {
     return this.locator().getByRole('button', {
       name: `Show gateway models for model ${String(index + 1)}`,
@@ -240,13 +247,6 @@ export class GlobalConfigDialog {
     await this.openRouterModelChoicesButton(index).click();
     await this.openRouterModelSearchInput().fill(search);
     await this.page.getByRole('option', { name: id }).click();
-  }
-
-  async setOpenRouterCredential({ secret, key }: { secret: string; key?: string }): Promise<void> {
-    await this.openRouterSecretInput().fill(secret);
-    if (key !== undefined) {
-      await this.openRouterSecretKeyInput().fill(key);
-    }
   }
 
   async addOpenRouterModel({ id, context }: { id: string; context?: number }): Promise<void> {

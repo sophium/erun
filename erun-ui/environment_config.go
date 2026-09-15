@@ -668,14 +668,13 @@ func applyEnvironmentCloudAliasSlots(existing *eruncommon.EnvConfig, config uiEn
 
 func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig {
 	out := uiClaudeConfig{
-		UseMantle:              copyBoolPtr(config.UseMantle),
-		UseBedrock:             copyBoolPtr(config.UseBedrock),
-		UseGateway:             copyBoolPtr(config.UseGateway),
-		GatewayAuthTokenSecret: strings.TrimSpace(config.GatewayAuthTokenSecret),
-		MaxOutputTokens:        copyIntPtr(config.MaxOutputTokens),
-		Effort:                 copyStringPtr(config.Effort),
-		DefaultModel:           copyStringPtr(config.DefaultModel),
-		VerboseDebug:           config.VerboseDebug,
+		UseMantle:       copyBoolPtr(config.UseMantle),
+		UseBedrock:      copyBoolPtr(config.UseBedrock),
+		UseGateway:      copyBoolPtr(config.UseGateway),
+		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
+		Effort:          copyStringPtr(config.Effort),
+		DefaultModel:    copyStringPtr(config.DefaultModel),
+		VerboseDebug:    config.VerboseDebug,
 	}
 	if models := config.NormalizedModels(); len(models) > 0 {
 		out.Models = models
@@ -689,15 +688,14 @@ func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfi
 		models = normalized
 	}
 	return eruncommon.EnvironmentClaudeConfig{
-		UseMantle:              copyBoolPtr(config.UseMantle),
-		UseBedrock:             copyBoolPtr(config.UseBedrock),
-		UseGateway:             copyBoolPtr(config.UseGateway),
-		GatewayAuthTokenSecret: strings.TrimSpace(config.GatewayAuthTokenSecret),
-		Models:                 models,
-		MaxOutputTokens:        copyIntPtr(config.MaxOutputTokens),
-		Effort:                 copyStringPtr(config.Effort),
-		DefaultModel:           copyStringPtr(config.DefaultModel),
-		VerboseDebug:           config.VerboseDebug,
+		UseMantle:       copyBoolPtr(config.UseMantle),
+		UseBedrock:      copyBoolPtr(config.UseBedrock),
+		UseGateway:      copyBoolPtr(config.UseGateway),
+		Models:          models,
+		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
+		Effort:          copyStringPtr(config.Effort),
+		DefaultModel:    copyStringPtr(config.DefaultModel),
+		VerboseDebug:    config.VerboseDebug,
 	}
 }
 

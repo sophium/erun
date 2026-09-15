@@ -39,36 +39,36 @@ func TestOpenRouterConfigConfigured(t *testing.T) {
 	}
 }
 
-func TestOpenRouterConfigAuthTokenSecretName(t *testing.T) {
-	// One erun-level catalog means one Secret name for every environment, so a
-	// catalog that names none still has a working name rather than leaving the
-	// operator to invent one.
+func TestOpenRouterConfigAuthTokenRefName(t *testing.T) {
+	// One erun-level catalog means one ref for every environment, so a catalog
+	// that names none still resolves to a working one rather than leaving the
+	// operator to invent a reference.
 	defaulted := &OpenRouterConfig{BaseURL: "https://x"}
-	if got := defaulted.AuthTokenSecretName(); got != DefaultOpenRouterAuthTokenSecret {
-		t.Fatalf("unnamed Secret = %q, want the default", got)
+	if got := defaulted.AuthTokenRefName(); got != DefaultOpenRouterAuthTokenRef {
+		t.Fatalf("unnamed ref = %q, want the default", got)
 	}
 
-	// An operator who already manages the credential under their own name keeps
-	// using it.
-	named := &OpenRouterConfig{BaseURL: "https://x", AuthTokenSecret: "  my-existing-secret  "}
-	if got := named.AuthTokenSecretName(); got != "my-existing-secret" {
-		t.Fatalf("named Secret = %q, want the trimmed name", got)
+	// A ref the operator has already written their credential under keeps being
+	// used, so an existing store entry is not orphaned by configuring a catalog.
+	named := &OpenRouterConfig{BaseURL: "https://x", AuthTokenRef: "  my-existing-ref  "}
+	if got := named.AuthTokenRefName(); got != "my-existing-ref" {
+		t.Fatalf("named ref = %q, want the trimmed ref", got)
 	}
 
-	// A catalog that names no gateway resolves to no Secret at all, so "no
-	// gateway" stays distinguishable from "gateway with the default Secret".
+	// A catalog that names no gateway resolves to no ref at all, so "no gateway"
+	// stays distinguishable from "gateway with the default ref".
 	var unconfigured *OpenRouterConfig
-	if got := unconfigured.AuthTokenSecretName(); got != "" {
-		t.Fatalf("unconfigured Secret = %q, want empty", got)
+	if got := unconfigured.AuthTokenRefName(); got != "" {
+		t.Fatalf("unconfigured ref = %q, want empty", got)
 	}
-	if got := (&OpenRouterConfig{}).AuthTokenSecretName(); got != "" {
-		t.Fatalf("catalog without a base URL Secret = %q, want empty", got)
+	if got := (&OpenRouterConfig{}).AuthTokenRefName(); got != "" {
+		t.Fatalf("catalog without a base URL ref = %q, want empty", got)
 	}
 }
 
 func TestEffectiveGateway(t *testing.T) {
 	yes, no := func() *bool { b := true; return &b }(), func() *bool { b := false; return &b }()
-	catalog := &OpenRouterConfig{BaseURL: "https://openrouter.ai/api", AuthTokenSecret: "erun-claude-gateway"}
+	catalog := &OpenRouterConfig{BaseURL: "https://openrouter.ai/api", AuthTokenRef: "claude-gateway"}
 
 	t.Run("an unconfigured catalog reaches no environment", func(t *testing.T) {
 		if got := EffectiveGateway(EnvironmentClaudeConfig{}, nil); got.Configured() {
@@ -96,25 +96,18 @@ func TestEffectiveGateway(t *testing.T) {
 		}
 	})
 
-	t.Run("an environment can name its own credential Secret", func(t *testing.T) {
-		got := EffectiveGateway(EnvironmentClaudeConfig{GatewayAuthTokenSecret: "  tenant-secret  "}, catalog)
-		if got.AuthTokenSecretName() != "tenant-secret" {
-			t.Fatalf("override Secret = %q, want the trimmed name", got.AuthTokenSecretName())
-		}
-		// The catalog is not mutated, so one environment's override cannot leak
-		// into another's resolution.
-		if catalog.AuthTokenSecret != "erun-claude-gateway" {
-			t.Fatalf("catalog was mutated: %q", catalog.AuthTokenSecret)
-		}
-		if EffectiveGateway(EnvironmentClaudeConfig{}, catalog).AuthTokenSecret != "erun-claude-gateway" {
-			t.Fatal("another environment must still see the catalog's own name")
-		}
-	})
-
-	t.Run("an override naming what the catalog already names is not a change", func(t *testing.T) {
-		got := EffectiveGateway(EnvironmentClaudeConfig{GatewayAuthTokenSecret: "erun-claude-gateway"}, catalog)
+	t.Run("the catalog is returned as it is, credential included", func(t *testing.T) {
+		// The credential is one erun-level value, so there is nothing here to
+		// resolve per environment: an environment takes the gateway and its
+		// credential together or opts out of both. Returning the catalog itself
+		// is what keeps the chart values, the launch, and the delivered Secret
+		// from ever disagreeing about which key is in play.
+		got := EffectiveGateway(EnvironmentClaudeConfig{}, catalog)
 		if got != catalog {
-			t.Fatal("an override equal to the catalog's name needs no copy")
+			t.Fatal("the catalog must be returned unchanged, not copied or rewritten")
+		}
+		if got.AuthTokenRefName() != "claude-gateway" {
+			t.Fatalf("ref = %q, want the catalog's own", got.AuthTokenRefName())
 		}
 	})
 }
@@ -162,7 +155,7 @@ func TestOpenRouterConfigResolveDefaultModel(t *testing.T) {
 }
 
 func TestOpenRouterConfigGatewayEnvVars(t *testing.T) {
-	c := &OpenRouterConfig{BaseURL: "  https://openrouter.ai/api  ", AuthTokenSecret: "erun-claude-gateway"}
+	c := &OpenRouterConfig{BaseURL: "  https://openrouter.ai/api  ", AuthTokenRef: "claude-gateway"}
 	env := c.GatewayEnvVars()
 	if env["ANTHROPIC_BASE_URL"] != "https://openrouter.ai/api" {
 		t.Fatalf("base URL = %q, want the trimmed value", env["ANTHROPIC_BASE_URL"])
@@ -172,8 +165,11 @@ func TestOpenRouterConfigGatewayEnvVars(t *testing.T) {
 	if value, ok := env["ANTHROPIC_API_KEY"]; !ok || value != "" {
 		t.Fatalf("ANTHROPIC_API_KEY must be present and empty, got %q (present=%v)", value, ok)
 	}
+	// These are the settings-file variables, which erun writes; the credential
+	// itself is delivered separately as a Secret, so neither it nor its ref
+	// belongs in this block.
 	for key, value := range env {
-		if strings.Contains(key, "TOKEN") || strings.Contains(value, "erun-claude-gateway") {
+		if strings.Contains(key, "TOKEN") || strings.Contains(value, "claude-gateway") {
 			t.Fatalf("a credential or its reference leaked into the env block: %s=%q", key, value)
 		}
 	}
@@ -226,8 +222,8 @@ func TestResolveOpenRouterConfig(t *testing.T) {
 // gatewayFixture is the catalog the gateway launch contracts share.
 func gatewayFixture() *OpenRouterConfig {
 	return &OpenRouterConfig{
-		BaseURL:         "https://openrouter.ai/api",
-		AuthTokenSecret: "erun-claude-gateway",
+		BaseURL:      "https://openrouter.ai/api",
+		AuthTokenRef: "claude-gateway",
 		Models: []OpenRouterModel{
 			{ID: "deepseek/deepseek-v4.1-flash", Context: 1048576},
 			{ID: "openai/gpt-6-astra", Context: 1050000},
@@ -301,13 +297,13 @@ func TestAISessionLaunchGatewayRemoteControl(t *testing.T) {
 
 // TestAISessionLaunchGatewayCredentialStaysOut pins the property that matters
 // most: the credential never reaches a launch command, whose argv is visible to
-// anything that can list processes. The Secret names it and the pod environment
-// carries it; neither belongs in the launch.
+// anything that can list processes. The pod reads it from a Secret erun
+// delivers; neither the value nor the store ref belongs in the launch.
 func TestAISessionLaunchGatewayCredentialStaysOut(t *testing.T) {
 	gated := &OpenRouterConfig{
-		BaseURL:         "https://openrouter.ai/api",
-		AuthTokenSecret: "sk-or-secret-must-not-leak",
-		Models:          []OpenRouterModel{{ID: "a/b", Context: 100}},
+		BaseURL:      "https://openrouter.ai/api",
+		AuthTokenRef: "sk-or-secret-must-not-leak",
+		Models:       []OpenRouterModel{{ID: "a/b", Context: 100}},
 	}
 	for _, got := range []string{
 		AISessionLaunchCommand("", EnvironmentClaudeConfig{}, gated, "team", "dev"),

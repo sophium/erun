@@ -23,9 +23,9 @@ function hasClaudeTriStateOverride(claude: UIEnvironmentConfig['claude']): boole
   );
 }
 
-// A list and a named Secret have no "inherit" spelling: empty means inherit.
+// A list has no "inherit" spelling: empty means inherit.
 function hasClaudeTypedOverride(claude: UIEnvironmentConfig['claude']): boolean {
-  return (claude.models?.length ?? 0) > 0 || (claude.gatewayAuthTokenSecret ?? '') !== '';
+  return (claude.models?.length ?? 0) > 0;
 }
 
 export function isValidClaudeTokens(

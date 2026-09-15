@@ -532,6 +532,8 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-claude-gateway');
   }
 
+  // The gateway credential is one erun-level value, so this control no longer
+  // exists and every use of it asserts that absence rather than filling it in.
   claudeGatewaySecretInput(): Locator {
     return this.locator().locator('#environment-config-claude-gateway-secret');
   }

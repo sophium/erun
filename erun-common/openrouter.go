@@ -2,13 +2,26 @@ package eruncommon
 
 import "strings"
 
-// DefaultOpenRouterAuthTokenSecret is the Secret name a catalog that names none
-// resolves to. The catalog is erun-level, so there is one Secret name for every
-// environment rather than one per environment — which makes it something to
-// default rather than a required entry the operator has to invent. A catalog
-// naming its own Secret still wins, so an operator who already manages the
-// credential under their own naming keeps using it.
-const DefaultOpenRouterAuthTokenSecret = "erun-claude-gateway"
+// Delivering the credential is erun's own business, not an operator entry.
+//
+// One erun-level catalog means one credential, so there is nothing for the
+// operator to name: they supply a value, and erun writes it into each
+// environment's namespace under these fixed names and points the chart at them.
+// Naming them here rather than only in the chart keeps the one place that
+// creates the Secret and the one place that reads it in agreement.
+const (
+	// GatewaySecretName is the Secret erun creates in each environment's
+	// namespace holding the gateway credential.
+	GatewaySecretName = "erun-claude-gateway"
+	// GatewaySecretKey is the entry within GatewaySecretName the chart reads.
+	GatewaySecretKey = "token"
+)
+
+// DefaultOpenRouterAuthTokenRef is the operator secret store ref the gateway
+// credential is saved under. A ref, not a value: the token lives in erun's own
+// operator secret store — the same store the Cloudflare token uses — so
+// config.yaml stays safe to back up and share.
+const DefaultOpenRouterAuthTokenRef = "claude-gateway"
 
 // OpenRouterConfig is the operator's erun-level catalog of gateway models and
 // the gateway that serves them. It is deliberately root config rather than a
@@ -19,16 +32,17 @@ type OpenRouterConfig struct {
 	// BaseURL is the gateway's Anthropic-compatible endpoint, e.g.
 	// https://openrouter.ai/api.
 	BaseURL string `yaml:"baseurl,omitempty" json:"baseURL,omitempty"`
-	// AuthTokenSecret names a Kubernetes Secret, in each environment's own
-	// namespace, holding the gateway credential. It is a reference rather than
-	// the token so config.yaml stays safe to back up and share, and so no
-	// credential value ever passes through helm's argv or a launch command.
-	// The operator provisions the Secret by whatever means they already use for
-	// secrets in the cluster.
-	AuthTokenSecret string `yaml:"authtokensecret,omitempty" json:"authTokenSecret,omitempty"`
-	// AuthTokenKey is the key within AuthTokenSecret holding the token. Empty
-	// means the chart's own default key.
-	AuthTokenKey string `yaml:"authtokenkey,omitempty" json:"authTokenKey,omitempty"`
+	// AuthTokenRef names the gateway credential in erun's own operator secret
+	// store — the same store the Cloudflare token uses. It is a reference
+	// rather than the token so config.yaml stays safe to back up and share, and
+	// so no credential value ever passes through helm's argv, a chart value, or
+	// a launch command.
+	//
+	// A store ref, precisely because the catalog is erun-level: the credential
+	// is one value on this machine, not a per-cluster Secret to go looking for.
+	// Deploy reads it and delivers it into each environment's namespace under
+	// GatewaySecretName.
+	AuthTokenRef string `yaml:"authtokenref,omitempty" json:"authTokenRef,omitempty"`
 	// DefaultModel is the catalog entry an environment selects when it has not
 	// chosen one. Ignored when it names no catalog entry.
 	DefaultModel string            `yaml:"defaultmodel,omitempty" json:"defaultModel,omitempty"`
@@ -69,38 +83,25 @@ func EffectiveGateway(claude EnvironmentClaudeConfig, catalog *OpenRouterConfig)
 	if claude.UseGateway != nil && !*claude.UseGateway {
 		return nil
 	}
-	return catalog.ForEnvironment(claude)
+	return catalog
 }
 
-// ForEnvironment returns the catalog as this environment uses it: the same
-// gateway, with the environment's own credential Secret when it names one. The
-// catalog itself is not mutated, so one environment's override cannot leak into
-// another's resolution.
-func (c *OpenRouterConfig) ForEnvironment(claude EnvironmentClaudeConfig) *OpenRouterConfig {
-	if c == nil {
-		return nil
-	}
-	override := strings.TrimSpace(claude.GatewayAuthTokenSecret)
-	if override == "" || override == strings.TrimSpace(c.AuthTokenSecret) {
-		return c
-	}
-	clone := *c
-	clone.AuthTokenSecret = override
-	return &clone
-}
-
-// AuthTokenSecretName returns the Secret the credential is read from: the one
-// the catalog names, or the conventional default when it names none. It returns
-// "" only for a catalog that is not configured at all, so a caller can tell
-// "no gateway" from "gateway with the default Secret".
-func (c *OpenRouterConfig) AuthTokenSecretName() string {
+// AuthTokenRefName returns the operator secret store ref the credential is read
+// from: the one the catalog names, or the conventional default when it names
+// none. It returns "" only for a catalog that is not configured at all, so a
+// caller can tell "no gateway" from "gateway with the default ref".
+//
+// There is deliberately no per-environment resolution here. The catalog is
+// erun-level and the credential is one erun-level value, so an environment
+// takes the gateway and its credential together or opts out of both.
+func (c *OpenRouterConfig) AuthTokenRefName() string {
 	if !c.Configured() {
 		return ""
 	}
-	if name := strings.TrimSpace(c.AuthTokenSecret); name != "" {
-		return name
+	if ref := strings.TrimSpace(c.AuthTokenRef); ref != "" {
+		return ref
 	}
-	return DefaultOpenRouterAuthTokenSecret
+	return DefaultOpenRouterAuthTokenRef
 }
 
 // Configured reports whether the catalog names a usable gateway. A base URL

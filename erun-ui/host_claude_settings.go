@@ -1,17 +1,11 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-)
 
-// claudeSettingsDirEnv overrides where Claude Code keeps its user settings. The
-// desktop honours it for the same reason Claude Code does: an operator who has
-// moved the directory should see their own configuration, not a path we assumed.
-const claudeSettingsDirEnv = "CLAUDE_CONFIG_DIR"
+	eruncommon "github.com/sophium/erun/erun-common"
+)
 
 // uiHostGatewayDefaults is the gateway the operator's own Claude Code is already
 // pointed at, read from their user-level settings.
@@ -20,16 +14,22 @@ const claudeSettingsDirEnv = "CLAUDE_CONFIG_DIR"
 // than asking the operator to retype an endpoint and model they configured
 // once already.
 //
-// The credential is deliberately absent. Settings hold the token as a *value*,
-// while the catalog carries a Secret *name* the pod resolves — so there is
-// nothing to carry across, and reading it would pull a credential into the
-// desktop's read model for no gain.
+// The credential travels as a hint and a presence flag, never as the value. The
+// desktop has no use for a live token — deploy reads it host-side — and a read
+// model is the wrong place to carry one.
 type uiHostGatewayDefaults struct {
 	BaseURL string `json:"baseUrl,omitempty"`
 	Model   string `json:"model,omitempty"`
 	// Context is the window the settings declare for Model. Zero means they
 	// declare none, so the catalog leaves the field to the operator.
 	Context int `json:"context,omitempty"`
+	// HasCredential reports whether these settings carry a gateway credential
+	// erun can deliver, so the catalog can say one will be picked up rather than
+	// asking for one that is already here.
+	HasCredential bool `json:"hasCredential,omitempty"`
+	// CredentialHint is the credential's last few characters, so an operator can
+	// tell which key is in play without the value crossing into the UI.
+	CredentialHint string `json:"credentialHint,omitempty"`
 }
 
 // LoadHostGatewayDefaults reports the gateway this machine's Claude Code already
@@ -40,27 +40,11 @@ type uiHostGatewayDefaults struct {
 // offer, which is the ordinary case rather than a failure. A file that is
 // present but unreadable is reported, because that is a real fault worth seeing.
 func (a *App) LoadHostGatewayDefaults() (uiHostGatewayDefaults, error) {
-	path, err := claudeSettingsPath()
+	env, err := eruncommon.HostClaudeSettingsEnv()
 	if err != nil {
 		return uiHostGatewayDefaults{}, err
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return uiHostGatewayDefaults{}, nil
-		}
-		return uiHostGatewayDefaults{}, err
-	}
-	var settings struct {
-		Env map[string]string `json:"env"`
-	}
-	if err := json.Unmarshal(raw, &settings); err != nil {
-		// Claude Code tolerates a malformed user settings file by ignoring the
-		// entries it cannot read, so a desktop that refused to open its catalog
-		// over one would be stricter than the tool owning the file.
-		return uiHostGatewayDefaults{}, nil
-	}
-	return hostGatewayDefaultsFromEnv(settings.Env), nil
+	return hostGatewayDefaultsFromEnv(env), nil
 }
 
 func hostGatewayDefaultsFromEnv(env map[string]string) uiHostGatewayDefaults {
@@ -77,19 +61,27 @@ func hostGatewayDefaultsFromEnv(env map[string]string) uiHostGatewayDefaults {
 			out.Context = context
 		}
 	}
+	// Read from this same env block rather than re-reading the file, so the
+	// gateway and the key it will be used with can never come from two different
+	// snapshots of the settings.
+	if token, ok := eruncommon.GatewayCredentialFromEnv(env); ok {
+		out.HasCredential = true
+		out.CredentialHint = credentialHint(token)
+	}
 	return out
 }
 
-// claudeSettingsPath resolves the user-level Claude Code settings file. The
-// config directory is honoured when set, so an operator who has moved it is
-// read where they actually keep it.
-func claudeSettingsPath() (string, error) {
-	if dir := strings.TrimSpace(os.Getenv(claudeSettingsDirEnv)); dir != "" {
-		return filepath.Join(dir, "settings.json"), nil
+// credentialHint identifies a credential without revealing it. Four characters
+// is enough to tell two keys apart and far too few to use one.
+//
+// The value must be strictly longer than the suffix: at exactly that length the
+// "hint" would be the whole credential, which is the opposite of the point.
+func credentialHint(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) <= credentialHintLength {
+		return ""
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".claude", "settings.json"), nil
+	return "…" + trimmed[len(trimmed)-credentialHintLength:]
 }
+
+const credentialHintLength = 4

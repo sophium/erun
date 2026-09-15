@@ -295,11 +295,13 @@ type uiOpenRouterModel struct {
 // through and the models selectable from it. The credential is a Secret
 // reference, never a value, so config.yaml stays safe to back up and share.
 type uiOpenRouterConfig struct {
-	BaseURL         string              `json:"baseUrl,omitempty"`
-	AuthTokenSecret string              `json:"authTokenSecret,omitempty"`
-	AuthTokenKey    string              `json:"authTokenKey,omitempty"`
-	DefaultModel    string              `json:"defaultModel,omitempty"`
-	Models          []uiOpenRouterModel `json:"models,omitempty"`
+	BaseURL string `json:"baseUrl,omitempty"`
+	// AuthTokenRef is the operator secret store ref the gateway credential is
+	// saved under. A ref, not a value: the token itself never enters the config,
+	// this read model, or a chart value.
+	AuthTokenRef string              `json:"authTokenRef,omitempty"`
+	DefaultModel string              `json:"defaultModel,omitempty"`
+	Models       []uiOpenRouterModel `json:"models,omitempty"`
 }
 
 type uiTenantConfig struct {
@@ -1030,10 +1032,7 @@ type uiClaudeConfig struct {
 	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
 	Effort          *string  `json:"effort,omitempty"`
 	DefaultModel    *string  `json:"defaultModel,omitempty"`
-	// GatewayAuthTokenSecret names a Secret this environment reads its gateway
-	// credential from, instead of the erun-level catalog's own name.
-	GatewayAuthTokenSecret string `json:"gatewayAuthTokenSecret,omitempty"`
-	VerboseDebug           bool   `json:"verboseDebug,omitempty"`
+	VerboseDebug    bool     `json:"verboseDebug,omitempty"`
 }
 
 type uiClaudeDefaults struct {

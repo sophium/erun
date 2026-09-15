@@ -303,10 +303,9 @@ func openRouterConfigToUI(config *eruncommon.OpenRouterConfig) *uiOpenRouterConf
 		return nil
 	}
 	out := &uiOpenRouterConfig{
-		BaseURL:         strings.TrimSpace(config.BaseURL),
-		AuthTokenSecret: strings.TrimSpace(config.AuthTokenSecret),
-		AuthTokenKey:    strings.TrimSpace(config.AuthTokenKey),
-		DefaultModel:    strings.TrimSpace(config.DefaultModel),
+		BaseURL:      strings.TrimSpace(config.BaseURL),
+		AuthTokenRef: strings.TrimSpace(config.AuthTokenRef),
+		DefaultModel: strings.TrimSpace(config.DefaultModel),
 	}
 	for _, m := range config.Models {
 		out.Models = append(out.Models, uiOpenRouterModel{ID: strings.TrimSpace(m.ID), Context: m.Context})
@@ -319,10 +318,9 @@ func openRouterConfigFromUI(config *uiOpenRouterConfig) *eruncommon.OpenRouterCo
 		return nil
 	}
 	out := &eruncommon.OpenRouterConfig{
-		BaseURL:         strings.TrimSpace(config.BaseURL),
-		AuthTokenSecret: strings.TrimSpace(config.AuthTokenSecret),
-		AuthTokenKey:    strings.TrimSpace(config.AuthTokenKey),
-		DefaultModel:    strings.TrimSpace(config.DefaultModel),
+		BaseURL:      strings.TrimSpace(config.BaseURL),
+		AuthTokenRef: strings.TrimSpace(config.AuthTokenRef),
+		DefaultModel: strings.TrimSpace(config.DefaultModel),
 	}
 	for _, m := range config.Models {
 		id := strings.TrimSpace(m.ID)

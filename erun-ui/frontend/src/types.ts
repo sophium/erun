@@ -507,9 +507,6 @@ export interface UIEnvironmentClaudeConfig {
   maxOutputTokens?: number;
   effort?: string;
   defaultModel?: string;
-  // gatewayAuthTokenSecret names a Secret this environment reads its gateway
-  // credential from instead of the catalog's own name.
-  gatewayAuthTokenSecret?: string;
   verboseDebug?: boolean;
 }
 

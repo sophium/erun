@@ -1006,6 +1006,9 @@ func applyPreRolloutResources(ctx Context, deployInput HelmDeploySpec) error {
 	if err := applyCloudflareCredentialsSecret(ctx, deployInput); err != nil {
 		return err
 	}
+	if err := applyGatewayCredentialsSecret(ctx, deployInput); err != nil {
+		return err
+	}
 	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
 		return err
 	}
@@ -3025,10 +3028,11 @@ func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig
 		args = append(args, "--set-string", "claude.maxOutputTokens="+strconv.Itoa(*config.MaxOutputTokens))
 	}
 	// The gateway is erun-level, so these render for every environment that
-	// selects from the catalog — resolved through this environment's own
-	// override, so one that opted out renders none of them and one that named
-	// its own Secret gets that name. Only the Secret's name travels here; its
-	// value never passes through helm.
+	// selects from the catalog; one that opted out renders none of them. Only
+	// the Secret's name travels here, and that name is a fixed constant rather
+	// than an operator entry — the credential is one erun-level value, delivered
+	// into this namespace by applyGatewayCredentialsSecret, so there is nothing
+	// per-environment to name. The value itself never passes through helm.
 	if gateway := EffectiveGateway(config, gateway); gateway.Configured() {
 		args = append(args, "--set-string", "claude.openRouterBaseURL="+escapeHelmSetValue(strings.TrimSpace(gateway.BaseURL)))
 		if ids := formatClaudeModels(gateway.ModelIDs()); ids != "" {
@@ -3042,15 +3046,11 @@ func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig
 				args = append(args, "--set-string", "claude.openRouterModelContext="+strconv.Itoa(context))
 			}
 		}
-		// The name always resolves, defaulting when the catalog does not name
-		// one: one catalog means one Secret name, so it is not an entry the
-		// operator must supply for the gateway to work.
-		if secret := gateway.AuthTokenSecretName(); secret != "" {
-			args = append(args, "--set-string", "claude.openRouterAuthTokenSecret="+escapeHelmSetValue(secret))
-		}
-		if key := strings.TrimSpace(gateway.AuthTokenKey); key != "" {
-			args = append(args, "--set-string", "claude.openRouterAuthTokenKey="+escapeHelmSetValue(key))
-		}
+		// Both names are erun's own constants, not operator entries: erun creates
+		// this Secret from the erun-level credential, so there is nothing here
+		// to supply and nothing to get out of step with what deploy creates.
+		args = append(args, "--set-string", "claude.openRouterAuthTokenSecret="+GatewaySecretName)
+		args = append(args, "--set-string", "claude.openRouterAuthTokenKey="+GatewaySecretKey)
 	}
 	return args
 }
