@@ -3025,9 +3025,11 @@ func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig
 		args = append(args, "--set-string", "claude.maxOutputTokens="+strconv.Itoa(*config.MaxOutputTokens))
 	}
 	// The gateway is erun-level, so these render for every environment that
-	// selects from the catalog. Only the credential's Secret name travels here;
-	// its value never passes through helm.
-	if gateway.Configured() {
+	// selects from the catalog — resolved through this environment's own
+	// override, so one that opted out renders none of them and one that named
+	// its own Secret gets that name. Only the Secret's name travels here; its
+	// value never passes through helm.
+	if gateway := EffectiveGateway(config, gateway); gateway.Configured() {
 		args = append(args, "--set-string", "claude.openRouterBaseURL="+escapeHelmSetValue(strings.TrimSpace(gateway.BaseURL)))
 		if ids := formatClaudeModels(gateway.ModelIDs()); ids != "" {
 			args = append(args, "--set-string", "claude.openRouterAvailableModels="+escapeHelmSetValue(ids))

@@ -66,6 +66,59 @@ func TestOpenRouterConfigAuthTokenSecretName(t *testing.T) {
 	}
 }
 
+func TestEffectiveGateway(t *testing.T) {
+	yes, no := func() *bool { b := true; return &b }(), func() *bool { b := false; return &b }()
+	catalog := &OpenRouterConfig{BaseURL: "https://openrouter.ai/api", AuthTokenSecret: "erun-claude-gateway"}
+
+	t.Run("an unconfigured catalog reaches no environment", func(t *testing.T) {
+		if got := EffectiveGateway(EnvironmentClaudeConfig{}, nil); got.Configured() {
+			t.Fatal("no catalog must mean no gateway")
+		}
+		if got := EffectiveGateway(EnvironmentClaudeConfig{}, &OpenRouterConfig{}); got.Configured() {
+			t.Fatal("a catalog with no base URL must mean no gateway")
+		}
+	})
+
+	t.Run("unset inherits the erun-level decision", func(t *testing.T) {
+		if got := EffectiveGateway(EnvironmentClaudeConfig{}, catalog); got != catalog {
+			t.Fatalf("unset override = %v, want the catalog itself", got)
+		}
+		if got := EffectiveGateway(EnvironmentClaudeConfig{UseGateway: yes}, catalog); got != catalog {
+			t.Fatalf("explicit true = %v, want the catalog itself", got)
+		}
+	})
+
+	t.Run("an environment can stay on its own Claude sign-in", func(t *testing.T) {
+		// The point of the opt-out: one environment leaves the gateway without
+		// moving every other environment off it.
+		if got := EffectiveGateway(EnvironmentClaudeConfig{UseGateway: no}, catalog); got != nil {
+			t.Fatalf("opted-out environment = %v, want no gateway", got)
+		}
+	})
+
+	t.Run("an environment can name its own credential Secret", func(t *testing.T) {
+		got := EffectiveGateway(EnvironmentClaudeConfig{GatewayAuthTokenSecret: "  tenant-secret  "}, catalog)
+		if got.AuthTokenSecretName() != "tenant-secret" {
+			t.Fatalf("override Secret = %q, want the trimmed name", got.AuthTokenSecretName())
+		}
+		// The catalog is not mutated, so one environment's override cannot leak
+		// into another's resolution.
+		if catalog.AuthTokenSecret != "erun-claude-gateway" {
+			t.Fatalf("catalog was mutated: %q", catalog.AuthTokenSecret)
+		}
+		if EffectiveGateway(EnvironmentClaudeConfig{}, catalog).AuthTokenSecret != "erun-claude-gateway" {
+			t.Fatal("another environment must still see the catalog's own name")
+		}
+	})
+
+	t.Run("an override naming what the catalog already names is not a change", func(t *testing.T) {
+		got := EffectiveGateway(EnvironmentClaudeConfig{GatewayAuthTokenSecret: "erun-claude-gateway"}, catalog)
+		if got != catalog {
+			t.Fatal("an override equal to the catalog's name needs no copy")
+		}
+	})
+}
+
 func TestOpenRouterConfigModelIDs(t *testing.T) {
 	c := &OpenRouterConfig{BaseURL: "https://x", Models: []OpenRouterModel{
 		{ID: "b"}, {ID: "  "}, {ID: "a"}, {ID: "b"}, {ID: " c "},

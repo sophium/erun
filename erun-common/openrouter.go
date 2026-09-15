@@ -49,6 +49,46 @@ type OpenRouterModel struct {
 	Context int    `yaml:"context,omitempty" json:"context,omitempty"`
 }
 
+// EffectiveGateway resolves the gateway an environment actually uses: the
+// erun-level catalog, unless the environment opts out of it.
+//
+// The tri-state mirrors UseMantle and UseBedrock. Unset inherits, so an
+// environment follows the operator's erun-level decision; an explicit false
+// keeps that one environment on its own Claude sign-in while every other
+// environment still uses the gateway; an explicit true is the same as
+// inheriting when a catalog exists, and is reserved for a future catalog that
+// arrives after the override was recorded.
+//
+// It never returns a gateway for an environment that opted out, so every caller
+// — the chart values, the launch, and the auth-mode decision — reaches the same
+// answer from one place.
+func EffectiveGateway(claude EnvironmentClaudeConfig, catalog *OpenRouterConfig) *OpenRouterConfig {
+	if !catalog.Configured() {
+		return nil
+	}
+	if claude.UseGateway != nil && !*claude.UseGateway {
+		return nil
+	}
+	return catalog.ForEnvironment(claude)
+}
+
+// ForEnvironment returns the catalog as this environment uses it: the same
+// gateway, with the environment's own credential Secret when it names one. The
+// catalog itself is not mutated, so one environment's override cannot leak into
+// another's resolution.
+func (c *OpenRouterConfig) ForEnvironment(claude EnvironmentClaudeConfig) *OpenRouterConfig {
+	if c == nil {
+		return nil
+	}
+	override := strings.TrimSpace(claude.GatewayAuthTokenSecret)
+	if override == "" || override == strings.TrimSpace(c.AuthTokenSecret) {
+		return c
+	}
+	clone := *c
+	clone.AuthTokenSecret = override
+	return &clone
+}
+
 // AuthTokenSecretName returns the Secret the credential is read from: the one
 // the catalog names, or the conventional default when it names none. It returns
 // "" only for a catalog that is not configured at all, so a caller can tell

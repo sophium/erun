@@ -30,10 +30,22 @@ func KnownClaudeModels() []string {
 }
 
 type EnvironmentClaudeConfig struct {
-	UseMantle       *bool    `yaml:"usemantle,omitempty" json:"useMantle,omitempty"`
-	UseBedrock      *bool    `yaml:"usebedrock,omitempty" json:"useBedrock,omitempty"`
-	Models          []string `yaml:"models,omitempty" json:"models,omitempty"`
-	MaxOutputTokens *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
+	UseMantle  *bool `yaml:"usemantle,omitempty" json:"useMantle,omitempty"`
+	UseBedrock *bool `yaml:"usebedrock,omitempty" json:"useBedrock,omitempty"`
+	// UseGateway tri-states this environment's use of the erun-level gateway
+	// catalog, the same way UseMantle and UseBedrock do: unset inherits the
+	// catalog, so an environment follows the operator's erun-level decision;
+	// true and false override it for this environment alone. A catalog is one
+	// erun-level list, so without this an environment could only be moved onto
+	// the gateway by moving every environment onto it.
+	UseGateway *bool `yaml:"usegateway,omitempty" json:"useGateway,omitempty"`
+	// GatewayAuthTokenSecret overrides the Secret this environment reads the
+	// gateway credential from. Empty uses the catalog's own name. It exists for
+	// the case the catalog cannot express: an environment whose credential is
+	// managed separately, such as a per-tenant Secret.
+	GatewayAuthTokenSecret string   `yaml:"gatewayauthtokensecret,omitempty" json:"gatewayAuthTokenSecret,omitempty"`
+	Models                 []string `yaml:"models,omitempty" json:"models,omitempty"`
+	MaxOutputTokens        *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
 	// Effort is the per-env Claude Code session effort level, one of
 	// low|medium|high|xhigh|max|ultracode. ultracode is not an --effort value:
 	// it enables xhigh effort plus standing workflow orchestration. Unset means

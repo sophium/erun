@@ -48,8 +48,10 @@ func resolveClaudeEffort(config EnvironmentClaudeConfig) string {
 // gateway the previous rule stands: the choice must be one of the environment's
 // available models.
 func resolveClaudeLaunchModel(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) string {
-	if gateway.Configured() {
-		return resolveGatewayLaunchModel(config, gateway)
+	// Resolved through the environment's own opt-out, so an environment that
+	// stays on its own Claude sign-in is never handed a catalog model.
+	if effective := EffectiveGateway(config, gateway); effective.Configured() {
+		return resolveGatewayLaunchModel(config, effective)
 	}
 	return resolveAvailableClaudeModel(config)
 }
@@ -180,7 +182,9 @@ func claudeRemoteControlFlag(claude EnvironmentClaudeConfig, gateway *OpenRouter
 // gateway rather than a claude.ai account, which is what decides Remote
 // Control eligibility.
 func claudeUsesGatewayAuth(claude EnvironmentClaudeConfig, gateway *OpenRouterConfig) bool {
-	if gateway.Configured() {
+	// Through the opt-out, so an environment that left the gateway keeps Remote
+	// Control, which a gateway credential could not pair.
+	if EffectiveGateway(claude, gateway).Configured() {
 		return true
 	}
 	return (claude.UseBedrock != nil && *claude.UseBedrock) ||
