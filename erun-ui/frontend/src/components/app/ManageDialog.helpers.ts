@@ -6,15 +6,26 @@ export const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
 
 export function isClaudeOverridden(claude: UIEnvironmentConfig['claude']): boolean {
+  return hasClaudeTriStateOverride(claude) || hasClaudeTypedOverride(claude);
+}
+
+// The tri-state overrides carry their own "inherit" value, so any of them being
+// set at all is an override.
+function hasClaudeTriStateOverride(claude: UIEnvironmentConfig['claude']): boolean {
   return (
     claude.useMantle !== undefined ||
     claude.useBedrock !== undefined ||
-    (claude.models?.length ?? 0) > 0 ||
+    claude.useGateway !== undefined ||
     claude.maxOutputTokens !== undefined ||
     claude.effort !== undefined ||
     claude.defaultModel !== undefined ||
     claude.verboseDebug === true
   );
+}
+
+// A list and a named Secret have no "inherit" spelling: empty means inherit.
+function hasClaudeTypedOverride(claude: UIEnvironmentConfig['claude']): boolean {
+  return (claude.models?.length ?? 0) > 0 || (claude.gatewayAuthTokenSecret ?? '') !== '';
 }
 
 export function isValidClaudeTokens(

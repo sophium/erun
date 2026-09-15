@@ -522,6 +522,20 @@ export class ManageDialog {
     return this.locator().getByLabel('Use host AWS credentials inside this env');
   }
 
+  // --- Per-environment gateway overrides ---
+  //
+  // Rendered only when the erun-level catalog names a gateway: without one
+  // there is nothing for an environment to override, so the controls are absent
+  // rather than offering a switch that changes nothing.
+
+  claudeGatewayField(): Locator {
+    return this.locator().locator('#environment-config-claude-gateway');
+  }
+
+  claudeGatewaySecretInput(): Locator {
+    return this.locator().locator('#environment-config-claude-gateway-secret');
+  }
+
   // Always renders; with no per-env override it shows "Default (ultracode)".
   claudeEffortSelect(): Locator {
     return this.locator().locator('#environment-config-claude-effort');

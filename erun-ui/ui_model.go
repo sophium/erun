@@ -1025,11 +1025,15 @@ type uiEnvironmentConfig struct {
 type uiClaudeConfig struct {
 	UseMantle       *bool    `json:"useMantle,omitempty"`
 	UseBedrock      *bool    `json:"useBedrock,omitempty"`
+	UseGateway      *bool    `json:"useGateway,omitempty"`
 	Models          []string `json:"models,omitempty"`
 	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
 	Effort          *string  `json:"effort,omitempty"`
 	DefaultModel    *string  `json:"defaultModel,omitempty"`
-	VerboseDebug    bool     `json:"verboseDebug,omitempty"`
+	// GatewayAuthTokenSecret names a Secret this environment reads its gateway
+	// credential from, instead of the erun-level catalog's own name.
+	GatewayAuthTokenSecret string `json:"gatewayAuthTokenSecret,omitempty"`
+	VerboseDebug           bool   `json:"verboseDebug,omitempty"`
 }
 
 type uiClaudeDefaults struct {
@@ -1042,6 +1046,10 @@ type uiClaudeDefaults struct {
 	MaxTokens       int      `json:"maxTokens"`
 	Effort          string   `json:"effort"`
 	EffortLevels    []string `json:"effortLevels"`
+	// GatewayConfigured reports whether the erun-level catalog names a gateway.
+	// Without one the per-environment controls have nothing to override, so the
+	// AI tab hides them rather than offering a switch that changes nothing.
+	GatewayConfigured bool `json:"gatewayConfigured"`
 }
 
 type uiRuntimePodConfig struct {

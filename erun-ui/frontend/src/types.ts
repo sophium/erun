@@ -499,10 +499,17 @@ export interface UIEnvironmentConfig {
 export interface UIEnvironmentClaudeConfig {
   useMantle?: boolean;
   useBedrock?: boolean;
+  // useGateway tri-states this environment's use of the erun-level gateway
+  // catalog: undefined inherits the operator's decision, true and false
+  // override it for this environment alone.
+  useGateway?: boolean;
   models?: string[];
   maxOutputTokens?: number;
   effort?: string;
   defaultModel?: string;
+  // gatewayAuthTokenSecret names a Secret this environment reads its gateway
+  // credential from instead of the catalog's own name.
+  gatewayAuthTokenSecret?: string;
   verboseDebug?: boolean;
 }
 
@@ -516,6 +523,9 @@ export interface UIEnvironmentClaudeDefaults {
   maxTokens: number;
   effort: string;
   effortLevels: string[];
+  // gatewayConfigured reports whether the erun-level catalog names a gateway.
+  // Without one there is nothing for the per-environment controls to override.
+  gatewayConfigured: boolean;
 }
 
 export interface UIRuntimePodConfig {

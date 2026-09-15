@@ -668,12 +668,14 @@ func applyEnvironmentCloudAliasSlots(existing *eruncommon.EnvConfig, config uiEn
 
 func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig {
 	out := uiClaudeConfig{
-		UseMantle:       copyBoolPtr(config.UseMantle),
-		UseBedrock:      copyBoolPtr(config.UseBedrock),
-		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
-		Effort:          copyStringPtr(config.Effort),
-		DefaultModel:    copyStringPtr(config.DefaultModel),
-		VerboseDebug:    config.VerboseDebug,
+		UseMantle:              copyBoolPtr(config.UseMantle),
+		UseBedrock:             copyBoolPtr(config.UseBedrock),
+		UseGateway:             copyBoolPtr(config.UseGateway),
+		GatewayAuthTokenSecret: strings.TrimSpace(config.GatewayAuthTokenSecret),
+		MaxOutputTokens:        copyIntPtr(config.MaxOutputTokens),
+		Effort:                 copyStringPtr(config.Effort),
+		DefaultModel:           copyStringPtr(config.DefaultModel),
+		VerboseDebug:           config.VerboseDebug,
 	}
 	if models := config.NormalizedModels(); len(models) > 0 {
 		out.Models = models
@@ -687,13 +689,15 @@ func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfi
 		models = normalized
 	}
 	return eruncommon.EnvironmentClaudeConfig{
-		UseMantle:       copyBoolPtr(config.UseMantle),
-		UseBedrock:      copyBoolPtr(config.UseBedrock),
-		Models:          models,
-		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
-		Effort:          copyStringPtr(config.Effort),
-		DefaultModel:    copyStringPtr(config.DefaultModel),
-		VerboseDebug:    config.VerboseDebug,
+		UseMantle:              copyBoolPtr(config.UseMantle),
+		UseBedrock:             copyBoolPtr(config.UseBedrock),
+		UseGateway:             copyBoolPtr(config.UseGateway),
+		GatewayAuthTokenSecret: strings.TrimSpace(config.GatewayAuthTokenSecret),
+		Models:                 models,
+		MaxOutputTokens:        copyIntPtr(config.MaxOutputTokens),
+		Effort:                 copyStringPtr(config.Effort),
+		DefaultModel:           copyStringPtr(config.DefaultModel),
+		VerboseDebug:           config.VerboseDebug,
 	}
 }
 
@@ -719,6 +723,9 @@ func claudeDefaultsForUI(gateway *eruncommon.OpenRouterConfig) uiClaudeDefaults 
 		MaxTokens:       maxTokens,
 		Effort:          defaultClaudeEffort,
 		EffortLevels:    claudeEffortLevelOptions(),
+		// The per-environment gateway controls override an erun-level catalog, so
+		// they are only meaningful when one exists.
+		GatewayConfigured: gateway.Configured(),
 	}
 }
 

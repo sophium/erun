@@ -6,6 +6,7 @@ import { updateManageClaudeConfig } from '@/app/manageEnvironmentThunks';
 import type { AppState } from '@/app/state';
 import { CheckboxField } from '@/components/app/ManageDialog.fields';
 import { isClaudeOverridden, isValidClaudeTokens } from '@/components/app/ManageDialog.helpers';
+import { ClaudeGatewayFields } from '@/components/app/ManageDialogAIClaudeGateway';
 import { ClaudeAddModelField } from '@/components/app/ManageDialogAIClaudeModels';
 import type { UIEnvironmentConfig } from '@/types';
 
@@ -16,6 +17,8 @@ type ManageDialog = AppState['manageDialog'];
 const claudeOverrideResetValues: Partial<UIEnvironmentConfig['claude']> = {
   useMantle: undefined,
   useBedrock: undefined,
+  useGateway: undefined,
+  gatewayAuthTokenSecret: undefined,
   models: [],
   maxOutputTokens: undefined,
   effort: undefined,
@@ -111,6 +114,15 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
           dispatch(updateManageClaudeConfig({ verboseDebug }));
         }}
       />
+      {defaults.gatewayConfigured ? (
+        <ClaudeGatewayFields
+          claude={claude}
+          disabled={disabled}
+          onChange={(values) => {
+            dispatch(updateManageClaudeConfig(values));
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -216,7 +228,7 @@ function ClaudeEffortField({
   );
 }
 
-function ClaudeBoolField({
+export function ClaudeBoolField({
   id,
   label,
   defaultValue,
