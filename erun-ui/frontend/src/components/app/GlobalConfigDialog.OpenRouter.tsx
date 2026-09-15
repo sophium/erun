@@ -18,6 +18,7 @@ import { Check, ChevronsUpDown, LoaderCircle, Plus, RefreshCw, Trash2 } from 'lu
 import * as React from 'react';
 
 import { useLoadGatewayModelsMutation } from '@/app/api/globalConfigApi';
+import { useLoadGatewayCredentialCandidatesMutation } from '@/app/api/globalConfigApi';
 import { readError } from '@/app/errors';
 import { updateGlobalConfig } from '@/app/globalConfigThunks';
 import { useAppDispatch } from '@/app/hooks';
@@ -26,15 +27,15 @@ import {
   isClaudeModelToken,
   selectableClaudeModelIds,
 } from '@/components/app/claudeModels.helpers';
-import type { UIOpenRouterConfig, UIOpenRouterModel } from '@/uiOpenRouterTypes';
-import type { UIGatewayModel } from '@/uiOpenRouterTypes';
+import { GatewayCredentialFields } from '@/components/app/GlobalConfigDialog.OpenRouterCredentials';
+import type {
+  UIGatewayCredentialCandidate,
+  UIGatewayModel,
+  UIOpenRouterConfig,
+  UIOpenRouterModel,
+} from '@/uiOpenRouterTypes';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
-
-const DEFAULT_TOKEN_KEY = 'token';
-// Mirrors erun-common's DefaultOpenRouterAuthTokenSecret: one catalog means one
-// Secret name for every environment, so it is defaulted rather than required.
-const DEFAULT_TOKEN_KEY_SECRET = 'erun-claude-gateway';
 
 // Known Anthropic-compatible gateway endpoints. The operator picks one rather
 // than recalling a URL, and a self-hosted gateway stays reachable through the
@@ -58,6 +59,30 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
   const [loadGatewayModels, { isLoading: modelsLoading }] = useLoadGatewayModelsMutation();
   const [candidates, setCandidates] = React.useState<UIGatewayModel[]>([]);
   const [modelsError, setModelsError] = React.useState('');
+
+  const [loadCredentialCandidates, { isLoading: credentialsLoading }] =
+    useLoadGatewayCredentialCandidatesMutation();
+  const [credentialCandidates, setCredentialCandidates] = React.useState<
+    UIGatewayCredentialCandidate[]
+  >([]);
+  const [credentialProblems, setCredentialProblems] = React.useState<string[]>([]);
+  const [credentialNamespaces, setCredentialNamespaces] = React.useState(0);
+
+  // Read on demand rather than on open: it walks every environment namespace,
+  // and an operator editing a base URL should not pay for that unasked.
+  const findCredentialCandidates = async () => {
+    setCredentialProblems([]);
+    try {
+      const result = await loadCredentialCandidates(undefined).unwrap();
+      setCredentialCandidates(result.candidates);
+      setCredentialProblems(result.problems ?? []);
+      setCredentialNamespaces(result.namespaces);
+    } catch (error) {
+      setCredentialCandidates([]);
+      setCredentialProblems([readError(error)]);
+      setCredentialNamespaces(0);
+    }
+  };
 
   const patch = (values: Partial<UIOpenRouterConfig>) => {
     dispatch(updateGlobalConfig({ openRouter: { ...gateway, ...values } }));
@@ -96,6 +121,17 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
   return (
     <div className="grid gap-3">
       <GatewayEndpointFields gateway={gateway} disabled={disabled} patch={patch} />
+
+      <GatewayCredentialFields
+        gateway={gateway}
+        candidates={credentialCandidates}
+        problems={credentialProblems}
+        namespaces={credentialNamespaces}
+        disabled={disabled}
+        loading={credentialsLoading}
+        onFindCandidates={() => void findCredentialCandidates()}
+        patch={patch}
+      />
 
       <OpenRouterModelsField
         models={models}
@@ -195,41 +231,6 @@ function GatewayEndpointFields({
           />
         </div>
       ) : null}
-
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div className="grid gap-2">
-          <Label htmlFor="global-config-openrouter-secret">Credential Secret (optional)</Label>
-          <Input
-            id="global-config-openrouter-secret"
-            autoComplete="off"
-            value={gateway.authTokenSecret ?? ''}
-            disabled={disabled}
-            placeholder={DEFAULT_TOKEN_KEY_SECRET}
-            onChange={(event) => {
-              patch({ authTokenSecret: event.target.value });
-            }}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="global-config-openrouter-secret-key">Secret key (optional)</Label>
-          <Input
-            id="global-config-openrouter-secret-key"
-            autoComplete="off"
-            value={gateway.authTokenKey ?? ''}
-            disabled={disabled}
-            placeholder={DEFAULT_TOKEN_KEY}
-            onChange={(event) => {
-              patch({ authTokenKey: event.target.value });
-            }}
-          />
-        </div>
-      </div>
-      <div className="text-[12px] leading-[1.4] text-muted-foreground">
-        A Kubernetes Secret in each environment&apos;s namespace holding the gateway token. One
-        catalog means one name, so leaving either field empty uses {DEFAULT_TOKEN_KEY_SECRET} and
-        its {DEFAULT_TOKEN_KEY} key — name them only to reuse a Secret you already manage. The value
-        itself is never stored in config.
-      </div>
     </>
   );
 }

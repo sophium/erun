@@ -47,6 +47,26 @@ function stubGatewayModels(
   });
 }
 
+// stubCredentialCandidates answers the Secret read, so the picker can be
+// exercised without a cluster. It stands in for the backend method, so it
+// returns that method's own result shape.
+function stubCredentialCandidates(
+  page: import('@playwright/test').Page,
+  result: Record<string, unknown>,
+): void {
+  void page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+    const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+    if (body.method !== 'LoadGatewayCredentialCandidates') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ data: result }),
+    });
+  });
+}
+
 // restoreCatalog clears everything these specs set. They mutate the suite's
 // global config rather than an environment, and the worker's backend is shared
 // with every other spec, so leaving a gateway configured would swap every later
@@ -176,6 +196,41 @@ test.describe('erun-level gateway catalog', () => {
       'openai/gpt-6-astra',
     );
     await expect(app.globalConfigDialog.openRouterModelContextInput(0)).toHaveValue('1050000');
+
+    await restoreCatalog(app.globalConfigDialog);
+  });
+
+  test('picks a credential Secret that already exists', async ({ app, page }) => {
+    // The Secret lives per environment namespace, so the names that exist are
+    // read and offered rather than invented. A namespace that could not be read
+    // is named: a Secret whose access is denied must not look like one that is
+    // missing.
+    stubCredentialCandidates(page, {
+      candidates: [
+        { name: 'erun-claude-gateway', namespaces: ['pw-alpha'], keys: ['token'] },
+        {
+          name: 'tenant-claude-gateway',
+          namespaces: ['pw-alpha', 'pw-beta'],
+          keys: ['token', 'refresh'],
+        },
+      ],
+      problems: ['pw-beta: secrets is forbidden'],
+      namespaces: 2,
+    });
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+
+    await app.globalConfigDialog.openRouterFindSecretsButton().click();
+    await app.globalConfigDialog.selectOpenRouterSecret('tenant-claude-gateway');
+    await expect(app.globalConfigDialog.openRouterSecretInput()).toHaveValue(
+      'tenant-claude-gateway',
+    );
+
+    // The unreadable namespace is surfaced beside the choices.
+    await expect(
+      app.globalConfigDialog.locator().getByText('pw-beta: secrets is forbidden'),
+    ).toBeVisible();
 
     await restoreCatalog(app.globalConfigDialog);
   });

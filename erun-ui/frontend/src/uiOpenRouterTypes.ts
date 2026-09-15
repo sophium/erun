@@ -48,3 +48,20 @@ export interface UIHostGatewayDefaults {
   model?: string;
   context?: number;
 }
+
+// UIGatewayCredentialCandidate is a Secret the gateway credential could come
+// from, so the catalog offers the names that exist instead of asking for one to
+// be invented. Only names are carried; a Secret's value is never read.
+export interface UIGatewayCredentialCandidate {
+  name: string;
+  namespaces?: string[];
+  keys?: string[];
+}
+
+export interface UIGatewayCredentialCandidates {
+  candidates: UIGatewayCredentialCandidate[];
+  // Namespaces that could not be read: a Secret that exists but whose access is
+  // denied must not read as a Secret that is missing.
+  problems?: string[];
+  namespaces: number;
+}

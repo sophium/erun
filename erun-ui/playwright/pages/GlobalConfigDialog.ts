@@ -204,6 +204,21 @@ export class GlobalConfigDialog {
     return this.locator().getByRole('button', { name: /Load from gateway|Reload from gateway/ });
   }
 
+  openRouterFindSecretsButton(): Locator {
+    return this.locator().getByRole('button', { name: /Find Secrets|Reload Secrets/ });
+  }
+
+  openRouterSecretChoicesButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Show Credential Secret (optional)' });
+  }
+
+  // The Secret name is picked from what the environment namespaces hold, so it
+  // does not have to be invented.
+  async selectOpenRouterSecret(name: string): Promise<void> {
+    await this.openRouterSecretChoicesButton().click();
+    await this.page.getByRole('option', { name }).click();
+  }
+
   openRouterModelChoicesButton(index: number): Locator {
     return this.locator().getByRole('button', {
       name: `Show gateway models for model ${String(index + 1)}`,

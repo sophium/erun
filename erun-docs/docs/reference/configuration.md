@@ -55,6 +55,8 @@ openrouter:
 
 Choosing a model for one environment is separate from the catalog: the environment's `claude.defaultmodel` selects which entry its AI tab starts on, and the AI tab can also add a model id the catalog does not list.
 
+The **credential Secret is offered rather than recalled**: ERun settings reads the environment namespaces (each on its own Kubernetes context, skipping host environments, which have no namespace) and lists the Secrets that exist, with each Secret's own key names, so a name that has to exist everywhere is picked rather than invented. A namespace that cannot be read is named in the dialog — a Secret whose access is denied must not read as a Secret that is missing.
+
 A catalog that is not yet configured **opens pre-filled from this machine's own Claude Code settings** (`~/.claude/settings.json`, or `CLAUDE_CONFIG_DIR` when set): the gateway's base URL, the model those settings run on, and the context window they declare for it. Nothing is stored by opening the dialog — the operator still saves — and a catalog already configured is never overwritten. The credential is not read from those settings at all: they hold a token *value*, while the catalog names a Secret the pod resolves.
 
 ### `TenantConfig` (`~/.config/erun/<tenant>/tenant.yaml`)

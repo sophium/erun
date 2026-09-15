@@ -1,7 +1,12 @@
 import type { UIERunConfig } from '@/types';
-import type { UIGatewayModel } from '@/uiOpenRouterTypes';
+import type { UIGatewayCredentialCandidates, UIGatewayModel } from '@/uiOpenRouterTypes';
 
-import { LoadERunConfig, LoadGatewayModels, SaveERunConfig } from '../../../wailsjs/go/main/App';
+import {
+  LoadERunConfig,
+  LoadGatewayCredentialCandidates,
+  LoadGatewayModels,
+  SaveERunConfig,
+} from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
@@ -23,6 +28,13 @@ export const globalConfigApi = wailsApi.injectEndpoints({
     loadGatewayModels: builder.mutation<UIGatewayModel[], string>({
       queryFn: wailsQueryFn<string, UIGatewayModel[]>((baseURL) => LoadGatewayModels(baseURL)),
     }),
+    // Reads the environment namespaces, so the catalog offers Secret names that
+    // exist rather than asking for one that has to be invented.
+    loadGatewayCredentialCandidates: builder.mutation<UIGatewayCredentialCandidates, NoValue>({
+      queryFn: wailsQueryFn<NoValue, UIGatewayCredentialCandidates>(() =>
+        LoadGatewayCredentialCandidates(),
+      ),
+    }),
   }),
 });
 
@@ -31,4 +43,5 @@ export const {
   useLazyGetERunConfigQuery,
   useSaveERunConfigMutation,
   useLoadGatewayModelsMutation,
+  useLoadGatewayCredentialCandidatesMutation,
 } = globalConfigApi;
