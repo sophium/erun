@@ -130,6 +130,134 @@ export class GlobalConfigDialog {
     await this.page.getByRole('button', { name: 'Refresh cloud contexts' }).click();
   }
 
+  // --- Gateway catalog ---
+  //
+  // The erun-level OpenRouter catalog: one list every environment selects from.
+  // Rows carry a data-openrouter-model index so a spec addresses the row it
+  // added rather than whichever one happens to be first.
+
+  openRouterBaseURLInput(): Locator {
+    return this.page.locator('#global-config-openrouter-baseurl');
+  }
+
+  // The gateway credential is reported, not typed into a field: erun delivers
+  // one erun-level value, so what an operator picks from is which key is in play.
+  // The summary carries its source so a spec asserts on the state rather than on
+  // a sentence that may be reworded.
+  openRouterCredentialSummary(): Locator {
+    return this.locator().locator('[data-gateway-credential-source]');
+  }
+
+  openRouterSetKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: /Set a key|Use a different key/ });
+  }
+
+  openRouterClearKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: "Use this machine's key" });
+  }
+
+  openRouterTokenInput(): Locator {
+    return this.page.locator('#global-config-openrouter-token');
+  }
+
+  openRouterSaveKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Save key', exact: true });
+  }
+
+  async setOpenRouterCredential(token: string): Promise<void> {
+    await this.openRouterSetKeyButton().click();
+    await this.openRouterTokenInput().fill(token);
+    await this.openRouterSaveKeyButton().click();
+  }
+
+  openRouterDefaultModelTrigger(): Locator {
+    return this.page.locator('#global-config-openrouter-default-model');
+  }
+
+  openRouterAddModelButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Add model', exact: true });
+  }
+
+  openRouterModelRows(): Locator {
+    return this.locator().locator('[data-openrouter-model]');
+  }
+
+  openRouterModelRow(index: number): Locator {
+    return this.locator().locator(`[data-openrouter-model="${String(index)}"]`);
+  }
+
+  openRouterModelIdInput(index: number): Locator {
+    return this.openRouterModelRow(index).getByLabel(`Model id ${String(index + 1)}`);
+  }
+
+  openRouterModelContextInput(index: number): Locator {
+    return this.openRouterModelRow(index).getByLabel(
+      `Context window for model ${String(index + 1)}`,
+    );
+  }
+
+  openRouterRemoveModelButton(index: number): Locator {
+    return this.openRouterModelRow(index).getByRole('button', {
+      name: `Remove model ${String(index + 1)}`,
+    });
+  }
+
+  openRouterGatewayTrigger(): Locator {
+    return this.page.locator('#global-config-openrouter-gateway');
+  }
+
+  // A known gateway is chosen from the list; anything else is a self-hosted
+  // address, so the field is revealed before it is typed into.
+  async setOpenRouterBaseURL(value: string): Promise<void> {
+    await this.openRouterGatewayTrigger().click();
+    if (value === '') {
+      await this.page.getByRole('option', { name: 'Not configured' }).click();
+      return;
+    }
+    if (value === 'https://openrouter.ai/api') {
+      await this.page.getByRole('option', { name: /OpenRouter/ }).click();
+      return;
+    }
+    await this.page.getByRole('option', { name: 'Self-hosted (enter a URL)' }).click();
+    await this.openRouterBaseURLInput().fill(value);
+  }
+
+  openRouterLoadModelsButton(): Locator {
+    return this.locator().getByRole('button', { name: /Load from gateway|Reload from gateway/ });
+  }
+
+  openRouterModelChoicesButton(index: number): Locator {
+    return this.locator().getByRole('button', {
+      name: `Show gateway models for model ${String(index + 1)}`,
+    });
+  }
+
+  openRouterModelSearchInput(): Locator {
+    return this.page.getByPlaceholder('Search models...');
+  }
+
+  async loadGatewayModels(): Promise<void> {
+    await this.openRouterLoadModelsButton().click();
+  }
+
+  // The choice is searched, not scrolled: a gateway can serve hundreds of
+  // models. The option's accessible name carries the display name and the id,
+  // so the id identifies it without depending on a name a gateway may omit.
+  async selectOpenRouterModel(index: number, id: string, search = id): Promise<void> {
+    await this.openRouterModelChoicesButton(index).click();
+    await this.openRouterModelSearchInput().fill(search);
+    await this.page.getByRole('option', { name: id }).click();
+  }
+
+  async addOpenRouterModel({ id, context }: { id: string; context?: number }): Promise<void> {
+    await this.openRouterAddModelButton().click();
+    const index = (await this.openRouterModelRows().count()) - 1;
+    await this.openRouterModelIdInput(index).fill(id);
+    if (context !== undefined) {
+      await this.openRouterModelContextInput(index).fill(String(context));
+    }
+  }
+
   async cancel(): Promise<void> {
     const button = this.locator().getByRole('button', { name: 'Cancel', exact: true });
     await button.scrollIntoViewIfNeeded();

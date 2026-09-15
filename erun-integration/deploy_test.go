@@ -3354,6 +3354,57 @@ esac
 		golden.Equal(t, "deploy/dry_run_with_aws_claude_models_traces_set_strings", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_with_openrouter_gateway_traces_set_strings", func(t *testing.T) {
+		// Exercises eruncommon.helmClaudeSetArgs' gateway branch: the erun-level
+		// catalog in root config resolves into the runtime chart's
+		// claude.openRouter* helm --set-string args. Only the credential's Secret
+		// name travels — a token value never reaches helm argv. This env is also
+		// AWS, so it pins that the gateway's available-models and model variables
+		// are not emitted twice.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "managed")
+		envDir := filepath.Join(tenantDir, "prod")
+		for _, dir := range []string{tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("name: managed\nprojectroot: "+setup.Cwd+"\ndefaultenvironment: prod\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: prod\n" +
+			"repopath: " + setup.Cwd + "\n" +
+			"kubernetescontext: edge\n" +
+			"containerregistry: registry.example/test\n" +
+			"runtimeversion: 1.0.0\n" +
+			"managedcloud: true\n" +
+			"cloudprovideralias: dev\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		rootBody := "openrouter:\n" +
+			"  baseurl: https://openrouter.ai/api\n" +
+			"  authtokensecret: erun-claude-gateway\n" +
+			"  defaultmodel: deepseek/deepseek-v4-pro-0813\n" +
+			"  models:\n" +
+			"    - id: deepseek/deepseek-v4.1-flash\n" +
+			"      context: 1048576\n" +
+			"    - id: deepseek/deepseek-v4-pro-0813\n" +
+			"      context: 1024000\n"
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(rootBody), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_with_openrouter_gateway_traces_set_strings", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_helm_pending_recovery_via_auto_recover_env", func(t *testing.T) {
 		// Exercises wrapHelmDeployWithReleaseRecovery + the production
 		// helm-recovery path: a stubbed `helm` exits with the pending
