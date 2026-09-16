@@ -143,7 +143,13 @@ test.describe('review panel reconnect targeting in an orchestrator session (#123
         { tenant: SEED_TENANT, environment: SEED_ENV_BETA, directory: '/tmp/orch-beta' },
       ],
       tenants: [SEED_TENANT],
-      directories: ['/tmp/orch-alpha', '/tmp/orch-beta'],
+      // Empty, not absent: this orchestrator has only its linked environments, and
+      // the diff panel renders one section per directory an orchestrator works in
+      // itself -- so a fictional path here would add a failing section beside the
+      // ones these tests are about. Empty matches what the desktop sends as well;
+      // see review-directory-target.spec.ts for the directory case, against a real
+      // directory.
+      directories: [],
       sessionId: RUNNING_SESSION_ID,
       status: 'running',
       busy: false,

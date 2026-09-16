@@ -22,20 +22,21 @@ func dockerfileConsumesPlaywrightTestAreas(dockerfilePath string) bool {
 	return dockerfilePlaywrightAreasPattern.Match(data)
 }
 
-// playwrightAreasRoot / playwrightSharedInfraPaths are relative to the
-// repository root and mirror the layout erun-ui/playwright/AGENTS.md
+// playwrightRoot / playwrightAreasRoot / playwrightSmokeRoot are relative to
+// the repository root and mirror the layout erun-ui/playwright/AGENTS.md
 // documents: tests/smoke/ always runs, tests/areas/<area>/ is what `erun
-// build` selects between, and a change under any of the shared paths below
-// can affect every area at once.
-const playwrightAreasRoot = "erun-ui/playwright/tests/areas/"
-
-var playwrightSharedInfraPaths = []string{
-	"erun-ui/playwright/fixtures/",
-	"erun-ui/playwright/pages/",
-	"erun-ui/playwright/global-setup.ts",
-	"erun-ui/playwright/global-teardown.ts",
-	"erun-ui/playwright/playwright.config.ts",
-}
+// build` selects between, and everything else under playwrightRoot -- the
+// harness (run.sh), its dependency manifest (package.json), fixtures, page
+// objects, global setup/teardown, playwright.config.ts, and anything else
+// added there later -- is infrastructure the whole suite depends on. That is
+// expressed as "not an area, not smoke" rather than an explicit list of
+// shared paths, so a new harness file is shared infra by default instead of
+// needing to be added to a list someone has to remember.
+const (
+	playwrightRoot      = "erun-ui/playwright/"
+	playwrightAreasRoot = playwrightRoot + "tests/areas/"
+	playwrightSmokeRoot = playwrightRoot + "tests/smoke/"
+)
 
 // applyPlaywrightAreaBuildArgs threads the smoke+area selection resolved from
 // the Playwright spec-file diff against the merge base into
@@ -54,8 +55,10 @@ func applyPlaywrightAreaBuildArgs(ctx Context, projectRoot string, build *Docker
 
 // resolvePlaywrightTestAreaSelection derives what `erun build` should run:
 //
-//   - a shared-infrastructure path changed (fixtures/pages/global-setup/
-//     global-teardown/playwright.config.ts) -> "all", the full suite
+//   - a path under playwrightRoot changed that is not a tests/areas/<area>/
+//     or tests/smoke/ spec (harness scripts like run.sh, package.json,
+//     fixtures, pages, global-setup/teardown, playwright.config.ts, ...) ->
+//     "all", the full suite
 //   - no Playwright spec file changed at all -> "smoke"
 //   - one or more tests/areas/<area>/ spec files changed -> "smoke,<area>,..."
 //
@@ -105,13 +108,27 @@ func classifyPlaywrightChangedFiles(changed []string) string {
 	return "smoke," + strings.Join(sorted, ",")
 }
 
+// playwrightChangeAffectsEveryArea decides "all" for a change under
+// playwrightRoot that is neither a tests/areas/<area>/ spec (which narrows to
+// that area) nor a tests/smoke/ spec (which needs no broadening: smoke
+// already runs in every selection). A file outside playwrightRoot entirely
+// is not this function's concern -- it falls through to the caller's
+// "smoke"-only default.
+//
+// Markdown is carved out deliberately, not by oversight: a `.md` file such as
+// erun-ui/playwright/AGENTS.md is read by humans and agents, never by the
+// harness or a spec, so it cannot break a test. Buying it the ~21-minute full
+// suite would cost real gate time for a change with zero ability to regress
+// anything the suite checks.
 func playwrightChangeAffectsEveryArea(file string) bool {
-	for _, shared := range playwrightSharedInfraPaths {
-		if strings.HasPrefix(file, shared) {
-			return true
-		}
+	rest, ok := strings.CutPrefix(file, playwrightRoot)
+	if !ok {
+		return false
 	}
-	return false
+	if strings.HasPrefix(file, playwrightAreasRoot) || strings.HasPrefix(file, playwrightSmokeRoot) {
+		return false
+	}
+	return !strings.HasSuffix(rest, ".md")
 }
 
 // playwrightMergeBaseCandidates mirrors resolveGitDiffReviewBase's own branch

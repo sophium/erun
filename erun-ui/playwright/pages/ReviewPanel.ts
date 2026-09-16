@@ -169,16 +169,26 @@ export class ReviewPanel {
   // copy of the diff panel's alert for the same per-env slot (#1230) — the
   // diff panel is the one place a linked environment's outage renders as an
   // actionable alert, so this locator only ever matches once per environment.
+  //
+  // Scoped to the panel's diff region rather than the whole page, which is what
+  // "the diff panel's alert" has to mean: the sidebar's orchestrator restore
+  // notices are role="alert" too, so a page-wide count was reading a surface
+  // these specs never meant to read. A notice left behind by an earlier spec in
+  // the same worker then inflated the count, and only sometimes, because which
+  // worker runs which spec varies per run. Every other alert assertion in this
+  // suite is already scoped to the surface it is about.
   errorAlerts(): Locator {
-    return this.page.getByRole('alert');
+    return this.diffContentRegion().getByRole('alert');
   }
 
   // reachabilityStatuses locates the informational "environment not running"
   // status DiffErrorAlert renders for the not-open reachability kind (#1230).
   // Unlike errorAlerts() this is role="status", not role="alert": it is not a
-  // fault, so it must not be announced as one (WCAG 4.1.3 / Nielsen #1).
+  // fault, so it must not be announced as one (WCAG 4.1.3 / Nielsen #1). Scoped
+  // to the diff region for the same reason errorAlerts() is: toasts announce as
+  // role="status" too, and they belong to no environment's section.
   reachabilityStatuses(): Locator {
-    return this.page.getByRole('status');
+    return this.diffContentRegion().getByRole('status');
   }
 
   // reviewBoundaryButton locates a "Review layers" scope button by its visible
@@ -201,5 +211,12 @@ export class ReviewPanel {
 
   viewAllBranchChangesButton(container: Locator): Locator {
     return container.getByRole('button', { name: 'View all branch changes' });
+  }
+
+  // refreshDiff asks the panel to fetch again. The panel loads its diffs when it
+  // OPENS, so a spec that needs a diff for a scope change that happened while the
+  // panel was already open (a session becoming active, say) has to ask for it.
+  async refreshDiff(): Promise<void> {
+    await this.page.getByRole('button', { name: 'Refresh diff' }).click();
   }
 }

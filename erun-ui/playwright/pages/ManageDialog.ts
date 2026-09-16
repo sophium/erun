@@ -61,8 +61,9 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-disablebuildscript');
   }
 
-  // The "Platform account" toggle binds the env's runtime SA to cluster-admin;
-  // env-type agnostic, so it renders for every environment type.
+  // The "Platform account" toggle binds the env's runtime SA to cluster-admin,
+  // so it renders for every pod-backed type. A host env has no runtime SA to
+  // bind, and its Runtime tab offers only the build-script opt-out below.
   platformAccountCheckbox(): Locator {
     return this.locator().locator('#environment-config-platformaccount');
   }
@@ -519,6 +520,22 @@ export class ManageDialog {
   // AWS alias now delivers credentials); this locator asserts it never renders.
   hostAwsCredentialsCheckbox(): Locator {
     return this.locator().getByLabel('Use host AWS credentials inside this env');
+  }
+
+  // --- Per-environment gateway overrides ---
+  //
+  // Rendered only when the erun-level catalog names a gateway: without one
+  // there is nothing for an environment to override, so the controls are absent
+  // rather than offering a switch that changes nothing.
+
+  claudeGatewayField(): Locator {
+    return this.locator().locator('#environment-config-claude-gateway');
+  }
+
+  // The gateway credential is one erun-level value, so this control no longer
+  // exists and every use of it asserts that absence rather than filling it in.
+  claudeGatewaySecretInput(): Locator {
+    return this.locator().locator('#environment-config-claude-gateway-secret');
   }
 
   // Always renders; with no per-env override it shows "Default (ultracode)".

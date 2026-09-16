@@ -308,7 +308,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 			IdleTrafficBytes: config.Idle.IdleTrafficBytes,
 		},
 		Claude:         claudeConfigToUI(config.Claude),
-		ClaudeDefaults: claudeDefaultsForUI(),
+		ClaudeDefaults: claudeDefaultsForUI(a.resolveOpenRouterConfig()),
 		AITool:         strings.TrimSpace(config.AITool),
 		LocalPorts: uiEnvironmentLocalPorts{
 			RangeStart:          ports.RangeStart,
@@ -670,6 +670,7 @@ func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig 
 	out := uiClaudeConfig{
 		UseMantle:       copyBoolPtr(config.UseMantle),
 		UseBedrock:      copyBoolPtr(config.UseBedrock),
+		UseGateway:      copyBoolPtr(config.UseGateway),
 		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
 		Effort:          copyStringPtr(config.Effort),
 		DefaultModel:    copyStringPtr(config.DefaultModel),
@@ -689,6 +690,7 @@ func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfi
 	return eruncommon.EnvironmentClaudeConfig{
 		UseMantle:       copyBoolPtr(config.UseMantle),
 		UseBedrock:      copyBoolPtr(config.UseBedrock),
+		UseGateway:      copyBoolPtr(config.UseGateway),
 		Models:          models,
 		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
 		Effort:          copyStringPtr(config.Effort),
@@ -697,19 +699,44 @@ func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfi
 	}
 }
 
-func claudeDefaultsForUI() uiClaudeDefaults {
+func claudeDefaultsForUI(gateway *eruncommon.OpenRouterConfig) uiClaudeDefaults {
 	minTokens, maxTokens := eruncommon.ClaudeMaxOutputTokensRange()
+	available := eruncommon.DefaultClaudeAvailableModels()
+	known := eruncommon.KnownClaudeModels()
+	// With a gateway configured the catalog is the selectable set. The Anthropic
+	// aliases are not models a gateway necessarily serves, so offering them would
+	// present choices that fail at launch; the operator curates one list at erun
+	// level and every environment selects from it.
+	if ids := gateway.ModelIDs(); len(ids) > 0 {
+		available = ids
+		known = ids
+	}
 	return uiClaudeDefaults{
 		UseMantle:       eruncommon.DefaultClaudeUseMantle,
 		UseBedrock:      eruncommon.DefaultClaudeUseBedrock,
-		Models:          eruncommon.DefaultClaudeAvailableModels(),
+		Models:          available,
 		MaxOutputTokens: eruncommon.DefaultClaudeMaxOutputTokens,
-		KnownModels:     eruncommon.KnownClaudeModels(),
+		KnownModels:     known,
 		MinTokens:       minTokens,
 		MaxTokens:       maxTokens,
 		Effort:          defaultClaudeEffort,
 		EffortLevels:    claudeEffortLevelOptions(),
+		// The per-environment gateway controls override an erun-level catalog, so
+		// they are only meaningful when one exists.
+		GatewayConfigured: gateway.Configured(),
 	}
+}
+
+// resolveOpenRouterConfig reads the erun-level gateway catalog for the desktop's
+// read models. A root config that cannot be read yields no catalog rather than
+// failing an environment's config view: the unreadable case is the unconfigured
+// one, and every path that acts on a gateway re-resolves it where it matters.
+func (a *App) resolveOpenRouterConfig() *eruncommon.OpenRouterConfig {
+	gateway, err := eruncommon.ResolveOpenRouterConfig(a.deps.store)
+	if err != nil {
+		return nil
+	}
+	return gateway
 }
 
 func normalizeUIClaudeModels(models []string) []string {

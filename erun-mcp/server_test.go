@@ -591,7 +591,13 @@ func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T
 	if output.Write == nil {
 		t.Fatalf("expected Write result, got %+v", output)
 	}
+	// Canonical, for the same reason exec_test.go compares canonical paths: on
+	// macOS t.TempDir() returns the TMPDIR spelling (/var/folders/...) while the
+	// tool reports the real one (/private/var/folders/...).
 	wantPath := filepath.Join(projectRoot, "config", "values.yaml")
+	if resolved, evalErr := filepath.EvalSymlinks(wantPath); evalErr == nil {
+		wantPath = resolved
+	}
 	if output.Write.Path != wantPath {
 		t.Fatalf("Path = %q, want %q", output.Write.Path, wantPath)
 	}

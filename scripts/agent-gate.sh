@@ -59,9 +59,8 @@
 # This script's own exit code distinguishes three outcomes, not two: 0 for a
 # clean pass, 0 (with a named warning on stderr) for a pass that exited 0 but
 # left unsupervised background work running behind it, and nonzero only for a
-# genuine gate failure. See root AGENTS.md's gate-verdict guidance next to the
-# other long-gate rules for why the two pass cases must never collapse into
-# the same signal as a real failure.
+# genuine gate failure. See erun-common/AGENTS.md's "Gate execution and
+# verdicts" for the distinction between wrapper status and completed work.
 
 set -eu
 
@@ -258,8 +257,7 @@ fi
 # it once here instead of propagating that collapse into this script's own
 # exit code. A real orphan still matters -- it means work this gate started
 # never reached its own verdict -- so it is surfaced as a loud, named warning,
-# never silently. See root AGENTS.md's gate-verdict guidance next to the other
-# long-gate rules.
+# never silently. See erun-common/AGENTS.md's "Gate execution and verdicts".
 final_status="$await_status"
 if [ "$await_status" -ne 0 ]; then
 	final_status_line=$(erun exec job status \

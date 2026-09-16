@@ -137,7 +137,7 @@ type UpgradeTarget struct {
 	Force           bool
 	// GateEnvironment names the environment driving this tenant's
 	// merge-queue gate -- erun has no stored concept of which environment
-	// that is (root AGENTS.md's release-cadence policy design, erun#1985),
+	// that is (see the backend API guide's Release cadence policy),
 	// so the caller states it, the same way `erun list --gate-environment`
 	// already does for drift detection. When set, that environment's item is
 	// always included regardless of its own Upgrade-all opt-in, and moved to
@@ -297,7 +297,7 @@ func upgradeInclusionTrace(tenant string, env EnvConfig, fleet, isGate bool) str
 // prioritizeGateUpgradeItem moves the gate environment's item to the front of
 // items when present, so RunUpgradePlan's sequential deploy loop rolls the
 // merge-queue gate before any environment it gates -- the release-cadence
-// policy's "immediate, unconditional" gate redeploy (root AGENTS.md, erun#1985),
+// policy's gate-first redeploy (see the backend API guide's Release cadence policy),
 // never left to per-environment discretion or to wherever it happened to sort.
 func prioritizeGateUpgradeItem(items []UpgradePlanItem, tenant, gateEnvironment string) []UpgradePlanItem {
 	for i, item := range items {

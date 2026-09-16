@@ -94,9 +94,8 @@ LINT_JOB_MEMORY_MIB := 700
 # other, and each of the three independently sizes its own width against the
 # *entire* memory ceiling via scripts/parallel-gate.sh -- three individually
 # safe widths can still sum past the box's real ceiling once check-gate runs
-# them side by side (root AGENTS.md's "Memory is the ceiling, not CPU": two
-# independent parallelism mechanisms can double-book memory even when each is
-# individually safe on its own). CHECK_GATE_FANOUT_PEAK_MEMORY_MIB is the
+# them side by side: independent parallelism mechanisms can double-book memory
+# even when each is individually safe. CHECK_GATE_FANOUT_PEAK_MEMORY_MIB is the
 # largest of the three's own already-measured peaks -- lint's own worst case,
 # every LINT_MODULES entry running at once -- and each of the three passes it
 # as parallel-gate.sh width's reserved-mem-mib argument before dividing what
@@ -256,9 +255,8 @@ test-erun-mcp:
 # BuildKit go-build cache mount and miss a drifted COPY/ADD contract.
 #
 # -race is load-bearing too: this module owns the activity-lease,
-# job-supervisor, and workspace-sync concurrent state (root AGENTS.md's own
-# "A long-running supervisor has exactly one writer of its record" note is
-# about this code), and turning it on found a real, previously-undetected
+# job-supervisor, and workspace-sync concurrent state (see erun-common/AGENTS.md's
+# single-writer contract), and turning it on found a real, previously-undetected
 # data race the first time it ran here -- a task job's background goroutine
 # recorded its own outcome as finished before its heartbeat's deferred
 # ReleaseEnvironmentActivityLease call had actually completed, so a caller
@@ -420,16 +418,9 @@ test-frontend:
 # run inside an agent pod; inside this Dockerfile stage neither applies
 # (ERUN_ENV_TYPE is unset during a docker build), so it just runs in place.
 #
-# Now a check-gate prerequisite (see check-gate's own comment for the
-# evidence). It was not always: a real run against main once found 27
-# failing specs, with two full runs on the same commit producing different
-# failure sets (27 vs 24) -- the suite was not deterministic under parallel
-# load. #1937's fixture-isolation fix (the shared seeded-baseline-row cache
-# leak) resolved that, re-verified by repeated full-suite runs with zero
-# failures before this target joined check-gate. Run this by hand, or via
-# `erun exec job` in an agent env, when iterating on a fix -- it no longer
-# needs `--skip-lint`/manual wiring to get signal, but a full run still
-# costs ~20 minutes.
+# This is a real check-gate prerequisite, not a manual coverage attestation.
+# Keep worker fixtures isolated and validate repeated-run determinism when
+# changing their lifecycle; see erun-ui/playwright/AGENTS.md.
 #
 # `erun build` narrows what this target actually runs: it resolves a
 # PLAYWRIGHT_TEST_AREAS build-arg (applyPlaywrightAreaBuildArgs in
@@ -461,10 +452,7 @@ test-frontend:
 # build; dropping those (erun#2375) moved the rewrite early enough to collide.
 # The cross-compile is ~4s, so sequencing it first costs nothing and removes
 # the overlap outright rather than making it less likely.
-test-playwright: test-erun-ui-windows-build
-test-playwright: test-frontend
-
-test-playwright:
+test-playwright: test-erun-ui-windows-build test-frontend
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh --skip-app-gates)
 
@@ -594,8 +582,7 @@ test-console-nginx:
 # --update-golden) — gate mode refuses outright if UPDATE_GOLDEN is set in the
 # environment, so it cannot be reseeded via `make check UPDATE_GOLDEN=1`.
 #
-# Detaches through the same wrapper as `check` below, since root AGENTS.md
-# tells contributors to run this standalone before pushing and it is long
+# Detaches through the same wrapper as `check` below: this standalone gate is long
 # enough on its own to hit the same foreground-timeout failure inside an
 # agent pod. check-gate depends on integration-test-gate directly rather than
 # on this target, so a `make check` run never nests one detached job inside
@@ -652,7 +639,7 @@ integration-test-gate:
 # (see lint's own comment above) is what stops those three from
 # double-booking memory against *each other* when `-j` runs them side by
 # side. It does not bound the other seven (in particular test-erun-ui's
-# `-race`, already flagged in root AGENTS.md as ~10x RSS) against any of the
+# race-enabled test process) against any of the
 # ten running concurrently -- verify actual peak memory on a real
 # `make check-gate` run before trusting this width in a memory-constrained
 # environment, and narrow it with real numbers if that run shows a problem.
@@ -673,21 +660,9 @@ check:
 # an agent pod); a failure tags no image. test-postgres-restart is
 # deliberately excluded -- see its own comment above for why.
 #
-# test-playwright joined this list once the suite's own flakiness was
-# resolved and re-verified, not merely once the toolchain existed (root
-# AGENTS.md "Integration Test Gate" and erun-ui/playwright/AGENTS.md's "No
-# flaky tests" carried the exact bar: a repeated-run track record, not one
-# clean run). It has one now: a --repeat-each=5 full-suite run (2,525/2,525
-# passed, the whole suite five times over) plus two further independent
-# full runs (514/514 each, one against the exact commit this comment landed
-# on) -- zero failures across every full-suite execution recorded this
-# session. Before this, the suite had 27 failing specs and produced
-# different failure sets across repeated runs on the same commit -- see the
-# git history of this target for the original exclusion and #1937 for the
-# fixture-isolation fix that resolved it. A red here is therefore a real
-# regression, never "the suite crying wolf" -- fix it in the same PR per
-# root AGENTS.md's "Fixing pre-existing issues is mandatory" rule, do not
-# revert this line.
+# Desktop Playwright runs here with the actual build toolchain. Do not remove
+# it to bypass failures; diagnose against comparable state and fix them under
+# root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
 # These ten run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
