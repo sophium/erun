@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 export class GlobalConfigDialog {
   constructor(public readonly page: Page) {}
@@ -249,12 +249,28 @@ export class GlobalConfigDialog {
     await this.page.getByRole('option', { name: id }).click();
   }
 
+  // addOpenRouterModel appends a row and fills it.
+  //
+  // The index comes from the count taken BEFORE the click, and the click is then
+  // waited on by expecting that count to rise. Reading the count after the click
+  // instead would be a non-retrying query: it can return the pre-click length
+  // while the new row is still mounting, which points the fills at the wrong row
+  // (or at none) and shows up later as the wrong value on reopen. Deriving the
+  // index from a count that is then waited on cannot skew.
+  //
+  // Both fields are asserted before returning, so a fill that did not stick
+  // fails here — where the row is visible — rather than after a save, where it
+  // would be indistinguishable from a persistence bug.
   async addOpenRouterModel({ id, context }: { id: string; context?: number }): Promise<void> {
+    const rows = this.openRouterModelRows();
+    const index = await rows.count();
     await this.openRouterAddModelButton().click();
-    const index = (await this.openRouterModelRows().count()) - 1;
+    await expect(rows).toHaveCount(index + 1);
     await this.openRouterModelIdInput(index).fill(id);
+    await expect(this.openRouterModelIdInput(index)).toHaveValue(id);
     if (context !== undefined) {
       await this.openRouterModelContextInput(index).fill(String(context));
+      await expect(this.openRouterModelContextInput(index)).toHaveValue(String(context));
     }
   }
 

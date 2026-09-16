@@ -101,12 +101,20 @@ async function restoreCatalog(dialog: GlobalConfigDialog): Promise<void> {
     await dialog.openRouterClearKeyButton().click();
   }
   await dialog.setOpenRouterBaseURL('');
-  // Remove from the end: each removal renumbers the rows after it.
-  let remaining = await dialog.openRouterModelRows().count();
-  while (remaining > 0) {
-    await dialog.openRouterRemoveModelButton(remaining - 1).click();
-    remaining -= 1;
-  }
+  // Remove from the end until none remain. This is driven by a poll rather than a
+  // count read once: the loop's exit condition IS "no rows left", so it cannot
+  // stop on a count that raced the render and leave one behind for the next spec
+  // — a leak that otherwise surfaces as an unrelated-looking value mismatch
+  // somewhere else in the file.
+  await expect
+    .poll(async () => {
+      const remaining = await dialog.openRouterModelRows().count();
+      if (remaining > 0) {
+        await dialog.openRouterRemoveModelButton(remaining - 1).click();
+      }
+      return remaining;
+    })
+    .toBe(0);
   await dialog.save();
   await dialog.waitForClosed();
 }
@@ -328,11 +336,25 @@ test.describe('erun-level gateway catalog', () => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
+    // The catalog must start empty, and this is asserted rather than assumed:
+    // this spec reads row 0 on reopen, so a row left behind by an earlier spec
+    // would be the one read. Both rows carry the same model id, so the id
+    // assertion would still pass and only the context would look wrong —
+    // exactly the confusing shape a leak produced. Failing here names it.
+    await expect(app.globalConfigDialog.openRouterModelRows()).toHaveCount(0);
+
     await app.globalConfigDialog.setOpenRouterBaseURL('https://openrouter.ai/api');
     await app.globalConfigDialog.addOpenRouterModel({
       id: 'deepseek/deepseek-v4.1-flash',
       context: 1048576,
     });
+    // The row must hold both figures before the save: asserting only after the
+    // reopen cannot tell a staging failure from a persistence one, and a save
+    // that silently dropped the window would look like a persistence bug.
+    await expect(app.globalConfigDialog.openRouterModelIdInput(0)).toHaveValue(
+      'deepseek/deepseek-v4.1-flash',
+    );
+    await expect(app.globalConfigDialog.openRouterModelContextInput(0)).toHaveValue('1048576');
     await app.globalConfigDialog.save();
     await app.globalConfigDialog.waitForClosed();
 
