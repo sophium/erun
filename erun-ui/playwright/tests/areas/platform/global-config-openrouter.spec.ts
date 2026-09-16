@@ -90,11 +90,15 @@ function stubGatewayCredential(
   });
 }
 
-// restoreCatalog clears everything these specs set. They mutate the suite's
-// global config rather than an environment, and the worker's backend is shared
-// with every other spec, so leaving a gateway configured would swap every later
-// spec's selectable models for the catalog's.
-async function restoreCatalog(dialog: GlobalConfigDialog): Promise<void> {
+// clearCatalog empties the catalog editor with the settings dialog already open.
+//
+// Specs call it BEFORE staging their own rows, not only after. The catalog is
+// shared root config, so a row an earlier spec left behind is otherwise read as
+// this spec's own — and because every spec here uses the same model id, that
+// shows up as a wrong value rather than as a stray row, which reads like a
+// persistence bug. Staging from a known-empty catalog makes each spec
+// independent of whatever ran before it in its worker.
+async function clearCatalog(dialog: GlobalConfigDialog): Promise<void> {
   // A saved key outlives the dialog, so it goes first: a later spec's panel would
   // otherwise report a key this one saved.
   if (await dialog.openRouterClearKeyButton().isVisible()) {
@@ -103,9 +107,7 @@ async function restoreCatalog(dialog: GlobalConfigDialog): Promise<void> {
   await dialog.setOpenRouterBaseURL('');
   // Remove from the end until none remain. This is driven by a poll rather than a
   // count read once: the loop's exit condition IS "no rows left", so it cannot
-  // stop on a count that raced the render and leave one behind for the next spec
-  // — a leak that otherwise surfaces as an unrelated-looking value mismatch
-  // somewhere else in the file.
+  // stop on a count that raced the render and leave one behind.
   await expect
     .poll(async () => {
       const remaining = await dialog.openRouterModelRows().count();
@@ -115,6 +117,14 @@ async function restoreCatalog(dialog: GlobalConfigDialog): Promise<void> {
       return remaining;
     })
     .toBe(0);
+}
+
+// restoreCatalog leaves the suite's global config as it found it. These specs
+// mutate shared root config rather than an environment, and the worker's backend
+// is shared with every other spec, so leaving a gateway configured would swap
+// every later spec's selectable models for the catalog's.
+async function restoreCatalog(dialog: GlobalConfigDialog): Promise<void> {
+  await clearCatalog(dialog);
   await dialog.save();
   await dialog.waitForClosed();
 }
@@ -269,6 +279,7 @@ test.describe('erun-level gateway catalog', () => {
   test('refuses a model id the launch would silently drop', async ({ app }) => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
+    await clearCatalog(app.globalConfigDialog);
 
     await app.globalConfigDialog.openRouterAddModelButton().click();
     await expect(app.globalConfigDialog.openRouterModelRows()).toHaveCount(1);
@@ -306,6 +317,7 @@ test.describe('erun-level gateway catalog', () => {
 
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
+    await clearCatalog(app.globalConfigDialog);
     await app.globalConfigDialog.setOpenRouterBaseURL('https://openrouter.ai/api');
     await app.globalConfigDialog.openRouterAddModelButton().click();
     // Before the list is loaded the row accepts a typed id.
@@ -335,12 +347,12 @@ test.describe('erun-level gateway catalog', () => {
   test('saves the catalog and shows it again on reopen', async ({ app }) => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
+    await clearCatalog(app.globalConfigDialog);
 
-    // The catalog must start empty, and this is asserted rather than assumed:
-    // this spec reads row 0 on reopen, so a row left behind by an earlier spec
-    // would be the one read. Both rows carry the same model id, so the id
-    // assertion would still pass and only the context would look wrong —
-    // exactly the confusing shape a leak produced. Failing here names it.
+    // Asserted after clearing, not assumed: this spec reads row 0 on reopen, so
+    // a row that survived the clear would be the one read. Both rows carry the
+    // same model id, so the id assertion would still pass and only the context
+    // would look wrong — exactly the confusing shape a leak produces.
     await expect(app.globalConfigDialog.openRouterModelRows()).toHaveCount(0);
 
     await app.globalConfigDialog.setOpenRouterBaseURL('https://openrouter.ai/api');
