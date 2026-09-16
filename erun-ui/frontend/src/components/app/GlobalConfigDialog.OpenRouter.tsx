@@ -24,9 +24,10 @@ import {
   useSaveGatewayCredentialMutation,
 } from '@/app/api/globalConfigApi';
 import { readError } from '@/app/errors';
-import { updateGlobalConfig } from '@/app/globalConfigThunks';
+import { updateGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch } from '@/app/hooks';
 import type { AppState } from '@/app/state';
+import type { AppDispatch } from '@/app/store';
 import {
   isClaudeModelToken,
   selectableClaudeModelIds,
@@ -35,6 +36,38 @@ import { GatewayCredentialFields } from '@/components/app/GlobalConfigDialog.Ope
 import type { UIGatewayModel, UIOpenRouterConfig, UIOpenRouterModel } from '@/uiOpenRouterTypes';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
+
+// catalogEditor returns the section's edit helper.
+//
+// Every catalog edit derives its next value from the config as it stands in the
+// store, not from the render closure it was created in. `updateGlobalConfig`
+// merges at dispatch time, but the value handed to it is built by the caller —
+// so two edits made within one render both start from the same snapshot and the
+// second overwrites the first. Removing two model rows in quick succession is
+// the case that bites: the second removal filters a list that still contains the
+// first row and puts it back. Reading current state inside the thunk is what
+// makes each edit compose with the one before it.
+//
+// The action is dispatched rather than returned: redux-thunk runs a thunk's body
+// but never dispatches what it returns, so returning it would leave every edit
+// as a function nobody calls.
+function catalogEditor(dispatch: AppDispatch) {
+  return (change: (current: UIOpenRouterConfig) => Partial<UIOpenRouterConfig>): void => {
+    dispatch((innerDispatch, getState) => {
+      const dialog = getState().globalConfigDialog;
+      if (dialog.busy || dialog.configLoading) {
+        return;
+      }
+      const current = dialog.config.openRouter ?? {};
+      innerDispatch(
+        updateGlobalConfigDialog({
+          error: '',
+          config: { ...dialog.config, openRouter: { ...current, ...change(current) } },
+        }),
+      );
+    });
+  };
+}
 
 // Known Anthropic-compatible gateway endpoints. The operator picks one rather
 // than recalling a URL, and a self-hosted gateway stays reachable through the
@@ -69,20 +102,28 @@ export function OpenRouterSection({ dialog }: { dialog: GlobalConfigDialog }): R
   const [clearGatewayCredential, { isLoading: clearingCredential }] =
     useClearGatewayCredentialMutation();
 
+  const editCatalog = catalogEditor(dispatch);
+
   const patch = (values: Partial<UIOpenRouterConfig>) => {
-    dispatch(updateGlobalConfig({ openRouter: { ...gateway, ...values } }));
+    editCatalog(() => values);
   };
 
   const setModel = (index: number, values: Partial<UIOpenRouterModel>) => {
-    patch({ models: models.map((model, i) => (i === index ? { ...model, ...values } : model)) });
+    editCatalog((current) => ({
+      models: (current.models ?? []).map((model, i) =>
+        i === index ? { ...model, ...values } : model,
+      ),
+    }));
   };
 
   const removeModel = (index: number) => {
-    patch({ models: models.filter((_, i) => i !== index) });
+    editCatalog((current) => ({ models: (current.models ?? []).filter((_, i) => i !== index) }));
   };
 
   const addModel = () => {
-    patch({ models: [...models, { id: '', context: undefined }] });
+    editCatalog((current) => ({
+      models: [...(current.models ?? []), { id: '', context: undefined }],
+    }));
   };
 
   // The gateway publishes the models it serves, so an operator picks rather
