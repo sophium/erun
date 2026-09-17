@@ -111,9 +111,9 @@ var buildCheckCoverage = map[string]coverageEntry{
 		reason: "the Makefile's test-frontend target runs `cd erun-ui/frontend && ... && yarn test`",
 	},
 	"erun-ui/playwright": {
-		kind: deliberatelyExcluded,
-		reason: "needs a built desktop app and a real k3d cluster; runs on its own schedule, never in the per-commit " +
-			"gate (root AGENTS.md's Makefile comment; erun-ui/playwright/AGENTS.md)",
+		kind:   gatedByMakeTarget,
+		target: "test-playwright",
+		reason: "the Makefile's test-playwright target runs erun-ui/playwright/run.sh against the built headless app",
 	},
 	"erun-console/playwright": {
 		kind: deliberatelyExcluded,

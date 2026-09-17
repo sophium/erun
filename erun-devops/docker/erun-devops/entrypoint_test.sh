@@ -78,6 +78,10 @@ start_run() {
         ERUN_MCP_PORT=17000 \
         ERUN_MCP_ENABLED="${_enabled}" \
         ERUN_APP_SESSION_DIR="${session_dir_override:-}" \
+        ANTHROPIC_BASE_URL="${anthropic_base_url_override:-}" \
+        ANTHROPIC_MODEL="${anthropic_model_override:-}" \
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS="${claude_max_context_override:-}" \
+        ERUN_CLAUDE_AVAILABLE_MODELS="${claude_available_models_override:-}" \
         setsid sh "${entrypoint}" "$@" >"${log}" 2>&1 &
     run_pid=$!
 }
@@ -275,4 +279,70 @@ case "${config}" in
 esac
 stop_run
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, and registry credential sync"
+# --- 9. A configured gateway relays Claude Code's routing settings ---
+# The gateway's address and credential reach the container as environment
+# variables, but two things have to land in Claude Code's settings file: the
+# model list, which is what makes the catalog selectable, and the model's
+# context window, because Claude Code assumes one for an id it cannot size.
+# The credential is deliberately absent — it stays in the pod environment via
+# its Secret reference, so it never reaches a settings file erun wrote.
+prepare_run gateway
+run_dir="${work_root}/gateway"
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ANTHROPIC_BASE_URL=https://openrouter.ai/api \
+    ANTHROPIC_MODEL=deepseek/deepseek-v4.1-flash \
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS=1048576 \
+    ERUN_CLAUDE_AVAILABLE_MODELS='anthropic/claude-fable-5.1,deepseek/deepseek-v4.1-flash' \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings=$(cat "${run_dir}/home/.claude/settings.json")
+case "${settings}" in
+    *'claude-fable-5.1'*) ;;
+    *) fail "the catalog's models should reach the settings model list: ${settings}" ;;
+esac
+case "${settings}" in
+    *'deepseek/deepseek-v4.1-flash'*) ;;
+    *) fail "the catalog's default model should be relayed into settings: ${settings}" ;;
+esac
+case "${settings}" in
+    *'1048576'*) ;;
+    *) fail "the model's context window should be relayed into settings: ${settings}" ;;
+esac
+case "${settings}" in
+    *ANTHROPIC_AUTH_TOKEN*) fail "the credential must never be written into a settings file: ${settings}" ;;
+    *) ;;
+esac
+stop_run
+
+# --- 10. Without a gateway the relay writes no routing values ---
+# An install that has configured no gateway must land in exactly the settings
+# shape it did before, or every env without one changes behaviour.
+prepare_run no_gateway
+run_dir="${work_root}/no_gateway"
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings=$(cat "${run_dir}/home/.claude/settings.json")
+for name in ANTHROPIC_BASE_URL ANTHROPIC_MODEL CLAUDE_CODE_MAX_CONTEXT_TOKENS; do
+    case "${settings}" in
+        *"${name}"*) fail "no ${name} should be relayed without a gateway: ${settings}" ;;
+        *) ;;
+    esac
+done
+stop_run
+
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, and gateway settings relay"

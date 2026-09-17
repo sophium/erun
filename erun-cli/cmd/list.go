@@ -452,14 +452,35 @@ func writeOrchestratorEntry(ctx common.Context, orchestrator common.ListOrchestr
 		return err
 	}
 	if len(orchestrator.Environments) == 0 {
-		_, err := fmt.Fprintln(ctx.Stdout, "    environments: none")
+		if _, err := fmt.Fprintln(ctx.Stdout, "    environments: none"); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintln(ctx.Stdout, "    environments:"); err != nil {
+			return err
+		}
+		for _, env := range orchestrator.Environments {
+			if err := writeOrchestratorEnvEntry(ctx, env); err != nil {
+				return err
+			}
+		}
+	}
+	return writeOrchestratorDirectories(ctx, orchestrator.Directories)
+}
+
+// writeOrchestratorDirectories prints the orchestrator's own directories, and
+// nothing at all when it has none: an orchestrator pointed at directories and
+// linking no environment must not read as having no scope, and one with only
+// environments should not grow an empty section.
+func writeOrchestratorDirectories(ctx common.Context, directories []string) error {
+	if len(directories) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "    directories:"); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(ctx.Stdout, "    environments:"); err != nil {
-		return err
-	}
-	for _, env := range orchestrator.Environments {
-		if err := writeOrchestratorEnvEntry(ctx, env); err != nil {
+	for _, directory := range directories {
+		if _, err := fmt.Fprintf(ctx.Stdout, "      - %s\n", directory); err != nil {
 			return err
 		}
 	}
