@@ -57,8 +57,8 @@ test.describe('terminal switch timing (#1322)', () => {
     const { tenant, environment } = seededEnv;
     await app.sidebar.openEnvironment(tenant, environment);
 
-    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
+    const localTab = app.tabStrip.tab('Local');
+    await app.tabStrip.waitForTab('Local');
 
     const tablist = page.getByRole('tablist', { name: 'Open terminals' });
     const extraTabs = tablist.getByRole('tab', { name: /Terminal \d+/ });

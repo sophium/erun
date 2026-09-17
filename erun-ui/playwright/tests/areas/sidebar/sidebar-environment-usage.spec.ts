@@ -90,6 +90,12 @@ async function driveEnvUsage(
 
 test.describe('environment usage on the hover cards', () => {
   test('the environment hover card renders a fresh reading with its age', async ({ app, page }) => {
+    // driveEnvUsage's own retry (20s) nests hoverEnvironmentRow's own retry
+    // (20s) inside it, so a single slow hover attempt under contention can
+    // consume most of the default 30s test budget before driveEnvUsage gets
+    // a chance to retry the whole thing. Widen the test's own budget rather
+    // than shrinking either nested retry's bound.
+    test.setTimeout(60_000);
     await app.reboot();
 
     const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
@@ -119,6 +125,10 @@ test.describe('environment usage on the hover cards', () => {
     app,
     page,
   }) => {
+    // See the preceding test's comment: driveEnvUsage's retry nests
+    // hoverEnvironmentRow's own retry, so this needs more than the 30s
+    // default under contention.
+    test.setTimeout(60_000);
     await app.reboot();
 
     const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
@@ -150,6 +160,10 @@ test.describe('environment usage on the hover cards', () => {
     app,
     page,
   }) => {
+    // See the first driveEnvUsage test's comment: its retry nests
+    // hoverEnvironmentRow's own retry, so this needs more than the 30s
+    // default under contention.
+    test.setTimeout(60_000);
     await app.reboot();
 
     const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
@@ -194,6 +208,10 @@ test.describe('environment usage on the hover cards', () => {
     app,
     page,
   }) => {
+    // See the first driveEnvUsage test's comment: its retry nests
+    // hoverOrchestratorRow's own retry, so this needs more than the 30s
+    // default under contention.
+    test.setTimeout(60_000);
     await app.reboot();
 
     const dialog = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
@@ -217,6 +235,16 @@ test.describe('environment usage on the hover cards', () => {
   // usage figure must come only from the cached sweep reading, never from a
   // fresh kubectl-exec fired by the hover gesture itself.
   test('hovering an environment triggers no LoadRuntimeUsage call', async ({ app, page }) => {
+    // Five real hover round-trips. Each one used to pair
+    // hoverEnvironmentRow's own convergence with a separate, un-retried
+    // `expect(...).toBeVisible()` -- but the card's open state belongs to the
+    // hovered row's own React state (erun-ui/playwright/AGENTS.md's hover-card
+    // bullet), so a re-render between the two calls can drop it, and nothing
+    // reopens it since the pointer never left. readEnvHoverCard reads the
+    // hover and the check as one retryable unit, recovering a drop by
+    // re-hovering. Five round-trips of that also legitimately need more than
+    // the 30s default under contention.
+    test.setTimeout(60_000);
     let calls = 0;
     await page.route('**/__erun_invoke', async (route, request) => {
       const body = JSON.parse(request.postData() ?? '{}') as { method?: string };
@@ -229,8 +257,9 @@ test.describe('environment usage on the hover cards', () => {
 
     for (let i = 0; i < 5; i += 1) {
       await page.mouse.move(0, 0);
-      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
-      await expect(app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA)).toBeVisible();
+      await app.sidebar.readEnvHoverCard(SEED_TENANT, SEED_ENV_ALPHA, async (card) => {
+        await expect(card).toBeVisible({ timeout: 1_000 });
+      });
       await page.mouse.move(0, 0);
     }
 

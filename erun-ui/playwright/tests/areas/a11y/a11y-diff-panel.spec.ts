@@ -128,6 +128,9 @@ test.describe('diff panel accessibility', () => {
     await stubDiff(page, [diffFile('src/very/long/path/wide-file.ts', 'x'.repeat(400))]);
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on the diff it
+    // renders.
+    await app.reviewPanel.waitForOpen();
     await expect
       .poll(() => app.reviewPanel.diffSectionPaths())
       .toEqual(['src/very/long/path/wide-file.ts']);

@@ -36,14 +36,14 @@ export class AppShell {
     await this.titlebar.toggleButton().waitFor({ state: 'visible' });
     // The "Loading environments..." overlay clears only once the tenant list
     // is final; wait it out before asserting on sidebar rows, or the check
-    // races the still-loading list.
+    // races the still-loading list. Hidden is already satisfied when the
+    // overlay never rendered (a fast machine), so this needs no cap of its
+    // own -- resolving on the no-overlay case and otherwise converging
+    // against the enclosing test's budget, rather than a 15s timeout whose
+    // expiry the old catch() swallowed into a silent proceed.
     await this.page
       .getByText('Loading environments...', { exact: true })
-      .waitFor({ state: 'hidden', timeout: 15_000 })
-      .catch(() => {
-        // The overlay may already be gone on a fast machine, so the timeout
-        // here is expected rather than a failure.
-      });
+      .waitFor({ state: 'hidden' });
     await this.page
       .locator(
         'button[aria-label^="Collapse "], button[aria-label^="Expand "], :text("No environments yet")',
@@ -161,11 +161,9 @@ export class AppShell {
   async openEnvironmentTerminal(tenant: string, environment: string): Promise<number> {
     await this.sidebar.openEnvironment(tenant, environment);
     for (const name of ['Local', 'ERun', 'AI']) {
-      await this.page
-        .getByRole('tab', { name, exact: true })
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await this.tabStrip.waitForTab(name);
     }
-    await this.page.getByRole('tab', { name: 'Local', exact: true }).click();
+    await this.tabStrip.tab('Local').click();
     return this.terminalPane.selectedSessionId();
   }
 }
