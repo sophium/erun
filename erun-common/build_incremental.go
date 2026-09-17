@@ -135,6 +135,9 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	if err := hashBuildVersionInto(hasher, buildInput); err != nil {
 		return "", err
 	}
+	if err := hashGatedCommitInto(hasher, buildInput); err != nil {
+		return "", err
+	}
 	digest := hex.EncodeToString(hasher.Sum(nil))
 	return digest[:16], nil
 }
@@ -185,6 +188,28 @@ func hashBuildVersionInto(w io.Writer, buildInput DockerBuildSpec) error {
 		return nil
 	}
 	if _, err := io.WriteString(w, "build-arg/ERUN_VERSION="+version+"\n"); err != nil {
+		return err
+	}
+	_, err := w.Write([]byte{0})
+	return err
+}
+
+// hashGatedCommitInto folds the revision a gate build must be a build of into
+// the fingerprint. Every other input describes the content being built, and a
+// merge-queue gate composes a prospective squash merge whose tree is
+// byte-identical to the source branch tip whenever that branch was rebased onto
+// the same target tip — so a content-only fingerprint makes the gate build
+// promote the image the READY build produced minutes earlier and the test stage
+// the gate exists to run never executes. The gate's claim is about a commit,
+// not about content that happens to match it, so that commit is a build input
+// like any other. A build naming no revision keeps its content-only identity:
+// ordinary builds (and a re-gate of the same merge commit) still promote.
+func hashGatedCommitInto(w io.Writer, buildInput DockerBuildSpec) error {
+	gatedCommit := strings.TrimSpace(buildInput.GatedCommit)
+	if gatedCommit == "" {
+		return nil
+	}
+	if _, err := io.WriteString(w, "gated-commit/"+gatedCommit+"\n"); err != nil {
 		return err
 	}
 	_, err := w.Write([]byte{0})

@@ -21,6 +21,7 @@ func ResolveCurrentDockerBuildSpecs(ctx Context, store DockerStore, findProjectR
 		if err != nil {
 			return nil, err
 		}
+		build.GatedCommit = strings.TrimSpace(target.GatedCommit)
 		builds = append(builds, build)
 	}
 

@@ -75,6 +75,14 @@ type DockerBuildSpec struct {
 	// matching fingerprint lets a later build skip rebuilding and promote the
 	// existing image (re-tag + push) instead.
 	Fingerprint string
+	// GatedCommit names the exact revision this build must be a build of: the
+	// merge-queue gate sets it to the prospective merge commit it gates, so the
+	// gate's own build can never promote an image built from a different commit
+	// — including the branch tip it was composed from when a rebase left the two
+	// trees identical. Empty for every ordinary build, which keeps its
+	// content-only identity and still promotes across commits that leave the
+	// build context untouched.
+	GatedCommit string
 	// Promote indicates a local image already matches this Fingerprint, so the
 	// build is skipped and the existing image is re-tagged and pushed instead of
 	// rebuilt.
@@ -181,6 +189,11 @@ type DockerCommandTarget struct {
 	Build bool
 	// NoIncremental disables the default fingerprint-based incremental build cache.
 	NoIncremental bool
+	// GatedCommit is the revision this build must be a build of, folded into
+	// every image's fingerprint. It is how the merge-queue gate keeps its own
+	// build from promoting an image built from anything other than the
+	// prospective merge commit it gates. Empty for ordinary builds.
+	GatedCommit string
 	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
 	// resolve docker/release contexts directly.
 	DisableBuildScriptDiscovery bool
