@@ -83,6 +83,28 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       );
       await expect(app.tenantDashboard.tabs()).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
+
+      // No tab strip renders here, so the card's body is the only place an
+      // operator learns which tabs exist — and it must say that none of them
+      // load. The previous wording named five of nine ("Reviews, Merge queue,
+      // Builds, Users, and the Audit log can't load"), which read as though
+      // Gates, Registration, Requests and API log still worked.
+      const body = app.tenantDashboard.notConnectedBody();
+      await expect(body).toBeVisible();
+      await expect(body).toContainText('none of its dashboard tabs can load');
+      for (const tab of ['Gates', 'Registration', 'Requests', 'API log']) {
+        await expect(body).toContainText(tab);
+      }
+      // The tabs the old sentence did name are still named: the fix added the
+      // missing four rather than trading the list away for a vaguer sentence.
+      for (const tab of ['Users', 'Reviews', 'Merge queue', 'Builds', 'Audit log']) {
+        await expect(body).toContainText(tab);
+      }
+      // Attaching the failure to a named subset is the defect's shape: a
+      // "…can't load" tail after a partial list reads as the unnamed tabs
+      // still working. The claim has to be about the whole dashboard.
+      await expect(body).not.toContainText("can't load");
+
       await page.screenshot({
         path: 'test-results/tenant-dashboard-not-connected-default.png',
       });

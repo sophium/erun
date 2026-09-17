@@ -7,9 +7,12 @@ import type { UITenantDashboard, UITenantDashboardPanel } from '@/types';
 import {
   activeTenantDashboardTab,
   middleEllipsis,
+  notConnectedPlatformBody,
   relativeDashboardDate,
   restrictedTenantDashboardReads,
   reviewAuthorInitials,
+  tenantDashboardTabList,
+  tenantDashboardTabs,
   visibleTenantDashboardTabs,
 } from './tenantDashboardPanels';
 
@@ -112,6 +115,41 @@ test('reviewAuthorInitials derives up to two letters from a display name', () =>
   assert.equal(reviewAuthorInitials('reviewer-1'), 'R1');
   assert.equal(reviewAuthorInitials('operator'), 'OP');
   assert.equal(reviewAuthorInitials(''), '?');
+});
+
+// The not-connected card replaces the whole dashboard, strip included, so its
+// body is the one place an operator learns which tabs exist and that none of
+// them load. These pin both halves against the sentence drifting away from the
+// strip as tabs are added.
+
+test('the not-connected tab list names every tab, in the strip order', () => {
+  const list = tenantDashboardTabList();
+  let cursor = -1;
+  for (const descriptor of tenantDashboardTabs) {
+    const at = list.indexOf(descriptor.label, cursor + 1);
+    assert.ok(at > cursor, `expected ${descriptor.label} after the previous tab in: ${list}`);
+    cursor = at;
+  }
+  assert.equal(tenantDashboardTabs.length, 9);
+});
+
+test('the not-connected body names every tab and says none of them load', () => {
+  const body = notConnectedPlatformBody();
+  for (const descriptor of tenantDashboardTabs) {
+    assert.ok(
+      body.includes(descriptor.label),
+      `expected the not-connected body to name the ${descriptor.label} tab; got: ${body}`,
+    );
+  }
+  assert.match(body, /none of its dashboard tabs can load/);
+});
+
+test('the not-connected body never enumerates a subset that can load', () => {
+  // The defect: a sentence listing five of nine tabs read as though the other
+  // four still worked. "can't load", "cannot load" and "can not load" all
+  // attach the failure to a named subset, which is the shape to keep out.
+  const body = notConnectedPlatformBody();
+  assert.doesNotMatch(body, /can'?t load|cannot load|can not load/);
 });
 
 test('middleEllipsis keeps both ends of a long identifier visible', () => {

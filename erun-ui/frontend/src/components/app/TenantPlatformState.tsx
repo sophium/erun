@@ -15,7 +15,10 @@ import * as React from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { HOSTED_PLATFORM_API_URL } from '@/app/hostedPlatform';
 import { showNotification } from '@/app/notificationThunks';
-import { tenantDashboardEnvironmentName } from '@/app/tenantDashboardPanels';
+import {
+  notConnectedPlatformBody,
+  tenantDashboardEnvironmentName,
+} from '@/app/tenantDashboardPanels';
 import {
   chooseTenantPlatformAlias,
   loadTenantDashboard,
@@ -118,7 +121,7 @@ function NotConnectedState(): React.ReactElement {
     <EmptyState
       icon={<Link2 />}
       heading="Connect this tenant to erunpaas.com"
-      body="This tenant isn't connected to a hosted erun platform yet, so Reviews, Merge queue, Builds, Users, and the Audit log can't load."
+      body={notConnectedPlatformBody()}
       action={
         <div className="grid w-full max-w-sm gap-2 text-left">
           <FieldLabel htmlFor="connect-platform-url" required>

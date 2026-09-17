@@ -187,6 +187,14 @@ export class TenantDashboard {
     return this.page.getByText('Connect this tenant to erunpaas.com', { exact: true });
   }
 
+  // notConnectedBody is the card's body text. Because this state replaces the
+  // whole dashboard — tab strip included — this sentence is the only place an
+  // operator learns which tabs exist, so both what it names and what it claims
+  // about them are contract.
+  notConnectedBody(): Locator {
+    return this.page.getByText(/none of its dashboard tabs can load/);
+  }
+
   connectApiUrlInput(): Locator {
     return this.page.getByLabel('Platform API URL');
   }

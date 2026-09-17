@@ -49,6 +49,35 @@ export const tenantDashboardTabs: readonly TenantDashboardTabDescriptor[] = [
   { tab: 'api-log', label: 'API log' },
 ];
 
+// tenantDashboardTabList names every tab in the strip's own order, read from
+// the descriptor list the strip renders rather than written out again. The
+// not-connected card's body is the only place an operator learns which tabs
+// exist — the state replaces the whole dashboard, strip included — so a
+// hand-written enumeration there silently stopped being true as tabs were
+// added: it kept naming the five that existed when it was written, and an
+// operator reasonably concluded the unnamed ones still worked. Deriving the
+// list from the descriptors is what makes that impossible to repeat.
+export function tenantDashboardTabList(): string {
+  const labels = tenantDashboardTabs.map((descriptor) => descriptor.label);
+  const last = labels[labels.length - 1];
+  if (last === undefined) {
+    return '';
+  }
+  if (labels.length === 1) {
+    return last;
+  }
+  return `${labels.slice(0, -1).join(', ')}, and ${last}`;
+}
+
+// notConnectedPlatformBody is the not-connected card's body text. Naming the
+// tabs is only half its job: because the card replaces the entire dashboard,
+// it must also say that none of them load. A sentence that named some tabs and
+// stopped implied the rest were still readable — the failure this wording
+// exists to prevent.
+export function notConnectedPlatformBody(): string {
+  return `This tenant isn't connected to a hosted erun platform yet, so none of its dashboard tabs can load — ${tenantDashboardTabList()}.`;
+}
+
 export function tenantDashboardPanel(
   data: UITenantDashboard | null | undefined,
   tab: TenantDashboardTab,
