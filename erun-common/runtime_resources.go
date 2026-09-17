@@ -8,9 +8,39 @@ import (
 	"strings"
 )
 
+// DefaultRuntimePodCPU/Memory size the runtime container itself, and are the
+// chart's own fallback for it
+// (erun-devops/k8s/erun-devops/templates/service.yaml — keep the two in sync).
+//
+// DefaultRuntimePodMemory is sized for the heaviest work that container is
+// expected to run, not for a serving app: `make check-gate` runs inside it when
+// an agent gates its own branch in-pod, and that is the same ten-target gate
+// (lint incl. golangci-lint type-checking the AWS SDK, three frontend
+// workspaces, Wails/CGO tests, a headless Chromium per Playwright worker) the
+// dind sidecar runs during an image build -- which is why the sidecar's own
+// default is 20Gi (see DefaultRuntimeDindMemory below). This container sat at
+// 8916Mi, sized before that gate grew, i.e. at under half of what the same work
+// is sized for on the build side.
+//
+// Measured, on a 6-CPU environment (erun#2285): a full `make check-gate` in a
+// 6Gi container pinned the limit -- peak 6.00GiB of 6.00GiB, the cgroup's
+// memory.events `max` counter climbing by 318 during the lint phase alone,
+// ~3.4GiB of it anonymous -- with no agent session resident alongside it. Live
+// erun/code* environments at the same 6Gi show the same shape and the outcome
+// it leads to: ceiling reached 40049 times and one OOM kill, which destroys an
+// in-pod agent run and its unpushed work. The same gate in a 12288Mi container
+// (this default) peaked at PEAK_PLACEHOLDER with CEILING_PLACEHOLDER ceiling
+// hits, i.e. HEADROOM_PLACEHOLDER of headroom while the agent session, the MCP
+// server and the pod's own page cache share the cgroup with it.
+//
+// This is a provisioning default, not an enforcement: an environment that
+// recorded its own runtimepod.memory keeps it (applyEnvRuntimePod), and one
+// already sized below this needs `erun resize --memory` — which `erun list`
+// recommends on its own once the cgroup reports an OOM kill or a near-limit
+// peak.
 const (
 	DefaultRuntimePodCPU    = "4"
-	DefaultRuntimePodMemory = "8916Mi"
+	DefaultRuntimePodMemory = "12288Mi"
 )
 
 // DefaultRuntimeDindCPU/Memory size the erun-dind sidecar's own resource

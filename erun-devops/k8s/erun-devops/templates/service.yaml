@@ -93,7 +93,13 @@ emitted; type is the single source of truth.
 {{- $runtimeLimits := default dict $runtimeResources.limits -}}
 {{- $runtimeRequests := default dict $runtimeResources.requests -}}
 {{- $runtimeCPU := default "4" $runtimeLimits.cpu -}}
-{{- $runtimeMemory := default "8916Mi" $runtimeLimits.memory -}}
+{{- /* Sized for the `make check-gate` an agent runs inside this container, not
+       for a serving app: it is the same ten-target gate the dind sidecar runs
+       during an image build, which is why that sidecar's own default is 20Gi.
+       Defaults mirror eruncommon.DefaultRuntimePodCPU/Memory in
+       erun-common/runtime_resources.go — keep the two in sync; that constant's
+       own comment records the measurement this number comes from. */ -}}
+{{- $runtimeMemory := default "12288Mi" $runtimeLimits.memory -}}
 {{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
 {{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
 {{- /* The erun-dind sidecar declares its own resources rather than relying on
