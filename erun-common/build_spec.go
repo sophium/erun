@@ -46,7 +46,7 @@ func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectR
 		if err != nil {
 			return nil, err
 		}
-		build.GatedCommit = strings.TrimSpace(gatedCommit)
+		build.GatedCommit = gatedCommit
 		return &build, nil
 	}
 
@@ -59,7 +59,7 @@ func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectR
 	if err != nil {
 		return nil, err
 	}
-	build.GatedCommit = strings.TrimSpace(gatedCommit)
+	build.GatedCommit = gatedCommit
 	return &build, nil
 }
 
