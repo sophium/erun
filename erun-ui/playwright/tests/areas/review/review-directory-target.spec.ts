@@ -20,6 +20,13 @@ test.describe('the diff panel shows a directory the orchestrator works in', () =
     app,
     page,
   }) => {
+    // This case stages a real git checkout, creates an orchestrator against it,
+    // starts a session and then waits for a host-git diff -- several round trips
+    // more than the suite-wide 30s per-test default is sized for, and enough of
+    // them for a loaded gate box to outrun it without any single step being
+    // wrong. The waits below each name their own owner; this only stops the
+    // whole-test clock from being the shortest of them.
+    test.setTimeout(60_000);
     const directory = makeChangedGitRepo();
     await stubDirectoryPicker(page, directory);
     const name = 'directory-diff-test';
@@ -42,23 +49,36 @@ test.describe('the diff panel shows a directory the orchestrator works in', () =
         // refresh below to race the panel's own render.
         await app.reviewPanel.waitForOpen();
       }
-      // The panel loads its diffs when it opens, and it was already open when the
-      // session became active, so this spec asks for the fetch explicitly rather
-      // than waiting out the periodic refresh. A slot that has never been fetched
-      // renders exactly like one whose diff is empty -- hence the explicit ask.
-      await app.reviewPanel.refreshDiff();
-
-      // The operator's symptom, pinned: this scope is reviewable, not empty.
-      await expect(page.getByText('No environment selected')).toHaveCount(0);
 
       // The section says what it is. A single target renders no header (the panel
       // keeps the env-tab case chrome-free), so the note is what identifies this
-      // as a directory section rather than an unlabelled environment one.
-      await expect(page.getByText('Local directory — no hosted review')).toBeVisible();
+      // as a directory section rather than an unlabelled environment one -- and
+      // it is also the witness that the panel has SWITCHED to the directory
+      // target, which everything below depends on. Turning the session row's
+      // click into an active session with a resolved target is a round trip, so
+      // converge on the settled state instead of racing it.
+      const localDirectoryNote = page.getByText('Local directory — no hosted review');
+      await localDirectoryNote.waitFor({ state: 'visible', timeout: 25_000 });
+
+      // The operator's symptom, pinned: this scope is reviewable, not empty.
+      // Read now that the panel has settled on this target, so a directory that
+      // never resolved cannot pass this by rendering nothing at all.
+      await expect(page.getByText('No environment selected')).toHaveCount(0);
 
       // And the changed file arrived, which is the directory's own diff having
-      // been read with host git -- the whole point of the target existing.
-      await expect.poll(() => app.reviewPanel.treeFilePaths()).toContain('notes.md');
+      // been read with host git -- the whole point of the target existing. The
+      // panel loads its diffs when it OPENS, and it was already open when the
+      // session became active, so this spec asks for the fetch explicitly
+      // rather than waiting out the periodic refresh. Re-issue that ask on each
+      // attempt: one ask that lands before the panel has switched targets
+      // fetches nothing, and nothing retries it, so a single click would leave
+      // this waiting on a slot that was never fetched.
+      await expect(async () => {
+        await app.reviewPanel.refreshDiff();
+        await expect
+          .poll(() => app.reviewPanel.treeFilePaths(), { timeout: 2_000 })
+          .toContain('notes.md');
+      }).toPass({ timeout: 25_000 });
     } finally {
       removeOrchestrator(name);
       fs.rmSync(directory, { recursive: true, force: true });

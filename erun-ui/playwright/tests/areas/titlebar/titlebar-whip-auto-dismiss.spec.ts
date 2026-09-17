@@ -48,17 +48,26 @@ async function forceDocumentFocused(page: import('@playwright/test').Page): Prom
 }
 
 // Opens the popover and pushes, landing on the report view (skipping past
-// the target picker every one of these tests starts from). Clicking the
-// primary action leaves the mouse resting on the popover -- exactly like a
-// real operator's cursor would -- so this moves it away afterward. Without
-// that, `hovered` stays true from the click itself and the auto-dismiss
-// timer (which pauses while hovered) never starts at all, which is the
-// pause/resume feature working correctly, not something to route around.
+// the target picker every one of these tests starts from).
+//
+// The primary action is activated by KEYBOARD, deliberately. A click parks
+// the pointer on the picker's primary action, and the report then replaces
+// that picker underneath the cursor -- which raises PopoverContent's
+// onMouseEnter (the hover-hold the timer pauses on) and, worse, leaves the
+// outcome depending on where the pointer is when Chromium's own
+// layout-driven hover update lands relative to the mouseleave asking for it
+// to leave. `page.mouse.move(0, 0)` after the report appeared was the old way
+// of asking for that mouseleave; it is not deterministic under the gate's
+// contention, where the timer can be armed and cancelled again before the
+// assertion below ever advances the clock, leaving an all-pushed report open
+// forever. Keeping the pointer out of the popover for the whole flow removes
+// that dependency: the timer is armed by the report's own mount, which is the
+// thing under test. The hover-hold this routes around has its own test below,
+// which drives the pointer into the report explicitly.
 async function openAndWhip(app: import('../../../pages/index.js').AppShell): Promise<void> {
   await app.titlebar.openWhipPanel();
-  await app.titlebar.whipRunButton().click();
+  await app.titlebar.whipRunButton().press('Enter');
   await app.titlebar.waitForWhipReportOpen();
-  await app.page.mouse.move(0, 0);
 }
 
 test.describe('whip report auto-dismiss', () => {
