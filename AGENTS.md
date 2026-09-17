@@ -277,6 +277,15 @@ controls: its own final turn.
   more.
 - Run the full `make check` gate before merging. This repository uses its own
   build and merge queue; do not add GitHub Actions for build or test gating.
+- **"The suite" in a gate conversation means the area-scoped selection, not the
+  full run.** `erun build` resolves it per change
+  (`erun-ui/playwright/AGENTS.md` § "Area-scoped gate selection"), not
+  unconditionally the full run for every build — that section's classification
+  rule decides which coverage a given change actually earns, and its own history
+  records a correctness gap the classification once had (a desktop
+  application-code change that touched no spec file selected smoke-only, so a
+  green gate did not mean the specs covering that change had run) and the fix
+  that closed it.
 - Structural tests that read sibling modules, directory trees, or generated
   artifacts outside their compiled inputs must run uncached (`go test -count=1`)
   in their module's gate. Add that wiring with the test; a cached pass cannot
