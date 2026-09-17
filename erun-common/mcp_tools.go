@@ -147,7 +147,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// "PATCH /v1/tenants/reconcile-bootstrap-name" entry -- there is no ongoing
 	// UI affordance to design here, and erun-console's TenantSwitcher already
 	// names the unreachable membership this repairs. Declared rather than
-	// inferred: before #2307 the desktop-surface gate passed this capability by
+	// inferred: the desktop-surface gate used to pass this capability by
 	// accident (see erun-integration/desktop_surface_test.go's capabilityToken).
 	"platform_tenant_repair-org-mapping": {Family: "platform", CLIPath: []string{"platform", "tenant", "repair-org-mapping"}, Title: "Repair a tenant's dead org mapping", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
 	"platform_identity_org_create":       {Family: "platform", CLIPath: []string{"platform", "identity", "org", "create"}, Title: "Create an organization on the platform's identity provider", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
@@ -178,7 +178,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// after it has fetched, gate-built, and pushed the prospective merge
 	// itself — no desktop surface authors this report either.
 	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
-	// Requeue recovers a merge-queue wedge (erun#2241): a review stuck at
+	// Requeue recovers a merge-queue wedge: a review stuck at
 	// MERGE with no desktop button to move it, only ever hit by whichever
 	// tooling drove gate-merge/the merge queue in the first place — the same
 	// agent-only shape as record-build/report-merged above.

@@ -86,7 +86,7 @@ func readOperatorSurfaceSource(t testing.TB, roots ...string) desktopsurface.Fro
 // stripping, so "mapping" matched unrelated prose in both trees (a colour
 // mapping named in a *.test.ts comment, an OIDC issuer mapping a form comment
 // says it deliberately cannot configure) and reported a capability with no
-// operator surface as surfaced -- the silent pass issue #2307 describes.
+// operator surface as surfaced -- the silent pass this derivation produced.
 // Collapsing the whole leaf keeps distinct capabilities distinct, since no
 // leaf can collide with another's token, while still matching the camelCase
 // identifier a real call site writes: OverrideAdvanceMergeQueue lowercases to
@@ -105,8 +105,8 @@ func capabilityToken(name, family string, cliPath []string) string {
 
 // TestCapabilityTokenKeepsCapabilitiesDistinct pins the property the whole
 // gate rests on: a capability's token has to identify that capability. Before
-// issue #2307's fix, capabilityToken trimmed a hyphenated leaf to its final
-// word, so "platform tenant repair-org-mapping" searched for "mapping" -- a
+// this fix, capabilityToken trimmed a hyphenated leaf to its final word, so
+// "platform tenant repair-org-mapping" searched for "mapping" -- a
 // noun generic enough to match prose about a different mapping entirely, in a
 // tree where no call site existed.
 func TestCapabilityTokenKeepsCapabilitiesDistinct(t *testing.T) {
@@ -352,8 +352,8 @@ var apiRouteWailsBindings = map[string]string{
 	// LoadTenantDashboard -> appendUnattachedTenantDashboardBuilds ->
 	// client.ListAllBuilds -> "GET /v1/builds" (erun-ui/tenant_dashboard.go,
 	// erun-common/platform_client_builds.go) -- merges an unattached build
-	// (erun#1954) into the same Builds tab the review-nested read above
-	// already populates.
+	// into the same Builds tab the review-nested read above already
+	// populates.
 	"GET /v1/builds": "LoadTenantDashboard",
 }
 
@@ -465,10 +465,10 @@ func apiRouteCapabilities(t testing.TB, root string) []desktopsurface.Capability
 // config.yaml. Unlike the other three enumerations, there is no fully-
 // automatic discovery for this source (a struct field carries no
 // "operator-settable" marker to walk), so the registry itself is the
-// enumeration: erun#1745 is the field that motivated adding it, after
-// OrchestratorEnvConfig.Role shipped with a reader (`erun list`) and no
-// writer, and none of the other three enumerations could see the gap because
-// a bare config field is none of a route, an MCP tool, or a CLI command.
+// enumeration: it exists because OrchestratorEnvConfig.Role shipped with a
+// reader (`erun list`) and no writer, and none of the other three
+// enumerations could see the gap because a bare config field is none of a
+// route, an MCP tool, or a CLI command.
 func operatorConfigCapabilities() []desktopsurface.Capability {
 	fields := eruncommon.OperatorSettableConfigFields
 	capabilities := make([]desktopsurface.Capability, 0, len(fields))
