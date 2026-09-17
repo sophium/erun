@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -78,7 +77,6 @@ func newActivityAISessionStatusCmd() *cobra.Command {
 	var tenant string
 	var environment string
 	var sessionID string
-	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Resolve the current status of one or every AI tool session",
@@ -88,16 +86,16 @@ func newActivityAISessionStatusCmd() *cobra.Command {
 			"recorded for the environment.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runActivityAISessionStatus(cmd, tenant, environment, sessionID, jsonOutput)
+			return runActivityAISessionStatus(cmd, tenant, environment, sessionID)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&sessionID, "session", "", "AI session id to resolve; omit to list every recorded session")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	addJSONAliasFlag(cmd)
 	return cmd
 }
 
-func runActivityAISessionStatus(cmd *cobra.Command, tenant, environment, sessionID string, jsonOutput bool) error {
+func runActivityAISessionStatus(cmd *cobra.Command, tenant, environment, sessionID string) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if err := validateActivityTarget(tenant, environment); err != nil {
@@ -109,22 +107,23 @@ func runActivityAISessionStatus(cmd *cobra.Command, tenant, environment, session
 		if err != nil {
 			return err
 		}
-		return writeAISessionStatuses(cmd, []common.AISessionStatus{status}, jsonOutput)
+		return writeAISessionStatuses(cmd, []common.AISessionStatus{status})
 	}
 	statuses, err := common.LoadAISessionStatuses(tenant, environment)
 	if err != nil {
 		return err
 	}
-	return writeAISessionStatuses(cmd, statuses, jsonOutput)
+	return writeAISessionStatuses(cmd, statuses)
 }
 
-func writeAISessionStatuses(cmd *cobra.Command, statuses []common.AISessionStatus, jsonOutput bool) error {
-	if jsonOutput {
-		encoder := json.NewEncoder(commandContext(cmd).Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(statuses)
-	}
+func writeAISessionStatuses(cmd *cobra.Command, statuses []common.AISessionStatus) error {
 	ctx := commandContext(cmd)
+	if ctx.Output == common.OutputJSON {
+		if statuses == nil {
+			statuses = []common.AISessionStatus{}
+		}
+		return ctx.WriteResult(statuses)
+	}
 	if len(statuses) == 0 {
 		return writeLabeledValue(ctx, "ai sessions", "none recorded")
 	}

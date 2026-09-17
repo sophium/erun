@@ -72,7 +72,6 @@ func newActivityTouchCmd() *cobra.Command {
 func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 	var tenant string
 	var environment string
-	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:  "status",
 		Args: cobra.NoArgs,
@@ -81,16 +80,12 @@ func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if jsonOutput {
-				encoder := json.NewEncoder(commandContext(cmd).Stdout)
-				encoder.SetIndent("", "  ")
-				return encoder.Encode(status)
-			}
-			return writeActivityStatus(commandContext(cmd), status)
+			ctx := commandContext(cmd)
+			return writeCommandResult(ctx, status, func() error { return writeActivityStatus(ctx, status) })
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	addJSONAliasFlag(cmd)
 	return cmd
 }
 
@@ -133,7 +128,7 @@ func runActivityStopReady(cmd *cobra.Command, store common.OpenStore, tenant, en
 	if err != nil {
 		return err
 	}
-	if jsonOutput {
+	if jsonRequested(cmd) {
 		if err := emitStopReadyJSON(commandContext(cmd).Stdout, status, result); err != nil {
 			return err
 		}
