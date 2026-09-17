@@ -37,6 +37,11 @@ type fakeDockerShapes struct {
 	// undescribedTags resolve with no descriptor at all, the shape the classic
 	// image store answers with.
 	undescribedTags []string
+	// inspectFails makes `docker image inspect` exit non-zero, the shape an
+	// older or unreachable daemon answers with.
+	inspectFails bool
+	// unreadableTags answer `docker image inspect` with output that is not JSON.
+	unreadableTags []string
 }
 
 // newRecordingFakeDocker installs a stub `docker` (via the ERUN_DOCKER_BIN
@@ -46,16 +51,21 @@ func newRecordingFakeDocker(t *testing.T, shapes fakeDockerShapes) {
 	t.Helper()
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "calls.log")
+	inspectAnswer := "    case \"${@: -1}\" in\n" +
+		"      " + shellCasePattern(shapes.indexTags) + ") echo '" + dockerImageIndexJSON + "' ;;\n" +
+		"      " + shellCasePattern(shapes.ociIndexTags) + ") echo '" + dockerImageOCIIndexJSON + "' ;;\n" +
+		"      " + shellCasePattern(shapes.undescribedTags) + ") echo '" + dockerImageUndescribedJSON + "' ;;\n" +
+		"      " + shellCasePattern(shapes.unreadableTags) + ") echo 'not json' ;;\n" +
+		"      *) echo '" + dockerImagePlainJSON + "' ;;\n" +
+		"    esac ;;\n"
+	if shapes.inspectFails {
+		inspectAnswer = "    exit 1\n"
+	}
 	script := "#!/bin/bash\n" +
 		"echo \"$*\" >> " + logPath + "\n" +
 		"case \"$1\" in\n" +
 		"  image)\n" +
-		"    case \"${@: -1}\" in\n" +
-		"      " + shellCasePattern(shapes.indexTags) + ") echo '" + dockerImageIndexJSON + "' ;;\n" +
-		"      " + shellCasePattern(shapes.ociIndexTags) + ") echo '" + dockerImageOCIIndexJSON + "' ;;\n" +
-		"      " + shellCasePattern(shapes.undescribedTags) + ") echo '" + dockerImageUndescribedJSON + "' ;;\n" +
-		"      *) echo '" + dockerImagePlainJSON + "' ;;\n" +
-		"    esac ;;\n" +
+		inspectAnswer +
 		"esac\n" +
 		"exit 0\n"
 	path := filepath.Join(dir, "docker")
@@ -129,6 +139,19 @@ func dockerCallsMatching(calls []string, needles ...string) []string {
 	return matched
 }
 
+// indexOfExactCall returns the position of the first recorded call whose joined
+// arguments are exactly want, or -1. `docker tag` takes both tags of interest
+// on one line in either direction, so a substring match cannot tell the
+// promote's re-tag from the repair that follows a rebuild.
+func indexOfExactCall(calls []string, want string) int {
+	for i, call := range calls {
+		if strings.TrimSpace(call) == want {
+			return i
+		}
+	}
+	return -1
+}
+
 // The build half of the invariant.
 func TestBuildPathPublishesEveryPlatformWithoutProvenanceAttestation(t *testing.T) {
 	for _, platform := range []string{"linux/amd64", "linux/arm64"} {
@@ -178,6 +201,46 @@ func TestPromoteRebuildsACacheEntryThatIsAWholeMultiPlatformIndex(t *testing.T) 
 	if !strings.Contains(stderr.String(), "would publish a multi-platform image under a per-arch tag") ||
 		!strings.Contains(stderr.String(), perArchTag) {
 		t.Fatalf("expected the rebuild to be reported against the tag it repairs, got: %s", stderr.String())
+	}
+	// Rebuilding is also what repairs the cache: the fingerprint entry is
+	// re-pointed at the single-platform image the build just produced, so the
+	// next run has an entry this check can promote instead of rebuilding again.
+	repaired := indexOfExactCall(recorded, "tag "+perArchTag+" "+fingerprintTag(testPromoteBuildInput().Image, "abc123", "linux/amd64"))
+	if repaired < 0 {
+		t.Fatalf("the rebuilt image was not re-tagged as the fingerprint entry, got %v", recorded)
+	}
+	if repaired < build {
+		t.Fatalf("the fingerprint entry was re-pointed before the rebuild that produces a single-platform image: %v", recorded)
+	}
+}
+
+// The fail-safe direction the shape check rests on: a daemon that cannot answer
+// — an inspect that fails, output that is not JSON — is not evidence of a
+// multi-platform image. Reading it as one would trade a working promote for a
+// full rebuild on every daemon that cannot say.
+func TestPromotePublishesWhenTheImageShapeCannotBeRead(t *testing.T) {
+	perArchTag := "ghcr.io/sophium/erun-console:1.0.246-amd64"
+	cases := map[string]fakeDockerShapes{
+		"inspect fails":      {inspectFails: true},
+		"output is not JSON": {unreadableTags: []string{perArchTag}},
+	}
+	for name, shapes := range cases {
+		t.Run(name, func(t *testing.T) {
+			newRecordingFakeDocker(t, shapes)
+
+			var stdout, stderr bytes.Buffer
+			if err := DockerImageBuilder(testPromoteBuildInput(), &stdout, &stderr); err != nil {
+				t.Fatalf("promote: %v", err)
+			}
+
+			calls := dockerCallsFrom(t)
+			if pushes := dockerCallsMatching(calls, "push", perArchTag); len(pushes) != 1 {
+				t.Fatalf("expected the cache entry to be promoted, got %v", calls)
+			}
+			if builds := dockerCallsMatching(calls, "build", "linux/amd64"); len(builds) != 0 {
+				t.Fatalf("an unreadable image shape must not force a rebuild, got %v", builds)
+			}
+		})
 	}
 }
 
