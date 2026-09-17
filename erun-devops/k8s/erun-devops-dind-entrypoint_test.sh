@@ -79,6 +79,7 @@ EOF
     PATH="${bin}:${PATH}" \
         ERUN_DIND_PROC_ROOT="${root}/proc" \
         ERUN_DIND_SYS_ROOT="${root}/sys" \
+        ERUN_DIND_DATA_ROOT="${root}/data" \
         sh "${entrypoint}" "$@" >"${work_root}/stdout" 2>"${work_root}/stderr" ||
         fail "the entrypoint exited non-zero"
     cat "${argv}" 2>/dev/null || true
@@ -179,5 +180,54 @@ mkdir -p "${root}/proc" "${root}/sys"
 run_entrypoint "${root}" >/dev/null
 [ -d "${root}/sys/fs/cgroup/docker" ] &&
     fail "expected no docker/ cgroup tree to be created with no readable own cgroup"
+
+# --- 12. A volume that already holds a build cache but no worker id (the state
+# a rolled pod starts from: the cache survived, the identity did not) gets one
+# derived from the daemon's own persisted engine id, so the records left on the
+# volume stay this worker's. ---
+root="$(stub_net eth0 1450)"
+mkdir -p "${root}/data/buildkit"
+: >"${root}/data/buildkit/cache.db"
+printf '%s' "51fb331d-c0d8-4f12-9f62-ac1f9a46372a" >"${root}/data/engine-id"
+run_entrypoint "${root}" >/dev/null
+worker_id="$(cat "${root}/data/buildkit/workerid" 2>/dev/null)"
+[ -n "${worker_id}" ] || fail "expected a worker id to be anchored on a volume with cache state"
+[ "$(printf '%s' "${worker_id}" | wc -c | tr -d ' ')" = "25" ] ||
+    fail "expected a 25-character worker id, got: ${worker_id}"
+grep -q "anchored BuildKit's worker identity" "${work_root}/stderr" ||
+    fail "expected the anchored worker identity to be announced on stderr"
+
+# --- 13. The anchor is derived, not merely persisted: losing the id file the
+# way a roll loses it reproduces the same id, so the cache records written
+# before the roll are still attributable after it. ---
+rm -f "${root}/data/buildkit/workerid"
+run_entrypoint "${root}" >/dev/null
+[ "$(cat "${root}/data/buildkit/workerid" 2>/dev/null)" = "${worker_id}" ] ||
+    fail "expected the same worker id to be re-derived after the id file was lost"
+
+# --- 14. A different daemon identity derives a different worker id, so two
+# volumes' caches never claim to be one worker's. ---
+printf '%s' "00000000-0000-0000-0000-000000000000" >"${root}/data/engine-id"
+rm -f "${root}/data/buildkit/workerid"
+run_entrypoint "${root}" >/dev/null
+[ "$(cat "${root}/data/buildkit/workerid" 2>/dev/null)" != "${worker_id}" ] ||
+    fail "expected a different engine id to derive a different worker id"
+
+# --- 15. An existing worker id is never rewritten: the daemon that wrote the
+# records on this volume owns them, and this wrapper is not the authority on
+# which identity that is. ---
+printf '%s' "existingworkeridvalue12345" >"${root}/data/buildkit/workerid"
+run_entrypoint "${root}" >/dev/null
+[ "$(cat "${root}/data/buildkit/workerid")" = "existingworkeridvalue12345" ] ||
+    fail "expected an existing worker id to be left untouched"
+
+# --- 16. A volume with no build cache yet (and an unreadable engine id) mints
+# nothing: there is no state to re-attribute, and a missing file must leave the
+# daemon exactly as it behaved before this existed. ---
+root="$(stub_net eth0 1450)"
+mkdir -p "${root}/data"
+run_entrypoint "${root}" >/dev/null
+[ -e "${root}/data/buildkit/workerid" ] &&
+    fail "expected no worker id to be invented with no build cache on the volume"
 
 echo "ok: erun-devops dind entrypoint tests passed"

@@ -8,6 +8,7 @@ set -eu
 
 proc_root="${ERUN_DIND_PROC_ROOT:-/proc}"
 sys_root="${ERUN_DIND_SYS_ROOT:-/sys}"
+data_root="${ERUN_DIND_DATA_ROOT:-/var/lib/docker}"
 
 # Reads procfs/sysfs rather than iproute2, which this image has no reason to
 # carry: in /proc/net/route an all-zero destination and mask is the default
@@ -73,5 +74,44 @@ cap_build_container_cpu() {
 # Never fatal: same reasoning as the MTU resolver above. A build that cannot
 # be capped still runs exactly as it did before this existed.
 cap_build_container_cpu || true
+
+# BuildKit attributes every cache record and every cache mount to the worker
+# identity it starts under, a random id it persists at <buildkit root>/workerid
+# (worker/base.ID in buildkit). The docker-state volume outlives the pod, so the
+# cache *data* survives a roll — `docker buildx du` still reports it in full —
+# but an identity that lives only in this container's own lifetime does not:
+# each roll's dockerd mints a fresh worker id, the cache records left by the
+# previous worker are no longer that worker's, and the next build re-runs
+# everything the volume is still holding: measured at ~5-6 minutes, and the
+# reason a released-but-rolled environment is slowest on its first build.
+#
+# Anchoring the id on the volume is not enough by itself, because the id file
+# is exactly the thing that went missing: the identity has to be *derivable*
+# from state the volume is already known to keep. The daemon's own engine id
+# (written once, on the same volume, and unchanged across every roll measured
+# so far) is that source, so a re-derivation after a roll reproduces the same
+# worker id and the cache records stay the same worker's.
+anchor_buildkit_worker_identity() {
+	buildkit_root="${data_root}/buildkit"
+	# No build cache on this volume yet: let BuildKit mint and persist its own
+	# first id rather than inventing an identity for state that does not exist.
+	[ -e "${buildkit_root}/cache.db" ] || return 0
+	[ -e "${buildkit_root}/workerid" ] && return 0
+
+	engine_id="$(cat "${data_root}/engine-id" 2>/dev/null)" || return 0
+	[ -n "${engine_id}" ] || return 0
+
+	# sha256sum is busybox's; a buildkit worker id is an opaque string, so any
+	# stable 25-character value derived from the engine id serves. A missing
+	# tool must leave the daemon exactly as it behaved before this existed.
+	worker_id="$(printf '%s' "erun-buildkit-${engine_id}" | sha256sum | cut -c1-25)" || return 0
+	[ -n "${worker_id}" ] || return 0
+
+	# No trailing newline: buildkit reads the file's bytes verbatim as the id.
+	printf '%s' "${worker_id}" >"${buildkit_root}/workerid" 2>/dev/null || return 0
+	echo "erun-dind: anchored BuildKit's worker identity at ${buildkit_root}/workerid" >&2
+}
+
+anchor_buildkit_worker_identity || true
 
 exec dockerd-entrypoint.sh "$@"
