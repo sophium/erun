@@ -55,8 +55,9 @@ async function forceDocumentFocused(page: import('@playwright/test').Page): Prom
 // timer (which pauses while hovered) never starts at all, which is the
 // pause/resume feature working correctly, not something to route around.
 async function openAndWhip(app: import('../../../pages/index.js').AppShell): Promise<void> {
-  await app.titlebar.whipButton().click();
+  await app.titlebar.openWhipPanel();
   await app.titlebar.whipRunButton().click();
+  await app.titlebar.waitForWhipReportOpen();
   await app.page.mouse.move(0, 0);
 }
 
@@ -72,6 +73,7 @@ test.describe('whip report auto-dismiss', () => {
     await expect(app.titlebar.whipReportBody().getByText('Pushed', { exact: true })).toBeVisible();
 
     await app.page.clock.fastForward(TRANSIENT_DISMISS_MS + 200);
+    await app.titlebar.waitForWhipReportClosed();
     await expect(app.titlebar.whipReportHeading()).toBeHidden();
   });
 
@@ -123,6 +125,7 @@ test.describe('whip report auto-dismiss', () => {
     // original report arrival.
     await app.page.mouse.move(0, 0);
     await app.page.clock.fastForward(TRANSIENT_DISMISS_MS + 200);
+    await app.titlebar.waitForWhipReportClosed();
     await expect(heading).toBeHidden();
   });
 

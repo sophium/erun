@@ -74,7 +74,7 @@ test('a realistic population keeps the whip action reachable without scrolling',
     // budget rather than share the single-row default.
     await waitForSeededRow(app, tenant, lastEnvironment, 60_000);
 
-    await app.titlebar.whipButton().click();
+    await app.titlebar.openWhipPanel();
 
     // Tick one target near the top of the now-long list -- the reported
     // click -- and the primary action must already be reachable, with no
@@ -82,6 +82,14 @@ test('a realistic population keeps the whip action reachable without scrolling',
     // cannot already be checked, so whatever the popover started with, one
     // manual check must widen it by exactly one.
     const firstTarget = `${tenant}/${firstEnvironment}`;
+    // The picker's own WhipTargets fetch has to resolve and render all 16
+    // seeded rows before this checkbox exists at all -- openWhipPanel()
+    // above only confirms the popover region itself mounted, not that this
+    // heavier-than-default population finished loading into it. Converge on
+    // the row directly (bounded by this test's own widened timeout) before
+    // handing off to the bare `expect`, which would otherwise only get the
+    // shorter `expect` timeout to absorb that load.
+    await app.titlebar.whipTargetCheckbox(firstTarget).waitFor({ state: 'visible' });
     await expect(app.titlebar.whipTargetCheckbox(firstTarget)).not.toBeChecked();
     const startingChecked = await whipCheckedCount(app);
     await app.titlebar.whipTargetCheckbox(firstTarget).check();
