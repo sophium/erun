@@ -72,6 +72,62 @@ type CloudContextStatus struct {
 	Message             string `json:"message,omitempty" yaml:"message,omitempty"`
 	StopProtection      bool   `json:"stopProtection,omitempty" yaml:"stopprotection,omitempty"`
 	StopProtectionKnown bool   `json:"stopProtectionKnown,omitempty" yaml:"stopprotectionknown,omitempty"`
+	// RefreshFailure is the batched status refresh that left this context
+	// Unknown. Every context covered by the same batch shares one record, so
+	// a single failure is reported once at the level it occurred instead of
+	// being copied verbatim into each row.
+	RefreshFailure *CloudContextRefreshFailure `json:"-" yaml:"-"`
+}
+
+// CloudContextRefreshFailure is one failed batched status refresh. A single
+// provider call covers every context sharing a provider alias and region, so
+// its failure belongs to that batch rather than to any one context.
+type CloudContextRefreshFailure struct {
+	CloudProviderAlias string
+	Region             string
+	Message            string
+	ContextNames       []string
+}
+
+// Summary names the failed batch and its cause, in the form shown to an
+// operator reading command output.
+func (f CloudContextRefreshFailure) Summary() string {
+	scope := "alias=" + strings.TrimSpace(f.CloudProviderAlias)
+	if region := strings.TrimSpace(f.Region); region != "" {
+		scope += " region=" + region
+	}
+	return "status refresh failed (" + scope + "): " + strings.TrimSpace(f.Message)
+}
+
+// CloudContextStatusMessage returns what one context has to say for itself: a
+// per-context detail when there is one, otherwise the shared batch failure that
+// affected it, otherwise nothing.
+func CloudContextStatusMessage(status CloudContextStatus) string {
+	if message := strings.TrimSpace(status.Message); message != "" {
+		return message
+	}
+	if status.RefreshFailure != nil {
+		return status.RefreshFailure.Summary()
+	}
+	return ""
+}
+
+// CloudContextRefreshFailures returns the distinct batched refresh failures
+// behind these statuses, in first-affected order. One failed batch yields one
+// entry however many contexts it covered; distinct failed batches stay
+// distinct.
+func CloudContextRefreshFailures(statuses []CloudContextStatus) []CloudContextRefreshFailure {
+	failures := make([]CloudContextRefreshFailure, 0)
+	seen := make(map[*CloudContextRefreshFailure]bool)
+	for i := range statuses {
+		failure := statuses[i].RefreshFailure
+		if failure == nil || seen[failure] {
+			continue
+		}
+		seen[failure] = true
+		failures = append(failures, *failure)
+	}
+	return failures
 }
 
 type InitCloudContextParams struct {
@@ -228,7 +284,7 @@ func groupCloudContextRefreshIndices(statuses []CloudContextStatus) map[cloudCon
 func refreshCloudContextRefreshGroup(ctx Context, store CloudReadStore, deps CloudContextDependencies, statuses []CloudContextStatus, key cloudContextRefreshKey, indices []int) {
 	provider, err := ResolveCloudProvider(store, key.alias)
 	if err != nil {
-		applyCloudContextRefreshError(statuses, indices, err)
+		applyCloudContextRefreshError(statuses, indices, key, err)
 		return
 	}
 	instanceIDs := make([]string, 0, len(indices))
@@ -237,7 +293,7 @@ func refreshCloudContextRefreshGroup(ctx Context, store CloudReadStore, deps Clo
 	}
 	states, err := describeCloudContextInstanceStates(ctx, deps, provider, key.region, instanceIDs)
 	if err != nil {
-		applyCloudContextRefreshError(statuses, indices, err)
+		applyCloudContextRefreshError(statuses, indices, key, err)
 		return
 	}
 	for _, i := range indices {
@@ -260,13 +316,24 @@ func applyCloudContextRefreshState(status *CloudContextStatus, states map[string
 	}
 }
 
-func applyCloudContextRefreshError(statuses []CloudContextStatus, indices []int, err error) {
+func applyCloudContextRefreshError(statuses []CloudContextStatus, indices []int, key cloudContextRefreshKey, err error) {
 	// When AWS cannot be reached, downgrade to Unknown so the UI never
-	// surfaces a stale "running" as authoritative.
-	message := "status refresh failed: " + err.Error()
+	// surfaces a stale "running" as authoritative. The cause is recorded once
+	// for the batch and referenced by each context it covered: every context
+	// in the group shares one cause and one command, so restating it per row
+	// would bury the detail that actually differs between rows. Nothing is
+	// swallowed -- callers surface the batch through CloudContextRefreshFailures.
+	failure := &CloudContextRefreshFailure{
+		CloudProviderAlias: key.alias,
+		Region:             key.region,
+		Message:            err.Error(),
+		ContextNames:       make([]string, 0, len(indices)),
+	}
 	for _, i := range indices {
 		statuses[i].Status = CloudContextStatusUnknown
-		statuses[i].Message = message
+		statuses[i].Message = ""
+		statuses[i].RefreshFailure = failure
+		failure.ContextNames = append(failure.ContextNames, strings.TrimSpace(statuses[i].Name))
 	}
 }
 

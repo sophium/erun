@@ -49,8 +49,15 @@ func runContextListCommand(ctx common.Context, store common.CloudContextStore, d
 		_, err := fmt.Fprintln(ctx.Stdout, "  none")
 		return err
 	}
+	// A failed batch is reported once, above the rows it affected. Each row
+	// still reports status=unknown and stays silent about the shared cause.
+	for _, failure := range common.CloudContextRefreshFailures(contexts) {
+		if _, err := fmt.Fprintln(ctx.Stdout, "  "+failure.Summary()); err != nil {
+			return err
+		}
+	}
 	for _, context := range contexts {
-		if err := writeCloudContext(ctx, context); err != nil {
+		if err := writeCloudContextRow(ctx, context); err != nil {
 			return err
 		}
 	}
@@ -233,7 +240,21 @@ func selectOrKeepInt(selectRunner SelectRunner, label string, options []int, cur
 	return strconv.Atoi(value)
 }
 
+// writeCloudContext renders one context on its own. There is no batch line
+// above it, so a shared refresh failure is the only way this context can
+// report why its status is unknown, and it reports it here.
 func writeCloudContext(ctx common.Context, status common.CloudContextStatus) error {
+	return writeCloudContextMessage(ctx, status, common.CloudContextStatusMessage(status))
+}
+
+// writeCloudContextRow renders one context inside a list, where batched
+// failures are reported once above the rows. The row then carries only what is
+// specific to it.
+func writeCloudContextRow(ctx common.Context, status common.CloudContextStatus) error {
+	return writeCloudContextMessage(ctx, status, status.Message)
+}
+
+func writeCloudContextMessage(ctx common.Context, status common.CloudContextStatus, message string) error {
 	context := status.CloudContextConfig
 	line := "  - " + context.Name
 	line += " provider=" + quotedValueOrNone(context.Provider)
@@ -250,8 +271,8 @@ func writeCloudContext(ctx common.Context, status common.CloudContextStatus) err
 	if status.StopProtectionKnown {
 		line += " stop-protection=" + strconv.FormatBool(status.StopProtection)
 	}
-	if strings.TrimSpace(status.Message) != "" {
-		line += " message=" + quotedValueOrNone(status.Message)
+	if message := strings.TrimSpace(message); message != "" {
+		line += " message=" + quotedValueOrNone(message)
 	}
 	_, err := fmt.Fprintln(ctx.Stdout, line)
 	return err

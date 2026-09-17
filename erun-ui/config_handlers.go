@@ -427,7 +427,7 @@ func cloudContextStatusToUI(status eruncommon.CloudContextStatus) uiCloudContext
 		DiskSizeGB:          context.DiskSizeGB,
 		KubernetesContext:   strings.TrimSpace(context.KubernetesContext),
 		Status:              strings.TrimSpace(status.Status),
-		Message:             strings.TrimSpace(status.Message),
+		Message:             strings.TrimSpace(eruncommon.CloudContextStatusMessage(status)),
 		StopProtection:      status.StopProtection,
 		StopProtectionKnown: status.StopProtectionKnown,
 	}
