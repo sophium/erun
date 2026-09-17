@@ -464,7 +464,7 @@ test-frontend:
 # the overlap outright rather than making it less likely.
 test-playwright: test-erun-ui-windows-build test-frontend
 	@echo ">> erun-ui/playwright suite (desktop tags)"
-	@(cd erun-ui/playwright && ./run.sh --skip-app-gates)
+	@(cd erun-ui/playwright && ./run.sh --skip-app-gates $(PROBE_PLAYWRIGHT_TARGETS))
 
 # A plain local `make check`/`make test-playwright` never goes through `erun
 # build`'s own resolution above, so PLAYWRIGHT_TEST_AREAS stayed unset here
