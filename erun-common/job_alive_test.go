@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -57,6 +58,56 @@ func TestEnvironmentJobAliveAgeMsExceedsFiveSecondsWithinSixSecondsOfSupervisorS
 	childPID := awaitFirstAliveBeat(t, tenant, environment, id)
 	killJobAliveSupervisorHelper(t, helper, childPID)
 	awaitAliveAgeExceedsStaleThreshold(t, tenant, environment, id)
+}
+
+// TestEnvironmentJobAliveAgeSurvivesAReconcileReadSlowerThanThePollBudget
+// covers the same contract as the kill test above, under the one condition
+// that used to make that test red on a loaded machine while the behaviour it
+// asserts was never wrong.
+//
+// LoadEnvironmentJob reconciles what it reads, and once the supervisor is gone
+// that reconcile can shell out to kubectl to ask whether the container
+// restarted -- a read that is disk-, process- and load-bound, not fixed-cost.
+// The poll helper used to give the job a `now` before that read and then
+// decide the deadline from a second, fresh clock reading afterwards, so one
+// read that outlasted the remaining budget ended the loop reporting
+// "condition not met" about an instant that had already met it. The stub below
+// makes that read slow on purpose -- deliberately, and by a margin just past
+// the 6s window -- so the failure reproduces on a quiet machine instead of only
+// on a busy one.
+func TestEnvironmentJobAliveAgeSurvivesAReconcileReadSlowerThanThePollBudget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGKILL semantics are POSIX-only")
+	}
+	isolateActivityCache(t)
+
+	// A stand-in kubectl that records that it ran and then stalls, so the
+	// reconcile read is slow for a known reason rather than because the
+	// machine happens to be loaded. It writes its marker beside itself, which
+	// keeps the script free of any interpolated path.
+	stubDir := t.TempDir()
+	stub := filepath.Join(stubDir, "kubectl")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\n: > \"$(dirname \"$0\")/called\"\nsleep 7\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	const tenant = "alive-contract-slow-read"
+	const environment = "kill-test"
+	const id = "beat"
+
+	helper := startJobAliveSupervisorHelper(t, tenant, environment, id)
+	childPID := awaitFirstAliveBeat(t, tenant, environment, id)
+	killJobAliveSupervisorHelper(t, helper, childPID)
+	awaitAliveAgeExceedsStaleThreshold(t, tenant, environment, id)
+
+	// Checked only once the contract held, so an earlier failure reports its
+	// own cause. Without this the stub silently stopping being consulted --
+	// the reconcile moving to the in-process Kubernetes client, say -- would
+	// leave this test green while covering nothing.
+	if _, err := os.Stat(filepath.Join(stubDir, "called")); err != nil {
+		t.Errorf("the slow kubectl stub was never consulted, so this test no longer exercises a slow reconcile read: %v", err)
+	}
 }
 
 // startJobAliveSupervisorHelper launches the re-entered process and registers
@@ -135,18 +186,30 @@ func awaitAliveAgeExceedsStaleThreshold(t *testing.T, tenant, environment, id st
 // pollUntilEnvironmentJob re-reads a job until it satisfies want or the
 // deadline passes, so the test reacts to the real beat cadence instead of
 // sleeping a fixed guess.
+//
+// One instant per attempt judges both: the read is given a now, want() judges
+// the record against that same now, and the deadline is compared against it
+// too rather than a fresh time.Now() taken once the read has returned. A read
+// is not free -- LoadEnvironmentJob reconciles the record, which can shell out
+// to kubectl for a same-pod supervisor loss -- so a slow one used to end the
+// loop reporting "condition not met" about an instant that had already met it,
+// which failed this helper's own tests on a loaded machine even though the
+// product behaviour they assert was never wrong. Its bound is now one read
+// past the deadline rather than exactly the deadline, which is the price of
+// never discarding an observation the condition would have accepted.
 func pollUntilEnvironmentJob(tenant, environment, id string, timeout time.Duration, want func(EnvironmentJob) bool) (EnvironmentJob, error) {
 	deadline := time.Now().Add(timeout)
 	var last EnvironmentJob
 	for {
-		job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
+		now := time.Now()
+		job, err := LoadEnvironmentJob(tenant, environment, id, now)
 		if err == nil {
 			last = job
 			if want(job) {
 				return job, nil
 			}
 		}
-		if !time.Now().Before(deadline) {
+		if !now.Before(deadline) {
 			return last, fmt.Errorf("condition not met within %s", timeout)
 		}
 		time.Sleep(100 * time.Millisecond)
