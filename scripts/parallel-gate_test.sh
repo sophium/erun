@@ -135,6 +135,51 @@ PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-mem-mib exceeding t
 # exactly as before this parameter was added.
 PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "omitted reserved-mem-mib defaults to 0" 2 6 700
 
+# --- the optional 5th arg (reserved-cpus) is reserved-mem-mib's CPU twin, for
+# the case memory reservation does not cover: a batch of *internally parallel*
+# jobs that runs concurrently with other work needing those CPUs, where the
+# job-count term counts each job as one CPU when the job is really a fan-out.
+# Reuse the "plenty" 12-CPU shape (job-count cap 3): reserving 9 leaves 3, so
+# a reservation that fits inside the slack costs nothing.
+case_dir="${work_root}/plenty"
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-cpus within the slack changes nothing" 3 3 700 0 9
+
+# --- and one that actually binds: reserving 10 of 12 CPUs leaves 2, which
+# must pull the width below the job-count cap of 3.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-cpus lowers the width" 2 3 700 0 10
+
+# --- reserving the entire box floors the CPU term at 1, never 0 or negative:
+# a job list must still make forward progress when every CPU is spoken for.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-cpus exceeding the ceiling floors at 1" 1 3 700 0 12
+
+# --- the shape the merge gate actually runs: 4 CPUs, ten targets of which up
+# to CHECK_GATE_PARALLELISM run at once, so each fan-out reserves the three
+# CPUs its co-runners need and lint's 6 modules collapse from 4 to 1. This is
+# the case the reservation exists for -- without it every one of the three
+# fan-outs resolves to 4 and together they present ~12 runnable threads to 4
+# CPUs, starving whatever latency-bound target is running beside them.
+case_dir="${work_root}/v2"
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "the gate's 3-CPU reservation collapses lint to 1" 1 6 700 0 3
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "the gate's 3-CPU reservation collapses helm to 1" 1 8 163 0 3
+
+# --- the reservation only ever narrows: with the memory term already binding
+# below the CPU term, adding a CPU reservation cannot raise the width back up.
+case_dir="${work_root}/mem-binds"
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "a CPU reservation cannot raise a memory-bound width" 2 6 700 0 3
+
+# --- a reservation smaller than the memory-bound width also leaves it alone:
+# 12 CPUs - 2 reserved = 10, still far above the 2 the 2GiB ceiling allows.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "a CPU reservation above the binding term is inert" 2 6 700 0 2
+
+# --- omitting reserved-cpus entirely (every existing 3- and 4-arg caller)
+# behaves exactly as before this parameter was added.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "omitted reserved-cpus defaults to 0" 2 6 700
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "omitted reserved-cpus beside a memory reservation" 1 6 700 1024
+
+# --- a non-numeric reservation is ignored rather than treated as zero-ish or
+# as a hard error, matching how the override chain above treats bad input.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "non-numeric reserved-cpus is ignored" 2 6 700 0 bogus
+
 # --- PARALLEL_GATE_MEMORY_LIMIT_MIB overrides the cgroup read outright, for
 # a BuildKit RUN step where memory.max reads "max" (unlimited) even though
 # the sidecar's chart-declared limit is real -- see the script's own header

@@ -106,7 +106,7 @@ LINT_JOB_MEMORY_MIB := 700
 # smaller environment where memory actually binds -- exactly the case this
 # guards against.
 CHECK_GATE_FANOUT_PEAK_MEMORY_MIB := $(shell echo $$(( $(words $(LINT_MODULES)) * $(LINT_JOB_MEMORY_MIB) )))
-LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODULES)) $(LINT_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
+LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODULES)) $(LINT_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB) $(CHECK_GATE_FANOUT_RESERVED_CPUS))
 
 # LINT_GOMAXPROCS bounds what each golangci-lint invocation may take, so the
 # fan-out above stops overcommitting the machine several times over.
@@ -118,12 +118,22 @@ LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODU
 # whole quota. In the in-image gate that is 6 invocations x 16 CPUs = 96
 # against a 16-CPU cap, and the cost is not merely queueing -- at that ratio
 # the build spent 79% of its CPU periods throttled and package downloads began
-# timing out (erun#2390), which reads as a network fault and is not.
+# timing out, which reads as a network fault and is not.
 #
 # Divide the quota by the width instead, floored at 1 so a small environment
-# still runs. Total demand becomes about the quota rather than a multiple.
+# still runs. Total demand becomes about the quota rather than a multiple --
+# but "about the quota" is still the whole box, which is lint's to take only
+# when lint is the only thing running. Under check-gate's own `-j` fan-out it
+# is not, so the result is additionally capped at CHECK_GATE_TARGET_CPU_SHARE:
+# the one-CPU-per-concurrent-target figure that fan-out's own reservation
+# leaves each of the ten. On a narrow box the cap is what does the work -- at
+# 4 CPUs the width is already 1, and without the cap that single invocation
+# would still take all four while nine other targets and test-playwright's two
+# workers want them.
 LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 	n=$$(( cpu / $(LINT_PARALLELISM) )); \
+	share=$(CHECK_GATE_TARGET_CPU_SHARE); \
+	[ "$$n" -le "$$share" ] || n=$$share; \
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
 
@@ -348,7 +358,7 @@ FRONTEND_GATE_JOB_MEMORY_MIB := 650
 # critical path (test-frontend -> test-playwright) where the saving is
 # wall-clock rather than slack.
 FRONTEND_GATE_JOB_COUNT := 15
-FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND_GATE_JOB_COUNT) $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
+FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND_GATE_JOB_COUNT) $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB) $(CHECK_GATE_FANOUT_RESERVED_CPUS))
 
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
@@ -515,7 +525,7 @@ test-erun-ui-windows-build:
 HELM_CHART_TEST_JOB_MEMORY_MIB := 163
 # Reserves room for lint/test-frontend under check-gate's own concurrent `-j`
 # fan-out -- see CHECK_GATE_FANOUT_PEAK_MEMORY_MIB's own comment above.
-HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(wildcard erun-devops/k8s/*_test.sh)) $(HELM_CHART_TEST_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
+HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(wildcard erun-devops/k8s/*_test.sh)) $(HELM_CHART_TEST_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB) $(CHECK_GATE_FANOUT_RESERVED_CPUS))
 
 # Helm-render assertions for the erun-devops/k8s charts (erun-devops,
 # erun-backend-postgres, erun-backend-db, erun-backend-api, erun-oci-registry,
@@ -667,9 +677,71 @@ integration-test-gate:
 CHECK_GATE_TARGET_COUNT := 10
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
+# CHECK_GATE_FANOUT_PEAK_MEMORY_MIB's CPU twin, and the same double-booking
+# problem one axis over. That reservation stops lint/test-frontend/
+# helm-chart-tests from summing past the box's *memory* ceiling when `-j` runs
+# them side by side; nothing stopped them summing past its *CPU* budget, and
+# they are the three targets that each size their own width against the whole
+# CPU quota. On a 4-CPU box every one of them resolves its width to 4, so
+# three concurrent fan-outs plus test-playwright's two workers can present
+# roughly a dozen runnable threads to four CPUs.
+#
+# The target that pays for that is whichever one is latency-bound rather than
+# throughput-bound, and in this gate that is test-playwright: a Playwright
+# worker is a Go backend *and* a headless Chromium, the config's own
+# measurement puts the clean figure at two cores per worker on a 4-core
+# environment, and its specs run 6.5-9.9s against a 10s expect timeout. A
+# starved machine therefore does not make the suite slower, it makes it red --
+# a spec that already sits near the ceiling crosses it. That is the shape of
+# the intermittent 552-passed/3-failed gate run.
+#
+# Each of the ten targets is entitled to the box's CPU divided by how many of
+# them run at once, so reserving one CPU per *other* slot is
+# CHECK_GATE_PARALLELISM - 1 -- capped at cpu-1, because a reservation that
+# consumed the entire box would floor every width at 1 for no gain and the
+# floor below already guarantees the single CPU that keeps a batch moving.
+#
+# Deliberately sized on the target count rather than on a measured per-target
+# CPU slope: the seven non-fan-out targets are flat single processes at or
+# under one CPU, so unlike LINT_JOB_MEMORY_MIB there is no measured marginal
+# cost to divide by, and inventing one would be the fabricated slope this
+# file's other sizing comments refuse. The cap is what keeps this from
+# over-reserving on a large box: at the reference 22-core build environment
+# CPU - (10-1) = 13 leaves lint its full measured width of 6, so this only
+# narrows a width on an environment small enough for one CPU per slot to be
+# the truth.
+CHECK_GATE_SHARED_CPU_RESERVATION := $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	r=$$(( $(CHECK_GATE_PARALLELISM) - 1 )); \
+	[ "$$r" -le $$(( cpu - 1 )) ] || r=$$(( cpu - 1 )); \
+	[ "$$r" -ge 0 ] || r=0; \
+	echo $$r)
+
+# What one concurrently-running check-gate target may claim for its own
+# internal parallelism. LINT_GOMAXPROCS below reads it: the job-count term
+# counts a golangci-lint invocation as one job, but the process takes its
+# GOMAXPROCS from the cgroup, so a width of 1 would otherwise still hand one
+# invocation the whole box.
+CHECK_GATE_SHARED_CPU_SHARE := $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	share=$$(( cpu / $(CHECK_GATE_PARALLELISM) )); \
+	[ "$$share" -ge 1 ] || share=1; \
+	echo $$share)
+
+# Both are applied only on `check`'s own recursive make line, never as the
+# default of the variables LINT_PARALLELISM / FRONTEND_GATE_PARALLELISM /
+# HELM_CHART_TEST_PARALLELISM / LINT_GOMAXPROCS read. A standalone `make lint`
+# or `make test-frontend` has the box to itself, so it must keep sizing
+# exactly as it always has; the over-subscription above is a property of the
+# fan-out, not of the target. Threading it through the sub-make is what keeps
+# the narrowing to the one context that needs it.
+CHECK_GATE_FANOUT_RESERVED_CPUS ?= 0
+CHECK_GATE_TARGET_CPU_SHARE ?= $(shell ./scripts/parallel-gate.sh cpu-quota)
+
 check:
 	@echo ">> concurrent-phase-spans: check-gate runs $(CHECK_GATE_TARGET_COUNT) targets at -j$(CHECK_GATE_PARALLELISM)"
-	./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) check-gate
+	./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) \
+		CHECK_GATE_FANOUT_RESERVED_CPUS=$(CHECK_GATE_SHARED_CPU_RESERVATION) \
+		CHECK_GATE_TARGET_CPU_SHARE=$(CHECK_GATE_SHARED_CPU_SHARE) \
+		check-gate
 
 # The full in-build gate: golangci-lint, erun-ui's own Go tests,
 # erun-backend-api's own Go tests, erun-mcp's own Go tests,
