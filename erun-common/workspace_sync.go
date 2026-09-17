@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,8 +54,8 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 	if err := validateWorkspaceSyncParams(&params); err != nil {
 		return WorkspaceSyncResult{}, err
 	}
-	pass := workspaceSyncPassLog{params: params, stale: "unknown"}
-	defer func() { pass.emit() }()
+	pass := workspaceSyncPassLog{params: params}
+	defer func() { workspaceSyncPasses.record(&pass) }()
 
 	if err := EnsureLocalWorkspaceSyncTarget(params.LocalPath); err != nil {
 		pass.failure = err
@@ -104,60 +103,6 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 		return result, fetchErr
 	}
 	return result, nil
-}
-
-// workspaceSyncPassLog is the always-on record of what one sync pass saw and
-// did, emitted as a single bounded line. A mirror that kept adding files while
-// silently never removing any took two investigations to explain precisely
-// because a pass left no trace of its own inputs, so this is unconditional and
-// counts-only — never one line per file.
-type workspaceSyncPassLog struct {
-	params     WorkspaceSyncParams
-	notGitRepo bool
-	remote     int
-	stale      string
-	local      int
-	fetch      int
-	deleted    int
-	signed     int
-	signNote   string
-	fetchErr   error
-	deleteErr  error
-	failure    error
-}
-
-func (l *workspaceSyncPassLog) recordResolved(resolved workspaceSyncPaths, err error) {
-	l.notGitRepo = resolved.notGitRepo
-	l.remote = len(resolved.remote)
-	l.stale = strconv.Itoa(resolved.stale)
-	if resolved.staleUnknown {
-		l.stale = "unknown"
-	}
-	l.local = len(resolved.localMeta)
-	l.failure = err
-}
-
-func (l *workspaceSyncPassLog) emit() {
-	log.Printf("erun: workspace sync %s -> %s: notGitRepo=%t remote=%d staleIndex=%s mirror=%d fetch=%d deleted=%d signed=%d%s%s%s%s",
-		l.params.RemotePath, l.params.LocalPath, l.notGitRepo, l.remote, l.stale, l.local, l.fetch, l.deleted, l.signed,
-		workspaceSyncPassNoteSuffix(" signNote", l.signNote),
-		workspaceSyncPassErrorSuffix(" fetchError", l.fetchErr),
-		workspaceSyncPassErrorSuffix(" deleteError", l.deleteErr),
-		workspaceSyncPassErrorSuffix(" error", l.failure))
-}
-
-func workspaceSyncPassNoteSuffix(label, note string) string {
-	if strings.TrimSpace(note) == "" {
-		return ""
-	}
-	return label + "=" + strings.TrimSpace(note)
-}
-
-func workspaceSyncPassErrorSuffix(label string, err error) string {
-	if err == nil {
-		return ""
-	}
-	return label + "=" + strings.TrimSpace(err.Error())
 }
 
 // WorkspaceSyncArtifactsSubdir is the read-only subdir of the host mirror that
