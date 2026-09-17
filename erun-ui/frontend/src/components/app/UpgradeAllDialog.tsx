@@ -19,6 +19,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { setUpgradeAllChoice } from '@/app/slices/upgradeAllSlice';
 import { closeUpgradeAllDialog, confirmUpgradeAll } from '@/app/upgradeThunks';
 import { selectionKey } from '@/app/versionSuggestions';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import type { UIUpgradePlanItem } from '@/types';
 
 // Must match the key confirmUpgradeAll resolves the picked version under.
@@ -119,9 +120,7 @@ function UpgradeAllBody({
   }
   if (error) {
     return (
-      <p role="alert" className="py-4 text-sm text-destructive">
-        {error}
-      </p>
+      <InlineAlert>{error}</InlineAlert>
     );
   }
   if (items.length === 0) {

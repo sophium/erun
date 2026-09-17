@@ -25,6 +25,7 @@ import {
   type OrchestratorEnvRole,
   type OrchestratorInfo,
 } from '@/app/slices/orchestratorsSlice';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import { OrchestratorConversationsSection } from '@/components/app/OrchestratorDialog.Conversations';
 import { DirectoriesField } from '@/components/app/OrchestratorDialog.Directories';
 import { EnvironmentsField } from '@/components/app/OrchestratorDialog.Environments';
@@ -293,9 +294,7 @@ function OrchestratorForm({
           </>
         ) : null}
         {error ? (
-          <p role="alert" className="text-sm break-words text-destructive">
-            {error}
-          </p>
+          <InlineAlert>{error}</InlineAlert>
         ) : null}
       </div>
 
@@ -479,9 +478,7 @@ function OrchestratorDeleteConfirm({
         </span>
       </div>
       {error ? (
-        <p role="alert" className="text-sm break-words text-destructive">
-          {error}
-        </p>
+        <InlineAlert>{error}</InlineAlert>
       ) : null}
       <DialogFooter>
         <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>

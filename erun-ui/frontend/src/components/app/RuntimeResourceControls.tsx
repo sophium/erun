@@ -12,6 +12,7 @@ import {
   runtimeResourceBounds,
   runtimeResourceValidation,
 } from '@/app/runtimeResources';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import type { UIRuntimePodConfig, UIRuntimeResourceStatus } from '@/types';
 
 interface RuntimeResourceControlsProps {
@@ -136,9 +137,7 @@ function RuntimeResourceMessages({
 }): React.ReactElement | null {
   if (blockingError) {
     return (
-      <div className="text-xs leading-[1.35] text-destructive" role="alert">
-        {blockingError}
-      </div>
+      <InlineAlert>{blockingError}</InlineAlert>
     );
   }
   if (!capacityWarning) {

@@ -28,6 +28,7 @@ import {
   updateExposeForm,
 } from '@/app/manageEnvironmentThunks';
 import type { AppState } from '@/app/state';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import { TextField } from '@/components/app/ManageDialog.fields';
 import { ExposeServicePicker } from '@/components/app/ManageDialogPortsServicePicker';
 
@@ -306,9 +307,7 @@ function ExposeServiceForm({ dialog }: { dialog: ManageDialog }): React.ReactEle
         />
       </div>
       {dialog.exposeError && (
-        <div role="alert" className="text-[13px] leading-[1.35] text-destructive">
-          {dialog.exposeError}
-        </div>
+        <InlineAlert>{dialog.exposeError}</InlineAlert>
       )}
       <Button
         type="button"
@@ -368,9 +367,7 @@ function UnexposeSection({ dialog }: { dialog: ManageDialog }): React.ReactEleme
         </span>
       </div>
       {dialog.unexposeError && (
-        <div role="alert" className="text-destructive">
-          {dialog.unexposeError}
-        </div>
+        <InlineAlert>{dialog.unexposeError}</InlineAlert>
       )}
       <div className="flex justify-end gap-2">
         <Button
