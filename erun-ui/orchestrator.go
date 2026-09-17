@@ -1200,8 +1200,6 @@ func orchestratorNoAskStopGuardCommand() string {
 		`const tail=lines.slice(-40);` +
 		`let said="";` +
 		`for(const line of tail){if(/"type"\s*:\s*"assistant"/.test(line))said=line;}` +
-		`let said="";` +
-		`for(const line of tail){if(/"type"\s*:\s*"assistant"/.test(line))said=line;}` +
 		`let spoken=said;` +
 		`try{const c=JSON.parse(said).message.content;` +
 		`if(typeof c==="string")spoken=c;` +
