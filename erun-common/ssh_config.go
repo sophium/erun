@@ -1,4 +1,4 @@
-package sshconfig
+package eruncommon
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 
 var userHomeDir = os.UserHomeDir
 
-type HostEntry struct {
+type SSHHostEntry struct {
 	Alias        string
 	HostKeyAlias string
 	HostName     string
@@ -18,7 +18,7 @@ type HostEntry struct {
 	IdentityFile string
 }
 
-func DefaultConfigPath() (string, error) {
+func DefaultSSHConfigPath() (string, error) {
 	homeDir, err := userHomeDir()
 	if err != nil {
 		return "", err
@@ -26,27 +26,27 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(homeDir, ".ssh", "config"), nil
 }
 
-func UpsertDefaultConfig(entry HostEntry) (string, error) {
-	path, err := DefaultConfigPath()
+func UpsertDefaultSSHConfig(entry SSHHostEntry) (string, error) {
+	path, err := DefaultSSHConfigPath()
 	if err != nil {
 		return "", err
 	}
-	return path, UpsertConfig(path, entry)
+	return path, UpsertSSHConfig(path, entry)
 }
 
-// DefaultConfigHasAlias reports whether the default ssh config (~/.ssh/config)
+// DefaultSSHConfigHasAlias reports whether the default ssh config (~/.ssh/config)
 // already declares a Host block for alias, so a caller can tell an alias name
 // that was merely derived from tenant/environment apart from one that will
 // actually resolve for an ssh client on this host.
-func DefaultConfigHasAlias(alias string) (bool, error) {
-	path, err := DefaultConfigPath()
+func DefaultSSHConfigHasAlias(alias string) (bool, error) {
+	path, err := DefaultSSHConfigPath()
 	if err != nil {
 		return false, err
 	}
-	return ConfigHasAlias(path, alias)
+	return SSHConfigHasAlias(path, alias)
 }
 
-func ConfigHasAlias(path, alias string) (bool, error) {
+func SSHConfigHasAlias(path, alias string) (bool, error) {
 	data, err := os.ReadFile(filepath.Clean(strings.TrimSpace(path)))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -62,7 +62,7 @@ func ConfigHasAlias(path, alias string) (bool, error) {
 	return false, nil
 }
 
-func UpsertConfig(path string, entry HostEntry) error {
+func UpsertSSHConfig(path string, entry SSHHostEntry) error {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" {
 		return fmt.Errorf("ssh config path is required")
@@ -78,11 +78,11 @@ func UpsertConfig(path string, entry HostEntry) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	updated := UpsertConfigContent(string(data), entry)
+	updated := UpsertSSHConfigContent(string(data), entry)
 	return os.WriteFile(path, []byte(updated), 0o600)
 }
 
-func UpsertConfigContent(existing string, entry HostEntry) string {
+func UpsertSSHConfigContent(existing string, entry SSHHostEntry) string {
 	lines := splitConfigLines(existing)
 	updated, replaced := replaceExistingHostEntries(lines, entry)
 	if !replaced {
@@ -93,7 +93,76 @@ func UpsertConfigContent(existing string, entry HostEntry) string {
 	return strings.TrimRight(strings.Join(trimTrailingBlankLines(updated), "\n"), "\n") + "\n"
 }
 
-func replaceExistingHostEntries(lines []string, entry HostEntry) ([]string, bool) {
+// RemoveDefaultSSHConfigAlias drops the Host block for alias from the default
+// ssh config, the inverse of UpsertDefaultSSHConfig. It reports whether a block
+// was actually removed, so a caller can tell "we had written one" apart from
+// "there was nothing of ours to remove".
+func RemoveDefaultSSHConfigAlias(alias string) (bool, error) {
+	path, err := DefaultSSHConfigPath()
+	if err != nil {
+		return false, err
+	}
+	return RemoveSSHConfigAlias(path, alias)
+}
+
+// RemoveSSHConfigAlias removes every Host block in path that declares exactly
+// alias and leaves the rest of the file — other environments' blocks and
+// hand-maintained entries alike — intact. A Host line naming several aliases is
+// left alone: this removes only a block it is certain belongs to alias alone,
+// and the writer emits one alias per block.
+func RemoveSSHConfigAlias(path, alias string) (bool, error) {
+	path = filepath.Clean(strings.TrimSpace(path))
+	alias = strings.TrimSpace(alias)
+	if path == "" {
+		return false, fmt.Errorf("ssh config path is required")
+	}
+	if alias == "" {
+		return false, fmt.Errorf("ssh host alias is required")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	updated, removed := RemoveSSHConfigAliasContent(string(data), alias)
+	if !removed {
+		return false, nil
+	}
+	return true, os.WriteFile(path, []byte(updated), 0o600)
+}
+
+func RemoveSSHConfigAliasContent(existing, alias string) (string, bool) {
+	lines := splitConfigLines(existing)
+	updated := make([]string, 0, len(lines))
+	removed := false
+	for i := 0; i < len(lines); {
+		if !hostLineNamesOnlyAlias(lines[i], alias) {
+			updated = append(updated, lines[i])
+			i++
+			continue
+		}
+		removed = true
+		i = skipHostEntry(lines, i+1)
+		// Drop the blank separator that immediately followed the block, so
+		// removal does not leave a double gap where it used to be.
+		if i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+			i++
+		}
+	}
+	if !removed {
+		return existing, false
+	}
+	joined := strings.Join(trimTrailingBlankLines(updated), "\n")
+	if joined == "" {
+		return "", true
+	}
+	return joined + "\n", true
+}
+
+func replaceExistingHostEntries(lines []string, entry SSHHostEntry) ([]string, bool) {
 	replaced := false
 	updated := make([]string, 0, len(lines)+8)
 	for i := 0; i < len(lines); {
@@ -110,7 +179,7 @@ func replaceExistingHostEntries(lines []string, entry HostEntry) ([]string, bool
 	return updated, replaced
 }
 
-func appendFirstReplacement(lines []string, entry HostEntry, replaced bool) []string {
+func appendFirstReplacement(lines []string, entry SSHHostEntry, replaced bool) []string {
 	if replaced {
 		return lines
 	}
@@ -138,7 +207,7 @@ func appendBlankBeforeEntry(lines []string) []string {
 	return lines
 }
 
-func RenderEntry(entry HostEntry) string {
+func RenderSSHHostEntry(entry SSHHostEntry) string {
 	lines := []string{
 		"Host " + entry.Alias,
 		"  HostName " + entry.HostName,
@@ -154,8 +223,8 @@ func RenderEntry(entry HostEntry) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func appendEntryLines(lines []string, entry HostEntry) []string {
-	return append(lines, splitConfigLines(RenderEntry(entry))...)
+func appendEntryLines(lines []string, entry SSHHostEntry) []string {
+	return append(lines, splitConfigLines(RenderSSHHostEntry(entry))...)
 }
 
 func splitConfigLines(content string) []string {
@@ -193,4 +262,16 @@ func hostLineHasAlias(line, alias string) bool {
 		}
 	}
 	return false
+}
+
+// hostLineNamesOnlyAlias reports whether line is a Host directive whose sole
+// alias is alias. Removal uses it rather than hostLineHasAlias so that a shared
+// "Host a b" line — never written by UpsertSSHConfig, and possibly another
+// environment's only remaining block — is never deleted.
+func hostLineNamesOnlyAlias(line, alias string) bool {
+	if !isHostDirective(line) {
+		return false
+	}
+	fields := strings.Fields(strings.TrimSpace(line))
+	return len(fields) == 2 && fields[1] == alias
 }

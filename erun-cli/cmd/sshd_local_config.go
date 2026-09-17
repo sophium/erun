@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
-	sshconfig "github.com/sophium/erun/internal/sshconfig"
 )
 
 type SSHDLocalConfigResult struct {
@@ -16,7 +15,7 @@ type SSHDLocalConfigWriter func(common.OpenResult) (SSHDLocalConfigResult, error
 
 func writeLocalSSHConfig(result common.OpenResult) (SSHDLocalConfigResult, error) {
 	info := common.SSHConnectionInfoForResult(result)
-	path, err := sshconfig.UpsertDefaultConfig(sshconfig.HostEntry{
+	path, err := common.UpsertDefaultSSHConfig(common.SSHHostEntry{
 		Alias:        info.HostAlias,
 		HostKeyAlias: info.HostAlias,
 		HostName:     info.Host,
