@@ -11,11 +11,16 @@ import {
 } from '../../wailsjs/go/main/App';
 import { startAITabOrPrompt } from './aiOccupancyThunks';
 import { resolveAutoStartGate } from './autoStartGate';
+import { environmentTypeIsHost } from './environmentType';
 import { readError } from './errors';
 import { hideTerminalMessage, showTerminalError, showTerminalMessage } from './notificationThunks';
 import { reattachRemoteTerminalTabs } from './remoteSessionTabsThunks';
 import { loadReviewDiff } from './reviewThunks';
-import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
+import {
+  selectActiveSlotForSelection,
+  selectEnvironmentExists,
+  selectEnvironmentType,
+} from './selectors';
 import { createIsCurrentSelection, isStaleDefaultLandingOpen } from './sessionOpenGuards';
 import { isNewSessionSelection } from './sessionSelection';
 import { setAutoStartPrompt } from './slices/autoStartPromptSlice';
@@ -139,7 +144,24 @@ const ensureLiveDefaultTab =
 
 export const ensureDefaultEnvTabs =
   (runSelection: UISelection, key: string, cols: number, rows: number): AppThunk<Promise<void>> =>
-  async (dispatch) => {
+  async (dispatch, getState) => {
+    // A host env has no pod, so two of the three default tabs have nothing to
+    // attach to: the ERun tab's `erun open` refuses the env outright ("it has no
+    // pod and no cluster to open a shell into"), and an AI tab has no pod to run
+    // its harness in. Spawning either would leave a refused tab plus a
+    // runtime-ensure warning about an environment that will never have a
+    // runtime. The Local tab is a shell in the directory, which is what opening
+    // a host env means — the same decision resolveAutoStartGate makes, so the
+    // two paths agree on what opening one produces.
+    const envType = selectEnvironmentType(
+      getState(),
+      runSelection.tenant,
+      runSelection.environment,
+    );
+    if (environmentTypeIsHost(envType)) {
+      await dispatch(ensureLiveDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
+      return;
+    }
     await dispatch(ensureLiveDefaultTab(key, runSelection, 'erun', 'ERun', cols, rows));
     await dispatch(ensureLiveDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
     await dispatch(ensureLiveDefaultTab(key, runSelection, 'ai', 'AI', cols, rows));

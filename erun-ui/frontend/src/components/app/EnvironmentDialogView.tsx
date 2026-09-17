@@ -14,7 +14,10 @@ import {
 import { FolderPlus, LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
-import { missingRequiredFieldReason } from '@/app/environmentDialogState';
+import {
+  environmentDialogResourceLimitMessage,
+  missingRequiredFieldReason,
+} from '@/app/environmentDialogState';
 import {
   closeEnvironmentDialog,
   selectEnvironmentVersionSuggestion,
@@ -22,10 +25,10 @@ import {
   submitEnvironmentDialog,
   updateEnvironmentDialog,
 } from '@/app/environmentDialogThunks';
+import { environmentTypeIsHost } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { showTerminalError } from '@/app/notificationThunks';
-import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { loadSavedPastEnvironments, loadSavedPastTenants } from '@/app/storage';
 import { useController } from '@/app/useController';
@@ -361,10 +364,16 @@ function environmentDialogSubmitGate(dialog: EnvironmentDialog): EnvironmentSubm
   // select. missingRequiredFieldReason then covers the value requirements —
   // including a context that is available but not yet selected — so the button's
   // enabled state matches exactly what submitEnvironmentDialog will accept.
+  // A host env has no pod and no cluster at all, so neither cluster-shaped
+  // blocker applies to it: each would report the absence of a cluster as the
+  // reason Create is disabled, naming a field that is not rendered for this
+  // type. Its own requirements (tenant, environment, directory) are covered by
+  // missingRequiredFieldReason.
+  const isHost = environmentTypeIsHost(dialog.envType);
   const blocker =
-    kubernetesContextBlocker(dialog) ??
+    (isHost ? null : kubernetesContextBlocker(dialog)) ??
     missingRequiredFieldReason(dialog) ??
-    runtimeCapacityBlocker(dialog);
+    (isHost ? null : runtimeCapacityBlocker(dialog));
   return blocker ? { disabled: true, reason: blocker } : { disabled: false, reason: '' };
 }
 
@@ -386,7 +395,7 @@ function runtimeCapacityBlocker(dialog: EnvironmentDialog): string | null {
     const fallback = dialog.resourceStatus?.message?.trim() ?? '';
     return fallback || 'Runtime capacity is unavailable.';
   }
-  const limitMessage = runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus);
+  const limitMessage = environmentDialogResourceLimitMessage(dialog);
   return limitMessage || null;
 }
 

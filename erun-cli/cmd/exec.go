@@ -24,6 +24,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		"Repository execution utilities",
 		newExecDiffCmd(findProjectRoot, runGit),
 		newExecRawCmd(findProjectRoot, runRaw),
+		newExecResolvePlaywrightAreasCmd(findProjectRoot),
 		newExecWriteCmd(findProjectRoot),
 		newExecCommitCmd(findProjectRoot),
 		newExecPushCmd(findProjectRoot),
@@ -175,6 +176,42 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text")
 	cmd.Flags().StringVar(&scope, "scope", "", "Diff scope: current (default), all, or commit")
 	cmd.Flags().StringVar(&selectedCommit, "selected-commit", "", "Oldest commit hash to include when --scope=commit")
+	return cmd
+}
+
+// newExecResolvePlaywrightAreasCmd builds `erun exec resolve-playwright-areas`,
+// which lets a local `make check` resolve the same smoke+area Playwright
+// selection `erun build` threads into the gate's own PLAYWRIGHT_TEST_AREAS
+// build-arg (erun-common.ResolvePlaywrightTestAreaSelection), so a developer
+// or agent iterating locally pays the same cost the authoritative gate does
+// instead of always running the full suite.
+func newExecResolvePlaywrightAreasCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "resolve-playwright-areas",
+		Short: "Resolve the smoke+area Playwright test selection for the current diff",
+		Long: "Resolve the same smoke+area Playwright test selection `erun build` computes for the gate's " +
+			"PLAYWRIGHT_TEST_AREAS build-arg, from the current git diff against the merge base " +
+			"(erun-ui/playwright/AGENTS.md's \"Area-scoped gate selection\"). Always exits 0 and prints " +
+			"\"all\" when the selection cannot be resolved (no git repository, or no merge base against any " +
+			"candidate upstream branch) -- the fail-safe direction, matching the Dockerfile's own unset-" +
+			"PLAYWRIGHT_TEST_AREAS default of running everything.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if findProjectRoot == nil {
+				findProjectRoot = common.FindProjectRoot
+			}
+			ctx := commandContext(cmd)
+			selection := "all"
+			if _, projectRoot, err := findProjectRoot(); err == nil {
+				if resolved, ok := common.ResolvePlaywrightTestAreaSelection(ctx, projectRoot); ok {
+					selection = resolved
+				}
+			}
+			_, err := fmt.Fprintln(ctx.Stdout, selection)
+			return err
+		},
+	}
 	return cmd
 }
 

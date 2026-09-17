@@ -136,18 +136,26 @@ export async function waitForSeededRow(
   }).toPass({ timeout: timeoutMs });
 }
 
-// captureHoverCard writes a hover card's own screenshot with a bounded wait.
+// captureHoverCard writes a hover card's own screenshot with a single bounded
+// attempt.
 //
 // A hover card exists only while the pointer rests on the row that raised it,
 // and locator.screenshot() carries no timeout of its own: it waits for the
-// element to be visible and stable for as long as its caller allows. A card
-// that closes or reflows mid-capture therefore does not fail the capture, it
-// silently consumes the entire convergence budget its caller was relying on to
-// re-drive the step -- so the step never gets a second attempt and the spec
-// reports a timeout with every assertion before it having passed. Bounding the
-// capture costs one attempt instead of the whole budget.
+// element to be visible and stable for as long as its caller allows, so an
+// unbounded call risks spending a whole convergence budget on one attempt.
+// Under real contention the stability half of that wait -- two consecutive
+// animation frames with an unchanged bounding box -- can take several seconds
+// to observe even though the card is fine, so the bound here is generous
+// (8s) rather than the tight budget a quiet machine would need. This used to
+// retry itself, but every caller now reads the card's content (and takes this
+// screenshot) from inside its own re-drivable hover+read block -- see
+// sidebar-orchestrator-hover-card-activity.spec.ts's withOrchestratorCard and
+// the live-update test's rehover() -- which already recovers a dropped card
+// by re-hovering. Retrying here too would stack two convergence loops inside
+// one test timeout and risk exceeding it before either one settles; one
+// bounded attempt per outer retry is enough.
 export async function captureHoverCard(card: Locator, filePath: string): Promise<void> {
-  await card.screenshot({ path: filePath, timeout: 2_000 });
+  await card.screenshot({ path: filePath, timeout: 8_000 });
 }
 
 export { expect };
