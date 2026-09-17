@@ -95,12 +95,21 @@ func writeControl(t *testing.T, conn *websocket.Conn, msg attachControlMessage) 
 	}
 }
 
+// attachReadDeadline bounds each read from the attach WebSocket. Every one of
+// these reads waits for a real dtach + shell process to produce something, so
+// the bound has to tolerate a busy host rather than measure it: at 10s the
+// golden-path test failed inside the in-build gate, where six packages
+// including this one run their own shells side by side, while the same test
+// passes standalone in seconds. It stays finite so a genuinely wedged attach
+// still fails its own test instead of hanging the suite.
+const attachReadDeadline = 60 * time.Second
+
 // waitForAnyBinary blocks until the first binary frame arrives, proving the
 // PTY has actually produced output (so the owner file -- written before dtach
 // ever runs -- is guaranteed to already be in place).
 func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	for {
 		kind, _, err := conn.ReadMessage()
 		if err != nil {
@@ -116,7 +125,7 @@ func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 // want appears or the deadline lapses.
 func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	var accumulated strings.Builder
 	for {
 		kind, data, err := conn.ReadMessage()
@@ -134,7 +143,7 @@ func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 
 func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	for {
 		kind, data, err := conn.ReadMessage()
 		if err != nil {
