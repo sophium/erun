@@ -17,10 +17,10 @@ type sessionProcess struct {
 // environmentJobSessionProcessesFunc builds the table
 // environmentJobSessionHasLiveMember scans; a var, matching
 // environmentJobResourceStateSummaryFunc's established test-seam shape in
-// job.go, so a test can substitute a process table instead of depending on
-// whatever happens to be running beside it. That substitution is the only way
-// a test on one platform can present the table that matters most here, the
-// Darwin one, whose session column ps leaves empty.
+// job.go, so a test can substitute a table instead of depending on whatever
+// happens to be running beside it. That substitution is also how the one table
+// no host here can produce — Darwin's, where ps leaves the session column
+// empty — gets exercised on a machine that is not Darwin.
 var environmentJobSessionProcessesFunc = platformSessionProcesses
 
 // sessionHasLiveMember reports whether the table holds a live member of
