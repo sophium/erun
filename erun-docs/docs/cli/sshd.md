@@ -22,6 +22,8 @@ erun sshd sync [TENANT] [ENVIRONMENT] [flags]
 
 The port-forward that makes the connection reachable is started later, when the environment is opened.
 
+The alias is tied to the environment, not just to the port: `erun delete` removes the block again, so the alias cannot survive its environment and start resolving into whichever environment inherits its local port. `erun list` flags the opposite case — an alias naming a configured environment that `~/.ssh/config` does not declare.
+
 ## Flags
 
 | Flag | Description |

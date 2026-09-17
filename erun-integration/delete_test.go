@@ -166,6 +166,51 @@ func TestDelete(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_removes_the_deleted_envs_ssh_config_block", func(t *testing.T) {
+		// The block `erun sshd init` writes names the env's local ssh port, and
+		// the env's port range is freed for whichever env is created next. A
+		// block outliving its env therefore does not fail — it connects to a
+		// different, live environment. Deleting must remove exactly its own
+		// block and leave a sibling env's block and hand-maintained entries.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedTenantEnv(t, setup, "team", "keep")
+		sshConfigPath := filepath.Join(setup.Home, ".ssh", "config")
+		mustWriteFile(t, sshConfigPath,
+			"Host github.com\n"+
+				"  User git\n"+
+				"\n"+
+				"Host erun-team-dev\n"+
+				"  HostName 127.0.0.1\n"+
+				"  Port 17022\n"+
+				"  User erun\n"+
+				"\n"+
+				"Host erun-team-keep\n"+
+				"  HostName 127.0.0.1\n"+
+				"  Port 17122\n"+
+				"  User erun\n",
+		)
+
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_removes_the_deleted_envs_ssh_config_block", normalize.Apply(result.Combined))
+
+		sshConfig, err := os.ReadFile(sshConfigPath)
+		if err != nil {
+			t.Fatalf("read ssh config: %v", err)
+		}
+		if strings.Contains(string(sshConfig), "erun-team-dev") {
+			t.Errorf("the deleted env's Host block survived, so ssh erun-team-dev can reach the env that inherits port 17022:\n%s", sshConfig)
+		}
+		for _, want := range []string{"Host erun-team-keep", "  Port 17122", "Host github.com"} {
+			if !strings.Contains(string(sshConfig), want) {
+				t.Errorf("delete dropped ssh config it does not own (%q missing):\n%s", want, sshConfig)
+			}
+		}
+	})
+
 	t.Run("real_run_last_env_of_non_default_tenant_keeps_root_default", func(t *testing.T) {
 		// Removing the last env of a secondary (non-default) tenant deletes
 		// that tenant's config but must leave the root default tenant
