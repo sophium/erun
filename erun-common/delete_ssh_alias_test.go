@@ -84,41 +84,12 @@ func readSSHConfig(t *testing.T, path string) string {
 	return string(data)
 }
 
-func TestDeleteEnvironmentRemovesItsSSHConfigBlock(t *testing.T) {
-	configPath := sandboxSSHConfig(t)
-	// The deleted env's block, a live sibling's block, and a hand-maintained
-	// entry that belongs to nobody in erun must survive the delete untouched.
-	writeSSHConfigBlock(t, configPath, SSHHostAlias("team", "dev"), 17022)
-	writeSSHConfigBlock(t, configPath, SSHHostAlias("team", "keep"), 17122)
-	if err := UpsertSSHConfig(configPath, SSHHostEntry{
-		Alias: "github.com", HostName: "github.com", Port: 22, User: "git",
-	}); err != nil {
-		t.Fatalf("write foreign block: %v", err)
-	}
-
-	store := &deleteSSHConfigStore{envs: map[string][]EnvConfig{
-		"team": {{Name: "dev"}, {Name: "keep"}},
-	}}
-	result, err := RunDeleteEnvironment(Context{}, DeleteEnvironmentParams{
-		Tenant: "team", Environment: "dev",
-	}, store, nil)
-	if err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if result.RemovedSSHHostAlias != "erun-team-dev" {
-		t.Errorf("delete should report the alias it removed, got %q", result.RemovedSSHHostAlias)
-	}
-
-	config := readSSHConfig(t, configPath)
-	if strings.Contains(config, "erun-team-dev") {
-		t.Errorf("stale block for the deleted env survived, so ssh erun-team-dev would forward to whichever env took port 17022:\n%s", config)
-	}
-	for _, want := range []string{"Host erun-team-keep", "  Port 17122", "Host github.com"} {
-		if !strings.Contains(config, want) {
-			t.Errorf("delete dropped config it does not own (%q missing):\n%s", want, config)
-		}
-	}
-}
+// The removal itself, including that a sibling env's block and a
+// hand-maintained entry survive it, is pinned end to end through the compiled
+// binary by
+// erun-integration TestDelete/real_run_removes_the_deleted_envs_ssh_config_block.
+// What stays here are the decisions that scenario cannot isolate: the
+// alias-ownership guard, the dry-run preview, and the content-level rules.
 
 func TestDeleteEnvironmentKeepsSSHConfigBlockAnotherEnvironmentOwns(t *testing.T) {
 	configPath := sandboxSSHConfig(t)
