@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -32,7 +33,13 @@ const (
 // fixed number. These are only the fallback: an environment that sizes the
 // sidecar independently (`erun init`/`erun resize --dind-cpu/--dind-memory`,
 // EnvConfig.RuntimeDindPod) overrides them the same way RuntimePod already
-// overrides DefaultRuntimePodCPU/Memory.
+// overrides DefaultRuntimePodCPU/Memory. DefaultRuntimeDindCPU is now the *last
+// resort* rather than the default an environment gets (see
+// ResolveRuntimeDindPodResources): an unset sidecar CPU is derived from the
+// machine's own core count, because a fixed 4 is a cap and not a reservation —
+// on a 24-core node it held every build to a sixth of the machine and the
+// kernel throttled it there, so builds stalled ~80% on CPU while the node sat
+// near-idle.
 //
 // Note this default does not by itself guarantee the limit is enforced on
 // every cluster: erun-dind's inner `dockerd` runs with no `--cgroup-parent`,
@@ -58,6 +65,70 @@ const (
 	DefaultRuntimeDindRequestCPU    = "0.25"
 	DefaultRuntimeDindRequestMemory = "1024Mi"
 )
+
+// DefaultRuntimeDindCPU is the *last resort* for an environment that has never
+// been sized and whose machine cannot be measured — see
+// ResolveRuntimeDindPodResources, which derives the sidecar's CPU from the node
+// instead and only falls back to this constant when there is no node to read.
+//
+// DefaultRuntimeDindCPUReservedCores is the headroom the node-derived default
+// keeps back from the node's core count for the runtime container beside the
+// sidecar and the node's own system work. Two cores is the same figure the
+// build gate's own timeout scaling already models: LINT_TIMEOUT_REFERENCE_CPU
+// (the repo-root Makefile) calibrates a 15-minute lint ceiling against a build
+// taking 22 of a 24-core node, i.e. exactly node-minus-two.
+const DefaultRuntimeDindCPUReservedCores = 2
+
+// DeriveRuntimeDindCPU answers "how much CPU can this node give a build" for a
+// node with hostCPUs cores: the whole node bar DefaultRuntimeDindCPUReservedCores,
+// floored at one core so a two-core node still builds.
+//
+// It is sized against the *node*, not against an assumed number of builds
+// sharing it, because a limit is a ceiling rather than a reservation: four
+// environments may each declare a near-node limit on one node without costing
+// the scheduler anything (their requests, not their limits, are what Kubernetes
+// reserves), and when they do build at once the kernel's own fair-share
+// scheduler divides the node between them by cpu.weight. Statically dividing
+// the node here would double-count that arbitration and re-create the reported
+// fault: one build alone on an idle node, throttled to a share sized for
+// contention that is not happening.
+//
+// The result is monotone in hostCPUs and never exceeds the node, so it stays
+// correct and conservative on a small machine: 24 cores -> 22, 8 -> 6, 4 -> 2,
+// 2 -> 1.
+func DeriveRuntimeDindCPU(hostCPUs int) string {
+	cores := hostCPUs - DefaultRuntimeDindCPUReservedCores
+	if cores < 1 {
+		cores = 1
+	}
+	return strconv.Itoa(cores)
+}
+
+// HostCPUCountEnvVar overrides HostCPUCount. See its comment.
+const HostCPUCountEnvVar = "ERUN_HOST_CPU_CORES"
+
+// HostCPUCount is the core count DeriveRuntimeDindCPU sizes against: the CPUs
+// available to this process via sched_getaffinity, which is the node's real
+// core count for a container that is not pinned to a cpuset — the same reading,
+// and the same reasoning, scripts/parallel-gate.sh's cpu_quota() already uses
+// as its own node-capacity fallback (`nproc` is not quota-aware; the cgroup
+// quota is a separate, narrower ceiling). Note it is deliberately NOT
+// GOMAXPROCS: that one *is* cgroup-aware since Go 1.25, so inside a capped
+// container it reports the cap, not the node.
+//
+// HostCPUCountEnvVar overrides it so a test or an integration scenario can pin
+// the value instead of inheriting whatever machine runs it, which would make
+// recorded configuration and golden output depend on the host — the same reason
+// BuildJobsEnvVar exists for the build's own worker count.
+func HostCPUCount() int {
+	if fromEnv, err := strconv.Atoi(strings.TrimSpace(os.Getenv(HostCPUCountEnvVar))); err == nil && fromEnv > 0 {
+		return fromEnv
+	}
+	if cpus := runtime.NumCPU(); cpus > 0 {
+		return cpus
+	}
+	return 0
+}
 
 // DefaultLimitRangeDefaultRequestCPU/Memory size the namespace LimitRange's
 // defaultRequest (namespaceResourceQuotaManifest in
@@ -251,6 +322,89 @@ func ValidateRuntimeDindPodResources(resources RuntimePodResources) error {
 		return fmt.Errorf("dind sidecar memory: %w", err)
 	}
 	return nil
+}
+
+// trimRuntimePodResources keeps only the values a caller actually supplied.
+// The counterpart of NormalizeRuntimePodResources for a value that is about to
+// be *written down* as a decision: normalizing records a default as if it had
+// been chosen, so nothing downstream — an operator reading the config, a later
+// re-init, a resize — can tell the two apart any more.
+func trimRuntimePodResources(resources RuntimePodResources) RuntimePodResources {
+	return RuntimePodResources{
+		CPU:    strings.TrimSpace(resources.CPU),
+		Memory: strings.TrimSpace(resources.Memory),
+	}
+}
+
+// ResolveRuntimeDindPodResources resolves the erun-dind sidecar sizing to
+// deploy for an environment that may never have chosen one. Normalize derives
+// nothing: this is the boundary that turns an unset sidecar CPU into a size
+// taken from the machine, which is what a deploy actually needs.
+//
+// A recorded value always wins; only a genuinely unset one is derived, from
+// the machine's own core count via DeriveRuntimeDindCPU. A recorded value is
+// the operator's decision and nothing here overrules it — not even a value
+// equal to the old stock constant, because erun cannot tell a 4 that was never
+// chosen from a 4 that was, and quietly rewriting an operator's sizing to fix
+// a default is a worse defect than the default. An environment sized before
+// this existed adopts the derivation with `erun resize --dind-cpu`.
+//
+// The derived value, and only the derived value, is clamped to a configured
+// namespace ResourceQuota: a ResourceQuota caps the *sum* of the pod's
+// container limits, so a node-sized sidecar beside a runtime container on a
+// namespace sized for the old constant would be refused at admission — a
+// sizing default must not turn into a failed rollout. An explicit value is left
+// unclamped to fail loudly instead: silently shrinking a number the operator
+// typed is worse than a rollout that names the quota
+// (validateRuntimeResizeAgainstQuota's own reasoning on the resize path, where
+// it can name the overage up front).
+func ResolveRuntimeDindPodResources(configured, runtimePod RuntimePodResources, ceiling NamespaceResourceQuota, hostCPUs int) RuntimePodResources {
+	resolved := trimRuntimePodResources(configured)
+	if strings.TrimSpace(resolved.CPU) == "" {
+		resolved.CPU = DeriveRuntimeDindCPU(hostCPUs)
+		resolved = clampDerivedRuntimeDindCPUToQuota(resolved, runtimePod, ceiling)
+	}
+	return NormalizeRuntimeDindPodResources(resolved)
+}
+
+// resolveRuntimeDindPodResourcesForDeploy is ResolveRuntimeDindPodResources at
+// the deploy boundary, where the machine to size against is this process's own
+// (HostCPUCount). Deploy is the only caller that has a machine to measure: init
+// deliberately records nothing for a sidecar the operator never sized, so every
+// later deploy re-derives from wherever it runs. For an environment deployed
+// from inside itself — the in-pod CLI/MCP edge — that is the node the build
+// actually executes on, which is the reading this whole derivation wants.
+func resolveRuntimeDindPodResourcesForDeploy(configured, runtimePod RuntimePodResources, ceiling NamespaceResourceQuota) RuntimePodResources {
+	return ResolveRuntimeDindPodResources(configured, runtimePod, ceiling, HostCPUCount())
+}
+
+// clampDerivedRuntimeDindCPUToQuota lowers a *derived* sidecar CPU to what the
+// namespace can still admit beside the runtime container, floored at one core
+// so a namespace sized below its own pod is still a diagnosable rollout
+// failure rather than an unparseable zero. A zero (unconfigured) ceiling
+// clamps nothing: deploy applies no ResourceQuota at all in that case.
+func clampDerivedRuntimeDindCPUToQuota(derived, runtimePod RuntimePodResources, ceiling NamespaceResourceQuota) RuntimePodResources {
+	quotaMilli, err := ParseKubernetesCPUToMilli(ceiling.CPU)
+	if err != nil {
+		return derived
+	}
+	derivedMilli, err := ParseKubernetesCPUToMilli(derived.CPU)
+	if err != nil {
+		return derived
+	}
+	runtimeMilli, err := ParseKubernetesCPUToMilli(runtimePod.CPU)
+	if err != nil {
+		runtimeMilli, _ = ParseKubernetesCPUToMilli(DefaultRuntimePodCPU)
+	}
+	available := quotaMilli - runtimeMilli
+	if available < 1000 {
+		available = 1000
+	}
+	if derivedMilli <= available {
+		return derived
+	}
+	derived.CPU = FormatKubernetesCPUFromMilli(available)
+	return derived
 }
 
 // NamespaceResourceQuota is a hard per-environment-namespace ceiling on

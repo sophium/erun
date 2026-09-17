@@ -864,9 +864,17 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		MCPAuthPublicKeyPath: strings.TrimSpace(s.params.MCPAuthPublicKeyPath),
 		// The pod cannot start on a private runtime image without these, so a new
 		// env records them from the start rather than on a second init.
-		ImagePullSecrets:   normalizeImagePullSecrets(s.params.ImagePullSecrets),
-		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
-		RuntimeDindPod:     NormalizeRuntimeDindPodResources(s.params.RuntimeDindPod),
+		ImagePullSecrets: normalizeImagePullSecrets(s.params.ImagePullSecrets),
+		RuntimePod:       NormalizeRuntimePodResources(s.params.RuntimePod),
+		// Recorded as supplied, never defaulted. A new env that did not name a
+		// sidecar CPU has not *chosen* one, and writing the stock constant here
+		// would make that default indistinguishable from an operator asking for
+		// it — the reason normalizeBootstrapInitParams trims these flags rather
+		// than normalizing them. An unset sidecar CPU is resolved at deploy from
+		// the machine the build runs on (ResolveRuntimeDindPodResources), which
+		// is also what lets it keep tracking that machine instead of freezing a
+		// number chosen on whatever host happened to run init.
+		RuntimeDindPod:     trimRuntimePodResources(s.params.RuntimeDindPod),
 		DisableBuildScript: s.params.DisableBuildScript,
 		PlatformAccount:    s.params.PlatformAccount,
 		Deploy:             initDeployConfig(s.params),

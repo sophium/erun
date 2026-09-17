@@ -104,6 +104,16 @@ func (s Setup) Env() []string {
 		// the same absolute-path routing hostTools uses for git. Empty when the
 		// host has no POSIX shell, which only matters on Windows.
 		"ERUN_STUB_SH=" + s.stubShell,
+		// A new environment's erun-dind sidecar CPU is derived from the machine
+		// (eruncommon.DeriveRuntimeDindCPU), so pin the machine this suite
+		// simulates rather than inheriting whatever core count runs the tests --
+		// the same reason ERUN_PUBLISHED_CHART_PROBE_OVERRIDE and
+		// ERUN_MCP_AUTH_LIVE_PROBE_OVERRIDE above answer their own probes
+		// statically. 24 cores is the reference build node the repo's own
+		// LINT_TIMEOUT_REFERENCE_CPU (22 of 24) is calibrated against, so the
+		// goldens show the derivation's real result rather than a number chosen
+		// to keep them still.
+		"ERUN_HOST_CPU_CORES=24",
 	}, s.toolBins...)
 }
 

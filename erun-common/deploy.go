@@ -2331,7 +2331,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
 		RuntimePod:          NormalizeRuntimePodResources(resolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, DefaultCgroupRoot)),
-		RuntimeDindPod:      NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
+		RuntimeDindPod:      resolveRuntimeDindPodResourcesForDeploy(target.EnvConfig.RuntimeDindPod, target.EnvConfig.RuntimePod, target.EnvConfig.NamespaceQuota),
 		NamespaceQuota:      target.EnvConfig.NamespaceQuota,
 		Stopped:             target.EnvConfig.Stopped,
 		Version:             version,

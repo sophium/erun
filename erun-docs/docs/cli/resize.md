@@ -27,6 +27,14 @@ erun resize --tenant my-tenant --environment dev --apply-recommendation --dry-ru
 
 Raise `--dind-memory` when a multi-arch `erun release`/`erun build --release` OOMs: a full rebuild runs `make check` for both target architectures inside the sidecar, concurrently, and every image build runs there — not in the runtime container.
 
+`--dind-cpu` is how an environment that predates the derived default adopts it. A sidecar CPU that is already recorded — including one recorded as the old stock `4` — is an operator's value and ERun never rewrites it; only an environment that has never been sized derives one at deploy time (the node's cores less two, never below one). So an environment sitting at a small sidecar CPU keeps it until you say otherwise:
+
+```bash
+erun resize --tenant my-tenant --environment dev --dind-cpu 22
+```
+
+Size it against the node, not against the number of environments sharing it. A limit is a ceiling, not a reservation: environments declare near-node limits on one node for free (the scheduler reserves their small *requests*), and when several do build at once the kernel divides the node between them itself. Sizing each one to `node ÷ environments` is what starves the build that runs alone — a fraction of the node's CPU throttled while the rest of the node sits idle.
+
 `--apply-recommendation` needs usage history retained inside the environment's own runtime pod, so run it there (over SSH, or through the environment's own MCP `resize` tool) — a host-side laptop invocation has nothing to read and refuses rather than guessing. It only ever sizes the runtime pod, never the sidecar.
 
 Before resolving a target, the trace prints the standing recommendation's own reasoning — the same `sizing:`/`sizing-evidence:` lines [`erun list`](/cli/list#the-sizing-recommendation) shows under `runtime-pod:` — even when the resolved plan is a no-op. A no-op that reports "already sized" is otherwise a dead end: this is what lets you see *why* nothing is proposed, not just that nothing is.

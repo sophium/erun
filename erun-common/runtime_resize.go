@@ -198,7 +198,12 @@ func runtimeDindResizeActions(current, target RuntimePodResources) []RuntimeResi
 
 func ResolveRuntimeResizePlan(tenant, environment string, current, currentDind RuntimePodResources, ceiling NamespaceResourceQuota, input RuntimeResizeInput, recommendation *RuntimeSizingRecommendation) (RuntimeResizePlan, error) {
 	current = NormalizeRuntimePodResources(liveRuntimePodResources(current, recommendation))
-	currentDind = NormalizeRuntimeDindPodResources(currentDind)
+	// Resolved the way a deploy resolves it, not normalized. A sidecar this
+	// environment never sized has no recorded CPU at all, and normalizing would
+	// read that as the stock constant — so a resize that only touches the
+	// runtime pod would plan the sidecar at that constant and then persist it,
+	// pinning the very default this deploy path exists to derive.
+	currentDind = resolveRuntimeDindPodResourcesForDeploy(currentDind, current, ceiling)
 	explicitCPU := strings.TrimSpace(input.CPU)
 	explicitMemory := strings.TrimSpace(input.Memory)
 	explicitDindCPU := strings.TrimSpace(input.DindCPU)
@@ -387,7 +392,14 @@ func traceRuntimeResizeOverriddenLeases(ctx Context, tenant, environment string,
 func applyRuntimeResize(ctx Context, deps RuntimeResizeDependencies, tenant, environment string, target OpenResult, plan RuntimeResizePlan) error {
 	updatedConfig := target.EnvConfig
 	updatedConfig.RuntimePod = plan.Target
-	updatedConfig.RuntimeDindPod = plan.DindTarget
+	// The sidecar is written only when this resize actually moved it. An
+	// environment that never chose a sidecar CPU leaves the field unset, and
+	// recording the value this plan resolved — rather than a value the operator
+	// asked for — would freeze a number this call never decided and stop the
+	// next deploy deriving one from the node it runs on.
+	if len(runtimeDindResizeActions(plan.DindCurrent, plan.DindTarget)) > 0 {
+		updatedConfig.RuntimeDindPod = plan.DindTarget
+	}
 	if err := deps.SaveEnvConfig(tenant, updatedConfig); err != nil {
 		return fmt.Errorf("resize: saving the new runtime pod size: %w", err)
 	}
