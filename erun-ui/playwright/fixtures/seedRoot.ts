@@ -265,7 +265,7 @@ export function createIsolatedLayout(): void {
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun'];
+  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude'];
   for (const name of stubs) {
     writeStubBinary(name);
   }
@@ -392,6 +392,16 @@ export function seedGitRemoteAgentForK3d(
 // - kubectl: answers the context listing with an empty set (the env-init
 //   dialog's deterministic empty state) and reports everything else as
 //   unreachable.
+// - claude: an orchestrator row reads "running" only while its spawned session
+//   is live (ListOrchestrators, erun-ui/orchestrator.go), so the specs that
+//   open an orchestrator need that session to stay up. The real binary cannot
+//   in a non-interactive host — no TTY, no credentials — so it exits at once,
+//   the row reads "stopped", and the spec times out; where a real session does
+//   start (a developer's machine, an agent pod), every orchestrator the suite
+//   opens spends the shared agent account on a nested agent nobody asked for.
+//   The stub prints a shell-prompt line (the action runner's setup-complete
+//   marker, see signalSessionReadyOnLine) and then sleeps, so the session is
+//   live, quiet, and killable.
 function writeStubBinary(name: string): void {
   if (isWindows) {
     // CreateProcess cannot exec a shell script or a .cmd/.bat file, so copy the
@@ -412,6 +422,14 @@ function writeStubBinary(name: string): void {
       '    ;;',
       '  *) exit 0 ;;',
       'esac',
+      '',
+    ].join('\n');
+  } else if (name === 'claude') {
+    body = [
+      '#!/bin/sh',
+      '# claude playwright stub: keeps an orchestrator session alive and inert.',
+      "printf 'claude@playwright:~$ \\n'",
+      'exec sleep 2147483647',
       '',
     ].join('\n');
   } else if (name === 'kubectl') {
