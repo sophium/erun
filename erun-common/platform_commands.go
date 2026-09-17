@@ -50,7 +50,7 @@ func ResolveERunPlatformAlias(store CloudReadStore, alias string) (CloudProvider
 	if alias != "" {
 		provider, err := ResolveCloudProvider(store, alias)
 		if err != nil {
-			return CloudProviderConfig{}, markPlatformAliasUnusable(err)
+			return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("%w (config read: %s)", err, platformAliasConfigScope(store)))
 		}
 		if provider.Provider != CloudProviderERun {
 			return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider))
@@ -67,14 +67,43 @@ func ResolveERunPlatformAlias(store CloudReadStore, alias string) (CloudProvider
 			erunProviders = append(erunProviders, provider)
 		}
 	}
+	// Naming the config in the failure text is what keeps the two transports
+	// from contradicting each other: they share this function but not
+	// necessarily a config root (the pod's MCP edge reads the pod config home,
+	// the operator's `erun` reads theirs), so an unqualified "none" reads as a
+	// claim about the operator's own config when it is a claim about another's.
+	scope := platformAliasConfigScope(store)
 	switch len(erunProviders) {
 	case 0:
-		return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("no erun platform cloud provider alias is configured; run `erun cloud init erun --api-url <url>` first"))
+		return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("no erun platform cloud provider alias is configured in %s; run `erun cloud init erun --api-url <url>` against that config first", scope))
 	case 1:
 		return erunProviders[0], nil
 	default:
-		return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one"))
+		return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("multiple erun platform cloud provider aliases are configured in %s (%s); pass --erun-alias to choose one, or the alias argument on an MCP platform tool", scope, strings.Join(erunPlatformAliasNames(erunProviders), ", ")))
 	}
+}
+
+// platformAliasConfigScope names the config file a store reads, for the
+// resolution messages above. A store that cannot name its root reports
+// "an unreadable config" rather than an empty string so the message never
+// reads as "the config you expected".
+func platformAliasConfigScope(store CloudReadStore) string {
+	if store == nil {
+		return "an unspecified config"
+	}
+	_, path, _ := store.LoadERunConfig()
+	if path = strings.TrimSpace(path); path == "" {
+		return "an unspecified config"
+	}
+	return path
+}
+
+func erunPlatformAliasNames(providers []CloudProviderConfig) []string {
+	names := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		names = append(names, provider.Alias)
+	}
+	return names
 }
 
 // newPlatformClientForAlias resolves the erun platform alias and builds a
