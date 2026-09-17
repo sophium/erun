@@ -74,6 +74,49 @@ func sealForwardForSweep(t *testing.T) {
 	seedMCPForward(t, "erun", "remote", forwardRepairTestPort)
 }
 
+// TestEdgeRecoveryPairsEveryEntryWhenTwoOrchestratorsShareTheEdge locks the
+// pairing when more than one orchestrator links the same environment: each one
+// logs its own outage entry, so a recovery must produce an exit naming each of
+// them. A single exit naming only the last orchestrator to be wired would leave
+// the other entry looking unresolved, which is the defect this pairing exists
+// to remove.
+func TestEdgeRecoveryPairsEveryEntryWhenTwoOrchestratorsShareTheEdge(t *testing.T) {
+	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
+	probe := &forwardRepairProbe{}
+	app, _ := forwardRepairTestApp(t, probe, nil)
+	defer app.shutdown(context.Background())
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	restoreLogOutputAfter(t)
+
+	envs := []eruncommon.OrchestratorEnvConfig{{Tenant: "erun", Environment: "remote"}}
+	app.wireOrchestratorMCP("petios", "Petios", envs)
+	app.wireOrchestratorMCP("atlas", "Atlas", envs)
+	for _, id := range []string{"petios", "atlas"} {
+		want := "orchestrator " + id + ": wired erun/remote but its edge is not answering"
+		if got := logs.String(); !strings.Contains(got, want) {
+			t.Fatalf("expected the entry for %s, got:\n%s", id, got)
+		}
+	}
+
+	sealForwardForSweep(t)
+	probe.setAnswers(true)
+	if state := sweepUntilRebindSettles(t, app); !state.reachable || !state.observed {
+		t.Fatalf("expected the sweep to observe the answering edge, got %+v", state)
+	}
+
+	for _, id := range []string{"petios", "atlas"} {
+		want := "orchestrator " + id + ": wired erun/remote and its edge is answering again"
+		if got := logs.String(); !strings.Contains(got, want) {
+			t.Fatalf("expected an exit pairing the entry for %s, got:\n%s", id, got)
+		}
+	}
+	if got := strings.Count(logs.String(), "answering again"); got != 2 {
+		t.Fatalf("recovery lines = %d, want one per recorded entry (2):\n%s", got, logs.String())
+	}
+}
+
 // TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired is the other half of
 // the property: an entry whose edge never answers through a bound port gets no
 // exit line, so the log cannot report a resolution that did not happen. A

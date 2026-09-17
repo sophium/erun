@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"slices"
 	"strings"
 )
 
@@ -18,13 +19,21 @@ import (
 // came back. The sweep already probes every recorded forward's edge on its
 // ordinary path, so pairing costs it one map read and no extra probe.
 
-// orchestratorEdgeOutage is one recorded entry: which orchestrator was wired to
-// the edge and the wiring it was wired to, so the exit can name both. It is
-// dropped when the exit is logged, so a later outage is a fresh episode rather
-// than a re-report of this one.
+// orchestratorEdgeOutage is one recorded entry: the wiring that was unreachable
+// and every orchestrator that reported it, so the exit can name both.
+//
+// It holds a set of orchestrators rather than one because an edge belongs to
+// the environment, not to the session that noticed it: when two orchestrators
+// link the same environment while its edge is down, each logs its own entry
+// line, and a single exit naming only the last of them would leave the other
+// entry looking unresolved. One entry line per orchestrator, one exit line per
+// orchestrator, is what makes the pairing exact.
+//
+// The record is dropped when the exits are logged, so a later outage is a fresh
+// episode rather than a re-report of this one.
 type orchestratorEdgeOutage struct {
-	orchestratorID string
-	label          string
+	label           string
+	orchestratorIDs []string
 }
 
 // recordOrchestratorEdgeOutage remembers an edge that was unreachable at wire
@@ -36,15 +45,20 @@ func (a *App) recordOrchestratorEdgeOutage(orchestratorID, label string) {
 	if !ok {
 		return
 	}
+	key := selectionKey(uiSelection{Tenant: tenant, Environment: environment})
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.edgeOutages == nil {
 		a.edgeOutages = make(map[string]orchestratorEdgeOutage)
 	}
-	a.edgeOutages[selectionKey(uiSelection{Tenant: tenant, Environment: environment})] = orchestratorEdgeOutage{
-		orchestratorID: orchestratorID,
-		label:          label,
+	episode := a.edgeOutages[key]
+	episode.label = label
+	// Re-wiring the same unreachable edge records one entry per orchestrator,
+	// never a duplicate for an orchestrator that already reported it.
+	if !slices.Contains(episode.orchestratorIDs, orchestratorID) {
+		episode.orchestratorIDs = append(episode.orchestratorIDs, orchestratorID)
 	}
+	a.edgeOutages[key] = episode
 }
 
 // noteOrchestratorEdgeAnswering logs the exit transition for an edge the sweep
@@ -71,8 +85,10 @@ func (a *App) noteOrchestratorEdgeAnswering(selection uiSelection) {
 	if !ok {
 		return
 	}
-	log.Printf("erun-app: orchestrator %s: wired %s and its edge is answering again",
-		episode.orchestratorID, episode.label)
+	for _, orchestratorID := range episode.orchestratorIDs {
+		log.Printf("erun-app: orchestrator %s: wired %s and its edge is answering again",
+			orchestratorID, episode.label)
+	}
 }
 
 // cutEnvLabel splits the "tenant/environment" label an unreachable wiring
