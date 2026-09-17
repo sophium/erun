@@ -34,7 +34,7 @@ func ResolveDockerImageReference(ctx Context, store DockerStore, findProjectRoot
 // resolution stays on the project-global paths: block unless the project also
 // declares a matching components: entry, which FindComponentDockerBuildContext
 // (and currentComponentDockerBuildContext's own cwd match) already scope to.
-func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*DockerBuildSpec, error) {
+func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride, gatedCommit string, platformOverride []string) (*DockerBuildSpec, error) {
 	store, _, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	if buildContext, ok := currentComponentDockerBuildContext(resolveBuildContext, componentName); ok {
@@ -42,6 +42,7 @@ func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectR
 		if err != nil {
 			return nil, err
 		}
+		build.GatedCommit = strings.TrimSpace(gatedCommit)
 		return &build, nil
 	}
 
@@ -54,6 +55,7 @@ func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectR
 	if err != nil {
 		return nil, err
 	}
+	build.GatedCommit = strings.TrimSpace(gatedCommit)
 	return &build, nil
 }
 
@@ -110,7 +112,12 @@ func resolveDockerBuildSpec(ctx Context, store DockerStore, findProjectRoot Proj
 		return DockerBuildSpec{}, err
 	}
 
-	return newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride), target.Platforms, target.Component)
+	build, err := newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride), target.Platforms, target.Component)
+	if err != nil {
+		return DockerBuildSpec{}, err
+	}
+	build.GatedCommit = strings.TrimSpace(target.GatedCommit)
+	return build, nil
 }
 
 func resolveDockerImageReferenceForProject(ctx Context, now NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (DockerImageReference, error) {

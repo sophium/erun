@@ -108,7 +108,7 @@ func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig,
 			return eruncommon.BuildExecutionSpec{}, err
 		}
 
-		build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride, target.Platforms)
+		build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, environment, component, target.VersionOverride, target.GatedCommit, target.Platforms)
 		if err != nil {
 			return eruncommon.BuildExecutionSpec{}, err
 		}
@@ -150,7 +150,8 @@ func resolveRuntimePushExecution(ctx eruncommon.Context, runtime RuntimeConfig, 
 		return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{pushInput}), nil
 	}
 
-	build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), target.Platforms)
+	// push publishes an already-built version; it gates nothing, so no gated commit.
+	build, err := eruncommon.ResolveDockerBuildForComponent(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component, strings.TrimSpace(target.VersionOverride), "", target.Platforms)
 	if err != nil {
 		return eruncommon.DockerPushExecutionSpec{}, err
 	}
