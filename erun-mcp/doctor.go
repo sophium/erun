@@ -354,16 +354,14 @@ func firstNonBlank(values ...string) string {
 }
 
 // writeDoctorDeployDiagnosis reports helm release status and runtime pods so an
-// agent can see why a deploy failed before any cleanup runs. Read-only. The
-// returned diagnosis carries ClusterUnreachable forward so every later
+// agent can see why a deploy failed before any cleanup runs. Read-only, so it
+// runs under preview/dry-run too — that mode withholds mutations, not reads.
+// The returned diagnosis carries ClusterUnreachable forward so every later
 // section that needs the runtime pod (git push access, docker storage) can
 // skip its own probe instead of independently rediscovering the same
-// unreachable cluster (erun#2394).
+// unreachable cluster.
 func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) (eruncommon.DeployDiagnosisResult, error) {
 	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
-	if runCtx.DryRun {
-		return diagnosis, nil
-	}
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
 			return diagnosis, err

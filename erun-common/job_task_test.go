@@ -352,9 +352,17 @@ func TestAHandoffTaskJobIsExcludedFromItsParentsFinishCheck(t *testing.T) {
 		t.Fatalf("StartTaskEnvironmentJob: %v", err)
 	}
 	<-started
-	defer close(release)
 
 	if running := environmentJobRunningChildren(dir, "parent-job", time.Now()); len(running) != 0 {
 		t.Fatalf("running children = %+v, want none: a handoff task must never hold its parent's finish check", running)
 	}
+
+	// Unblock the task and wait for its goroutine to actually finish (not
+	// just signal release) before the test returns. Without this, the
+	// goroutine's own cleanup (recorder.update, then the heartbeat's
+	// deferred ReleaseEnvironmentActivityLease) keeps running concurrently
+	// with whatever test runs next, and races that later test's own
+	// XDG_CACHE_HOME isolation over the shared xdg package state.
+	close(release)
+	waitForEnvironmentJobFinished(t, tenant, environment, "release")
 }

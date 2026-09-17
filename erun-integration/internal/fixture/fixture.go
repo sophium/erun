@@ -1669,6 +1669,102 @@ func StubCodesign(t testing.TB, dir string, spec CodesignStubSpec) string {
 	return logPath
 }
 
+// PodExecStubSpec configures the pod emulator that answers an outputs download.
+type PodExecStubSpec struct {
+	// Root is a directory that stands in for the pod's filesystem root, so a
+	// scenario seeds its payload at Root + the pod path erun will ask for.
+	Root string
+	// MaxStreamBytes is how much one exec may carry before it dies with
+	// kubectl's own stream error. This is the failure being regression-tested:
+	// the reported break sits between 12 MB and 14 MB of payload, and a whole
+	// large file in one exec is what exceeds it. 0 means no limit.
+	MaxStreamBytes int64
+	// RawEncoding drops the emulator to uncompressed ranges, standing in for a
+	// pod with no gzip.
+	RawEncoding bool
+	// FailOnceAt breaks the stream on the first read of each byte offset and
+	// serves it normally afterwards, so a scenario can prove a range is retried.
+	FailOnceAt []int64
+	// FailAlwaysAt breaks the stream on every read of each byte offset, so a
+	// scenario can prove what the download reports when a range never arrives.
+	FailAlwaysAt []int64
+}
+
+// StubPodExec writes a kubectl stub that answers `erun outputs download`
+// through the pod emulator in internal/fixture/podexec. A fixed-stdout stub
+// cannot serve this path — the download asks the pod a different question per
+// call — and the emulator is also what enforces MaxStreamBytes, the exec-stream
+// break the download has to survive.
+func StubPodExec(t testing.TB, dir string, spec PodExecStubSpec) string {
+	t.Helper()
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	args := []string{
+		shellSingleQuote(filepath.ToSlash(PodExecBinary(t))),
+		"--root", shellSingleQuote(filepath.ToSlash(spec.Root)),
+		"--max-stream-bytes", strconv.FormatInt(spec.MaxStreamBytes, 10),
+	}
+	if spec.RawEncoding {
+		args = append(args, "--encoding", "raw")
+	}
+	if len(spec.FailOnceAt) > 0 {
+		args = append(args, "--fail-once-at", shellSingleQuote(joinInt64s(spec.FailOnceAt)),
+			"--state", shellSingleQuote(filepath.ToSlash(filepath.Join(dir, "podexec-state"))))
+	}
+	if len(spec.FailAlwaysAt) > 0 {
+		args = append(args, "--fail-always-at", shellSingleQuote(joinInt64s(spec.FailAlwaysAt)))
+	}
+	args = append(args, "--", "\"$@\"")
+	return StubBinaryWithScript(t, dir, "kubectl", "exec "+strings.Join(args, " ")+"\n")
+}
+
+func joinInt64s(values []int64) string {
+	rendered := make([]string, 0, len(values))
+	for _, value := range values {
+		rendered = append(rendered, strconv.FormatInt(value, 10))
+	}
+	return strings.Join(rendered, ",")
+}
+
+var (
+	podExecBuildOnce sync.Once
+	podExecPath      string
+	podExecBuildErr  error
+)
+
+// PodExecBinary builds (once per process) the pod emulator that StubPodExec's
+// kubectl stub forwards to. Same shape as PortSimBinary: the stub body needs a
+// real program, and the scenario PATH holds none of the POSIX utilities erun's
+// remote scripts use.
+func PodExecBinary(t testing.TB) string {
+	t.Helper()
+	podExecBuildOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "erun-podexec-*")
+		if err != nil {
+			podExecBuildErr = fmt.Errorf("mkdir podexec cache: %w", err)
+			return
+		}
+		out := filepath.Join(dir, "podexec")
+		_, thisFile, _, ok := runtime.Caller(0)
+		if !ok {
+			podExecBuildErr = fmt.Errorf("resolve fixture package path")
+			return
+		}
+		cmd := osexec.Command("go", "build", "-o", out, ".")
+		cmd.Dir = filepath.Join(filepath.Dir(thisFile), "podexec")
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if combined, err := cmd.CombinedOutput(); err != nil {
+			podExecBuildErr = fmt.Errorf("build podexec: %w: %s", err, combined)
+			return
+		}
+		podExecPath = out
+	})
+	if podExecBuildErr != nil {
+		t.Fatalf("%v", podExecBuildErr)
+	}
+	return podExecPath
+}
+
 // StubEnv returns the env-var pairs that route the named binary lookups to
 // the stub at dir/<name>. Pass each result through env.Setup.Env() concat.
 func StubEnv(dir string, names ...string) []string {

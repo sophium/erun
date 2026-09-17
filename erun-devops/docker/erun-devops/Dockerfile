@@ -133,6 +133,17 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists \
     npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium
 
+# TestRootDockerignoreExcludesDocsBuildArtifacts and
+# TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules assert real
+# docker-build behavior of this exact file, so it has to be present in the
+# build context it documents -- it excludes itself from nothing, but this
+# stage's COPYs are all by explicit path, so it needs its own line regardless.
+COPY .dockerignore /src/.dockerignore
+# TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments reads
+# the repo's own checked-in project config; only this one file is needed, and
+# .dockerignore carves it out of the ".erun/*" exclusion for exactly this
+# reason.
+COPY .erun/config.yaml /src/.erun/config.yaml
 COPY Makefile /src/Makefile
 COPY scripts /src/scripts
 COPY package.json yarn.lock /src/

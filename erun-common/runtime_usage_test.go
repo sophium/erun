@@ -63,6 +63,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"memory_max=2147483648",
 				"memory_peak=1027301376",
 				"memory_oom_kill=0",
+				"memory_ceiling_hits=21292",
 				"cpu_max=100000 100000",
 				"cpu_usage_before=581511501",
 				"cpu_usage_after=581611501",
@@ -75,7 +76,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			wantMemory: RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
-				OOMKillsObserved: true,
+				OOMKillsObserved: true, CeilingHits: 21292, CeilingHitsObserved: true,
 			},
 			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112)},
 		},
@@ -188,6 +189,27 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 			},
 			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
 		},
+		{
+			// memory.events' "max" counter (cgroup ceiling hits) is exactly
+			// as unreadable as oom_kill from the same file; CeilingHitsObserved
+			// must stay false rather than reporting a confident "never hit it".
+			name: "memory.events max (ceiling hits) missing reports unobserved, not a fabricated zero",
+			output: strings.Join([]string{
+				"cgroup_type=cgroup2fs",
+				"memory_current=413589504",
+				"memory_max=2147483648",
+				"memory_peak=1027301376",
+				"memory_oom_kill=0",
+				"memory_ceiling_hits=",
+			}, "\n"),
+			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: RuntimeMemoryUsage{
+				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
+				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
+				OOMKillsObserved: true,
+			},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+		},
 	}
 }
 
@@ -249,6 +271,12 @@ func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want RuntimeMemoryUsage) {
 	}
 	if got.OOMKillsObserved != want.OOMKillsObserved {
 		t.Errorf("Memory.OOMKillsObserved = %t, want %t", got.OOMKillsObserved, want.OOMKillsObserved)
+	}
+	if got.CeilingHits != want.CeilingHits {
+		t.Errorf("Memory.CeilingHits = %d, want %d", got.CeilingHits, want.CeilingHits)
+	}
+	if got.CeilingHitsObserved != want.CeilingHitsObserved {
+		t.Errorf("Memory.CeilingHitsObserved = %t, want %t", got.CeilingHitsObserved, want.CeilingHitsObserved)
 	}
 }
 

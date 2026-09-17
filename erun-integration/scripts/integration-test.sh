@@ -14,10 +14,15 @@
 #
 # Environment:
 #   COVERAGE_THRESHOLD             default 75 (percent). See note below.
-#   GOCOVERDIR                     override the directory used for raw
-#                                  counter files; defaults to a fresh, unique
-#                                  temp directory per invocation (see note
-#                                  below on why not a fixed path).
+#   GOCOVERDIR                     override the root directory raw counter
+#                                  files are collected under; defaults to a
+#                                  fresh, unique temp directory per invocation
+#                                  (see note below on why not a fixed path).
+#                                  Every process that runs the instrumented
+#                                  binary gets its own private subdirectory of
+#                                  this root (see note below on why), so this
+#                                  var never names where any one process
+#                                  writes directly.
 #   INTEGRATION_TEST_PARALLELISM   override the `go test -parallel` value
 #                                  outright, skipping the width calculation
 #                                  below.
@@ -94,6 +99,21 @@
 #     explicit GOCOVERDIR opts back into the old shared/reusable-path
 #     behavior (e.g. to inspect counters after the run); only the default
 #     changed.
+#   - Within one invocation, every process that runs the instrumented binary
+#     gets its own private subdirectory of $cover_dir (internal/erun's
+#     PrivateCoverDir), rather than all of them sharing $cover_dir directly.
+#     Go's coverage runtime emits its meta-data file at process init using a
+#     temp filename with only a nanosecond timestamp for uniqueness (no PID),
+#     so with -parallel>1 several instrumented subprocesses can start close
+#     enough together to compute the same temp name, race to rename it into
+#     place, and have the loser's rename fail outright -- silently dropping
+#     that process's coverage rather than failing its own test (measured at a
+#     12.5% failure rate across 8 runs sharing one directory before this
+#     fix). Giving every process its own directory makes the race impossible
+#     rather than merely rare. The per-process directories are merged with
+#     `go tool covdata merge` before the percentage is computed, and any
+#     directory left empty (a process that should have emitted but didn't)
+#     fails the gate outright rather than silently lowering the merged total.
 
 set -euo pipefail
 
@@ -127,13 +147,22 @@ cd "$here"
 profile="$here/coverage/profile.txt"
 mkdir -p "$(dirname "$profile")"
 
+cleanup_dirs=()
+cleanup() {
+    local d
+    for d in ${cleanup_dirs[@]+"${cleanup_dirs[@]}"}; do
+        rm -rf "$d"
+    done
+}
+trap cleanup EXIT
+
 if [[ -n "${GOCOVERDIR:-}" ]]; then
     cover_dir="$GOCOVERDIR"
     mkdir -p "$cover_dir"
     rm -rf "$cover_dir"/*
 else
     cover_dir="$(mktemp -d "${TMPDIR:-/tmp}/erun-integration-cover.XXXXXX")"
-    trap 'rm -rf "$cover_dir"' EXIT
+    cleanup_dirs+=("$cover_dir")
 fi
 
 export GOCOVERDIR="$cover_dir"
@@ -150,8 +179,41 @@ fi
 "$here/../scripts/timed-step.sh" "running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)" \
     go test -count=1 -parallel="$test_parallelism" ./...
 
+# Every process that ran the instrumented binary wrote into its own private
+# subdirectory of $cover_dir (see the note above on why). Enumerate them and
+# fail loudly if any is empty rather than let a merge step quietly absorb a
+# lost emit into a lower, but still plausible-looking, percentage.
+proc_cover_dirs=()
+while IFS= read -r d; do proc_cover_dirs+=("$d"); done < <(find "$cover_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+if [[ "${#proc_cover_dirs[@]}" -eq 0 ]]; then
+    echo "!! no per-process coverage directories were created under $cover_dir; the suite's coverage wiring is broken" >&2
+    exit 1
+fi
+
+empty_cover_dirs=()
+nonempty_cover_dirs=()
+for d in "${proc_cover_dirs[@]}"; do
+    if [[ -n "$(find "$d" -mindepth 1 -maxdepth 1 -type f)" ]]; then
+        nonempty_cover_dirs+=("$d")
+    else
+        empty_cover_dirs+=("$d")
+    fi
+done
+if [[ "${#empty_cover_dirs[@]}" -gt 0 ]]; then
+    echo "!! ${#empty_cover_dirs[@]} of ${#proc_cover_dirs[@]} per-process coverage directories have no data (a lost coverage emit):" >&2
+    printf '  %s\n' "${empty_cover_dirs[@]}" >&2
+    exit 1
+fi
+
+merged_dir="$(mktemp -d "${TMPDIR:-/tmp}/erun-integration-cover-merged.XXXXXX")"
+cleanup_dirs+=("$merged_dir")
+joined_cover_dirs="$(IFS=,; echo "${nonempty_cover_dirs[*]}")"
+
+"$here/../scripts/timed-step.sh" "merging ${#nonempty_cover_dirs[@]} per-process coverage directories" \
+    go tool covdata merge -i="$joined_cover_dirs" -o="$merged_dir"
+
 "$here/../scripts/timed-step.sh" "merging coverage counters into $profile" \
-    go tool covdata textfmt -i="$cover_dir" -o="$profile"
+    go tool covdata textfmt -i="$merged_dir" -o="$profile"
 
 cover_func_started=$(date +%s)
 # One `go tool cover -func` pass, reused for both the printed tail and the

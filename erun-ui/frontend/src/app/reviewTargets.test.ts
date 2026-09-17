@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 
-import { selectReviewEnvTargets } from './selectors';
+import { test } from 'vitest';
+
+import { selectReviewTargets } from './selectors';
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
 import type { RootState } from './store';
 
@@ -9,13 +10,17 @@ function orchestrator(
   id: string,
   sessionId: number,
   environments: OrchestratorInfo['environments'],
+  directories: string[] = [],
 ) {
   return {
     id,
     name: id,
     environments,
     tenants: [...new Set(environments.map((env) => env.tenant))],
-    directories: environments.map((env) => env.directory),
+    // The orchestrator's own directories, which belong to no environment --
+    // deliberately NOT the linked environments' directories, which is what this
+    // used to derive and what the payload no longer means.
+    directories,
     sessionId,
     status: sessionId > 0 ? 'running' : 'stopped',
     busy: false,
@@ -32,7 +37,7 @@ function orchestrator(
   } satisfies OrchestratorInfo;
 }
 
-// Only the three slices selectReviewEnvTargets reads.
+// Only the three slices selectReviewTargets reads.
 function stateWith(fields: {
   sessionId?: number;
   orchestrators?: OrchestratorInfo[];
@@ -45,7 +50,7 @@ function stateWith(fields: {
   } as unknown as RootState;
 }
 
-// #1178: an orchestrator session resolves the diff panel's targets from its
+// An orchestrator session resolves the diff panel's targets from its
 // linked environments, in their configured order -- the order the diff panel
 // renders sections in, and the order ReviewRangeControls scopes its per-env
 // controls by.
@@ -60,11 +65,11 @@ test('an active orchestrator session resolves its linked environments as targets
     ],
   });
 
-  const targets = selectReviewEnvTargets(state);
+  const targets = selectReviewTargets(state);
 
   assert.deepEqual(targets, [
-    { envKey: 'acme/alpha', tenant: 'acme', environment: 'alpha' },
-    { envKey: 'acme/beta', tenant: 'acme', environment: 'beta' },
+    { kind: 'env', envKey: 'acme/alpha', tenant: 'acme', environment: 'alpha' },
+    { kind: 'env', envKey: 'acme/beta', tenant: 'acme', environment: 'beta' },
   ]);
 });
 
@@ -73,15 +78,17 @@ test('an active orchestrator session resolves its linked environments as targets
 test('an environment tab (no active orchestrator) resolves the sidebar selection as the sole target', () => {
   const state = stateWith({ selected: { tenant: 'acme', environment: 'alpha' } });
 
-  const targets = selectReviewEnvTargets(state);
+  const targets = selectReviewTargets(state);
 
-  assert.deepEqual(targets, [{ envKey: 'acme/alpha', tenant: 'acme', environment: 'alpha' }]);
+  assert.deepEqual(targets, [
+    { kind: 'env', envKey: 'acme/alpha', tenant: 'acme', environment: 'alpha' },
+  ]);
 });
 
 test('nothing selected and no active orchestrator resolves no targets', () => {
   const state = stateWith({});
 
-  assert.deepEqual(selectReviewEnvTargets(state), []);
+  assert.deepEqual(selectReviewTargets(state), []);
 });
 
 // The active SESSION decides, not the sidebar's environment selection: with
@@ -99,9 +106,11 @@ test('an active orchestrator session ignores a stale sidebar environment selecti
     selected: { tenant: 'acme', environment: 'unrelated' },
   });
 
-  const targets = selectReviewEnvTargets(state);
+  const targets = selectReviewTargets(state);
 
-  assert.deepEqual(targets, [{ envKey: 'acme/alpha', tenant: 'acme', environment: 'alpha' }]);
+  assert.deepEqual(targets, [
+    { kind: 'env', envKey: 'acme/alpha', tenant: 'acme', environment: 'alpha' },
+  ]);
 });
 
 // A stopped orchestrator (sessionId 0) must not contribute targets even
@@ -116,5 +125,61 @@ test('a stopped orchestrator contributes no targets', () => {
     ],
   });
 
-  assert.deepEqual(selectReviewEnvTargets(state), []);
+  assert.deepEqual(selectReviewTargets(state), []);
+});
+
+// An orchestrator that links no environment at all and names only directories is
+// a definition the desktop accepts, and the panel used to read "No environment
+// selected" for it -- the whole review surface missing for a scope the
+// orchestrator actually works in. Each directory resolves to a target of its own.
+test('an orchestrator whose only scope is directories resolves those as targets', () => {
+  const state = stateWith({
+    sessionId: 42,
+    orchestrators: [
+      orchestrator('scratch', 42, [], ['/Users/op/src/notes', '/Users/op/src/scratch']),
+    ],
+  });
+
+  const targets = selectReviewTargets(state);
+
+  assert.deepEqual(targets, [
+    {
+      kind: 'directory',
+      envKey: 'directory:/Users/op/src/notes',
+      directory: '/Users/op/src/notes',
+    },
+    {
+      kind: 'directory',
+      envKey: 'directory:/Users/op/src/scratch',
+      directory: '/Users/op/src/scratch',
+    },
+  ]);
+});
+
+// Both kinds together: the environments an orchestrator links and the
+// directories it works in are in scope at once, environments first, so a session
+// that has both reads as one panel rather than one kind hiding the other.
+test('a linked environment and a directory both resolve, environments first', () => {
+  const state = stateWith({
+    sessionId: 42,
+    orchestrators: [
+      orchestrator(
+        'mixed',
+        42,
+        [{ tenant: 'acme', environment: 'alpha', directory: '/tmp/alpha', role: '' }],
+        ['/Users/op/src/scratch'],
+      ),
+    ],
+  });
+
+  const targets = selectReviewTargets(state);
+
+  assert.deepEqual(targets, [
+    { kind: 'env', envKey: 'acme/alpha', tenant: 'acme', environment: 'alpha' },
+    {
+      kind: 'directory',
+      envKey: 'directory:/Users/op/src/scratch',
+      directory: '/Users/op/src/scratch',
+    },
+  ]);
 });
