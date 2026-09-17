@@ -115,6 +115,11 @@ describe('ConfigView via App', () => {
     // The provision error is visible text, not hidden behind a bare title tooltip.
     expect(contexts.getByText('Failed')).toBeInTheDocument();
     expect(contexts.getByText('run-instances: InsufficientInstanceCapacity')).toBeInTheDocument();
+
+    // The reason is announced when it appears, not red text a screen reader skips.
+    expect(contexts.getByRole('alert')).toHaveTextContent(
+      'run-instances: InsufficientInstanceCapacity',
+    );
   });
 
   it('renders environment provisioning status badges, scoped to the environments table', async () => {
@@ -126,6 +131,9 @@ describe('ConfigView via App', () => {
     expect(envs.getByText('Failed')).toBeInTheDocument();
     // A failed env surfaces its provision error inline, like a failed context.
     expect(envs.getByText('deploy job did not succeed')).toBeInTheDocument();
+
+    // A failed env's reason is announced, like a failed context's.
+    expect(envs.getByRole('alert')).toHaveTextContent('deploy job did not succeed');
   });
 
   it('renders empty states for an empty payload', async () => {

@@ -63,7 +63,9 @@ function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
         <div className="flex flex-col items-start gap-1">
           {renderStatusBadge(env.status, ENV_STATUS_TONES, ENV_STATUS_LABELS)}
           {env.status === 'failed' && env.provisionError !== undefined && (
-            <span className="text-xs text-destructive">{env.provisionError}</span>
+            <span role="alert" aria-live="polite" className="text-xs text-destructive">
+              {env.provisionError}
+            </span>
           )}
         </div>
       </TableCell>
@@ -165,7 +167,9 @@ function ContextItem({ context }: { context: CloudContext }): React.ReactElement
       <span className="flex flex-col items-end gap-1">
         {renderStatusBadge(context.status, STATUS_TONES, STATUS_LABELS)}
         {context.status === 'failed' && context.provisionError !== undefined && (
-          <span className="text-xs text-destructive">{context.provisionError}</span>
+          <span role="alert" aria-live="polite" className="text-xs text-destructive">
+            {context.provisionError}
+          </span>
         )}
       </span>
     </li>

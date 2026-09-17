@@ -226,10 +226,14 @@ function EnvironmentsTable({
               label={environment.status}
             />
             {environment.status === 'deletion-blocked' && environment.deleteError && (
-              <p className="mt-1 text-xs text-destructive">{environment.deleteError}</p>
+              <p role="status" aria-live="polite" className="mt-1 text-xs text-destructive">
+                {environment.deleteError}
+              </p>
             )}
             {environment.status === 'failed' && environment.provisionError && (
-              <p className="mt-1 text-xs text-destructive">{environment.provisionError}</p>
+              <div className="mt-1">
+                <InlineAlert>{environment.provisionError}</InlineAlert>
+              </div>
             )}
           </DataCell>
           <DataCell>{environment.deployedVersion ?? environment.runtimeVersion}</DataCell>

@@ -63,3 +63,29 @@ test('the desktop no longer hand-rolls a destructive color mapping outside Inlin
 
   assert.deepEqual(offenders, []);
 });
+
+const registrationEnvironments = join(
+  frontendSrc,
+  'components/app/TenantDashboardPanels.RegistrationEnvironments.tsx',
+);
+
+test('the registration environments table announces its failure reasons', () => {
+  // The row's failure reason is the whole payload of a failed or
+  // deletion-blocked environment and appears asynchronously; rendering it as a
+  // bare destructive paragraph leaves it unannounced next to a changed badge.
+  const source = readFileSync(registrationEnvironments, 'utf8');
+
+  assert.ok(
+    source.includes('<InlineAlert>{environment.provisionError}</InlineAlert>'),
+    'a failed environment must render its provisionError through InlineAlert',
+  );
+  assert.ok(
+    source.includes('role="status" aria-live="polite"'),
+    'a deletion-blocked environment must render its deleteError in a live status region',
+  );
+  assert.equal(
+    source.includes('<p className="mt-1 text-xs text-destructive">'),
+    false,
+    'no environment failure reason may render as a bare destructive paragraph',
+  );
+});
