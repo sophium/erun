@@ -164,8 +164,8 @@ test.describe('terminal query responses (#347)', () => {
     const { tenant, environment } = seededEnv;
 
     await app.sidebar.openEnvironment(tenant, environment);
-    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
+    const localTab = app.tabStrip.tab('Local');
+    await app.tabStrip.waitForTab('Local');
     // The env also spawns ERun and AI sessions, slower than Local (see
     // tab-strip.spec). Each spawn completing reassigns the active terminal
     // session; on a loaded host one can land AFTER the extra terminal below is
@@ -173,14 +173,10 @@ test.describe('terminal query responses (#347)', () => {
     // controller only writes to xterm when the payload's session IS the active
     // one) and the query never answered. Wait for both to appear first so the
     // active session settles before the extra terminal is created and selected.
-    await page.getByRole('tab', { name: 'ERun', exact: true }).waitFor({
-      state: 'visible',
-      timeout: 15_000,
-    });
-    await page.getByRole('tab', { name: 'AI', exact: true }).waitFor({
-      state: 'visible',
-      timeout: 15_000,
-    });
+    // These converge through the strip's own wait, which carries no cap of its
+    // own; the 15s each used to carry sits below this test's 30s budget.
+    await app.tabStrip.waitForTab('ERun');
+    await app.tabStrip.waitForTab('AI');
 
     const tablist = page.getByRole('tablist', { name: 'Open terminals' });
     const extraTabs = tablist.getByRole('tab', { name: /Terminal \d+/ });
