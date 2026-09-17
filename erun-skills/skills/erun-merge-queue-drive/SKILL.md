@@ -80,10 +80,9 @@ release. Pass `--gated-commit` always: it is what makes the gate an actual
 second build, instead of a fingerprint promotion of the READY build's image
 in the case that matters most — a source rebased onto the current target tip
 first, whose tree is then byte-identical to the prospective merge's. Confirm
-the build really ran (per-image decision lines showing a rebuild, not 26
-cache hits in under a second); a promoted gate verifies no content the READY
-build did not already verify, and must not be recorded as an independent
-gate. The gate publishes nothing. Save its complete stdout/stderr and
+the build really ran (per-image decision lines showing a rebuild rather than
+an all-images cache hit); a promoted gate verifies no content the READY build
+did not already verify, and must not be recorded as an independent gate. The gate publishes nothing. Save its complete stdout/stderr and
 composition under the attempt's durable log/artifact location.
 
 Use a tracked job and explicit execution timeout when the build outlives one
