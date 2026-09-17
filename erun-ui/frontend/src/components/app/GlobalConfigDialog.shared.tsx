@@ -2,13 +2,12 @@ import { Button, cloudProviderStatusTone, StatusBadge } from 'erun-kit';
 import { CheckCircle2, LoaderCircle, LogIn, LogOut, Play, Power, UserCircle2 } from 'lucide-react';
 import * as React from 'react';
 
-import { dialogErrorClassName, statusLabel } from '@/components/app/GlobalConfigDialog.helpers';
+import { statusLabel } from '@/components/app/GlobalConfigDialog.helpers';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 export function DialogError({ error }: { error: string }): React.ReactElement | null {
   return error ? (
-    <div className={dialogErrorClassName} role="alert">
-      {error}
-    </div>
+    <InlineAlert>{error}</InlineAlert>
   ) : null;
 }
 

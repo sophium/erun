@@ -34,14 +34,12 @@ import { loadSavedPastEnvironments, loadSavedPastTenants } from '@/app/storage';
 import { useController } from '@/app/useController';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
 import { ContainerRegistryField } from '@/components/app/EnvironmentDialogView.RegistryField';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 import { EnvironmentTypeSelect, LocalRepoPathField } from './EnvironmentTypeFields';
 import { KubernetesContextSelect } from './KubernetesContextSelect';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
 import { VersionField } from './VersionField';
-
-const dialogErrorClassName =
-  'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
 
 type EnvironmentDialog = AppState['environmentDialog'];
 
@@ -341,9 +339,7 @@ function CheckboxField({
 
 function DialogError({ error }: { error: string }): React.ReactElement | null {
   return error ? (
-    <div className={dialogErrorClassName} role="alert">
-      {error}
-    </div>
+    <InlineAlert>{error}</InlineAlert>
   ) : null;
 }
 

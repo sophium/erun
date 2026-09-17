@@ -23,7 +23,7 @@ import { showTerminalError } from '@/app/notificationThunks';
 import { runtimeResourceValidation } from '@/app/runtimeResources';
 import { useController } from '@/app/useController';
 import { deleteConfirmationValue, normalizeDialogValue } from '@/app/versionSuggestions';
-import { dialogErrorClassName } from '@/components/app/ManageDialog.helpers';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import { ManageDialogContent, type ManageDialogState } from '@/components/app/ManageDialogTabs';
 
 export function ManageDialogView(): React.ReactElement {
@@ -96,9 +96,7 @@ export function ManageDialogView(): React.ReactElement {
 
 function DialogError({ error }: { error: string }): React.ReactElement | null {
   return error ? (
-    <div className={dialogErrorClassName} role="alert">
-      {error}
-    </div>
+    <InlineAlert>{error}</InlineAlert>
   ) : null;
 }
 
