@@ -124,6 +124,12 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
   test('the environment card aligns a single-line label and value to one baseline', async ({
     app,
   }) => {
+    // Two genuine round-trips -- the boot auto-open this waits out, then the
+    // hover-and-measure retry below -- whose legitimate combined cost under
+    // contention can approach the 30s default even after both converge, so
+    // the test's own budget is widened rather than either convergence capped
+    // below it.
+    test.setTimeout(60_000);
     await app.reboot();
     // reboot() returns before the tenant's default-landing env (this one)
     // finishes its own auto-open (StartLocalSession/StartSession/StartAISession),
@@ -136,7 +142,7 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     // it behind an unrelated geometry mismatch.
     await app.page
       .getByRole('button', { name: `Opening ${SEED_TENANT} / ${SEED_ENV_ALPHA}...` })
-      .waitFor({ state: 'hidden', timeout: 25_000 });
+      .waitFor({ state: 'hidden' });
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     // Hover and measure inside ONE re-drivable block. The card's open state is
     // the hovered row's own React state, so any re-render of that row drops it
@@ -162,12 +168,14 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
   test('the environment card no longer stacks the Version row now that `wide` is retired (#1901)', async ({
     app,
   }) => {
+    // See the preceding test for why the budget is widened.
+    test.setTimeout(60_000);
     await app.reboot();
     // See the preceding test for why: wait for the default-landing env's
     // own boot-time auto-open to finish before hovering.
     await app.page
       .getByRole('button', { name: `Opening ${SEED_TENANT} / ${SEED_ENV_ALPHA}...` })
-      .waitFor({ state: 'hidden', timeout: 25_000 });
+      .waitFor({ state: 'hidden' });
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     // Hover and measure inside ONE re-drivable block; see the comment on the
     // preceding test for why.

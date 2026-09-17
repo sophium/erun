@@ -20,8 +20,8 @@ test.describe('terminal scroll on session switch', () => {
 
     await app.sidebar.openEnvironment(tenant, environment);
 
-    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
+    const localTab = app.tabStrip.tab('Local');
+    await app.tabStrip.waitForTab('Local');
 
     // Count only the "Terminal N" extras: the env's default tabs (notably AI)
     // land asynchronously after the env opens, so a whole-strip count taken now

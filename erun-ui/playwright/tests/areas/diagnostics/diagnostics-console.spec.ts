@@ -14,13 +14,18 @@ test.describe('diagnostics console', () => {
   test.beforeEach(async ({ app }) => {
     if (!(await app.debugPanel.isOpen())) {
       await app.debugPanel.toggle();
-      await expect(app.debugPanel.resizeHandle()).toBeVisible();
+      // Converge through the panel's own helper rather than expect's fixed
+      // budget, then on the tab the test needs.
+      await app.debugPanel.waitForOpen();
     }
   });
 
   test.afterEach(async ({ app }) => {
     if (await app.debugPanel.isOpen()) {
       await app.debugPanel.toggle();
+      // Converge on the close so a slow restore can't leak an open panel into
+      // the next test in this worker.
+      await app.debugPanel.waitForClosed();
     }
   });
 

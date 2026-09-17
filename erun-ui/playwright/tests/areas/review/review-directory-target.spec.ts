@@ -37,6 +37,10 @@ test.describe('the diff panel shows a directory the orchestrator works in', () =
       await app.sidebar.openOrchestratorSession(name);
       if (!(await app.reviewPanel.isOpen())) {
         await app.titlebar.toggleReviewPanel();
+        // This branch is the one that knows the panel was closed, so the toggle
+        // can only have opened it -- converge here rather than leaving the
+        // refresh below to race the panel's own render.
+        await app.reviewPanel.waitForOpen();
       }
       // The panel loads its diffs when it opens, and it was already open when the
       // session became active, so this spec asks for the fetch explicitly rather
