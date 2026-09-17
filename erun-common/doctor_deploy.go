@@ -27,7 +27,7 @@ type DeployDiagnosisResult struct {
 	// (host credentials, git push access, the docker-storage inspection)
 	// reads this instead of re-probing the same unreachable cluster and
 	// paying its own multi-minute kubectl timeout to rediscover the exact
-	// fact this diagnosis already established (erun#2394).
+	// fact this diagnosis already established.
 	ClusterUnreachable bool
 }
 
@@ -58,8 +58,7 @@ func deployDiagnosisPodArgs(req ShellLaunchParams) []string {
 // the same unreachable cluster would only pay its own multi-minute timeout to
 // rediscover the exact fact the helm read just established. ClusterUnreachable
 // carries that determination forward so every later doctor section can skip
-// its own probe the same way instead of independently rediscovering it
-// (erun#2394).
+// its own probe the same way instead of independently rediscovering it.
 func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResult {
 	helmArgs := helmStatusArgs(req)
 	ctx.TraceCommand("", "helm", helmArgs...)

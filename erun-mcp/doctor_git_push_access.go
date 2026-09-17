@@ -16,7 +16,7 @@ import (
 // pushes from the operator's own machine. When an earlier section already
 // confirmed the cluster is unreachable (diagnosis.ClusterUnreachable), this
 // reports the same skip instead of paying its own kubectl exec timeout to
-// rediscover it (erun#2394).
+// rediscover it.
 func writeDoctorGitPushAccess(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams, diagnosis eruncommon.DeployDiagnosisResult) error {
 	if !target.EnvConfig.RemoteWorktree() {
 		return nil

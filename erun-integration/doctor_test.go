@@ -1631,9 +1631,9 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", func(t *testing.T) {
-		// erun#2394: once the helm release status read confirms the
-		// Kubernetes API server itself is unreachable, doctor must not
-		// rediscover that fact in the Pods, Host AWS credentials, Git push
+		// Once the helm release status read confirms the Kubernetes API
+		// server itself is unreachable, doctor must not rediscover that fact
+		// in the Pods, Host AWS credentials, Git push
 		// access, or Docker storage sections -- before the fix each paid its
 		// own multi-minute kubectl timeout to relearn what the helm read
 		// already established (~8 minutes and 17 klog frames across the four
@@ -2111,9 +2111,9 @@ func stubDoctorHelmStatus(t *testing.T, stubsDir, releaseStatus string) {
 }
 
 // stubDoctorHelmStatusUnreachable stubs `helm status` to fail with the
-// unreachable-API-server error a real cluster reports (erun#2394's trigger),
-// matching the reported run's exact wording. No other helm command is
-// expected to run once this fails.
+// unreachable-API-server error a real cluster reports, matching the reported
+// run's exact wording. No other helm command is expected to run once this
+// fails.
 func stubDoctorHelmStatusUnreachable(t *testing.T, stubsDir string) {
 	t.Helper()
 	script := strings.Join([]string{

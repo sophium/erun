@@ -310,9 +310,9 @@ func reportDoctorInspectionUnreachable(ctx common.Context, options doctorOptions
 
 // reportDoctorCleanupSkippedUnreachable mirrors reportDoctorInspectionUnreachable
 // for the case where an earlier section already confirmed the cluster is
-// unreachable (erun#2394): it reports the same skip and the same "no prune
-// action ran" outcome without paying a second kubectl exec timeout to
-// rediscover what the helm release status section already proved.
+// unreachable: it reports the same skip and the same "no prune action ran"
+// outcome without paying a second kubectl exec timeout to rediscover what the
+// helm release status section already proved.
 func reportDoctorCleanupSkippedUnreachable(ctx common.Context, options doctorOptions) error {
 	if repErr := reportPodSkippedUnreachable(ctx, "Docker storage"); repErr != nil {
 		return repErr

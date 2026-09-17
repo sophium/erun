@@ -173,9 +173,9 @@ func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 	}
 }
 
-// TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable is the erun#2394
-// regression: a helm status read that fails with the cluster's own
-// unreachable-API-server signal must set ClusterUnreachable and skip the
+// TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable is the regression
+// for an unreachable cluster: a helm status read that fails with the cluster's
+// own unreachable-API-server signal must set ClusterUnreachable and skip the
 // second kubectl probe entirely, rather than paying its own timeout to
 // rediscover the same fact. kubectl is pointed at a stub that fails the test
 // if ever invoked, so a regression that re-adds the probe fails loudly.

@@ -19,7 +19,7 @@ import (
 // "could not read" report rather than aborting the rest of doctor's checks.
 // When an earlier section already confirmed the cluster is unreachable
 // (diagnosis.ClusterUnreachable), this reports the same skip instead of
-// paying its own kubectl exec timeout to rediscover it (erun#2394).
+// paying its own kubectl exec timeout to rediscover it.
 func reportHostCredentials(ctx common.Context, store common.ConfigStore, result common.OpenResult, diagnosis common.DeployDiagnosisResult) error {
 	if !result.EnvConfig.HasAWSCloudAlias() {
 		return nil

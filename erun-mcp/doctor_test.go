@@ -15,8 +15,8 @@ import (
 // real_run_cluster_unreachable_skips_pod_dependent_sections_once_established:
 // once the helm status read confirms the Kubernetes API server itself is
 // unreachable, the Pods, Git push access, and Docker storage sections must
-// report a skip instead of re-probing (erun#2394). kubectl is stubbed to fail
-// the test outright if invoked, since with the fix none of these sections
+// report a skip instead of re-probing. kubectl is stubbed to fail the test
+// outright if invoked, since with the fix none of these sections
 // should ever shell out to it.
 func TestDoctorToolSkipsPodDependentSectionsWhenClusterUnreachable(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
