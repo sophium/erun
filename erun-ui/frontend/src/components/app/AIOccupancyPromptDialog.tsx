@@ -66,9 +66,7 @@ export function AIOccupancyPromptDialog(): React.ReactElement {
             </li>
           ))}
         </ul>
-        {prompt.error && (
-          <InlineAlert>{prompt.error}</InlineAlert>
-        )}
+        {prompt.error && <InlineAlert>{prompt.error}</InlineAlert>}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button
             type="button"

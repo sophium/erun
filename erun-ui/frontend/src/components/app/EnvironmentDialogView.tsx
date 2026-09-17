@@ -338,9 +338,7 @@ function CheckboxField({
 }
 
 function DialogError({ error }: { error: string }): React.ReactElement | null {
-  return error ? (
-    <InlineAlert>{error}</InlineAlert>
-  ) : null;
+  return error ? <InlineAlert>{error}</InlineAlert> : null;
 }
 
 interface EnvironmentSubmitGate {

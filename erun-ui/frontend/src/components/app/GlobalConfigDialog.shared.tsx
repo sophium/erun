@@ -6,9 +6,7 @@ import { statusLabel } from '@/components/app/GlobalConfigDialog.helpers';
 import { InlineAlert } from '@/components/app/InlineAlert';
 
 export function DialogError({ error }: { error: string }): React.ReactElement | null {
-  return error ? (
-    <InlineAlert>{error}</InlineAlert>
-  ) : null;
+  return error ? <InlineAlert>{error}</InlineAlert> : null;
 }
 
 export function CloudStatusBadge({ status }: { status: string }): React.ReactElement {

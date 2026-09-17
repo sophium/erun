@@ -125,9 +125,7 @@ function RuntimeSizingResizeOutcome({
     );
   }
   if (isError) {
-    return (
-      <InlineAlert>{readError(error)}</InlineAlert>
-    );
+    return <InlineAlert>{readError(error)}</InlineAlert>;
   }
   return null;
 }

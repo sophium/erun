@@ -57,9 +57,7 @@ export function HistoryTab({
     return <HistoryEmptyState message="Loading auto-stop history…" />;
   }
   if (error) {
-    return (
-      <InlineAlert>Failed to load auto-stop history: {error}</InlineAlert>
-    );
+    return <InlineAlert>Failed to load auto-stop history: {error}</InlineAlert>;
   }
   if (history.length === 0) {
     return (

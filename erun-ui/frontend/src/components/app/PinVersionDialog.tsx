@@ -101,9 +101,7 @@ export function PinVersionDialog(): React.ReactElement {
 
           {plan ? <PinPlanTable plan={plan} applied={applied} /> : null}
 
-          {error ? (
-            <InlineAlert>{error}</InlineAlert>
-          ) : null}
+          {error ? <InlineAlert>{error}</InlineAlert> : null}
           {status ? (
             <p role="status" className="text-sm break-words text-muted-foreground">
               {status}

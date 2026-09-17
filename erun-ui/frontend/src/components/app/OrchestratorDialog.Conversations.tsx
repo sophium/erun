@@ -85,9 +85,7 @@ export function OrchestratorConversationsSection({
           {listing.notice ? ` ${listing.notice}` : ''}
         </p>
       ) : null}
-      {failure ? (
-        <InlineAlert>{failure}</InlineAlert>
-      ) : null}
+      {failure ? <InlineAlert>{failure}</InlineAlert> : null}
       <ConversationList orchestratorId={orchestratorId} listing={listing} failed={failure !== ''} />
       {omitted ? <p className="text-xs text-muted-foreground">{omitted}</p> : null}
     </div>

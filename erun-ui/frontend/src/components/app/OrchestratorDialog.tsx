@@ -293,9 +293,7 @@ function OrchestratorForm({
             <OrchestratorGuidanceSection orchestratorId={editing.id} />
           </>
         ) : null}
-        {error ? (
-          <InlineAlert>{error}</InlineAlert>
-        ) : null}
+        {error ? <InlineAlert>{error}</InlineAlert> : null}
       </div>
 
       <div className="shrink-0 border-t px-6 pt-4 pb-6">
@@ -477,9 +475,7 @@ function OrchestratorDeleteConfirm({
           their workspace sync are left intact.
         </span>
       </div>
-      {error ? (
-        <InlineAlert>{error}</InlineAlert>
-      ) : null}
+      {error ? <InlineAlert>{error}</InlineAlert> : null}
       <DialogFooter>
         <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
           Cancel

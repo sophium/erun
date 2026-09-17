@@ -55,7 +55,9 @@ export function CloseConfirmDialog(): React.ReactElement {
           ))}
         </ul>
         {gate.error && (
-          <InlineAlert>Could not record the interrupted work: {gate.error}. Closing anyway.</InlineAlert>
+          <InlineAlert>
+            Could not record the interrupted work: {gate.error}. Closing anyway.
+          </InlineAlert>
         )}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button

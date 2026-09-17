@@ -101,9 +101,7 @@ function ReclaimOutcome({
   failure: string;
 }): React.ReactElement | null {
   if (failure) {
-    return (
-      <InlineAlert>{failure}</InlineAlert>
-    );
+    return <InlineAlert>{failure}</InlineAlert>;
   }
   if (!outcome) {
     return null;

@@ -119,9 +119,7 @@ function UpgradeAllBody({
     );
   }
   if (error) {
-    return (
-      <InlineAlert>{error}</InlineAlert>
-    );
+    return <InlineAlert>{error}</InlineAlert>;
   }
   if (items.length === 0) {
     return (

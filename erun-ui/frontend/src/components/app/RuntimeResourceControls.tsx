@@ -136,9 +136,7 @@ function RuntimeResourceMessages({
   capacityBlocks: boolean;
 }): React.ReactElement | null {
   if (blockingError) {
-    return (
-      <InlineAlert>{blockingError}</InlineAlert>
-    );
+    return <InlineAlert>{blockingError}</InlineAlert>;
   }
   if (!capacityWarning) {
     return null;

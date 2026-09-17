@@ -306,9 +306,7 @@ function ExposeServiceForm({ dialog }: { dialog: ManageDialog }): React.ReactEle
           }}
         />
       </div>
-      {dialog.exposeError && (
-        <InlineAlert>{dialog.exposeError}</InlineAlert>
-      )}
+      {dialog.exposeError && <InlineAlert>{dialog.exposeError}</InlineAlert>}
       <Button
         type="button"
         size="sm"
@@ -366,9 +364,7 @@ function UnexposeSection({ dialog }: { dialog: ManageDialog }): React.ReactEleme
           resolving until re-exposed.
         </span>
       </div>
-      {dialog.unexposeError && (
-        <InlineAlert>{dialog.unexposeError}</InlineAlert>
-      )}
+      {dialog.unexposeError && <InlineAlert>{dialog.unexposeError}</InlineAlert>}
       <div className="flex justify-end gap-2">
         <Button
           type="button"

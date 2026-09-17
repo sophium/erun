@@ -62,9 +62,7 @@ export function AutoStartPromptDialog(): React.ReactElement {
             you can change it from the environment settings later.
           </DialogDescription>
         </DialogHeader>
-        {prompt.error && (
-          <InlineAlert>{prompt.error}</InlineAlert>
-        )}
+        {prompt.error && <InlineAlert>{prompt.error}</InlineAlert>}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button
             type="button"
