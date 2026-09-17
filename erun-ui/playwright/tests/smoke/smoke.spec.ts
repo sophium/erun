@@ -117,6 +117,13 @@ test.describe('smoke', () => {
   });
 
   test('diagnostics: the diagnostics console opens with the erun trace tab', async ({ app }) => {
+    // The panel's primary tab names whichever context is active, and a
+    // running orchestrator session outranks the sidebar's environment
+    // selection. A spec earlier in this worker can leave one running, so
+    // establish the environment context here instead of asserting against
+    // whichever context boot happened to restore.
+    await app.openEnvironmentTerminal(SEED_TENANT, SEED_ENV_ALPHA);
+
     // Converge on the panel actually having opened before asserting on a tab
     // inside it, rather than racing the toggle's render against a flat
     // visibility timeout (waitForOpen defers to the enclosing test's budget).
