@@ -276,7 +276,7 @@ export const issueReferenceBaseline = {
   'erun-ui/frontend/src/components/app/Sidebar.OrchestratorHoverCard.tsx': 1,
   'erun-ui/frontend/src/components/app/TenantDashboardMessage.tsx': 2,
   'erun-ui/frontend/src/components/app/TenantDashboardPanels.Gates.tsx': 1,
-  'erun-ui/frontend/src/components/app/TenantDashboardPanels.Reviews.tsx': 3,
+  'erun-ui/frontend/src/components/app/TenantDashboardPanels.Reviews.tsx': 2,
   'erun-ui/frontend/src/components/app/TerminalTabStrip.tsx': 1,
   'erun-ui/frontend/src/components/app/Titlebar.Controls.tsx': 2,
   'erun-ui/frontend/src/components/app/Titlebar.WhipAction.TargetPicker.tsx': 2,

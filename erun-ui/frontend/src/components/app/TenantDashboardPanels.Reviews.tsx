@@ -36,6 +36,34 @@ import {
 } from './TenantDashboardMessage';
 import { MergeQueueBlockedAlert } from './TenantDashboardPanels.MergeQueueBlocked';
 
+// REVIEW_FILTERS states the review filter contract once: the toolbar
+// renders one toggle per entry, and ReviewsEmptyState names the active subset
+// from these same entries. Before, the empty state received only the pair's
+// `||`, so it could not say which filter came up empty and hedged with
+// "whichever you've turned on". Adding a third filter here extends the copy
+// without touching it. Labels are part of the Playwright surface — they are
+// matched by accessible name, so keep them stable.
+const REVIEW_FILTERS = [
+  { key: 'mine', label: 'Mine' },
+  { key: 'waitingOnMe', label: 'Waiting on me' },
+] as const;
+
+type ReviewFilterKey = (typeof REVIEW_FILTERS)[number]['key'];
+type ReviewFilterState = Partial<Record<ReviewFilterKey, boolean>>;
+
+// describeActiveFilters renders the active filter labels as the object of the
+// filtered-empty sentence: "Mine", "both Mine and Waiting on me", or
+// "Mine, Waiting on me, and Blocked" once a third filter exists.
+function describeActiveFilters(labels: string[]): string {
+  const [only] = labels;
+  if (labels.length === 1 && only !== undefined) {
+    return only;
+  }
+  const head = labels.slice(0, -1).join(', ');
+  const tail = labels[labels.length - 1] ?? '';
+  return labels.length === 2 ? `both ${head} and ${tail}` : `${head}, and ${tail}`;
+}
+
 // ReviewsPanel is the review object's own home: status, branches, and — via
 // each row — its builds, comment threads, and merge-queue position. The
 // merge-queue tab stays a queue-shaped view of the same reviews.
@@ -43,7 +71,6 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   const dispatch = useAppDispatch();
   const reviewFilter = useAppSelector((state) => state.tenantDashboard.reviewFilter);
   const reviews = data?.reviews ?? [];
-  const filterActive = reviewFilter.mine || reviewFilter.waitingOnMe;
   return (
     <TabsContent value="reviews" className="min-h-0 overflow-auto">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -52,25 +79,24 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
             {reviews.length} review{reviews.length === 1 ? '' : 's'}
           </span>
           <ReviewFilterSegmentedControl
-            mine={reviewFilter.mine}
-            waitingOnMe={reviewFilter.waitingOnMe}
-            mineCount={data?.mineReviewCount}
-            waitingOnMeCount={data?.waitingOnMeReviewCount}
-            onToggleMine={() => {
-              void dispatch(setReviewFilter({ mine: !reviewFilter.mine }));
+            filter={reviewFilter}
+            counts={{
+              mine: data?.mineReviewCount,
+              waitingOnMe: data?.waitingOnMeReviewCount,
             }}
-            onToggleWaitingOnMe={() => {
-              void dispatch(setReviewFilter({ waitingOnMe: !reviewFilter.waitingOnMe }));
+            onToggle={{
+              mine: () => {
+                void dispatch(setReviewFilter({ mine: !reviewFilter.mine }));
+              },
+              waitingOnMe: () => {
+                void dispatch(setReviewFilter({ waitingOnMe: !reviewFilter.waitingOnMe }));
+              },
             }}
           />
         </div>
         <NewReviewAction data={data} />
       </div>
-      <PanelBody
-        data={data}
-        tab="reviews"
-        empty={<ReviewsEmptyState filterActive={filterActive} />}
-      >
+      <PanelBody data={data} tab="reviews" empty={<ReviewsEmptyState filter={reviewFilter} />}>
         {reviews.length > 0 ? (
           <ReviewsTable
             reviews={reviews}
@@ -87,7 +113,7 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
 }
 
 // ReviewFilterSegmentedControl is one grouped control, not two independent
-// buttons (#1378): Mine and Waiting-on-me visually merge into a single pill,
+// buttons: Mine and Waiting-on-me visually merge into a single pill,
 // matching the DiffSourceButton segmented-toggle pattern the review panel's
 // Env/ERun source switch already uses (Nielsen #4, consistency). Each side
 // still toggles independently — a review can be both — so this is a grouped
@@ -95,29 +121,25 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
 // side is the discovery signal itself: which pile has work in it is visible
 // before either is clicked, rather than only after.
 function ReviewFilterSegmentedControl({
-  mine,
-  waitingOnMe,
-  mineCount,
-  waitingOnMeCount,
-  onToggleMine,
-  onToggleWaitingOnMe,
+  filter,
+  counts,
+  onToggle,
 }: {
-  mine: boolean;
-  waitingOnMe: boolean;
-  mineCount: number | undefined;
-  waitingOnMeCount: number | undefined;
-  onToggleMine: () => void;
-  onToggleWaitingOnMe: () => void;
+  filter: ReviewFilterState;
+  counts: Record<ReviewFilterKey, number | undefined>;
+  onToggle: Record<ReviewFilterKey, () => void>;
 }): React.ReactElement {
   return (
     <div className="flex items-center gap-1 rounded-[var(--radius)] border border-input bg-background p-1 text-[13px]">
-      <ReviewFilterToggle label="Mine" count={mineCount} active={mine} onClick={onToggleMine} />
-      <ReviewFilterToggle
-        label="Waiting on me"
-        count={waitingOnMeCount}
-        active={waitingOnMe}
-        onClick={onToggleWaitingOnMe}
-      />
+      {REVIEW_FILTERS.map((entry) => (
+        <ReviewFilterToggle
+          key={entry.key}
+          label={entry.label}
+          count={counts[entry.key]}
+          active={filter[entry.key] === true}
+          onClick={onToggle[entry.key]}
+        />
+      ))}
     </div>
   );
 }
@@ -166,14 +188,19 @@ function ReviewFilterToggle({
 
 // ReviewsEmptyState keeps "nothing exists yet" and "nothing matches this
 // filter" visually and textually distinct, per the repo's three-empty-states
-// rule — a filtered zero must not read as "this tenant has no reviews".
-function ReviewsEmptyState({ filterActive }: { filterActive: boolean }): React.ReactElement {
+// rule — a filtered zero must not read as "this tenant has no reviews". It
+// receives the filter itself, not a collapsed boolean, so it can name the
+// filter that is actually active.
+function ReviewsEmptyState({ filter }: { filter: ReviewFilterState }): React.ReactElement {
   const dispatch = useAppDispatch();
-  if (filterActive) {
+  const activeLabels = REVIEW_FILTERS.filter((entry) => filter[entry.key] === true).map(
+    (entry) => entry.label,
+  );
+  if (activeLabels.length > 0) {
     return (
       <EmptyState
         heading="No reviews match this filter"
-        body="Nothing is both Mine and Waiting on me right now, whichever you've turned on."
+        body={`Nothing is ${describeActiveFilters(activeLabels)} right now.`}
         action={
           <Button
             type="button"
