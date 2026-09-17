@@ -23,7 +23,7 @@
 # A second mode answers a different question -- not "run these jobs bounded
 # by a width", but "what should that width even be":
 #
-#   Usage: parallel-gate.sh width <job-count> <mem-per-job-mib> [reserved-mem-mib]
+#   Usage: parallel-gate.sh width <job-count> <mem-per-job-mib> [reserved-mem-mib] [reserved-cpus]
 #
 # Prints one integer: min(job-count, CPUs available to this environment,
 # (memory available - reserved-mem-mib) / mem-per-job-mib). Kept in this
@@ -48,6 +48,24 @@
 # *entire* memory ceiling) -- without it, a batch's own width would assume
 # the full ceiling is available to it alone and risk oversubscribing memory
 # once the concurrently-running job is counted.
+#
+# reserved-cpus (optional, defaults to 0) is reserved-mem-mib's CPU twin, for
+# the same double-booking shape: a caller sizing a batch of *internally
+# parallel* jobs that runs concurrently with other work on the same
+# environment. It is subtracted from the CPU term before that term is applied,
+# floored at 1 so a job list still makes forward progress -- reserving the
+# whole box must not produce a width of 0.
+#
+# Memory and CPU need separate reservations because they are not the same
+# quantity: reserved-mem-mib exists so a batch does not *sum* past a hard
+# ceiling it and its co-runners share, while reserved-cpus exists because a
+# job counted as "one" by the job-count term is not one CPU of demand when the
+# job is itself a fan-out (a golangci-lint invocation takes GOMAXPROCS from
+# the cgroup; a `go test ./...` runs packages in parallel). Without it, N such
+# batches each sized against the *entire* quota run side by side and the
+# environment is oversubscribed by roughly the number of concurrency
+# mechanisms, which is what starves whatever is latency-bound and running
+# beside them.
 #
 # CPU: cgroup v2 cpu.max (quota/period), then cgroup v1
 # cpu.cfs_quota_us/cpu.cfs_period_us, then `nproc`, then a constant. A quota
@@ -171,9 +189,19 @@ if [ "${1:-}" = "width" ]; then
 	job_count=$2
 	mem_per_job_mib=$3
 	reserved_mem_mib=${4:-0}
+	reserved_cpus=${5:-0}
 
 	width=$job_count
 	cpu=$(cpu_quota)
+	if is_positive_int "$reserved_cpus" && [ "$reserved_cpus" -gt 0 ] && is_positive_int "$cpu"; then
+		# What is left after the co-runners' share, floored at 1: reserving
+		# the whole box must still leave the batch able to run at all.
+		if [ "$cpu" -gt "$reserved_cpus" ]; then
+			cpu=$((cpu - reserved_cpus))
+		else
+			cpu=1
+		fi
+	fi
 	if is_positive_int "$cpu" && [ "$cpu" -lt "$width" ]; then
 		width=$cpu
 	fi
