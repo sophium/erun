@@ -22,7 +22,7 @@ import (
 // 8916Mi, sized before that gate grew, i.e. at under half of what the same work
 // is sized for on the build side.
 //
-// Measured, on a 6-CPU environment (erun#2285): a full `make check-gate` in a
+// Measured, on a 6-CPU environment: a full `make check-gate` in a
 // 6Gi container pinned the limit -- peak 6.00GiB of 6.00GiB, the cgroup's
 // memory.events `max` counter climbing by 318 during the lint phase alone,
 // ~3.4GiB of it anonymous -- with no agent session resident alongside it. Live

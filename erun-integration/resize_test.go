@@ -50,7 +50,7 @@ func TestResize(t *testing.T) {
 		// env config or rolling anything.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "6", "--memory", "12288Mi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "6", "--memory", "16384Mi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -59,12 +59,12 @@ func TestResize(t *testing.T) {
 	})
 
 	t.Run("dry_run_no_op_when_already_sized", func(t *testing.T) {
-		// The default runtimepod is cpu=4 memory=8916Mi (runtime_resources.go);
+		// The default runtimepod is cpu=4 memory=12288Mi (runtime_resources.go);
 		// asking for exactly that must report a no-op and never reach the
 		// lease check or the deploy composition.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "4", "--memory", "8916Mi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "4", "--memory", "12288Mi", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -188,7 +188,7 @@ func TestResize(t *testing.T) {
 		// EnvConfig.runtimedindpod and rolls the pod through the same deploy
 		// composition. The runtime pod's own recorded size is written too
 		// (resize always normalizes and re-persists both), but at its
-		// unchanged default (cpu=4/8916Mi) rather than the sidecar's new
+		// unchanged default (cpu=4/12288Mi) rather than the sidecar's new
 		// values, proving the two knobs stayed independent.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -217,7 +217,7 @@ func TestResize(t *testing.T) {
 		if !strings.Contains(string(data), "16384Mi") {
 			t.Fatalf("expected the persisted runtimedindpod memory to be 16384Mi, got:\n%s", data)
 		}
-		if !strings.Contains(string(data), "runtimepod:\n    cpu: \"4\"\n    memory: 8916Mi") {
+		if !strings.Contains(string(data), "runtimepod:\n    cpu: \"4\"\n    memory: 12288Mi") {
 			t.Fatalf("expected the runtime pod's own resources to stay at their unchanged default, got:\n%s", data)
 		}
 	})
@@ -287,14 +287,14 @@ func TestResize(t *testing.T) {
 	t.Run("dry_run_apply_recommendation_holds_cpu_at_live_limit", func(t *testing.T) {
 		// Regression for the bug where the apply plan was built from the
 		// configured runtimepod (silent in-pod, so it normalizes to the
-		// package defaults cpu=4/8916Mi) instead of the live cgroup limits
+		// package defaults cpu=4/12288Mi) instead of the live cgroup limits
 		// the verdict itself is scored against. Fixture mirrors a real
 		// environment running at 12 CPUs / 23552Mi with a silent config: the
 		// verdict says "cpu hold from 12" and "memory lower ... from
 		// 23552Mi", so the resolved plan must carry cpu=12 through unchanged
 		// and read memory's "from" as 23552Mi, never fall back to cpu=4 or
-		// memory 8916Mi. The leading space on each needle keeps the check from
-		// tripping on the unrelated, default-valued "dind-cpu=4"/"dind-memory=8916Mi"
+		// memory 12288Mi. The leading space on each needle keeps the check from
+		// tripping on the unrelated, default-valued "dind-cpu=4"/"dind-memory=20Gi"
 		// fields the same trace line now also carries.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -316,8 +316,8 @@ func TestResize(t *testing.T) {
 		if !strings.Contains(result.Combined, "cpu=12") {
 			t.Fatalf("expected the resolved command to carry cpu=12 (the live value) through unchanged, got:\n%s", result.Combined)
 		}
-		if strings.Contains(result.Combined, " cpu=4") || strings.Contains(result.Combined, " memory=8916Mi") {
-			t.Fatalf("expected the plan to never fall back to the package defaults cpu=4/8916Mi, got:\n%s", result.Combined)
+		if strings.Contains(result.Combined, " cpu=4") || strings.Contains(result.Combined, " memory=12288Mi") {
+			t.Fatalf("expected the plan to never fall back to the package defaults cpu=4/12288Mi, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "resize/dry_run_apply_recommendation_holds_cpu_at_live_limit", normalize.Apply(result.Combined))
 	})
@@ -360,7 +360,7 @@ func TestResize(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(inEnvironment(setup.Env()), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "6", "--memory", "12288Mi"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"resize", "--tenant", "team", "--environment", "dev", "--cpu", "6", "--memory", "16384Mi"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -373,8 +373,8 @@ func TestResize(t *testing.T) {
 		if !strings.Contains(string(data), "cpu: \"6\"") && !strings.Contains(string(data), "cpu: 6") {
 			t.Fatalf("expected the persisted runtimepod cpu to be 6, got:\n%s", data)
 		}
-		if !strings.Contains(string(data), "12288Mi") {
-			t.Fatalf("expected the persisted runtimepod memory to be 12288Mi, got:\n%s", data)
+		if !strings.Contains(string(data), "16384Mi") {
+			t.Fatalf("expected the persisted runtimepod memory to be 16384Mi, got:\n%s", data)
 		}
 	})
 }
