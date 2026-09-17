@@ -68,13 +68,29 @@ func readOperatorSurfaceSource(t testing.TB, roots ...string) desktopsurface.Fro
 	return desktopsurface.FrontendSource(sb.String())
 }
 
-// capabilityToken picks the literal word most likely to appear in whatever
+// capabilityToken picks the literal token most likely to appear in whatever
 // frontend code calls a capability: the last CLI path segment when one
 // exists, falling further back to family, then the raw name, for a wire-only
-// tool. A hyphenated leaf (review_queue_override-advance's "override-advance")
-// is trimmed to its final word ("advance"): the compound name's qualifier
-// rarely appears verbatim in frontend prose or identifiers, but its core verb
-// does, since that is also the plain command's own leaf name.
+// tool. A hyphenated leaf is collapsed to one run of letters rather than
+// trimmed to its final word -- "override-advance" becomes "overrideadvance",
+// "repair-org-mapping" becomes "repairorgmapping".
+//
+// Trimming to the final word only recovers a capability's core verb by
+// accident, and this gate's value is entirely its trustworthiness. It holds
+// for "override-advance", whose last word *is* the verb and whose frontend
+// call site is OverrideAdvanceMergeQueue. It does not hold for
+// "repair-org-mapping", whose last word is the generic noun "mapping" while
+// the verb that identifies it -- "repair" -- is the part discarded. A token
+// that generic identifies nothing: FrontendSource.Contains is a raw
+// case-insensitive substring search over every .ts/.tsx file with no comment
+// stripping, so "mapping" matched unrelated prose in both trees (a colour
+// mapping named in a *.test.ts comment, an OIDC issuer mapping a form comment
+// says it deliberately cannot configure) and reported a capability with no
+// operator surface as surfaced -- the silent pass issue #2307 describes.
+// Collapsing the whole leaf keeps distinct capabilities distinct, since no
+// leaf can collide with another's token, while still matching the camelCase
+// identifier a real call site writes: OverrideAdvanceMergeQueue lowercases to
+// "overrideadvancemergequeue", which contains "overrideadvance".
 func capabilityToken(name, family string, cliPath []string) string {
 	token := name
 	if len(cliPath) > 0 {
@@ -82,10 +98,56 @@ func capabilityToken(name, family string, cliPath []string) string {
 	} else if family != "" {
 		token = family
 	}
-	if idx := strings.LastIndex(token, "-"); idx >= 0 && idx+1 < len(token) {
-		token = token[idx+1:]
+	// A single-segment name or family is already one undistinguished run;
+	// the hyphen is the one separator the frontend trees never write.
+	return strings.ReplaceAll(token, "-", "")
+}
+
+// TestCapabilityTokenKeepsCapabilitiesDistinct pins the property the whole
+// gate rests on: a capability's token has to identify that capability. Before
+// issue #2307's fix, capabilityToken trimmed a hyphenated leaf to its final
+// word, so "platform tenant repair-org-mapping" searched for "mapping" -- a
+// noun generic enough to match prose about a different mapping entirely, in a
+// tree where no call site existed.
+func TestCapabilityTokenKeepsCapabilitiesDistinct(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		path []string
+		want string
+		// callSite is the identifier a real frontend call site writes for
+		// this capability. Keeping capabilities distinct must not cost a
+		// genuine surface its match.
+		callSite string
+	}{
+		{[]string{"review_queue", "override-advance"}, "overrideadvance", "OverrideAdvanceMergeQueue"},
+		{[]string{"platform", "tenant", "repair-org-mapping"}, "repairorgmapping", "RepairOrgMapping"},
+		{[]string{"platform", "tenant", "list"}, "list", "TenantList"},
+	} {
+		got := capabilityToken("", "", tc.path)
+		if got != tc.want {
+			t.Errorf("capabilityToken(%q) = %q, want %q", strings.Join(tc.path, " "), got, tc.want)
+		}
+		if !desktopsurface.FrontendSource("const call = "+tc.callSite+";").Contains(got) {
+			t.Errorf("capabilityToken(%q) = %q no longer matches its own call site %q",
+				strings.Join(tc.path, " "), got, tc.callSite)
+		}
 	}
-	return token
+
+	// The exact prose that made the gate report an unsurfaced capability as
+	// surfaced: a colour mapping named in a *.test.ts comment and a form
+	// comment about an OIDC issuer mapping that form cannot configure. Neither
+	// is a way in, so neither may satisfy the token.
+	unrelated := desktopsurface.FrontendSource(strings.Join([]string{
+		"// rather than relying on a reviewer noticing a new hand-rolled color mapping.",
+		"// because it configures an OIDC issuer mapping this form has no safe way to ...",
+		"// the operator who repairs the mapping is usually the person reading this",
+	}, "\n"))
+	token := capabilityToken("", "", []string{"platform", "tenant", "repair-org-mapping"})
+	if unrelated.Contains(token) {
+		t.Errorf("capabilityToken(%q) = %q still matches unrelated prose about a different mapping",
+			"platform tenant repair-org-mapping", token)
+	}
 }
 
 // mcpCapabilities returns one Capability per registered MCP tool.
