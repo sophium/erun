@@ -1,13 +1,121 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	common "github.com/sophium/erun/erun-common"
 )
+
+// A replacement forward is started moments after the forward it replaces was
+// stopped, and the predecessor's listening socket outlives the process that
+// held it: the kill returns, the port stops accepting, and the kernel still
+// refuses a bind on it for a short while. kubectl reports that refusal as
+// "Unable to listen on port N ... address already in use" and exits — measured
+// at 58% of reattachments on the environments this was written for (erun#2294).
+// Each one costs a whole retry window during which the environment is
+// unreachable, which is the symptom the reattach path exists to remove.
+//
+// So a listen that fails because the port is still held is not a failed
+// attempt. It is the same attempt, started a moment too early, and the answer
+// is to wait the socket out rather than to treat the port as taken. Only that
+// failure is absorbed: a pod that is not running, a cluster that is not
+// answering, a state file that cannot be written — every other error is
+// returned on the first try, unretried. A port genuinely held by something that
+// is not going away exhausts these attempts and is then reported just as
+// loudly, naming the log that holds kubectl's own words.
+const (
+	// portForwardBindRetryAttempts bounds one start. The socket it waits out is
+	// a close in progress, not a lease, so the whole window stays short: ten
+	// attempts a tenth of a second apart is one second — the same budget
+	// waitForLocalPortToClose already spends, and nowhere near long enough to
+	// disguise a port that is genuinely taken.
+	portForwardBindRetryAttempts = 10
+	// portForwardBindRetryInterval is how long each retry waits before starting
+	// kubectl again. Fixed rather than backing off: the thing being waited for
+	// is a socket teardown, which completes in tens of milliseconds when it
+	// completes at all.
+	portForwardBindRetryInterval = 100 * time.Millisecond
+)
+
+// errPortForwardListenConflict marks a startup wait that ended because the port
+// could not be bound, rather than because nothing answered through it. Only
+// this error is retried, so the two have to be distinguishable: a wait that
+// times out against a pod that is not running looks identical from the outside
+// and must not be mistaken for a dying socket.
+var errPortForwardListenConflict = errors.New("the local port could not be bound")
+
+// startPortForwardWithBindRetry runs attempt until it succeeds, and retries it
+// while — and only while — it fails because the predecessor's socket has not
+// finished closing. It returns the last process started alongside the error
+// that ended the loop, so a caller's own failure path still has something to
+// release. Bounded: see portForwardBindRetryAttempts.
+func startPortForwardWithBindRetry(ctx common.Context, kind string, localPort int, attempt func() (*os.Process, error)) (*os.Process, error) {
+	for try := 1; ; try++ {
+		process, err := attempt()
+		if err == nil {
+			return process, nil
+		}
+		if try >= portForwardBindRetryAttempts || !errors.Is(err, errPortForwardListenConflict) {
+			return process, err
+		}
+		if process != nil {
+			// The process kubectl exited on its own failed listen; this only
+			// matters for the attempt that got far enough to run.
+			_ = process.Kill()
+		}
+		ctx.Trace(fmt.Sprintf("%s: 127.0.0.1:%d is still held by the previous listener's closing socket; retrying the port-forward (attempt %d of %d)",
+			kind, localPort, try+1, portForwardBindRetryAttempts))
+		time.Sleep(portForwardBindRetryInterval)
+	}
+}
+
+// portForwardLogSize is where a start's own log output begins, so the conflict
+// check below reads only what this attempt wrote. The log is append-only across
+// every forward an environment has ever had, and a stale "Unable to listen"
+// line from an earlier attempt must not sentence a later, unrelated failure to
+// a second retry.
+func portForwardLogSize(logPath string) int64 {
+	info, err := os.Stat(logPath)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// portForwardLogReportsListenConflict reports whether the bytes appended to
+// logPath since since are kubectl's address-in-use listen failure. The two
+// markers are kubectl's own phrasing, not the OS's: the platform-specific
+// wording underneath them ("bind: address already in use" on unix, a WSA
+// variant on Windows) is what varies, and the caller needs this to hold on
+// every host.
+func portForwardLogReportsListenConflict(logPath string, since int64) bool {
+	file, err := os.Open(logPath)
+	if err != nil {
+		return false
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	if since > 0 {
+		if _, err := file.Seek(since, io.SeekStart); err != nil {
+			return false
+		}
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return false
+	}
+	value := strings.ToLower(string(data))
+	return strings.Contains(value, "unable to listen on port") &&
+		strings.Contains(value, "unable to listen on any of the requested ports")
+}
 
 // previewAdoptOrConflict mirrors in dry-run what the live path would do
 // when the local port is already held: adopt the existing kubectl

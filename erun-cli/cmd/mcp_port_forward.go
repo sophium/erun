@@ -140,22 +140,28 @@ func startMCPPortForward(ctx common.Context, statePath string, expectedState mcp
 		_ = logFile.Close()
 	}()
 
-	cmd := common.Command("kubectl", args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	detachBackgroundProcess(cmd)
-	if err := cmd.Start(); err != nil {
-		return 0, err
-	}
+	process, err := startPortForwardWithBindRetry(ctx, "mcp", localPort, func() (*os.Process, error) {
+		cmd := common.Command("kubectl", args...)
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		detachBackgroundProcess(cmd)
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
 
-	expectedState.LogPath = logPath
-	expectedState.ProcessID = cmd.Process.Pid
-	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
-		return 0, err
-	}
+		expectedState.LogPath = logPath
+		expectedState.ProcessID = cmd.Process.Pid
+		if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
+			return cmd.Process, err
+		}
 
-	if err := waitForMCPPortForward(localPort, logPath); err != nil {
-		releaseUnreachablePortForward(ctx, "mcp", cmd.Process, localPort, err)
+		if err := waitForMCPPortForward(localPort, logPath); err != nil {
+			return cmd.Process, err
+		}
+		return cmd.Process, nil
+	})
+	if err != nil {
+		releaseUnreachablePortForward(ctx, "mcp", process, localPort, err)
 		return 0, err
 	}
 	return localPort, nil
@@ -176,10 +182,17 @@ func releaseUnreachablePortForward(ctx common.Context, kind string, process *os.
 }
 
 func waitForMCPPortForward(localPort int, logPath string) error {
+	logStart := portForwardLogSize(logPath)
 	deadline := time.Now().Add(mcpPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalMCPEndpoint(localPort) {
 			return nil
+		}
+		// kubectl exits the moment its listen fails, so waiting out the rest
+		// of the timeout would spend five seconds to learn what the log
+		// already says — and the retry path cannot afford that per attempt.
+		if portForwardLogReportsListenConflict(logPath, logStart) {
+			return fmt.Errorf("%w: kubectl could not listen on 127.0.0.1:%d; see %s", errPortForwardListenConflict, localPort, logPath)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

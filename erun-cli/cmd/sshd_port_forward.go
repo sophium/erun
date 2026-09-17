@@ -139,32 +139,45 @@ func startSSHDPortForward(ctx common.Context, statePath string, expectedState ss
 		_ = logFile.Close()
 	}()
 
-	cmd := common.Command("kubectl", args...)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	detachBackgroundProcess(cmd)
-	if err := cmd.Start(); err != nil {
-		return common.SSHConnectionInfo{}, err
-	}
+	process, err := startPortForwardWithBindRetry(ctx, "sshd", info.Port, func() (*os.Process, error) {
+		cmd := common.Command("kubectl", args...)
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		detachBackgroundProcess(cmd)
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
 
-	expectedState.LogPath = logPath
-	expectedState.ProcessID = cmd.Process.Pid
-	if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
-		return common.SSHConnectionInfo{}, err
-	}
+		expectedState.LogPath = logPath
+		expectedState.ProcessID = cmd.Process.Pid
+		if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
+			return cmd.Process, err
+		}
 
-	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
-		releaseUnreachablePortForward(ctx, "sshd", cmd.Process, info.Port, err)
+		if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
+			return cmd.Process, err
+		}
+		return cmd.Process, nil
+	})
+	if err != nil {
+		releaseUnreachablePortForward(ctx, "sshd", process, info.Port, err)
 		return common.SSHConnectionInfo{}, err
 	}
 	return info, nil
 }
 
 func waitForSSHDPortForward(port int, logPath string) error {
+	logStart := portForwardLogSize(logPath)
 	deadline := time.Now().Add(sshdPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalSSHEndpoint(port) {
 			return nil
+		}
+		// See waitForMCPPortForward: kubectl exits on a failed listen, so the
+		// conflict is readable from the log long before the timeout, and the
+		// retry path depends on being told promptly.
+		if portForwardLogReportsListenConflict(logPath, logStart) {
+			return fmt.Errorf("%w: kubectl could not listen on 127.0.0.1:%d; see %s", errPortForwardListenConflict, port, logPath)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
