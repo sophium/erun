@@ -24,10 +24,10 @@ test.describe('sidebar Run Doctor reachability (#1217)', () => {
   }) => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
 
-    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
-    const erunTab = page.getByRole('tab', { name: 'ERun', exact: true });
-    await erunTab.waitFor({ state: 'visible', timeout: 15_000 });
+    const localTab = app.tabStrip.tab('Local');
+    await app.tabStrip.waitForTab('Local');
+    const erunTab = app.tabStrip.tab('ERun');
+    await app.tabStrip.waitForTab('ERun');
 
     // Move off the Local tab first, so doctor switching back to it is an
     // observable effect rather than a coincidence of already being there.
