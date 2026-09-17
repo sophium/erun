@@ -23,10 +23,13 @@ type UsageInput struct {
 // both numbers in one call instead of a separate `resize --preview` just to
 // see the reasoning. Embeds RuntimeUsage so every existing field stays at the
 // top level; Sizing is additive.
-type UsageOutput struct {
-	eruncommon.RuntimeUsage
-	Sizing *eruncommon.RuntimeSizingRecommendation `json:"sizing,omitempty"`
-}
+//
+// It is an alias of the shared report rather than a parallel struct so the
+// pairing, and the recommendation inside it, is produced by one call from one
+// body of evidence. A warning that named the problem while a separately
+// computed recommendation named a different one would be worse than either
+// alone, and two structs is exactly how that starts.
+type UsageOutput = eruncommon.RuntimeUsageReport
 
 // usageTool reads CPU quota utilisation, memory against the container's own
 // cgroup limit, and disk usage for the workspace mount, straight from the
@@ -53,8 +56,10 @@ func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 		if err != nil {
 			return nil, UsageOutput{}, err
 		}
-		sizing := eruncommon.EnvironmentRuntimeSizing(target.Tenant, target.EnvConfig)
-		return nil, UsageOutput{RuntimeUsage: result, Sizing: sizing}, nil
+		// The reading is paired with the recommendation in one call, so the
+		// warnings in `result` and the sizing advice beside them are derived
+		// from the same evidence and cannot contradict each other.
+		return nil, eruncommon.ResolveRuntimeUsageReport(target.Tenant, target.EnvConfig, result), nil
 	}
 }
 

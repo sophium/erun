@@ -6,7 +6,8 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-func writeUsageResult(ctx common.Context, usage common.RuntimeUsage) error {
+func writeUsageResult(ctx common.Context, report common.RuntimeUsageReport) error {
+	usage := report.RuntimeUsage
 	if err := writeUsageCPU(ctx, usage.CPU); err != nil {
 		return err
 	}
@@ -19,7 +20,10 @@ func writeUsageResult(ctx common.Context, usage common.RuntimeUsage) error {
 	if err := writeUsageDisk(ctx, usage.Disk); err != nil {
 		return err
 	}
-	return writeUsageWarnings(ctx, usage.Warnings)
+	if err := writeUsageWarnings(ctx, usage.Warnings); err != nil {
+		return err
+	}
+	return writeUsageSizing(ctx, report.Sizing)
 }
 
 // writeUsageBuildsCaveat names the gap CPU/Memory above cannot close on a
@@ -109,6 +113,34 @@ func writeUsageWarnings(ctx common.Context, warnings []string) error {
 	}
 	for _, warning := range warnings {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  %s\n", warning); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeUsageSizing prints the standing recommendation directly beneath the
+// warnings, because the two are one subject: an environment reported as
+// saturated with no advice beside it leaves the operator holding an alarm and
+// no next action. It renders through runtimeSizingLines -- the same renderer
+// `erun list` uses, over the same recommendation, computed once from the
+// reading above plus retained history -- so the remedy shown here cannot
+// contradict the one shown there.
+//
+// A recommendation is omitted only when the reading and the history together
+// support none at all, which is silence about an environment erun has never
+// observed rather than silence about a saturated one: a memory warning is
+// derived from the same evidence and the same threshold as a raise, so a
+// warning always arrives with its verdict.
+func writeUsageSizing(ctx common.Context, sizing *common.RuntimeSizingRecommendation) error {
+	if sizing == nil {
+		return nil
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "Sizing recommendation:"); err != nil {
+		return err
+	}
+	for _, line := range runtimeSizingLines(sizing, "  ") {
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err
 		}
 	}
