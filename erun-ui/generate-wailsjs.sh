@@ -57,7 +57,14 @@ hash_wails_inputs() {
 		find "$SCRIPT_DIR/headlessserver" -name '*.go' -print 2>/dev/null
 		printf '%s\n' "$SCRIPT_DIR/wails.json" "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/go.sum"
 	} | sort | xargs sha256sum
-	if ! (cd "$SCRIPT_DIR/../erun-common" && go doc -all -u . 2>/dev/null) | sha256sum; then
+	# Test go doc's own exit status, not the pipeline's: `if ! cmd | sha256sum`
+	# observes sha256sum, which succeeds even on empty input, so a failed
+	# `go doc` used to hash an empty string instead of falling back -- a
+	# transient failure silently produced a different digest, i.e. a spurious
+	# cache miss.
+	if ERUN_COMMON_DOC=$(cd "$SCRIPT_DIR/../erun-common" && go doc -all -u . 2>/dev/null) && [ -n "$ERUN_COMMON_DOC" ]; then
+		printf '%s' "$ERUN_COMMON_DOC" | sha256sum
+	else
 		find "$SCRIPT_DIR/../erun-common" -name '*.go' -print | sort | xargs sha256sum
 	fi
 }
