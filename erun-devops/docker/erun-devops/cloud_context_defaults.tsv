@@ -4,7 +4,7 @@
 #   - erun-common: ResolveInjectedRuntimeConfig + NormalizeCloudContextConfig
 #     (the Go path; see erun-common/cloud_context_entrypoint_parity_test.go)
 #   - erun-devops/docker/erun-devops/entrypoint.sh:402,487 (the shell twin;
-#     see entrypoint_test.sh case 9a)
+#     see entrypoint_test.sh case 8a)
 #
 # Columns, tab-separated:
 #   label                   the input state, for failure messages
