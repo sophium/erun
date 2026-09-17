@@ -8,7 +8,7 @@ import (
 
 // The entry this file pairs with is logged by wireOrchestratorMCP: an
 // orchestrator wired to an environment whose edge does not answer gets a line
-// saying so. Until #2348 that line had no counterpart, and an entry-only
+// saying so. Until then that line had no counterpart, and an entry-only
 // transition degrades to "something was wrong at some point inside the retained
 // window" — a recovered edge reads exactly like a dead one, and the two have
 // different remedies (investigate vs. ignore).

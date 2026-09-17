@@ -11,7 +11,7 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain is the pairing #2348 asks
+// TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain is the pairing this defect asks
 // for, end to end through the two real code paths: the entry is written by
 // wireOrchestratorMCP at spawn, and the exit by the activity sweep that later
 // observes the same edge answering. Both directions are asserted, because the
