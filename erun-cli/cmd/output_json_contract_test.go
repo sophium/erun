@@ -30,7 +30,7 @@ func newOutputContractCmd() *cobra.Command {
 }
 
 // TestOutputJSONHonouredThroughGlobalFlagAndAlias is the regression guard for
-// erun#2395: the global --output json and the legacy per-command --json must
+// the global --output json and the legacy per-command --json must
 // resolve to the same mode, so both reach the one shared renderer instead of a
 // command-local format.
 func TestOutputJSONHonouredThroughGlobalFlagAndAlias(t *testing.T) {
@@ -75,7 +75,7 @@ func TestJSONAliasIsHidden(t *testing.T) {
 	}
 }
 
-// TestIdleRegistersNoRivalOutputFormat pins erun#2395's specific defect: idle
+// TestIdleRegistersNoRivalOutputFormat pins the specific defect: idle
 // used to carry its own --json document. It must now offer the inherited
 // --output plus the hidden alias, and no third output switch.
 func TestIdleRegistersNoRivalOutputFormat(t *testing.T) {
@@ -297,7 +297,7 @@ func TestTextModeNeverWritesJSON(t *testing.T) {
 
 // TestNoCommandWritesItsOwnStdoutJSON fails when a command grows a JSON document
 // of its own instead of routing through the shared writer: a second format can
-// only reappear where a second encoder does, which is how erun#2395 happened.
+// only reappear where a second encoder does, which is how the divergence began.
 // The one allow-listed site writes the in-pod monitor's persisted stop-decision
 // handoff (a distinct payload record-stop reads back), not a command result.
 func TestNoCommandWritesItsOwnStdoutJSON(t *testing.T) {
