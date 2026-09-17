@@ -453,6 +453,8 @@ test-frontend:
 # The cross-compile is ~4s, so sequencing it first costs nothing and removes
 # the overlap outright rather than making it less likely.
 test-playwright: test-erun-ui-windows-build test-frontend
+	@echo ">> erun-ui/playwright suite (desktop tags)"
+	@(cd erun-ui/playwright && ./run.sh --skip-app-gates)
 
 # A plain local `make check`/`make test-playwright` never goes through `erun
 # build`'s own resolution above, so PLAYWRIGHT_TEST_AREAS stayed unset here
@@ -469,13 +471,11 @@ test-playwright: test-erun-ui-windows-build test-frontend
 # test stage's own build-arg thread, including its empty-string "run
 # everything" default, is left untouched. `export` (no value) marks the
 # variable for export to the recipe's environment whenever it does get a
-# value, from either source.
+# value, from either source. Declared after the recipe, not beside it: the
+# coverage gate in erun-integration reads a target's recipe from its first
+# definition line, so that line has to stay adjacent to the recipe.
 test-playwright: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
 export PLAYWRIGHT_TEST_AREAS
-
-test-playwright:
-	@echo ">> erun-ui/playwright suite (desktop tags)"
-	@(cd erun-ui/playwright && ./run.sh --skip-app-gates)
 
 # Cross-compiles erun-app for Windows to prove the one other platform erun-ui
 # ships to (Scoop, built from source at install time) still compiles and
