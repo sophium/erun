@@ -13,6 +13,20 @@ func b64Auth(userPass string) string {
 	return base64.StdEncoding.EncodeToString([]byte(userPass))
 }
 
+// describeCredential renders a credential-bearing value for a failure message
+// without the credential itself: its scheme, when it has one, and its length.
+// An assertion that no credential was sent fails exactly when the value came
+// from the ambient environment rather than a fixture, so printing the value
+// would put a live secret in the gate log; the scheme and length still say
+// which kind of credential leaked in.
+func describeCredential(value string) string {
+	scheme, credential, found := strings.Cut(value, " ")
+	if !found {
+		return fmt.Sprintf("%d bytes, no scheme", len(value))
+	}
+	return fmt.Sprintf("scheme %q, credential %d bytes", scheme, len(credential))
+}
+
 func writeDockerConfig(t *testing.T, contents string) string {
 	t.Helper()
 	dir := t.TempDir()

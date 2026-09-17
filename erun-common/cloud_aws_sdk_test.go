@@ -169,7 +169,7 @@ func TestLibraryRunAWSBearerTokenDryRunTracesWithoutCallingAWS(t *testing.T) {
 		t.Fatalf("libraryRunAWSBearerToken: %v", err)
 	}
 	if token != "" {
-		t.Fatalf("token = %q, want empty on dry run", token)
+		t.Fatalf("minted %s on a dry run, want no token", describeCredential(token))
 	}
 
 	wantTrace := formatShellCommand("", "aws", awsGetWebIdentityTokenArgs("my-profile", "https://api.example")...)

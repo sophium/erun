@@ -40,7 +40,7 @@ func TestResolveConfiguredRuntimeRegistryVersionsListsPrivateRegistry(t *testing
 		t.Fatalf("listed %q, want the registry's own v2 tags endpoint", gotPath)
 	}
 	if gotAuth != "" {
-		t.Fatal("sent authorization with no credential available")
+		t.Fatalf("sent an Authorization header with no credential available (%s)", describeCredential(gotAuth))
 	}
 	if versions.LatestStable != "1.0.178" {
 		t.Fatalf("latest stable %q, want 1.0.178", versions.LatestStable)
