@@ -156,6 +156,10 @@ type App struct {
 	// port-forward that holds its local port while its edge answers nothing.
 	// See environment_forward_repair.go.
 	forwardRepairs map[string]forwardRepairEpisode
+	// edgeOutages tracks, per environment, an "edge is not answering" entry
+	// logged when an orchestrator wired it, until the sweep sees that edge
+	// answer and logs the matching exit. See orchestrator_edge_recovery.go.
+	edgeOutages    map[string]orchestratorEdgeOutage
 	busyEnvs       map[string]int
 	workspaceSyncs map[string]*workspaceSyncWorker
 	orchestrators  map[string]*orchestratorSession
