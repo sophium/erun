@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -40,7 +39,6 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	var exclusive bool
 	var scope string
 	var orchestrator string
-	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "take",
 		Short: "Take or renew a named lease so the environment reports it as busy",
@@ -77,7 +75,7 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 				Scope:       scope,
 				Exclusive:   exclusive,
 				Holder:      common.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
-			}, jsonOutput)
+			})
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
@@ -88,12 +86,12 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim exclusivity over --scope instead of plain presence; a second exclusive take in the same scope is refused and told who holds it")
 	cmd.Flags().StringVar(&scope, "scope", "", "The resource this exclusive claim protects (default \"worktree\"); only meaningful with --exclusive")
 	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on the lease so a refusal can name who to go ask")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the lease as JSON")
+	addJSONAliasFlag(cmd)
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams, jsonOutput bool) error {
+func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams) error {
 	if err := validateActivityTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -105,10 +103,8 @@ func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params c
 	if !resolved {
 		return nil
 	}
-	if jsonOutput {
-		encoder := json.NewEncoder(ctx.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(lease)
+	if ctx.Output == common.OutputJSON {
+		return ctx.WriteResult(lease)
 	}
 	_, err = fmt.Fprintf(ctx.Stdout, "lease held: %s (id %s), expires in %s\n", lease.Name, lease.ID, formatLeaseRemaining(lease, time.Now()))
 	return err
@@ -244,7 +240,6 @@ func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen Op
 func newActivityLeaseListCmd(resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
-	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   "List the leases currently holding the environment busy",
@@ -252,16 +247,16 @@ func newActivityLeaseListCmd(resolveOpen OpenResolver) *cobra.Command {
 		Example: "  erun activity lease list --tenant team --environment dev",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runActivityLeaseList(cmd, resolveOpen, tenant, environment, jsonOutput)
+			return runActivityLeaseList(cmd, resolveOpen, tenant, environment)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the leases as JSON")
+	addJSONAliasFlag(cmd)
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runActivityLeaseList(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runActivityLeaseList(cmd *cobra.Command, resolveOpen OpenResolver, tenant, environment string) error {
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return err
 	}
@@ -273,7 +268,7 @@ func runActivityLeaseList(cmd *cobra.Command, resolveOpen OpenResolver, tenant, 
 	if !resolved {
 		return nil
 	}
-	return writeActivityLeases(ctx, leases, time.Now(), jsonOutput)
+	return writeActivityLeases(ctx, leases, time.Now())
 }
 
 func listLeases(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment string) ([]common.EnvironmentActivityLease, bool, error) {
@@ -291,14 +286,12 @@ func listLeases(ctx context.Context, commandCtx common.Context, resolveOpen Open
 	return leases, true, nil
 }
 
-func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
-	if jsonOutput {
-		encoder := json.NewEncoder(ctx.Stdout)
-		encoder.SetIndent("", "  ")
+func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivityLease, now time.Time) error {
+	if ctx.Output == common.OutputJSON {
 		if leases == nil {
 			leases = []common.EnvironmentActivityLease{}
 		}
-		return encoder.Encode(leases)
+		return ctx.WriteResult(leases)
 	}
 	if len(leases) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no leases held")
@@ -334,20 +327,19 @@ func newActivitySampleCmd() *cobra.Command {
 	var environment string
 	var procRoot string
 	var cgroupRoot string
-	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "sample",
 		Short: "Sample resident build and agent processes and record activity and resource usage",
 		Long:  "Records activity only when a matched process burned CPU since the previous\nsample, so an agent parked at a prompt does not keep the environment awake.\nAlso records SSH activity when an sshd child process holds an allocated\npseudo-terminal, so a real interactive session reads as active while\nport-forward re-establishment and background sync traffic do not. Also\nretains the container's own cgroup CPU and memory counters, which is what\nlets erun recommend a size for this environment from what it has actually done.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runActivitySample(cmd, tenant, environment, procRoot, cgroupRoot, jsonOutput)
+			return runActivitySample(cmd, tenant, environment, procRoot, cgroupRoot)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&procRoot, "proc-root", common.DefaultProcRoot, "Process filesystem to sample")
 	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", common.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON")
+	addJSONAliasFlag(cmd)
 	return cmd
 }
 
@@ -364,7 +356,7 @@ func recordActivityIf(found bool, tenant, environment, kind string) error {
 	})
 }
 
-func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroupRoot string, jsonOutput bool) error {
+func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroupRoot string) error {
 	if err := validateActivityTarget(tenant, environment); err != nil {
 		return err
 	}
@@ -392,12 +384,12 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 	if err := recordActivityIf(interactiveSSH, tenant, environment, common.ActivityKindSSH); err != nil {
 		return err
 	}
-	return writeActivitySampleResult(commandContext(cmd), result, jsonOutput)
+	return writeActivitySampleResult(commandContext(cmd), result)
 }
 
-func writeActivitySampleResult(ctx common.Context, result common.ResidentActivityResult, jsonOutput bool) error {
-	if jsonOutput {
-		return json.NewEncoder(ctx.Stdout).Encode(result)
+func writeActivitySampleResult(ctx common.Context, result common.ResidentActivityResult) error {
+	if ctx.Output == common.OutputJSON {
+		return ctx.WriteResult(result)
 	}
 	if !result.Busy {
 		_, err := fmt.Fprintln(ctx.Stdout, "no working build or agent processes")
