@@ -1,0 +1,21 @@
+lease held: merge-queue drive 2442 (id merge-queue), expires in <REMAINING>
+audit: erun activity lease take --environment dev --exclusive --id merge-queue --name merge-queue drive 2442 --orchestrator erun --tenant team
+  merge-queue: merge-queue drive 2442, exclusive on worktree, held by orchestrator erun, expires in <REMAINING>
+audit: erun activity lease list --environment dev --tenant team
+audit: erun exec gate-merge --dry-run --source [feature/add-widget] --target main
+gate-merge: refused, merge-queue holds team/dev exclusively
+refusing to run gate-merge: this environment is held exclusively by orchestrator erun (merge-queue drive 2442, lease id merge-queue), and work that claims the environment must not overlap with anything else here
+the claim expires in <ELAPSED> unless its holder renews it, and is reclaimed on the next read if the holder's process is gone or its pod was replaced
+wait for it, or release it: erun activity lease release --tenant team --environment dev --id merge-queue --exclusive --scope worktree
+audit: erun exec gate-merge --dry-run --remote nonexistent --source [feature/add-widget] --target main --under-lease merge-queue
+gate-merge: running under the caller's own exclusive claim merge-queue, proceeding
+git -C <TMP> status --porcelain --untracked-files=no
+cd <TMP> && git fetch nonexistent main feature/add-widget
+cd <TMP> && git checkout -B main nonexistent/main
+cd <TMP> && git merge --squash nonexistent/feature/add-widget
+cd <TMP> && git commit -m '<message>'
+audit: erun exec gate-merge --dry-run --source [feature/add-widget] --target main --under-lease some-other-drive
+gate-merge: refused, merge-queue holds team/dev exclusively
+refusing to run gate-merge: this environment is held exclusively by orchestrator erun (merge-queue drive 2442, lease id merge-queue), and work that claims the environment must not overlap with anything else here
+the claim expires in <ELAPSED> unless its holder renews it, and is reclaimed on the next read if the holder's process is gone or its pod was replaced
+wait for it, or release it: erun activity lease release --tenant team --environment dev --id merge-queue --exclusive --scope worktree
