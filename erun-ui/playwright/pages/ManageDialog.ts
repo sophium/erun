@@ -344,6 +344,21 @@ export class ManageDialog {
     return this.locator().getByTestId('manage-jobs-unreachable-reconnect');
   }
 
+  // The read was refused -- a pod timeout, an auth or parse failure -- rather
+  // than the runtime being unreachable. Its own surface, with its own retry;
+  // scoped by its message so it is never confused with the unreachable card's
+  // role="status" above (the two can never render together, but the assertion
+  // should still say which one it is looking at).
+  jobsReadFailure(): Locator {
+    return this.locator()
+      .getByRole('alert')
+      .filter({ hasText: "Could not read this environment's jobs" });
+  }
+
+  jobsReadFailureRetry(): Locator {
+    return this.locator().getByTestId('manage-jobs-retry');
+  }
+
   jobRows(): Locator {
     return this.locator().getByTestId('manage-jobs-row');
   }
