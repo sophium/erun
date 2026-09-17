@@ -134,6 +134,17 @@ function RuntimeUsageSummary({
   );
 }
 
+// The announcement rule for every Runtime-tab panel, stated once here because
+// all three read panels share it: a reading the panel could not take, and a
+// reading that merely crossed a threshold, are both `role="status"`. Neither is
+// an event that should cut a screen-reader user off mid-sentence in a dialog
+// they deliberately opened and are already looking at, and all three panels can
+// fail at once for one cause -- three assertions of the same fault. `role="alert"`
+// is reserved for an action that failed and needs a decision (the reclaim and
+// resize failures in the sibling panels), which stays the only assertive
+// announcement on this tab. A threshold crossing is information about a number
+// the panel did read -- announcing it loudly while the failure to read at all
+// stayed polite is the inversion this rule exists to prevent.
 function RuntimeUsageWarnings({
   warnings,
 }: {
@@ -143,7 +154,7 @@ function RuntimeUsageWarnings({
     return null;
   }
   return (
-    <ul className="grid gap-1" role="alert">
+    <ul className="grid gap-1" role="status">
       {warnings.map((warning) => (
         <li
           key={warning}
