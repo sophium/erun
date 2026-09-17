@@ -183,11 +183,11 @@ For cloud-native secret stores (AWS Secrets Manager, GCP Secret Manager, Vault) 
 
 ## How many envs can run at once
 
-The hard limit is your machine's CPU + memory (for local clusters) or the cloud context's instance type (for managed clusters). In practice, the runtime pod is sized for ~4 CPU and ~12 GiB — that is the default because an agent runs the full `make check-gate` inside that container, the same gate an image build runs in the `erun-dind` sidecar. An env that only serves an app needs far less; trim it with [`erun resize`](/cli/resize) and a typical app stack adds 2–8 GiB per env. So:
+The hard limit is your machine's CPU + memory (for local clusters) or the cloud context's instance type (for managed clusters). In practice, the runtime pod is sized for ~4 CPU and ~16 GiB — that is the default because an agent runs the full `make check-gate` inside that container, the same gate an image build runs in the `erun-dind` sidecar. An env that only serves an app needs far less; trim it with [`erun resize`](/cli/resize) and a typical app stack adds 2–8 GiB per env. So:
 
-- **16 GiB laptop** — 1–2 envs running side by side comfortably.
-- **32 GiB laptop** — 2–3 envs at the default sizing, more if you trim the ones that do not run gates.
-- **64 GiB laptop** — 5–6 envs, or more if you trim per-env runtime-pod sizing to fit your workload.
+- **16 GiB laptop** — 1 env at the default sizing, 2 if you trim the ones that do not run gates.
+- **32 GiB laptop** — 2 envs at the default sizing.
+- **64 GiB laptop** — 4 envs, or more if you trim per-env runtime-pod sizing to fit your workload.
 
 Those numbers are about envs running *at once*, not envs you have. Configured envs cost nothing;
 only running ones reserve capacity. So the usual way past the limit is not a bigger machine — it is
