@@ -36,14 +36,24 @@ export class AppShell {
     await this.titlebar.toggleButton().waitFor({ state: 'visible' });
     // The "Loading environments..." overlay clears only once the tenant list
     // is final; wait it out before asserting on sidebar rows, or the check
-    // races the still-loading list. Hidden is already satisfied when the
-    // overlay never rendered (a fast machine), so this needs no cap of its
-    // own -- resolving on the no-overlay case and otherwise converging
-    // against the enclosing test's budget, rather than a 15s timeout whose
-    // expiry the old catch() swallowed into a silent proceed.
+    // races the still-loading list.
+    //
+    // This is a settle, not an assertion, so its expiry must not be the thing a
+    // test dies on. Hidden is already satisfied when the overlay never rendered
+    // (a fast machine). A contended gate is the other case: four workers on a
+    // 4-CPU dind keep the overlay up past 30s, and an uncapped wait spends the
+    // enclosing test's whole budget here -- which reports as "Test timeout of
+    // 30000ms exceeded while setting up app" at this line, naming neither the
+    // overlay nor the surface under test. Capping above the observed worst case
+    // and tolerating the expiry hands the diagnosis to the explicit row wait
+    // below, which IS the assertion that has to hold and fails informatively.
     await this.page
       .getByText('Loading environments...', { exact: true })
-      .waitFor({ state: 'hidden' });
+      .waitFor({ state: 'hidden', timeout: 45_000 })
+      .catch(() => {
+        // Expected when the overlay never rendered at all, and tolerated when a
+        // contended gate keeps it up past the bound: the row wait below decides.
+      });
     await this.page
       .locator(
         'button[aria-label^="Collapse "], button[aria-label^="Expand "], :text("No environments yet")',
