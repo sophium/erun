@@ -195,8 +195,11 @@ export class TenantDashboard {
     return this.page.getByRole('button', { name: 'Connect', exact: true });
   }
 
+  // Addressed by id, not by role: the alert this names is one of several that
+  // can be on screen at once (the sidebar carries its own), so a page-wide
+  // getByRole('alert') is ambiguous exactly when something else has failed.
   connectErrorAlert(): Locator {
-    return this.page.getByRole('alert');
+    return this.page.locator('#platform-connect-error');
   }
 
   chooseAliasHeading(): Locator {
@@ -233,8 +236,9 @@ export class TenantDashboard {
     return this.page.locator('#enroll-admin-command');
   }
 
+  // Addressed by id for the same reason as connectErrorAlert above.
   enrollErrorAlert(): Locator {
-    return this.page.getByRole('alert');
+    return this.page.locator('#platform-enroll-error');
   }
 
   noPermissionHeading(): Locator {

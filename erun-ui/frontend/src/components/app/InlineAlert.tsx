@@ -7,9 +7,21 @@ import * as React from 'react';
 // not signalled by colour alone (WCAG 1.4.1) and an alert role so it is
 // announced when it appears (WCAG 4.1.3). Long values wrap instead of
 // widening the row the alert sits in.
-export function InlineAlert({ children }: { children: React.ReactNode }): React.ReactElement {
+export function InlineAlert({
+  children,
+  id,
+}: {
+  children: React.ReactNode;
+  // Optional stable handle for the alert a caller needs to address
+  // unambiguously. Several of these can be on screen at once -- the sidebar
+  // and the panel it opened each carry their own -- so a page-wide
+  // getByRole('alert') matches more than one the moment anything else on the
+  // screen is in a failed state.
+  id?: string;
+}): React.ReactElement {
   return (
     <div
+      id={id}
       role="alert"
       className="flex w-full items-start gap-2 rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]"
     >
