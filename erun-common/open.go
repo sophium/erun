@@ -47,8 +47,8 @@ const (
 )
 
 // ShellSessionTakenOverNotice is the stable line `erun open` prints when its
-// persistent session is re-attached from another ERun window (screen -d -r
-// semantics: the session keeps running, this viewer is detached). The desktop
+// persistent session is re-attached from another ERun window (dtach
+// takeover semantics: the session keeps running, this viewer is detached). The desktop
 // matches this exact line to stop its reconnect loop instead of stealing the
 // session back, so treat the wording as a public contract.
 const ShellSessionTakenOverNotice = "open: session re-attached in another ERun window"
@@ -936,8 +936,11 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 // (dtach -A) a persistent session at socket and take ownership of it from any
 // other viewer, evicting them rather than sharing the pty. This is the
 // takeover half of the reattach contract erun-cli's own shell tabs already
-// run under (screen -d -r semantics: the session keeps running, an evicted
-// viewer only loses its own view) — exported so a caller outside
+// run under (dtach takeover semantics: the session keeps running, an evicted
+// viewer only loses its own view, and the pod holds no readable scrollback —
+// dtach clears a reattached client's screen, so terminal output cannot be
+// captured out of band the way a screen or tmux pane could be) — exported so a
+// caller outside
 // erun-cli/erun-common (the WSS session-attach gateway erun#1106 adds) can
 // reuse it instead of reimplementing the owner-id handoff. launchCommand runs
 // only the first time the session is created; a reattach connects to
@@ -951,7 +954,7 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string {
 	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
 	lines := []string{
-		// Take over the session from any other ERun window (screen-style
+		// Take over the session from any other ERun window (dtach
 		// detach-elsewhere-and-reattach-here): claim ownership, then detach
 		// other viewers by killing their dtach clients. The master — which
 		// owns the running shell/claude — is never touched, and when it
