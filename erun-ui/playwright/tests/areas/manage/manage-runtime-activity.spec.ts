@@ -41,6 +41,18 @@ test.describe('manage dialog runtime activity panel', () => {
     );
     await expect(panel).not.toContainText('signal:');
 
+    // Announced with the same urgency as the usage and sizing panels' failed
+    // reads: politely. The unusable reading is a state the operator can see and
+    // retry from the refresh control beside it, not an event to interrupt with
+    // -- role="alert" stays reserved on this tab for an action that failed.
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+    await expect(
+      panel.getByRole('status').filter({
+        hasText:
+          /Cannot read what the runtime is running|Open the environment to see what it is running/,
+      }),
+    ).toBeVisible();
+
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
   });

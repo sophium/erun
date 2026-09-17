@@ -193,6 +193,16 @@ test.describe('manage dialog sizing recommendation panel', () => {
     await expect(panel).toContainText("Cannot read this environment's sizing recommendation");
     await expect(panel).not.toContainText('signal:');
 
+    // Announced with the same urgency as the usage and activity panels' failed
+    // reads: politely. The recommendation being unreadable is a state, and the
+    // refresh control beside it is the way out; this panel keeps its assertive
+    // role for the resize that failed and the lease refusal that needs a
+    // decision.
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+    await expect(
+      panel.getByRole('status').filter({ hasText: "Cannot read this environment's sizing" }),
+    ).toBeVisible();
+
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
   });

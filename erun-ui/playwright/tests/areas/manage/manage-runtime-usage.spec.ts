@@ -106,6 +106,17 @@ test.describe('manage dialog runtime usage panel', () => {
     // just the raw figures — it is what makes the reading actionable.
     await expect(panel).toContainText('/home/erun is at 90% disk usage (warns at 90%)');
 
+    // Announced politely. A threshold crossing is information about a number
+    // the panel did read, so it is a status, and the panel holds no assertive
+    // announcement at all -- role="alert" on this tab is reserved for an
+    // action that failed and needs a decision. Asserting both halves here is
+    // what stops the warning line re-taking the urgent role the failed-read
+    // branch declines.
+    await expect(
+      panel.getByRole('status').filter({ hasText: 'is at 90% disk usage' }),
+    ).toBeVisible();
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
   });
@@ -203,6 +214,17 @@ test.describe('manage dialog runtime usage panel', () => {
     await expect(panel).toBeVisible();
     await expect(panel).toContainText("Cannot read this environment's resource usage");
     await expect(panel).not.toContainText('signal:');
+
+    // A failed read is announced with the same urgency here as in the activity
+    // and sizing panels: politely. The operator opened this dialog and is
+    // looking straight at the panel, the refusal persists on screen, and the
+    // refresh control beside it is the way out -- so it is a state to report,
+    // not an event to interrupt with. This is the announcement rule the three
+    // Runtime-tab panels share.
+    await expect(panel.getByRole('alert')).toHaveCount(0);
+    await expect(
+      panel.getByRole('status').filter({ hasText: 'Cannot read this environment' }),
+    ).toBeVisible();
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
