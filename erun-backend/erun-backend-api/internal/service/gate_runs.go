@@ -51,12 +51,28 @@ func NewGateRunService(gateRuns GateRunRepository) *GateRunService {
 	return &GateRunService{gateRuns: gateRuns}
 }
 
-// terminalGateRunStatuses are the outcomes ReportOutcome may report; RUNNING
-// is only ever the status Start assigns.
-var terminalGateRunStatuses = map[model.GateRunStatus]bool{
+// gateRunStatuses is the gate_runs.status domain, listed once: which values
+// exist, and of those, which ReportOutcome may report as an outcome (RUNNING
+// is only ever the status Start assigns, so it is always false). Every caller
+// that names a status reads this one map, so a value one surface understands
+// cannot drift out of another's reach.
+var gateRunStatuses = map[model.GateRunStatus]bool{
+	model.GateRunStatusRunning:      false,
 	model.GateRunStatusPassed:       true,
 	model.GateRunStatusFailed:       true,
 	model.GateRunStatusInconclusive: true,
+}
+
+// ValidateGateRunStatusFilter refuses a GET /v1/gate-runs ?status= value the
+// gate_runs table could never hold. A typo has to be named as a bad filter
+// rather than answered with the same empty list a legitimately empty result
+// produces. It is deliberately the write path's own contract (same error type,
+// same named field), not a second list of valid values beside it.
+func ValidateGateRunStatusFilter(status model.GateRunStatus) error {
+	if _, known := gateRunStatuses[status]; !known {
+		return &InvalidGateRunInputError{Field: "status", Reason: "must be RUNNING, PASSED, FAILED, or INCONCLUSIVE"}
+	}
+	return nil
 }
 
 // Start records the beginning of one gate attempt. A caller with no
@@ -86,7 +102,7 @@ func (s *GateRunService) Start(ctx context.Context, run model.GateRun) (model.Ga
 // status. Reporting against a gate run that already has one is refused —
 // see GateRunAlreadyDecidedError.
 func (s *GateRunService) ReportOutcome(ctx context.Context, gateRunID string, status model.GateRunStatus, failingStep, logRef, mergeCommit string) (model.GateRun, error) {
-	if !terminalGateRunStatuses[status] {
+	if !gateRunStatuses[status] {
 		return model.GateRun{}, &InvalidGateRunInputError{Field: "status", Reason: "must be PASSED, FAILED, or INCONCLUSIVE"}
 	}
 	existing, err := s.gateRuns.Get(ctx, gateRunID)

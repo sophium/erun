@@ -3,6 +3,7 @@ package routes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -102,5 +103,62 @@ func TestListGateRunsNormalizesLowercaseStatusFilter(t *testing.T) {
 	}
 	if repo.listFilter.Status != model.GateRunStatusFailed {
 		t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusFailed)
+	}
+}
+
+// TestListGateRunsRejectsUnknownStatusFilter: an unknown `?status=` must be
+// refused with the write route's own named-field error, not answered with the
+// zero rows a legitimately empty result returns -- the two are indistinguishable
+// to an operator, which is the harm #2015's case fix named one layer over.
+func TestListGateRunsRejectsUnknownStatusFilter(t *testing.T) {
+	repo := &stubGateRunRepository{}
+	routes := GateRunRoutes{gateRuns: repo}
+	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=bogus-status", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listGateRuns(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Details struct {
+			Field string `json:"field"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error body: %v: %s", err, rec.Body.String())
+	}
+	if body.Code != "INVALID_BODY" {
+		t.Fatalf("code = %q, want INVALID_BODY: %s", body.Code, rec.Body.String())
+	}
+	if body.Details.Field != "status" {
+		t.Fatalf("details.field = %q, want %q: %s", body.Details.Field, "status", rec.Body.String())
+	}
+	if repo.listFilter != (apirepository.GateRunFilter{}) {
+		t.Fatalf("repository was queried with %+v despite the bad filter", repo.listFilter)
+	}
+}
+
+// TestListGateRunsAcceptsRunningStatusFilter: RUNNING is a valid gate_runs
+// status, so narrowing the list to runs still in flight must keep working even
+// though the write route -- which only ever reports outcomes -- refuses it.
+// This is why the filter validates against the status domain rather than the
+// write path's terminal-only subset.
+func TestListGateRunsAcceptsRunningStatusFilter(t *testing.T) {
+	repo := &stubGateRunRepository{}
+	routes := GateRunRoutes{gateRuns: repo}
+	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=running", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listGateRuns(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if repo.listFilter.Status != model.GateRunStatusRunning {
+		t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusRunning)
 	}
 }

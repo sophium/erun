@@ -36,10 +36,22 @@ func RegisterGateRunRoutes(register ProtectedRouteRegistrar, gateRuns GateRunRep
 
 func (r GateRunRoutes) listGateRuns(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
+	// Absent keeps its meaning: list every gate run. Present must name a status
+	// gate_runs could actually hold -- validated through the write path's own
+	// contract and rendered by the same error writer, so a typo is refused
+	// (400, field "status") instead of answered with the zero rows a real empty
+	// result also produces.
+	status := model.GateRunStatus(strings.ToUpper(strings.TrimSpace(query.Get("status"))))
+	if status != "" {
+		if err := service.ValidateGateRunStatusFilter(status); err != nil {
+			writeGateRunError(w, req, err)
+			return
+		}
+	}
 	filter := apirepository.GateRunFilter{
 		TargetBranch: query.Get("targetBranch"),
 		SourceBranch: query.Get("sourceBranch"),
-		Status:       model.GateRunStatus(strings.ToUpper(strings.TrimSpace(query.Get("status")))),
+		Status:       status,
 	}
 	runs, err := r.gateRuns.List(req.Context(), filter)
 	if err != nil {
