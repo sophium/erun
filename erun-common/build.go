@@ -269,6 +269,10 @@ func dockerBuildsByTag(builds []DockerBuildSpec) map[string]DockerBuildSpec {
 
 func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, error) {
 	target.VersionOverride = strings.TrimSpace(target.VersionOverride)
+	target.GatedCommit = strings.TrimSpace(target.GatedCommit)
+	if err := validateGatedCommit(target.GatedCommit); err != nil {
+		return DockerCommandTarget{}, nil, err
+	}
 	if !target.Release {
 		return target, nil, nil
 	}

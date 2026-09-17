@@ -194,6 +194,33 @@ func hashBuildVersionInto(w io.Writer, buildInput DockerBuildSpec) error {
 	return err
 }
 
+// errGatedCommitNotACommit rejects a gated-commit value that is not a git
+// object name. A branch or tag name is the dangerous case, not a harmless one:
+// it is a stable string across different commits, so folding it in would leave
+// a gate build's fingerprint unchanged exactly as if no gated commit had been
+// given at all — the silent reproduction of the defect this input closes.
+var errGatedCommitNotACommit = errors.New(`gated-commit must name a commit (for example "$(git rev-parse HEAD)"), not a branch or tag: a name that stays the same across different commits would not bind the build to any one of them`)
+
+// validateGatedCommit accepts an empty value (an ordinary build) or a git
+// object name. Abbreviated object names are accepted: any prefix still
+// identifies one commit, so it is stable for the run that passes it.
+func validateGatedCommit(value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) < 7 || len(value) > 64 {
+		return errGatedCommitNotACommit
+	}
+	for _, r := range value {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F':
+		default:
+			return errGatedCommitNotACommit
+		}
+	}
+	return nil
+}
+
 // hashGatedCommitInto folds the revision a gate build must be a build of into
 // the fingerprint. Every other input describes the content being built, and a
 // merge-queue gate composes a prospective squash merge whose tree is

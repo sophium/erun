@@ -125,6 +125,26 @@ func TestApplyIncrementalPromotionNeverPromotesAGateBuildFromAnotherCommitsImage
 	}
 }
 
+// TestValidateGatedCommitRejectsANameThatIsNotACommit keeps a branch or tag
+// name out of the fingerprint input: unlike a commit id it stays the same
+// across different commits, which would restore the promote-from-another-
+// commit behaviour this input exists to remove.
+func TestValidateGatedCommitRejectsANameThatIsNotACommit(t *testing.T) {
+	if err := validateGatedCommit(""); err != nil {
+		t.Fatalf("expected an empty gated commit to be accepted for an ordinary build: %v", err)
+	}
+	for _, accepted := range []string{gatedTestCommit, "ee2cb402", "ABCDEF1"} {
+		if err := validateGatedCommit(accepted); err != nil {
+			t.Errorf("expected %q to be accepted: %v", accepted, err)
+		}
+	}
+	for _, rejected := range []string{"main", "HEAD", "origin/main", "v1.2.3", "refs/heads/main", "3c21ac8g"} {
+		if err := validateGatedCommit(rejected); err == nil {
+			t.Errorf("expected %q to be rejected as a gated commit", rejected)
+		}
+	}
+}
+
 // TestApplyIncrementalPromotionStillPromotesOrdinaryBuildsAcrossCommits guards
 // the cost side of the fix: ordinary builds keep their content-only identity, so
 // a commit that leaves the build context untouched still promotes instead of

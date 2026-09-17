@@ -37,6 +37,10 @@ func ResolveDockerImageReference(ctx Context, store DockerStore, findProjectRoot
 func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride, gatedCommit string, platformOverride []string) (*DockerBuildSpec, error) {
 	store, _, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
+	gatedCommit = strings.TrimSpace(gatedCommit)
+	if err := validateGatedCommit(gatedCommit); err != nil {
+		return nil, err
+	}
 	if buildContext, ok := currentComponentDockerBuildContext(resolveBuildContext, componentName); ok {
 		build, err := newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, platformOverride, "")
 		if err != nil {
