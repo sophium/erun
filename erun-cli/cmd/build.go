@@ -328,6 +328,7 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommand
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Delete and recreate conflicting release tags when combined with --release")
 	cmd.Flags().BoolVar(&target.NoIncremental, "no-incremental", false, "Disable fingerprint-based build caching and rebuild every image from scratch")
 	cmd.Flags().StringSliceVar(&target.Platforms, "platform", nil, "Build only these docker platforms (e.g. linux/amd64), repeatable; overrides the project's configured environments.<env>.docker.platforms. Mutually exclusive with --release, which always publishes every platform erun supports")
+	cmd.Flags().StringVar(&target.GatedCommit, "gated-commit", "", "The revision this build must be a build of, folded into the fingerprint so the build cannot promote an image built from a different commit (the merge queue's gate build passes the prospective merge commit)")
 }
 
 func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {

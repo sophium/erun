@@ -15,6 +15,7 @@ type BuildInput struct {
 	Version       string   `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
 	Release       bool     `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
 	NoIncremental bool     `json:"noIncremental,omitempty" jsonschema:"when true, disable fingerprint-based build caching and rebuild every image from scratch"`
+	GatedCommit   string   `json:"gatedCommit,omitempty" jsonschema:"the revision this build must be a build of, folded into the fingerprint so the build cannot promote an image built from a different commit; a merge queue's gate build passes the prospective merge commit it gates"`
 	Platforms     []string `json:"platforms,omitempty" jsonschema:"optional docker --platform overrides (e.g. [\"linux/amd64\"]) for an environment that can only ever run one architecture; takes precedence over the project's configured environments.<env>.docker.platforms. Mutually exclusive with release, which always publishes every platform erun supports"`
 	Preview       bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Jobs          int      `json:"jobs,omitempty" jsonschema:"build this many images at once; 0 resolves from the machine and 1 is sequential. Independent images build concurrently; an image that FROMs a sibling still waits for it"`
@@ -41,7 +42,7 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 				runCtx.MCPTool = "build"
 				component := strings.TrimSpace(input.Component)
 				version := strings.TrimSpace(input.Version)
-				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, component, version, input.Release, input.NoIncremental, input.Platforms)
+				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, component, version, strings.TrimSpace(input.GatedCommit), input.Release, input.NoIncremental, input.Platforms)
 				if err != nil {
 					return err
 				}
@@ -83,7 +84,7 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 	}
 }
 
-func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (eruncommon.BuildExecutionSpec, error) {
+func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig, projectRoot, component, versionOverride, gatedCommit string, release, noIncremental bool, platforms []string) (eruncommon.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	target := eruncommon.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
@@ -91,6 +92,7 @@ func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig,
 		VersionOverride: versionOverride,
 		Release:         release,
 		NoIncremental:   noIncremental,
+		GatedCommit:     gatedCommit,
 		Platforms:       platforms,
 	}
 	findProjectRoot := func() (string, string, error) {
