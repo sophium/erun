@@ -81,7 +81,7 @@ type EnvironmentExclusivityConflictError struct {
 	// about the caller's own action rather than about the mechanism.
 	Operation string
 	// Scope is the scope the holder actually took its claim on, carried so a
-	// reader never has to assume which scope was contended -- and so the
+	// reader never has to assume which scope was contended — and so the
 	// release remedy below names the store the claim is really in, rather than
 	// the environment scope an exclusive take only uses when asked for it.
 	Scope  string
@@ -151,7 +151,7 @@ func environmentExclusivityHoldsWholeEnvironment(scope string) bool {
 // the environment's one shared worktree, which is what `exec gate-merge`
 // rewrites. The default scope claims exactly that resource, and the
 // environment scope claims everything here, so it covers the worktree too. Any
-// other scope names a resource of the caller's own choosing -- a second clone's
+// other scope names a resource of the caller's own choosing — a second clone's
 // checkout, the case scopes exist for -- and a claim on it must not refuse work
 // in a different one.
 func environmentExclusivityCoversWorktree(scope string) bool {
@@ -235,7 +235,7 @@ func EnsureEnvironmentNotExclusivelyHeld(ctx Context, what, underLeaseID string)
 	// Every exclusive claim covering the worktree this rewrites, not only the
 	// one claiming the whole environment. An exclusive take defaults to the
 	// worktree scope, so reading the environment scope alone found nothing to
-	// refuse and let the drive rewrite the tree under a claim that was held --
+	// refuse and let the drive rewrite the tree under a claim that was held —
 	// failing open for exactly the caller, an orchestrator holding the worktree
 	// for its whole window, this guard was written for.
 	claims := heldEnvironmentExclusivityClaims(tenant, environment, now, environmentExclusivityCoversWorktree)
