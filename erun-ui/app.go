@@ -191,7 +191,7 @@ type App struct {
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
 	envEnsureMu               sync.Mutex
-	envEnsureInflight         map[string]struct{}
+	envEnsureInflight         map[string]*envEnsureRun
 	envEnsureDone             map[string]time.Time
 	envEnsureFailNotified     map[string]struct{}
 	// initEmitted dedups the environment-initialized signal per env. `erun init`

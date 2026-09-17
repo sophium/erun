@@ -18,15 +18,27 @@ import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 //
 // Linking also kicks off a best-effort MCP port-forward for the linked
 // environment, so an operator never has to run `erun open` by hand before
-// an orchestrator's tools work. The headless harness has no real
-// cluster to forward against (kubectl/erun are stubbed here), so that
-// reachability contract — opened when healthy, left alone when stopped,
-// surfaced when it fails — is covered by
-// TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen,
+// an orchestrator's tools work — and launching one opens the forward of any
+// linked environment whose edge is not answering, before the MCP client config
+// naming that port is written, since the client connects once as it launches
+// and never asks again. The headless harness has no real cluster to forward
+// against (kubectl/erun are stubbed here, and the reachability probe is pinned
+// to "unreachable" for the whole suite so a seeded env can never read a real
+// local port), so that reachability contract — opened when healthy, left alone
+// when stopped, left alone when already answering, surfaced when it fails — is
+// covered by TestCreateOrchestratorLinkOpensTheForwardWithoutManualOpen,
 // TestUpdateOrchestratorLinkOpensTheForwardForANewlyAddedEnv,
 // TestLinkingAStoppedEnvironmentDoesNotForceStartIt, and
 // TestLinkingAnEnvironmentSurfacesAForwardOpenFailure in
-// erun-ui/orchestrator_link_forward_test.go.
+// erun-ui/orchestrator_link_forward_test.go, and by
+// TestSpawnOrchestratorOpensTheEdgeBeforeWritingMCPConfig,
+// TestSpawnOrchestratorCompletesWithAnUnreachableEdge,
+// TestWireOrchestratorMCPRetriesAnEdgeRepairThatFailed, and
+// TestWireOrchestratorMCPLeavesAnAnsweringEdgeAlone in
+// erun-ui/orchestrator_edge_ensure_test.go. What this spec locks down on that
+// contract is the invariant the harness can reach: the isolation seams above
+// leave the whole flow inert rather than half-wired, so nothing here forwards,
+// respawns, or blocks against a cluster that is not there.
 test.describe('orchestrator links a local-agent environment', () => {
   test('offers the env and shows its worktree as a derived path', async ({ app }) => {
     await app.sidebar.newOrchestratorButton().click();
