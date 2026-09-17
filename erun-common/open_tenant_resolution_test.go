@@ -67,8 +67,8 @@ func TestResolveOpenTenantInferencePermittedButUnresolved(t *testing.T) {
 	msg := err.Error()
 	// A caller that does not name itself gets the command-free wording. The
 	// failure is real and the remedies are named, but no operation is blamed:
-	// the defect in issue #2363 was this branch claiming `open` could not infer
-	// a tenant for a command that was not open.
+	// the defect was this branch claiming `open` could not infer a tenant for
+	// a command that was not open.
 	if strings.Contains(msg, "open") {
 		t.Fatalf("a nameless caller must not have a command name invented for it: %q", msg)
 	}
@@ -84,8 +84,8 @@ func TestResolveOpenTenantInferencePermittedButUnresolved(t *testing.T) {
 }
 
 // TestResolveOpenTenantNamesTheCommandThatActuallyFailed is the regression for
-// issue #2363: the failure must name the operation the operator ran, and offer
-// that operation's own recovery, rather than a fixed one.
+// the failure naming a fixed operation: it must name the operation the
+// operator ran, and offer that operation's own recovery, rather than "open"'s.
 func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 	store := openTenantResolutionStore{}
 	tests := []struct {

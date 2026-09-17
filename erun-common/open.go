@@ -427,8 +427,8 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 // command's own flag, because it is the next thing the operator runs. A fixed
 // command name here sends the reader to an operation they never invoked and
 // did not need — `erun usage` failing must not report that `open` could not
-// infer a tenant (issue #2363), since the reasonable readings of that are all
-// wrong (a typo, a hidden delegation to open, or open being the fault).
+// infer a tenant, since the reasonable readings of that are all wrong (a typo,
+// a hidden delegation to open, or open being the fault).
 //
 // command is empty for a caller that did not name itself; the wording then
 // keeps the disclosure and both remedies but names no operation, which stays
@@ -978,8 +978,8 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 // takeover half of the reattach contract erun-cli's own shell tabs already
 // run under (screen -d -r semantics: the session keeps running, an evicted
 // viewer only loses its own view) — exported so a caller outside
-// erun-cli/erun-common (the WSS session-attach gateway erun#1106 adds) can
-// reuse it instead of reimplementing the owner-id handoff. launchCommand runs
+// erun-cli/erun-common (the WSS session-attach gateway) can reuse it instead
+// of reimplementing the owner-id handoff. launchCommand runs
 // only the first time the session is created; a reattach connects to
 // whatever it is already running.
 //

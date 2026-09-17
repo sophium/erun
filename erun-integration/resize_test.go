@@ -27,8 +27,8 @@ func TestResize(t *testing.T) {
 	t.Run("dry_run_missing_tenant", func(t *testing.T) {
 		// resize resolves its target through the same shared resolver as
 		// usage/observe/deploy. With no tenant configured the failure must name
-		// resize and its own --tenant recovery, not another command's (issue
-		// #2363); resize's --tenant scopes resolution, so offering it is real.
+		// resize and its own --tenant recovery, not another command's; resize's
+		// --tenant scopes resolution, so offering it is a real next step.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"resize", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
