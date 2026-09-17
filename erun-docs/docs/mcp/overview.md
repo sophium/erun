@@ -705,8 +705,8 @@ Changes the runtime pod's and/or the `erun-dind` sidecar's CPU/memory limits and
 {
   "plan": {
     "tenant": "myapp", "environment": "prod",
-    "current": { "cpu": "4", "memory": "12288Mi" },
-    "target":  { "cpu": "6", "memory": "12288Mi" },
+    "current": { "cpu": "4", "memory": "16384Mi" },
+    "target":  { "cpu": "6", "memory": "16384Mi" },
     "dindCurrent": { "cpu": "4", "memory": "20Gi" },
     "dindTarget":  { "cpu": "4", "memory": "24Gi" },
     "actions": [

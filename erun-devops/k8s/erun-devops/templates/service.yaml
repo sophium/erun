@@ -99,7 +99,7 @@ emitted; type is the single source of truth.
        Defaults mirror eruncommon.DefaultRuntimePodCPU/Memory in
        erun-common/runtime_resources.go — keep the two in sync; that constant's
        own comment records the measurement this number comes from. */ -}}
-{{- $runtimeMemory := default "12288Mi" $runtimeLimits.memory -}}
+{{- $runtimeMemory := default "16384Mi" $runtimeLimits.memory -}}
 {{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
 {{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
 {{- /* The erun-dind sidecar declares its own resources rather than relying on

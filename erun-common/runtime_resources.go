@@ -25,24 +25,30 @@ import (
 // The number comes from running that gate in containers of each size on the
 // same 6-CPU environment (the same image, `make -j6 check-gate`), "cold"
 // meaning a first run after a fresh checkout -- cold Go build and
-// golangci-lint caches, which is what a container does after a branch switch or
-// a pruned build cache:
+// golangci-lint caches, which is what a new environment, a branch switch or a
+// pruned build cache looks like:
 //
 //	limit    caches  peak      ceiling hits  result
 //	6144Mi   cold    6.00GiB   318+          survived on reclaim alone
 //	6144Mi   warm    2.59GiB   0             passed
-//	12288Mi  cold    8.98GiB   0             passed
+//	12288Mi  cold    11.7GiB   0             passed, no headroom left
 //	12288Mi  warm    4.18GiB   0             passed
 //
 // At 6Gi the cold gate has no room at all: it pins the limit and spends the run
-// in reclaim. The gate is not the whole story either -- this agent's own 6Gi
-// container holds 4.83GiB at *idle*, 4.0GiB of it page cache for the repo,
-// node_modules and the Go caches, against a memory.peak pinned at 6.00GiB and
-// memory.events `max` at 40049: it lives in reclaim, and an OOM kill is only a
-// question of which allocation outruns it. That is the state an in-pod agent
-// run and its unpushed work die in. 12288Mi is ~1.5x the warm peak and still
-// above the coldest one, and leaves the agent session, the MCP server and that
-// page cache room to share the cgroup.
+// in reclaim. At 12Gi it fits but consumes nearly all of it, which is what
+// makes 16384Mi this default rather than 12288Mi -- the gate's fan-out is sized
+// from the limit it is given, so a limit just above the cold peak is a limit
+// the next heavier change lands against. At 16384Mi the same cold peak sits
+// near three quarters of the limit, and the warm gate a container runs day to
+// day sits at about a quarter of it.
+//
+// The gate is not the whole story either: this agent's own 6Gi container holds
+// 4.83GiB at *idle*, 4.0GiB of it page cache for the repo, node_modules and the
+// Go caches, against a memory.peak pinned at 6.00GiB and memory.events `max` at
+// 40049 -- it lives in reclaim, and an OOM kill is only a question of which
+// allocation outruns it. That is the state an in-pod agent run and its unpushed
+// work die in. This default leaves the gate, the agent session, the MCP server
+// and that page cache room to share the cgroup instead.
 //
 // This is a provisioning default, not an enforcement: an environment that
 // recorded its own runtimepod.memory keeps it (applyEnvRuntimePod), and one
@@ -51,7 +57,7 @@ import (
 // peak.
 const (
 	DefaultRuntimePodCPU    = "4"
-	DefaultRuntimePodMemory = "12288Mi"
+	DefaultRuntimePodMemory = "16384Mi"
 )
 
 // DefaultRuntimeDindCPU/Memory size the erun-dind sidecar's own resource

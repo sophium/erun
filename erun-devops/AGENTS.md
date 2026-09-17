@@ -118,7 +118,7 @@ composition and release invariants belong to root/shared logic, not chart policy
   `runtime.resources.limits.memory` fallback move together, and a lowered limit
   re-creates the OOM kills that destroy an in-pod agent run and its unpushed work.
   A cold full gate has been measured pinning a 6Gi limit (peak equal to the limit,
-  ceiling hits throughout lint) against ~48% of 12288Mi with no ceiling hits.
+  ceiling hits throughout lint) against ~70% of 16384Mi with no ceiling hits.
 - Do not write limits to a node-shared `docker/buildkit` cgroup. Standalone
   buildkitd configuration is not read by dockerd's embedded builder; daemon-wide
   cgroup-parent changes broke exec/readiness. Per-leaf caps do not prove aggregate

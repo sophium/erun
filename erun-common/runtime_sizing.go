@@ -182,7 +182,7 @@ type RuntimeSizingParams struct {
 // carries no runtimepod at all (the chart injects the container's limits), so
 // scoring the live container against the declared value would score it against
 // NormalizeRuntimePodResources' defaults — on a 12-core, 23552Mi environment
-// whose config is silent, that reads as a 12288Mi limit and turns a 2x
+// whose config is silent, that reads as a 16384Mi limit and turns a 2x
 // over-provision into a recommendation to grow. The cgroup limit is the size
 // the container is actually running under, so it is the size that is scored.
 func RecommendRuntimeSizing(params RuntimeSizingParams) (RuntimeSizingRecommendation, bool) {

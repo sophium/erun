@@ -6,7 +6,7 @@ Loaded tenant configuration
 Loading environment configuration
 ==> Initializing team/dev
 init: runtime version not given; keeping <VERSION>
-init: runtime pod resources not given; keeping cpu=4 memory=12288Mi
+init: runtime pod resources not given; keeping cpu=4 memory=16384Mi
 init: erun-dind sidecar resources not given; keeping cpu=4 memory=20Gi
 init: deploy components set to erun-backend-api,erun-backend-db
 init: --type not given; keeping env type "local-agent"
