@@ -64,8 +64,14 @@ async function forceDocumentFocused(page: import('@playwright/test').Page): Prom
 // that dependency: the timer is armed by the report's own mount, which is the
 // thing under test. The hover-hold this routes around has its own test below,
 // which drives the pointer into the report explicitly.
+//
+// The park happens BEFORE the push, not after the report appears: the whip
+// button the panel was opened from is the popover's own anchor, so the click
+// that opened it left the pointer on top of the surface that is about to
+// change underneath it.
 async function openAndWhip(app: import('../../../pages/index.js').AppShell): Promise<void> {
   await app.titlebar.openWhipPanel();
+  await app.page.mouse.move(0, 0);
   await app.titlebar.whipRunButton().press('Enter');
   await app.titlebar.waitForWhipReportOpen();
 }
