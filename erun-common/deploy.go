@@ -1152,7 +1152,7 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	versionOverride = resolveDeployVersionOverride(target, versionOverride)
 
-	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	resolvedTarget, err := resolveDeployTarget(ctx.Command, ctx.CommandScopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -1235,7 +1235,7 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 
-	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	resolvedTarget, err := resolveDeployTarget(ctx.Command, ctx.CommandScopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return nil, err
 	}
@@ -1954,8 +1954,8 @@ func ResolveCurrentDeploySpecsForDockerTarget(ctx Context, store BuildDeployStor
 	return resolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, deployTarget, true)
 }
 
-func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
-	result, err := resolveDeployTargetOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+func resolveDeployTarget(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
+	result, err := resolveDeployTargetOpenResult(command, scopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return OpenResult{}, err
 	}
@@ -1965,7 +1965,7 @@ func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, r
 	return result, nil
 }
 
-func resolveDeployTargetOpenResult(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
+func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
 	store, findProjectRoot, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	if strings.TrimSpace(target.Tenant) != "" || strings.TrimSpace(target.Environment) != "" || strings.TrimSpace(target.RepoPath) != "" {
@@ -1987,8 +1987,10 @@ func resolveDeployTargetOpenResult(store DeployStore, findProjectRoot ProjectFin
 	}
 
 	return resolveOpenWithFinder(store, findProjectRoot, OpenParams{
-		UseDefaultTenant:      true,
-		UseDefaultEnvironment: true,
+		UseDefaultTenant:          true,
+		UseDefaultEnvironment:     true,
+		Command:                   command,
+		CommandScopesTenantByFlag: scopesTenantByFlag,
 	})
 }
 
@@ -2020,7 +2022,9 @@ func ResolveDeployTargetScope(store DeployStore, findProjectRoot ProjectFinderFu
 	if tenant != "" && environment != "" {
 		return tenant, environment
 	}
-	resolved, err := resolveDeployTarget(store, findProjectRoot, nil, nil, nil, target)
+	// A nameless command on purpose: this is diagnostics that degrade quietly
+	// rather than fail, so it has no failure message to name a recovery in.
+	resolved, err := resolveDeployTarget("", false, store, findProjectRoot, nil, nil, nil, target)
 	if err != nil {
 		return tenant, environment
 	}

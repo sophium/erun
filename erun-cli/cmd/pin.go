@@ -49,7 +49,7 @@ func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen f
 			if list {
 				return runPinListCommand(cmd.Context(), ctx)
 			}
-			params, err := resolveOpenParams(args, target)
+			params, err := resolveOpenParams(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}

@@ -343,8 +343,8 @@ func TestDeploy(t *testing.T) {
 		// there is no env to name, so the header drops the tenant/environment
 		// pair entirely instead of falling back to a bare separator. Also locks
 		// resolveOpenTenant's inference-permitted-but-unresolved error: it must
-		// name open, not just repeat "default tenant is not configured", and
-		// state the recovery.
+		// name the command that actually ran (deploy, not open), not just repeat
+		// "default tenant is not configured", and state that command's recovery.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
 		if result.ExitCode == 0 {

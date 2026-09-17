@@ -27,7 +27,7 @@ func newPublishCmd(store common.DeployStore, findProjectRoot common.ProjectFinde
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := withCloudContextPreflight(commandContext(cmd), store)
-			publishTarget, err := resolveDeployTargetArgs(args, target)
+			publishTarget, err := resolveDeployTargetArgs(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}

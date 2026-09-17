@@ -86,7 +86,7 @@ func newMCPCallCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPCallCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), tool, arguments)
+			return runMCPCallCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), tool, arguments)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -109,7 +109,7 @@ func newMCPToolsCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPToolsCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment))
+			return runMCPToolsCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
 	addDryRunFlag(cmd)
@@ -132,7 +132,7 @@ func newMCPTokenCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPTokenCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment))
+			return runMCPTokenCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
 	addDryRunFlag(cmd)

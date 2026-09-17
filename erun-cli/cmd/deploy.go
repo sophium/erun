@@ -39,7 +39,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := withCloudContextPreflight(commandContext(cmd), store)
-			deployTarget, err := resolveDeployTargetArgs(args, target)
+			deployTarget, err := resolveDeployTargetArgs(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}
@@ -146,8 +146,8 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	_ = cmd.Flags().MarkHidden("repo-path")
 }
 
-func resolveDeployTargetArgs(args []string, target common.DeployTarget) (common.DeployTarget, error) {
-	params, err := resolveOpenParams(args, common.OpenParams{
+func resolveDeployTargetArgs(command string, args []string, target common.DeployTarget) (common.DeployTarget, error) {
+	params, err := resolveOpenParams(command, args, common.OpenParams{
 		Tenant:      target.Tenant,
 		Environment: target.Environment,
 	})
