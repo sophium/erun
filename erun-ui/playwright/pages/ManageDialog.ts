@@ -240,6 +240,17 @@ export class ManageDialog {
     return this.page.locator('#environment-config-deploy-components-hint');
   }
 
+  // The reason a fully unchecked checklist refuses Deploy, rendered beside the
+  // button and, while the version panel is open, beside the boxes inside it — two
+  // instances of one reason, as the runtime-chart notice also has.
+  deploySelectionNotice(): Locator {
+    return this.page.locator('#environment-config-deploy-selection-notice');
+  }
+
+  deploySelectionPanelNotice(): Locator {
+    return this.page.locator('#environment-config-deploy-selection-notice-panel');
+  }
+
   // Enabled only when the selection differs from the saved default. Matched by
   // id, not name, so it never collides with the dialog footer's Save.
   saveDeployComponentsButton(): Locator {

@@ -1,9 +1,12 @@
 import { Button } from 'erun-kit';
+import { AlertTriangle } from 'lucide-react';
 import * as React from 'react';
 
 import {
+  DEPLOY_SELECTION_PANEL_NOTICE_ID,
   deployComponentLabel,
   deployComponentSelectionChanged,
+  deploySelectionIsEmpty,
 } from '@/app/deployComponentsSelection';
 import { readError } from '@/app/errors';
 import { useAppDispatch } from '@/app/hooks';
@@ -41,6 +44,14 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
   const { deployComponents, deployComponentSelection, deployComponentsLoading } = dialog;
   const selectionSet = new Set(deployComponentSelection);
   const changed = deployComponentSelectionChanged(deployComponents, deployComponentSelection);
+  // Nothing checked here is an explicit statement, not an absent one — see
+  // deploySelectionIsEmpty. It refuses Deploy, and this names the reason where the
+  // operator is looking rather than leaving a dead button.
+  const selectionEmpty = deploySelectionIsEmpty(
+    deployComponents,
+    deployComponentSelection,
+    deployComponentsLoading,
+  );
   // The checklist follows the version chosen in the picker above — never the
   // env's current version — and is gated on a pick for every env type: the panel
   // is strictly sequential (pick a version, then choose which charts roll out),
@@ -96,23 +107,48 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
               No deployable components found for this environment.
             </div>
           ) : (
-            <div className="grid gap-2">
-              {deployComponents.map((component) => (
-                <CheckboxField
-                  key={component.name}
-                  id={`environment-config-deploy-component-${component.name}`}
-                  label={deployComponentLabel(component)}
-                  checked={selectionSet.has(component.name)}
-                  disabled={dialog.busy || dialog.configLoading}
-                  onChange={(checked) => {
-                    dispatch(toggleManageDeployComponent(component.name, checked));
-                  }}
-                />
-              ))}
-            </div>
+            <>
+              <div className="grid gap-2">
+                {deployComponents.map((component) => (
+                  <CheckboxField
+                    key={component.name}
+                    id={`environment-config-deploy-component-${component.name}`}
+                    label={deployComponentLabel(component)}
+                    checked={selectionSet.has(component.name)}
+                    disabled={dialog.busy || dialog.configLoading}
+                    onChange={(checked) => {
+                      dispatch(toggleManageDeployComponent(component.name, checked));
+                    }}
+                  />
+                ))}
+              </div>
+              {selectionEmpty && <EmptySelectionNotice id={DEPLOY_SELECTION_PANEL_NOTICE_ID} />}
+            </>
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// EmptySelectionNotice names why Deploy is refused when every box is unchecked.
+// The checklist's sentence above covers the checked case alone, and the resolver
+// reads an empty set as "unspecified" and falls back to the runtime chart alone
+// (erun-common/deploy_components.go), so submitting it would roll out the very
+// chart the operator cleared. Rendered beside the boxes and beside the button; the
+// fix is one click away in the list, so there is nothing else to offer here.
+export function EmptySelectionNotice({ id }: { id: string }): React.ReactElement {
+  return (
+    <div
+      id={id}
+      role="status"
+      className="flex items-start gap-2 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] leading-[1.4] text-foreground"
+    >
+      <AlertTriangle aria-hidden="true" className="mt-[1px] size-3.5 shrink-0" />
+      <span>
+        Nothing is checked, so Deploy has nothing to roll out. Check at least one chart &mdash; an
+        empty list would otherwise still install the runtime chart.
+      </span>
     </div>
   );
 }

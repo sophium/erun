@@ -51,6 +51,36 @@ export function deployComponentSelectionChanged(
   return baseline.some((name) => !selected.has(name));
 }
 
+// deploySelectionIsEmpty reports that a loaded checklist has every box unchecked.
+//
+// An empty set is NOT the same as no selection. A transport that omits the
+// selection leaves the resolver to its own precedence — the saved
+// deploy.components, then the repo plan, then the runtime chart alone
+// (bootstrap/heal) — which is right for the CLI, where an omitted `--components`
+// flag genuinely means "unspecified". In this dialog the checklist is loaded
+// before Deploy is reachable, so an empty set there is the operator having cleared
+// every box, and the two are indistinguishable downstream. Deploy is gated on this
+// instead of passing it down, so the picker's "exactly the checked charts" stays
+// true rather than describing an exception.
+//
+// False while the checklist is loading or came back empty: there the selection is
+// unknown, not deliberately cleared.
+export function deploySelectionIsEmpty(
+  options: UIDeployableComponent[],
+  selection: string[],
+  loading: boolean,
+): boolean {
+  return !loading && options.length > 0 && selection.length === 0;
+}
+
+// The reason an empty selection refuses Deploy, rendered twice: beside the boxes
+// in the version panel, and beside the button. Two ids for one reason, mirroring
+// RUNTIME_CHART_NOTICE_ID / RUNTIME_CHART_PANEL_NOTICE_ID — the panel is a popover
+// that covers the row beneath it, so the always-visible instance would otherwise
+// be hidden behind the very list the operator is clearing.
+export const DEPLOY_SELECTION_NOTICE_ID = 'environment-config-deploy-selection-notice';
+export const DEPLOY_SELECTION_PANEL_NOTICE_ID = 'environment-config-deploy-selection-notice-panel';
+
 // The one runtime chart every published-chart env installs, regardless of
 // tenant. It is NOT the release name — that is <tenant>-devops. Mirrors the
 // backend constant; keep both in sync.

@@ -1,7 +1,11 @@
 import { Button, EmptyState, SelectField } from 'erun-kit';
-import { Ban, Plus, Rocket } from 'lucide-react';
+import { Ban, Plus } from 'lucide-react';
 import * as React from 'react';
 
+import {
+  DEPLOY_SELECTION_NOTICE_ID,
+  deploySelectionIsEmpty,
+} from '@/app/deployComponentsSelection';
 import {
   environmentTypeBuildsHereLocally,
   environmentTypeIsHost,
@@ -19,13 +23,15 @@ import {
   updateManageDialog,
 } from '@/app/manageEnvironmentThunks';
 import { showTerminalError } from '@/app/notificationThunks';
-import { RUNTIME_CHART_NOTICE_ID, runtimeChartBlocksDeploy } from '@/app/runtimeChartPlan';
+import { runtimeChartBlocksDeploy } from '@/app/runtimeChartPlan';
 import type { AppState } from '@/app/state';
 import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
+import { EmptySelectionNotice } from '@/components/app/ManageDialogDeployComponents';
 import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivity';
 import { RuntimeChartField } from '@/components/app/ManageDialogRuntimeChart';
 import { RuntimeChartNotice } from '@/components/app/ManageDialogRuntimeChartNotice';
+import { RuntimeDeployButton } from '@/components/app/ManageDialogRuntimeDeployButton';
 import { RuntimePowerField } from '@/components/app/ManageDialogRuntimePower';
 import { RuntimeSizingField } from '@/components/app/ManageDialogRuntimeSizing';
 import { RuntimeUsageField } from '@/components/app/ManageDialogRuntimeUsage';
@@ -396,6 +402,17 @@ function RuntimeDeployField({
   onDeploy: () => void;
   onCreateVersion: () => void;
 }): React.ReactElement {
+  // A loaded checklist with every box unchecked is the operator stating "roll out
+  // nothing" — but an empty set reaches the resolver as "unspecified", where it
+  // falls back to the runtime chart alone (erun-common/deploy_components.go). So
+  // Deploy refuses instead of rolling out the chart that was just cleared, and the
+  // reason is named beside the button rather than discovered by a rollout.
+  const selectionEmpty = deploySelectionIsEmpty(
+    dialog.deployComponents,
+    dialog.deployComponentSelection,
+    dialog.deployComponentsLoading,
+  );
+  const chartBlocked = runtimeChartBlocksDeploy(dialog);
   return (
     <div className="grid gap-2">
       <div className="text-sm font-medium leading-none">Runtime version</div>
@@ -417,30 +434,15 @@ function RuntimeDeployField({
           onChoicesOpenChange={onChoicesOpenChange}
           onSelect={onSelect}
         />
-        <Button
-          id="environment-config-deploy"
-          type="button"
-          size="sm"
-          // Deploy installs a chosen version by reference, so it stays disabled
-          // until the operator picks one — never a build, never a guess — and
-          // until that version's component charts have been probed, so it can't
-          // fire the new version with the previous version's chart selection.
-          // ...and on a version the registry says has no runtime chart, with the
-          // reason named beside the button rather than discovered by failing.
-          disabled={
-            disabled === true ||
-            overrideVersion.trim() === '' ||
-            dialog.deployComponentsLoading ||
-            runtimeChartBlocksDeploy(dialog)
-          }
-          aria-describedby={runtimeChartBlocksDeploy(dialog) ? RUNTIME_CHART_NOTICE_ID : undefined}
-          onClick={onDeploy}
-        >
-          <Rocket aria-hidden="true" />
-          Deploy
-        </Button>
+        <RuntimeDeployButton dialog={dialog} disabled={disabled} onDeploy={onDeploy} />
       </div>
       {!dialog.choicesOpen && <RuntimeChartNotice dialog={dialog} />}
+      {/* One blocking reason at a time: on a version with no runtime chart the
+          chart notice above already names the fix, and its notice owns the id the
+          button describes itself by. */}
+      {!dialog.choicesOpen && selectionEmpty && !chartBlocked && (
+        <EmptySelectionNotice id={DEPLOY_SELECTION_NOTICE_ID} />
+      )}
       {/* Deploy above installs an existing published version by reference and never
           builds. Producing a new version from this env's source is this explicit,
           separate action (local-agent envs only). */}
@@ -451,7 +453,10 @@ function RuntimeDeployField({
           size="sm"
           variant="outline"
           className="justify-self-start"
-          disabled={disabled}
+          // Same rule as Deploy: this action also ends in a deploy of the checked
+          // charts, so an empty checklist refuses it rather than silently rolling
+          // out the runtime chart the operator cleared.
+          disabled={disabled === true || selectionEmpty}
           onClick={onCreateVersion}
         >
           <Plus aria-hidden="true" />

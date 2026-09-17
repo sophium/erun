@@ -382,4 +382,49 @@ test.describe('manage dialog — components to deploy (#718)', () => {
         }),
     ).toBeVisible();
   });
+
+  test('unchecking every component refuses Deploy instead of deploying the runtime (#2384)', async ({
+    app,
+    page,
+    seededRuntimeEnv,
+  }) => {
+    // The checklist's sentence promises "exactly the checked charts", but an empty
+    // selection reaches the resolver as "unspecified" and falls back to the runtime
+    // chart alone (erun-common/deploy_components.go) — so clearing every box used to
+    // roll out the one chart the operator had just declined. Deploy now refuses and
+    // names the reason where the boxes are, keeping the sentence true.
+    await stubVersionSuggestions(page);
+    const runtimeName = `${seededRuntimeEnv.tenant}-devops`;
+    await app.sidebar.openManageDialogViaKeyboard(
+      seededRuntimeEnv.tenant,
+      seededRuntimeEnv.environment,
+    );
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    await app.manageDialog.openVersionPicker();
+    await app.manageDialog.pickVersion('1.0.0');
+
+    const runtime = app.manageDialog.deployComponentCheckbox(runtimeName);
+    await expect(runtime).toBeChecked();
+    await expect(app.manageDialog.deployButton()).toBeEnabled();
+    await expect(app.manageDialog.deploySelectionPanelNotice()).toHaveCount(0);
+
+    await runtime.click();
+    await expect(runtime).not.toBeChecked();
+    await expect(app.manageDialog.deploySelectionPanelNotice()).toBeVisible();
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
+    // The refusal is described, not just rendered: a disabled button whose reason
+    // is only visible elsewhere reads as a dead end.
+    await expect(app.manageDialog.deployButton()).toHaveAttribute(
+      'aria-describedby',
+      'environment-config-deploy-selection-notice',
+    );
+
+    // Restoring a check restores Deploy, and the reason goes with it.
+    await runtime.click();
+    await expect(runtime).toBeChecked();
+    await expect(app.manageDialog.deploySelectionPanelNotice()).toHaveCount(0);
+    await expect(app.manageDialog.deployButton()).toBeEnabled();
+  });
 });
