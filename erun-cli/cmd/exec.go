@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
@@ -155,7 +154,6 @@ func newExecGateRunReportCmd(store common.CloudReadStore, alias *string, deps co
 
 func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc) *cobra.Command {
 	var (
-		jsonOutput     bool
 		scope          string
 		selectedCommit string
 	)
@@ -166,14 +164,14 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runExecDiffCommand(commandContext(cmd), findProjectRoot, runGit, execDiffOptions{
-				JSON:           jsonOutput,
+				JSON:           jsonRequested(cmd),
 				Scope:          scope,
 				SelectedCommit: selectedCommit,
 			})
 		},
 	}
 	addDryRunFlag(cmd)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text")
+	addJSONAliasFlag(cmd)
 	cmd.Flags().StringVar(&scope, "scope", "", "Diff scope: current (default), all, or commit")
 	cmd.Flags().StringVar(&selectedCommit, "selected-commit", "", "Oldest commit hash to include when --scope=commit")
 	return cmd
@@ -1066,9 +1064,7 @@ func runExecDiffCommand(ctx common.Context, findProjectRoot common.ProjectFinder
 		return err
 	}
 	if opts.JSON {
-		encoder := json.NewEncoder(ctx.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
+		return ctx.WriteResult(result)
 	}
 	return common.WriteRawDiff(ctx.Stdout, result)
 }
