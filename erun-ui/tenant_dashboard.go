@@ -29,7 +29,7 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		input.mcpBearer = a.mcpBearer(tenant, strings.TrimSpace(input.Environment))
 		log, err := a.deps.loadAPILog(ctx, input)
 		if err != nil {
-			dashboard.APILogError = err.Error()
+			dashboard.APILogError = "Could not read this environment's API log. " + err.Error()
 		} else {
 			dashboard.APILog = log
 		}
