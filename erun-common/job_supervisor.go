@@ -902,6 +902,8 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 	// carries what the run last did rather than the poll's stale view of it.
 	beat.refresh(false)
 
+	cancelledBy, wasCancelled := consumeEnvironmentJobCancelRequest(recorder.dir, recorder.snapshot().ID)
+
 	code, signal, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
 	// A job that already spent its bounded reinvocations (see
 	// considerEnvironmentJobReinvocation) and still ends up here gate-incomplete
@@ -936,6 +938,9 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		job.Reason = reason
 		job.ExitCode = &code
 		job.StartedJobFailed = startedJobFailed
+		if wasCancelled {
+			job.CancelledByJobID = cancelledBy
+		}
 		worktree.apply(job)
 	}
 
@@ -978,9 +983,9 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 		reason = "failed to start: " + waitErr.Error()
 	}
 	jobState = EnvironmentJobStateExited
-	if state != nil && environmentJobProcessGroupSurvivors(childPID) {
+	if state != nil && (environmentJobProcessGroupSurvivors(childPID) || environmentJobSessionSurvivors(childPID)) {
 		jobState = EnvironmentJobStateAbandoned
-		reason = "the job's own process exited, but it left other processes still running in its process group — background work it started and never waited for; nothing further will be reported for that work"
+		reason = "the job's own process exited, but it left other processes still running in its process group or session — background work it started and never waited for; nothing further will be reported for that work"
 	}
 	self := recorder.snapshot()
 	if running := awaitEnvironmentJobRunningChildren(recorder.dir, self.ID, resolveEnvironmentJobGateIncompleteWaitCap()); len(running) > 0 {
@@ -1450,6 +1455,14 @@ func CancelEnvironmentJob(ctx Context, params CancelEnvironmentJobParams) (Cance
 	ctx.Trace(fmt.Sprintf("job: sending SIG%s to process group %d (job %s)", signal, target, job.ID))
 	if ctx.DryRun {
 		return result, nil
+	}
+	// Recorded before the signal reaches the target, so its own finish check
+	// -- which runs concurrently with this call, not after it -- has the
+	// marker in place by the time it looks for one. Best-effort like the
+	// signal itself: a write that fails here costs only the provenance, not
+	// the cancel.
+	if dir, dirErr := environmentJobDir(params.Tenant, params.Environment); dirErr == nil {
+		recordEnvironmentJobCancelRequest(dir, job.ID, CurrentEnvironmentJobID())
 	}
 	if err := signalEnvironmentJobProcessGroup(target, signal); err != nil {
 		return CancelEnvironmentJobResult{}, err
