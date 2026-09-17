@@ -31,16 +31,25 @@ import (
 //	limit    caches  peak      ceiling hits  result
 //	6144Mi   cold    6.00GiB   318+          survived on reclaim alone
 //	6144Mi   warm    2.59GiB   0             passed
-//	12288Mi  cold    11.7GiB   0             passed, no headroom left
+//	12288Mi  cold    11.71GiB  0             passed, no headroom left
 //	12288Mi  warm    4.18GiB   0             passed
+//	16384Mi  cold    12.54GiB  0             passed
+//	16384Mi  warm    7.17GiB   0             passed
 //
 // At 6Gi the cold gate has no room at all: it pins the limit and spends the run
-// in reclaim. At 12Gi it fits but consumes nearly all of it, which is what
-// makes 16384Mi this default rather than 12288Mi -- the gate's fan-out is sized
-// from the limit it is given, so a limit just above the cold peak is a limit
-// the next heavier change lands against. At 16384Mi the same cold peak sits
-// near three quarters of the limit, and the warm gate a container runs day to
-// day sits at about a quarter of it.
+// in reclaim. At 12Gi it fits but consumes nearly all of it -- 97.6% -- which is
+// what makes 16384Mi this default rather than 12288Mi: a limit just above the
+// cold peak is one the next heavier change lands against. At 16384Mi the
+// coldest run peaks at 78% of the limit and the warm gate a container runs day
+// to day at 45%, both with the ceiling untouched.
+//
+// Neither share falls much as the limit grows, which is why this default is
+// sized to leave the coldest first run a fifth of its limit unused rather than
+// to a round multiple of the old one: three of the ten targets (lint, the
+// frontend workspaces, the chart tests) size their own fan-out from the memory
+// they are given, so a container with more memory runs more of that work at
+// once, and a container with too little reclaims against its page cache for the
+// whole run instead.
 //
 // The gate is not the whole story either: this agent's own 6Gi container holds
 // 4.83GiB at *idle*, 4.0GiB of it page cache for the repo, node_modules and the
