@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,39 @@ func newAttachTestRuntime(t *testing.T) RuntimeConfig {
 		t.Fatalf("create session socket dir: %v", err)
 	}
 	return RuntimeConfig{Context: RuntimeContext{Tenant: "attach-test", Environment: "env-" + t.Name()}}
+}
+
+// useDTachShim puts a `dtach` shim on PATH for attach tests whose subject is
+// this edge's own PTY handling rather than dtach's session management. The
+// production attach script (eruncommon.RemoteAppSessionAttachLines) still runs
+// verbatim; only the dtach binary it invokes is substituted, so the test needs
+// no dtach installed on the host. Tests that assert dtach's own detach,
+// reattach or takeover semantics keep the real binary -- a shim cannot stand in
+// for those, because the eviction path depends on dtach's separate master and
+// client processes.
+//
+// The shim is prepended rather than appended so the substitute is used even on
+// a host that does have dtach, which keeps the test's behaviour identical
+// everywhere instead of differing with the host.
+func useDTachShim(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	// The production script's only dtach invocation is
+	//   dtach -A <socket> -r <redraw> <launchCommand>
+	// so drop those four option words and run the session program on the PTY
+	// this edge allocated. Fail loudly if that contract ever changes shape,
+	// rather than silently running the wrong argument as the session program.
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" != \"-A\" ] || [ \"$3\" != \"-r\" ]; then\n" +
+		"  echo \"dtach shim: unexpected dtach invocation: $*\" >&2\n" +
+		"  exit 2\n" +
+		"fi\n" +
+		"shift 4\n" +
+		"exec \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "dtach"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write dtach shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // newAuthedAttachServer serves the real production mux (newHTTPHandler,
@@ -277,8 +311,11 @@ func TestAttachCreatesSessionDirectoryOnAFreshPod(t *testing.T) {
 // TestAttachResizeControlMessageResizesThePTY proves the resize wire message
 // actually reaches the PTY: `stty size` reports the shell's own view of the
 // terminal dimensions, so a mismatch here means the control message was
-// dropped rather than applied.
+// dropped rather than applied. The dimensions under test are the ones this
+// edge sets on the PTY it allocates, so dtach's own session management is not
+// the subject and a shim stands in for it.
 func TestAttachResizeControlMessageResizesThePTY(t *testing.T) {
+	useDTachShim(t)
 	runtime := newAttachTestRuntime(t)
 	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
