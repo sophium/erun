@@ -2264,17 +2264,32 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 		log.Printf("erun-app: orchestrator %s: wired %s but its edge is not answering", id, env.Label)
 	}
 	if len(unreachable) > 0 {
-		notice := orchestratorMCPUnreachableNotice(name, unreachable)
-		// A combined notice naming several environments has no single env to
-		// attach a deploy action to; only the common single-env case gets one.
-		if tenant, environment, ok := singleOrchestratorMCPUnreachableEnv(unreachable); ok {
-			a.emitEnvNotification("warning", tenant, environment,
-				notificationSourceOrchestratorEdgeUnreachable, notice, notificationActionDeploy)
-		} else {
-			a.emitAppNotification("warning", notice)
-		}
+		a.reportUnreachableOrchestratorEdges(name, unreachable)
 	}
 	return path
+}
+
+// reportUnreachableOrchestratorEdges warns about every linked environment whose
+// edge did not answer, one env-scoped notice each. Reported per environment
+// rather than as a single combined notice because the remedy is per environment
+// and the notice is what carries it: a combined notice names several envs, so
+// there is no one env its deploy action could target, and dropping the action
+// there left exactly the orchestrators with the most edges down — the ones that
+// need it most — with prose and nothing to click. One notice per env gives each
+// the same action, scoping, and later lifecycle clear the single-env case gets.
+// An edge whose label is not a well-formed <tenant>/<environment> still gets its
+// warning; it just has no env for an action to target.
+func (a *App) reportUnreachableOrchestratorEdges(name string, unreachable []orchestratorMCPUnreachable) {
+	for _, edge := range unreachable {
+		notice := orchestratorMCPUnreachableNotice(name, []orchestratorMCPUnreachable{edge})
+		tenant, environment, ok := orchestratorMCPUnreachableEnv(edge.Label)
+		if !ok {
+			a.emitAppNotification("warning", notice)
+			continue
+		}
+		a.emitEnvNotification("warning", tenant, environment,
+			notificationSourceOrchestratorEdgeUnreachable, notice, notificationActionDeploy)
+	}
 }
 
 // conversationToLaunch answers which conversation a spawn attaches to. A named
