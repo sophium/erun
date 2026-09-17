@@ -217,14 +217,23 @@ func RecommendRuntimeSizing(params RuntimeSizingParams) (RuntimeSizingRecommenda
 	}
 	peak := history.ObservedPeakMemoryBytes
 	oomKills := history.ObservedOOMKills
+	periods := history.ObservedPeriods
+	throttled := history.ObservedThrottledPeriods
 	if params.Live != nil {
-		// Union, not replacement: the retained peak is monotonic across
-		// restarts and the live reading is one more observation of the same
-		// environment, so neither may overwrite the other.
+		// Union, not replacement: every figure below is monotonic in the
+		// evidence -- a retained peak, an accumulated kill count, a total of
+		// elapsed scheduling periods -- and the live reading is one more
+		// observation of the same environment, so neither may overwrite the
+		// other. Both sides count the same quantity even though they are
+		// accumulated differently (the history sums deltas across restarts, the
+		// reading is the current container's own lifetime total), so the larger
+		// is the one that has seen more.
 		peak = max(peak, runtimeLivePeakMemoryBytes(*params.Live))
 		if params.Live.Memory.OOMKillsObserved {
 			oomKills = max(oomKills, params.Live.Memory.OOMKills)
 		}
+		periods = max(periods, params.Live.CPU.Periods)
+		throttled = max(throttled, params.Live.CPU.ThrottledPeriods)
 	}
 	samples := len(history.Samples)
 	if samples == 0 && params.Live != nil {
@@ -240,8 +249,8 @@ func RecommendRuntimeSizing(params RuntimeSizingParams) (RuntimeSizingRecommenda
 		ObservedOOMKills:         oomKills,
 		CPUQuotaMilli:            runtimeQuotaMilli(latest.CPU.QuotaCores),
 		ObservedPeakCPUMilli:     history.ObservedPeakCPUMilli,
-		ObservedPeriods:          history.ObservedPeriods,
-		ObservedThrottledPeriods: history.ObservedThrottledPeriods,
+		ObservedPeriods:          periods,
+		ObservedThrottledPeriods: throttled,
 		Signals:                  []string{"cgroup memory.peak", "cgroup memory.events oom_kill", "cgroup cpu.stat usage_usec/nr_throttled"},
 		Unavailable:              runtimeUsageUnavailable(latest),
 	}
@@ -250,7 +259,7 @@ func RecommendRuntimeSizing(params RuntimeSizingParams) (RuntimeSizingRecommenda
 		Knob: "runtimepod",
 		Verdicts: []RuntimeSizingVerdict{
 			recommendRuntimeMemory(history, latest, peak, oomKills, params.Ceiling),
-			recommendRuntimeCPU(history, latest),
+			recommendRuntimeCPU(history, latest, periods, throttled),
 		},
 		Evidence: evidence,
 	}, true
@@ -343,7 +352,7 @@ func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, pe
 	return verdict
 }
 
-func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage) RuntimeSizingVerdict {
+func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage, observedPeriods, observedThrottled int64) RuntimeSizingVerdict {
 	verdict := RuntimeSizingVerdict{Resource: "cpu"}
 	quota := runtimeQuotaMilli(latest.CPU.QuotaCores)
 	if quota <= 0 {
@@ -352,29 +361,27 @@ func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage) Runti
 		return verdict
 	}
 	verdict.Current = FormatKubernetesCPUFromMilli(quota)
-	periods := history.ObservedPeriods
-	throttled := history.ObservedThrottledPeriods
 
-	if periods >= runtimeSizingThrottlePeriods && float64(throttled) >= float64(periods)*runtimeSizingThrottleRatio {
+	if observedPeriods >= runtimeSizingThrottlePeriods && float64(observedThrottled) >= float64(observedPeriods)*runtimeSizingThrottleRatio {
 		verdict.Action = RuntimeSizingRaise
 		verdict.Confidence = RuntimeSizingConfidenceHigh
 		verdict.Suggested = FormatKubernetesCPUFromMilli(scaleMilliToWholeCores(quota, runtimeSizingCPURaiseMultiple))
-		verdict.Reason = fmt.Sprintf("%s of scheduling periods throttled (%d of %d)", formatThrottleRatio(throttled, periods), throttled, periods)
+		verdict.Reason = runtimeThrottleLabel(observedThrottled, observedPeriods)
 		return verdict
 	}
 
-	throttleLabel := fmt.Sprintf("%s of scheduling periods throttled (%d of %d)", formatThrottleRatio(throttled, periods), throttled, periods)
+	throttleLabel := runtimeThrottleLabel(observedThrottled, observedPeriods)
 	if reason, ok := runtimeSizingShrinkWindowShortfall(history); !ok {
 		verdict.Action = RuntimeSizingUnknown
 		verdict.Reason = fmt.Sprintf("%s, but %s", throttleLabel, reason)
 		return verdict
 	}
-	if periods < runtimeSizingThrottlePeriods {
+	if observedPeriods < runtimeSizingThrottlePeriods {
 		verdict.Action = RuntimeSizingUnknown
-		verdict.Reason = fmt.Sprintf("only %d scheduling periods observed, too few to read a throttle ratio from", periods)
+		verdict.Reason = fmt.Sprintf("only %d scheduling periods observed, too few to read a throttle ratio from", observedPeriods)
 		return verdict
 	}
-	if throttled > 0 {
+	if observedThrottled > 0 {
 		// Below the raise threshold but not at zero: the quota already binds
 		// sometimes. That is not grounds to grow, and it is emphatically not
 		// grounds to shrink — a ratio under the threshold is "tolerable", not
@@ -471,6 +478,13 @@ func scaleMilliToWholeCores(milli int64, multiple float64) int64 {
 
 func formatBytesAsMi(bytes int64) string {
 	return fmt.Sprintf("%dMi", (bytes+1024*1024-1)/(1024*1024))
+}
+
+// runtimeThrottleLabel words the throttle ratio every CPU verdict is an
+// answer to. It is one function so the ratio a raise cites and the ratio a
+// hold cites cannot be worded, or rounded, differently.
+func runtimeThrottleLabel(throttled, periods int64) string {
+	return fmt.Sprintf("%s of scheduling periods throttled (%d of %d)", formatThrottleRatio(throttled, periods), throttled, periods)
 }
 
 // formatThrottleRatio keeps two decimals because the interesting throttle
