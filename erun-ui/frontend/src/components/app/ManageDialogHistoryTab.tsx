@@ -2,6 +2,7 @@ import { History } from 'lucide-react';
 import * as React from 'react';
 
 import { readError } from '@/app/errors';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import type { UIIdlePolicy, UILastStopEvent, UILastStopMarker, UISelection } from '@/types';
 
 import { LoadStopHistory } from '../../../wailsjs/go/main/App';
@@ -57,13 +58,7 @@ export function HistoryTab({
   }
   if (error) {
     return (
-      <div
-        role="alert"
-        aria-live="polite"
-        className="rounded-[var(--radius)] border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px] text-destructive"
-      >
-        Failed to load auto-stop history: {error}
-      </div>
+      <InlineAlert>Failed to load auto-stop history: {error}</InlineAlert>
     );
   }
   if (history.length === 0) {

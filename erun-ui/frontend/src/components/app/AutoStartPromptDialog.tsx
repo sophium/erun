@@ -12,6 +12,7 @@ import * as React from 'react';
 
 import { cancelAutoStartPrompt, confirmAutoStartPrompt } from '@/app/autoStartThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 // Asks once per remote environment whether opening it should auto-start its
 // stopped EC2 instance, and persists the answer so the prompt does not
@@ -62,12 +63,7 @@ export function AutoStartPromptDialog(): React.ReactElement {
           </DialogDescription>
         </DialogHeader>
         {prompt.error && (
-          <div
-            role="alert"
-            className="rounded-[var(--radius)] border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-[13px] leading-[1.4] text-destructive"
-          >
-            {prompt.error}
-          </div>
+          <InlineAlert>{prompt.error}</InlineAlert>
         )}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button
