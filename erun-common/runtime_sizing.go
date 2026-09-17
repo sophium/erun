@@ -25,13 +25,14 @@ const (
 	// between two reads.
 	//
 	// It is the warning threshold, not a figure of its own choosing, and that
-	// identity is the contract: the alarm and the advisory answer the same
-	// question about the same reading, so a peak that fires a memory warning
-	// always crosses the raise margin and can never leave an operator holding
-	// an alarm with nothing to do about it. Spelling the two thresholds
-	// separately is how they drifted apart -- the warning spoke at 85% while
-	// the recommendation stayed silent until 90%, and stayed silent entirely on
-	// an environment whose retained history was empty, which is the state a
+	// identity is the contract. The memory warning fires when
+	// 100*memory.current/limit reaches this figure, the raise fires when
+	// 100*peak/limit does, and peak is never below current (the live reading's
+	// own peak is the max of the two), so a reading that fires a memory warning
+	// always crosses the raise margin. Spelling the two thresholds separately
+	// is how they drifted apart -- the warning spoke at 85% while the
+	// recommendation stayed silent until 90%, and stayed silent entirely on an
+	// environment whose retained history was empty, which is the state a
 	// host-side `erun list` is always in.
 	runtimeSizingRaiseMemoryPercent = RuntimeUsageMemoryWarnPercent
 
@@ -306,7 +307,7 @@ func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling NamespaceRes
 		verdict.Reason = fmt.Sprintf("%d oom kill(s) at %s%s", oomKills, formatBytesAsMi(limit), bounded)
 		return verdict, true
 	}
-	if wholePercent(peak, limit) < runtimeSizingRaiseMemoryPercent {
+	if float64(peak) < float64(limit)*runtimeSizingRaiseMemoryPercent/100 {
 		return RuntimeSizingVerdict{}, false
 	}
 	suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(peak, runtimeSizingMemoryHeadroom), ceiling)
@@ -498,24 +499,11 @@ func formatThrottleRatio(throttled, periods int64) string {
 	return fmt.Sprintf("%.2f%%", float64(throttled)/float64(periods)*100)
 }
 
-// wholePercent is the ratio at the precision every threshold and every reason
-// string in this file states it: whole percent. Comparing raw byte ratios
-// instead would let a reading the code itself prints as "85%" fail an 85%
-// test, because an integer byte count truncated toward zero sits a fraction of
-// a byte under the percentage it rounds to -- which is exactly the boundary a
-// saturated environment is measured at.
-func wholePercent(part, whole int64) float64 {
-	if whole <= 0 {
-		return 0
-	}
-	return math.Round(100 * float64(part) / float64(whole))
-}
-
 func formatPercent(part, whole int64) string {
 	if whole <= 0 {
 		return "n/a"
 	}
-	return fmt.Sprintf("%.0f%%", wholePercent(part, whole))
+	return fmt.Sprintf("%.0f%%", float64(part)/float64(whole)*100)
 }
 
 // runtimeQuotaMilli converts RuntimeCPUUsage's cores-based quota into the

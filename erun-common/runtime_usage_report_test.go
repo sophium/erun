@@ -1,6 +1,8 @@
 package eruncommon
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -10,9 +12,37 @@ const (
 	testMemoryWarn = 6 * testGiB
 )
 
-// saturatingReading is the reading issue #2371 was filed on: an environment
-// sustained against its memory ceiling, no OOM kill recorded yet. It is the
-// case where the warning fired and the recommendation had nothing to say.
+// memoryReadingForPercent builds a memory reading the way the reader does, from
+// the raw counters, rather than assembling one field by field: a fixture that
+// states percentOfLimit itself can disagree with the bytes under it, and the
+// whole property here lives on the boundary those two meet at. current is the
+// smallest whole byte count that reaches percent, so the crossing itself is
+// what gets tested.
+func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, oomKills int64) RuntimeUsage {
+	bytesFor := func(percent float64) int64 {
+		return int64(math.Ceil(float64(limit) * percent / 100))
+	}
+	values := map[string]string{
+		"cgroup_type":    cgroupV2FSType,
+		"memory_max":     strconv.FormatInt(limit, 10),
+		"memory_peak":    strconv.FormatInt(bytesFor(peakPercent), 10),
+		"memory_current": strconv.FormatInt(bytesFor(currentPercent), 10),
+		"cpu_max":        "400000 100000",
+	}
+	if oomKills > 0 {
+		values["memory_oom_kill"] = strconv.FormatInt(oomKills, 10)
+	} else {
+		values["memory_oom_kill"] = "0"
+	}
+	usage := RuntimeUsage{Tenant: "erun", Environment: "code3", Memory: runtimeMemoryUsageFromValues(values)}
+	usage.Warnings = runtimeUsageWarnings(usage)
+	return usage
+}
+
+// saturatingReading is the reading this contract exists for: an environment
+// sustained against its memory ceiling, peak at the limit, no OOM kill recorded
+// yet. It is the case where the warning fired and the recommendation had
+// nothing to say.
 func saturatingReading(current, limit int64) RuntimeUsage {
 	return RuntimeUsage{
 		Tenant:      "erun",
@@ -50,36 +80,33 @@ func memoryVerdict(t *testing.T, recommendation RuntimeSizingRecommendation) Run
 func TestSaturationWarningAlwaysCarriesItsRecommendation(t *testing.T) {
 	limit := int64(6 * testGiB)
 
-	for _, percent := range []int64{85, 88, 90, 95, 97, 100} {
-		current := int64(float64(limit) * float64(percent) / 100)
-		usage := saturatingReading(current, limit)
-		usage.Memory.PeakBytes = current
-		// The reader reports this figure itself; the fixture states it rather
-		// than letting integer byte counts round a boundary case the wrong way.
-		usage.Memory.PercentOfLimit = float64(percent)
-
-		if len(runtimeUsageWarnings(usage)) == 0 {
-			t.Fatalf("%d%% of the limit fired no warning; the fixture is wrong, not the code", percent)
+	// The first figure is the threshold itself, crossed by the smallest byte
+	// count that crosses it. That is the boundary the alarm and the advisory
+	// have to agree on, and the one an integer byte count can fall off.
+	for _, percent := range []float64{RuntimeUsageMemoryWarnPercent, 86, 88, 90, 95, 100} {
+		usage := memoryReadingForPercent(percent, percent, limit, 0)
+		if len(usage.Warnings) == 0 {
+			t.Fatalf("%.0f%% of the limit fired no warning; the fixture is wrong, not the code", percent)
 		}
 
 		recommendation, ok := RecommendRuntimeSizing(RuntimeSizingParams{Live: &usage})
 		if !ok {
-			t.Fatalf("%d%% of the limit fired a warning but produced no recommendation at all", percent)
+			t.Fatalf("%.0f%% of the limit fired a warning but produced no recommendation at all", percent)
 		}
 		verdict := memoryVerdict(t, recommendation)
 		if verdict.Action != RuntimeSizingRaise {
-			t.Errorf("%d%% of the limit warned but the recommendation says %q (%s); a saturated environment must be told what would fix it",
+			t.Errorf("%.0f%% of the limit warned but the recommendation says %q (%s); a saturated environment must be told what would fix it",
 				percent, verdict.Action, verdict.Reason)
 		}
 		if strings.TrimSpace(verdict.Suggested) == "" {
-			t.Errorf("%d%% of the limit warned but the raise suggests no size", percent)
+			t.Errorf("%.0f%% of the limit warned but the raise suggests no size", percent)
 		}
 		if verdict.Confidence != RuntimeSizingConfidenceHigh {
-			t.Errorf("%d%% of the limit: a raise stands on evidence of harm and must be high confidence, got %q",
+			t.Errorf("%.0f%% of the limit: a raise stands on evidence of harm and must be high confidence, got %q",
 				percent, verdict.Confidence)
 		}
 		if strings.TrimSpace(verdict.Reason) == "" {
-			t.Errorf("%d%% of the limit: raise carries no reason", percent)
+			t.Errorf("%.0f%% of the limit: raise carries no reason", percent)
 		}
 	}
 }

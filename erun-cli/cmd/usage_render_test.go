@@ -13,7 +13,7 @@ const (
 	renderGiB = 1024 * renderMiB
 )
 
-// code3Reading is the reading issue #2371 was filed on: `erun/code3` pinned
+// code3Reading is the reading this renderer exists for: `erun/code3` pinned
 // against its 6144Mi limit, peak at the ceiling, no OOM kill recorded yet. The
 // warnings fire; before this change nothing followed them.
 func code3Reading() common.RuntimeUsage {
