@@ -31,6 +31,31 @@ func addOutputFlag(cmd *cobra.Command) {
 	cmd.PersistentFlags().String("output", "text", outputFlagUsage)
 }
 
+// jsonAliasFlagName is the per-command flag a few commands grew before the
+// global --output existed. It is kept working as an alias, but it resolves to
+// the same mode as --output json so both spellings reach the one shared
+// renderer (Context.WriteResult) instead of a second, command-local format.
+const jsonAliasFlagName = "json"
+
+// addJSONAliasFlag registers --json as a hidden alias for --output json.
+func addJSONAliasFlag(cmd *cobra.Command) {
+	cmd.Flags().Bool(jsonAliasFlagName, false, "Alias for --output json; prefer the global --output")
+	_ = cmd.Flags().MarkHidden(jsonAliasFlagName)
+}
+
+// jsonAliasSet reports whether the legacy per-command --json was passed.
+func jsonAliasSet(cmd *cobra.Command) bool {
+	set, err := cmd.Flags().GetBool(jsonAliasFlagName)
+	return err == nil && set
+}
+
+// jsonRequested is the single predicate a command consults to decide whether
+// to emit the structured result: the global flag or its alias, never a
+// command-local notion of "json".
+func jsonRequested(cmd *cobra.Command) bool {
+	return commandOutputMode(cmd) == common.OutputJSON
+}
+
 // commandOutputMode falls back to text on an unset or unparsable value so output
 // rendering never blocks; strict --output validation lives elsewhere.
 func commandOutputMode(cmd *cobra.Command) common.OutputMode {
@@ -42,7 +67,23 @@ func commandOutputMode(cmd *cobra.Command) common.OutputMode {
 	if err != nil {
 		return common.OutputText
 	}
+	// --json is the pre-global alias, so it selects JSON too and thereby the
+	// same renderer; it is not a rival output format.
+	if mode != common.OutputJSON && jsonAliasSet(cmd) {
+		return common.OutputJSON
+	}
 	return mode
+}
+
+// writeCommandResult is the one gate every command uses to choose between its
+// human report and the shared structured result: JSON mode calls WriteResult,
+// text mode calls the command's own renderer. Nothing else may write a JSON
+// document to Stdout, so the shape stays defined in one place.
+func writeCommandResult(ctx common.Context, result any, renderText func() error) error {
+	if ctx.Output == common.OutputJSON {
+		return ctx.WriteResult(result)
+	}
+	return renderText()
 }
 
 func isDryRunCommand(cmd *cobra.Command) bool {

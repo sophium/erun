@@ -84,7 +84,7 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 		return runListVersionDrift(ctx, result, versionDriftTenant, gateEnvironment, failOnDrift)
 	}
 
-	return writeListResult(ctx, result)
+	return writeCommandResult(ctx, result, func() error { return writeListResult(ctx, result) })
 }
 
 func runListVersionDrift(ctx common.Context, result common.ListResult, versionDriftTenant, gateEnvironment string, failOnDrift bool) error {

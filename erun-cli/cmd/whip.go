@@ -24,7 +24,6 @@ import (
 func newWhipCmd(store common.ListStore, resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
-	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "whip [TENANT] [ENVIRONMENT]",
 		Short: "Push every live orchestrator and environment agent to keep moving",
@@ -55,17 +54,17 @@ func newWhipCmd(store common.ListStore, resolveOpen OpenResolver) *cobra.Command
 			if len(args) > 1 {
 				environment = args[1]
 			}
-			return runWhipCommand(cmd.Context(), commandContext(cmd), store, resolveOpen, tenant, environment, jsonOutput)
+			return runWhipCommand(cmd.Context(), commandContext(cmd), store, resolveOpen, tenant, environment)
 		},
 	}
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Whip only this tenant's environment (requires --environment)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Whip only this environment (requires --tenant)")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	addJSONAliasFlag(cmd)
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runWhipCommand(ctx context.Context, commandCtx common.Context, store common.ListStore, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runWhipCommand(ctx context.Context, commandCtx common.Context, store common.ListStore, resolveOpen OpenResolver, tenant, environment string) error {
 	scoped := strings.TrimSpace(tenant) != "" || strings.TrimSpace(environment) != ""
 	targets, err := resolveWhipEnvironmentTargets(store, tenant, environment)
 	if err != nil {
@@ -80,7 +79,7 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 	// JSON stays a single document on stdout, so it is written at the end.
 	emit := func(result common.WhipResult) error {
 		report.Results = append(report.Results, result)
-		if jsonOutput {
+		if commandCtx.Output == common.OutputJSON {
 			return nil
 		}
 		return writeWhipResult(commandCtx, result, commandCtx.DryRun)
@@ -106,12 +105,11 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 		}
 	}
 
-	if jsonOutput {
-		encoder := json.NewEncoder(commandCtx.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(report)
-	}
-	return nil
+	// The rows were already written as each target resolved (see emit above),
+	// so text mode has nothing left to print here; only JSON needs the single
+	// document, and writing it through the shared helper is what makes the
+	// global --output json (and its --json alias) work on this command.
+	return writeCommandResult(commandCtx, report, func() error { return nil })
 }
 
 type whipEnvironmentTarget struct {

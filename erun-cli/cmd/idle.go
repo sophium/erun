@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -14,7 +13,6 @@ import (
 func newIdleCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
-	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "idle [TENANT] [ENVIRONMENT]",
 		Short: "Show environment idle stop status",
@@ -24,7 +22,7 @@ func newIdleCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command
 			"one the desktop's activity view shows. An edge that cannot be reached is\n" +
 			"reported as such rather than as an idle environment — safe to act on before a\n" +
 			"stop, a redeploy, or a delete.",
-		Example:       "  erun idle --tenant team --environment dev\n  erun idle team dev --json",
+		Example:       "  erun idle --tenant team --environment dev\n  erun idle team dev --output json",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -35,17 +33,17 @@ func newIdleCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command
 			if len(args) > 1 {
 				environment = args[1]
 			}
-			return runIdleCommand(cmd.Context(), commandContext(cmd), store, resolveOpen, tenant, environment, jsonOutput)
+			return runIdleCommand(cmd.Context(), commandContext(cmd), store, resolveOpen, tenant, environment)
 		},
 	}
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Tenant")
 	cmd.Flags().StringVar(&environment, "environment", "", "Environment")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	addJSONAliasFlag(cmd)
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runIdleCommand(ctx context.Context, commandCtx common.Context, store common.OpenStore, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runIdleCommand(ctx context.Context, commandCtx common.Context, store common.OpenStore, resolveOpen OpenResolver, tenant, environment string) error {
 	status, resolved, err := resolveEnvironmentIdleStatus(ctx, commandCtx, store, resolveOpen, tenant, environment)
 	if err != nil {
 		return err
@@ -53,12 +51,10 @@ func runIdleCommand(ctx context.Context, commandCtx common.Context, store common
 	if !resolved {
 		return nil
 	}
-	if jsonOutput {
-		encoder := json.NewEncoder(commandCtx.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(status)
-	}
-	return writeIdleStatus(commandCtx, status)
+	// The shared result writer is the only JSON shape for this command: the
+	// previous rival --json document is gone, and --json itself is now an
+	// alias for --output json (see addJSONAliasFlag).
+	return writeCommandResult(commandCtx, status, func() error { return writeIdleStatus(commandCtx, status) })
 }
 
 // resolveEnvironmentIdleStatus reads the local store only when this process is
