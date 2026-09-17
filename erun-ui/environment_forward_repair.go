@@ -74,7 +74,7 @@ func (a *App) reconcileForwardHealth(selection uiSelection, port int, portIsBoun
 	// bound port whose edge answers counts as recovery.
 	answers := portIsBound && a.mcpEdgeAnswers(port)
 	if answers {
-		a.retireOrchestratorEdgeOutage(selection)
+		a.noteOrchestratorEdgeAnswering(selection)
 	}
 	health := eruncommon.ClassifyPortForward(established, portIsBound, answers)
 	if !health.Interrupted() {

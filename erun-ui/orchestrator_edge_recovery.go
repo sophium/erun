@@ -47,15 +47,22 @@ func (a *App) recordOrchestratorEdgeOutage(orchestratorID, label string) {
 	}
 }
 
-// retireOrchestratorEdgeOutage logs the exit transition for an edge the sweep
-// has just seen answer, and forgets it.
+// noteOrchestratorEdgeAnswering logs the exit transition for an edge the sweep
+// has just seen answer through a bound forward, and forgets it.
+//
+// The sweep establishes that fact in two places, and both call this: the
+// ordinary one, where the edge answered a real MCP request and the sweep has a
+// status to show for it, and the narrower one in reconcileForwardHealth, where
+// the port is bound and the edge replied to the reachability probe but the idle
+// question failed. A reply is a live tunnel in both cases, which is the
+// question an outage entry leaves open.
 //
 // A no-op when nothing was recorded for this environment, which is the common
 // case: most edges never fail their wire-time probe, and an edge that fails it
 // and stays broken keeps its entry until it answers, so it gets no exit line.
 // That is the property — every entry eventually pairs with an exit once the
 // edge is healthy, and a still-broken edge has none.
-func (a *App) retireOrchestratorEdgeOutage(selection uiSelection) {
+func (a *App) noteOrchestratorEdgeAnswering(selection uiSelection) {
 	key := selectionKey(normalizeSelection(selection))
 	a.mu.Lock()
 	episode, ok := a.edgeOutages[key]
