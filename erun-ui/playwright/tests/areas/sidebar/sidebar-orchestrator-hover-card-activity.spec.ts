@@ -677,6 +677,64 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       },
     );
   });
+
+  // A session this desktop did not launch -- started in a terminal, or left by
+  // a previous desktop instance -- is read and displayed like any other, but
+  // the pacer decides only for sessions the desktop holds, so its nudge count
+  // simply never moves. Nothing in that number separates it from an
+  // orchestrator erun has just checked and found nothing to do about, which is
+  // the whole of the defect.
+  //
+  // The read model behind this flag is covered by
+  // TestListOrchestratorsMarksAConfiguredOrchestratorItCannotPace in
+  // erun-ui/orchestrator_pacing_test.go (it needs a real report file and a real
+  // config, which the headless harness deliberately does not stage for this
+  // card); this spec locks the rendered surface down to the same JSON contract.
+  test('an orchestrator this desktop cannot pace says so, instead of reading as freshly checked', async ({
+    app,
+    page,
+  }) => {
+    await stubOrchestratorList(
+      page,
+      snapshot({
+        // Stopped here while its own hooks keep reporting from wherever it is
+        // really running: the state that used to be indistinguishable from a
+        // session that needed nothing.
+        status: 'stopped',
+        sessionId: 0,
+        pacingUnreachable: true,
+      }),
+    );
+    await app.reboot();
+
+    await withOrchestratorCard(page, app, async (dialog) => {
+      await expect(dialog).toBeVisible();
+      const nudgeRow = dialog.locator('dd').filter({ hasText: 'Not paced from this desktop' });
+      // Both halves of the distinction, on one row: this desktop has not nudged
+      // it, and cannot.
+      await expect(nudgeRow).toContainText('Not nudged');
+      await expect(nudgeRow).toContainText('erun has no session for it here');
+      // Scoped to this desktop on purpose -- the session may be healthy and
+      // paced by something else, so the line must not read as a claim about
+      // the session itself.
+      await captureHoverCard(dialog, 'test-results/1383-visual/unpaced-from-this-desktop.png');
+    });
+  });
+
+  // The inverse, which matters just as much: an orchestrator this desktop does
+  // hold a session for is paced here, and must never be told otherwise.
+  test('an orchestrator this desktop owns is never told it is not paced here', async ({
+    app,
+    page,
+  }) => {
+    await stubOrchestratorList(page, snapshot({ pacingUnreachable: false }));
+    await app.reboot();
+
+    await withOrchestratorCard(page, app, async (dialog) => {
+      await expect(dialog).toBeVisible();
+      await expect(dialog).not.toContainText('Not paced from this desktop');
+    });
+  });
 });
 
 interface EnvActivityEvent {
