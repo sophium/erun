@@ -11,13 +11,12 @@ Usage:
 
 Examples:
   erun idle --tenant team --environment dev
-  erun idle team dev --json
+  erun idle team dev --output json
 
 Flags:
       --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Environment
   -h, --help                 help for idle
-      --json                 Write JSON output
       --tenant string        Tenant
 
 Global Flags:
