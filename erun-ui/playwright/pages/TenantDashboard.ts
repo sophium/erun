@@ -69,6 +69,23 @@ export class TenantDashboard {
     return this.activePanel().getByText('No audit events', { exact: true });
   }
 
+  // API log tab. A failed read renders InlineAlert (role="alert") while a log
+  // with nothing in it renders the panel's empty state, so the two are asserted
+  // separately: this panel deliberately distinguishes "the read failed" from
+  // "nothing logged yet", and a spec has to be able to hold it to that.
+  apiLogAlert(): Locator {
+    return this.activePanel().getByRole('alert');
+  }
+
+  apiLogEmptyState(): Locator {
+    return this.activePanel().getByText('No API log returned', { exact: true });
+  }
+
+  // The log body is a <pre> of raw container output with no role of its own.
+  apiLogBody(): Locator {
+    return this.activePanel().locator('pre');
+  }
+
   gatesTable(): Locator {
     return this.activePanel().getByRole('table');
   }
