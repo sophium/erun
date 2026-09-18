@@ -130,13 +130,38 @@ func stopStaleSSHDPortForward(ctx common.Context, matches bool, state sshdPortFo
 
 func startSSHDPortForward(ctx common.Context, statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
 	logPath := sshdPortForwardLogPath(statePath)
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	var process *os.Process
+	if err := retryTransientPortForwardStart(func() error {
+		p, err := launchSSHDPortForwardProcess(ctx, logPath, args)
+		if err != nil {
+			return err
+		}
+		process = p
+		return nil
+	}); err != nil {
 		return common.SSHConnectionInfo{}, err
+	}
+	expectedState.LogPath = logPath
+	expectedState.ProcessID = process.Pid
+	if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
+		return common.SSHConnectionInfo{}, err
+	}
+
+	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
+		releaseUnreachablePortForward(ctx, "sshd", process, info.Port, err)
+		return common.SSHConnectionInfo{}, err
+	}
+	return info, nil
+}
+
+func launchSSHDPortForwardProcess(ctx common.Context, logPath string, args []string) (*os.Process, error) {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return nil, err
 	}
 	rotatePortForwardLogIfOversized(ctx, "sshd", logPath)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return common.SSHConnectionInfo{}, err
+		return nil, err
 	}
 	defer func() {
 		_ = logFile.Close()
@@ -147,20 +172,9 @@ func startSSHDPortForward(ctx common.Context, statePath string, expectedState ss
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
-		return common.SSHConnectionInfo{}, err
+		return nil, err
 	}
-
-	expectedState.LogPath = logPath
-	expectedState.ProcessID = cmd.Process.Pid
-	if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
-		return common.SSHConnectionInfo{}, err
-	}
-
-	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
-		releaseUnreachablePortForward(ctx, "sshd", cmd.Process, info.Port, err)
-		return common.SSHConnectionInfo{}, err
-	}
-	return info, nil
+	return cmd.Process, nil
 }
 
 func waitForSSHDPortForward(port int, logPath string) error {

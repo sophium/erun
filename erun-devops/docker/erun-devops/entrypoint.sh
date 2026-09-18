@@ -680,6 +680,15 @@ const statePath = process.env.CLAUDE_STATE_PATH;
 const configureBedrock = process.env.ERUN_CLAUDE_CONFIGURE_BEDROCK === '1';
 const region = (process.env.ERUN_CLAUDE_REGION || '').trim();
 
+// A gateway routes Claude the way Bedrock does -- through a provider the
+// environment's config selects, rather than a claude.ai login -- so the same
+// settings relay applies to both. The chart emits the base URL only when a
+// gateway is configured, which makes the pod's own environment the signal and
+// needs no separate flag. Only non-secret routing values are relayed: the
+// credential stays in the pod environment via its Secret reference.
+const configureGateway = (process.env.ANTHROPIC_BASE_URL || '').trim() !== '';
+const configureRelay = configureBedrock || configureGateway;
+
 function readJSON(path) {
   try {
     const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));
@@ -743,7 +752,7 @@ function listValue(value) {
   return result;
 }
 
-if (configureBedrock) {
+if (configureRelay) {
   const settings = readJSON(settingsPath);
   settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
   settings.env = ensureObject(settings, 'env');
@@ -764,6 +773,9 @@ if (configureBedrock) {
     'ANTHROPIC_BEDROCK_BASE_URL',
     'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
     'ANTHROPIC_BEDROCK_SERVICE_TIER',
+    // A gateway serves model ids Claude Code cannot size on its own, so the
+    // window the chart declares for the catalog's default travels with it.
+    'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
     'CLAUDE_CODE_SKIP_MANTLE_AUTH',
     'DISABLE_PROMPT_CACHING',
     'ENABLE_PROMPT_CACHING_1H',

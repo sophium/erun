@@ -53,7 +53,7 @@ import (
 //
 // What this file does NOT check, so a green run is never read as "the help
 // is all true": flag *prose* (what a flag's usage string says it does or
-// defaults to), whether help is *useful* (root AGENTS.md's CLI Help quality
+// defaults to), whether help is *useful* (erun-cli/AGENTS.md's CLI Help quality
 // bar is still a human review job), and any vocabulary other than gate-run
 // status. "Every registered flag appears in help" is not a separate check
 // here either -- Cobra generates the flags section of `--help` directly from

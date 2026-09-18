@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -536,10 +537,9 @@ func TestReclaimAgentJobWorkCloneNeverReportsFinishedAheadOfSettledReclaim(t *te
 
 // TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed covers the
 // other direction of the same contract: a clone the git-state check judges
-// safe to delete, but whose actual removal fails (permission denied on a
-// nested entry here), must be reported kept with a reason -- never reclaimed
-// -- because a caller that trusted "reclaimed" would believe the disk is
-// clear when it is not.
+// safe to delete, but whose actual removal fails, must be reported kept with
+// a reason -- never reclaimed -- because a caller that trusted "reclaimed"
+// would believe the disk is clear when it is not.
 func TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed(t *testing.T) {
 	isolateActivityCache(t)
 	_, root := withFakeWorkHome(t)
@@ -549,26 +549,15 @@ func TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed(t *testing.T
 	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
 
-	// An untracked, gitignored subdirectory: it does not make the working
-	// tree look dirty (so the decision stays "safe to reclaim"), but its own
-	// permissions block os.RemoveAll from unlinking the file inside it.
-	locked := filepath.Join(repo, "locked")
-	if err := os.MkdirAll(locked, 0o755); err != nil {
-		t.Fatalf("mkdir locked dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(locked, "file.txt"), []byte("data\n"), 0o644); err != nil {
-		t.Fatalf("write locked file: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("locked/\n"), 0o644); err != nil {
-		t.Fatalf("write gitignore: %v", err)
-	}
-	runGitForTest(t, repo, "add", ".gitignore")
-	runGitForTest(t, repo, "commit", "-q", "-m", "ignore locked dir")
-	runGitForTest(t, repo, "push", "-q", "origin", "feature/lane")
-	if err := os.Chmod(locked, 0o555); err != nil {
-		t.Fatalf("chmod locked dir read-only: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	// Inject the removal failure rather than fixturing it with a chmod'd
+	// file: os.RemoveAll succeeds against any permission a process's own uid
+	// can bypass, including root's, so a filesystem-permission fixture proves
+	// nothing when the suite runs as root -- as it does inside the
+	// erun-devops test-stage build that gates this module's own tests.
+	simulatedErr := errors.New("simulated removal failure: locked file")
+	originalRemoveAll := workCloneRemoveAll
+	workCloneRemoveAll = func(string) error { return simulatedErr }
+	t.Cleanup(func() { workCloneRemoveAll = originalRemoveAll })
 
 	const tenant, environment, id = "reclaim-contract", "removal-failure", "job"
 	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{

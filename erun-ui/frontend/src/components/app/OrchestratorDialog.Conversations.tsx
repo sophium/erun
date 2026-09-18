@@ -7,6 +7,7 @@ import {
   attachOrchestratorConversation,
   detachOrchestratorConversation,
 } from '@/app/orchestratorThunks';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import {
   formatTranscriptSize,
   omittedSummary,
@@ -84,11 +85,7 @@ export function OrchestratorConversationsSection({
           {listing.notice ? ` ${listing.notice}` : ''}
         </p>
       ) : null}
-      {failure ? (
-        <p role="alert" className="text-sm break-words text-destructive">
-          {failure}
-        </p>
-      ) : null}
+      {failure ? <InlineAlert>{failure}</InlineAlert> : null}
       <ConversationList orchestratorId={orchestratorId} listing={listing} failed={failure !== ''} />
       {omitted ? <p className="text-xs text-muted-foreground">{omitted}</p> : null}
     </div>
