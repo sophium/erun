@@ -173,7 +173,7 @@ func whipOneEnvironment(ctx context.Context, commandCtx common.Context, resolveO
 		Reason:    common.WhipReasonNotAlive,
 	}
 
-	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, scopedOpenParams(tenant, environment))
+	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, scopedOpenParams(commandCtx.Command, tenant, environment))
 	if err != nil {
 		notAlive.Error = err.Error()
 		return notAlive

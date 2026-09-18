@@ -32,7 +32,7 @@ func newMCPProxyCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPProxyCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment))
+			return runMCPProxyCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
 	addDryRunFlag(cmd)

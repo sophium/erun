@@ -49,7 +49,7 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUsageCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), intervalSeconds)
+			return runUsageCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), intervalSeconds)
 		},
 	}
 	addDryRunFlag(cmd)

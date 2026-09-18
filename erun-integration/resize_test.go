@@ -31,6 +31,19 @@ func TestResize(t *testing.T) {
 		golden.Equal(t, "resize/help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_missing_tenant", func(t *testing.T) {
+		// resize resolves its target through the same shared resolver as
+		// usage/observe/deploy. With no tenant configured the failure must name
+		// resize and its own --tenant recovery, not another command's; resize's
+		// --tenant scopes resolution, so offering it is a real next step.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"resize", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit with no tenant configured, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "resize/dry_run_missing_tenant", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_explicit_values", func(t *testing.T) {
 		// --dry-run must trace the resolved plan (current -> target per
 		// resource) and the note on what moves/doesn't, without writing the

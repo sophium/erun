@@ -367,7 +367,6 @@ var issueReferenceBaseline = map[string]int{
 	"erun-common/mcp_tools_test.go":                       1,
 	"erun-common/observe.go":                              1,
 	"erun-common/observe_drift.go":                        1,
-	"erun-common/open.go":                                 1,
 	"erun-common/operator_settable_config.go":             1,
 	"erun-common/orchestrator_env_role_test.go":           1,
 	"erun-common/platform_client.go":                      2,

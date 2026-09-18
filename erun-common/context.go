@@ -21,10 +21,25 @@ type Context struct {
 	// policy, so it rides the context rather than the docker command target,
 	// which flows into the env-agnostic resolvers where policy must not leak.
 	// Zero means "resolve it" (see resolveBuildJobs); one is strictly sequential.
-	BuildJobs                  int
-	Stdin                      io.Reader
-	Stdout                     io.Writer
-	Stderr                     io.Writer
+	BuildJobs int
+	Stdin     io.Reader
+	Stdout    io.Writer
+	Stderr    io.Writer
+	// Command is the operator-facing invocation of the command that is running
+	// (for example "erun usage", "erun outputs list"), set once at command
+	// entry. Resolution failures name the command's own recovery from it, so a
+	// failure names the operation the operator actually ran rather than a fixed
+	// one. Empty for callers that are not a CLI command (the desktop app, MCP),
+	// which get the command-free wording instead of a borrowed name.
+	Command string
+	// CommandScopesTenantByFlag reports whether Command takes a --tenant flag
+	// that scopes resolution (rather than, say, `list`'s --tenant, which selects
+	// version-drift reporting). It gates whether the recovery may name that flag
+	// as the fix: offering a flag that does not do what the operator wants is the
+	// same defect as naming the wrong command, so a command with no such flag
+	// (build and push take the tenant positionally) gets a recovery that names
+	// the command without asserting a flag it does not have.
+	CommandScopesTenantByFlag  bool
 	KubernetesContextPreflight KubernetesContextPreflightFunc
 	// RegistryForwards owns any kubectl port-forwards a cluster registry needs.
 	// It is set once at command entry so the forward's lifetime spans registry

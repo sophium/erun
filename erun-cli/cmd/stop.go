@@ -43,7 +43,7 @@ func newStopCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 // context, and starting a machine in order to stop a pod on it is the opposite
 // of what the operator asked for.
 func runStopCommand(ctx common.Context, args []string, overrides common.OpenParams, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error) error {
-	params, err := resolveOpenParams(args, overrides)
+	params, err := resolveOpenParams(ctx.Command, args, overrides)
 	if err != nil {
 		return err
 	}

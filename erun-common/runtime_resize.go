@@ -423,10 +423,12 @@ func applyRuntimeResize(ctx Context, deps RuntimeResizeDependencies, tenant, env
 
 func RunRuntimeResize(ctx Context, deps RuntimeResizeDependencies, params RuntimeResizeParams) (RuntimeResizeResult, error) {
 	target, err := ResolveOpen(deps.Store, OpenParams{
-		Tenant:                strings.TrimSpace(params.Tenant),
-		Environment:           strings.TrimSpace(params.Environment),
-		UseDefaultTenant:      strings.TrimSpace(params.Tenant) == "",
-		UseDefaultEnvironment: strings.TrimSpace(params.Environment) == "",
+		Tenant:                    strings.TrimSpace(params.Tenant),
+		Environment:               strings.TrimSpace(params.Environment),
+		UseDefaultTenant:          strings.TrimSpace(params.Tenant) == "",
+		UseDefaultEnvironment:     strings.TrimSpace(params.Environment) == "",
+		Command:                   ctx.Command,
+		CommandScopesTenantByFlag: ctx.CommandScopesTenantByFlag,
 	})
 	if err != nil {
 		return RuntimeResizeResult{}, err

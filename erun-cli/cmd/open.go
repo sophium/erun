@@ -62,7 +62,7 @@ func resolveOpenTarget(
 	if vscode && intellij {
 		return common.OpenResult{}, false, fmt.Errorf("--vscode and --intellij cannot be used together")
 	}
-	params, err := resolveOpenParams(args, target)
+	params, err := resolveOpenParams(ctx.Command, args, target)
 	if err != nil {
 		return common.OpenResult{}, false, err
 	}
@@ -190,17 +190,19 @@ type openOptions struct {
 	Reconnect        bool
 }
 
-func resolveOpenArgs(args []string, resolveOpen func(common.OpenParams) (common.OpenResult, error)) (common.OpenParams, common.OpenResult, error) {
+func resolveOpenArgs(command string, args []string, resolveOpen func(common.OpenParams) (common.OpenResult, error)) (common.OpenParams, common.OpenResult, error) {
 	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
 		return common.OpenParams{}, common.OpenResult{}, err
 	}
 
+	params.Command = command
+	params.CommandScopesTenantByFlag = true
 	result, err := resolveOpen(params)
 	return params, result, err
 }
 
-func resolveOpenParams(args []string, overrides common.OpenParams) (common.OpenParams, error) {
+func resolveOpenParams(command string, args []string, overrides common.OpenParams) (common.OpenParams, error) {
 	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
 		return common.OpenParams{}, err
@@ -227,6 +229,8 @@ func resolveOpenParams(args []string, overrides common.OpenParams) (common.OpenP
 		params.UseDefaultEnvironment = false
 	}
 
+	params.Command = command
+	params.CommandScopesTenantByFlag = true
 	return params, nil
 }
 
@@ -241,7 +245,7 @@ func runInitBeforeOpenForParams(ctx common.Context, params common.OpenParams, ru
 }
 
 func resolveOpenWithInitStop(ctx common.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error) (common.OpenResult, bool, error) {
-	_, result, err := resolveOpenArgs(args, resolveOpen)
+	_, result, err := resolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}
@@ -254,7 +258,7 @@ func resolveOpenWithInitStop(ctx common.Context, args []string, shouldRunInit fu
 }
 
 func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error) (common.OpenResult, bool, error) {
-	params, result, err := resolveOpenArgs(args, resolveOpen)
+	params, result, err := resolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}

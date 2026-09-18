@@ -38,7 +38,7 @@ func newInputsUploadCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInputsUploadCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), args[0], args[1], common.RunRemoteCommandWithStdin)
+			return runInputsUploadCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), args[0], args[1], common.RunRemoteCommandWithStdin)
 		},
 	}
 	addDryRunFlag(cmd)
