@@ -42,6 +42,9 @@ var tenantDashboardAPIFixtures = map[string]string{
 	"/v1/contexts":                `[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`,
 	"/v1/environments":            `[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`,
 	"/v1/invite-requests":         `[]`,
+	// A restricted panel is answered with the grant that would lift it, so a
+	// real platform's role list is part of these fixtures too.
+	"/v1/roles": `[{"roleId":"role-audit","name":"Auditor","permissions":[{"apiMethod":"GET","apiPath":"/v1/audit-events"}]},{"roleId":"role-reviewer","name":"Reviewer","permissions":[{"apiMethodPattern":"^GET$","apiPathPattern":"^/v1/reviews/[^/]+$"}]}]`,
 }
 
 // tenantDashboardAPIResponse is tenantDashboardAPI's fixture body for every

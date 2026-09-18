@@ -3,6 +3,14 @@
 // the same pattern). Nothing here changes shape; types.ts re-exports the
 // whole module so every existing `from './types'` import keeps working.
 
+// UIAccessRemedy is the copyable hand-over a capability denial offers: the
+// grant command already resolved for this caller, and the name of the role it
+// grants so the request can be made in the platform's own vocabulary.
+export interface UIAccessRemedy {
+  command?: string;
+  roleName?: string;
+}
+
 export interface UITenantDashboardInput {
   tenant: string;
   environment?: string;
@@ -49,6 +57,11 @@ export interface UITenantDashboard {
   platformUrl?: string;
   platformIssuer?: string;
   platformSubject?: string;
+  // accessRemedies keys a restricted route to the copyable grant that would
+  // give the caller the access they were refused, so a restricted tab hands
+  // over the request rather than only naming what is missing. Absent when no
+  // role covers the access or the tenant's roles could not be read.
+  accessRemedies?: Record<string, UIAccessRemedy>;
   user?: UITenantDashboardUser;
   // users is the Users tab's roster: the tenant's users, from GET /v1/users.
   // Distinct from user above, which is the caller's own identity — the tab

@@ -518,6 +518,23 @@ func TestPlatform(t *testing.T) {
 		}
 	})
 
+	// The post-enrollment grant: the one an operator reaches for after a user
+	// already exists, since re-enrolling an enrolled identity is a no-op that
+	// leaves its roles untouched. Both ids have to reach the request.
+	t.Run("user_grant_role_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"platform", "user", "grant-role",
+			"--user-id", "user-1", "--role-id", "role-reviewer", "--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/user_grant_role_dry_run", normalize.Apply(result.Combined))
+	})
+
 	t.Run("user_enroll_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")

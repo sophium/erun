@@ -688,4 +688,66 @@ test.describe('tenant dashboard — review build profile (#2274)', () => {
       removeEnvironment(SEED_TENANT, environment);
     }
   });
+  // The denial a caller refused a review actually sees. It has to carry the
+  // grant, filled in with the caller's own user id: an assertion that it
+  // merely names the missing read passes on the version that stopped short.
+  test('a review the caller may not open hands over the grant that lifts it', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-restricted-remedy');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [REVIEW],
+            panels: [
+              { tab: 'users' },
+              { tab: 'reviews' },
+              { tab: 'queue' },
+              { tab: 'builds' },
+              { tab: 'audit' },
+            ],
+          });
+          return;
+        }
+        if (body.method === 'LoadReviewDetail') {
+          await fulfillJSON(route, {
+            reviewId: REVIEW.reviewId,
+            restricted: 'GET /v1/reviews/{review_id}',
+            accessRemedies: {
+              'GET /v1/reviews/{review_id}': {
+                command: 'erun platform user grant-role --user-id user-1 --role-id role-reviewer',
+                roleName: 'Reviewer',
+              },
+            },
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+      await app.tenantDashboard.openReview('Add widget');
+      await app.reviewDetailDialog.waitForOpen();
+
+      await expect(app.reviewDetailDialog.locator()).toContainText(
+        'You do not have access to this review',
+      );
+      await expect(app.reviewDetailDialog.locator()).toContainText(
+        'erun platform user grant-role --user-id user-1 --role-id role-reviewer',
+      );
+      await expect(app.reviewDetailDialog.locator()).toContainText('Reviewer');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
 });

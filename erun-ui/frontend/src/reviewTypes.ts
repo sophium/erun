@@ -2,7 +2,7 @@
 // 500-line max-lines cap (see diffTypes.ts for the same pattern). Nothing here
 // changes shape; types.ts re-exports the whole module so every existing
 // `from './types'` import keeps working.
-import type { UITenantDashboardBuild, UITenantDashboardReview } from './types';
+import type { UIAccessRemedy, UITenantDashboardBuild, UITenantDashboardReview } from './types';
 
 export interface UIReviewDetailInput {
   tenant: string;
@@ -18,6 +18,11 @@ export interface UIReviewDetail {
   // capability set exists to gate the reads below honestly.
   apiError?: string;
   restricted?: string;
+  // accessRemedies keys each restricted route above to the copyable grant that
+  // would give the caller the access they were refused, so a denial hands over
+  // the request rather than only naming what is missing. Absent when no role
+  // covers the access or the tenant's roles could not be read.
+  accessRemedies?: Record<string, UIAccessRemedy>;
   error?: string;
   review?: UITenantDashboardReview;
   comments?: UIReviewComment[];
@@ -178,4 +183,15 @@ export interface UIPushWorkingTreeBranchResult {
   branch: string;
   remote: string;
   commit: string;
+}
+
+// UIReviewCreateCapability is TenantReviewCreateCapability's answer as the
+// frontend consumes it. accessRemedy is the copyable grant that would give the
+// caller the write they were refused — absent when no role covers it — so the
+// dialog's notice hands over the request rather than only naming the
+// capability.
+export interface UIReviewCreateCapability {
+  canCreate: boolean;
+  restricted?: string;
+  accessRemedy?: UIAccessRemedy;
 }

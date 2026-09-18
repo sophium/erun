@@ -365,9 +365,14 @@ type uiTenantDashboard struct {
 	// PlatformIssuer/PlatformSubject prefill an enrollment request from the
 	// identity already in hand, once a bearer minted successfully — set even
 	// when the subsequent identity read itself failed (not-enrolled).
-	PlatformIssuer  string                 `json:"platformIssuer,omitempty"`
-	PlatformSubject string                 `json:"platformSubject,omitempty"`
-	User            *uiTenantDashboardUser `json:"user,omitempty"`
+	PlatformIssuer  string `json:"platformIssuer,omitempty"`
+	PlatformSubject string `json:"platformSubject,omitempty"`
+	// AccessRemedies keys each panel's restricted route to the copyable grant
+	// that would give the caller the access they were refused, so a restricted
+	// tab hands over the request instead of only naming what is missing.
+	// Absent when no role covers the access or the roles could not be read.
+	AccessRemedies map[string]eruncommon.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
+	User           *uiTenantDashboardUser                     `json:"user,omitempty"`
 	// Users is the Users tab's roster: the tenant's users, read from
 	// GET /v1/users. Distinct from User above, which is the caller's own
 	// identity from whoami — the tab lists the tenant, not the caller, and an
@@ -676,16 +681,21 @@ type uiReviewDetail struct {
 	ReviewID string `json:"reviewId"`
 	// APIError is a whole-detail failure: identity could not be read, so no
 	// capability set exists to gate the reads below honestly.
-	APIError           string                   `json:"apiError,omitempty"`
-	Restricted         string                   `json:"restricted,omitempty"`
-	Error              string                   `json:"error,omitempty"`
-	Review             *uiTenantDashboardReview `json:"review,omitempty"`
-	Comments           []uiReviewComment        `json:"comments,omitempty"`
-	CommentsRestricted string                   `json:"commentsRestricted,omitempty"`
-	CommentsError      string                   `json:"commentsError,omitempty"`
-	Builds             []uiTenantDashboardBuild `json:"builds,omitempty"`
-	BuildsRestricted   string                   `json:"buildsRestricted,omitempty"`
-	BuildsError        string                   `json:"buildsError,omitempty"`
+	APIError   string `json:"apiError,omitempty"`
+	Restricted string `json:"restricted,omitempty"`
+	// AccessRemedies keys each restricted route above to the copyable grant
+	// that would give the caller the access they were refused, so a denial
+	// hands over the request instead of only naming what is missing. Absent
+	// when no role covers the access or the roles could not be read.
+	AccessRemedies     map[string]eruncommon.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
+	Error              string                                     `json:"error,omitempty"`
+	Review             *uiTenantDashboardReview                   `json:"review,omitempty"`
+	Comments           []uiReviewComment                          `json:"comments,omitempty"`
+	CommentsRestricted string                                     `json:"commentsRestricted,omitempty"`
+	CommentsError      string                                     `json:"commentsError,omitempty"`
+	Builds             []uiTenantDashboardBuild                   `json:"builds,omitempty"`
+	BuildsRestricted   string                                     `json:"buildsRestricted,omitempty"`
+	BuildsError        string                                     `json:"buildsError,omitempty"`
 	// QueuePosition is 1-based; 0 means the review is not in its target
 	// branch's merge queue right now.
 	QueuePosition int `json:"queuePosition,omitempty"`

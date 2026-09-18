@@ -100,8 +100,13 @@ export class TenantDashboard {
     );
   }
 
+  // The note is the whole status region, not just the sentence that opens it:
+  // the grant it carries renders as a sibling of that sentence, so a locator
+  // on the sentence alone sees a note that never names its remedy.
   restrictedAccessNote(): Locator {
-    return this.page.getByText('Some panels are hidden because you do not have access to');
+    return this.page
+      .getByText('Some panels are hidden because you do not have access to')
+      .locator('..');
   }
 
   async clickRefresh(): Promise<void> {
