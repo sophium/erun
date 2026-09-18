@@ -78,7 +78,7 @@ func TestGate(t *testing.T) {
 		golden.Equal(t, "gate/show_dry_run", normalize.Apply(result.Combined))
 	})
 
-	// erun#2052: /v1/gate-runs merged and closed its issue while every
+	// /v1/gate-runs merged and closed its issue while every
 	// deployed control plane still predated it, and every real caller of
 	// `erun gate list` saw only an opaque "http 404: 404 page not found" with
 	// nothing distinguishing "the plane's router has never heard of this

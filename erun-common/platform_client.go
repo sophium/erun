@@ -854,7 +854,7 @@ func (e *PlatformStatusError) Error() string {
 // deployed plane" apart from an application-level 404 (a well-formed request
 // for an id that doesn't exist, which always carries erun-backend-api's own
 // JSON error shape instead). A route can merge, get unit-tested, and close
-// its issue while the deployed plane still predates it (erun#2052); every
+// its issue while the deployed plane still predates it; every
 // ordinary typed call funnels through do()/platformStatusError, so without
 // this the operator sees only an opaque "http 404: 404 page not found" with
 // nothing distinguishing a genuine not-found from a plane running old code.
