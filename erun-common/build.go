@@ -27,6 +27,17 @@ func ResolveCurrentDockerBuildSpecs(ctx Context, store DockerStore, findProjectR
 	return builds, nil
 }
 
+// ErrBuildPlanEmpty reports a build that resolved no work at all: no docker
+// images, no linux package builds, no project build script, no charts, no
+// release. Nothing about such a plan is a pass -- running it builds nothing and
+// tests nothing -- so resolution refuses it here rather than letting the
+// caller's exit code read as a green gate.
+var ErrBuildPlanEmpty = errors.New("build resolved nothing to build")
+
+func newEmptyBuildPlanError(reason string) error {
+	return fmt.Errorf("%w: %s", ErrBuildPlanEmpty, reason)
+}
+
 func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
@@ -64,7 +75,34 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 	if releaseSpec != nil {
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
-	return finalizeBuildExecution(ctx, execution, target.NoIncremental)
+	return finalizeResolvedBuildExecution(ctx, execution, target.NoIncremental)
+}
+
+// finalizeResolvedBuildExecution applies incremental promotion and chart
+// resolution, then refuses an execution that plans no work at all: no release,
+// no script, no linux builds, no images, no pushes, no charts. Running it would
+// build nothing and test nothing, so its exit code must not read as a pass.
+func finalizeResolvedBuildExecution(ctx Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
+	execution, err := finalizeBuildExecution(ctx, execution, noIncremental)
+	if err != nil {
+		return BuildExecutionSpec{}, err
+	}
+	if !buildExecutionPlansWork(execution) {
+		return BuildExecutionSpec{}, newEmptyBuildPlanError("the image plan resolved to no images and no component charts")
+	}
+	return execution, nil
+}
+
+// buildExecutionPlansWork reports whether an execution has anything to run. An
+// execution that plans none of these does no work and tests nothing, so its
+// success would be indistinguishable from a real pass.
+func buildExecutionPlansWork(execution BuildExecutionSpec) bool {
+	return execution.release != nil ||
+		execution.script != nil ||
+		len(execution.linuxBuilds) > 0 ||
+		len(execution.dockerBuilds) > 0 ||
+		len(execution.dockerPushes) > 0 ||
+		len(execution.componentCharts) > 0
 }
 
 // finalizeBuildExecution applies incremental promotion, then resolves the
@@ -203,7 +241,11 @@ func resolveLinuxBuildsForExecution(findProjectRoot ProjectFinderFunc, resolveBu
 
 func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, target DockerCommandTarget, hadLinuxBuilds bool) (BuildExecutionSpec, error) {
 	if hadLinuxBuilds {
-		return BuildExecutionSpec{skippedLinux: true}, nil
+		// The project does have linux package builds, but this host cannot run
+		// them and nothing else resolved either. Exiting zero here is the same
+		// false green as an empty image plan: the host was asked to build and
+		// built nothing. Name the cause instead of reporting success.
+		return BuildExecutionSpec{}, newEmptyBuildPlanError("this project's linux package builds need a Linux host with dpkg-deb, and no docker images resolved")
 	}
 	script, err := resolveNestedProjectBuildScript(findProjectRoot, target)
 	if err != nil {
