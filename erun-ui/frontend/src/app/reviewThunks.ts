@@ -164,7 +164,7 @@ async function loadOneReviewDiff(
     // tick on itself -- not against a manual click arriving mid-tick. RTK
     // Query's condition() bails a forced refetch out from under a pending
     // request for the same query before ever looking at forceRefetch (see
-    // the getInitialState fix), so without this wait the click would
+    // erun#1953's getInitialState fix), so without this wait the click would
     // silently inherit the in-flight tick's result instead of its own.
     await dispatch(reviewApi.util.getRunningQueryThunk('getDiff', diffArgs));
     const diff = await dispatch(

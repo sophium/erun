@@ -401,7 +401,7 @@ export const loadTenantDashboard =
     // to catch a dropped one later, so two of them landing close together
     // must not race. RTK Query's condition() bails a forced refetch out from
     // under a pending request for the same query before ever looking at
-    // forceRefetch (see the getInitialState fix), so without this
+    // forceRefetch (see erun#1953's getInitialState fix), so without this
     // wait the later caller would silently inherit the earlier request's
     // pre-mutation data instead of its own fresh read.
     await dispatch(tenantApi.util.getRunningQueryThunk('getTenantDashboard', input));
