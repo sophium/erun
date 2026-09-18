@@ -136,13 +136,13 @@ type releaseArtifacts struct {
 }
 
 func ResolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
-	return resolveReleaseSpec(ctx, findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitBranchExists, params)
+	return resolveReleaseSpec(ctx, findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitBranchExists, GitCommandRunner, params)
 }
 
-func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, params ReleaseParams) (ReleaseSpec, error) {
-	findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists = normalizeReleaseDependencies(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists)
+func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit GitCommandRunnerFunc, params ReleaseParams) (ReleaseSpec, error) {
+	findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit = normalizeReleaseDependencies(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit)
 
-	inputs, err := resolveReleaseInputs(ctx, findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, params)
+	inputs, err := resolveReleaseInputs(ctx, findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit, params)
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
@@ -479,6 +479,113 @@ func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit Gi
 	return false, false
 }
 
+// releaseStampCommitPrefix is the subject newReleaseStage's stamp commit
+// always carries ("[skip ci] release <version>"), so a retry can recognize
+// its own leftover stamp commits sitting at HEAD.
+const releaseStampCommitPrefix = "[skip ci] release "
+
+// releaseStampWalkLimit bounds how many leading stamp commits are ever
+// walked past when looking for a leftover. A release stamps at most once per
+// attempt, so a real chain this long could only be repeated failed retries,
+// never legitimate history; the cap keeps a pathological repository from
+// turning this into an unbounded run of fetches.
+const releaseStampWalkLimit = 20
+
+// resolveReleaseVersionCommit is the commit whose short sha names a
+// candidate/prerelease version (resolveReleaseVersion). Root AGENTS.md
+// "Release Rules" calls the pre-publish stages "recoverable by re-running",
+// but a release that fails after its "release" stage stamp leaves that stamp
+// sitting, unpushed, at HEAD — naming the retry's version after the stamp
+// rather than the change actually being released stacks another stamp on
+// the next attempt (each one resolving yet another wrong version) and
+// invalidates the build fingerprint cache, since the stamp changes tracked
+// files. Skipping past a leading run of such stamps is safe only
+// while each one is unpushed and origin's branch history has never
+// incorporated it — the same leftover-vs-real-collision boundary
+// releaseTagMismatchError already draws for the release tag.
+func resolveReleaseVersionCommit(ctx Context, projectRoot, branch string, resolveCommit GitValueResolverFunc, runGit GitCommandRunnerFunc) (string, error) {
+	base, found, err := findLeftoverReleaseStampBase(ctx, projectRoot, branch, runGit)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return resolveCommit(ctx, projectRoot)
+	}
+	ctx.Trace("release: HEAD is a leftover, unpushed release stamp from an earlier attempt; resolving the version from " + base + " instead")
+	return gitShortCommitOf(ctx, projectRoot, base)
+}
+
+// findLeftoverReleaseStampBase walks HEAD's parents past a leading run of
+// the release stage's own stamp commits, stopping at the first commit that
+// either is not a stamp or is already reachable from origin/branch — a real,
+// previously published stamp, not an interrupted attempt's leftover. found
+// is false when HEAD carries no such leftover, meaning version resolution
+// should keep using HEAD as before.
+func findLeftoverReleaseStampBase(ctx Context, projectRoot, branch string, runGit GitCommandRunnerFunc) (string, bool, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", false, nil
+	}
+
+	base, ok, err := gitResolvedRef(ctx, projectRoot, "HEAD")
+	if err != nil || !ok {
+		return "", false, err
+	}
+
+	found := false
+	for i := 0; i < releaseStampWalkLimit; i++ {
+		leftover, err := isLeftoverReleaseStampCommit(projectRoot, branch, base, runGit)
+		if err != nil {
+			return "", false, err
+		}
+		if !leftover {
+			break
+		}
+		parent, ok, err := gitResolvedRef(ctx, projectRoot, base+"^")
+		if err != nil {
+			return "", false, err
+		}
+		if !ok {
+			break
+		}
+		base = parent
+		found = true
+	}
+	if !found {
+		return "", false, nil
+	}
+	return base, true, nil
+}
+
+// isLeftoverReleaseStampCommit reports whether commit is one of the release
+// stage's own stamp commits (by subject) that is also unpushed and not yet
+// incorporated by origin/branch — the two conditions that together make it a
+// safe-to-skip-past leftover from an interrupted attempt rather than real,
+// published history.
+func isLeftoverReleaseStampCommit(projectRoot, branch, commit string, runGit GitCommandRunnerFunc) (bool, error) {
+	subject, err := gitCommitSubject(projectRoot, commit)
+	if err != nil {
+		return false, err
+	}
+	if !strings.HasPrefix(subject, releaseStampCommitPrefix) {
+		return false, nil
+	}
+	reachable, known := releaseBaseBranchIncorporates(projectRoot, branch, commit, runGit)
+	return known && !reachable, nil
+}
+
+func gitShortCommitOf(ctx Context, projectRoot, commit string) (string, error) {
+	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--short", commit)
+	output, err := Command("git", "-C", projectRoot, "rev-parse", "--short", commit).Output()
+	if err != nil {
+		if stderr := stderrFromExitError(err); stderr != "" {
+			return "", fmt.Errorf("%w: %s", err, stderr)
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 func deleteExistingReleaseTag(ctx Context, projectRoot, tag string, runGit GitCommandRunnerFunc) error {
 	localExists, err := gitTagExists(ctx, projectRoot, tag)
 	if err != nil {
@@ -712,7 +819,7 @@ func appendOrReplaceEnv(env []string, key, value string) []string {
 	return append(env, prefix+value)
 }
 
-func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc) (ProjectFinderFunc, ProjectConfigLoaderFunc, GitValueResolverFunc, GitValueResolverFunc, GitBranchCheckerFunc) {
+func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit GitCommandRunnerFunc) (ProjectFinderFunc, ProjectConfigLoaderFunc, GitValueResolverFunc, GitValueResolverFunc, GitBranchCheckerFunc, GitCommandRunnerFunc) {
 	if findProjectRoot == nil {
 		findProjectRoot = FindProjectRoot
 	}
@@ -728,10 +835,13 @@ func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProject
 	if branchExists == nil {
 		branchExists = GitBranchExists
 	}
-	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists
+	if runGit == nil {
+		runGit = GitCommandRunner
+	}
+	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit
 }
 
-func resolveReleaseInputs(ctx Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, params ReleaseParams) (releaseInputs, error) {
+func resolveReleaseInputs(ctx Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit GitCommandRunnerFunc, params ReleaseParams) (releaseInputs, error) {
 	ctx.Trace("release: resolving project root")
 	projectRoot, err := resolveReleaseProjectRoot(findProjectRoot, params)
 	if err != nil {
@@ -757,7 +867,7 @@ func resolveReleaseInputs(ctx Context, findProjectRoot ProjectFinderFunc, loadPr
 	ctx.Trace(fmt.Sprintf("release: main branch = %s, develop branch = %s", releaseConfig.MainBranch, releaseConfig.DevelopBranch))
 
 	ctx.Trace("release: resolving git branch and commit")
-	branch, commit, err := resolveReleaseGitState(ctx, projectRoot, resolveBranch, resolveCommit)
+	branch, commit, err := resolveReleaseGitState(ctx, projectRoot, resolveBranch, resolveCommit, runGit)
 	if err != nil {
 		ctx.Trace("release: git state resolution failed: " + err.Error())
 		return releaseInputs{}, err
@@ -803,12 +913,12 @@ func loadReleaseConfig(projectRoot string, loadProjectConfig ProjectConfigLoader
 	return projectConfig.NormalizedReleaseConfig(), nil
 }
 
-func resolveReleaseGitState(ctx Context, projectRoot string, resolveBranch, resolveCommit GitValueResolverFunc) (string, string, error) {
+func resolveReleaseGitState(ctx Context, projectRoot string, resolveBranch, resolveCommit GitValueResolverFunc, runGit GitCommandRunnerFunc) (string, string, error) {
 	branch, err := resolveBranch(ctx, projectRoot)
 	if err != nil {
 		return "", "", err
 	}
-	commit, err := resolveCommit(ctx, projectRoot)
+	commit, err := resolveReleaseVersionCommit(ctx, projectRoot, branch, resolveCommit, runGit)
 	if err != nil {
 		return "", "", err
 	}

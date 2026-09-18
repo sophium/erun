@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, mock, test } from 'node:test';
+
+import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import { scheduleTransientDismiss } from './transientDismissTimer';
 
@@ -40,11 +41,11 @@ function fire(type: 'blur' | 'focus'): void {
 beforeEach(() => {
   focused = true;
   installWindow();
-  mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
 });
 
 afterEach(() => {
-  mock.timers.reset();
+  vi.useRealTimers();
 });
 
 test('runs onDismiss once the duration elapses while the window stays focused', () => {
@@ -52,9 +53,9 @@ test('runs onDismiss once the duration elapses while the window stays focused', 
   scheduleTransientDismiss(3200, () => {
     dismissed += 1;
   });
-  mock.timers.tick(3199);
+  vi.advanceTimersByTime(3199);
   assert.equal(dismissed, 0, 'must not fire before its own duration');
-  mock.timers.tick(1);
+  vi.advanceTimersByTime(1);
   assert.equal(dismissed, 1);
 });
 
@@ -65,18 +66,18 @@ test('pauses while the window is blurred and only resumes counting down after fo
   scheduleTransientDismiss(3200, () => {
     dismissed += 1;
   });
-  mock.timers.tick(1000);
+  vi.advanceTimersByTime(1000);
   focused = false;
   fire('blur');
   // Far past the original duration -- none of this time may count.
-  mock.timers.tick(60_000);
+  vi.advanceTimersByTime(60_000);
   assert.equal(dismissed, 0, 'time spent blurred must never count toward the countdown');
 
   focused = true;
   fire('focus');
-  mock.timers.tick(2199);
+  vi.advanceTimersByTime(2199);
   assert.equal(dismissed, 0, 'only the remaining 2200ms from before the blur should be left');
-  mock.timers.tick(1);
+  vi.advanceTimersByTime(1);
   assert.equal(dismissed, 1);
 });
 
@@ -86,14 +87,14 @@ test('never starts the countdown at all if the window begins unfocused', () => {
   scheduleTransientDismiss(3200, () => {
     dismissed += 1;
   });
-  mock.timers.tick(60_000);
+  vi.advanceTimersByTime(60_000);
   assert.equal(dismissed, 0, 'an unfocused window must never start the clock');
 
   focused = true;
   fire('focus');
-  mock.timers.tick(3199);
+  vi.advanceTimersByTime(3199);
   assert.equal(dismissed, 0);
-  mock.timers.tick(1);
+  vi.advanceTimersByTime(1);
   assert.equal(dismissed, 1);
 });
 
@@ -102,15 +103,15 @@ test('the returned cancel function stops it, even mid-countdown, and blur/focus 
   const cancel = scheduleTransientDismiss(3200, () => {
     dismissed += 1;
   });
-  mock.timers.tick(1000);
+  vi.advanceTimersByTime(1000);
   cancel();
-  mock.timers.tick(60_000);
+  vi.advanceTimersByTime(60_000);
   assert.equal(dismissed, 0, 'a cancelled countdown must never fire');
 
   focused = false;
   fire('blur');
   focused = true;
   fire('focus');
-  mock.timers.tick(60_000);
+  vi.advanceTimersByTime(60_000);
   assert.equal(dismissed, 0, 'a cancelled countdown must not be revived by focus churn');
 });

@@ -56,6 +56,8 @@ var defaultRules = []Replacement{
 	// to re-supply. Scenarios that must prove the concrete path reached the
 	// message assert it against the un-normalized capture.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktopid\.pub`), "<DESKTOP_IDENTITY_PUBLIC>"},
+	// Desktop restart markers share the macOS config path's embedded space.
+	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktop-control\.json`), "<TMP>"},
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]+`), "<TMP>"},
 	// A separate rule for temp paths whose separators are percent-escaped,
 	// which the plain-path rule above cannot match.
@@ -129,6 +131,9 @@ var defaultRules = []Replacement{
 	// a diff's `index <blob>..<blob>` — content-derived and stable — survives.
 	{regexp.MustCompile(`\[([^\s\]]+) [0-9a-f]{7,40}\]`), "[$1 <SHORTSHA>]"},
 	{regexp.MustCompile(`(?m)^(\s+)[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>..<SHORTSHA>"},
+	// A fast-forward merge prints its own short shas on an unindented
+	// "Updating <old>..<new>" line, so the indented range rule above never sees it.
+	{regexp.MustCompile(`(?m)^Updating [0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "Updating <SHORTSHA>..<SHORTSHA>"},
 	// A forced ref update (`git push --force`/`--force-with-lease`, as the
 	// release tag's repoint-after-rebase does) prints a three-dot range, not
 	// the fast-forward push status line's two-dot range above, and
@@ -154,6 +159,10 @@ var defaultRules = []Replacement{
 	// executable file not found in %PATH%` — so collapse either whole message to
 	// one token (the path is already <TMP>) for an OS-invariant golden.
 	{regexp.MustCompile(`(?:fork/exec|exec:)[^\n]*<TMP>[^\n]*`), "<EXEC_ERROR>"},
+	// The build CPU-cap cgroup path is keyed by the running machine's own
+	// hostname (buildContainerCPUCapCgroupParent), so it differs per host and
+	// per test run rather than being a stable value a golden can pin.
+	{regexp.MustCompile(`/docker/erun-build-cpu-cap-\S+`), "/docker/erun-build-cpu-cap-<POD>"},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 
@@ -225,10 +234,12 @@ func Apply(s string, extra ...Replacement) string {
 // timingLinePattern matches an already-redacted step-timing row: leading
 // indentation (always an even number of spaces — renderStepTimingRows in
 // erun-common/timing.go indents each depth by two), then a label, then the
-// "[<ELAPSED>]" token the bracket-duration rule above just produced. The
-// bracket shape is deliberately unique to the timing table (see that rule's
-// own comment), so any line matching this is a timing row and nothing else.
-var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\]$`)
+// "[<ELAPSED>]" token the bracket-duration rule above just produced, then an
+// optional status suffix (a failed row records "— exit status N" after its
+// duration). The bracket shape is deliberately unique to the timing table (see
+// that rule's own comment), so any line matching this is a timing row and
+// nothing else.
+var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\](?: .*)?$`)
 
 // canonicalizeStepTimingOrder reorders each step-timing block's sibling rows
 // by name instead of leaving them in the real wall-clock order they were
@@ -245,31 +256,34 @@ var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\]$`)
 // Canonicalizing every level to name order here removes that remaining
 // variance the same way the synthetic-row drop above removes the variance in
 // whether a gap row appears at all.
+//
+// Sibling order is duration order at *every* level, the shallowest included:
+// a run of same-depth rows are siblings that happen to tie, not independent
+// trees, so sorting only a recognized root's descendants would leave exactly
+// the closest-run steps — the ones most likely to cross the noise floor and
+// swap — in wall-clock order.
 func canonicalizeStepTimingOrder(s string) string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); {
-		rootDepth, ok := timingLineDepth(lines[i])
-		if !ok {
+		if _, ok := timingLineDepth(lines[i]); !ok {
 			out = append(out, lines[i])
 			i++
 			continue
 		}
-		// A tree's root is a timing line whose own depth nothing before it in
-		// this block undercuts; every subsequent line strictly deeper than it
-		// is one of its descendants, and the first line that is not (a
-		// shallower or equal-depth timing line, reportStepTiming's own
-		// "step timing (ordered by duration):" header included, or plain
-		// non-timing text) starts the next tree or leaves the block entirely.
-		end := i + 1
+		// A maximal contiguous run of timing rows is one forest. The rows of a
+		// step-timing tree are emitted as the tree is walked, and a multi-line
+		// step failure interleaves its own message between two rows of the same
+		// tree, so a run ends at a line that is not a timing row at all — not
+		// at a shallower one, which is a sibling or a parent.
+		end := i
 		for end < len(lines) {
-			d, ok := timingLineDepth(lines[end])
-			if !ok || d <= rootDepth {
+			if _, ok := timingLineDepth(lines[end]); !ok {
 				break
 			}
 			end++
 		}
-		out = append(out, sortedTimingBlock(lines[i:end])...)
+		out = append(out, sortedTimingForest(lines[i:end])...)
 		i = end
 	}
 	return strings.Join(out, "\n")
@@ -297,28 +311,39 @@ type timingNode struct {
 	children []*timingNode
 }
 
-// sortedTimingBlock parses one root row plus its full, contiguous subtree
-// (lines[0] is the root; every later line is some descendant of it) and
-// returns it re-serialized with every level's children sorted by name.
-func sortedTimingBlock(lines []string) []string {
+// sortedTimingForest parses one contiguous run of timing rows into the forest
+// their depths describe — a row deeper than the one above it is that row's
+// child, and a row at the same or shallower depth closes that subtree and
+// starts a sibling — and returns it re-serialized with every level, the roots
+// included, sorted by name.
+func sortedTimingForest(lines []string) []string {
 	if len(lines) == 0 {
 		return nil
 	}
-	root := &timingNode{line: lines[0]}
-	stack := []*timingNode{root}
-	for _, line := range lines[1:] {
+	var roots []*timingNode
+	var stack []*timingNode
+	for _, line := range lines {
 		depth, _ := timingLineDepth(line)
 		node := &timingNode{line: line, depth: depth}
-		for len(stack) > 1 && stack[len(stack)-1].depth >= depth {
+		for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
 			stack = stack[:len(stack)-1]
 		}
-		parent := stack[len(stack)-1]
-		parent.children = append(parent.children, node)
+		if len(stack) == 0 {
+			roots = append(roots, node)
+		} else {
+			parent := stack[len(stack)-1]
+			parent.children = append(parent.children, node)
+		}
 		stack = append(stack, node)
 	}
-	sortTimingNodeChildren(root)
+	sort.SliceStable(roots, func(i, j int) bool {
+		return strings.TrimSpace(roots[i].line) < strings.TrimSpace(roots[j].line)
+	})
 	out := make([]string, 0, len(lines))
-	appendTimingNode(&out, root)
+	for _, root := range roots {
+		sortTimingNodeChildren(root)
+		appendTimingNode(&out, root)
+	}
 	return out
 }
 

@@ -5,6 +5,7 @@ import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
 import type { UIEnvironmentNodeSnapshot } from './uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
+import type { UIHostGatewayDefaults, UIOpenRouterConfig } from './uiOpenRouterTypes';
 import type {
   UIErunVersion,
   UIRuntimeImageLineMismatch,
@@ -300,6 +301,13 @@ export interface UIERunConfig {
   defaultTenant: string;
   cloudProviders?: UICloudProviderStatus[];
   cloudContexts?: UICloudContextStatus[];
+  // The erun-level gateway catalog. It lives in root config because it is one
+  // list the operator maintains and every environment selects from it.
+  openRouter?: UIOpenRouterConfig;
+  // The gateway this machine's own Claude Code already routes through, offered
+  // as the catalog's starting point. It is read from the operator's user
+  // settings and is never stored until they save the catalog.
+  openRouterDefaults?: UIHostGatewayDefaults;
 }
 
 export interface UICloudProviderStatus {
@@ -491,6 +499,10 @@ export interface UIEnvironmentConfig {
 export interface UIEnvironmentClaudeConfig {
   useMantle?: boolean;
   useBedrock?: boolean;
+  // useGateway tri-states this environment's use of the erun-level gateway
+  // catalog: undefined inherits the operator's decision, true and false
+  // override it for this environment alone.
+  useGateway?: boolean;
   models?: string[];
   maxOutputTokens?: number;
   effort?: string;
@@ -508,6 +520,9 @@ export interface UIEnvironmentClaudeDefaults {
   maxTokens: number;
   effort: string;
   effortLevels: string[];
+  // gatewayConfigured reports whether the erun-level catalog names a gateway.
+  // Without one there is nothing for the per-environment controls to override.
+  gatewayConfigured: boolean;
 }
 
 export interface UIRuntimePodConfig {

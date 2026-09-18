@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Runs a list of independent shell commands with bounded concurrency,
 # buffering each command's combined stdout/stderr so concurrent output never
 # interleaves, then emits every buffered block in input order under its own
@@ -23,20 +23,31 @@
 # A second mode answers a different question -- not "run these jobs bounded
 # by a width", but "what should that width even be":
 #
-#   Usage: parallel-gate.sh width <job-count> <mem-per-job-mib>
+#   Usage: parallel-gate.sh width <job-count> <mem-per-job-mib> [reserved-mem-mib]
 #
 # Prints one integer: min(job-count, CPUs available to this environment,
-# memory available / mem-per-job-mib). Kept in this script rather than a
-# separate one because #1702 found two independent parallelism sizers in this
-# repo (this file's Makefile callers, and erun-ui/playwright/playwright.config.ts)
-# that disagreed about which resource is the ceiling; this is now the one
-# shell-side answer, read the same cgroup files with the same fallbacks the
-# TypeScript side already used for its memory ceiling. The TypeScript side
-# doesn't need a matching CPU rewrite: it already gets the CPU quota (not the
-# affinity mask) for free from Node's os.availableParallelism(), which is
-# quota-aware via libuv -- see that file's own comment. `nproc` is not
-# quota-aware (it reads sched_getaffinity), so the shell side has to read the
-# quota itself.
+# (memory available - reserved-mem-mib) / mem-per-job-mib). Kept in this
+# script rather than a separate one because this repo had two independent
+# parallelism sizers (this file's Makefile callers, and
+# erun-ui/playwright/playwright.config.ts) that disagreed about which
+# resource is the ceiling; this is now the one shell-side answer, read the
+# same cgroup files with the same fallbacks the TypeScript side already used
+# for its memory ceiling. The TypeScript side doesn't need a matching CPU
+# rewrite: it already gets the CPU quota (not the affinity mask) for free
+# from Node's os.availableParallelism(), which is quota-aware via libuv --
+# see that file's own comment. `nproc` is not quota-aware (it reads
+# sched_getaffinity), so the shell side has to read the quota itself.
+#
+# reserved-mem-mib (optional, defaults to 0) subtracts a flat amount from the
+# read memory ceiling before dividing by mem-per-job-mib. It exists for a
+# caller sizing a batch of jobs that runs concurrently with something *else*
+# also consuming memory on the same environment (the Makefile's `lint`,
+# `test-frontend`, and `helm-chart-tests` targets each reserve room for one
+# another this way, since `check-gate`'s own `-j` fan-out can run any of the
+# three at the same time and each already sizes its own width against the
+# *entire* memory ceiling) -- without it, a batch's own width would assume
+# the full ceiling is available to it alone and risk oversubscribing memory
+# once the concurrently-running job is counted.
 #
 # CPU: cgroup v2 cpu.max (quota/period), then cgroup v1
 # cpu.cfs_quota_us/cpu.cfs_period_us, then `nproc`, then a constant. A quota
@@ -68,72 +79,98 @@
 # Dockerfile threads the sidecar's own configured limit in through this
 # variable instead so the width calculation still has a real number to divide
 # by (see DIND_MEMORY_LIMIT_MIB in that Dockerfile).
+#
+# PARALLEL_GATE_CPU_LIMIT is the same override for the CPU term, for the
+# identical reason: cpu.max/cpu.cfs_quota_us also read unlimited in that
+# sibling cgroup, so cpu_quota() falls through to `nproc`, which reports the
+# host node's real core count (sched_getaffinity, not the sidecar's cgroup
+# quota) -- oversized for an environment that does not own that many cores
+# exclusively (erun#2081). The erun-devops Dockerfile threads the sidecar's
+# own configured CPU limit in through this variable the same way it does for
+# memory (see DIND_CPU_LIMIT in that Dockerfile).
+#
+# A third mode answers a narrower question than either of the above -- not a
+# job-fan-out width, just the resolved CPU quota itself:
+#
+#   Usage: parallel-gate.sh cpu-quota
+#
+# Prints cpu_quota()'s result on its own, so a caller that needs the raw
+# number (the Makefile's LINT_TIMEOUT scaling, see erun#2266) can reuse the
+# exact same override chain -- PARALLEL_GATE_CPU_LIMIT, then cgroup v2, then
+# cgroup v1, then `nproc`, then the constant fallback -- instead of
+# re-implementing cgroup reads a second time.
+cgroup_root="${PARALLEL_GATE_CGROUP_ROOT:-/sys/fs/cgroup}"
+# JS's Number.MAX_SAFE_INTEGER (2^53 - 1). cgroup v1's unlimited sentinel
+# for memory.limit_in_bytes is ~2^63, far above this, and cannot itself be
+# represented exactly as a JS number -- so this is the largest limit value
+# playwright.config.ts's parallel memory check can treat as real, and this
+# script matches it rather than trusting a v1 host's literal sentinel value.
+max_safe_int=9007199254740991
+
+is_positive_int() {
+	case "$1" in
+	'' | *[!0-9]*) return 1 ;;
+	*) [ "$1" -gt 0 ] ;;
+	esac
+}
+
+cpu_quota() {
+	if is_positive_int "${PARALLEL_GATE_CPU_LIMIT:-}"; then
+		echo "$PARALLEL_GATE_CPU_LIMIT"
+		return
+	fi
+	if [ -r "$cgroup_root/cpu.max" ]; then
+		read -r quota period <"$cgroup_root/cpu.max" 2>/dev/null || quota=""
+		if [ "${quota:-}" != "max" ] && is_positive_int "${quota:-}" && is_positive_int "${period:-}"; then
+			echo $((quota / period))
+			return
+		fi
+	fi
+	if [ -r "$cgroup_root/cpu/cpu.cfs_quota_us" ] && [ -r "$cgroup_root/cpu/cpu.cfs_period_us" ]; then
+		quota=$(cat "$cgroup_root/cpu/cpu.cfs_quota_us" 2>/dev/null) || quota=""
+		period=$(cat "$cgroup_root/cpu/cpu.cfs_period_us" 2>/dev/null) || period=""
+		if is_positive_int "$quota" && is_positive_int "$period"; then
+			echo $((quota / period))
+			return
+		fi
+	fi
+	n=$(nproc 2>/dev/null) || n=""
+	if is_positive_int "$n"; then
+		echo "$n"
+		return
+	fi
+	echo 4
+}
+
+# mem_limit_mib prints the memory ceiling in MiB, or nothing when
+# unlimited/unreadable -- an empty result means "drop the memory term",
+# not "zero memory available".
+mem_limit_mib() {
+	if is_positive_int "${PARALLEL_GATE_MEMORY_LIMIT_MIB:-}"; then
+		echo "$PARALLEL_GATE_MEMORY_LIMIT_MIB"
+		return
+	fi
+	if [ -r "$cgroup_root/memory.max" ]; then
+		val=$(cat "$cgroup_root/memory.max" 2>/dev/null) || val=""
+		if [ "$val" != "max" ] && is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
+			echo $((val / 1024 / 1024))
+			return
+		fi
+	fi
+	if [ -r "$cgroup_root/memory/memory.limit_in_bytes" ]; then
+		val=$(cat "$cgroup_root/memory/memory.limit_in_bytes" 2>/dev/null) || val=""
+		if is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
+			echo $((val / 1024 / 1024))
+			return
+		fi
+	fi
+}
+
 if [ "${1:-}" = "width" ]; then
 	set -eu
 	job_count=$2
 	mem_per_job_mib=$3
-	cgroup_root="${PARALLEL_GATE_CGROUP_ROOT:-/sys/fs/cgroup}"
-	# JS's Number.MAX_SAFE_INTEGER (2^53 - 1). cgroup v1's unlimited sentinel
-	# for memory.limit_in_bytes is ~2^63, far above this, and cannot itself be
-	# represented exactly as a JS number -- so this is the largest limit value
-	# playwright.config.ts's parallel memory check can treat as real, and this
-	# script matches it rather than trusting a v1 host's literal sentinel value.
-	max_safe_int=9007199254740991
-
-	is_positive_int() {
-		case "$1" in
-		'' | *[!0-9]*) return 1 ;;
-		*) [ "$1" -gt 0 ] ;;
-		esac
-	}
-
-	cpu_quota() {
-		if [ -r "$cgroup_root/cpu.max" ]; then
-			read -r quota period <"$cgroup_root/cpu.max" 2>/dev/null || quota=""
-			if [ "${quota:-}" != "max" ] && is_positive_int "${quota:-}" && is_positive_int "${period:-}"; then
-				echo $((quota / period))
-				return
-			fi
-		fi
-		if [ -r "$cgroup_root/cpu/cpu.cfs_quota_us" ] && [ -r "$cgroup_root/cpu/cpu.cfs_period_us" ]; then
-			quota=$(cat "$cgroup_root/cpu/cpu.cfs_quota_us" 2>/dev/null) || quota=""
-			period=$(cat "$cgroup_root/cpu/cpu.cfs_period_us" 2>/dev/null) || period=""
-			if is_positive_int "$quota" && is_positive_int "$period"; then
-				echo $((quota / period))
-				return
-			fi
-		fi
-		n=$(nproc 2>/dev/null) || n=""
-		if is_positive_int "$n"; then
-			echo "$n"
-			return
-		fi
-		echo 4
-	}
-
-	# mem_limit_mib prints the memory ceiling in MiB, or nothing when
-	# unlimited/unreadable -- an empty result means "drop the memory term",
-	# not "zero memory available".
-	mem_limit_mib() {
-		if is_positive_int "${PARALLEL_GATE_MEMORY_LIMIT_MIB:-}"; then
-			echo "$PARALLEL_GATE_MEMORY_LIMIT_MIB"
-			return
-		fi
-		if [ -r "$cgroup_root/memory.max" ]; then
-			val=$(cat "$cgroup_root/memory.max" 2>/dev/null) || val=""
-			if [ "$val" != "max" ] && is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
-				echo $((val / 1024 / 1024))
-				return
-			fi
-		fi
-		if [ -r "$cgroup_root/memory/memory.limit_in_bytes" ]; then
-			val=$(cat "$cgroup_root/memory/memory.limit_in_bytes" 2>/dev/null) || val=""
-			if is_positive_int "$val" && [ "$val" -lt "$max_safe_int" ]; then
-				echo $((val / 1024 / 1024))
-				return
-			fi
-		fi
-	}
+	reserved_mem_mib=${4:-0}
 
 	width=$job_count
 	cpu=$(cpu_quota)
@@ -142,6 +179,13 @@ if [ "${1:-}" = "width" ]; then
 	fi
 	mem_mib=$(mem_limit_mib)
 	if [ -n "$mem_mib" ] && is_positive_int "$mem_per_job_mib"; then
+		if is_positive_int "$reserved_mem_mib"; then
+			if [ "$mem_mib" -gt "$reserved_mem_mib" ]; then
+				mem_mib=$((mem_mib - reserved_mem_mib))
+			else
+				mem_mib=0
+			fi
+		fi
 		by_mem=$((mem_mib / mem_per_job_mib))
 		[ "$by_mem" -ge 1 ] || by_mem=1
 		if [ "$by_mem" -lt "$width" ]; then
@@ -149,6 +193,12 @@ if [ "${1:-}" = "width" ]; then
 		fi
 	fi
 	echo "$width"
+	exit 0
+fi
+
+if [ "${1:-}" = "cpu-quota" ]; then
+	set -eu
+	cpu_quota
 	exit 0
 fi
 
@@ -168,16 +218,30 @@ while IFS="$tab" read -r short_name marker cmd; do
 	printf '%s' "$short_name" > "$tmp/$i.name"
 	printf '%s' "$marker" > "$tmp/$i.marker"
 	(
+		job_started=$(date +%s)
 		if sh -c "$cmd" > "$tmp/$i.out" 2>&1; then
 			echo 0 > "$tmp/$i.rc"
 		else
 			echo 1 > "$tmp/$i.rc"
 		fi
+		echo $(( $(date +%s) - job_started )) > "$tmp/$i.secs"
 	) &
 	running=$((running + 1))
+	# Start the next job as soon as ANY running job finishes, rather than
+	# draining the whole batch first. With a batch drain a single long job
+	# holds every free slot idle until it finishes, so a list whose durations
+	# are uneven costs the sum of each batch's slowest member instead of
+	# max(job). Measured on test-frontend's fifteen workspace gates at width
+	# 12: the 64s frontend test suite sat in the first batch and a ~40s
+	# console test suite was stranded behind it in the second, for ~104s where
+	# a queue would have cost ~64s.
+	#
+	# `wait -n` is why this script is bash rather than sh; POSIX wait has no
+	# way to block on "whichever finishes first". bash is present wherever
+	# this runs (the erun-devops image and developer machines alike).
 	if [ "$running" -ge "$max_parallel" ]; then
-		wait
-		running=0
+		wait -n
+		running=$((running - 1))
 	fi
 done
 wait
@@ -186,7 +250,12 @@ total=$i
 failed=""
 j=1
 while [ "$j" -le "$total" ]; do
-	echo ">> $(cat "$tmp/$j.marker")"
+	# The job's own measured duration, not the gap to the next marker. This
+	# loop replays captured output after every job has finished, so the
+	# markers below are emitted back-to-back and carry no timing information
+	# of their own -- anything derived from the interval between them
+	# describes the replay, not the work.
+	echo ">> $(cat "$tmp/$j.marker") [$(cat "$tmp/$j.secs" 2>/dev/null || echo 0)s]"
 	cat "$tmp/$j.out"
 	if [ "$(cat "$tmp/$j.rc")" != "0" ]; then
 		failed="$failed $(cat "$tmp/$j.name")"
