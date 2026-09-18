@@ -59,7 +59,7 @@ A directory on the Operator's own machine, with **no pod and no cluster at all**
 
 **Host is not local-agent.** They both name a directory on your machine, and that similarity is exactly the trap: a local-agent env's worktree is that directory *hostPath-mounted into a pod*, which is where its agent actually runs. A host env has no pod at all — it doesn't deploy, doesn't get a kubernetes context, doesn't open a shell through `erun open` (that directory is already where you are; open it directly), and never resolves a runtime version. `erun deploy`, `erun pin`, and `erun terraform` all refuse a host env by name rather than resolving a plan that has nothing to act on.
 
-An orchestrator can link a host env the same way it links a local-agent one: since there is no pod to sync a worktree from, the review directory and the worktree are the same path, and the Agent working there is the operator's own checkout — the orchestrator doesn't edit it directly, same as any other linked env.
+An orchestrator can link a host env the same way it links a local-agent one: since there is no pod to sync a worktree from, the review directory and the worktree are the same path. It is the one linked kind with no in-pod Agent to delegate to, so **the orchestrator authors and builds in that directory directly** — the same directory is its review window and its worktree, and nothing syncs, mounts, or otherwise owns it. Every pod-backed kind keeps the read-only rule.
 
 Typical names: `<operator>-desktop-build`, `<operator>-macos-sign`.
 
