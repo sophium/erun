@@ -111,7 +111,7 @@ The two agents this topology names, both shipped in the runtime image (`/etc/eru
 | Does | Runs [`/erun-review`](/agent-reference/skills-spec#erun-review): reads the diff, posts line-anchored comments, and — where it has a concrete fix — pushes a proposal branch the author can take. Returns to reviews it has already commented on, reads the builder's replies, and resolves its own threads once addressed. Opens threads sparingly — every open thread blocks the merge. |
 | Never does | Advance the merge queue. Call `override-advance`. Resolve a thread it did not open (it can only resolve its own). |
 
-Both agents pick up their work through `erun review list --waiting-on-me` (the reviewer filter) and the reviews the builder itself opened; assigning a reviewer is available from every erun client — [`erun review reviewers`](/cli/review#review-reviewers) on the CLI, the `review_reviewers_*` MCP tools, and the desktop app's review **Reviewers** surface — see [Reviews § Author, reviewers, and discovery](/collaboration/reviews#author-reviewers-and-discovery).
+Both agents pick up their work through `erun review list --waiting-on-me` (the reviewer filter) and the reviews the builder itself opened; assigning a reviewer is available from every erun client — [`erun review reviewers`](/cli/review#review-reviewers) on the CLI, the [`review_reviewers_*`](/mcp/overview) MCP tools, and the desktop app's review [**Reviewers**](/desktop/reviews#reviewers) surface — see [Reviews § Author, reviewers, and discovery](/collaboration/reviews#author-reviewers-and-discovery).
 
 ## Docs contract
 
