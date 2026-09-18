@@ -119,7 +119,7 @@ LINT_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words $(LINT_MODU
 # whole quota. In the in-image gate that is 6 invocations x 16 CPUs = 96
 # against a 16-CPU cap, and the cost is not merely queueing -- at that ratio
 # the build spent 79% of its CPU periods throttled and package downloads began
-# timing out (erun#2390), which reads as a network fault and is not.
+# timing out, which reads as a network fault and is not.
 #
 # Divide the quota by the width instead, floored at 1 so a small environment
 # still runs. Total demand becomes about the quota rather than a multiple.
@@ -346,7 +346,7 @@ FRONTEND_LINT_CACHE_DIR := $(CURDIR)/.cache/frontend-lint
 # get enough CPU to service the socket even though bandwidth is fine: the same
 # tarball fetches in 0.27s from a container on this very daemon when the box is
 # idle, while the in-gate install spent 275s and then failed on it. Three
-# releases died that way, each reading as a network fault (erun#2390). Raising
+# releases died that way, each reading as a network fault. Raising
 # the ceiling turns a hard failure into a slow success; it does not mask a real
 # outage, which still fails once the longer window elapses.
 test-frontend:
@@ -424,7 +424,7 @@ test-frontend:
 #     cannot embed directory frontend/dist: contains no embeddable files
 #
 # It went unnoticed while build.sh spent ~2 minutes on gates before its vite
-# build; dropping those (erun#2375) moved the rewrite early enough to collide.
+# build; dropping those moved the rewrite early enough to collide.
 # The cross-compile is ~4s, so sequencing it first costs nothing and removes
 # the overlap outright rather than making it less likely.
 test-playwright: test-erun-ui-windows-build
