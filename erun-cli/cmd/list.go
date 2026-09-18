@@ -20,7 +20,7 @@ func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc
 		Short: "List configured tenants and environments",
 		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
 			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. When an environment's version is not recorded locally, its deployed release is read live to tell a confirmed absence (\"none\") apart from a version that could not be determined at all (\"undetermined\", excluded from the max/behind computation with the reason stated); --dry-run traces that check instead of running it. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
-			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. Add --erun-alias to narrow the check to one configured erun-hosted alias instead of probing every configured one. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
+			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. A plane whose own discovery document advertises an apiUrl resolving to a genuinely different address is flagged distinctly, since that is not a benign alias. Add --erun-alias to narrow the check to one configured erun-hosted alias instead of probing every configured one. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
 			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
@@ -165,9 +165,9 @@ func versionDriftExitError(drift common.TenantVersionDrift) error {
 
 // controlPlaneVersionDriftExitError makes control-plane version drift a
 // non-zero exit when --fail-on-drift asks for it: any plane behind or ahead
-// of the published version, any plane erun could not reach, or a baseline
-// erun could not even resolve -- none of those confirm a plane is running
-// what erun actually published.
+// of the published version, any plane erun could not reach, any plane
+// advertising a foreign apiUrl, or a baseline erun could not even resolve --
+// none of those confirm a plane is running what erun actually published.
 func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) error {
 	var problems []string
 	if drift.PublishedVersionError != "" {
@@ -183,10 +183,28 @@ func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) er
 	if len(ahead) > 0 {
 		problems = append(problems, fmt.Sprintf("%d plane(s) ahead of published: %s", len(ahead), strings.Join(ahead, ", ")))
 	}
+	if mismatched := controlPlaneAPIURLMismatches(drift.Planes); len(mismatched) > 0 {
+		problems = append(problems, fmt.Sprintf("%d plane(s) advertising a foreign apiUrl: %s", len(mismatched), strings.Join(mismatched, ", ")))
+	}
 	if len(problems) == 0 {
 		return nil
 	}
 	return fmt.Errorf("control plane version drift: %s", strings.Join(problems, "; "))
+}
+
+// controlPlaneAPIURLMismatches names every plane whose own discovery document
+// advertised an apiUrl resolving to a different backend than the one erun
+// actually reached -- the one condition here that is never routine drift, so
+// --fail-on-drift reports it alongside behind/ahead rather than folding it
+// into either.
+func controlPlaneAPIURLMismatches(planes []common.ControlPlaneVersionStatus) []string {
+	var mismatched []string
+	for _, plane := range planes {
+		if plane.AdvertisedAPIURLMismatch != "" {
+			mismatched = append(mismatched, plane.Alias)
+		}
+	}
+	return mismatched
 }
 
 // classifyControlPlaneVersionDrift buckets every plane, and its linked
@@ -374,6 +392,13 @@ func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlane
 	}
 	if err := writeControlPlaneAdditionalAliases(ctx, plane.AdditionalAliases); err != nil {
 		return err
+	}
+	// Above the nested console: this is a property of the plane itself, so it
+	// reads with the plane's own line rather than under its console.
+	if plane.AdvertisedAPIURLMismatch != "" {
+		if _, err := fmt.Fprintln(ctx.Stdout, "    [advertised apiUrl mismatch: "+plane.AdvertisedAPIURLMismatch+"]"); err != nil {
+			return err
+		}
 	}
 	if plane.Console == nil {
 		return nil

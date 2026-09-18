@@ -709,4 +709,85 @@ func TestListControlPlanes(t *testing.T) {
 			t.Fatalf("expected two reachable plane entries in the structured output, got %d:\n%s", got, result.Combined)
 		}
 	})
+
+	// A plane's own discovery document can name an apiUrl that is not this
+	// backend. A textually different apiUrl is common and benign (the
+	// collapsing scenarios above model exactly that), so the check resolves
+	// both hostnames and flags only an address this plane's own host shares
+	// nothing with. These scenarios drive it with literal addresses -- the
+	// configured stub's loopback listener against the reserved, never-routed
+	// 2001:db8::/32 documentation prefix -- so no DNS stub is needed.
+
+	t.Run("real_run_flags_a_foreign_advertised_apiurl", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStubAt(t, "http://[2001:db8::1]:9999", "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "advertised apiUrl mismatch") {
+			t.Fatalf("expected the plane's foreign advertised apiUrl to be flagged:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_real_run_flags_a_foreign_advertised_apiurl",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("fail_on_drift_foreign_advertised_apiurl_exits_non_zero", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStubAt(t, "http://[2001:db8::1]:9999", "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		// The plane is at the published version, so nothing else in this
+		// report is drift -- a foreign advertised apiUrl has to fail the run
+		// on its own.
+		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a foreign advertised apiUrl, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "1 plane(s) advertising a foreign apiUrl: erun+test@erun") {
+			t.Fatalf("expected the failure to name the plane advertising a foreign apiUrl:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_fail_on_drift_foreign_advertised_apiurl_exits_non_zero",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("real_run_json_output_reports_the_advertised_apiurl_mismatch", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStubAt(t, "http://[2001:db8::1]:9999", "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, `"advertisedApiUrlMismatch"`) {
+			t.Fatalf("expected the mismatch in the structured output:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("real_run_json_output_omits_the_advertised_apiurl_mismatch_when_the_plane_agrees", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		// controlPlaneStub advertises its own listener address, the same one
+		// erun dialed -- so the field has to be a signal, not a constant.
+		plane := controlPlaneStub(t, "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, `"advertisedApiUrlMismatch"`) {
+			t.Fatalf("expected no mismatch for a plane advertising the address erun reached:\n%s", result.Combined)
+		}
+	})
 }

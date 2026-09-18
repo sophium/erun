@@ -221,7 +221,7 @@ erun list --control-planes
 
 ```
 published version: 1.0.247
-Control planes:
+Control planes (1 backend, 1 alias):
   - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
     console: url="https://console.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
 ```
@@ -232,9 +232,11 @@ That same `GET /v1/platform` response also names the plane's linked console (`co
 
 A console that answers `GET /version.json` but doesn't serve the expected JSON document — for example an SPA fallback page served for a route that isn't wired up yet — is never folded into `reachable=no`: it did answer, so it prints `reachable=yes version=unknown reason="..."` instead, with the reason naming the HTTP status and content type it actually served.
 
+That response also names the apiUrl the plane believes it is served at. When that resolves to a different backend than the one you configured — a plane advertising a different plane's api — it prints an `[advertised apiUrl mismatch: ...]` line beneath the plane's own line. An apiUrl that merely *differs textually* is never flagged: a vanity hostname that CNAMEs to the one erun dialed is the same backend under two names, so the two hostnames are resolved and compared instead of string-matched, and a hostname that doesn't resolve on either side prints nothing rather than a guess.
+
 This makes real network calls (each plane and console, plus erun's registry), so add `--dry-run` to preview which planes, consoles, and registry lookup would be checked without making any call.
 
-This report also exits `0` on its own, same as `--tenant`'s above. Add `--fail-on-drift` to make that one invocation exit non-zero when a plane or its console is behind or ahead of published, a plane or console is unreachable, or the published baseline itself couldn't be resolved — none of those confirm a plane and its console are running what erun actually published:
+This report also exits `0` on its own, same as `--tenant`'s above. Add `--fail-on-drift` to make that one invocation exit non-zero when a plane or its console is behind or ahead of published, a plane advertises a foreign apiUrl, a plane or console is unreachable, or the published baseline itself couldn't be resolved — none of those confirm a plane and its console are running what erun actually published:
 
 ```bash
 erun list --control-planes --fail-on-drift
@@ -265,4 +267,4 @@ erun list | grep "effective"      # what ERun targets right now
 | `--control-planes` combined with `--tenant`/`--gate-environment`. | Errors `--control-planes cannot be combined with --tenant/--gate-environment`; nothing is printed. |
 | `--control-planes` and a configured plane or its linked console is unreachable, or the registry lookup fails. | Not an error — printed as a finding (`reachable=no reason="..."`, or `published version: unresolved (...)`); exit code stays `0` unless `--fail-on-drift` is set. |
 | `--fail-on-drift` passed without `--tenant` or `--control-planes`. | Errors `--fail-on-drift requires --tenant or --control-planes`; nothing is printed. |
-| `--fail-on-drift` set and the report finds drift (an environment behind max, a behind gate, an unreachable/behind/ahead plane or console, or an unresolved published baseline). | The full report still prints, then the command exits non-zero naming what it found. Never fires under `--dry-run` — nothing was probed, so there is nothing to fail on. |
+| `--fail-on-drift` set and the report finds drift (an environment behind max, a behind gate, an unreachable/behind/ahead plane or console, a plane advertising a foreign apiUrl, or an unresolved published baseline). | The full report still prints, then the command exits non-zero naming what it found. Never fires under `--dry-run` — nothing was probed, so there is nothing to fail on. |
