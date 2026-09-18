@@ -50,9 +50,12 @@ export const MIN_MAIN_PANE_WIDTH = 360;
 // while showing the tenant dashboard, which never renders alongside the
 // review panel (MainPane.tsx shows one or the other), so it is its own,
 // wider floor rather than folded into MIN_MAIN_PANE_WIDTH above. Measured,
-// not guessed: the dashboard's tab strip (Users/Reviews/Merge queue/Builds/
-// Audit log/API log) plus the page header's padding has an unwrapping,
-// unshrinkable content width of ~495px in Chromium. MIN_MAIN_PANE_WIDTH's
+// not guessed: the dashboard's header and panel chrome plus the page
+// header's padding has an unshrinkable content width of ~495px in Chromium.
+// The tab strip itself no longer sets this floor — it wraps onto as many
+// rows as the width calls for, which is what keeps the strip usable in the
+// band where the sidebar is still open and <main> is already narrower than
+// nine tabs in a row. MIN_MAIN_PANE_WIDTH's
 // 360 let that content render wider than <main>, invisibly — the
 // intermediate overflow-x-auto wrapper (MainPane.tsx) permits the overflow
 // but never paints a discoverable scrollbar for it. 500 rounds the

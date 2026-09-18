@@ -1,5 +1,16 @@
 import type { Locator, Page } from '@playwright/test';
 
+import type { ElementBox } from '../fixtures/boundingBox.js';
+
+export interface TabBox extends ElementBox {
+  label: string;
+}
+
+export interface TabStripGeometry {
+  list: ElementBox;
+  tabs: TabBox[];
+}
+
 export type TenantDashboardTab =
   | 'Users'
   | 'Reviews'
@@ -37,6 +48,56 @@ export class TenantDashboard {
 
   tabs(): Locator {
     return this.page.getByRole('tab');
+  }
+
+  // tabStrip is the dashboard's own tab list. The terminal tab strip is a
+  // second role="tablist" on the same page, so this scopes by a tab only the
+  // dashboard carries rather than taking the first match.
+  tabStrip(): Locator {
+    return this.page
+      .getByRole('tablist')
+      .filter({ has: this.page.getByRole('tab', { name: 'API log' }) });
+  }
+
+  // tabStripGeometry samples the strip and every tab it holds in one round
+  // trip, so the boxes it returns describe one layout pass. Reading them tab
+  // by tab would let a resize or re-render land between two reads and produce
+  // a set of rectangles that never co-existed on screen.
+  async tabStripGeometry(): Promise<TabStripGeometry> {
+    return this.tabStrip().evaluate((list) => {
+      const box = (el: Element): ElementBox => {
+        const rect = el.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      };
+      return {
+        list: box(list),
+        tabs: [...list.querySelectorAll('[role="tab"]')].map((tab) => ({
+          label: (tab.textContent ?? '').trim(),
+          ...box(tab),
+        })),
+      };
+    });
+  }
+
+  // coveredTabs hit-tests every tab at its own centre and names the ones
+  // something else is painting over. Geometry alone cannot tell a tab that
+  // covers a button from a tab a button covers, and only the second one is
+  // unclickable.
+  async coveredTabs(): Promise<string[]> {
+    return this.tabStrip().evaluate((list) =>
+      [...list.querySelectorAll('[role="tab"]')].flatMap((tab) => {
+        const rect = tab.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        if (hit && (hit === tab || tab.contains(hit))) {
+          return [];
+        }
+        const label = (tab.textContent ?? '').trim();
+        const blocker = hit
+          ? `${hit.tagName}${hit.textContent ? ` "${hit.textContent.trim()}"` : ''}`
+          : 'nothing';
+        return [`${label} is covered at its own centre by ${blocker}`];
+      }),
+    );
   }
 
   restrictedAccessNote(): Locator {
