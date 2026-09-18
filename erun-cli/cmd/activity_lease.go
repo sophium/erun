@@ -181,7 +181,15 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 	if !resolved {
 		return nil
 	}
-	_, err = fmt.Fprintf(ctx.Stdout, "%s\n", releaseLeaseSummary(outcome, id))
+	// The note is resolved only for the wrong-store outcome, and only by
+	// asking the store that does hold the id. A note that cannot be read falls
+	// back to the plain summary rather than failing a release that already
+	// did the right thing.
+	note := ""
+	if outcome == common.EnvironmentActivityLeaseHeldElsewhere {
+		note, _ = common.EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id, exclusive)
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "%s\n", releaseLeaseSummary(outcome, id, note))
 	return err
 }
 
@@ -190,11 +198,18 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 // notice a release aimed at the wrong store -- an exclusive claim released
 // without --exclusive reported the same "lease released" line as a real
 // release, while the exclusive claim it never touched stayed held for its
-// full TTL.
-func releaseLeaseSummary(outcome common.EnvironmentActivityLeaseReleaseOutcome, id string) string {
+// full TTL. A no-match that the id turns out to be holding under the other
+// shape says so, and names the release that would match, rather than leaving
+// the operator to conclude the claim is already gone.
+func releaseLeaseSummary(outcome common.EnvironmentActivityLeaseReleaseOutcome, id, note string) string {
 	trimmed := strings.TrimSpace(id)
-	if outcome == common.EnvironmentActivityLeaseReleased {
+	switch outcome {
+	case common.EnvironmentActivityLeaseReleased:
 		return fmt.Sprintf("lease released: %s", trimmed)
+	case common.EnvironmentActivityLeaseHeldElsewhere:
+		if note != "" {
+			return fmt.Sprintf("lease not released: %s is %s", trimmed, note)
+		}
 	}
 	return fmt.Sprintf("lease not held: %s", trimmed)
 }
