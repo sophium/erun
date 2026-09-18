@@ -112,9 +112,10 @@ func shouldRepairWorkspaceSync(ctx common.Context, promptRunner PromptRunner, re
 	if healthy || ctx.DryRun || promptRunner == nil {
 		return false, nil
 	}
-	return confirmPrompt(promptRunner, fmt.Sprintf(
+	return doctorConfirm(ctx, promptRunner, fmt.Sprintf(
 		"Repair workspace sync SSH for %s/%s (install key, write ssh config, ensure port-forward; no redeploy)?",
-		result.Tenant, result.Environment))
+		result.Tenant, result.Environment),
+		"Re-run with --repair-workspace-sync to run it without a prompt.")
 }
 
 // repairWorkspaceSyncProvisioning runs the non-destructive provisioning steps.
