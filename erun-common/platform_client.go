@@ -373,6 +373,23 @@ func (c *PlatformClient) CreateUser(ctx context.Context, params PlatformCreateUs
 	return user, err
 }
 
+// PlatformGrantUserRoleParams grants one role to one already-enrolled user.
+// Unlike enrollment, this is how an operator adds a role to somebody who is
+// already in the tenant — the case a client that can see a caller lacks a
+// capability has to hand over, since re-enrolling an enrolled identity is a
+// no-op that leaves its roles untouched.
+type PlatformGrantUserRoleParams struct {
+	UserID string `json:"-"`
+	RoleID string `json:"roleId"`
+}
+
+// GrantUserRole grants RoleID to the user named by UserID, in the caller's own
+// resolved tenant (the endpoint has no cross-tenant override; RLS scopes it).
+func (c *PlatformClient) GrantUserRole(ctx context.Context, params PlatformGrantUserRoleParams) error {
+	path := "/v1/users/" + url.PathEscape(params.UserID) + "/roles"
+	return c.do(ctx, http.MethodPost, path, params, true, nil)
+}
+
 // PlatformListUsersParams optionally targets another tenant, honored only for
 // an operations-scoped caller.
 type PlatformListUsersParams struct {
