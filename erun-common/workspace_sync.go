@@ -674,7 +674,7 @@ const workspaceSyncStagingStaleAge = time.Hour
 // staging dir at the start of its own run; a concurrent pass mid-extraction
 // into that same directory saw it vanish out from under its still-running tar,
 // which then failed to create the child directories it needed and exited
-// non-zero even though most files had already extracted cleanly (erun#2055).
+// non-zero even though most files had already extracted cleanly.
 // Debris a killed pass leaves behind -- the one case a fixed name used to clean
 // up immediately -- is swept once it is unambiguously stale rather than on
 // every pass, since a fresh directory might belong to a pass still running.

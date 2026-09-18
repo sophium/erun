@@ -208,7 +208,7 @@ func TestSyncOutputsArtifactsPublishesCompletelyAndKeepsItsMarkingAndPruning(t *
 }
 
 // TestPrepareWorkspaceSyncStagingNeverClobbersAConcurrentPass is the regression
-// for erun#2055: a fixed-name staging directory meant every pass started by
+// for the defect: a fixed-name staging directory meant every pass started by
 // wiping it, including one a *different*, concurrently-running pass's tar
 // extraction was actively writing into (the desktop's own periodic workspace
 // sync poller and a manually invoked `erun sshd sync` can both reach the same
