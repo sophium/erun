@@ -1,10 +1,12 @@
 <#
 run.ps1 - Windows counterpart of erun-cli/run.sh.
 
-Rebuilds the erun CLI from source on every invocation and execs it, so `erun`
-always runs the latest source. For `erun app` it also rebuilds the desktop app
-(via erun-ui/build.ps1) into erun-cli\bin\erun-app.exe before launching, so
-`erun app` resolves the fresh desktop next to erun.exe (erun-cli/cmd/app.go).
+Rebuilds the erun CLI from source and execs it, so `erun` runs the latest
+source -- except for a help or completion request, which is static text
+answered from the binary already built. For `erun app` it also rebuilds the
+desktop app (via erun-ui/build.ps1) into erun-cli\bin\erun-app.exe before
+launching, so `erun app` resolves the fresh desktop next to erun.exe
+(erun-cli/cmd/app.go); a help request never reaches that launch.
 
 Invoked via the `erun` shim (erun.cmd) on PATH; not usually called directly.
 #>
