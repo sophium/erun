@@ -148,6 +148,15 @@ demonstrated:
   `release_disk_headroom.go`.
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
+- A push the registry rejects for a blob it does not hold is the concurrent-publisher
+  shape, not a local defect: two releases sharing layers can have the loser's manifest
+  rejected while the peer's upload is still committing. `DockerImagePusher` re-pushes
+  it, bounded, gated on `IsDockerUnknownBlobError` alone. Do not add a second retry
+  for it at a higher layer and do not widen the predicate — an auth, policy, or network
+  failure must still surface on its first occurrence. The promote path's
+  rebuild-from-source fallback remains the deeper recovery for the one blob rejection
+  a re-push cannot clear: a stale local "already pushed" record that skips the upload
+  again.
 - Refuse an existing release tag at a different HEAD. If it is an unpushed,
   unincorporated interrupted-run tag, name that diagnosis and the explicit remedy;
   never automatically delete it. Preserve retryable version state.
