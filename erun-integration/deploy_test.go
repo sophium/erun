@@ -4819,3 +4819,74 @@ const unschedulablePodJSON = `{
     }
   ]
 }`
+
+// A deploy running inside the target env's own runtime pod has none of the
+// three credential routes resolveGHCRBasicAuth knows -- no docker config, no gh
+// session, no GH_TOKEN/GITHUB_TOKEN -- so before this fix every read of the
+// tenant's private chart was anonymous, ghcr refused to mint a token, and deploy
+// refused the read as unconfirmed. The env already declares where the credential
+// lives: its imagepullsecrets names a dockerconfigjson Secret in its own
+// namespace that the pod's service account can read. The pod resolves it from
+// there instead of falling back to anonymous.
+func TestDeployInPodResolvesDeclaredImagePullSecret(t *testing.T) {
+	t.Parallel()
+
+	// run deploys team/dev from a credential-less process, optionally marking it
+	// as team/dev's own runtime pod. Everything else is identical, so the trace
+	// difference is the gating and nothing else.
+	run := func(t *testing.T, inPod bool) string {
+		t.Helper()
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ghcr-pull\n")
+
+		// The pod pulls with the credential the Secret declares; the process
+		// holds no docker config of its own, so only the declared Secret can
+		// supply one.
+		secretJSON := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`,
+			base64.StdEncoding.EncodeToString([]byte(`{"auths":{"ghcr.io":{"auth":"cHVsbHNlY3JldDpwdw=="}}}`)))
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", fmt.Sprintf(`case "$*" in
+  *"get secret ghcr-pull -o json"*) cat <<'JSON'
+%s
+JSON
+    ;;
+  *) exit 0 ;;
+esac
+`, secretJSON))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0",
+			"DOCKER_CONFIG="+t.TempDir())
+		if inPod {
+			envVars = append(envVars, "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_NAMESPACE=team-dev")
+		}
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "pullsecret") {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		return result.Combined
+	}
+
+	const resolved = "registry credential: resolved 1 registry credential(s) from this environment's declared image pull secret(s) ghcr-pull"
+
+	if trace := run(t, true); !strings.Contains(trace, resolved) {
+		t.Fatalf("in-pod deploy did not resolve the env's declared image pull secret:\n%s", trace)
+	}
+	if trace := run(t, false); strings.Contains(trace, resolved) {
+		t.Fatalf("a deploy outside its env's runtime pod must not read that env's declared pull secrets:\n%s", trace)
+	}
+}

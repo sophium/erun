@@ -1281,6 +1281,11 @@ func finalizeRuntimeChartSpecs(ctx Context, target DeployTarget, resolvedTarget 
 }
 
 func resolveDeploySpecsForResolvedTarget(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, resolvedTarget OpenResult, target DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]DeploySpec, error) {
+	// Resolve the credential this env declared for its own runtime pod before any
+	// chart probe runs: the tenant-chart check below reads a registry ahead of the
+	// runtime-chart ladder, and both must authenticate rather than probe
+	// anonymously and be refused. Idempotent, so the ladder's own call is fine.
+	configureInPodDeclaredRegistryAuth(ctx, resolvedTarget)
 	if resolvedTarget.RemoteRepo() {
 		return resolvePublishedDeploySpecs(ctx, store, findProjectRoot, resolvedTarget, target)
 	}
