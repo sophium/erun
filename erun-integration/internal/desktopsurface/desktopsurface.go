@@ -38,6 +38,13 @@ type Capability struct {
 	// ("waitingOnMe") -- and either is a real way in. Ignored when Pattern is
 	// set; Token is ignored when Tokens is non-empty.
 	Tokens []string
+	// FlagTokens marks Tokens as a CLI flag's spellings, matched with
+	// containsFlagIdentifier rather than as a bare substring. A flag's
+	// camelCase spelling is an ordinary word (roleName, tokenName, keyName),
+	// so a bare substring match counts any component that merely reads
+	// someone else's same-named field -- or an interface that declares one --
+	// as an operator way in for a flag nothing actually surfaces.
+	FlagTokens bool
 	// Pattern, when set, is a regular expression searched for
 	// case-insensitively instead of Token. API routes use this: a
 	// parameterized path's literal segments (e.g. "/v1/users/{user_id}/roles")
@@ -152,6 +159,36 @@ func (p preparedSource) contains(token string) bool {
 	return strings.Contains(p.lower, strings.ToLower(token))
 }
 
+// containsFlagIdentifier reports whether token appears in the source in a
+// context that could actually be a way in for a CLI flag, rather than
+// incidentally. Two shapes are excluded, because neither can pass a flag:
+//
+//   - a property access (`remedy.roleName`) -- a read of someone else's field
+//   - an optional field declaration (`roleName?: string`) -- an interface
+//     declaring a field of that name, not a call site
+//
+// A real binding keeps counting: a JSX attribute (`roleName={x}`), an
+// object-literal key (`roleName: x`), a destructured local, a positional
+// argument. Those have neither shape, so this narrows the false positives
+// without dropping a genuine way in.
+func (p preparedSource) containsFlagIdentifier(token string) bool {
+	needle := strings.ToLower(token)
+	for from := 0; ; {
+		i := strings.Index(p.lower[from:], needle)
+		if i < 0 {
+			return false
+		}
+		at := from + i
+		after := at + len(needle)
+		propertyAccess := at > 0 && p.lower[at-1] == '.'
+		optionalField := strings.HasPrefix(p.lower[after:], "?:")
+		if !propertyAccess && !optionalField {
+			return true
+		}
+		from = after
+	}
+}
+
 func (p preparedSource) containsPattern(pattern string) bool {
 	return regexp.MustCompile("(?i)" + pattern).MatchString(p.raw)
 }
@@ -217,6 +254,12 @@ func referencedInFrontend(c Capability, frontendSource preparedSource) bool {
 	}
 	if len(c.Tokens) > 0 {
 		for _, token := range c.Tokens {
+			if c.FlagTokens {
+				if frontendSource.containsFlagIdentifier(token) {
+					return true
+				}
+				continue
+			}
 			if frontendSource.contains(token) {
 				return true
 			}

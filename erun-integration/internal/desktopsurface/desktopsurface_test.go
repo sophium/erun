@@ -384,3 +384,32 @@ func TestFindUnboundAppMethodsClearsAnExportedMethodEvenWithNoCaller(t *testing.
 		t.Fatalf("want an exported method cleared regardless of callers -- Wails binds it whether or not Go code also calls it, got %+v", unbound)
 	}
 }
+
+// TestContainsFlagIdentifierIgnoresIncidentalMatches pins the narrowing
+// containsFlagIdentifier exists for. A CLI flag's camelCase spelling is an
+// ordinary word, so a bare substring match counted an unrelated component's
+// field read -- and an interface's field declaration -- as an operator way in
+// for a flag nothing surfaces: a denial-remedy note that names an RBAC role
+// made `cloud init aws --role-name` read as surfaced while
+// erun-cli/cmd/command_tree.go still declared that gap.
+func TestContainsFlagIdentifierIgnoresIncidentalMatches(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{"property access only", "const x = remedy.roleName", false},
+		{"optional field declaration only", "interface U { roleName?: string }", false},
+		{"both incidental shapes", "interface U { roleName?: string }\nconst x = remedy.roleName", false},
+		{"a jsx attribute is a real binding", "<Field roleName={value} />", true},
+		{"an object-literal key is a real binding", "const o = { roleName: value }", true},
+		{"a positional argument is a real binding", "openAws(roleName)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FrontendSource(tc.source).prepare().containsFlagIdentifier("roleName")
+			if got != tc.want {
+				t.Errorf("containsFlagIdentifier(%q) = %v, want %v", tc.source, got, tc.want)
+			}
+		})
+	}
+}

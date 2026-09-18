@@ -129,7 +129,7 @@ func TestCapabilityTokenKeepsCapabilitiesDistinct(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("capabilityToken(%q) = %q, want %q", strings.Join(tc.path, " "), got, tc.want)
 		}
-		if !desktopsurface.FrontendSource("const call = "+tc.callSite+";").Contains(got) {
+		if !desktopsurface.FrontendSource("const call = " + tc.callSite + ";").Contains(got) {
 			t.Errorf("capabilityToken(%q) = %q no longer matches its own call site %q",
 				strings.Join(tc.path, " "), got, tc.callSite)
 		}
@@ -319,6 +319,7 @@ func cliFlagCapabilities() []desktopsurface.Capability {
 				Name:            key,
 				Source:          "CLI flag",
 				Tokens:          []string{f.Name, camelCaseFlagName(f.Name)},
+				FlagTokens:      true,
 				AgentFacing:     cmd.IsAgentFacingCLIOnlyFlag(path, f.Name),
 				KnownGap:        cmd.IsKnownUnsurfacedFlag(path, f.Name),
 				DeclarationHint: fmt.Sprintf("erun-cli/cmd/command_tree.go's cliOnlyAgentFacingFlags map (add %q with a comment explaining why no affordance could correspond to it)", key),
