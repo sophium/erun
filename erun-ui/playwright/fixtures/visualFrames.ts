@@ -11,8 +11,8 @@ import { expect } from '@playwright/test';
  * instead of driving the pod's desktop. A frame whose name claims a state its
  * pixels do not show is worse than a missing frame, because the bundle then
  * looks complete while documenting a state it never captured. These helpers
- * keep the pending half of a transition open for the capture, and make two
- * frames that should differ fail loudly instead of collapsing into one file.
+ * keep the pending half of a transition open for the capture, and make frames
+ * that should differ fail loudly instead of collapsing into one file.
  */
 
 export interface ResponseGate {
@@ -45,16 +45,31 @@ function frameDigest(path: string): Promise<string> {
 }
 
 /**
- * Assert two captured frames are different files.
+ * Assert that every frame a test wrote is a distinct file.
  *
- * Frames named for different states must not hash equal: byte-identical frames
- * mean the capture outlived the state it was meant to record. Names both paths
- * in the failure so the duplicated pair is visible without hashing the bundle
- * by hand.
+ * Byte-identical frames mean at least one capture outlived the state it was
+ * meant to record, so the bundle documents a state it never saw. Checking the
+ * whole set rather than one nominated pair is deliberate: the failure is a
+ * capture that settles early, and which frame it collides with is an accident
+ * of what else the test writes. Names both colliding paths in the failure so
+ * the duplicate is visible without hashing the bundle by hand.
+ *
+ * Returns one digest per path, in input order, so a caller can also assert that
+ * every frame it named was actually read -- a guard that checked nothing would
+ * otherwise pass silently, which is the defect it exists to catch.
  */
-export async function expectDistinctFrames(a: string, b: string): Promise<void> {
-  const [digestA, digestB] = await Promise.all([frameDigest(a), frameDigest(b)]);
-  expect(digestA, `${a} and ${b} are byte-identical frames for states that differ`).not.toBe(
-    digestB,
+export async function expectFramesAllDistinct(paths: string[]): Promise<string[]> {
+  const digests = await Promise.all(
+    paths.map(async (path): Promise<[string, string]> => [path, await frameDigest(path)]),
   );
+  const seen = new Map<string, string>();
+  for (const [path, digest] of digests) {
+    const collidesWith = seen.get(digest);
+    expect(
+      collidesWith,
+      `${path} and ${collidesWith} are byte-identical frames for states that differ`,
+    ).toBeUndefined();
+    seen.set(digest, path);
+  }
+  return digests.map(([, digest]) => digest);
 }

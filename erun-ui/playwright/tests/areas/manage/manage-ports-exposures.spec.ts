@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test';
 
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
-import { expectDistinctFrames, holdResponse } from '../../../fixtures/visualFrames.js';
+import { expectFramesAllDistinct, holdResponse } from '../../../fixtures/visualFrames.js';
 
 // The Ports tab's public-exposure surface (issue #1351). The headless harness
 // has no real cluster and no project with a platform block (see
@@ -284,10 +284,14 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     expect(listCalls).toBe(2);
 
     await dialog.screenshot({ path: 'test-results/1351-visual/ports-populated.png' });
-    await expectDistinctFrames(
+    // Every frame this test wrote must be a distinct file: a capture that
+    // settles early collapses into its settled sibling, and the bundle then
+    // documents a state the run never saw.
+    await expectFramesAllDistinct([
+      'test-results/1351-visual/ports-empty-configured.png',
       'test-results/1351-visual/ports-create-inflight.png',
       'test-results/1351-visual/ports-populated.png',
-    );
+    ]);
 
     const clipboardWrite = page.waitForRequest(
       (req) =>
@@ -440,10 +444,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       path: 'test-results/1351-visual/ports-remove-inflight.png',
     });
     unexposeGate.release();
-    await expectDistinctFrames(
+    await expectFramesAllDistinct([
       'test-results/1351-visual/ports-remove-confirm.png',
       'test-results/1351-visual/ports-remove-inflight.png',
-    );
+    ]);
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     expect(unexposeCalls).toBe(1);
