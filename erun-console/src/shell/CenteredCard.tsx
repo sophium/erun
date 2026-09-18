@@ -1,8 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from 'erun-kit';
 import type * as React from 'react';
 
-import { BrandMark } from './BrandMark';
 import { consoleBrandLabel } from './brand';
+import { BrandMark } from './BrandMark';
 
 // CenteredCard is the shared frame for every pre-shell screen (sign-in, not
 // enrolled, error, loading): a branded card centered in the viewport, so the

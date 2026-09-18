@@ -1,8 +1,8 @@
 import type * as React from 'react';
 
 import type { OidcConfig } from '../auth/auth';
-import { BrandMark } from './BrandMark';
 import { BUNDLED_BRAND } from './brand';
+import { BrandMark } from './BrandMark';
 import { DEFAULT_DESCRIPTION, DEFAULT_TAGLINE } from './landingContent';
 import { LandingDifferentiators } from './LandingDifferentiators';
 import { LandingFooter } from './LandingFooter';

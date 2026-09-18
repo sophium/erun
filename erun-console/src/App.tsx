@@ -11,6 +11,7 @@ import { beginLogin, signOut } from './auth/auth';
 import { fetchPlatformConfig } from './config/platform';
 import { AcceptInvitePage } from './identity/AcceptInvitePage';
 import { AppShell } from './shell/AppShell';
+import { consoleBrand, consoleBrandLabel } from './shell/brand';
 import { LandingScreen } from './shell/LandingScreen';
 import {
   ErrorScreen,
@@ -19,7 +20,6 @@ import {
   ResolutionErrorScreen,
   TenantUnresolvedScreen,
 } from './shell/PreShellScreens';
-import { consoleBrand, consoleBrandLabel } from './shell/brand';
 import { beginTenantSwitch, consumeTenantSwitchIntent } from './shell/tenantSwitch';
 import type { TenantSwitchMismatch } from './shell/TenantSwitchMismatchBanner';
 import { applyTheme, initialTheme } from './shell/theme';

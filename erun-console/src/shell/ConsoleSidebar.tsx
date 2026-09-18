@@ -3,11 +3,11 @@ import type * as React from 'react';
 
 import type { PlatformTenant } from '../app/api/tenantsApi';
 import type { OidcConfig } from '../auth/auth';
+import { BUNDLED_BRAND, consoleBrandLabel } from './brand';
 import { BrandMark } from './BrandMark';
 import { ScopeSelector } from './ScopeSelector';
 import type { ConsoleSection, ConsoleSectionId } from './sections';
 import { type CurrentTenant, TenantSwitcher } from './TenantSwitcher';
-import { BUNDLED_BRAND, consoleBrandLabel } from './brand';
 
 // NavBadge is the nav-level pending-count pill: a pending count must be
 // visible without opening the view. It is console-shell-owned, not a kit

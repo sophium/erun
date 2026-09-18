@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import bootPage from '../../index.html?raw';
 import { BUNDLED_BRAND, consoleBrand, consoleBrandLabel } from './brand';
 
 // These assert on the two values themselves — the name the served page carries
@@ -33,8 +32,12 @@ describe('console brand', () => {
   });
 
   it('ships that same name in the boot page, so the pre-bundle title does not flip either', () => {
-    const html = readFileSync(fileURLToPath(new URL('../../index.html', import.meta.url)), 'utf8');
-
-    expect(html).toContain(`<title>${consoleBrandLabel(undefined)}</title>`);
+    // The container entrypoint rewrites this title from platform.brand at start
+    // (erun-devops/docker/erun-console/docker-entrypoint.d/05-platform-brand.sh),
+    // and the bundle reads the same value for its pre-resolution paint. What
+    // this pins is the state that rewrite leaves alone: an instance that names
+    // itself nowhere must still show one name on both sides, not the bundled
+    // product default here and something else there.
+    expect(bootPage).toContain(`<title>${consoleBrandLabel(undefined)}</title>`);
   });
 });
