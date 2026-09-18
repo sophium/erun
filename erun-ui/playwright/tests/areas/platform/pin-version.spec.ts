@@ -75,6 +75,19 @@ test.describe('change erun version (#744)', () => {
     const dialog = app.page.getByTestId('pin-version-dialog');
     await expect(dialog).toBeVisible();
 
+    // The description claims it re-pins "every erun reference", so it has to
+    // name every kind of site the engine rewrites. It once listed four of the
+    // six, so an operator would believe a re-pin could not have touched a
+    // coordinate it did. erun-common's pin_surface_drift_test.go is the
+    // authoritative enumeration guard across all the describing surfaces; this
+    // is the rendered dialog carrying the same enumeration.
+    await expect(dialog).toContainText('Terraform module refs');
+    await expect(dialog).toContainText('dns01_webhook_image');
+    await expect(dialog).toContainText('umbrella chart');
+    await expect(dialog).toContainText('build-env image tag');
+    await expect(dialog).toContainText('own stock release');
+    await expect(dialog).toContainText('runtime version');
+
     // The regression: the Version select's trigger must show its
     // "no explicit choice" option's label, not render blank.
     const versionTrigger = dialog.getByRole('combobox', { name: 'Version' });

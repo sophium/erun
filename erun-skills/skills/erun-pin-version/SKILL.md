@@ -20,6 +20,8 @@ around it: resolve a target, verify it is real, show the plan, apply, report.
 | Terraform module ref | `?ref=v<version>` on every `github.com/sophium/erun.git//…` source |
 | Helm chart dependencies | each `<tenant>-<component>` umbrella's `Chart.yaml` erun dependency `version:` |
 | Build-env image | `FROM …/erun-devops:<version>` in a custom runtime image |
+| Terraform variable image reference | an erun image reference a tenant's own Terraform sets directly, e.g. the cluster-edge module's `dns01_webhook_image` |
+| Environment runtime image | the env's `runtimeimage`, when it names erun's own stock `erun-devops` image |
 | Environment runtime version | the env's `runtimeversion` |
 
 Only erun's own references. A tenant's own Terraform sources, their own chart
