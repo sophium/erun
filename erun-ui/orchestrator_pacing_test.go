@@ -730,7 +730,7 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 		pacingCapped: true,
 	}
 
-	// id != name, the shape erun#2270 reported: the log names the id first and
+	// id != name, the shape that was reported: the log names the id first and
 	// carries the display name beside it.
 	nudgedSession := newCallRecordingSession()
 	nudgedKey := orchestratorSessionKey("petios")
@@ -763,10 +763,10 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPacingLogLineJoinsItsNudgeHistoryRecord pins the outcome
-// erun#2270 asked for: a log line and a state record about the same
-// orchestrator are matchable without reading config.yaml. The pacing log named
-// the config `name:` while orchestrator-nudge-history.json keys by `id:`, so an
+// TestOrchestratorPacingLogLineJoinsItsNudgeHistoryRecord pins that a pacing
+// log line and a nudge history record about the same orchestrator are matchable
+// without reading config.yaml. The pacing log named the config `name:` while
+// orchestrator-nudge-history.json keys by `id:`, so an
 // orchestrator whose pair differs — petios / petios-qa on the reporting host —
 // appeared under two strings on two surfaces with nothing saying so, and the
 // state file read as silently dropping nudges.
