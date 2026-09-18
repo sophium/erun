@@ -772,13 +772,16 @@ Resolves tenant/environment/namespace the same way every other typed command doe
   "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
   "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ],
   "warnings": [],
+  "build": { "quotaCores": 4, "utilizationPercent": 100.0, "intervalSeconds": 1, "periods": 200, "throttledPeriods": 200 },
   "excludesBuilds": true
 }
 ```
 
 `cpu.quotaCores` is `cpu.max`'s quota ÷ period; `memory.percentOfLimit` is `memory.current` ÷ `memory.max`; `disk[].percentUsed` is `df`'s used ÷ total for the watched mount (the runtime chart's `HOME`, `/home/erun`, is the only mount watched today). `warnings` is omitted (empty) unless a threshold below is crossed.
 
-`excludesBuilds` is `true` whenever the environment's type carries the `erun-dind` sidecar (every type except `runtime` and `host` — `EnvironmentType.UsesDindSidecar`), omitted (false) otherwise. `cpu`/`memory` above are read from the `erun-devops` container's own cgroup alone; an image build (`erun build`/`erun release`) actually runs in `erun-dind`, a separate cgroup whose build containers are cgroup siblings rather than descendants of this one, so there is no path from inside `erun-devops` to read them. `excludesBuilds` names that gap explicitly rather than let a busy build read as an idle environment — the same disclosure the desktop's Runtime tab caption makes (`usageExcludesBuilds` in `erun-ui/frontend/src/components/app/Sidebar.helpers.ts`) and the non-JSON output states as a `Note:` line. [`erun observe`](/agent-reference/cli-flags#erun-observe) reports the sidecar's own resource limits.
+`excludesBuilds` is `true` whenever the environment's type carries the `erun-dind` sidecar (every type except `runtime` and `host` — `EnvironmentType.UsesDindSidecar`), omitted (false) otherwise. `cpu`/`memory` above are read from the `erun-devops` container's own cgroup alone; an image build (`erun build`/`erun release`) actually runs in `erun-dind`, a separate cgroup whose build containers are cgroup siblings rather than descendants of this one, so the `erun-devops` container cannot read them. `excludesBuilds` names that scope explicitly — the same disclosure the desktop's hover-card caption makes (`usageExcludesBuilds` in `erun-ui/frontend/src/components/app/Sidebar.helpers.ts`) and the non-JSON output states as a `Note:` line.
+
+`build` closes the gap those two fields leave, on exactly the environments `excludesBuilds` marks: a second `kubectl exec`, this one into the `erun-dind` container, sampling the cap cgroup `erun-dind` creates for this pod (`/sys/fs/cgroup/docker/erun-build-cpu-cap-<pod>`, resolved from the sidecar's own hostname). `build.quotaCores`/`utilizationPercent`/`intervalSeconds` mirror `cpu`'s fields, and `periods`/`throttledPeriods` are that cgroup's own `nr_periods`/`nr_throttled` — the ratio that tells a build working at its cap apart from one being starved by it. It is the figure that moves during a build: `100.0%` of its quota against a `cpu` figure near zero. When the cgroup cannot be read — an image whose sidecar predates it, or a caller that cannot exec into that container — `build` carries an `unavailable` reason and the non-JSON output prints `Build CPU: unavailable (<reason>)`, never a zero. [`erun observe`](/agent-reference/cli-flags#erun-observe) reports the sidecar's own resource limits.
 
 ### Unavailability, not failure {#usage-unavailability}
 
