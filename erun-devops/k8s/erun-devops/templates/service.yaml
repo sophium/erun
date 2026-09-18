@@ -142,7 +142,7 @@ emitted; type is the single source of truth.
        overriding the whole image reference. This default is not left to
        memory: k8s/image-version_test.sh fails the render gate when it and
        erun-devops/docker/erun-dind/VERSION disagree. */ -}}
-{{- $dindImageTag := default "28.1.1-4" .Values.dindImageTag -}}
+{{- $dindImageTag := default "28.1.1-5" .Values.dindImageTag -}}
 {{- $dindImage := default (printf "%s/erun-dind:%s" $containerRegistry $dindImageTag) (index $imageOverrides "erun-dind") -}}
 {{- /* The gid of the `docker` group baked into the docker:<ver>-dind base, which
        owns the daemon socket. Surfaced as a value so an env can follow the base
