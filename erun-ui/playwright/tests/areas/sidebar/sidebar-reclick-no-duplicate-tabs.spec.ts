@@ -20,8 +20,7 @@ test.describe('sidebar env re-click with alive default tabs', () => {
 
     // Local spawns eagerly, before ERun's slower StartSession, so it is the
     // most reliable signal that the first open has settled.
-    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
+    await app.tabStrip.waitForTab('Local');
 
     const initialLocalCount = await page.getByRole('tab', { name: 'Local', exact: true }).count();
     const initialERunCount = await page.getByRole('tab', { name: 'ERun', exact: true }).count();

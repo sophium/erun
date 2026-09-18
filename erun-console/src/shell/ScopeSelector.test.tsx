@@ -30,6 +30,7 @@ describe('ScopeSelector', () => {
         tenants={TENANTS}
         ownTenant={OWN_TENANT}
         value={undefined}
+        active="overview"
         onChange={vi.fn()}
       />,
     );
@@ -43,6 +44,7 @@ describe('ScopeSelector', () => {
         tenants={TENANTS}
         ownTenant={OWN_TENANT}
         value={undefined}
+        active="overview"
         onChange={vi.fn()}
       />,
     );
@@ -59,6 +61,7 @@ describe('ScopeSelector', () => {
         tenants={TENANTS}
         ownTenant={OWN_TENANT}
         value={undefined}
+        active="overview"
         onChange={onChange}
       />,
     );
@@ -78,6 +81,7 @@ describe('ScopeSelector', () => {
         tenants={TENANTS}
         ownTenant={OWN_TENANT}
         value="tenant-other"
+        active="overview"
         onChange={onChange}
       />,
     );
@@ -95,10 +99,46 @@ describe('ScopeSelector', () => {
         tenants={TENANTS}
         ownTenant={OWN_TENANT}
         value="tenant-other"
+        active="overview"
         onChange={vi.fn()}
       />,
     );
     expect(screen.getByText(/Viewing another tenant's rows/)).toBeInTheDocument();
     expect(screen.getByText(/Acme/)).toBeInTheDocument();
+  });
+
+  // The selector renders on every section, but its claim that
+  // scope applies must not -- a section whose own panel never threads
+  // scopeTenantId server-side (e.g. Tenants, an OPERATIONS-only action with
+  // no per-tenant scope of its own) must say so plainly instead of
+  // asserting a reach it does not have.
+  it('does not claim scope applies on a section that does not honour it', () => {
+    render(
+      <ScopeSelector
+        tenantType="OPERATIONS"
+        tenants={TENANTS}
+        ownTenant={OWN_TENANT}
+        value="tenant-other"
+        active="tenants"
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/Viewing another tenant's rows/)).not.toBeInTheDocument();
+    expect(screen.getByText(/doesn't use Administering/)).toBeInTheDocument();
+  });
+
+  it('shows no note at all on a non-honouring section while unscoped', () => {
+    render(
+      <ScopeSelector
+        tenantType="OPERATIONS"
+        tenants={TENANTS}
+        ownTenant={OWN_TENANT}
+        value={undefined}
+        active="tenants"
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(/Viewing another tenant's rows/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/doesn't use Administering/)).not.toBeInTheDocument();
   });
 });

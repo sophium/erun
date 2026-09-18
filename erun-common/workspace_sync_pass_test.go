@@ -66,7 +66,31 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "unsetenv ERUN_ENVIRONMENT: %v\n", err)
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	// Timing history is the operator's, not the suite's: this package reaches
+	// writeTimingRecord through the build/deploy paths its tests drive, so
+	// without this the binary appends microsecond records for commands that
+	// never ran to the operator's real ~/.erun/timing -- and, because retention
+	// prunes on write, evicts a genuine record to make room. Redirected for the
+	// whole binary rather than per test, so a test added later is isolated by
+	// default. A caller who set the variable explicitly keeps their value.
+	var timingTempDir string
+	if _, ok := os.LookupEnv(TimingRecordDirEnv); !ok {
+		dir, err := os.MkdirTemp("", "erun-timing-test-")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create timing temp dir: %v\n", err)
+			os.Exit(1)
+		}
+		if err := os.Setenv(TimingRecordDirEnv, dir); err != nil {
+			fmt.Fprintf(os.Stderr, "set %s: %v\n", TimingRecordDirEnv, err)
+			os.Exit(1)
+		}
+		timingTempDir = dir
+	}
+	code := m.Run()
+	if timingTempDir != "" {
+		_ = os.RemoveAll(timingTempDir)
+	}
+	os.Exit(code)
 }
 
 func runWorkspaceSyncSSHStub(args []string) int {

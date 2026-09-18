@@ -90,6 +90,7 @@ test.describe('manage dialog — runtime chart coordinate (#994)', () => {
     await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
     // Deploy-relevant change: the chart is half of what a deploy installs, so the
     // banner tells the operator it takes effect on the next deploy (Nielsen #1).
+    await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
 
     // Reopen: the chart persisted to the env config.

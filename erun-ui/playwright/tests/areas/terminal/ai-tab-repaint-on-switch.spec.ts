@@ -16,10 +16,10 @@ test.describe('AI tab repaints on switch', () => {
     const { tenant, environment } = seededEnv;
     await app.sidebar.openEnvironment(tenant, environment);
 
-    const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
-    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await aiTab.waitFor({ state: 'visible', timeout: 20_000 });
-    await localTab.waitFor({ state: 'visible', timeout: 20_000 });
+    const aiTab = app.tabStrip.tab('AI');
+    const localTab = app.tabStrip.tab('Local');
+    await app.tabStrip.waitForTab('AI');
+    await app.tabStrip.waitForTab('Local');
 
     // Land on the AI tab and wait for the inert shell to render its prompt.
     await aiTab.click();
@@ -55,8 +55,8 @@ test.describe('AI tab repaints on switch', () => {
     const { tenant, environment } = seededEnv;
     await app.sidebar.openEnvironment(tenant, environment);
 
-    const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
-    await aiTab.waitFor({ state: 'visible', timeout: 20_000 });
+    const aiTab = app.tabStrip.tab('AI');
+    await app.tabStrip.waitForTab('AI');
 
     // First open only — no switch, no input. Content must appear on its own.
     await aiTab.click();

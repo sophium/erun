@@ -32,7 +32,7 @@ const (
 	envUsageEvent               = "env-usage"
 	envNodeEvent                = "env-node"
 	appCloseGateEvent           = "app-close-gate"
-	appSessionEnvVar            = "ERUN_UI_SESSION"
+	appSessionEnvVar            = eruncommon.DesktopSessionEnvVar
 )
 
 type erunUIStore interface {
@@ -156,6 +156,10 @@ type App struct {
 	// port-forward that holds its local port while its edge answers nothing.
 	// See environment_forward_repair.go.
 	forwardRepairs map[string]forwardRepairEpisode
+	// edgeOutages tracks, per environment, an "edge is not answering" entry
+	// logged when an orchestrator wired it, until the sweep sees that edge
+	// answer and logs the matching exit. See orchestrator_edge_recovery.go.
+	edgeOutages    map[string]orchestratorEdgeOutage
 	busyEnvs       map[string]int
 	workspaceSyncs map[string]*workspaceSyncWorker
 	orchestrators  map[string]*orchestratorSession
@@ -226,6 +230,12 @@ type App struct {
 	// streamers among them) are already emitting through it.
 	emitMu sync.RWMutex
 	emitFn func(name string, args ...any)
+
+	// restartControlMarkerMu guards the control record against this process's
+	// own shutdown, so an adoption still waiting for a previous owner to exit
+	// cannot republish an endpoint after shutdown has removed it.
+	restartControlMarkerMu       sync.Mutex
+	restartControlMarkerReleased bool
 
 	// restartControl is the loopback server a CLI-triggered restart talks
 	// to (see restart_control.go). nil when the bind failed or startup has not
@@ -629,25 +639,6 @@ func (a *App) startup(ctx context.Context) {
 	go a.reconcileWorkspaceSyncForConfiguredEnvs()
 }
 
-// startRestartControl binds the loopback restart-trigger server and records
-// how to reach it, so a CLI-triggered restart can find and verify this
-// exact process before asking it to restart. A bind failure is logged and
-// left without a marker (see startRestartControlServer): a desktop that
-// cannot expose a restart trigger this launch still works for everything
-// else, and an absent marker is exactly what an external trigger correctly
-// reads as "no running desktop to restart".
-func (a *App) startRestartControl() {
-	server, port := startRestartControlServer(a)
-	if server == nil {
-		return
-	}
-	a.restartControl = server
-	marker := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: port, StartedAtUnix: time.Now().Unix()}
-	if err := eruncommon.WriteDesktopControlMarker(a.deps.desktopControlMarkerPath, marker); err != nil {
-		log.Printf("erun-app: write restart control marker: %v", err)
-	}
-}
-
 func (a *App) shutdown(context.Context) {
 	a.stopConfigWatcher()
 	a.stopActivityPollers()
@@ -655,9 +646,7 @@ func (a *App) shutdown(context.Context) {
 	a.stopActionRunners()
 	a.investigations.stopTimers()
 	a.restartControl.Close()
-	if err := eruncommon.RemoveDesktopControlMarker(a.deps.desktopControlMarkerPath); err != nil {
-		log.Printf("erun-app: remove restart control marker: %v", err)
-	}
+	a.releaseRestartControlMarker()
 	a.mu.Lock()
 	a.stopAllWorkspaceSyncsLocked()
 	a.stopAllCloudCredentialsRefreshersLocked()

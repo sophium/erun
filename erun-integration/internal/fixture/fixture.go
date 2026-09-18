@@ -489,6 +489,31 @@ func SeedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environment str
 	)
 }
 
+// SeedRuntimeTenantEnvWithDeployComponents writes a runtime-type env tree that
+// also carries a saved deploy.components selection. It models the env as the
+// host sees it, so a scenario can set the in-pod identity and still hand the
+// process a selection that resolved to something — the contrast to
+// SeedRuntimeTenantEnv, whose config has no deploy block at all and is what the
+// pod actually carries.
+func SeedRuntimeTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, tenant, environment string, components []string) {
+	t.Helper()
+	SeedRuntimeTenantEnv(t, setup, tenant, environment)
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	contents := "name: " + environment + "\n" +
+		"repopath: " + filepath.Join(setup.Home, "git", tenant) + "\n" +
+		"kubernetescontext: test-context\n" +
+		"containerregistry: registry.example/test\n" +
+		"runtimeversion: 1.0.0\n" +
+		"type: runtime\n"
+	if len(components) > 0 {
+		contents += "deploy:\n  components:\n"
+		for _, component := range components {
+			contents += "    - " + component + "\n"
+		}
+	}
+	mustWrite(t, filepath.Join(envDir, "config.yaml"), contents)
+}
+
 // SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
 // runtimeversion (and no local/published chart), reproducing the fresh-env
 // decision path that the desktop create regression hit: with no version

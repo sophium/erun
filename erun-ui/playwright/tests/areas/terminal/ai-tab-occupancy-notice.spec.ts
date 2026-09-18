@@ -30,8 +30,8 @@ test.describe('AI tab occupancy notice', () => {
     await dialog.startAnyway();
     await dialog.waitForClosed();
 
-    const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
-    await aiTab.waitFor({ state: 'visible', timeout: 20_000 });
+    const aiTab = app.tabStrip.tab('AI');
+    await app.tabStrip.waitForTab('AI');
     await aiTab.click();
 
     // Persistent indicator (Nielsen #1: visibility of system status) while the
@@ -63,15 +63,13 @@ test.describe('AI tab occupancy notice', () => {
 
   test('an environment with no held lease shows no occupancy notice', async ({
     app,
-    page,
     seededEnv,
   }) => {
     const { tenant, environment } = seededEnv;
 
     await app.sidebar.openEnvironment(tenant, environment);
 
-    const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
-    await aiTab.waitFor({ state: 'visible', timeout: 20_000 });
+    await app.tabStrip.waitForTab('AI');
     await expect(app.aiOccupancyPromptDialog.locator()).toHaveCount(0);
   });
 });
