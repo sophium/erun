@@ -274,7 +274,7 @@ test-frontend:
 # evidence). It was not always: a real run against main once found 27
 # failing specs, with two full runs on the same commit producing different
 # failure sets (27 vs 24) -- the suite was not deterministic under parallel
-# load. #1937's fixture-isolation fix (the shared seeded-baseline-row cache
+# load. The fixture-isolation fix (the shared seeded-baseline-row cache
 # leak) resolved that, re-verified by repeated full-suite runs with zero
 # failures before this target joined check-gate. Run this by hand, or via
 # `erun exec job` in an agent env, when iterating on a fix -- it no longer
@@ -450,7 +450,7 @@ check:
 # on) -- zero failures across every full-suite execution recorded this
 # session. Before this, the suite had 27 failing specs and produced
 # different failure sets across repeated runs on the same commit -- see the
-# git history of this target for the original exclusion and #1937 for the
+# git history of this target for the original exclusion and the
 # fixture-isolation fix that resolved it. A red here is therefore a real
 # regression, never "the suite crying wolf" -- fix it in the same PR per
 # root AGENTS.md's "Fixing pre-existing issues is mandatory" rule, do not
