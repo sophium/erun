@@ -74,7 +74,7 @@ func startJob(t *testing.T, setup env.Setup, envVars []string, name string, args
 // t.TempDir()'s own cleanup: a tick that lands mid-RemoveAll recreates the
 // "leases" directory RemoveAll just emptied (TakeEnvironmentActivityLease
 // calls os.MkdirAll before it writes), which is exactly the
-// "directory not empty" ENOTEMPTY erun#2106 reported. Waiting for the
+// "directory not empty" ENOTEMPTY that was reported. Waiting for the
 // supervisor's own pid to disappear is what makes the teardown deterministic
 // instead of a timing bet.
 func cancelJobForCleanup(t *testing.T, setup env.Setup, envVars []string, id string) {
@@ -2202,7 +2202,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 }
 
 // TestWaitForJobSupervisorExitBlocksUntilTheRecordedPidIsGone is the
-// regression test for erun#2106: TestJob's own cleanup sent "job cancel" and
+// regression test for the defect: TestJob's own cleanup sent "job cancel" and
 // returned immediately, racing t.TempDir()'s own removal of the activity
 // directory against the real supervisor process -- which CancelEnvironmentJob
 // deliberately never signals (see cancelJobForCleanup's comment) and which
