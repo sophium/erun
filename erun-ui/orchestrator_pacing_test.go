@@ -730,19 +730,25 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 		pacingCapped: true,
 	}
 
+	// id != name, the shape erun#2270 reported: the log names the id first and
+	// carries the display name beside it.
 	nudgedSession := newCallRecordingSession()
-	nudgedKey := orchestratorSessionKey("nudged")
+	nudgedKey := orchestratorSessionKey("petios")
 	app.sessions[nudgedKey] = &managedTerminal{session: nudgedSession, key: nudgedKey, serial: 4, kind: sessionKindOrchestrator}
-	app.orchestrators["nudged"] = &orchestratorSession{id: "nudged", serial: 4, name: "nudged", startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute)}
+	app.orchestrators["petios"] = &orchestratorSession{id: "petios", serial: 4, name: "petios-qa", startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute)}
 
 	app.reconcileOrchestratorPacing()
 
 	logged := logs.String()
+	// The id leads because it is the key the state files use; the display name
+	// follows parenthetically only when it differs. The fixtures that keep
+	// id == name pin that the common case still reads exactly as it did before,
+	// so a redundant "fresh (fresh)" cannot creep in.
 	for _, want := range []string{
 		"orchestrator fresh pacing decision=fresh",
 		"orchestrator gone pacing decision=not-alive",
 		"orchestrator capped pacing decision=already-capped",
-		"orchestrator nudged pacing decision=nudge",
+		"orchestrator petios (petios-qa) pacing decision=nudge",
 	} {
 		if !strings.Contains(logged, want) {
 			t.Fatalf("expected %q in the pacing log, got:\n%s", want, logged)
@@ -754,5 +760,49 @@ func TestOrchestratorPacingLogsEachDecisionReasonOnTransition(t *testing.T) {
 	app.reconcileOrchestratorPacing()
 	if logs.Len() != 0 {
 		t.Fatalf("expected no repeated pacing log lines on an unchanged reason, got:\n%s", logs.String())
+	}
+}
+
+// TestOrchestratorPacingLogLineJoinsItsNudgeHistoryRecord pins the outcome
+// erun#2270 asked for: a log line and a state record about the same
+// orchestrator are matchable without reading config.yaml. The pacing log named
+// the config `name:` while orchestrator-nudge-history.json keys by `id:`, so an
+// orchestrator whose pair differs — petios / petios-qa on the reporting host —
+// appeared under two strings on two surfaces with nothing saying so, and the
+// state file read as silently dropping nudges.
+func TestOrchestratorPacingLogLineJoinsItsNudgeHistoryRecord(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	orchestratorPacingNudgeSettle = 0
+	restoreLogOutputAfter(t)
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+
+	app := NewApp(erunUIDeps{})
+	historyPath := app.deps.orchestratorNudgeHistoryPath
+	if historyPath == "" {
+		t.Fatal("expected the app to resolve a nudge history path")
+	}
+
+	session := newCallRecordingSession()
+	key := orchestratorSessionKey("petios")
+	app.sessions[key] = &managedTerminal{session: session, key: key, serial: 4, kind: sessionKindOrchestrator}
+	app.orchestrators["petios"] = &orchestratorSession{
+		id: "petios", serial: 4, name: "petios-qa",
+		startedAt: time.Now().Add(-orchestratorPacingStaleAfter - time.Minute),
+	}
+
+	app.reconcileOrchestratorPacing()
+
+	const wantLine = "orchestrator petios (petios-qa) pacing decision=nudge"
+	if !strings.Contains(logs.String(), wantLine) {
+		t.Fatalf("expected %q in the pacing log, got:\n%s", wantLine, logs.String())
+	}
+	if _, found, unreadable := orchestratorNudgeHistoryFor(historyPath, "petios"); !found || unreadable {
+		t.Fatalf("expected a nudge history record under id %q (found=%v unreadable=%v), so the log line joins its state record",
+			"petios", found, unreadable)
+	}
+	if _, found, _ := orchestratorNudgeHistoryFor(historyPath, "petios-qa"); found {
+		t.Fatalf("nudge history must be keyed by the id, not by the display name %q", "petios-qa")
 	}
 }
