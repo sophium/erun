@@ -96,6 +96,18 @@ func transientRegistryReadSamples() []registryReadSample {
 			output: `Error: received unexpected HTTP status: 502 Bad Gateway`,
 			source: "observed proxy answer in front of the registry",
 		},
+		{
+			output: `Error: received unexpected HTTP status: 500`,
+			source: "constructed: the same status with no reason phrase, the form the previous trailing-space marker failed to match while its 502 and 503 siblings matched theirs",
+		},
+		{
+			output: `Error: received unexpected HTTP status: 502`,
+			source: "constructed: the reason-phrase-less form, pinned so all three status codes classify alike",
+		},
+		{
+			output: `Error: received unexpected HTTP status: 503`,
+			source: "constructed: the reason-phrase-less form, pinned so all three status codes classify alike",
+		},
 	}
 }
 
@@ -142,7 +154,7 @@ func TestIsTransientRegistryReadErrorMatchesEveryMarker(t *testing.T) {
 		"denied", "unauthorized", "not found", "manifest unknown",
 		"timeout", "timed out", "temporary failure", "connection reset",
 		"connection refused", "eof", "no such host", "tls handshake",
-		"service unavailable", "too many requests", "500 ", "502", "503",
+		"service unavailable", "too many requests", "500", "502", "503",
 	}
 	for _, marker := range markers {
 		if !isTransientRegistryReadError(marker) {
