@@ -82,10 +82,10 @@ func noWait(int) {}
 
 const concurrentPushTestTag = "ghcr.io/sophium/erun-backend-api:1.0.250-pr.4fa33ad5-arm64"
 
-// TestAConcurrentPublishersUnknownBlobIsAbsorbedByRepushing is the erun#2254
-// case: the push is rejected because a peer run's upload of a shared layer has
-// not committed, and the identical push succeeds once it has. The failure must
-// not reach the release as a build failure.
+// TestAConcurrentPublishersUnknownBlobIsAbsorbedByRepushing is the case the
+// fix exists for: the push is rejected because a peer run's upload of a shared
+// layer has not committed, and the identical push succeeds once it has. The
+// failure must not reach the release as a build failure.
 func TestAConcurrentPublishersUnknownBlobIsAbsorbedByRepushing(t *testing.T) {
 	attempted := newCountingFakeDockerOnPath(t, "unknown blob", 1)
 
