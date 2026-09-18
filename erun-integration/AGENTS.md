@@ -83,6 +83,21 @@ cross-repository structural gates, not production helpers.
 - Normalize incidental paths, times, IDs, and ordering without erasing the contract.
   Dynamic server ports use per-server extra rules matching already-normalized
   `<LOOPBACK>`; do not blanket-normalize meaningful fixed ports.
+- **A normalizer that silently stops normalizing is worse than one that never
+  existed.** Do not gate normalization on a shape assertion that can fail closed
+  and silently: the step-timing canonicalizer ended its block at the first row it
+  could not parse, so one unrecognized row shape — a failed step's `" — <error>"`
+  suffix, or a multi-line error — turned canonicalization off for that whole tree
+  *and* reparented the rows after it. That is invisible on an idle machine (every
+  sibling ties inside the production noise floor, so the recorded order already is
+  name order) and surfaces only where timings diverge, under a gate's load
+  (erun#2076). Assert the property the normalizer exists to provide, not the
+  pattern that implements it: `TestGoldenTimingBlocksAreOrderInvariant`
+  (`internal/normalize/timingorder_golden_test.go`) reorders every real golden's
+  timing block with an indentation-derived parser deliberately independent of
+  `timingLinePattern` and requires canonicalization to reproduce it byte for byte.
+  It reads goldens outside its own compiled inputs, so it depends on
+  `scripts/integration-test.sh` running this module with `-count=1`.
 - Record through direct `UPDATE_GOLDEN=1 go test ...` or the script's explicit
   `--update-golden` mode, then read every changed golden against intended behavior
   and compare on clean state. A golden diff is a behavior diff, not generated noise.
