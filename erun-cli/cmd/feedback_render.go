@@ -88,16 +88,35 @@ func isNoShellCommand(cmd *cobra.Command) bool {
 	return err == nil && noShell
 }
 
+// commandScopesTenantByFlag reports whether cmd's --tenant scopes resolution.
+// Commands whose --tenant means something else (list's selects version-drift
+// reporting) return false, so their failures never offer it as the tenant fix;
+// resolution failures name the flag only when it is the real next step.
+func commandScopesTenantByFlag(cmd *cobra.Command) bool {
+	if cmd.Flags().Lookup("tenant") == nil {
+		return false
+	}
+	return !commandTenantFlagIsNotScoping(cmd)
+}
+
+// commandTenantFlagIsNotScoping names the commands whose --tenant flag is not a
+// tenant-scoping flag, so it must never be offered as the tenant remedy.
+func commandTenantFlagIsNotScoping(cmd *cobra.Command) bool {
+	return cmd.Name() == "list"
+}
+
 func commandContext(cmd *cobra.Command) common.Context {
 	verbosity := commandVerbosity(cmd)
 	return common.Context{
-		Logger:    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
-		Verbosity: verbosity,
-		DryRun:    isDryRunCommand(cmd),
-		Output:    commandOutputMode(cmd),
-		Stdin:     cmd.InOrStdin(),
-		Stdout:    cmd.OutOrStdout(),
-		Stderr:    cmd.ErrOrStderr(),
+		Logger:                    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
+		Verbosity:                 verbosity,
+		DryRun:                    isDryRunCommand(cmd),
+		Output:                    commandOutputMode(cmd),
+		Command:                   cmd.CommandPath(),
+		CommandScopesTenantByFlag: commandScopesTenantByFlag(cmd),
+		Stdin:                     cmd.InOrStdin(),
+		Stdout:                    cmd.OutOrStdout(),
+		Stderr:                    cmd.ErrOrStderr(),
 	}
 }
 

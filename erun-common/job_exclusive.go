@@ -338,19 +338,23 @@ func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now ti
 		TTL:         params.LeaseTTL,
 		Exclusive:   true,
 		Scope:       EnvironmentActivityLeaseScopeEnvironment,
-		Holder:      environmentJobExclusivityHolder(params),
+		Holder:      environmentJobHolder(params.Tenant),
 		Now:         now,
 	})
 }
 
-// environmentJobExclusivityHolder names who to go ask when this claim refuses
-// someone. The orchestrator id is read from the environment rather than taken as
-// input for the same reason the lease store never takes a holder's tenant from
-// caller input: a claim must not be able to name someone else as its holder.
-func environmentJobExclusivityHolder(params StartEnvironmentJobParams) EnvironmentActivityLeaseHolder {
+// environmentJobHolder names who a job's own leases belong to, so a refusal
+// naming them can say who to go ask instead of naming an unnamed holder. The
+// orchestrator id is read from the environment rather than taken as input for
+// the same reason the lease store never takes a holder's tenant from caller
+// input: a claim must not be able to name someone else as its holder. Shared
+// by every lease a job takes on its own behalf — the exclusive claim and the
+// plain presence lease alike — so a refusal against either names the same
+// initiator.
+func environmentJobHolder(tenant string) EnvironmentActivityLeaseHolder {
 	return EnvironmentActivityLeaseHolder{
-		Orchestrator: strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID")),
-		Tenant:       params.Tenant,
+		Orchestrator: strings.TrimSpace(os.Getenv(OrchestratorIDEnvVar)),
+		Tenant:       tenant,
 	}
 }
 
@@ -358,7 +362,8 @@ func environmentJobExclusivityHolder(params StartEnvironmentJobParams) Environme
 // scoped to this job's own id, so it can never drop a claim that has since been
 // legitimately taken by someone else.
 func releaseEnvironmentJobExclusivityClaim(tenant, environment, id string) error {
-	return ReleaseExclusiveEnvironmentActivityLease(tenant, environment, EnvironmentActivityLeaseScopeEnvironment, environmentJobExclusiveLeaseID(id))
+	_, err := ReleaseExclusiveEnvironmentActivityLease(tenant, environment, EnvironmentActivityLeaseScopeEnvironment, environmentJobExclusiveLeaseID(id))
+	return err
 }
 
 // environmentJobExclusivityTakeError translates a lost create race into the
@@ -371,4 +376,18 @@ func environmentJobExclusivityTakeError(params StartEnvironmentJobParams, err er
 		return err
 	}
 	return environmentExclusivityConflict(fmt.Sprintf("job %q", params.ID), params.Tenant, params.Environment, conflict.Holder, true, now)
+}
+
+// DescribeExclusiveJobStartVersionSkew is describeExclusiveClaimVersionSkew
+// for job start's off-environment dispatch (exec_raw/exec_agent). A caller on
+// a release that added --exclusive can run it against an environment whose
+// edge predates the feature entirely: the flag parses fine host-side, but the
+// remote edge's own compiled schema is what actually enforces it, so the two
+// are not required to agree without this. Without this translation the edge's
+// raw schema rejection reads like a malformed call rather than the version
+// mismatch it is.
+func DescribeExclusiveJobStartVersionSkew(tenant, environment string, exclusive bool, err error) error {
+	return describeExclusiveClaimVersionSkew(tenant, environment, "job start",
+		"upgrade the environment (erun pin / erun deploy) to run this job exclusively there, or drop --exclusive to accept concurrent jobs",
+		exclusive, err)
 }

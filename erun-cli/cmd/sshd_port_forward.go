@@ -43,6 +43,9 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 
 	matches := stateMatchesSSHDTarget(state, expectedState)
 	if matches && !stateHasDeprecatedLocalProxy(state) && canReachLocalSSHEndpoint(info.Port) {
+		// A reachable forward is reused as-is and keeps writing to the log it
+		// opened when it started, so this touch is the chance to re-apply the cap.
+		rotatePortForwardLogIfOversized(ctx, "sshd", sshdPortForwardLogPath(statePath))
 		return info, nil
 	}
 	args := kubectlPortForwardArgs(result, info.Port)
@@ -91,6 +94,7 @@ func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected 
 	adopted := expected
 	adopted.ProcessID = pid
 	adopted.LogPath = sshdPortForwardLogPath(statePath)
+	rotatePortForwardLogIfOversized(ctx, "sshd", adopted.LogPath)
 	if err := saveSSHDPortForwardState(statePath, adopted); err != nil {
 		return false, fmt.Errorf("adopt SSHD port-forward (PID %d): %w", pid, err)
 	}
@@ -128,12 +132,35 @@ func stopStaleSSHDPortForward(ctx common.Context, matches bool, state sshdPortFo
 
 func startSSHDPortForward(ctx common.Context, statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
 	logPath := sshdPortForwardLogPath(statePath)
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	var process *os.Process
+	if err := retryTransientPortForwardStart(func() error {
+		p, err := launchSSHDPortForwardProcess(logPath, args)
+		if err != nil {
+			return err
+		}
+		process = p
+		return nil
+	}); err != nil {
 		return common.SSHConnectionInfo{}, err
 	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
+
+	expectedState.LogPath = logPath
+	expectedState.ProcessID = process.Pid
+	if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
 		return common.SSHConnectionInfo{}, err
+	}
+
+	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
+		releaseUnreachablePortForward(ctx, "sshd", process, info.Port, err)
+		return common.SSHConnectionInfo{}, err
+	}
+	return info, nil
+}
+
+func launchSSHDPortForwardProcess(logPath string, args []string) (*os.Process, error) {
+	logFile, err := openPortForwardLog(logPath)
+	if err != nil {
+		return nil, err
 	}
 	defer func() {
 		_ = logFile.Close()
@@ -144,20 +171,9 @@ func startSSHDPortForward(ctx common.Context, statePath string, expectedState ss
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
-		return common.SSHConnectionInfo{}, err
+		return nil, err
 	}
-
-	expectedState.LogPath = logPath
-	expectedState.ProcessID = cmd.Process.Pid
-	if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
-		return common.SSHConnectionInfo{}, err
-	}
-
-	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
-		releaseUnreachablePortForward(ctx, "sshd", cmd.Process, info.Port, err)
-		return common.SSHConnectionInfo{}, err
-	}
-	return info, nil
+	return cmd.Process, nil
 }
 
 func waitForSSHDPortForward(port int, logPath string) error {

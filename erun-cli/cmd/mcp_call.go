@@ -21,6 +21,12 @@ import (
 // treat-anything-not-running-as-terminal watcher falls into.
 const mcpChannelUnreachableExitCode = 126
 
+// reattachMCPChannel is the spawn the reattach path performs. It is a variable
+// so the decision that keeps a --dry-run from starting real work can be tested
+// by asserting the spawn is never invoked, which is the only observable a
+// preview leaves behind.
+var reattachMCPChannel = reattachEnvironmentMCPChannel
+
 // callMCPToolWithReattach is the shared choke point for every host-side call
 // into an environment's MCP edge (mcp call and the job/idle/activity verbs
 // via callEnvironmentTool): a channel that has dropped or gone stale gets
@@ -42,7 +48,14 @@ func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, tar
 	}
 	result, err := call()
 	if err != nil && errors.Is(err, common.ErrMCPEndpointUnreachable) {
-		if reattachErr := reattachEnvironmentMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
+		// A preview resolves and traces; it never executes. Reattaching spawns a
+		// real `erun open --reconnect` child that keeps running past the
+		// preview, so a --dry-run reports the channel as unreachable instead of
+		// re-establishing it.
+		if commandCtx.DryRun {
+			return result, err
+		}
+		if reattachErr := reattachMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
 			result, err = call()
 		}
 	}
@@ -86,7 +99,7 @@ func newMCPCallCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPCallCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), tool, arguments)
+			return runMCPCallCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), tool, arguments)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -109,7 +122,7 @@ func newMCPToolsCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPToolsCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment))
+			return runMCPToolsCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
 	addDryRunFlag(cmd)
@@ -132,7 +145,7 @@ func newMCPTokenCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPTokenCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment))
+			return runMCPTokenCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
 	addDryRunFlag(cmd)
@@ -295,6 +308,8 @@ func mcpEdgeTokenMinter(target mcpEdgeTarget) common.MCPTokenMinter {
 // a missing port-forward and an edge that does not trust this machine's identity.
 func mcpEdgeError(target mcpEdgeTarget, err error) error {
 	switch {
+	case errors.Is(err, common.ErrMCPTargetNotAnswering):
+		return fmt.Errorf("%w; the port-forward is up, so retry in a few seconds once %s/%s has finished starting — re-establish the forward with `erun open %s %s --reconnect` only if it stays unresponsive", err, target.tenant, target.environment, target.tenant, target.environment)
 	case errors.Is(err, common.ErrMCPEndpointUnreachable):
 		return fmt.Errorf("%w; run `erun open %s %s` so the local MCP port-forward is up", err, target.tenant, target.environment)
 	case errors.Is(err, common.ErrMCPUnauthorized):

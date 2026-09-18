@@ -50,11 +50,35 @@ ERun reads a small number of `ERUN_*` variables, mostly when running inside a ru
 
 Each `EnvConfig.*` reference is fully spec'd in [Configuration · EnvConfig](/reference/configuration#envconfig).
 
+## Orchestrator-session variables
+
+A host-side orchestrator session has no pod, so none of the variables above apply
+to it. The desktop app sets a smaller, disjoint set on the session process at
+launch, and the shared orchestrator contract reads its scope from them.
+
+| Variable | Type | Default | Purpose | Source |
+|---|---|---|---|---|
+| `ERUN_ORCHESTRATOR_ID` | string | unset | **The session's identity.** The orchestrator's own id, which keys into the `orchestrators:` list in erun's `config.yaml`: matching this id is how the session resolves which environments are its own, and it names the session's `RESUME-NOTE.<id>.md`. An empty value means a transient (Investigate) session with no id and no linked environments. | Orchestrator spawn. |
+| `ERUN_ORCHESTRATOR_LAUNCH` | UUID | unset | Per-launch nonce. The session's own hooks stamp it onto the conversation id they report, so a restart's hand-off attaches to the launch that asked for it rather than to any session carrying the same orchestrator id. | Orchestrator spawn, minted once per launch. |
+| `ERUN_OUTPUTS_DIR` | absolute path | unset | Host directory this session's deliverables are written to, so the outputs convention an in-pod agent follows still has a target with no pod. See the in-pod table above for the same variable inside a runtime pod. | Orchestrator spawn; omitted for a transient session, which has no id and so no directory of its own. |
+| `ERUN_UI_SESSION` | bool literal `1` | unset | Internal. Marks the process as one the desktop app started, so the app can tell its own session from a shell the Operator opened by hand. Do not depend on this. | Desktop app, for every session it launches (orchestrator and in-app shell alike). |
+| `ERUN_DEV_BIN_DIR` | absolute path | `erun-cli/bin` | Internal to the development wrapper `erun-cli/run.sh`, which reads it as the directory it builds `erun` and `erun-app` into. An Operator sets it to a directory outside the checkout so that invoking `erun` does not write into a worktree — which a host-side orchestrator treats as a read-only review directory. Do not depend on this; it is not part of the session contract. | `erun-cli/run.sh` (read from the environment, never set by erun). |
+
+One variable outside the `ERUN_*` namespace is set here too:
+`CLAUDE_CODE_SUBAGENT_MODEL` (string, `opus`), which pins the model the
+session's subagents run on. The in-pod Claude variables above are unrelated —
+those come from `EnvConfig.claude.*` and describe a pod, not a session.
+
+Read scope from `ERUN_ORCHESTRATOR_ID`, never from memory or disk: the id is the
+only thing that ties a session to its `orchestrators:` entry.
+
 ## CLI-side variables
 
 | Variable | Type | Default | Purpose |
 |---|---|---|---|
 | `ERUN_IDLE_PROBE` | bool literal `true` | unset | Hint that the CLI is being invoked by the desktop's idle prober. When set, suppresses interactive output. |
+| `ERUN_FORCE_TTY` | bool literal `1` | unset | Internal test seam. Reports stdout as a terminal to a piped run, so an interactive path can be exercised without a TTY. Do not depend on this. |
+| `ERUN_LOCAL_SHELL_OVERRIDE` | bool literal `1` | unset | Internal test seam. Launches the Local tab's shell as a genuine interactive POSIX shell with a pinned prompt and no rc files, so a terminal-content test is not at the mercy of the Operator's own `$SHELL` dotfiles. Do not depend on this. |
 | Docker / Helm / kubectl standard variables | various | per tool | Honoured as documented by each tool (e.g. `DOCKER_HOST`, `KUBECONFIG`, `HELM_NAMESPACE`). |
 
 ## Variables NOT read by ERun
@@ -62,6 +86,6 @@ Each `EnvConfig.*` reference is fully spec'd in [Configuration · EnvConfig](/re
 The following look ERun-related but are not consumed:
 
 - `ERUN_VERSION` — compiled into the binary at build time (`-ldflags -X main.Version=…`). Not read from the environment.
-- `ERUN_HOME` — there is no such variable; per-user config lives under `~/.config/erun/` (or the OS-equivalent path; see [Config locations](/reference/config-locations)).
+- `ERUN_HOME` — there is no such variable; per-user config lives under `<config-root>/`, the platform's own config directory (see [Config locations](/reference/config-locations)), and per-environment state always lives under `~/.erun/`.
 
 A variable not in either table above is ignored.

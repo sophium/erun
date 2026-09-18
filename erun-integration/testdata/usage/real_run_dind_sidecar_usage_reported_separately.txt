@@ -1,0 +1,79 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "cpu": {
+    "quotaCores": 12,
+    "utilizationPercent": 0.024999999999999998,
+    "intervalSeconds": 1,
+    "usageUsec": 1003000
+  },
+  "memory": {
+    "currentBytes": 104857600,
+    "peakBytes": 104857600,
+    "peakObserved": true,
+    "limitBytes": 24696061952,
+    "percentOfLimit": 0.42459239130434784,
+    "oomKillsObserved": true
+  },
+  "disk": [
+    {
+      "mount": "<HOME>",
+      "nodeShared": true,
+      "totalBytes": 202991730688,
+      "usedBytes": 91142750208,
+      "percentUsed": 44.899735520796746
+    }
+  ],
+  "warnings": [
+    "erun-dind: memory is at 89% of its 14336Mi limit (warns at 85%)"
+  ],
+  "excludesBuilds": true,
+  "dind": {
+    "cpu": {
+      "quotaCores": 4,
+      "utilizationPercent": 47.5,
+      "intervalSeconds": 1,
+      "usageUsec": 2900000
+    },
+    "memory": {
+      "currentBytes": 13421772800,
+      "peakBytes": 13958643712,
+      "peakObserved": true,
+      "limitBytes": 15032385536,
+      "percentOfLimit": 89.28571428571429,
+      "oomKillsObserved": true
+    }
+  },
+  "sizing": {
+    "knob": "runtimepod",
+    "verdicts": [
+      {
+        "resource": "memory",
+        "action": "insufficient-evidence",
+        "current": "23552Mi",
+        "reason": "peak 100Mi of 23552Mi (0%), but only 0m observed of the 24h0m a shrink needs"
+      },
+      {
+        "resource": "cpu",
+        "action": "insufficient-evidence",
+        "current": "12",
+        "reason": "n/a of scheduling periods throttled (0 of 0), but only 0m observed of the 24h0m a shrink needs"
+      }
+    ],
+    "evidence": {
+      "observedSeconds": 0,
+      "samples": 1,
+      "restarts": 0,
+      "memoryLimitBytes": 24696061952,
+      "observedPeakMemoryBytes": 104857600,
+      "observedOomKills": 0,
+      "cpuQuotaMilli": 12000,
+      "signals": [
+        "cgroup memory.peak",
+        "cgroup memory.events oom_kill",
+        "cgroup cpu.stat usage_usec/nr_throttled"
+      ]
+    }
+  }
+}
+audit: erun usage --output json

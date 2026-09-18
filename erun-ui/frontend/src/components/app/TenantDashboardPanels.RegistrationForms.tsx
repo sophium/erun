@@ -11,7 +11,7 @@ import {
   updateRegistrationDraft,
 } from '@/app/tenantRegistrationThunks';
 
-import { InlineAlert } from './InlineAlert';
+import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { type TenantDashboardData } from './TenantDashboardMessage';
 import { PlanList } from './TenantDashboardPanels.Registration';
 
@@ -215,10 +215,18 @@ export function EnvironmentSection({
 }: {
   data: TenantDashboardData;
   draft: RegistrationState;
-}): React.ReactElement | null {
+}): React.ReactElement {
   const dispatch = useAppDispatch();
+  // The one notice for the register capability on this tab: LocalEnvironmentsSection
+  // sits above this and hides for the same flag, so posting the missing access
+  // here names it once instead of twice.
   if (data?.canRegisterEnvironment !== true) {
-    return null;
+    return (
+      <PermissionNotice>
+        You can see this tab, but registering a hosted environment needs additional access. Ask an
+        administrator.
+      </PermissionNotice>
+    );
   }
   return (
     <section className="grid gap-3">

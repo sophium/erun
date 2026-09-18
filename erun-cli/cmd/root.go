@@ -168,6 +168,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newDoctorCmd(d.resolveOpen, d.configStore, cloudDependencies(), common.CloudContextDependencies{}, runPrompt),
 		newObserveCmd(d.resolveOpen),
 		newUsageCmd(d.resolveOpen),
+		newE2ECmd(d.resolveOpen, common.FindProjectRoot),
 		newDeleteCmd(d.configStore, runPrompt, common.DeleteKubernetesNamespace),
 		newExposeCmd(d.configStore, d.configStore, cloudDependencies(), common.FindProjectRoot),
 		newUnexposeCmd(d.configStore, d.configStore, cloudDependencies(), common.FindProjectRoot),
@@ -261,7 +262,7 @@ func (d rootDependencies) deployCommand() *cobra.Command {
 }
 
 func (d rootDependencies) resizeCommand() *cobra.Command {
-	return newResizeCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, d.recoveringDeployHelmChart)
+	return newResizeCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, d.recoveringDeployHelmChart, d.resolveOpen)
 }
 
 func (d rootDependencies) publishCommand() *cobra.Command {

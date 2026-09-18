@@ -249,7 +249,7 @@ func TestObserve(t *testing.T) {
 	// runtimepod (the SeedTenantEnv default, and the in-pod reality per
 	// runtime_resources.go's NormalizeRuntimePodResources doc) asserts nothing
 	// about the pod's shape, so a release sized well above the package's
-	// DefaultRuntimePodCPU/Memory (4 / 8916Mi) must report no runtimepod drift —
+	// DefaultRuntimePodCPU/Memory (4 / 16384Mi) must report no runtimepod drift —
 	// comparing the release against a manufactured default nobody configured is
 	// exactly the bug, not the fix.
 	t.Run("real_run_runtime_pod_silent_config_reports_no_drift", func(t *testing.T) {

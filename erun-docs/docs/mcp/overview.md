@@ -77,7 +77,7 @@ An env deployed with a trust anchor requires a **bearer on every request**, incl
 | Lifetime | 5 minutes. Mint per request; do not cache. |
 | Failure | `401` with the verification reason. |
 
-An env deployed before key injection (no anchor configured) stays unauthenticated — loopback-only, behind the namespace's default-deny `NetworkPolicy`.
+An env deployed before key injection (no anchor configured) answers any caller that can reach the port. The edge binds the pod IP rather than loopback — the in-pod Service that `erun expose` fronts has to reach it — and the runtime chart's `NetworkPolicy` re-permits `mcp` from any source, so an unanchored edge is reachable from every pod in the cluster, not just the env's own namespace. Inject a key by redeploying before treating an env as safe to leave running unanchored.
 
 **Don't hand-roll the token.** `erun mcp call` and `erun mcp tools` mint one internally per request; `erun mcp proxy` does the same for a client that speaks MCP itself, relaying its stdio to this endpoint; and `erun mcp token` prints one for a caller driving the protocol directly:
 
@@ -172,6 +172,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `pin` | `erun pin` | The resolved plan: every erun version reference for the env, its current value and its new one, plus whether it was applied. Verifies the target is published first. Resolves the checkout to rewrite from `projectRoot`, then the server's own runtime repo path; refuses rather than scan a wider directory when neither is set — there is no cwd to fall back to the way a shell user has. `preview` returns the plan without writing. |
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block, unless `skipIfUnconfigured` turns that into a no-op. Supports preview (dry-run). |
 | `unexpose` | `erun unexpose` | Removes an environment's per-env wildcard DNS record — the DNS-side counterpart to `expose`, run at teardown. Supports preview. |
+| `e2e` | `erun e2e` | Discovers `playwright/` the way `build` discovers `docker/`, refuses (naming the cause) if the environment isn't deployed, the target service isn't exposed, or its certificate isn't ready, then runs the suite once with the resolved HTTPS URL and deployed version injected. Supports preview and background jobs (`wait: false`). |
 | `terraform` | `erun terraform` | Runs a hosted platform's per-environment Terraform (`apply`/`plan`/`destroy`). `apply`/`destroy` mutate real cloud and cluster state and require `confirm` to equal the environment name. `preview` returns the resolved commands without executing them. |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
@@ -289,6 +290,7 @@ Talks to a hosted erun platform (`erun-backend-api`) over the `erun`-type cloud 
 | `platform_identity_org_create` | Work | Create an organization on the platform's own identity provider — the org an org-scoped tenant mapping needs before `platform_tenant_create`'s `orgFieldValue` can produce a mapping any token will ever resolve to. Requires an operations-tenant caller. |
 | `platform_user_list` | Read | List a tenant's users. `tenantId` targets another tenant and is honored only for an operations-tenant caller. |
 | `platform_user_enroll` | Work | Enrol a user into a tenant. Same `tenantId` scoping as `platform_user_list`; `roleIds` names the roles to grant instead of the platform's default. |
+| `platform_user_grant-role` | Work | Grant a role to a user already enrolled in the caller's tenant — the post-enrollment grant `platform_user_enroll` cannot perform, since re-enrolling an enrolled identity is a no-op that leaves its roles untouched. `roleId` comes from the tenant's role list. |
 | `platform_env_list` | Read | List the caller's tenant's hosted environments. |
 | `platform_env_get` | Read | Fetch one hosted environment by id. |
 | `platform_env_register` | Work | Register a hosted environment. For a runtime environment with `runtimeVersion` and a deploy executor configured, this also starts a server-side deploy — poll `platform_env_get` to watch it converge. |
@@ -413,6 +415,12 @@ Generating conventional code (a new service, a migration job, an Ingress, …) i
 
 Every call lands in the audit trail with its tool name, so `exec_raw` invocations are immediately distinguishable from typed ones.
 
+### Dry runs {#dry-runs}
+
+A tool that can rehearse an action instead of performing it accepts `preview`. Set it to `true` and the call resolves what it would do — the plan, the commands, the targets — and returns that without touching anything. It is how a caller checks a reconcile before running one against a live environment.
+
+The capability does not follow tool families. Read it from the tool itself: whenever `preview` appears in a tool's `inputSchema`, that tool's description closes with **Supports preview.**, so a description is enough to tell a tool you can rehearse from one you cannot. A tool whose schema omits `preview` has no dry run — never assume one, and never infer one from a sibling tool in the same family.
+
 ### Full tool index {#full-tool-index}
 
 Every tool the server can register, one row each, grouped by `_meta.family` and matching `erun-common`'s `MCPToolDescriptor` table exactly — a scripted test (`TestMCPOverviewDocumentsEveryTool` in `erun-mcp`) fails the build if a tool is registered here without a row below, or a row below names a tool that isn't registered. Retired aliases (`diff`, `raw`, `write`, `commit`, `workspace_sync`) are omitted; see [Working tree](#working-tree--typed-mutations-no-shell) and [Host-served](#host-served) above for those.
@@ -439,6 +447,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `usage` | `erun usage` | Read |
 | *(top-level)* | `resize` | `erun resize` | Work |
 | *(top-level)* | `delete` | `erun delete` | Work |
+| *(top-level)* | `e2e` | `erun e2e` | Work |
 | exec | `exec_diff` | `erun exec diff` | Read |
 | exec | `exec_raw` | `erun exec raw` | Work |
 | exec | `exec_write` | `erun exec write` | Work |
@@ -481,6 +490,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | platform | `platform_identity_org_create` | `erun platform identity org create` | Work |
 | platform | `platform_user_list` | `erun platform user list` | Read |
 | platform | `platform_user_enroll` | `erun platform user enroll` | Work |
+| platform | `platform_user_grant-role` | `erun platform user grant-role` | Work |
 | platform | `platform_env_list` | `erun platform env list` | Read |
 | platform | `platform_env_get` | `erun platform env get` | Read |
 | platform | `platform_env_register` | `erun platform env register` | Work |
@@ -568,6 +578,8 @@ The write side is the CLI verb `erun activity ai-session report`, which a tool's
 ```jsonc
 // ai_sessions { "session": "abc123" }
 {
+  "tenant": "myapp",
+  "environment": "dev",
   "sessions": [
     {
       "sessionId": "abc123",
@@ -579,6 +591,8 @@ The write side is the CLI verb `erun activity ai-session report`, which a tool's
   ]
 }
 ```
+
+`tenant`/`environment` echo the resolved target, the same way `idle_stop_history` does, so an empty `sessions` list cannot be misread as answering for a different target than the one requested. An environment with no recorded sessions returns `"sessions": []`, never `null`.
 
 An `exited` or `oom-killed` session additionally carries `exitCode` when the process reported one. `oom-killed` is reported only when the caller that recorded the exit explicitly said so (`exitReason: "oom"`) — detecting the kill itself (a cgroup `memory.events` read, a `dmesg` scan) is the reporting side's job, not this tool's.
 
@@ -661,12 +675,14 @@ Reads CPU quota utilisation, memory against the container's own cgroup limit, an
   "environment": "prod",
   "cpu": { "quotaCores": 1, "utilizationPercent": 12.4, "intervalSeconds": 1 },
   "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
-  "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ],
+  "disk": [ { "mount": "/home/erun", "nodeShared": true, "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0, "ownUsedBytes": 45097156608, "ownUsageObserved": true } ],
   "excludesBuilds": true
 }
 ```
 
 Every field reports its own unavailability rather than failing the call: a cluster on cgroup v1 (or with `/sys/fs/cgroup` missing) reports `cpu.unavailable`/`memory.unavailable` with the reason instead of a fabricated zero, and an unlimited `memory.max` reports `memory.unlimited: true` rather than a percentage with no denominator. A `warnings` array appears only when a named threshold is crossed (memory ≥ 85% of its limit, `memory.peak` ≥ 95%, or a watched mount ≥ 90% used) — a heavily-loaded environment might return:
+
+**`disk[].totalBytes`/`usedBytes`/`percentUsed` are the node's, not this environment's (`nodeShared: true`).** They come from a statfs of the whole mount, which every environment scheduled on the same node shares — two environments on the same node report the identical figures regardless of which one is actually filling it. `disk[].ownUsedBytes` (a `du` of the mount, scoped to this environment's own directory tree, bounded to 30s) is the number this environment can actually reduce; `ownUsageObserved` distinguishes a genuine reading from an unreadable or timed-out `du`, mirroring `peakObserved`.
 
 `excludesBuilds` is `true` on every environment whose type carries the `erun-dind` sidecar (all but `runtime` and `host`), omitted otherwise: `cpu`/`memory` above are scoped to the `erun-devops` container alone, and an image build actually runs in `erun-dind` — a separate cgroup this reading has no path to, since its build containers are cgroup siblings rather than descendants. This names that gap rather than let a busy build read as an idle environment; `observe` reports the sidecar's own resource limits.
 
@@ -682,7 +698,7 @@ Every field reports its own unavailability rather than failing the call: a clust
 
 `intervalSeconds` (input, default 1, clamped to 0.1–30) sets the CPU sample window: `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter.
 
-When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `erun list` reports under `runtime-pod:` — so a caller checking on an environment does not need a separate `resize` call just to see it. Omitted when nothing has been observed yet.
+When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `resize` reasons from — so a caller checking on an environment does not need a separate `resize` call just to see it. That history is retained by this environment's own pod monitor and lives in this pod, which is why the block appears here: [`erun list`](/cli/list) reaches the same verdict only when run inside the environment itself, a host-run `erun list` reports none for it, and [`erun usage`](/cli/usage) carries no sizing block at all — so neither is a substitute for this tool. Omitted when nothing has been observed yet.
 
 ### `resize`
 
@@ -693,8 +709,8 @@ Changes the runtime pod's and/or the `erun-dind` sidecar's CPU/memory limits and
 {
   "plan": {
     "tenant": "myapp", "environment": "prod",
-    "current": { "cpu": "4", "memory": "8916Mi" },
-    "target":  { "cpu": "6", "memory": "8916Mi" },
+    "current": { "cpu": "4", "memory": "16384Mi" },
+    "target":  { "cpu": "6", "memory": "16384Mi" },
     "dindCurrent": { "cpu": "4", "memory": "20Gi" },
     "dindTarget":  { "cpu": "4", "memory": "24Gi" },
     "actions": [
@@ -820,7 +836,7 @@ Trigger a build. Same semantics as the CLI `erun build` — it builds the images
 | `release` | bool (optional) | Pin a bare release version instead of minting a snapshot. |
 | `force` | bool (optional) | Bypass the fingerprint cache. |
 | `dry_run` | bool (optional) | Preview without building. |
-| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `environments.<env>.docker.platforms`. Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
+| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `docker.platforms` (per-environment or project-wide). Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 
 The MCP `build` tool does **not** expose the `--deploy` convenience switch — an Agent composes the rollout by calling `push` and `deploy` itself with the `version` from this tool's output.
 

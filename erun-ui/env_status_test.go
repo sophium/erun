@@ -56,18 +56,25 @@ func envStatuses(emits *capturedEmits) []envStatusPayload {
 	return out
 }
 
-func waitForEnvStatus(t *testing.T, emits *capturedEmits, status string, timeout time.Duration) {
+// envStatusWaitBound is a safety net, not a budget. waitForEnvStatus returns
+// the instant the emit lands, so a generous bound costs a passing test
+// nothing and is what keeps a slow, contended machine from failing a test
+// about status wiring.
+const envStatusWaitBound = 30 * time.Second
+
+func waitForEnvStatus(t *testing.T, emits *capturedEmits, status string) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		for _, payload := range envStatuses(emits) {
-			if payload.Status == status {
-				return
+	arrived := emits.waitFor(envStatusWaitBound, func(byName map[string][]any) bool {
+		for _, raw := range byName[envStatusEvent] {
+			if payload, ok := raw.(envStatusPayload); ok && payload.Status == status {
+				return true
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		return false
+	})
+	if !arrived {
+		t.Fatalf("env-status %q was not emitted; got %+v", status, envStatuses(emits))
 	}
-	t.Fatalf("env-status %q was not emitted; got %+v", status, envStatuses(emits))
 }
 
 func TestEnvStatusStoppedWhenReconnectRefusedForStoppedContext(t *testing.T) {
@@ -81,7 +88,7 @@ func TestEnvStatusStoppedWhenReconnectRefusedForStoppedContext(t *testing.T) {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 	// The fresh open attempt clears any stale flag.
-	waitForEnvStatus(t, emits, "", 2*time.Second)
+	waitForEnvStatus(t, emits, "")
 
 	// After an intentional Stop, the session exit must flag the row, not respawn.
 	app.markIntentionalStopForCloudContext("managed-cloud")
@@ -90,7 +97,7 @@ func TestEnvStatusStoppedWhenReconnectRefusedForStoppedContext(t *testing.T) {
 	sessionsMu.Unlock()
 	_ = current.Close()
 
-	waitForEnvStatus(t, emits, envStatusStopped, 2*time.Second)
+	waitForEnvStatus(t, emits, envStatusStopped)
 
 	sessionsMu.Lock()
 	got := len(sessions)
@@ -121,7 +128,7 @@ func TestEnvStatusFailedAfterReconnectLoopCapAndClearedByRespawns(t *testing.T) 
 		_ = current.Close()
 	}
 
-	waitForEnvStatus(t, emits, envStatusFailed, 2*time.Second)
+	waitForEnvStatus(t, emits, envStatusFailed)
 
 	statuses := envStatuses(emits)
 	last := statuses[len(statuses)-1]
@@ -154,7 +161,7 @@ func TestEnvStatusClearedByLaterSuccessfulDeploy(t *testing.T) {
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "erun", Environment: "remote", Version: "1.0.1"})
 	app.finishDeployByTenantEnv(uiSelection{}, "erun", "remote", activityQueueStatusSucceeded, "")
 
-	waitForEnvStatus(t, emits, "", 2*time.Second)
+	waitForEnvStatus(t, emits, "")
 	statuses := envStatuses(emits)
 	last := statuses[len(statuses)-1]
 	if last.Tenant != "erun" || last.Environment != "remote" || last.Status != "" {

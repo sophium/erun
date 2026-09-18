@@ -1,0 +1,53 @@
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+release: branch = main, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = stable
+release: develop branch "develop" exists = true
+<VERSION>
+audit: erun release
+release: branch=main mode=stable version=<VERSION>
+next version: <VERSION>
+publishing image: ghcr.io/sophium/api:<VERSION>
+release: worktree clean = true
+stage: sync-remote
+From <TMP>
+   <SHORTSHA>..<SHORTSHA>  develop    -> origin/develop
+Current branch main is up to date.
+stage: release
+[main <SHORTSHA>] [skip ci] release <VERSION>
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+release version: <VERSION> (source control only; no artifacts were built or published)
+stage: post-release-version-bump
+[main <SHORTSHA>] [skip ci] prepare <VERSION>
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+stage: sync-develop
+Switched to branch 'develop'
+Updating <SHORTSHA>..<SHORTSHA>
+Fast-forward
+ erun-devops/VERSION             | 2 +-
+ erun-devops/k8s/api/Chart.yaml  | 4 ++--
+ erun-devops/k8s/base/Chart.yaml | 4 ++--
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+Switched to branch 'main'
+Your branch is ahead of 'origin/main' by 2 commits.
+  (use "git push" to publish your local commits)
+stage: push
+To <TMP>
+   <SHORTSHA>..<SHORTSHA>  main -> main
+ * [new tag]         <VERSION> -> <VERSION>
+ ! [rejected]        develop -> develop (non-fast-forward)
+error: failed to push some refs to '<TMP>'
+exit status 1
+release: the push was rejected for develop (non-fast-forward), which is not origin/main having moved during the release, so nothing is rebased or retried.
+Everything else this release publishes is already public: its images and charts verified on the registry and tag <VERSION> is on the remote. What did not land is develop (non-fast-forward).
+The GitHub Release object for <VERSION> is created after this push, so it does not exist yet either.
+Recover by hand — do not delete tag <VERSION> and do not reset main, both are already public:
+  git -C <TMP> fetch origin
+  reconcile develop with its remote, push it, then create the GitHub Release for the existing tag <VERSION>

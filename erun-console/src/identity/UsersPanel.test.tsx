@@ -550,3 +550,186 @@ describe('UsersPanel', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
+
+// The header names the signed-in identity by its erun username
+// (whoami's own `username`) while this table used to render only the IdP's
+// own username, so an operator's own row was unrecognizable, and looked
+// entirely absent when the two names shared nothing in common. These lock
+// the fix: the row matching the caller's own erun user id is marked "You",
+// the erun username renders as the primary label with the IdP username
+// alongside it when the two diverge, and the OIDC subject -- the one value
+// that actually joins the erun and IdP directories -- is always reachable.
+describe('UsersPanel — caller identity (erun#2050)', () => {
+  it("marks the caller's own row and shows both usernames when they diverge", async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: '386994597031248060',
+            username: 'zadmin@frs.auth.example.com',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-1',
+            erunUsername: 'erun',
+          },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(
+      <UsersPanel
+        token="dev-token"
+        ownTenantId="own-tenant"
+        tenantType="OPERATIONS"
+        callerErunUserId="erun-1"
+      />,
+    );
+
+    expect(await screen.findByText('erun')).toBeInTheDocument();
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.getByText(/IdP username: zadmin@frs\.auth\.example\.com/)).toBeInTheDocument();
+    expect(screen.getByText(/Subject: 386994597031248060/)).toBeInTheDocument();
+  });
+
+  it("does not mark a row that is not the signed-in caller's own", async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: 'sub-someone-else',
+            username: 'someone-else@idp.example.com',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-2',
+            erunUsername: 'someone',
+          },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(
+      <UsersPanel
+        token="dev-token"
+        ownTenantId="own-tenant"
+        tenantType="OPERATIONS"
+        callerErunUserId="erun-1"
+      />,
+    );
+
+    await screen.findByText('someone');
+    expect(screen.queryByText('You')).not.toBeInTheDocument();
+  });
+
+  it('renders a single name with no redundant secondary line when the erun and IdP usernames match', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([
+          {
+            id: 'sub-alice',
+            username: 'alice',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-alice',
+            erunUsername: 'alice',
+          },
+        ]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(
+      <UsersPanel token="dev-token" ownTenantId="own-tenant" tenantType="OPERATIONS" />,
+    );
+
+    await screen.findByText('alice');
+    expect(screen.queryByText(/IdP username:/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Subject: sub-alice/)).toBeInTheDocument();
+  });
+});
+
+// The scope selector was rendered on every section but read by only three
+// panels, and Users was not one of them -- an operator pointing
+// "Administering" at another tenant saw their own tenant's identities
+// unchanged, with no signal the control did not apply. These lock the fix:
+// a scoped read swaps in the target tenant's own org and membership join
+// (mirroring shell/AppShell.test.tsx's existing Environments scope test),
+// and a target tenant with no org mapping renders that fact plainly instead
+// of a false "no users enrolled" empty state.
+describe('UsersPanel scope selector', () => {
+  const TENANTS = [
+    { tenantId: 'own-tenant', name: 'Acme', type: 'OPERATIONS', createdAt: '', updatedAt: '' },
+    { tenantId: 'tenant-beta', name: 'Beta', type: 'COMPANY', createdAt: '', updatedAt: '' },
+  ];
+
+  it("swaps in the scoped tenant's own users and reports its own membership, never the caller's own tenant's rows", async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/tenants') {
+        return jsonResponse(TENANTS);
+      }
+      if (req.url === '/v1/tenant-issuers?tenantId=tenant-beta') {
+        return jsonResponse([
+          {
+            tenantId: 'tenant-beta',
+            issuer: 'https://idp.example.com',
+            name: 'Beta',
+            orgFieldKey: 'org_id',
+            orgFieldValue: 'org-beta',
+          },
+        ]);
+      }
+      if (req.url === '/v1/identity/users?orgId=org-beta&tenantId=tenant-beta') {
+        return jsonResponse([
+          {
+            id: 'idp-beta-1',
+            username: 'carol',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-carol',
+          },
+        ]);
+      }
+      // The caller's own, unscoped read -- must never be hit while scoped.
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([{ id: 'idp-own-1', username: 'alice', state: 'USER_STATE_ACTIVE' }]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(
+      <UsersPanel
+        token="dev-token"
+        ownTenantId="own-tenant"
+        tenantType="OPERATIONS"
+        scopeTenantId="tenant-beta"
+      />,
+    );
+
+    expect(await screen.findByText('carol')).toBeInTheDocument();
+    expect(screen.getByText('Tenant member')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage roles' })).toBeInTheDocument();
+    expect(screen.queryByText('alice')).not.toBeInTheDocument();
+    // The scoped badge in the card header names the tenant being viewed.
+    expect(screen.getAllByText('Beta').length).toBeGreaterThan(0);
+  });
+
+  it('states plainly that the scoped tenant has no organization mapping, instead of rendering a false empty table', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/tenants') {
+        return jsonResponse(TENANTS);
+      }
+      if (req.url === '/v1/tenant-issuers?tenantId=tenant-beta') {
+        return jsonResponse([]);
+      }
+      return jsonResponse([]);
+    });
+    renderWithStore(
+      <UsersPanel
+        token="dev-token"
+        ownTenantId="own-tenant"
+        tenantType="OPERATIONS"
+        scopeTenantId="tenant-beta"
+      />,
+    );
+
+    expect(await screen.findByText(/has no organization mapping yet/)).toBeInTheDocument();
+    expect(screen.queryByText('No users enrolled yet.')).not.toBeInTheDocument();
+  });
+});

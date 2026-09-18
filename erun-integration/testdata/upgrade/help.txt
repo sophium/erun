@@ -4,6 +4,8 @@ Pass --fleet to instead roll every environment in --tenant to --version regardle
 
 High blast radius: this rolls out new runtime images to multiple — possibly remote — environments, which restarts their pods and can spend cloud money. Run with --dry-run first to review the resolved plan (each member, its channel, and current → target, in the exact order it will deploy) and the exact deploy actions before anything ships. Scope it with TENANT/ENVIRONMENT to upgrade a subset (one environment at a time is a plain positional scope); --version pins one version across the set, skipping channel resolution. Because a roll restarts the runtime pod, each environment is refused — naming the holder — while it is held by another worker (a running build, deploy, or agent session); pass --override-lease to roll it anyway.
 
+Out of scope: the installed desktop app bundle (ERun.app / erun-app) is not something this command upgrades -- it only rolls remote runtime environments. `erun doctor` reports the installed bundle's version and flags drift from this CLI; there is no automated way to update the bundle itself today.
+
 Usage:
   erun upgrade [TENANT] [ENVIRONMENT] [flags]
 

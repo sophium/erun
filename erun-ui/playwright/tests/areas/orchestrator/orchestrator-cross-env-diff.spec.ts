@@ -188,6 +188,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     await expect(review.envSectionHeader(ALPHA_ENV_KEY)).toBeVisible();
@@ -217,6 +220,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await expect
       .poll(() => review.diffSectionPaths())
@@ -235,6 +241,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
   test('a single linked environment renders no redundant env label', async ({ app }) => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
     await app.titlebar.toggleReviewPanel();
+    // The assertion below counts rendered labels, which is zero either way if
+    // the panel never opened -- so converge on it having opened first.
+    await app.reviewPanel.waitForOpen();
 
     // Single-env sessions must not gain the multi-env label (#1314) — the
     // review panel here has exactly one target, so no surface names it.
@@ -253,6 +262,7 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
     await expect
       .poll(() => app.reviewPanel.diffSectionPaths())
       .toEqual(expect.arrayContaining(['alpha-only.ts', 'beta-only.ts']));
@@ -275,6 +285,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     // The changed-files tree renders its own copy of the same per-env alert;
     // collapse it so the alert count below reflects the diff list alone.
@@ -303,6 +316,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await review.collapseChangedFilesSection();
     await expect(review.changedFilesTree()).toBeHidden();
@@ -331,6 +347,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     await expect(review.envSectionHeader(ALPHA_ENV_KEY)).toBeVisible();
@@ -365,6 +384,9 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
 
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await expect
       .poll(() => review.diffSectionPaths())
@@ -439,6 +461,11 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
     await expect(app.titlebar.changedFilesToggle()).toHaveCount(0);
 
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel's own open/closed witness rather than racing the
+    // toggle's render against expect's fixed budget -- the line above this
+    // block already established it starts closed, so each toggle's direction
+    // is known.
+    await app.titlebar.changedFilesToggle().waitFor({ state: 'visible' });
     await expect(app.titlebar.changedFilesToggle()).toBeVisible();
     // The env-scoped controls stay hidden even with the panel open -- the
     // orchestrator session, not the diff panel, gates them.
@@ -447,6 +474,7 @@ test.describe('orchestrator cross-env diff panel (#1178)', () => {
     await expect(app.titlebar.contributeToggleButton()).toHaveCount(0);
 
     await app.titlebar.toggleReviewPanel();
+    await app.titlebar.changedFilesToggle().waitFor({ state: 'hidden' });
     await expect(app.titlebar.changedFilesToggle()).toHaveCount(0);
   });
 });

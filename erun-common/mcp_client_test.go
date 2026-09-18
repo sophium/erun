@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -121,6 +122,35 @@ func TestOpenMCPSessionDoesNotWaitForStartup(t *testing.T) {
 	}
 	if elapsed > time.Second {
 		t.Fatalf("handshake took %s -- the typed CLI/desktop path must fail fast, not wait for startup", elapsed)
+	}
+}
+
+// The two held-port faults reach a caller as different errors, because the
+// remedy each one leads to is the opposite of the other's: a stale forward is
+// re-established, while a target that has not come up yet is waited for, and
+// re-opening the environment behind a working forward does nothing at all.
+func TestCallMCPToolNamesAnUnreadyTargetRatherThanAStaleForward(t *testing.T) {
+	port := startDroppingListener(t)
+
+	_, err := CallMCPTool(context.Background(), MCPToolCallParams{
+		Endpoint:      MCPLocalEndpoint(port),
+		MintToken:     func() (string, error) { return "test-token", nil },
+		ClientVersion: "test",
+		Tool:          "version",
+	})
+	if err == nil {
+		t.Fatal("expected the call to fail against a forward whose target never answered")
+	}
+	if !errors.Is(err, ErrMCPTargetNotAnswering) {
+		t.Fatalf("expected an unready target, got: %v", err)
+	}
+	// Callers gate their own recovery on the broad class, so the narrower one
+	// has to stay inside it.
+	if !errors.Is(err, ErrMCPEndpointUnreachable) {
+		t.Fatalf("an unready target is still an unreachable endpoint, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "stale port-forward") {
+		t.Fatalf("an unready target must not be reported as a stale forward, got: %v", err)
 	}
 }
 

@@ -92,6 +92,28 @@ Let's Encrypt production rate limits, then re-apply without it for real certs. O
 cluster that already runs Traefik or cert-manager, add
 `-var install_ingress_controller=false` and/or `-var install_cert_manager=false`.
 
+**Plaintext and HSTS are the edge's job, not each Ingress's.** The module
+redirects the plaintext entrypoint to the secure one (301) and serves
+`Strict-Transport-Security` there, for every host the controller routes. That
+placement is the point: Traefik answers `:80` for every rule it routes, so until
+the entrypoint upgrades the scheme, a visitor who types the bare domain stays on
+http — and so does any *relative* redirect issued behind the edge, because a
+relative `Location` inherits whatever scheme the browser started on. A host
+added later therefore cannot forget it, and no application can be left holding
+the pieces. `install_ingress_controller=false` means this module installs no
+controller and declares no transport policy: the controller that already exists
+owns both.
+
+`hsts_max_age_seconds` defaults to `86400` (one day), with
+`hsts_include_subdomains` and `hsts_preload` off. HSTS cannot be recalled early:
+a browser that has read the header refuses plaintext for that host until the
+max-age expires, so the first value is deliberately short and the two switches
+that bind names beyond the hosts this module serves stay off until every name
+under the domain is verified https-only. Raise `hsts_max_age_seconds` towards
+`31536000` first, then `hsts_include_subdomains`, then `hsts_preload`. The
+docs host is published to Cloudflare Pages rather than routed through the edge,
+so it carries its own `_headers` in `erun-docs/static/`, not this module's.
+
 **In-cluster resolution of the platform's own names.** k3s's bundled CoreDNS ends
 its default Corefile in `forward . /etc/resolv.conf`, so every name outside
 `cluster.local` — including the platform's own published hostnames — resolves
@@ -221,6 +243,17 @@ kubectl wait --for=condition=Ready issuer/erun-cloudflare -n "$NS" --timeout=120
 # The wildcard cert is issued (DNS-01 solves in the services zone; may take a few minutes).
 kubectl get certificate -n "$NS"
 kubectl wait --for=condition=Ready certificate/erun-cloudflare-wildcard -n "$NS" --timeout=600s
+```
+
+The transport policy is verified from **outside** the cluster, because that is
+where it is observed: reading the Middleware object back proves it was created,
+not that the entrypoint serves it or that a redirect answers before an
+application does.
+
+```sh
+# http answers a permanent redirect, and https carries HSTS.
+curl -sSI "http://<base-domain>" | head -1     # HTTP/1.1 301 Moved Permanently
+curl -sSI "https://<base-domain>" | grep -i strict-transport-security
 ```
 
 When `install_coredns_forward` is set, confirm the cluster can actually resolve the

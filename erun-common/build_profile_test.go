@@ -9,15 +9,13 @@ import (
 	"time"
 )
 
-// withTimingHome points timingRecordDir at a fresh temp dir for the duration
-// of the test by overriding HOME, since timingRecordDir derives from
-// os.UserHomeDir with no injectable override.
-func withTimingHome(t *testing.T) string {
+// withTimingHome points the timing history at a fresh temp dir for the duration
+// of the test, which is this test's to own rather than the binary-wide tree
+// TestMain installs. It names the destination directly instead of moving HOME,
+// so the kubeconfig and cloud config these tests still read keep resolving.
+func withTimingHome(t *testing.T) {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home) // os.UserHomeDir also checks this on Windows
-	return home
+	t.Setenv(TimingRecordDirEnv, t.TempDir())
 }
 
 func writeFakeTimingRecord(t *testing.T, dir, command string, startedAt time.Time, failed bool) string {

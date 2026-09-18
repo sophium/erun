@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -307,6 +307,16 @@ test-erun-dns01-webhook:
 # the `typescript` package this step's own `yarn install` already resolves,
 # not each package's full type-aware lint setup.
 #
+# Only the *self-test* of the regression-coverage gate (root AGENTS.md § "A
+# Defect Fix Names Its Reproduction") runs here, never the gate itself: the
+# gate reads git history, and this target runs inside the erun-devops image
+# test stage's Docker build context, which has no `.git`. Running its pure
+# classifier here is still the point -- it keeps the enforcement logic itself
+# gated by check-gate, the same split erun-integration's structural gates use
+# (classifier unit-tested on synthetic data, wiring supplies the real state).
+# The gate's real invocation lives in fast-check below, which root AGENTS.md
+# already requires before every push.
+#
 # erun-ui/frontend imports generated Wails bindings (wailsjs/) that are
 # gitignored/dockerignored like any other generated artifact (dist,
 # node_modules), so they are absent both from a fresh checkout and from the
@@ -386,6 +396,8 @@ test-frontend:
 		yarn install --frozen-lockfile --prefer-offline --network-timeout 600000
 	@./scripts/timed-step.sh "issue-reference gate (erun-kit, erun-ui/frontend, erun-console)" \
 		sh -c 'node --test scripts/check-issue-references.test.mjs && node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src'
+	@./scripts/timed-step.sh "regression-coverage gate self-test" \
+		node --test scripts/check-regression-coverage.test.mjs
 	@./scripts/timed-step.sh "generating erun-ui/frontend wailsjs bindings" \
 		./erun-ui/generate-wailsjs.sh
 	@( \
@@ -456,6 +468,27 @@ test-playwright: test-erun-ui-windows-build test-frontend
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh --skip-app-gates)
 
+# A plain local `make check`/`make test-playwright` never goes through `erun
+# build`'s own resolution above, so PLAYWRIGHT_TEST_AREAS stayed unset here
+# and this target always ran the full suite (~21-23 minutes) while the gate
+# that actually protects `main` ran in tens of seconds -- backwards, since a
+# local run is supposed to be a cheaper preview of the same gate, not a
+# stricter one. Resolve the identical selection here too, via `erun exec
+# resolve-playwright-areas` (a thin CLI wrapper around the same
+# erun-common.ResolvePlaywrightTestAreaSelection function `erun build` calls
+# above), so a developer or agent iterating locally pays the same cost the
+# gate does. This is a target-specific variable (scoped to test-playwright
+# and whatever depends on it) using `?=`, so it is only evaluated when the
+# caller has not already supplied PLAYWRIGHT_TEST_AREAS -- the Dockerfile
+# test stage's own build-arg thread, including its empty-string "run
+# everything" default, is left untouched. `export` (no value) marks the
+# variable for export to the recipe's environment whenever it does get a
+# value, from either source. Declared after the recipe, not beside it: the
+# coverage gate in erun-integration reads a target's recipe from its first
+# definition line, so that line has to stay adjacent to the recipe.
+test-playwright: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
+export PLAYWRIGHT_TEST_AREAS
+
 # Cross-compiles erun-app for Windows to prove the one other platform erun-ui
 # ships to (Scoop, built from source at install time) still compiles and
 # links. No CGO needed: unlike the darwin backend (real cgo + Objective-C,
@@ -499,9 +532,11 @@ HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words 
 # Helm-render assertions for the erun-devops/k8s charts (erun-devops,
 # erun-backend-postgres, erun-backend-db, erun-backend-api, erun-oci-registry,
 # erun-zitadel, erun-console, erun-docs): each *_test.sh renders its chart with
-# `helm template` and asserts on the output. No cluster, no docker -- pure
-# rendering -- so a pinned `helm` binary is all the image test stage needs to
-# run these (see the Dockerfile's test stage). Iterates the directory rather
+# `helm template` and asserts on the output. image-version_test.sh sits here
+# too, asserting chart image defaults against the docker/<image>/VERSION pins
+# they mirror. No cluster, no docker -- pure rendering -- so a pinned `helm`
+# binary is all the image test stage needs to run these (see the Dockerfile's
+# test stage). Iterates the directory rather
 # than naming each script so a new chart's *_test.sh is picked up with no
 # Makefile edit. Scripts run concurrently (bounded by
 # HELM_CHART_TEST_PARALLELISM) via scripts/parallel-gate.sh, which buffers
@@ -564,6 +599,25 @@ test-retention-grants:
 # env, before merging a change to atlas.hcl, schema/, or migrations/default/.
 test-schema-drift:
 	sh erun-devops/docker/erun-backend-db/schema_drift_test.sh
+
+# Proof that erun-backend-db's baked migration directory is internally
+# consistent -- every migrations/default/*.sql file hashes to the atlas.sum
+# entry recorded for it -- checked purely against the files on disk, no
+# postgres and no docker. Unlike test-schema-drift/test-postgres-restart/
+# test-retention* above, this needs only the `atlas` CLI, which the
+# erun-devops image test stage already installs (for erun-integration's
+# gate-merge scenarios) and the final runtime image installs too, so it runs
+# inside `make check` itself rather than needing a separate by-hand/job
+# invocation. This is the release gate that was missing when v1.0.247
+# shipped with `20260902130000_gate_runs.sql`'s atlas.sum entry not matching
+# its own file content (the migration was edited after `atlas migrate hash`
+# was run for it, and the mismatch landed on main undetected through a
+# squash-merge), and nothing validated the baked migration directory before
+# that image was built and published. `atlas migrate validate` reports
+# exactly the "checksum mismatch" atlas reports at deploy time, before an
+# image is ever built.
+test-atlas-validate:
+	sh erun-devops/docker/erun-backend-db/atlas_validate_test.sh
 
 # End-to-end proof that the console's nginx config (default.conf.template)
 # never resolves a missing content-hashed asset or a health/version request to
@@ -664,22 +718,40 @@ check:
 # it to bypass failures; diagnose against comparable state and fix them under
 # root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
-# These ten run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# These eleven run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
 # rather than scripts/parallel-gate.sh is what drives it here, and where the
 # two real ordering dependencies -- test-playwright and
 # test-erun-ui-windows-build each needing test-frontend -- are declared).
-# Do not drop any of the ten from this line to move the fan-out elsewhere:
+# Do not drop any of the eleven from this line to move the fan-out elsewhere:
 # erun-integration/build_check_coverage_test.go and
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
 # if any of these names is missing from it.
-check-gate: lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
+# The prerequisite ORDER on this line is load-bearing when the resolved fan-out
+# width is narrower than the target list, not cosmetic: `make -j` dispatches
+# prerequisites in the order listed, filling each free slot with the next one,
+# so a target listed late cannot start until enough earlier targets have
+# finished. `test-frontend` heads the single longest chain in the gate --
+# test-frontend -> {test-playwright, test-erun-ui-windows-build}, where
+# test-playwright then builds the wailsjs bindings and the desktop erun-app
+# before any spec can run -- so while it sat seventh it took a slot only after
+# the six lint/module targets ahead of it began to drain, and at the reference
+# 4-CPU build container those are the longest jobs in the gate. Listing the
+# critical-path targets first lets the chain head take a slot in the first
+# dispatch batch. This is a no-op when the width already covers every target
+# (the in-pod gate resolves -j10 and dispatches all eleven within 0.32s), which is
+# why it is a scheduling fix and not on its own a wall-time reduction.
+# Reordering this line is safe (nothing keys on the order); DROPPING a name is
+# not -- see the coverage-test note directly above.
+check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests test-atlas-validate integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
-# tracker-reference gate (root AGENTS.md § "Code Comments"), and prettier
-# formatting. This is NOT a substitute for check/check-gate -- it runs no
+# tracker-reference gate (root AGENTS.md § "Code Comments"), the
+# regression-coverage gate (root AGENTS.md § "A Defect Fix Names Its
+# Reproduction"), and prettier formatting. This is NOT a substitute for
+# check/check-gate -- it runs no
 # tests, no build, and no integration suite, so a green fast-check says
 # nothing about those. It exists purely so a contributor (human or agent)
 # can catch the failures it does cover in seconds locally instead of one
@@ -711,6 +783,16 @@ check-gate: lint test-erun-common test-erun-ui test-erun-backend-api test-erun-m
 # elsewhere in the tree replayed a stale cached "ok" and missed it -- caught
 # by hand while validating this target, not theoretical.
 #
+# The regression-coverage gate is the one step here that has no check-gate
+# home to be scoped down from: it reads this branch's own commits and diff,
+# and check-gate runs inside a Docker build context with no `.git`. fast-check
+# is where it belongs anyway -- root AGENTS.md requires fast-check before
+# every push, which is exactly the moment a defect fix either does or does not
+# name the case that reproduces the failure it was filed for. Its own
+# self-test runs immediately before it (and again inside check-gate, via
+# test-frontend) so a broken classifier fails loudly rather than waving every
+# change through.
+#
 # Prettier runs the same `yarn format:check` each workspace's own
 # package.json already defines, across all three workspaces at once via
 # scripts/parallel-gate.sh (same aggregated-output/single-failure-report
@@ -726,6 +808,9 @@ fast-check: lint
 	@echo ">> issue-reference gate (TypeScript: erun-kit, erun-ui/frontend, erun-console)"
 	@node --test scripts/check-issue-references.test.mjs
 	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src
+	@echo ">> regression-coverage gate (this branch)"
+	@node --test scripts/check-regression-coverage.test.mjs
+	@node scripts/check-regression-coverage.mjs
 	@echo ">> prettier --check (erun-kit, erun-ui/frontend, erun-console)"
 	@for d in erun-kit erun-ui/frontend erun-console; do \
 		printf '%s\t%s\t%s\n' "$$d" "prettier $$d" "cd $$d && yarn format:check"; \

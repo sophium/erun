@@ -78,7 +78,7 @@ func ensureReleasePublishesResolvedImages(spec ReleaseSpec, publisher ReleasePub
 	if len(missing) == 0 {
 		return nil
 	}
-	return fmt.Errorf("release %s resolved images that nothing in this run publishes: %s\na release publishes before it tags, so it will not announce a version the registry never receives; run `erun release` from the project root so every release image resolves to a build",
+	return fmt.Errorf("release %s resolved images that nothing in this run publishes: %s\na build publishes before the release tags, so it will not announce a version the registry never receives; run `erun build --release` from the project root so every release image resolves to a build",
 		spec.Version, strings.Join(missing, ", "))
 }
 

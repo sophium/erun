@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -237,6 +238,36 @@ func RunPlatformCreateUser(ctx Context, store CloudReadStore, alias string, para
 		return PlatformUser{}, nil
 	}
 	return client.CreateUser(context.Background(), params)
+}
+
+// RunPlatformListRoles lists the caller's tenant's roles and their
+// permissions, the lookup a client needs to turn a missing capability into the
+// role id a grant command takes.
+func RunPlatformListRoles(ctx Context, store CloudReadStore, alias string, deps CloudDependencies) ([]PlatformRole, error) {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return nil, err
+	}
+	tracePlatformCall(ctx, provider, "GET", "/v1/roles")
+	if ctx.DryRun {
+		return nil, nil
+	}
+	return client.ListRoles(context.Background())
+}
+
+// RunPlatformGrantUserRole grants one role to one already-enrolled user, the
+// post-enrollment grant `erun platform user enroll` cannot perform.
+func RunPlatformGrantUserRole(ctx Context, store CloudReadStore, alias string, params PlatformGrantUserRoleParams, deps CloudDependencies) error {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return err
+	}
+	path := "/v1/users/" + url.PathEscape(params.UserID) + "/roles"
+	tracePlatformCall(ctx, provider, "POST", path, "roleId="+params.RoleID)
+	if ctx.DryRun {
+		return nil
+	}
+	return client.GrantUserRole(context.Background(), params)
 }
 
 // RunPlatformListUsers lists the target tenant's users.

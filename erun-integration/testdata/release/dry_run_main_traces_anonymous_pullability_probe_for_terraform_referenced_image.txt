@@ -10,8 +10,7 @@ release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
 release: classified mode = stable
 release: develop branch "develop" exists = false
-<VERSION>
-audit: erun release --dry-run
+audit: erun build --dry-run --release
 release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>

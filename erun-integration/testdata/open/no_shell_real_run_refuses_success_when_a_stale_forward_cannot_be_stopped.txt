@@ -1,0 +1,1 @@
+open: port-forward setup failed, so there is no local channel to wait on: MCP: local MCP port 26100 is held by a stale kubectl port-forward that could not be stopped: PID 999999999: kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address <LOOPBACK>

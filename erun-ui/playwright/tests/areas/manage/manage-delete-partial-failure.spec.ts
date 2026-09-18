@@ -40,6 +40,11 @@ test.describe('manage dialog delete — partial failure (#1212)', () => {
     await app.manageDialog.confirmDelete(`${seededEnv.tenant}-${seededEnv.environment}`);
 
     const pill = page.getByRole('alert').filter({ hasText: 'NAMESPACE_DELETE_UNREACHABLE_MARKER' });
+    // Converge on the result view actually having rendered (the delete
+    // round-trip and the confirm-view-to-result-pill swap are two separate
+    // steps) before asserting on it, rather than racing that render against
+    // a bare expect's fixed timeout.
+    await pill.waitFor({ state: 'visible' });
     await expect(pill).toBeVisible();
     await expect(pill).toContainText(`Deleted ${seededEnv.tenant} / ${seededEnv.environment}.`);
     await expect(page.getByRole('button', { name: 'Copy output' })).toBeVisible();

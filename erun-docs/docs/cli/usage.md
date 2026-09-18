@@ -23,7 +23,21 @@ erun usage --tenant my-tenant --environment dev --output json
 
 A crossed threshold (memory, memory's peak, or disk usage getting close to full) shows up as a plain-language warning in the output — you don't have to compute the percentages yourself.
 
+Under the warnings, the environment's standing sizing recommendation prints as `sizing:` and `sizing-evidence:` — the same two lines [`erun list`](/cli/list#the-sizing-recommendation) shows, computed from this reading plus whatever history is retained. A reading that trips a memory warning always comes with a raise verdict naming the size that would fix it, so a saturated environment is never reported without the thing to do about it. The recommendation is advisory: acting on it is [`erun resize --apply-recommendation`](/cli/resize).
+
+```bash
+erun usage --tenant my-tenant --environment dev
+#   Warnings (2):
+#     memory is at 98% of its 6144Mi limit (warns at 85%)
+#     memory.peak reached 100% of the limit (warns at 95%) -- this environment came close to an OOM kill
+#   Sizing recommendation:
+#     sizing: memory raise to 9216Mi from 6144Mi (peak 6144Mi of 6144Mi (100%) is within the raise margin, high confidence); ...
+#     sizing-evidence: 31h12m observed, 240 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, ...
+```
+
 On an agent env, this reading cannot see the environment's own builds: `erun build`/`erun release` run in a separate sidecar container (`erun-dind`), not the one this reads. The output says so directly on every environment that carries the sidecar — see [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures) for why, and `erun observe` for the sidecar's own limits.
+
+The environment's standing [sizing recommendation](/cli/list#the-sizing-recommendation) is not part of this output. It is derived from usage history the environment's own pod monitor retained, and this reading does not carry that history back to the caller, so there is nothing here to derive a verdict from. Read it from inside the environment instead — the `usage` and `resize` tools over its MCP endpoint, or the desktop Runtime tab.
 
 ## Flags
 

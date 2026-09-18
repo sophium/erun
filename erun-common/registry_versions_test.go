@@ -200,3 +200,78 @@ func TestIsTransientRegistryError(t *testing.T) {
 		t.Error("a non-network error is terminal")
 	}
 }
+
+func TestIsRuntimeRegistryVersionTag(t *testing.T) {
+	tests := []struct {
+		tag  string
+		want bool
+	}{
+		{"1.0.250", true},
+		{"1.0.192-snapshot-20260821151853", true},
+		{"1.0.250-pr.4fa33ad5-arm64", true},
+		{"1.0.250-arm64", true},
+		{"1.0.250-amd64", true},
+		{"2.0.0-rc.1", true},
+		{"permcheck-tmp", false},
+		{"authprobe", false},
+		{"latest", false},
+		{"stable", false},
+		{"1.0", false},
+		{"1.0.250.1", false},
+		{"1.0.250-", false},
+		{"v1.0.250", false},
+		{"", false},
+	}
+	for _, test := range tests {
+		if got := isRuntimeRegistryVersionTag(test.tag); got != test.want {
+			t.Errorf("isRuntimeRegistryVersionTag(%q) = %v, want %v", test.tag, got, test.want)
+		}
+	}
+}
+
+// A stray registry tag must not reach Tags: Tags is what every surface
+// enumerates, and the desktop picker maps it into its version select with no
+// filter of its own, so an entry here is presented to the operator as a
+// pinnable version.
+func TestLatestRuntimeVersionsFromTagsOffersOnlyVersionShapedTags(t *testing.T) {
+	versions := latestRuntimeVersionsFromTags([]string{
+		"1.0.250",
+		"1.0.192-snapshot-20260821151853",
+		"1.0.250-pr.4fa33ad5-arm64",
+		"1.0.250-arm64",
+		"permcheck-tmp",
+		"authprobe",
+	})
+
+	for _, stray := range []string{"permcheck-tmp", "authprobe"} {
+		if versions.HasVersion(stray) {
+			t.Errorf("%q is not a version, so HasVersion must not accept it", stray)
+		}
+		for _, offered := range versions.Tags {
+			if offered == stray {
+				t.Errorf("%q must not appear in Tags; Tags = %v", stray, versions.Tags)
+			}
+		}
+	}
+
+	for _, want := range []string{
+		"1.0.250",
+		"1.0.192-snapshot-20260821151853",
+		"1.0.250-pr.4fa33ad5-arm64",
+		"1.0.250-arm64",
+	} {
+		if !versions.HasVersion(want) {
+			t.Errorf("version-shaped tag %q must stay pinnable; Tags = %v", want, versions.Tags)
+		}
+	}
+
+	if len(versions.Tags) != 4 {
+		t.Errorf("Tags = %v, want only the four version-shaped tags", versions.Tags)
+	}
+	if versions.LatestStable != "1.0.250" {
+		t.Errorf("LatestStable = %q, want 1.0.250", versions.LatestStable)
+	}
+	if versions.LatestSnapshot != "1.0.192-snapshot-20260821151853" {
+		t.Errorf("LatestSnapshot = %q, want 1.0.192-snapshot-20260821151853", versions.LatestSnapshot)
+	}
+}

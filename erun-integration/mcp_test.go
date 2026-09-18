@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -47,6 +48,29 @@ func startSilentPortForward(t *testing.T, port int) {
 				return
 			}
 			defer func() { _ = conn.Close() }()
+		}
+	}()
+}
+
+// startDroppingPortForward binds port and closes every connection it accepts
+// without writing a reply — a forward that is up whose target never took the
+// call, which is what a pod mid-roll behind a working forward looks like from
+// the local side. It is the shape that must not be reported as a stale
+// forward: nothing about the tunnel is wrong.
+func startDroppingPortForward(t *testing.T, port int) {
+	t.Helper()
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("listen on 127.0.0.1:%d: %v", port, err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			_ = conn.Close()
 		}
 	}()
 }
@@ -807,6 +831,35 @@ exit 3`)
 		}
 	})
 
+	t.Run("call_real_run_unready_target_is_not_sent_to_a_reopen", func(t *testing.T) {
+		// A forward whose target has not come up yet — an environment mid-roll
+		// after a deploy — takes the local connection and closes it without
+		// answering. The forward itself is working, so the recovery the stale
+		// case prints ("run `erun open …`") would replace nothing and leave the
+		// same wait ahead: the failure has to name the state it is actually in.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		startDroppingPortForward(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 126 {
+			t.Fatalf("expected exit 126 (channel unreachable) for a target that has not come up, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "still starting") {
+			t.Fatalf("expected the unready target to be named as such, got:\n%s", result.Combined)
+		}
+		// Re-opening is what the stale shape prints, and it replaces nothing
+		// while the forward is up and working.
+		if strings.Contains(result.Combined, "so the local MCP port-forward is up") {
+			t.Fatalf("an environment whose forward is up must not be sent to a re-open, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "if it stays unresponsive") {
+			t.Fatalf("the unready target still needs a way out when it does not recover, got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("proxy_dry_run_traces_the_resolved_edge", func(t *testing.T) {
 		t.Parallel()
 		// The plan must name the edge the relay would reach, and must neither read
@@ -1210,5 +1263,50 @@ exit 3`)
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "mcp/tools_real_run_lists_tools_with_their_arguments", normalize.Apply(result.Combined))
+	})
+
+	t.Run("tools_structured_output_carries_the_descriptor_the_edge_sent", func(t *testing.T) {
+		// Structured output exists for callers that decide whether a tool is
+		// safe to call before calling it, so it must carry the annotations and
+		// protocol extensions the edge sent, not the subset the scannable text
+		// rendering narrows to.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{
+			"tools/list": `{"tools":[` +
+				`{"_meta":{"family":"cloud","mcpOnly":true},` +
+				`"annotations":{"destructiveHint":true,"idempotentHint":false,"openWorldHint":true,"readOnlyHint":false},` +
+				`"description":"Clear the AWS credentials delivered to this environment.",` +
+				`"inputSchema":{"type":"object","properties":{}},` +
+				`"name":"cloud_clear_aws_credentials",` +
+				`"outputSchema":{"type":"object","properties":{"cleared":{"type":"boolean"}}},` +
+				`"title":"Clear AWS credentials"}` +
+				`]}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "tools", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var listed, want struct {
+			Tools []map[string]any `json:"tools"`
+		}
+		if err := json.Unmarshal([]byte(result.Stdout), &listed); err != nil {
+			t.Fatalf("decode tools JSON output: %v\n%s", err, result.Stdout)
+		}
+		if err := json.Unmarshal([]byte(edge.Results["tools/list"]), &want); err != nil {
+			t.Fatalf("decode the edge's own tools/list payload: %v", err)
+		}
+		if len(listed.Tools) != len(want.Tools) {
+			t.Fatalf("structured output listed %d tools, want %d: %s", len(listed.Tools), len(want.Tools), result.Stdout)
+		}
+		// Whole descriptors, so a field the protocol gains later fails here
+		// rather than disappearing from the structured surface unnoticed.
+		if !reflect.DeepEqual(listed.Tools, want.Tools) {
+			t.Errorf("structured output does not carry the descriptor the edge sent\n got: %v\nwant: %v", listed.Tools, want.Tools)
+		}
 	})
 }

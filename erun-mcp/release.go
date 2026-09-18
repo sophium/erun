@@ -2,6 +2,7 @@ package erunmcp
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -19,16 +20,19 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
 			var spec eruncommon.ReleaseSpec
 			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
-				// Release resolves the same execution `erun build --release` does, so
-				// it publishes the version's images and charts before it tags them.
+				// Release marks source control only: it stamps, tags and pushes the
+				// version and never builds or publishes an artifact. Build and
+				// publish are `build --release` and `push --version`.
 				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, "", "", true, false, nil)
 				if err != nil {
 					return err
 				}
-				if resolved, ok := eruncommon.BuildExecutionReleaseSpec(execution); ok {
-					spec = resolved
+				resolved, ok := eruncommon.BuildExecutionReleaseSpec(execution)
+				if !ok {
+					return errors.New("release: the resolved plan is not a release")
 				}
-				return eruncommon.RunReleaseExecution(runCtx, execution, eruncommon.GitCommandRunner, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime))
+				spec = resolved
+				return eruncommon.RunReleaseSpec(runCtx, spec, eruncommon.GitCommandRunner, runtime.BuildScriptRunner)
 			})
 			output.Spec = &spec
 			return output, err

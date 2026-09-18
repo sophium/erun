@@ -188,6 +188,11 @@ type CloudDependencies struct {
 	// (GET <consoleURL>/version.json, unauthenticated) -- see
 	// control_plane_version_drift.go.
 	FetchConsoleVersion func(Context, string) (string, error)
+	// ResolveHostAddrs resolves a hostname to its IP addresses -- used by
+	// control_plane_version_drift.go to tell a plane's own discovery document
+	// naming a benign canonical alias apart from one advertising a genuinely
+	// different backend.
+	ResolveHostAddrs func(Context, string) ([]string, error)
 }
 
 // DefaultCloudDependencies returns a CloudDependencies with CloudSecretStore
@@ -956,6 +961,9 @@ func normalizeERunCloudDependencies(deps CloudDependencies) CloudDependencies {
 	}
 	if deps.FetchConsoleVersion == nil {
 		deps.FetchConsoleVersion = defaultFetchConsoleVersion
+	}
+	if deps.ResolveHostAddrs == nil {
+		deps.ResolveHostAddrs = defaultResolveHostAddrs
 	}
 	return deps
 }

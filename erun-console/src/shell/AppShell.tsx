@@ -38,17 +38,29 @@ function OperationsSectionContent({
   token,
   docsUrl,
   tenant,
+  callerErunUserId,
+  scopeTenantId,
 }: {
   active: 'tenants' | 'users' | 'org-settings' | 'smtp-settings';
   token: string;
   docsUrl: string | undefined;
   tenant: TenantConfigView['tenant'];
+  callerErunUserId: string | undefined;
+  scopeTenantId: string | undefined;
 }): React.ReactElement {
   switch (active) {
     case 'tenants':
       return <TenantsPanel token={token} docsUrl={docsUrl} />;
     case 'users':
-      return <UsersPanel token={token} ownTenantId={tenant.tenantId} tenantType={tenant.type} />;
+      return (
+        <UsersPanel
+          token={token}
+          ownTenantId={tenant.tenantId}
+          tenantType={tenant.type}
+          callerErunUserId={callerErunUserId}
+          scopeTenantId={scopeTenantId}
+        />
+      );
     case 'org-settings':
       return <OrgSettingsPanel token={token} />;
     case 'smtp-settings':
@@ -67,6 +79,7 @@ function SectionContent({
   docsUrl,
   tenants,
   scopeTenantId,
+  callerErunUserId,
   onChanged,
 }: {
   active: ConsoleSectionId;
@@ -75,6 +88,7 @@ function SectionContent({
   docsUrl: string | undefined;
   tenants: PlatformTenant[];
   scopeTenantId: string | undefined;
+  callerErunUserId: string | undefined;
   onChanged: () => void;
 }): React.ReactElement {
   switch (active) {
@@ -126,6 +140,8 @@ function SectionContent({
           token={token}
           docsUrl={docsUrl}
           tenant={config.tenant}
+          callerErunUserId={callerErunUserId}
+          scopeTenantId={scopeTenantId}
         />
       );
   }
@@ -239,6 +255,7 @@ export function AppShell({
             docsUrl={docsUrl}
             tenants={tenants}
             scopeTenantId={scopeTenantId}
+            callerErunUserId={whoamiQuery.data?.userId}
             onChanged={onChanged}
           />
         </main>

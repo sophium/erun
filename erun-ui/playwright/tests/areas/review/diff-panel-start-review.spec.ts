@@ -101,7 +101,10 @@ async function openDiffPanel(
   await app.sidebar.openEnvironment(tenant, environment);
   await dismissAIOccupancyPromptIfShown(app);
   await app.titlebar.toggleReviewPanel();
-  await expect(app.page.getByText('package main')).toBeVisible();
+  // Converge on the panel having opened, then on the diff it fetches: both are
+  // separate renders after the toggle, and expect's own budget is a fixed 10s.
+  await app.reviewPanel.waitForOpen();
+  await app.page.getByText('package main').waitFor({ state: 'visible' });
 }
 
 function startReviewButton(app: import('../../../pages/index.js').AppShell) {
@@ -201,6 +204,51 @@ test.describe('diff panel — starting a review (#1315)', () => {
     // through explicitly or it renders "No tenant is open." instead of data.
     await expect(app.reviewDetailDialog.locator()).toContainText('Add widget');
     await expect(app.reviewDetailDialog.locator()).not.toContainText('No tenant is open');
+  });
+
+  // The denied entry point, which the diff panel reaches without the tenant
+  // dashboard ever having loaded. Naming the capability is not enough: the
+  // notice has to hand over the grant, filled in with the caller's own user id.
+  test('a caller who may not open a review is handed the grant that lifts it', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        await fulfillJSON(route, DIFF);
+        return;
+      }
+      if (body.method === 'TenantReviewCreateCapability') {
+        await fulfillJSON(route, {
+          canCreate: false,
+          restricted: 'You do not have access to create reviews.',
+          accessRemedy: {
+            command: 'erun platform user grant-role --user-id user-1 --role-id role-author',
+            roleName: 'Author',
+          },
+        });
+        return;
+      }
+      if (body.method === 'EnvironmentWorkingIssue') {
+        await fulfillJSON(route, { available: true, branch: 'feature/777-thing' });
+        return;
+      }
+      await route.continue();
+    });
+
+    await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
+    await expect(startReviewButton(app)).toBeVisible();
+    await startReviewButton(app).click();
+
+    const dialog = app.createReviewDialog;
+    await dialog.waitForOpen();
+    await expect(dialog.locator()).toContainText('You do not have access to create reviews.');
+    await expect(dialog.locator()).toContainText(
+      'erun platform user grant-role --user-id user-1 --role-id role-author',
+    );
+    await expect(dialog.locator()).toContainText('Author');
   });
 
   test('a push that fails names its own next action', async ({ app, page, seededEnv }) => {

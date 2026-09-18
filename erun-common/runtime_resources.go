@@ -8,9 +8,65 @@ import (
 	"strings"
 )
 
+// DefaultRuntimePodCPU/Memory size the runtime container itself, and are the
+// chart's own fallback for it
+// (erun-devops/k8s/erun-devops/templates/service.yaml — keep the two in sync).
+//
+// DefaultRuntimePodMemory is sized for the heaviest work that container is
+// expected to run, not for a serving app: `make check-gate` runs inside it when
+// an agent gates its own branch in-pod, and that is the same ten-target gate
+// (lint incl. golangci-lint type-checking the AWS SDK, three frontend
+// workspaces, Wails/CGO tests, a headless Chromium per Playwright worker) the
+// dind sidecar runs during an image build -- which is why the sidecar's own
+// default is 20Gi (see DefaultRuntimeDindMemory below). This container sat at
+// 8916Mi, sized before that gate grew, i.e. at under half of what the same work
+// is sized for on the build side.
+//
+// The number comes from running that gate in containers of each size on the
+// same 6-CPU environment (the same image, `make -j6 check-gate`), "cold"
+// meaning a first run after a fresh checkout -- cold Go build and
+// golangci-lint caches, which is what a new environment, a branch switch or a
+// pruned build cache looks like:
+//
+//	limit    caches  peak      ceiling hits  result
+//	6144Mi   cold    6.00GiB   318+          survived on reclaim alone
+//	6144Mi   warm    2.59GiB   0             passed
+//	12288Mi  cold    11.71GiB  0             passed, no headroom left
+//	12288Mi  warm    4.18GiB   0             passed
+//	16384Mi  cold    12.54GiB  0             passed
+//	16384Mi  warm    7.17GiB   0             passed
+//
+// At 6Gi the cold gate has no room at all: it pins the limit and spends the run
+// in reclaim. At 12Gi it fits but consumes nearly all of it -- 97.6% -- which is
+// what makes 16384Mi this default rather than 12288Mi: a limit just above the
+// cold peak is one the next heavier change lands against. At 16384Mi the
+// coldest run peaks at 78% of the limit and the warm gate a container runs day
+// to day at 45%, both with the ceiling untouched.
+//
+// Neither share falls much as the limit grows, which is why this default is
+// sized to leave the coldest first run a fifth of its limit unused rather than
+// to a round multiple of the old one: three of the ten targets (lint, the
+// frontend workspaces, the chart tests) size their own fan-out from the memory
+// they are given, so a container with more memory runs more of that work at
+// once, and a container with too little reclaims against its page cache for the
+// whole run instead.
+//
+// The gate is not the whole story either: this agent's own 6Gi container holds
+// 4.83GiB at *idle*, 4.0GiB of it page cache for the repo, node_modules and the
+// Go caches, against a memory.peak pinned at 6.00GiB and memory.events `max` at
+// 40049 -- it lives in reclaim, and an OOM kill is only a question of which
+// allocation outruns it. That is the state an in-pod agent run and its unpushed
+// work die in. This default leaves the gate, the agent session, the MCP server
+// and that page cache room to share the cgroup instead.
+//
+// This is a provisioning default, not an enforcement: an environment that
+// recorded its own runtimepod.memory keeps it (applyEnvRuntimePod), and one
+// already sized below this needs `erun resize --memory` — which `erun list`
+// recommends on its own once the cgroup reports an OOM kill or a near-limit
+// peak.
 const (
 	DefaultRuntimePodCPU    = "4"
-	DefaultRuntimePodMemory = "8916Mi"
+	DefaultRuntimePodMemory = "16384Mi"
 )
 
 // DefaultRuntimeDindCPU/Memory size the erun-dind sidecar's own resource

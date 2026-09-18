@@ -61,6 +61,15 @@ different network namespace. Keep restart host-side; do not add an unreachable t
 Apply `erun-cli/AGENTS.md` § "CLI Help And MCP Tool Descriptions", including
 parameter descriptions. Both transports must describe the same actual behavior.
 
+- **The preview sentence is derived from the schema, never typed.** `addTool`
+  reads whether the tool's input type declares a `preview` property and appends
+  `Supports preview.` when it does; a description claiming a preview its schema
+  cannot deliver fails registration. Do not hand-write the sentence, and do not
+  add a tool whose description and schema disagree about it — 22 of 80 tools once
+  carried it and 58 did not, which reads as a capability boundary that does not
+  exist. `preview_advertised_test.go` pins the biconditional over the whole
+  surface in both directions.
+
 ## Diagnosing A Deployed Runtime Via MCP
 
 - Inspect state from its owning machine: pod evidence does not establish host

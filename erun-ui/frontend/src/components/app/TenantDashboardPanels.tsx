@@ -40,11 +40,11 @@ export function TenantDashboardPanels({ data }: { data: TenantDashboardData }): 
 }
 
 function UsersPanel({ data }: { data: TenantDashboardData }): React.ReactElement {
-  const user = data?.user;
+  const users = data?.users ?? [];
   return (
     <TabsContent value="users" className="min-h-0 overflow-auto">
       <PanelBody data={data} tab="users" empty={<EmptyState heading="No signed-in user" />}>
-        {user ? <UsersTable users={[user]} /> : null}
+        {users.length > 0 ? <UsersTable users={users} /> : null}
       </PanelBody>
     </TabsContent>
   );
@@ -97,13 +97,19 @@ function AuditPanel({ data }: { data: TenantDashboardData }): React.ReactElement
   );
 }
 
+// Subject is rendered on its own column rather than folded into the
+// username display: it is the one value that reliably joins
+// this erun identity against the same person's row in the console's
+// identity-administration Users list, which lists IdP identities rather
+// than erun users and previously had nowhere to show it either.
 function UsersTable({ users }: { users: UITenantDashboardUser[] }): React.ReactElement {
   return (
-    <DataTable headers={['Username', 'Roles']}>
+    <DataTable headers={['Username', 'Roles', 'Subject']}>
       {users.map((user) => (
         <tr key={user.userId || (user.username ?? '') || (user.subject ?? '')}>
           <DataCell strong>{displayUsername(user)}</DataCell>
-          <DataCell>{formatRoles(user.roles)}</DataCell>
+          <DataCell>{formatRosterRoles(user.roles)}</DataCell>
+          <DataCell>{user.subject ?? '—'}</DataCell>
         </tr>
       ))}
     </DataTable>
@@ -211,7 +217,12 @@ function displayUsername(user: UITenantDashboardUser): string {
   return 'Unknown user';
 }
 
-function formatRoles(roles: string[] | undefined): string {
+// formatRosterRoles renders a roster row's roles. GET /v1/users reports the
+// tenant's users without their roles, so an absent list here means the roles
+// were not reported -- not that the user has none. Claiming the latter would
+// state something false about a colleague; only the caller's own row carries
+// roles, which whoami answered with.
+function formatRosterRoles(roles: string[] | undefined): string {
   const names = roles?.map((role) => role.trim()).filter(Boolean) ?? [];
-  return names.length > 0 ? names.join(', ') : 'No roles assigned';
+  return names.length > 0 ? names.join(', ') : 'Not reported';
 }

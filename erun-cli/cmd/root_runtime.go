@@ -42,14 +42,20 @@ func newCommandGroup(use, short string, commands ...*cobra.Command) *cobra.Comma
 // scopedOpenParams adapts the --tenant/--environment flag pair every
 // environment-scoped command shares: an omitted flag means "the current scope",
 // resolved the same way as for `deploy` or `open`.
-func scopedOpenParams(tenant, environment string) common.OpenParams {
+// cmd supplies the command's own invocation (CommandPath), so a
+// tenant-resolution failure names the command the operator actually ran and
+// offers that command's own recovery. Every scoped command routing through
+// here is what keeps that true when a new command adopts the flag pair.
+func scopedOpenParams(command, tenant, environment string) common.OpenParams {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	return common.OpenParams{
-		Tenant:                tenant,
-		Environment:           environment,
-		UseDefaultTenant:      tenant == "",
-		UseDefaultEnvironment: environment == "",
+		Tenant:                    tenant,
+		Environment:               environment,
+		UseDefaultTenant:          tenant == "",
+		UseDefaultEnvironment:     environment == "",
+		Command:                   command,
+		CommandScopesTenantByFlag: true,
 	}
 }
 
@@ -76,6 +82,35 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 	return cmd
 }
 
+// tenantSelectionUnavailableExitCode marks a run that needed a tenant chosen
+// but had no way to ask for one: stdin is not a terminal and holds no answer to
+// read, so the prompt would print its menu, read EOF, and fail. Distinct from
+// the ordinary failure code so a caller that discards stderr can tell "this run
+// is waiting on a choice only I can make" apart from "the command ran and
+// failed" -- and distinct from platformAliasUnusableExitCode (127), which
+// answers a different question, so neither condition can be mistaken for the
+// other. Continues the sequence jobAwaitTimeoutExitCode (124),
+// jobAwaitUnknownExitCode (125), and mcpChannelUnreachableExitCode (126) set.
+const tenantSelectionUnavailableExitCode = 128
+
+// bootstrapInitExitError preserves the exit-code contract of a bootstrap-init
+// failure for a caller that only reads the code. An unresolvable platform alias
+// is untouched here: it keeps the sentinel main maps to its own code (127), so
+// the tenant-selection refusal below can never impersonate it. The refusal gets
+// a code of its own for the same reason -- "this run needs a tenant from you" is
+// a different outcome from "the command ran and failed", and from "the platform
+// alias cannot be resolved".
+func bootstrapInitExitError(err error) error {
+	if errors.Is(err, common.ErrNotInGitRepository) {
+		return internal.MarkReported(common.ErrNotInGitRepository)
+	}
+	var unavailable common.TenantSelectionUnavailableError
+	if errors.As(err, &unavailable) {
+		return internal.WithExitCode(err, tenantSelectionUnavailableExitCode)
+	}
+	return err
+}
+
 func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand common.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(common.Context, common.BootstrapInitParams) error {
 	return func(ctx common.Context, params common.BootstrapInitParams) error {
 		ctx = withCloudContextPreflight(ctx, store)
@@ -86,6 +121,7 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 			SelectTenant: func(tenants []common.TenantConfig) (common.TenantSelectionResult, error) {
 				return selectTenantPrompt(selectRunner, tenants)
 			},
+			TenantSelectionUnavailable: tenantSelectionUnavailable(),
 			Confirm: func(label string) (bool, error) {
 				return confirmPrompt(promptRunner, label)
 			},
@@ -110,10 +146,7 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 			Context:                   ctx,
 		}, params)
 		if err != nil {
-			if errors.Is(err, common.ErrNotInGitRepository) {
-				return internal.MarkReported(common.ErrNotInGitRepository)
-			}
-			return err
+			return bootstrapInitExitError(err)
 		}
 		ctx.TraceCommand("", "ensure-agent-instructions")
 		ctx.TraceCommand("", "ensure-claude-settings")

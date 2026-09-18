@@ -477,9 +477,10 @@ const notificationSourceForwardOutage = "port-forward-outage"
 const notificationSourceDeployFailed = "deploy-failed"
 
 // notificationSourceOrchestratorEdgeUnreachable tags the "wired tools for …,
-// but its edge is not answering" warning an orchestrator launch posts when
-// exactly one linked environment's edge failed its reachability probe — the
-// only case with an unambiguous env to attach the deploy action to (#1390).
+// but its edge is not answering" warning an orchestrator launch posts for a
+// linked environment whose edge failed its reachability probe. Posted once per
+// such environment and tagged with that env, so each one carries the deploy
+// action for the env it names and each is cleared by its own env's lifecycle.
 const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
 
 // notificationSourceMCPUnreachable tags the "the local MCP endpoint isn't

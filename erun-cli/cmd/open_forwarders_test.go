@@ -35,7 +35,7 @@ func TestActivateForwardersBestEffort(t *testing.T) {
 		activateAPI:  func(common.Context, common.OpenResult) error { apiCalled = true; return fmt.Errorf("api boom") },
 	}
 
-	runner.activateForwarders()
+	err := runner.activateForwarders()
 
 	if !sshdCalled || !mcpCalled || !apiCalled {
 		t.Fatalf("every forwarder must be attempted despite failures: sshd=%v mcp=%v api=%v", sshdCalled, mcpCalled, apiCalled)
@@ -49,6 +49,14 @@ func TestActivateForwardersBestEffort(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("warning output missing %q; got:\n%s", want, got)
+		}
+	}
+	if err == nil {
+		t.Fatal("expected activateForwarders to still report every failure via its returned error")
+	}
+	for _, want := range []string{"sshd boom", "mcp boom", "api boom"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("returned error missing %q; got: %v", want, err)
 		}
 	}
 }

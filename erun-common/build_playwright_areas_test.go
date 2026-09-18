@@ -42,7 +42,7 @@ func TestDockerfileConsumesPlaywrightTestAreas(t *testing.T) {
 
 // newPlaywrightAreaTestRepo lays out just enough of the real tree shape
 // (erun-ui/playwright/tests/{smoke,areas/<area>,fixtures,pages}) on branch
-// "main" for resolvePlaywrightTestAreaSelection to classify a later diff
+// "main" for ResolvePlaywrightTestAreaSelection to classify a later diff
 // against it, then checks out a feature branch so HEAD moves independently
 // of main -- the same shape newAgentJobTestRepo (job_worktree_test.go) uses
 // for other git-plumbing tests in this package.
@@ -63,18 +63,48 @@ func newPlaywrightAreaTestRepo(t *testing.T) string {
 	return dir
 }
 
-func TestResolvePlaywrightTestAreaSelectionNoSpecChangeIsSmokeOnly(t *testing.T) {
+func TestResolvePlaywrightTestAreaSelectionNoChangeIsSmokeOnly(t *testing.T) {
 	dir := newPlaywrightAreaTestRepo(t)
-	writeFileForTest(t, dir, "erun-ui/frontend/src/App.tsx", "// app changed\n")
+	writeFileForTest(t, dir, "erun-common/some_file.go", "// unrelated backend change\n")
 	runGitForTest(t, dir, "add", ".")
-	runGitForTest(t, dir, "commit", "-q", "-m", "source only")
+	runGitForTest(t, dir, "commit", "-q", "-m", "unrelated change")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
 	if selection != "smoke" {
-		t.Fatalf("expected smoke-only selection for a source-only diff, got %q", selection)
+		t.Fatalf("expected smoke-only selection for a diff outside erun-ui and outside any spec, got %q", selection)
+	}
+}
+
+func TestResolvePlaywrightTestAreaSelectionErunUIGoSourceChangeRunsEverything(t *testing.T) {
+	dir := newPlaywrightAreaTestRepo(t)
+	writeFileForTest(t, dir, "erun-ui/orchestrator.go", "// new orchestrator behaviour\n")
+	runGitForTest(t, dir, "add", ".")
+	runGitForTest(t, dir, "commit", "-q", "-m", "erun-ui go source change")
+
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
+	if !ok {
+		t.Fatalf("expected selection to resolve")
+	}
+	if selection != "all" {
+		t.Fatalf("expected \"all\" for an erun-ui Go source change, got %q", selection)
+	}
+}
+
+func TestResolvePlaywrightTestAreaSelectionErunUIFrontendChangeRunsEverything(t *testing.T) {
+	dir := newPlaywrightAreaTestRepo(t)
+	writeFileForTest(t, dir, "erun-ui/frontend/src/App.tsx", "// app changed\n")
+	runGitForTest(t, dir, "add", ".")
+	runGitForTest(t, dir, "commit", "-q", "-m", "frontend source only")
+
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
+	if !ok {
+		t.Fatalf("expected selection to resolve")
+	}
+	if selection != "all" {
+		t.Fatalf("expected \"all\" for an erun-ui/frontend source change, got %q", selection)
 	}
 }
 
@@ -84,7 +114,7 @@ func TestResolvePlaywrightTestAreaSelectionOneAreaChanged(t *testing.T) {
 	runGitForTest(t, dir, "add", ".")
 	runGitForTest(t, dir, "commit", "-q", "-m", "sidebar spec")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
@@ -100,7 +130,7 @@ func TestResolvePlaywrightTestAreaSelectionTwoAreasChanged(t *testing.T) {
 	runGitForTest(t, dir, "add", ".")
 	runGitForTest(t, dir, "commit", "-q", "-m", "two areas")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
@@ -115,7 +145,7 @@ func TestResolvePlaywrightTestAreaSelectionFixturesChangeRunsEverything(t *testi
 	runGitForTest(t, dir, "add", ".")
 	runGitForTest(t, dir, "commit", "-q", "-m", "shared fixture change")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
@@ -131,7 +161,7 @@ func TestResolvePlaywrightTestAreaSelectionUncommittedAndUntrackedFilesCount(t *
 	// Untracked new spec file, never `git add`ed.
 	writeFileForTest(t, dir, "erun-ui/playwright/tests/areas/sidebar/sidebar-untracked.spec.ts", "// untracked\n")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
@@ -146,7 +176,7 @@ func TestResolvePlaywrightTestAreaSelectionRunShChangeRunsEverything(t *testing.
 	runGitForTest(t, dir, "add", ".")
 	runGitForTest(t, dir, "commit", "-q", "-m", "harness change")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
@@ -161,7 +191,7 @@ func TestResolvePlaywrightTestAreaSelectionPackageJSONChangeRunsEverything(t *te
 	runGitForTest(t, dir, "add", ".")
 	runGitForTest(t, dir, "commit", "-q", "-m", "harness manifest change")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
@@ -176,7 +206,7 @@ func TestResolvePlaywrightTestAreaSelectionAgentsMarkdownChangeStaysSmokeOnly(t 
 	runGitForTest(t, dir, "add", ".")
 	runGitForTest(t, dir, "commit", "-q", "-m", "docs change")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
@@ -191,7 +221,7 @@ func TestResolvePlaywrightTestAreaSelectionSmokeSpecChangeStaysSmokeOnly(t *test
 	runGitForTest(t, dir, "add", ".")
 	runGitForTest(t, dir, "commit", "-q", "-m", "smoke spec change")
 
-	selection, ok := resolvePlaywrightTestAreaSelection(testContext(), dir)
+	selection, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir)
 	if !ok {
 		t.Fatalf("expected selection to resolve")
 	}
@@ -209,7 +239,7 @@ func TestResolvePlaywrightTestAreaSelectionNoMergeBaseFailsSafe(t *testing.T) {
 	runGitForTest(t, dir, "add", ".")
 	runGitForTest(t, dir, "commit", "-q", "-m", "seed")
 
-	if _, ok := resolvePlaywrightTestAreaSelection(testContext(), dir); ok {
+	if _, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir); ok {
 		t.Fatalf("expected no resolvable merge base against any candidate branch to fail safe (ok=false)")
 	}
 }

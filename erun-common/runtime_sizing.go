@@ -17,12 +17,24 @@ import (
 // healthy multiple of the peak it actually observed.
 
 const (
-	// runtimeSizingRaiseMemoryFraction is the share of the limit an observed
-	// peak has to reach before erun says raise. Set well below 1.0 on purpose:
-	// the sample interval means the true peak is always at least the peak
-	// observed, so an environment already touching 90% has plausibly touched
-	// more between two reads.
-	runtimeSizingRaiseMemoryFraction = 0.90
+	// runtimeSizingRaiseMemoryPercent is the share of the limit an observed
+	// peak has to reach before erun says raise, in the same whole-percent units
+	// RuntimeUsageMemoryWarnPercent reports. Set well below 100 on purpose: the
+	// sample interval means the true peak is always at least the peak observed,
+	// so an environment already touching the margin has plausibly touched more
+	// between two reads.
+	//
+	// It is the warning threshold, not a figure of its own choosing, and that
+	// identity is the contract. The memory warning fires when
+	// 100*memory.current/limit reaches this figure, the raise fires when
+	// 100*peak/limit does, and peak is never below current (the live reading's
+	// own peak is the max of the two), so a reading that fires a memory warning
+	// always crosses the raise margin. Spelling the two thresholds separately
+	// is how they drifted apart -- the warning spoke at 85% while the
+	// recommendation stayed silent until 90%, and stayed silent entirely on an
+	// environment whose retained history was empty, which is the state a
+	// host-side `erun list` is always in.
+	runtimeSizingRaiseMemoryPercent = RuntimeUsageMemoryWarnPercent
 
 	// runtimeSizingMemoryHeadroom is the multiple of the observed peak every
 	// memory recommendation targets and no shrink may cross — the whole safety
@@ -170,6 +182,15 @@ type RuntimeSizingParams struct {
 	// cannot be deployed. Zero means no quota is configured and no ceiling is
 	// known here.
 	Ceiling NamespaceResourceQuota
+	// Live is the reading this recommendation is being reported alongside, when
+	// the caller has just taken one. Supplying it is what lets a warning and the
+	// recommendation that answers it be derived from the same evidence: the
+	// reading is merged into the retained history before a single verdict is
+	// computed, rather than the caller running a second, separate sizing pass
+	// over the warning it just produced. Nil for callers that only have retained
+	// history (`erun list`), which is the honest answer for a host that never
+	// took a reading of this environment.
+	Live *RuntimeUsage
 }
 
 // RecommendRuntimeSizing derives an environment's standing recommendation from
@@ -182,27 +203,55 @@ type RuntimeSizingParams struct {
 // carries no runtimepod at all (the chart injects the container's limits), so
 // scoring the live container against the declared value would score it against
 // NormalizeRuntimePodResources' defaults — on a 12-core, 23552Mi environment
-// whose config is silent, that reads as a 8916Mi limit and turns a 2x
+// whose config is silent, that reads as a 16384Mi limit and turns a 2x
 // over-provision into a recommendation to grow. The cgroup limit is the size
 // the container is actually running under, so it is the size that is scored.
 func RecommendRuntimeSizing(params RuntimeSizingParams) (RuntimeSizingRecommendation, bool) {
 	history := params.History
-	latest, ok := history.Latest()
+	// A live reading is the newest observation of this environment, so it is
+	// the reading every figure below is scored against when one was supplied --
+	// including its limit, which a resize since the last retained sample would
+	// otherwise leave stale. Without one, the retained history is all there is.
+	latest, ok := runtimeSizingLatestReading(history, params.Live)
 	if !ok {
 		return RuntimeSizingRecommendation{}, false
+	}
+	peak := history.ObservedPeakMemoryBytes
+	oomKills := history.ObservedOOMKills
+	periods := history.ObservedPeriods
+	throttled := history.ObservedThrottledPeriods
+	if params.Live != nil {
+		// Union, not replacement: every figure below is monotonic in the
+		// evidence -- a retained peak, an accumulated kill count, a total of
+		// elapsed scheduling periods -- and the live reading is one more
+		// observation of the same environment, so neither may overwrite the
+		// other. Both sides count the same quantity even though they are
+		// accumulated differently (the history sums deltas across restarts, the
+		// reading is the current container's own lifetime total), so the larger
+		// is the one that has seen more.
+		peak = max(peak, runtimeLivePeakMemoryBytes(*params.Live))
+		if params.Live.Memory.OOMKillsObserved {
+			oomKills = max(oomKills, params.Live.Memory.OOMKills)
+		}
+		periods = max(periods, params.Live.CPU.Periods)
+		throttled = max(throttled, params.Live.CPU.ThrottledPeriods)
+	}
+	samples := len(history.Samples)
+	if samples == 0 && params.Live != nil {
+		samples = 1
 	}
 
 	evidence := RuntimeSizingEvidence{
 		ObservedSeconds:          int64(history.ObservedWindow() / time.Second),
-		Samples:                  len(history.Samples),
+		Samples:                  samples,
 		Restarts:                 history.Restarts,
 		MemoryLimitBytes:         latest.Memory.LimitBytes,
-		ObservedPeakMemoryBytes:  history.ObservedPeakMemoryBytes,
-		ObservedOOMKills:         history.ObservedOOMKills,
+		ObservedPeakMemoryBytes:  peak,
+		ObservedOOMKills:         oomKills,
 		CPUQuotaMilli:            runtimeQuotaMilli(latest.CPU.QuotaCores),
 		ObservedPeakCPUMilli:     history.ObservedPeakCPUMilli,
-		ObservedPeriods:          history.ObservedPeriods,
-		ObservedThrottledPeriods: history.ObservedThrottledPeriods,
+		ObservedPeriods:          periods,
+		ObservedThrottledPeriods: throttled,
 		Signals:                  []string{"cgroup memory.peak", "cgroup memory.events oom_kill", "cgroup cpu.stat usage_usec/nr_throttled"},
 		Unavailable:              runtimeUsageUnavailable(latest),
 	}
@@ -210,14 +259,66 @@ func RecommendRuntimeSizing(params RuntimeSizingParams) (RuntimeSizingRecommenda
 	return RuntimeSizingRecommendation{
 		Knob: "runtimepod",
 		Verdicts: []RuntimeSizingVerdict{
-			recommendRuntimeMemory(history, latest, params.Ceiling),
-			recommendRuntimeCPU(history, latest),
+			recommendRuntimeMemory(history, latest, peak, oomKills, params.Ceiling),
+			recommendRuntimeCPU(history, latest, periods, throttled),
 		},
 		Evidence: evidence,
 	}, true
 }
 
-func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, ceiling NamespaceResourceQuota) RuntimeSizingVerdict {
+// runtimeSizingLatestReading picks the reading a recommendation is scored
+// against: the live one whenever the caller supplied a reading worth scoring,
+// and the newest retained sample otherwise. Reports false only when there is
+// nothing observed at all, which is the one case erun answers with silence
+// rather than a guess.
+func runtimeSizingLatestReading(history RuntimeUsageHistory, live *RuntimeUsage) (RuntimeUsage, bool) {
+	if live != nil && live.HasCounters() {
+		return *live, true
+	}
+	return history.Latest()
+}
+
+// runtimeLivePeakMemoryBytes is the high-water mark a single live reading
+// establishes: memory.peak where the kernel exposed it, and current usage
+// otherwise. Current usage is a legitimate substitute rather than a fallback
+// of convenience -- a container pinned at its ceiling reports its pressure in
+// memory.current, and the warning thresholds read the same two figures, so
+// dropping this one would let an alarm fire on evidence the recommendation
+// refused to look at.
+func runtimeLivePeakMemoryBytes(usage RuntimeUsage) int64 {
+	return max(usage.Memory.PeakBytes, usage.Memory.CurrentBytes)
+}
+
+// runtimeMemoryRaiseVerdict is the single place a memory raise is decided and
+// worded. Both the retained history and a live reading funnel through it, so
+// the two can never reach different conclusions from the same evidence, and
+// the figure it tests against is the same one the memory warning fires on.
+func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling NamespaceResourceQuota) (RuntimeSizingVerdict, bool) {
+	verdict := RuntimeSizingVerdict{Resource: "memory", Current: formatBytesAsMi(limit)}
+	if oomKills > 0 {
+		// A kill is evidence of harm, and one is enough. The observed peak is
+		// also the wrong basis after a kill: the allocation that triggered it
+		// was refused, so it never landed in memory.peak. Size from the limit
+		// that proved too small instead.
+		suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(limit, runtimeSizingMemoryHeadroom), ceiling)
+		verdict.Action = RuntimeSizingRaise
+		verdict.Confidence = RuntimeSizingConfidenceHigh
+		verdict.Suggested = suggested
+		verdict.Reason = fmt.Sprintf("%d oom kill(s) at %s%s", oomKills, formatBytesAsMi(limit), bounded)
+		return verdict, true
+	}
+	if float64(peak) < float64(limit)*runtimeSizingRaiseMemoryPercent/100 {
+		return RuntimeSizingVerdict{}, false
+	}
+	suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(peak, runtimeSizingMemoryHeadroom), ceiling)
+	verdict.Action = RuntimeSizingRaise
+	verdict.Confidence = RuntimeSizingConfidenceHigh
+	verdict.Suggested = suggested
+	verdict.Reason = fmt.Sprintf("peak %s of %s (%s) is within the raise margin%s", formatBytesAsMi(peak), formatBytesAsMi(limit), formatPercent(peak, limit), bounded)
+	return verdict, true
+}
+
+func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, peak, oomKills int64, ceiling NamespaceResourceQuota) RuntimeSizingVerdict {
 	verdict := RuntimeSizingVerdict{Resource: "memory"}
 	limit := latest.Memory.LimitBytes
 	if limit <= 0 {
@@ -226,28 +327,9 @@ func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, ce
 		return verdict
 	}
 	verdict.Current = formatBytesAsMi(limit)
-	peak := history.ObservedPeakMemoryBytes
 
-	if history.ObservedOOMKills > 0 {
-		// A kill is evidence of harm, and one is enough. The observed peak is
-		// also the wrong basis after a kill: the allocation that triggered it
-		// was refused, so it never landed in memory.peak. Size from the limit
-		// that proved too small instead.
-		verdict.Action = RuntimeSizingRaise
-		verdict.Confidence = RuntimeSizingConfidenceHigh
-		suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(limit, runtimeSizingMemoryHeadroom), ceiling)
-		verdict.Suggested = suggested
-		verdict.Reason = fmt.Sprintf("%d oom kill(s) at %s%s", history.ObservedOOMKills, formatBytesAsMi(limit), bounded)
-		return verdict
-	}
-
-	if float64(peak) >= float64(limit)*runtimeSizingRaiseMemoryFraction {
-		verdict.Action = RuntimeSizingRaise
-		verdict.Confidence = RuntimeSizingConfidenceHigh
-		suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(peak, runtimeSizingMemoryHeadroom), ceiling)
-		verdict.Suggested = suggested
-		verdict.Reason = fmt.Sprintf("peak %s of %s (%s) is within the raise margin%s", formatBytesAsMi(peak), formatBytesAsMi(limit), formatPercent(peak, limit), bounded)
-		return verdict
+	if raise, ok := runtimeMemoryRaiseVerdict(limit, peak, oomKills, ceiling); ok {
+		return raise
 	}
 
 	if reason, ok := runtimeSizingShrinkWindowShortfall(history); !ok {
@@ -271,7 +353,7 @@ func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, ce
 	return verdict
 }
 
-func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage) RuntimeSizingVerdict {
+func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage, observedPeriods, observedThrottled int64) RuntimeSizingVerdict {
 	verdict := RuntimeSizingVerdict{Resource: "cpu"}
 	quota := runtimeQuotaMilli(latest.CPU.QuotaCores)
 	if quota <= 0 {
@@ -280,29 +362,27 @@ func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage) Runti
 		return verdict
 	}
 	verdict.Current = FormatKubernetesCPUFromMilli(quota)
-	periods := history.ObservedPeriods
-	throttled := history.ObservedThrottledPeriods
 
-	if periods >= runtimeSizingThrottlePeriods && float64(throttled) >= float64(periods)*runtimeSizingThrottleRatio {
+	if observedPeriods >= runtimeSizingThrottlePeriods && float64(observedThrottled) >= float64(observedPeriods)*runtimeSizingThrottleRatio {
 		verdict.Action = RuntimeSizingRaise
 		verdict.Confidence = RuntimeSizingConfidenceHigh
 		verdict.Suggested = FormatKubernetesCPUFromMilli(scaleMilliToWholeCores(quota, runtimeSizingCPURaiseMultiple))
-		verdict.Reason = fmt.Sprintf("%s of scheduling periods throttled (%d of %d)", formatThrottleRatio(throttled, periods), throttled, periods)
+		verdict.Reason = runtimeThrottleLabel(observedThrottled, observedPeriods)
 		return verdict
 	}
 
-	throttleLabel := fmt.Sprintf("%s of scheduling periods throttled (%d of %d)", formatThrottleRatio(throttled, periods), throttled, periods)
+	throttleLabel := runtimeThrottleLabel(observedThrottled, observedPeriods)
 	if reason, ok := runtimeSizingShrinkWindowShortfall(history); !ok {
 		verdict.Action = RuntimeSizingUnknown
 		verdict.Reason = fmt.Sprintf("%s, but %s", throttleLabel, reason)
 		return verdict
 	}
-	if periods < runtimeSizingThrottlePeriods {
+	if observedPeriods < runtimeSizingThrottlePeriods {
 		verdict.Action = RuntimeSizingUnknown
-		verdict.Reason = fmt.Sprintf("only %d scheduling periods observed, too few to read a throttle ratio from", periods)
+		verdict.Reason = fmt.Sprintf("only %d scheduling periods observed, too few to read a throttle ratio from", observedPeriods)
 		return verdict
 	}
-	if throttled > 0 {
+	if observedThrottled > 0 {
 		// Below the raise threshold but not at zero: the quota already binds
 		// sometimes. That is not grounds to grow, and it is emphatically not
 		// grounds to shrink — a ratio under the threshold is "tolerable", not
@@ -399,6 +479,13 @@ func scaleMilliToWholeCores(milli int64, multiple float64) int64 {
 
 func formatBytesAsMi(bytes int64) string {
 	return fmt.Sprintf("%dMi", (bytes+1024*1024-1)/(1024*1024))
+}
+
+// runtimeThrottleLabel words the throttle ratio every CPU verdict is an
+// answer to. It is one function so the ratio a raise cites and the ratio a
+// hold cites cannot be worded, or rounded, differently.
+func runtimeThrottleLabel(throttled, periods int64) string {
+	return fmt.Sprintf("%s of scheduling periods throttled (%d of %d)", formatThrottleRatio(throttled, periods), throttled, periods)
 }
 
 // formatThrottleRatio keeps two decimals because the interesting throttle

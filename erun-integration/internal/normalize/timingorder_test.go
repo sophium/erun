@@ -56,6 +56,98 @@ func TestStepTimingSiblingsCanonicalizeToNameOrder(t *testing.T) {
 				"    push [<ELAPSED>]\n",
 		},
 		{
+			// A failed step renders its error after the duration, so the row
+			// no longer ends at the bracket. That shape used to fall out of
+			// the canonicalizer entirely, which ended the block at it and left
+			// every sibling after it in the order the run measured — the whole
+			// point of this normalization, silently off in exactly the
+			// scenarios that induce a failure on purpose.
+			"a failed row's error suffix does not stop the canonicalization",
+			"  push [9s]\n" +
+				"    base (cache miss: x) [4s]\n" +
+				"      linux/arm64 (cache miss: x) [2s]\n" +
+				"      linux/amd64 (cache miss: x) [1s]\n" +
+				"    api (cache miss: x) [5s]\n" +
+				"      linux/arm64 (cache miss: x) [3s]\n" +
+				"      linux/amd64 (failed) (cache miss: x) [2s] — unauthorized: denied\n" +
+				"      linux/amd64 (cache miss: x) [1s]\n" +
+				"    chart base [1s]\n" +
+				"    chart api [1s]\n",
+			"  push [<ELAPSED>]\n" +
+				"    api (cache miss: x) [<ELAPSED>]\n" +
+				"      linux/amd64 (cache miss: x) [<ELAPSED>]\n" +
+				"      linux/amd64 (failed) (cache miss: x) [<ELAPSED>] — unauthorized: denied\n" +
+				"      linux/arm64 (cache miss: x) [<ELAPSED>]\n" +
+				"    base (cache miss: x) [<ELAPSED>]\n" +
+				"      linux/amd64 (cache miss: x) [<ELAPSED>]\n" +
+				"      linux/arm64 (cache miss: x) [<ELAPSED>]\n" +
+				"    chart api [<ELAPSED>]\n" +
+				"    chart base [<ELAPSED>]\n",
+		},
+		{
+			// An error can run to several lines (the missing-binfmt refusal
+			// ends with a command on its own line). Those lines are part of
+			// the row above them and have to travel with it when siblings are
+			// reordered, not be read as rows of their own.
+			"a multi-line error stays attached to the row it belongs to",
+			"  build (failed) [9s] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"    base (failed) [5s] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"    api (failed) [4s] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"timing record written to somewhere\n",
+			"  build (failed) [<ELAPSED>] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"    api (failed) [<ELAPSED>] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"    base (failed) [<ELAPSED>] — cannot build linux/arm64. retry:\n" +
+				"  docker run --privileged --rm tonistiigi/binfmt --install all\n" +
+				"timing record written to somewhere\n",
+		},
+		{
+			// The shallowest level is duration order too. These rows are
+			// siblings that tie, not three independent trees, so a run with no
+			// single recognised parent must still canonicalize: leaving them in
+			// wall-clock order is exactly the variance this function exists to
+			// remove, and the closest-run rows are the likeliest to swap.
+			"same-depth rows with no common parent sort by name too",
+			"  publish [1.0s]\n" +
+				"    api (cache hit) [0.9s]\n" +
+				"  post-release-version-bump [1.1s]\n" +
+				"  push (failed) [0.8s] — exit status 1\n",
+			"  post-release-version-bump [<ELAPSED>]\n" +
+				"  publish [<ELAPSED>]\n" +
+				"    api (cache hit) [<ELAPSED>]\n" +
+				"  push (failed) [<ELAPSED>] — exit status 1\n",
+		},
+		{
+			// A failed row records its status after the duration. It is a
+			// timing row like any other, so it has to be recognised, sorted
+			// among its siblings, and carry its suffix through unchanged.
+			"a failed row's status suffix does not stop it being a timing row",
+			"  push [1.0s]\n" +
+				"    publish [0.9s]\n" +
+				"    api (failed) [0.8s] — denied: token does not match expected scopes\n",
+			"  push [<ELAPSED>]\n" +
+				"    api (failed) [<ELAPSED>] — denied: token does not match expected scopes\n" +
+				"    publish [<ELAPSED>]\n",
+		},
+		{
+			// A multi-line step failure interleaves its message between two
+			// rows of the same tree, so a run ends at a non-timing line rather
+			// than at a shallower one; each fragment still canonicalizes.
+			"a run broken by an interleaved message sorts each fragment",
+			"  release (failed) [1.0s] — exit status 1\n" +
+				"recover by hand\n" +
+				"  sync-develop [0.4s]\n" +
+				"  release [0.5s]\n",
+			"  release (failed) [<ELAPSED>] — exit status 1\n" +
+				"recover by hand\n" +
+				"  release [<ELAPSED>]\n" +
+				"  sync-develop [<ELAPSED>]\n",
+		},
+		{
 			"a single root with one child is untouched beyond redaction",
 			"step timing (ordered by duration):\n  deploy [2.1s]\n    the-release [1.9s]\n",
 			"step timing (ordered by duration):\n  deploy [<ELAPSED>]\n    the-release [<ELAPSED>]\n",

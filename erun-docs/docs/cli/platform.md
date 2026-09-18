@@ -18,6 +18,7 @@ erun platform tenant list [flags]
 erun platform tenant repair-org-mapping --issuer <issuer> --org-field-key <key> --org-field-value <value> [flags]
 erun platform identity org create --name <name> [flags]
 erun platform user enroll --username <username> [flags]
+erun platform user grant-role --user-id <user-id> --role-id <role-id> [flags]
 erun platform user list [flags]
 erun platform env list [flags]
 erun platform env get ENVIRONMENT_ID [flags]
@@ -76,11 +77,13 @@ Repairs a tenant already stuck with an unresolvable `(issuer, org)` mapping — 
 
 Creates an organization on the platform's own identity provider — the org an org-scoped tenant mapping needs before `platform tenant create --org-field-value` can produce a mapping any token will ever resolve to. Requires an operations-tenant caller. Prints the new org id in a form directly usable as `--org-field-value`.
 
-### `platform user enroll` / `platform user list`
+### `platform user enroll` / `platform user grant-role` / `platform user list`
 
 Enrolls a user in a tenant, or lists a tenant's users. `--issuer`/`--subject` link the external identity the user signs in with; `--tenant-id` targets another tenant and is honored only for an operations-tenant caller.
 
 `--role-id` (repeatable) names the roles the enrollment grants, instead of the platform's own default (`TenantUser`, or `TenantAdmin` for a tenant's first user). Use it to enroll a tenant's administrator directly: an enrollment that lands as an ordinary member has to be elevated from *inside* the tenant afterwards, and if no one there can grant roles yet, nothing can. List the target tenant's role ids with `GET /v1/roles` ([roles endpoints](/agent-reference/api-protocol#roles-endpoints)).
+
+`platform user grant-role` is the grant that comes *after* an enrollment: it adds one role to a user who is already in the tenant. Re-enrolling an enrolled identity is a no-op that leaves its roles untouched, so `platform user enroll --role-id` cannot elevate anyone who already exists — this is the command that can. Both ids are required, and the grant is permission-gated: the caller's own role must already include `POST /v1/users/{user_id}/roles`. Granting is what a client offers when it can see that a user lacks an access; the role to name is the one whose permissions cover that access, which `GET /v1/roles` reports alongside each role. Supported over MCP as `platform_user_grant-role`.
 
 ### `platform env list` / `platform env get`
 

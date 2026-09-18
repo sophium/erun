@@ -1485,6 +1485,72 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_tracked_project_config_reports_nothing", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_stale_desktop_app_bundle", func(t *testing.T) {
+		// The installed desktop app bundle can drift arbitrarily far
+		// behind the CLI with nothing to say so. A single ~/Applications/ERun.app
+		// bundle whose Info.plist version differs from this CLI's own build
+		// version must surface under "== Desktop app ==", identically in
+		// --dry-run and for real since this is a pure file read.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		writeDesktopAppBundle(t, filepath.Join(setup.Home, "Applications", "ERun.app"), "1.0.51")
+		envVars := append(setup.Env(),
+			"ERUN_HOST_OS_OVERRIDE=darwin",
+			"ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE="+filepath.Join(setup.Home, "no-system-applications"),
+		)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Multiple ERun.app bundles") {
+			t.Fatalf("expected no multiple-bundle warning for a single bundle, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_stale_desktop_app_bundle", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_reports_shadowed_desktop_app_bundle", func(t *testing.T) {
+		// The operator-reported shape: a current bundle at
+		// ~/Applications/ERun.app sits alongside a stale one at
+		// /Applications/ERun.app (both simulated here since a test must never
+		// touch a real /Applications -- ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE
+		// is the seam for that). Both share the bundle id com.sophium.erun, so
+		// Finder/Spotlight/the Dock can launch either one regardless of which
+		// is current -- doctor must name both bundles, flag the stale one
+		// against this CLI's own version, and warn about the shadow-copy
+		// hazard even though this CLI's own build (a "dev" build here) happens
+		// to match one of the two.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		systemApplications := filepath.Join(setup.Home, "system-applications")
+		writeDesktopAppBundle(t, filepath.Join(setup.Home, "Applications", "ERun.app"), "dev")
+		writeDesktopAppBundle(t, filepath.Join(systemApplications, "ERun.app"), "1.0.51")
+		envVars := append(setup.Env(),
+			"ERUN_HOST_OS_OVERRIDE=darwin",
+			"ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE="+systemApplications,
+		)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_shadowed_desktop_app_bundle", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_no_desktop_app_bundle_reports_nothing", func(t *testing.T) {
+		// The common case (this host's HOST_OS_OVERRIDE isn't even darwin, and
+		// even on darwin, no bundle installed anywhere): no "== Desktop app =="
+		// section at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Desktop app") {
+			t.Fatalf("expected no desktop-app finding when nothing is installed, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_no_desktop_app_bundle_reports_nothing", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_reports_expired_host_credentials", func(t *testing.T) {
 		// The failure #903 was filed for: the profile is present and well-formed
 		// but its credentials lapsed overnight, which otherwise first surfaces as
@@ -1603,6 +1669,75 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_prune_images_and_build_cache_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_without_tty_skips_optional_prune_prompts", func(t *testing.T) {
+		// Regression coverage for the no-TTY run: doctor is the command reached
+		// for when a deploy has already failed, so its caller is often an
+		// orchestrator or CI step with no terminal. Reaching the optional prune
+		// prompts with stdin bound to /dev/null read EOF and exited 1 with
+		// "Doctor failed team/dev: ^D" -- a verdict on an environment nothing
+		// was wrong with. With no TTY each optional prune must be reported as
+		// skipped, named, and left unrun, and the run must exit 0 on the health
+		// of what it did examine.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{
+			Cwd:              setup.Cwd,
+			Env:              envVars,
+			StdinFromDevNull: true,
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("no-TTY doctor exited %d; a skipped optional prompt is not a failed environment: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Doctor failed") {
+			t.Fatalf("no-TTY doctor reported the environment as failed: %s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_without_tty_skips_optional_prune_prompts", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_without_tty_declines_pending_helm_recovery", func(t *testing.T) {
+		// The other prompt doctor offers unasked: a stuck pending release makes
+		// RecommendedDeployRecovery suggest one mutating recovery. With no TTY
+		// that must read as "not confirmed", named, and never as a failed
+		// environment -- doctor is reached for precisely when a deploy failed,
+		// so a missing terminal must not cost the caller the diagnosis.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "pending-install")
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{
+			Cwd:              setup.Cwd,
+			Env:              envVars,
+			StdinFromDevNull: true,
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("no-TTY doctor exited %d on a pending release: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Doctor failed") {
+			t.Fatalf("no-TTY doctor reported the environment as failed: %s", result.Combined)
+		}
+		// The diagnosis recommends exactly one recovery, so the flag named is
+		// the one that fits it -- not both alternatives.
+		if !strings.Contains(result.Combined, "--clear-pending-helm") {
+			t.Errorf("report does not name --clear-pending-helm as the way to run the recommended recovery explicitly:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Could not confirm") && !strings.Contains(result.Combined, "Not run") {
+			t.Errorf("report does not say the recovery went unconfirmed:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "Running: Clear pending helm release") {
+			t.Errorf("a recovery nobody confirmed was run:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "==> Doctor done team/dev") {
+			t.Errorf("doctor did not complete the run:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_without_tty_declines_pending_helm_recovery", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_clear_pending_helm_via_prompt_then_prune_containers", func(t *testing.T) {
 		// The helm stub reports STATUS: pending-install, so the
 		// diagnosis recommends exactly one recovery and the interactive
@@ -1628,6 +1763,29 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_clear_pending_helm_via_prompt_then_prune_containers", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", func(t *testing.T) {
+		// Once the helm release status read confirms the Kubernetes API
+		// server itself is unreachable, doctor must not rediscover that fact
+		// in the Pods, Host AWS credentials, Git push
+		// access, or Docker storage sections -- before the fix each paid its
+		// own multi-minute kubectl timeout to relearn what the helm read
+		// already established (~8 minutes and 17 klog frames across the four
+		// sections in the reported run). kubectl is deliberately left
+		// unstubbed (absent from fixture.StubEnv below): if any of the four
+		// sections still probes for real, erun.Run's own
+		// "executable file not found" detection fails this test outright.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithAWSAlias(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatusUnreachable(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_storage_unhealthy_diagnostic_error", func(t *testing.T) {
@@ -2087,6 +2245,24 @@ func stubDoctorHelmStatus(t *testing.T, stubsDir, releaseStatus string) {
 	fixture.StubBinaryWithScript(t, stubsDir, "helm", script)
 }
 
+// stubDoctorHelmStatusUnreachable stubs `helm status` to fail with the
+// unreachable-API-server error a real cluster reports, matching the reported
+// run's exact wording. No other helm command is expected to run once this
+// fails.
+func stubDoctorHelmStatusUnreachable(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$1" in`,
+		`  status)`,
+		`    echo 'Error: kubernetes cluster unreachable: Get "https://198.51.100.10:6443/version?timeout=32s": dial tcp 198.51.100.10:6443: i/o timeout' >&2`,
+		`    exit 1`,
+		`    ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "helm", script)
+}
+
 // stubDoctorKubectl stubs every kubectl surface the real-run doctor
 // cleanup path touches: the pod listing for the diagnosis, the
 // deployment wait (overridable via waitArm to simulate cluster
@@ -2265,4 +2441,19 @@ func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	if got := info.Mode().Perm(); got != want {
 		t.Errorf("expected %s mode %o, got %o", path, want, got)
 	}
+}
+
+// writeDesktopAppBundle stages the minimal shape of a macOS ERun.app bundle
+// (Contents/Info.plist carrying CFBundleShortVersionString) that
+// reportInstalledDesktopAppVersion reads, at bundlePath.
+func writeDesktopAppBundle(t *testing.T, bundlePath, version string) {
+	t.Helper()
+	plist := "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
+		"<plist version=\"1.0\">\n" +
+		"  <dict>\n" +
+		"    <key>CFBundleShortVersionString</key>\n" +
+		"    <string>" + version + "</string>\n" +
+		"  </dict>\n" +
+		"</plist>\n"
+	mustWriteFile(t, filepath.Join(bundlePath, "Contents", "Info.plist"), plist)
 }

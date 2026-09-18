@@ -15,8 +15,8 @@ test.describe('deploy-progress overlay stays on-screen (#713)', () => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     // The overlay renders over whichever terminal session is active, so pin the
     // ERun tab (the env default) active first.
-    const erunTab = page.getByRole('tab', { name: 'ERun', exact: true });
-    await erunTab.waitFor({ state: 'visible', timeout: 15_000 });
+    const erunTab = app.tabStrip.tab('ERun');
+    await app.tabStrip.waitForTab('ERun');
     await erunTab.click();
 
     const sessionId = await discoverSelectedSessionId(app, page);

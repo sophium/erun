@@ -292,6 +292,60 @@ func TestFindMissingDesktopSurfaceStillFlagsAWailsBoundRouteWithNoRealReference(
 	}
 }
 
+// TestFindMissingDesktopSurfaceClearsAFlagSpelledInCamelCase locks the second
+// spelling a CLI flag legitimately appears under: a frontend request model
+// names the same dimension "waitingOnMe", never the kebab-case flag name the
+// CLI parses.
+func TestFindMissingDesktopSurfaceClearsAFlagSpelledInCamelCase(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "review list --waiting-on-me", Source: "CLI flag", Tokens: []string{"waiting-on-me", "waitingOnMe"}},
+	}
+	frontend := FrontendSource("const filter = { waitingOnMe: true }")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 0 {
+		t.Fatalf("want the flag cleared by its camelCase spelling, got %+v", missing)
+	}
+}
+
+// TestFindMissingDesktopSurfaceFlagsAFlagWhoseCommandIsSurfacedButDimensionIsNot
+// is the classifier-level statement of the granularity change: the command
+// token is all over the source and the flag's own dimension is nowhere, and
+// the flag must still be flagged. Command granularity cleared exactly this.
+func TestFindMissingDesktopSurfaceFlagsAFlagWhoseCommandIsSurfacedButDimensionIsNot(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "review_list", Source: "MCP tool", Token: "list"},
+		{Name: "review list --author-user-id", Source: "CLI flag", Tokens: []string{"author-user-id", "authorUserId"}},
+	}
+	frontend := FrontendSource("export function ReviewList() { return reviewList() }")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 1 || missing[0].Capability.Name != "review list --author-user-id" {
+		t.Fatalf("want only the flag flagged while its command clears, got %+v", missing)
+	}
+	if msg := missing[0].Message(); !strings.Contains(msg, "authorUserId") {
+		t.Fatalf("want Message() to name every spelling it searched for, got %q", msg)
+	}
+}
+
+// TestFindMissingDesktopSurfaceRequiresEveryTokenToBeAbsentBeforeFlagging is
+// the any-of half of the Tokens contract: one spelling present is enough, so
+// the gate does not demand a frontend use both.
+func TestFindMissingDesktopSurfaceRequiresEveryTokenToBeAbsentBeforeFlagging(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "expose --no-tls", Source: "CLI flag", Tokens: []string{"no-tls", "noTls"}},
+	}
+	frontend := FrontendSource("<Checkbox name=\"no-tls\" />")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 0 {
+		t.Fatalf("want the flag cleared by its kebab-case spelling alone, got %+v", missing)
+	}
+}
+
 func TestFindUnboundAppMethodsFlagsAnUnexportedMethodWithNoOtherCaller(t *testing.T) {
 	decls := []AppMethodDecl{
 		{Name: "whipOrchestratorNow", Exported: false, File: "orchestrator_pacing.go", Line: 289, IdentUses: 0},
@@ -328,5 +382,34 @@ func TestFindUnboundAppMethodsClearsAnExportedMethodEvenWithNoCaller(t *testing.
 
 	if len(unbound) != 0 {
 		t.Fatalf("want an exported method cleared regardless of callers -- Wails binds it whether or not Go code also calls it, got %+v", unbound)
+	}
+}
+
+// TestContainsFlagIdentifierIgnoresIncidentalMatches pins the narrowing
+// containsFlagIdentifier exists for. A CLI flag's camelCase spelling is an
+// ordinary word, so a bare substring match counted an unrelated component's
+// field read -- and an interface's field declaration -- as an operator way in
+// for a flag nothing surfaces: a denial-remedy note that names an RBAC role
+// made `cloud init aws --role-name` read as surfaced while
+// erun-cli/cmd/command_tree.go still declared that gap.
+func TestContainsFlagIdentifierIgnoresIncidentalMatches(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source string
+		want   bool
+	}{
+		{"property access only", "const x = remedy.roleName", false},
+		{"optional field declaration only", "interface U { roleName?: string }", false},
+		{"both incidental shapes", "interface U { roleName?: string }\nconst x = remedy.roleName", false},
+		{"a jsx attribute is a real binding", "<Field roleName={value} />", true},
+		{"an object-literal key is a real binding", "const o = { roleName: value }", true},
+		{"a positional argument is a real binding", "openAws(roleName)", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FrontendSource(tc.source).prepare().containsFlagIdentifier("roleName")
+			if got != tc.want {
+				t.Errorf("containsFlagIdentifier(%q) = %v, want %v", tc.source, got, tc.want)
+			}
+		})
 	}
 }

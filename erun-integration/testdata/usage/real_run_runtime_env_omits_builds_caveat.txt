@@ -20,10 +20,46 @@
   "disk": [
     {
       "mount": "<HOME>",
+      "nodeShared": true,
       "totalBytes": 202991730688,
       "usedBytes": 91142750208,
-      "percentUsed": 44.899735520796746
+      "percentUsed": 44.899735520796746,
+      "ownUsedBytes": 45097156608,
+      "ownUsageObserved": true
     }
-  ]
+  ],
+  "sizing": {
+    "knob": "runtimepod",
+    "verdicts": [
+      {
+        "resource": "memory",
+        "action": "insufficient-evidence",
+        "current": "2048Mi",
+        "reason": "peak 980Mi of 2048Mi (48%), but only 0m observed of the 24h0m a shrink needs"
+      },
+      {
+        "resource": "cpu",
+        "action": "insufficient-evidence",
+        "current": "1",
+        "reason": "0.11% of scheduling periods throttled (425 of 376556), but only 0m observed of the 24h0m a shrink needs"
+      }
+    ],
+    "evidence": {
+      "observedSeconds": 0,
+      "samples": 1,
+      "restarts": 0,
+      "memoryLimitBytes": 2147483648,
+      "observedPeakMemoryBytes": 1027301376,
+      "observedOomKills": 0,
+      "cpuQuotaMilli": 1000,
+      "observedPeriods": 376556,
+      "observedThrottledPeriods": 425,
+      "signals": [
+        "cgroup memory.peak",
+        "cgroup memory.events oom_kill",
+        "cgroup cpu.stat usage_usec/nr_throttled"
+      ]
+    }
+  }
 }
 audit: erun usage --output json

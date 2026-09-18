@@ -474,6 +474,14 @@ func latestRuntimeVersionsFromTags(tags []string) RuntimeRegistryVersions {
 		if tag = strings.TrimSpace(tag); tag == "" {
 			continue
 		}
+		// A repository's tag list is not a release list: scratch tags live beside
+		// real versions, and everything in Tags is offered to an operator as a
+		// pinnable version. Apply the same notion of "is a version" here that the
+		// latest stable/snapshot selection below already applies, so the
+		// enumeration cannot disagree with its own header lines.
+		if !isRuntimeRegistryVersionTag(tag) {
+			continue
+		}
 		uniqueTags = appendUniqueRuntimeTag(uniqueTags, tag)
 		if version, ok := newerRegistryStableVersion(tag, latestStable, latestStableSet); ok {
 			latestStable, latestStableSet = version, true
@@ -491,6 +499,20 @@ func latestRuntimeVersionsFromTags(tags []string) RuntimeRegistryVersions {
 		result.LatestStable = formatSemver(latestStable)
 	}
 	return result
+}
+
+// isRuntimeRegistryVersionTag reports whether a registry tag names an erun
+// version an environment can pin to: a three-part numeric version, optionally
+// carrying a build suffix (`-snapshot-<timestamp>`, `-pr.<sha>`, `-arm64`).
+// Anchoring on the version shape rather than denying the scratch tags observed
+// today keeps the next temporary tag out on its own.
+func isRuntimeRegistryVersionTag(tag string) bool {
+	base, suffix, hasSuffix := strings.Cut(strings.TrimSpace(tag), "-")
+	if hasSuffix && suffix == "" {
+		return false
+	}
+	_, ok := parseRegistryStableVersion(base)
+	return ok
 }
 
 func appendUniqueRuntimeTag(tags []string, tag string) []string {

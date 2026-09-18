@@ -42,6 +42,9 @@ var tenantDashboardAPIFixtures = map[string]string{
 	"/v1/contexts":                `[{"contextId":"context-1","tenantId":"tenant-1","name":"prod","provider":"aws","status":"running"}]`,
 	"/v1/environments":            `[{"environmentId":"env-1","tenantId":"tenant-1","name":"prod","type":"runtime","status":"running"}]`,
 	"/v1/invite-requests":         `[]`,
+	// A restricted panel is answered with the grant that would lift it, so a
+	// real platform's role list is part of these fixtures too.
+	"/v1/roles": `[{"roleId":"role-audit","name":"Auditor","permissions":[{"apiMethod":"GET","apiPath":"/v1/audit-events"}]},{"roleId":"role-reviewer","name":"Reviewer","permissions":[{"apiMethodPattern":"^GET$","apiPathPattern":"^/v1/reviews/[^/]+$"}]}]`,
 }
 
 // tenantDashboardAPIResponse is tenantDashboardAPI's fixture body for every
@@ -316,5 +319,101 @@ func TestTenantDashboardExplainsARefusedIdentityRead(t *testing.T) {
 	}
 	if len(dashboard.Panels) != 0 {
 		t.Fatalf("expected no panels to be claimed when identity could not be read, got %+v", dashboard.Panels)
+	}
+}
+
+// TestTenantDashboardUsersPanelListsTheTenantRoster is the readable half: a
+// caller who may read GET /v1/users gets the tenant's whole roster on the
+// Users tab. A tenant with three users renders three rows, not the caller's
+// one row from whoami.
+func TestTenantDashboardUsersPanelListsTheTenantRoster(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		requests = append(requests, req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch req.URL.Path {
+		case "/v1/whoami":
+			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"reader","roles":["Auditor"],"capabilities":null}`))
+		case "/v1/users":
+			_, _ = w.Write([]byte(`[{"userId":"user-1","tenantId":"tenant-1","username":"reader"},{"userId":"user-2","tenantId":"tenant-1","username":"pat"},{"userId":"user-3","tenantId":"tenant-1","username":"sam"}]`))
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
+
+	if panel := panelFor(t, dashboard, tenantDashboardTabUsers); panel.Restricted != "" || panel.Error != "" {
+		t.Fatalf("expected a readable users panel, got %+v", panel)
+	}
+	assertTenantDashboardRoster(t, dashboard)
+	if got := strings.Count(strings.Join(requests, ","), "/v1/users"); got != 1 {
+		t.Fatalf("expected exactly one roster read for the whole dashboard load, got %d in %q", got, requests)
+	}
+}
+
+// assertTenantDashboardRoster pins the Users tab's rows, and the roles the
+// roster read did and did not answer for.
+func assertTenantDashboardRoster(t *testing.T, dashboard uiTenantDashboard) {
+	t.Helper()
+	if len(dashboard.Users) != 3 {
+		t.Fatalf("expected the tenant's three users, got %d: %+v", len(dashboard.Users), dashboard.Users)
+	}
+	for i, want := range []string{"reader", "pat", "sam"} {
+		if dashboard.Users[i].Username != want {
+			t.Fatalf("expected roster row %d to be %q, got %+v", i, want, dashboard.Users[i])
+		}
+	}
+	// GET /v1/users reports no roles, so a row it did not answer for must stay
+	// unset rather than read as "none assigned"; the caller's own row carries
+	// the roles whoami answered with.
+	if len(dashboard.Users[0].Roles) != 1 || dashboard.Users[0].Roles[0] != "Auditor" {
+		t.Fatalf("expected the caller's own row to carry whoami's roles, got %+v", dashboard.Users[0])
+	}
+	if len(dashboard.Users[1].Roles) != 0 {
+		t.Fatalf("expected a row the roster read reports no roles for to stay unknown, got %+v", dashboard.Users[1])
+	}
+}
+
+// TestTenantDashboardNamesAnUnreadableRoster is the other half: a caller who
+// may not read GET /v1/users gets that read named on the Users panel, never a
+// table reduced to their own row — a one-row table under a Username/Roles
+// header states a false count for the tenant.
+func TestTenantDashboardNamesAnUnreadableRoster(t *testing.T) {
+	var requests []string
+	capabilities := `[{"method":"GET","path":"/v1/whoami"},{"method":"GET","path":"/v1/audit-events"}]`
+	server := tenantDashboardAPI(t, capabilities, nil, &requests)
+	defer server.Close()
+
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
+
+	if panel := panelFor(t, dashboard, tenantDashboardTabUsers); panel.Restricted != tenantDashboardReadUsers {
+		t.Fatalf("expected the users panel to name the missing read %q, got %+v", tenantDashboardReadUsers, panel)
+	}
+	if len(dashboard.Users) != 0 {
+		t.Fatalf("expected no roster to be claimed when the read is not permitted, got %+v", dashboard.Users)
+	}
+	if strings.Contains(strings.Join(requests, ","), "/v1/users") {
+		t.Fatalf("expected the unpermitted roster read not to be attempted, got %q", requests)
+	}
+}
+
+// TestTenantDashboardReportsAFailedRosterRead covers the roster read that is
+// permitted but refused: the panel carries that failure rather than falling
+// back to a single row.
+func TestTenantDashboardReportsAFailedRosterRead(t *testing.T) {
+	var requests []string
+	server := tenantDashboardAPI(t, "null", map[string]bool{"/v1/users": true}, &requests)
+	defer server.Close()
+
+	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
+
+	panel := panelFor(t, dashboard, tenantDashboardTabUsers)
+	if panel.Error == "" || panel.Restricted != "" {
+		t.Fatalf("expected the users panel to carry its own read failure, got %+v", panel)
+	}
+	if len(dashboard.Users) != 0 {
+		t.Fatalf("expected no roster to be claimed when the read failed, got %+v", dashboard.Users)
 	}
 }

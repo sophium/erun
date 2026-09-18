@@ -19,8 +19,7 @@ test.describe('deploy-failed respawn guard', () => {
 
     // Local is spawned eagerly on open, so its tab is the most reliable
     // signal that the open settled.
-    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
+    await app.tabStrip.waitForTab('Local');
 
     // AI/ERun tabs are not asserted — they need a runtime the headless
     // harness has no cluster for.

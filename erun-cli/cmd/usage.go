@@ -22,21 +22,39 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"the peak high-water mark, and a real OOM-kill count from the cgroup, replacing\n" +
 			"a post-mortem guess); CPU utilisation is measured against its quota over a\n" +
 			"sample interval. A named warning fires when memory, memory's peak, or disk\n" +
-			"usage cross a fixed threshold. Every field reports its own unavailability\n" +
+			"usage cross a fixed threshold; the memory-peak and OOM-kill warnings also\n" +
+			"consult the environment's retained history, because those cgroup counters\n" +
+			"reset when the container restarts and an environment that has been\n" +
+			"OOM-killed would otherwise read as memory-healthy. Every field reports its own unavailability\n" +
 			"(cgroup v1, an unlimited limit, a file that could not be read) rather than\n" +
 			"failing the call, since those are normal on some clusters, not errors.\n\n" +
-			"On a build-capable environment (local-agent, remote-agent), CPU and memory\n" +
-			"are scoped to this container alone: every image build actually runs in the\n" +
-			"erun-dind sidecar, a separate cgroup this reading cannot see, so a busy build\n" +
-			"can show as idle here. The output states this exclusion explicitly on those\n" +
-			"environments; `erun observe` reports the sidecar's own resource limits.",
+			"Disk is reported for the whole mount (node, shared): every environment\n" +
+			"scheduled on the same node sees the identical total/used/percent, so cleaning\n" +
+			"up one environment may barely move it. The own-usage line beneath it (a `du`\n" +
+			"of this environment's own directory) is the figure this environment can\n" +
+			"actually act on.\n\n" +
+			"On a build-capable environment (local-agent, remote-agent), every image build\n" +
+			"actually runs in the erun-dind sidecar, a separate cgroup from the runtime\n" +
+			"container above -- so this command also reads the sidecar's own CPU and\n" +
+			"memory against its own limit and reports it alongside, with the same named\n" +
+			"warnings if the sidecar itself nears its memory limit or records an OOM kill.\n" +
+			"A busy build no longer reads as an idle environment. If the sidecar's own\n" +
+			"cgroup could not be read, the output says so instead; `erun observe` reports\n" +
+			"its resource limits either way.\n\n" +
+			"The environment's standing sizing recommendation is not part of this output.\n" +
+			"It is derived from usage history the environment's own pod monitor retained,\n" +
+			"and this reading does not carry that history back to the caller, so there is\n" +
+			"nothing here to derive a verdict from. Read it from inside the environment\n" +
+			"instead: the `usage` and `resize` tools over its MCP endpoint, or the desktop\n" +
+			"Runtime tab. `erun list` prints it under `runtime-pod:` only when run inside\n" +
+			"the environment itself, where that history lives; from a host it prints none.",
 		Example: "  erun usage --tenant team --environment dev\n" +
 			"  erun usage --tenant team --environment dev --interval 3 --output json",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runUsageCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), intervalSeconds)
+			return runUsageCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), intervalSeconds)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -61,8 +79,9 @@ func runUsageCommand(ctx common.Context, resolveOpen OpenResolver, params common
 	if ctx.DryRun {
 		return nil
 	}
+	report := common.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
 	if ctx.Output == common.OutputJSON {
-		return ctx.WriteResult(usage)
+		return ctx.WriteResult(report)
 	}
-	return writeUsageResult(ctx, usage)
+	return writeUsageResult(ctx, report)
 }

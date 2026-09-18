@@ -601,6 +601,54 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_configured_platforms_narrows_build_to_one_architecture", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_project_platform_default_narrows_unlisted_environment", func(t *testing.T) {
+		// docker.platforms at the top level of .erun/config.yaml is the project
+		// default, inherited by every environment that declares no platforms of
+		// its own. A project whose machines are all single-architecture states
+		// the pin once, so an environment nobody listed (here "code1", which has
+		// no entry at all) cannot silently fall back to the multi-arch build and
+		// pay for an emulated architecture its node cannot run.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"docker:\n"+
+				"  platforms: [linux/amd64]\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "code1"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected the project-wide docker.platforms default to exclude arm64 from the build plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_project_platform_default_narrows_unlisted_environment", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_empty_platform_list_opts_environment_out_of_project_default", func(t *testing.T) {
+		// The explicit opt-out: an environment declaring platforms: [] is not
+		// pinned by the project default, so the generic environment name `erun
+		// init` assigns keeps building every platform a contributor's own
+		// machine may need.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"docker:\n"+
+				"  platforms: [linux/amd64]\n"+
+				"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      platforms: []\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected an explicit platforms: [] to restore the multi-arch build:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_empty_platform_list_opts_environment_out_of_project_default", normalize.Apply(result.Combined))
+	})
+
 	t.Run("release_platform_flag_conflict_errors", func(t *testing.T) {
 		// --release always publishes every platform erun supports, so combining
 		// it with an explicit --platform override is refused rather than
@@ -788,6 +836,30 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("expected non-zero exit (build.sh ignored, no docker context), got 0: %s", result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_disable_build_script_ignores_project_build_sh", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_refuses_script_fallback_when_the_project_has_a_docker_module", func(t *testing.T) {
+		// A project whose docker module holds images must never degrade to a
+		// nested project build script: that exits zero having built no image and
+		// run no gate, which the caller reading the exit code cannot tell from a
+		// real pass. Running from a directory that resolves no images is the
+		// shape of that false green, and it must fail loudly instead.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		nestedDir := filepath.Join(setup.Cwd, "erun-ui")
+		if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+			t.Fatalf("mkdir nested dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(nestedDir, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write nested build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", ".")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add nested build script")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: nestedDir, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit (project has a docker module, no image resolved), got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_refuses_script_fallback_when_the_project_has_a_docker_module", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_with_project_build_script_executes_script", func(t *testing.T) {
@@ -1657,6 +1729,90 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_release_absorbs_a_concurrent_publishers_unknown_blob", func(t *testing.T) {
+		// A release whose push is rejected because a concurrent publisher's
+		// upload of a shared layer has not committed yet must re-push and finish,
+		// not fail the build four minutes in with everything already built.
+		// The docker stub rejects the first push with "unknown blob" and accepts
+		// every later one — the observable shape the registry-side race takes for
+		// the run that loses it.
+		//
+		// The gh stub exists for the credential preflight GHCR runs before any
+		// build (an anonymous push is refused up front), not to drive a login
+		// retry: "unknown blob" is not an authorization failure, so the retry
+		// that absorbs it is the push funnel's blob re-push, which the
+		// "re-pushing" assertion below pins. ERUN_AUTO_LOGIN_ON_PUSH only keeps
+		// an unexpected login path from blocking on a prompt.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		counter := filepath.Join(stubs, "docker-push-counter")
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  push)`,
+			`    count=0`,
+			`    if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
+			`    count=$((count + 1))`,
+			`    printf '%s' "$count" > '` + counter + `'`,
+			`    if [ "$count" = "1" ]; then`,
+			`      printf 'unknown blob\n' >&2`,
+			`      exit 1`,
+			`    fi`,
+			`    exit 0 ;;`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			// manifest inspect backs both the pre-publish probe and the
+			// post-publish verify; marker-file-tracked so this scenario does
+			// not falsely report the image as already published before
+			// manifest push has run.
+			`  manifest)`,
+			`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
+			`    case "$2" in`,
+			`      inspect) [ -f "$marker" ] && exit 0 || exit 1 ;;`,
+			`      push) touch "$marker" ; exit 0 ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// Release operations (tag, push) go through the git stub so the release
+		// stage succeeds without a real remote. The gh stub answers the user
+		// lookup and token read the GHCR credential preflight performs.
+		fixture.StubBinary(t, stubs, "git", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "api user") printf 'octo-owner\n'; exit 0 ;;`,
+			`  "auth token") printf 'gh-token\n'; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git", "helm")...)
+		// tryGHCRLoginViaGH gates on exec.LookPath("gh"), which reads PATH rather
+		// than the ERUN_<NAME>_BIN override.
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/real_run_release_absorbs_a_concurrent_publishers_unknown_blob", normalize.Apply(result.Combined))
+		if !strings.Contains(result.Combined, "re-pushing (1/2)") {
+			t.Errorf("expected the release to report the bounded re-push rather than failing, got:\n%s", result.Combined)
+		}
+		// The push counter is a side effect outside the captured streams: >= 2
+		// proves the rejected push was really re-run instead of the rejection
+		// being swallowed.
+		rawCount, err := os.ReadFile(counter)
+		if err != nil {
+			t.Fatalf("read push counter: %v", err)
+		}
+		if pushes, convErr := strconv.Atoi(strings.TrimSpace(string(rawCount))); convErr != nil || pushes < 2 {
+			t.Fatalf("expected at least 2 docker push invocations (blob rejection + re-push), got %q", rawCount)
+		}
+	})
+
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
 		// --release dry-run must trace the per-platform docker build + docker push
 		// for the release-tagged image, plus the local tag for downstream
@@ -1769,6 +1925,43 @@ func TestBuild(t *testing.T) {
 		if !strings.Contains(result.Combined, "build report to erun platform skipped:") {
 			t.Fatalf("expected a recorded skip for the failed report, got:\n%s", result.Combined)
 		}
+	})
+
+	t.Run("dry_run_e2e_implies_deploy_and_no_playwright_folder_is_a_clean_no_op", func(t *testing.T) {
+		// --e2e implies --deploy (no separate --deploy needed), and composes
+		// the e2e step after the deploy trace; a project with no playwright/
+		// folder makes that step a clean no-op rather than an error.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"build", "--e2e", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "e2e: no playwright/ suite found; nothing to run") {
+			t.Fatalf("expected --e2e to report a clean no-op with no playwright/ folder, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_e2e_implies_deploy_and_no_playwright_folder_is_a_clean_no_op", normalize.Apply(result.Combined))
+	})
+
+	t.Run("e2e_with_project_build_script_errors", func(t *testing.T) {
+		// --e2e implies --deploy, which cannot compose with a project build
+		// script; it must fail with the same clear message --deploy alone
+		// produces, rather than a confusing e2e-specific error.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", "build.sh")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add build script")
+		result := erun.Run(t, []string{"build", "--e2e", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --e2e with a build script, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/e2e_with_project_build_script_errors", normalize.Apply(result.Combined))
 	})
 }
 

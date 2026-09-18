@@ -13,9 +13,11 @@ import type { UISelection } from '@/types';
 // target has always meant "resolve the latest published stable release".
 export const PIN_LATEST_STABLE_TARGET = '__erun_pin_latest_stable__';
 
-// One erun version is recorded in several places — the Terraform refs, each
-// umbrella's erun chart dependencies, the build-env image tag, the environment's
-// own runtime version — and they only work when they agree. This dialog moves
+// One erun version is recorded in several places — the Terraform module refs, an
+// erun image reference set directly in Terraform variables, each umbrella's erun
+// chart dependencies, the build-env image tag, a stated runtime chart or runtime
+// image naming erun's own stock release, and the environment's own runtime
+// version — and they only work when they agree. This dialog moves
 // them together, and shows the plan first: a re-pin edits files across a repo,
 // so it should be something an operator agrees to rather than trusts.
 export interface PinSiteView {

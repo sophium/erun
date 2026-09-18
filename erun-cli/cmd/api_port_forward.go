@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -52,7 +51,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return 0, nil
 	}
 
-	if reusableRecordedPortForward(ctx, "api", state, expectedState, localPort, canReachLocalAPIEndpoint) {
+	if reusableRecordedPortForward(ctx, "api", mcpPortForwardLogPath(statePath), state, expectedState, localPort, canReachLocalAPIEndpoint) {
 		return localPort, nil
 	}
 	args := kubectlAPIPortForwardArgs(result, localPort)
@@ -111,6 +110,7 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 	adopted := expected
 	adopted.ProcessID = pid
 	adopted.LogPath = mcpPortForwardLogPath(statePath)
+	rotatePortForwardLogIfOversized(ctx, "api", adopted.LogPath)
 	if err := saveMCPPortForwardState(statePath, adopted); err != nil {
 		return false, fmt.Errorf("adopt API port-forward (PID %d): %w", pid, err)
 	}
@@ -120,12 +120,33 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 
 func startAPIPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	var process *os.Process
+	if err := retryTransientPortForwardStart(func() error {
+		p, err := launchAPIPortForwardProcess(logPath, args)
+		if err != nil {
+			return err
+		}
+		process = p
+		return nil
+	}); err != nil {
 		return 0, err
 	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
+	expectedState.ProcessID = process.Pid
+	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
+		releaseUnreachablePortForward(ctx, "api", process, localPort, err)
 		return 0, err
+	}
+	if err := waitForAPIPortForward(localPort, logPath); err != nil {
+		releaseUnreachablePortForward(ctx, "api", process, localPort, err)
+		return 0, err
+	}
+	return localPort, nil
+}
+
+func launchAPIPortForwardProcess(logPath string, args []string) (*os.Process, error) {
+	logFile, err := openPortForwardLog(logPath)
+	if err != nil {
+		return nil, err
 	}
 	defer func() {
 		_ = logFile.Close()
@@ -136,18 +157,9 @@ func startAPIPortForward(ctx common.Context, statePath string, expectedState mcp
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
-		return 0, err
+		return nil, err
 	}
-	expectedState.ProcessID = cmd.Process.Pid
-	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
-		releaseUnreachablePortForward(ctx, "api", cmd.Process, localPort, err)
-		return 0, err
-	}
-	if err := waitForAPIPortForward(localPort, logPath); err != nil {
-		releaseUnreachablePortForward(ctx, "api", cmd.Process, localPort, err)
-		return 0, err
-	}
-	return localPort, nil
+	return cmd.Process, nil
 }
 
 func waitForAPIPortForward(localPort int, logPath string) error {

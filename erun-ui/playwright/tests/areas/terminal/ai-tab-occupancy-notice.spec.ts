@@ -1,5 +1,10 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
-import { removeHeldLease, writeHeldLease } from '../../../fixtures/seedRoot.js';
+import {
+  removeCompletedJob,
+  removeHeldLease,
+  writeCompletedJob,
+  writeHeldLease,
+} from '../../../fixtures/seedRoot.js';
 
 const OCCUPANT_LEASE = 'job-fix-1201';
 
@@ -30,8 +35,8 @@ test.describe('AI tab occupancy notice', () => {
     await dialog.startAnyway();
     await dialog.waitForClosed();
 
-    const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
-    await aiTab.waitFor({ state: 'visible', timeout: 20_000 });
+    const aiTab = app.tabStrip.tab('AI');
+    await app.tabStrip.waitForTab('AI');
     await aiTab.click();
 
     // Persistent indicator (Nielsen #1: visibility of system status) while the
@@ -63,15 +68,56 @@ test.describe('AI tab occupancy notice', () => {
 
   test('an environment with no held lease shows no occupancy notice', async ({
     app,
-    page,
     seededEnv,
   }) => {
     const { tenant, environment } = seededEnv;
 
     await app.sidebar.openEnvironment(tenant, environment);
 
+    await app.tabStrip.waitForTab('AI');
+    await expect(app.aiOccupancyPromptDialog.locator()).toHaveCount(0);
+  });
+
+  // The banner once named a lease holder and offered "View jobs", but the
+  // Jobs tab it routed to reported "No jobs yet" -- the lease's id was only
+  // shape-identical to a job's own lease id ("job-<anything>", exactly the
+  // CLI's own `--name job-fix-1245` example), with no job record behind it.
+  // The banner must not offer an action it cannot substantiate, and must
+  // offer it once a real job actually backs the occupancy.
+  test('the banner only offers "View jobs" when a real job backs the lease', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    const HAND_LEASE = 'job-visual-demo';
+    writeHeldLease(tenant, environment, HAND_LEASE);
+
+    await app.sidebar.openEnvironment(tenant, environment);
+    await app.aiOccupancyPromptDialog.waitForOpen();
+    await app.aiOccupancyPromptDialog.startAnyway();
+    await app.aiOccupancyPromptDialog.waitForClosed();
+
     const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
     await aiTab.waitFor({ state: 'visible', timeout: 20_000 });
-    await expect(app.aiOccupancyPromptDialog.locator()).toHaveCount(0);
+    await aiTab.click();
+
+    await expect(page.getByText('Another agent is working here')).toBeVisible();
+    const viewJobs = page.getByRole('button', {
+      name: `Show the jobs running in ${environment}`,
+    });
+    await expect(viewJobs).toHaveCount(0);
+
+    removeHeldLease(tenant, environment, HAND_LEASE);
+    const JOB_ID = 'gate-9';
+    const JOB_LEASE = `job-${JOB_ID}`;
+    writeCompletedJob(tenant, environment, JOB_ID, 'repo gate');
+    writeHeldLease(tenant, environment, JOB_LEASE);
+
+    // The next idle-status poll (every 1s) picks up the swapped lease.
+    await expect(viewJobs).toBeVisible({ timeout: 15_000 });
+
+    removeHeldLease(tenant, environment, JOB_LEASE);
+    removeCompletedJob(tenant, environment, JOB_ID);
   });
 });

@@ -185,3 +185,167 @@ func dockerfileFromRefIsPinned(ref string, stages map[string]struct{}) bool {
 	}
 	return tag != "" && tag != "latest"
 }
+
+var (
+	makefileRulePattern       = regexp.MustCompile(`^([A-Za-z0-9_.-]+)\s*::?\s*(.*)$`)
+	makefileShellScriptToken  = regexp.MustCompile(`(?:^|\s)(\S+\.sh)(?:\s|$)`)
+	scriptRelativeRootPattern = regexp.MustCompile(`\$\{?script_dir\}?/(?:\.\./)+([A-Za-z0-9_][A-Za-z0-9_./-]*)`)
+)
+
+type makefileRule struct {
+	prereqs []string
+	recipe  []string
+}
+
+// makefileRules reads the Makefile into one entry per target, keeping its
+// prerequisites and its tab-indented recipe lines apart -- the recipe is what
+// names the shell scripts a target actually runs.
+func makefileRules(t *testing.T, root string) map[string]makefileRule {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	rules := make(map[string]makefileRule)
+	current := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "\t") {
+			if current != "" {
+				rule := rules[current]
+				rule.recipe = append(rule.recipe, line)
+				rules[current] = rule
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		match := makefileRulePattern.FindStringSubmatch(line)
+		if match == nil {
+			current = ""
+			continue
+		}
+		current = match[1]
+		rule := rules[current]
+		rule.prereqs = append(rule.prereqs, strings.Fields(match[2])...)
+		rules[current] = rule
+	}
+	return rules
+}
+
+// checkGateShellScripts returns every shell script the Makefile's check-gate
+// prerequisite targets name and that really exists in the repository, in a
+// stable order. A token that resolves to no file is skipped rather than
+// reported: a recipe also writes `./run.sh` after a `cd` into another
+// directory, and `erun-devops/k8s/*_test.sh` as a shell glob, neither of which
+// is a repository-root path — and a script that is genuinely missing fails the
+// gate loudly on its own, without this test's help.
+func checkGateShellScripts(t *testing.T, root string) []string {
+	t.Helper()
+	rules := makefileRules(t, root)
+	gate, ok := rules["check-gate"]
+	if !ok {
+		t.Fatal("Makefile declares no check-gate target")
+	}
+	seen := make(map[string]struct{})
+	var scripts []string
+	for _, prereq := range gate.prereqs {
+		for _, line := range rules[prereq].recipe {
+			for _, match := range makefileShellScriptToken.FindAllStringSubmatch(line, -1) {
+				script := strings.TrimPrefix(strings.TrimSpace(match[1]), "./")
+				if _, dup := seen[script]; dup {
+					continue
+				}
+				if info, err := os.Stat(filepath.Join(root, script)); err != nil || info.IsDir() {
+					continue
+				}
+				seen[script] = struct{}{}
+				scripts = append(scripts, script)
+			}
+		}
+	}
+	sort.Strings(scripts)
+	return scripts
+}
+
+// erunDevopsProvidedSrcPaths returns every container path under /src that the
+// Dockerfile's COPY instructions provide. /src itself is dropped: a COPY whose
+// destination is the bare workdir provides no directory a script can enter.
+func erunDevopsProvidedSrcPaths(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	const srcPrefix = "/src/"
+	var provided []string
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if len(trimmed) < len("COPY ") || !strings.EqualFold(trimmed[:len("COPY ")], "COPY ") {
+			continue
+		}
+		var tokens []string
+		for _, field := range strings.Fields(trimmed)[1:] {
+			if strings.HasPrefix(field, "--") {
+				continue // --from=, --chmod= and friends are not paths
+			}
+			tokens = append(tokens, field)
+		}
+		if len(tokens) < 2 {
+			continue
+		}
+		dest := strings.TrimSuffix(tokens[len(tokens)-1], "/")
+		if strings.HasPrefix(dest, srcPrefix) && dest != "/src" {
+			provided = append(provided, dest)
+		}
+	}
+	return provided
+}
+
+// providedSrcPathExists reports whether the image provides wanted itself or
+// anything beneath it. A script only has to `cd` into the directory, and
+// copying a deeper path creates every parent on the way down.
+func providedSrcPathExists(provided []string, wanted string) bool {
+	for _, path := range provided {
+		if path == wanted || strings.HasPrefix(path, wanted+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCheckGateScriptsResolveOnlyDirectoriesTheDevopsImageProvides extends the
+// COPY-or-`cd`-fails rule the Makefile states for LINT_MODULES beyond the Go
+// modules it lints, to the shell scripts check-gate runs. Those scripts
+// resolve a repository root from their own script_dir
+// (`cd "${script_dir}/../../../<path>"`), which is a directory this stage has
+// to provide for the same reason a linted module does -- and unlike a missing
+// module, which fails lint loudly, a missing directory fails only the one
+// script, inside the image, while the identical command passes in a full
+// checkout.
+//
+// That is exactly how test-atlas-validate shipped: the target, its script and
+// the module's own Dockerfile all landed together, but the erun-devops image --
+// whose test stage is what runs `make check` -- was never taught to COPY the
+// module the new script cd's into. The result was a gate that passed for every
+// contributor and on every PR, and a `make check` that could not succeed inside
+// any erun-devops image build, which is every release build. Nothing here is
+// release-specific: this test reads the Makefile and the Dockerfile, so it
+// fails in the same run that introduces the next one.
+func TestCheckGateScriptsResolveOnlyDirectoriesTheDevopsImageProvides(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	provided := erunDevopsProvidedSrcPaths(t, filepath.Join(root, "erun-devops", "docker", "erun-devops", "Dockerfile"))
+	for _, script := range checkGateShellScripts(t, root) {
+		data, err := os.ReadFile(filepath.Join(root, script))
+		if err != nil {
+			t.Fatalf("read %s: %v", script, err)
+		}
+		for _, match := range scriptRelativeRootPattern.FindAllStringSubmatch(string(data), -1) {
+			wanted := "/src/" + filepath.ToSlash(filepath.Clean(match[1]))
+			if providedSrcPathExists(provided, wanted) {
+				continue
+			}
+			t.Errorf("%s resolves %q relative to its own location, but the erun-devops image test stage COPYs nothing under %s — `make check` passes in a full checkout and fails inside every image build, so no release can be produced", script, match[1], wanted)
+		}
+	}
+}

@@ -6,61 +6,76 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-func writeUsageResult(ctx common.Context, usage common.RuntimeUsage) error {
-	if err := writeUsageCPU(ctx, usage.CPU); err != nil {
+func writeUsageResult(ctx common.Context, report common.RuntimeUsageReport) error {
+	usage := report.RuntimeUsage
+	if err := writeUsageCPU(ctx, "", usage.CPU); err != nil {
 		return err
 	}
-	if err := writeUsageMemory(ctx, usage.Memory); err != nil {
+	if err := writeUsageMemory(ctx, "", usage.Memory); err != nil {
 		return err
 	}
-	if err := writeUsageBuildsCaveat(ctx, usage.ExcludesBuilds); err != nil {
+	if err := writeUsageDindReading(ctx, usage); err != nil {
 		return err
 	}
 	if err := writeUsageDisk(ctx, usage.Disk); err != nil {
 		return err
 	}
-	return writeUsageWarnings(ctx, usage.Warnings)
-}
-
-// writeUsageBuildsCaveat names the gap CPU/Memory above cannot close on a
-// build-capable environment: an image build runs in the erun-dind sidecar, a
-// separate cgroup this reading cannot see, so it can read idle while a build
-// saturates the sidecar. Matches the desktop hover card's "-- excludes
-// builds" caveat (Sidebar.EnvHoverCard.tsx) so the two transports never
-// disagree about whether this reading covers builds.
-func writeUsageBuildsCaveat(ctx common.Context, excludesBuilds bool) error {
-	if !excludesBuilds {
-		return nil
-	}
-	_, err := fmt.Fprintln(ctx.Stdout,
-		"Note: CPU/Memory above exclude the erun-dind sidecar where builds run -- its usage is not visible from inside this container; see `erun observe` for the sidecar's own limits.")
-	return err
-}
-
-func writeUsageCPU(ctx common.Context, cpu common.RuntimeCPUUsage) error {
-	if cpu.Unavailable != "" {
-		_, err := fmt.Fprintf(ctx.Stdout, "CPU: unavailable (%s)\n", cpu.Unavailable)
+	if err := writeUsageWarnings(ctx, usage.Warnings); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(ctx.Stdout, "CPU: %.1f%% of a %.2f-core quota (sampled over %.1fs)\n",
-		cpu.UtilizationPercent, cpu.QuotaCores, cpu.IntervalSeconds)
+	return writeUsageSizing(ctx, report.Sizing)
+}
+
+// writeUsageDindReading prints the erun-dind sidecar's own CPU/memory reading
+// on a build-capable environment: every image build actually runs there, a
+// separate cgroup the runtime container's own reading above cannot see, so
+// without this a busy build reads as an idle environment. Falls back to
+// naming the gap when the sidecar's own cgroup could not be read (an older
+// runtime image, a sidecar mid-restart), matching the desktop hover card's
+// "-- excludes builds" caveat (Sidebar.EnvHoverCard.tsx) so both transports
+// agree on what this reading covers either way.
+func writeUsageDindReading(ctx common.Context, usage common.RuntimeUsage) error {
+	if !usage.ExcludesBuilds {
+		return nil
+	}
+	if usage.Dind == nil {
+		_, err := fmt.Fprintln(ctx.Stdout,
+			"Note: CPU/Memory above exclude the erun-dind sidecar where builds run -- its usage could not be read from inside this container; see `erun observe` for its resource limits.")
+		return err
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "erun-dind sidecar (where builds run):"); err != nil {
+		return err
+	}
+	if err := writeUsageCPU(ctx, "  ", usage.Dind.CPU); err != nil {
+		return err
+	}
+	return writeUsageMemory(ctx, "  ", usage.Dind.Memory)
+}
+
+func writeUsageCPU(ctx common.Context, prefix string, cpu common.RuntimeCPUUsage) error {
+	if cpu.Unavailable != "" {
+		_, err := fmt.Fprintf(ctx.Stdout, "%sCPU: unavailable (%s)\n", prefix, cpu.Unavailable)
+		return err
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "%sCPU: %.1f%% of a %.2f-core quota (sampled over %.1fs)\n",
+		prefix, cpu.UtilizationPercent, cpu.QuotaCores, cpu.IntervalSeconds)
 	return err
 }
 
-func writeUsageMemory(ctx common.Context, memory common.RuntimeMemoryUsage) error {
+func writeUsageMemory(ctx common.Context, prefix string, memory common.RuntimeMemoryUsage) error {
 	if memory.Unavailable != "" {
-		_, err := fmt.Fprintf(ctx.Stdout, "Memory: unavailable (%s)\n", memory.Unavailable)
+		_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: unavailable (%s)\n", prefix, memory.Unavailable)
 		return err
 	}
 	peak := formatUsagePeak(memory)
 	oomKills := formatUsageOOMKills(memory)
 	if memory.Unlimited {
-		_, err := fmt.Fprintf(ctx.Stdout, "Memory: %s used, no limit set, peak %s, OOM kills %s\n",
-			formatUsageBytes(memory.CurrentBytes), peak, oomKills)
+		_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: %s used, no limit set, peak %s, OOM kills %s\n",
+			prefix, formatUsageBytes(memory.CurrentBytes), peak, oomKills)
 		return err
 	}
-	_, err := fmt.Fprintf(ctx.Stdout, "Memory: %s / %s (%.1f%%), peak %s, OOM kills %s\n",
-		formatUsageBytes(memory.CurrentBytes), formatUsageBytes(memory.LimitBytes), memory.PercentOfLimit,
+	_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: %s / %s (%.1f%%), peak %s, OOM kills %s\n",
+		prefix, formatUsageBytes(memory.CurrentBytes), formatUsageBytes(memory.LimitBytes), memory.PercentOfLimit,
 		peak, oomKills)
 	return err
 }
@@ -84,20 +99,34 @@ func formatUsageOOMKills(memory common.RuntimeMemoryUsage) string {
 	return fmt.Sprintf("%d", memory.OOMKills)
 }
 
+// writeUsageDisk labels the mount's total/used/percent as "(node, shared)":
+// they come from a statfs of the whole mount, so every environment scheduled
+// on the same node reports the identical figures regardless of which of them
+// actually wrote the bytes (see RuntimeDiskUsage.NodeShared). The own-usage
+// line beneath it is the number scoped to this environment alone -- the one
+// an operator can actually reduce by cleaning up this environment.
 func writeUsageDisk(ctx common.Context, disks []common.RuntimeDiskUsage) error {
 	for _, disk := range disks {
 		if disk.Unavailable != "" {
-			if _, err := fmt.Fprintf(ctx.Stdout, "Disk %s: unavailable (%s)\n", disk.Mount, disk.Unavailable); err != nil {
+			if _, err := fmt.Fprintf(ctx.Stdout, "Disk (node, shared) %s: unavailable (%s)\n", disk.Mount, disk.Unavailable); err != nil {
 				return err
 			}
-			continue
-		}
-		if _, err := fmt.Fprintf(ctx.Stdout, "Disk %s: %s / %s (%.1f%%)\n",
+		} else if _, err := fmt.Fprintf(ctx.Stdout, "Disk (node, shared): %s %s / %s (%.1f%%)\n",
 			disk.Mount, formatUsageBytes(disk.UsedBytes), formatUsageBytes(disk.TotalBytes), disk.PercentUsed); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(ctx.Stdout, "  this environment's own usage: %s\n", formatUsageDiskOwn(disk)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func formatUsageDiskOwn(disk common.RuntimeDiskUsage) string {
+	if !disk.OwnUsageObserved {
+		return "unavailable"
+	}
+	return formatUsageBytes(disk.OwnUsedBytes)
 }
 
 func writeUsageWarnings(ctx common.Context, warnings []string) error {
@@ -109,6 +138,34 @@ func writeUsageWarnings(ctx common.Context, warnings []string) error {
 	}
 	for _, warning := range warnings {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  %s\n", warning); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeUsageSizing prints the standing recommendation directly beneath the
+// warnings, because the two are one subject: an environment reported as
+// saturated with no advice beside it leaves the operator holding an alarm and
+// no next action. It renders through runtimeSizingLines -- the same renderer
+// `erun list` uses, over the same recommendation, computed once from the
+// reading above plus retained history -- so the remedy shown here cannot
+// contradict the one shown there.
+//
+// A recommendation is omitted only when the reading and the history together
+// support none at all, which is silence about an environment erun has never
+// observed rather than silence about a saturated one: a memory warning is
+// derived from the same evidence and the same threshold as a raise, so a
+// warning always arrives with its verdict.
+func writeUsageSizing(ctx common.Context, sizing *common.RuntimeSizingRecommendation) error {
+	if sizing == nil {
+		return nil
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "Sizing recommendation:"); err != nil {
+		return err
+	}
+	for _, line := range runtimeSizingLines(sizing, "  ") {
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err
 		}
 	}

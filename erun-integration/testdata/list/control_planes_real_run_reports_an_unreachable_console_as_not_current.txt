@@ -1,5 +1,5 @@
   published version: <VERSION>
-Control planes:
+Control planes (1 backend, 1 alias):
   - erun+test@erun api-url=<PLANE_API> reachable=yes version=<VERSION>
     console: url=http://<LOOPBACK>:1 reachable=no reason=fetch console version: Get "http://<LOOPBACK>:1/version.json": dial tcp <LOOPBACK>:1: connect: connection refused
 audit: erun list --control-planes

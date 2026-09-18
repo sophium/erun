@@ -254,6 +254,82 @@ test.describe('manage dialog jobs tab', () => {
     await app.manageDialog.cancel();
   });
 
+  // A read that timed out named its cause and offered no way out: the operator
+  // had to switch tabs and hope the remount re-fetched, while the unreachable
+  // card one tab away already carried a Retry. The retry must re-issue the
+  // read, not dismiss the alert -- so this asserts the alert is *replaced* by
+  // the list the second read returned.
+  test('a refused read offers a Retry that re-issues the read', async ({ app, page }) => {
+    let reads = 0;
+    await page.route('**/__erun_invoke', async (route, request) => {
+      if (invokeMethod(request) !== 'LoadEnvironmentJobs') {
+        await route.continue();
+        return;
+      }
+      reads += 1;
+      if (reads === 1) {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'context deadline exceeded talking to the pod' }),
+        });
+      }
+      return fulfillJSON(route, [RUNNING_JOB]);
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.jobsTabTrigger().click();
+
+    // "Could not read" is not "No jobs": nothing is known here, so the empty
+    // state must not appear behind it.
+    await expect(app.manageDialog.jobsReadFailure()).toContainText(
+      'context deadline exceeded talking to the pod',
+    );
+    await expect(app.manageDialog.jobsEmptyState()).toHaveCount(0);
+    await expect(app.manageDialog.jobsReadFailureRetry()).toBeEnabled();
+
+    await app.manageDialog.jobsReadFailureRetry().click();
+
+    await expect(app.manageDialog.jobsReadFailure()).toHaveCount(0);
+    await expect(app.manageDialog.jobRows()).toHaveCount(1);
+    expect(reads).toBeGreaterThan(1);
+
+    await app.manageDialog.cancel();
+  });
+
+  // The other half of "re-issues the read": a retry that fails again must show
+  // the new failure rather than leave the operator on a stale cause they have
+  // already read.
+  test('a retry that fails again reports the fresh cause', async ({ app, page }) => {
+    let reads = 0;
+    await page.route('**/__erun_invoke', async (route, request) => {
+      if (invokeMethod(request) !== 'LoadEnvironmentJobs') {
+        await route.continue();
+        return;
+      }
+      reads += 1;
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: reads === 1 ? 'context deadline exceeded talking to the pod' : 'bad gateway',
+        }),
+      });
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.jobsTabTrigger().click();
+
+    await expect(app.manageDialog.jobsReadFailure()).toContainText('context deadline exceeded');
+
+    await app.manageDialog.jobsReadFailureRetry().click();
+
+    await expect(app.manageDialog.jobsReadFailure()).toContainText('bad gateway');
+    await expect(app.manageDialog.jobsReadFailure()).not.toContainText('context deadline exceeded');
+
+    await app.manageDialog.cancel();
+  });
+
   // The failure path: a refused cancel must say so beside the control and leave
   // the job listed, rather than silently doing nothing.
   test('a refused cancel is reported beside the job', async ({ app, page }) => {

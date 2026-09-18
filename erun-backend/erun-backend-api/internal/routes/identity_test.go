@@ -16,11 +16,13 @@ import (
 )
 
 type stubEnrolledUserLister struct {
-	users []model.User
-	err   error
+	users     []model.User
+	err       error
+	gotFilter repository.UserFilter
 }
 
-func (s *stubEnrolledUserLister) List(context.Context, repository.UserFilter) ([]model.User, error) {
+func (s *stubEnrolledUserLister) List(_ context.Context, filter repository.UserFilter) ([]model.User, error) {
+	s.gotFilter = filter
 	return s.users, s.err
 }
 
@@ -169,6 +171,44 @@ func TestListUsersThreadsOrgIDQueryParam(t *testing.T) {
 	}
 }
 
+// TestListUsersDefaultsMembershipJoinToCallersOwnTenant locks today's
+// unchanged behaviour: omitting ?tenantId= must keep cross-referencing
+// against the caller's own resolved tenant, so an existing caller sees no
+// change.
+func TestListUsersDefaultsMembershipJoinToCallersOwnTenant(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	erunUsers := &stubEnrolledUserLister{}
+	routes := IdentityRoutes{admin: admin, erunUsers: erunUsers}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if erunUsers.gotFilter.TenantID != "tenant-ops" {
+		t.Fatalf("gotFilter.TenantID = %q, want the caller's own tenant-ops", erunUsers.gotFilter.TenantID)
+	}
+}
+
+// TestListUsersThreadsTenantIDQueryParamForMembershipJoin is the fix itself:
+// the membership join must target the tenant being administered, not the
+// caller's own resolved tenant -- otherwise every row
+// from another org misses the join against its genuine members and renders
+// "IdP only, not enrolled" for people who really are enrolled, just in a
+// different tenant.
+func TestListUsersThreadsTenantIDQueryParamForMembershipJoin(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	erunUsers := &stubEnrolledUserLister{}
+	routes := IdentityRoutes{admin: admin, erunUsers: erunUsers}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users?orgId=org-tenant-x&tenantId=tenant-x", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if erunUsers.gotFilter.TenantID != "tenant-x" {
+		t.Fatalf("gotFilter.TenantID = %q, want tenant-x", erunUsers.gotFilter.TenantID)
+	}
+}
+
 // TestListUsersDistinguishesEnrolledFromIdPOnly locks the core of #1482's
 // Users-page fix: a self-registered IdP account with no erun mapping must
 // not render identically to an actual tenant member. It also proves the
@@ -203,6 +243,46 @@ func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 	}
 	if !views[2].IsMachine || views[2].Enrolled {
 		t.Fatalf("views[2] (admin-sa) = %+v, want a machine account, not enrolled", views[2])
+	}
+}
+
+// TestListUsersReportsErunUsernameAlongsideIdPUsername locks the backend
+// half: an enrolled row's own erun username travels alongside the
+// IdP's own username field rather than being merged away, so a client can
+// render both when they diverge instead of rendering only the IdP one under
+// a caller who is used to seeing their erun username everywhere else
+// (whoami's own `username`, reviews, audit entries). The row's own `id` is
+// asserted too: it is the OIDC subject, the one stable value that actually
+// joins the two directories, and it must keep flowing through unrenamed for
+// a client to recognize "this is the same person" against whoami's subject.
+func TestListUsersReportsErunUsernameAlongsideIdPUsername(t *testing.T) {
+	admin := &stubIdentityAdminClient{users: []zitadel.User{
+		{ID: "sub-1", Username: "zadmin@frs.auth.example.com", Email: "admin@example.com"},
+	}}
+	erunUsers := &stubEnrolledUserLister{users: []model.User{
+		{UserID: "erun-1", Username: "erun", ExternalUserID: "sub-1"},
+	}}
+	routes := IdentityRoutes{admin: admin, erunUsers: erunUsers}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var views []identityUserView
+	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("got %d views, want 1", len(views))
+	}
+	if views[0].Username != "zadmin@frs.auth.example.com" {
+		t.Fatalf("views[0].Username = %q, want the IdP username unchanged", views[0].Username)
+	}
+	if views[0].ErunUsername != "erun" {
+		t.Fatalf("views[0].ErunUsername = %q, want the enrolled erun user's own username", views[0].ErunUsername)
+	}
+	if views[0].ID != "sub-1" {
+		t.Fatalf("views[0].ID = %q, want the OIDC subject reported so a client can join whoami's own subject against it", views[0].ID)
 	}
 }
 

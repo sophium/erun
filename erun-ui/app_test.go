@@ -1983,6 +1983,40 @@ func TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled(t *testing.T)
 	}
 }
 
+// The API log is one tab of nine, so a failed read must name the read it could
+// not make before the raw error — the same shape the Runtime panels and
+// Manage's jobs panel use. The underlying error stays verbatim: operators need
+// the original transport text, not a paraphrase of it.
+func TestLoadTenantDashboardAPILogErrorNamesTheReadThatFailed(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		notEnrolledDashboardAPIResponse(t, w, req.URL.Path)
+	}))
+	defer server.Close()
+
+	const rawError = "exit status 1: kubectl stub: no cluster in the Playwright harness"
+	app := testERunPlatformAliasApp(t, server.URL)
+	app.deps.loadAPILog = func(_ context.Context, _ uiTenantDashboardInput) (string, error) {
+		return "", errors.New(rawError)
+	}
+
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
+		Tenant: "frs",
+		MCPURL: "http://127.0.0.1:17000/mcp",
+	})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if !strings.Contains(dashboard.APILogError, "Could not read this environment's API log") {
+		t.Fatalf("API log error does not name the read that failed: %q", dashboard.APILogError)
+	}
+	if !strings.Contains(dashboard.APILogError, rawError) {
+		t.Fatalf("API log error dropped the underlying error text: %q", dashboard.APILogError)
+	}
+	if dashboard.APILog != "" {
+		t.Fatalf("expected no API log alongside the error, got %q", dashboard.APILog)
+	}
+}
+
 // notEnrolledDashboardAPIResponse serves TestLoadTenantDashboardReturnsAPILogWhenIdentityIsNotEnrolled's
 // fixture: whoami always 401s, and the identity-scoped invite-request/config
 // reads it still makes with the same bearer both answer normally.
