@@ -3,6 +3,7 @@ cd <TMP> && git check-ignore -q -- .erun/config.yaml
 build: component platform-validator selected (.erun/config.yaml components)
 build: docker build root configured as harnesses/platform-validator/docker (.erun/config.yaml components.platform-validator.docker)
 build: version file configured as harnesses/platform-validator/VERSION (.erun/config.yaml components.platform-validator.version)
+docker info -f '{{.DockerRootDir}}'
 docker image inspect ghcr.io/sophium/platform-validator:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/platform-validator:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/platform-validator:fp-<HEX16>-arm64

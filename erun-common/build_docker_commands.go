@@ -39,11 +39,14 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		started := time.Now()
+		cgroupBefore := captureBuildCgroupSnapshot()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
+		output, err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
+		elapsed := time.Since(started)
 		if buildInput.PlatformObserver != nil {
-			buildInput.PlatformObserver(platform, time.Since(started), err)
+			cgroup := buildCgroupMetricsFromSnapshots(cgroupBefore, captureBuildCgroupSnapshot(), elapsed)
+			buildInput.PlatformObserver(platform, elapsed, err, cgroup, output)
 		}
 		if err != nil {
 			return err
@@ -60,10 +63,14 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 // fallback promotePlatformImage reaches for when the registry rejects a
 // promoted tag, so a cache-hit decision that turns out to be wrong at push
 // time still ends in a real, correctly-tagged image rather than a failure.
-func buildPlatformImageFromSource(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+// The returned string is the real `docker build`'s own captured
+// `--progress=plain` output, for a caller (PlatformObserver) to mine for a
+// per-Dockerfile-step timing breakdown; the tag/push steps that follow it
+// produce nothing worth parsing the same way.
+func buildPlatformImageFromSource(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 	args := dockerBuildArgs(buildInput, platform)
-	err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
+	output, err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
 	if err == nil {
 		err = tagFingerprintAfterBuild(buildInput, platform, stdout, stderr)
 	}
@@ -73,7 +80,7 @@ func buildPlatformImageFromSource(buildInput DockerBuildSpec, platform string, s
 	if err == nil {
 		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
 	}
-	return err
+	return output, err
 }
 
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
@@ -82,9 +89,11 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 		started := time.Now()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		err := promotePlatformImage(buildInput, platform, stdout, stderr)
+		output, err := promotePlatformImage(buildInput, platform, stdout, stderr)
 		if buildInput.PlatformObserver != nil {
-			buildInput.PlatformObserver(platform, time.Since(started), err)
+			// Promotion re-tags and pushes an already-built image; it never runs
+			// `docker build`, so there is no build-cgroup cost to attribute.
+			buildInput.PlatformObserver(platform, time.Since(started), err, nil, output)
 		}
 		if err != nil {
 			return err
@@ -110,7 +119,7 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 // retried, since rebuilding could not change its outcome; it is returned with
 // the promoted tag and its cached source named, so the failure says which
 // image and which operation it belongs to instead of a bare daemon message.
-func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 	err := runDockerTag(fpTag, platformTag, stdout, stderr)
@@ -121,10 +130,10 @@ func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, s
 		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
 	}
 	if err == nil {
-		return nil
+		return "", nil
 	}
 	if !IsDockerUnknownBlobError(err.Error()) {
-		return fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, err)
+		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, err)
 	}
 	_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
 	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
@@ -273,28 +282,33 @@ func platformShortSuffix(platform string) string {
 // returns, so "exit code: N" is never the whole story for a step that just
 // spent minutes running. At debug verbosity the caller already wants
 // everything live, so it streams as it always has.
-func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) error {
+// runDockerBuildOnce returns the build's captured combined output alongside
+// its error (or "" alongside a nil error's own message-shaped output on
+// success — see below) so a caller can mine BuildKit's own per-step timings
+// out of it (build_progress_phases.go) without re-running or re-capturing
+// anything.
+func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) (string, error) {
 	cmd := Command("docker", args...)
 	cmd.Dir = dir
-	output := new(bytes.Buffer)
+	capture := &commandOutputCapture{}
 	if verbosity >= VerbosityDebug {
-		cmd.Stdout = commandOutputWriter(stdout, output)
-		cmd.Stderr = commandOutputWriter(stderr, output)
+		cmd.Stdout = teeWriter(stdout, &capture.stdout)
+		cmd.Stderr = teeWriter(stderr, &capture.stderr)
 	} else {
-		cmd.Stdout = output
-		cmd.Stderr = output
+		cmd.Stdout = &capture.stdout
+		cmd.Stderr = &capture.stderr
 	}
 	err := cmd.Run()
+	message := capture.combined()
 	if err == nil {
-		return nil
+		return message, nil
 	}
 
-	message := output.String()
 	if verbosity < VerbosityDebug && stderr != nil {
 		_, _ = io.WriteString(stderr, message)
 	}
 	if push && IsDockerPushAuthorizationError(message) {
-		return DockerRegistryAuthError{
+		return message, DockerRegistryAuthError{
 			Tag:      authContextTag,
 			Registry: dockerRegistryFromImageTag(authContextTag),
 			Message:  strings.TrimSpace(message),
@@ -302,7 +316,7 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 		}
 	}
 	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message); ok {
-		return DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
+		return message, DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
 	}
 	// Keep the step's own last words whatever else is known: they are all the
 	// durable timing record will ever have (see build_failure_reason.go).
@@ -311,9 +325,9 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 		reason = joinFailureReason(reason, diagnosis)
 	}
 	if reason != "" {
-		return DockerBuildStepError{Reason: reason, Err: err}
+		return message, DockerBuildStepError{Reason: reason, Err: err}
 	}
-	return err
+	return message, err
 }
 
 func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
@@ -366,7 +380,7 @@ func tryDockerTag(source, target string, stdout, stderr io.Writer) error {
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}
-	cmd.Stderr = commandOutputWriter(stderr, capture)
+	cmd.Stderr = teeWriter(stderr, capture)
 	if err := cmd.Run(); err != nil {
 		return dockerTagError{err: err, message: capture.String()}
 	}
@@ -446,23 +460,6 @@ func DockerManifestExists(tag string, insecure bool) (bool, error) {
 	return false, err
 }
 
-func commandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
-	writers := make([]io.Writer, 0, 2)
-	if primary != nil {
-		writers = append(writers, primary)
-	}
-	if capture != nil {
-		writers = append(writers, capture)
-	}
-	if len(writers) == 0 {
-		return io.Discard
-	}
-	if len(writers) == 1 {
-		return writers[0]
-	}
-	return io.MultiWriter(writers...)
-}
-
 func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	tag := platformSuffixedTag(strings.TrimSpace(buildInput.Image.Tag), platform)
 	// --provenance=false: BuildKit's default provenance attestation turns each
@@ -490,6 +487,18 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	}
 	if buildArgVersion != "" {
 		args = append(args, "--build-arg", "ERUN_VERSION="+buildArgVersion)
+	}
+	if buildInput.DindCPULimit != "" {
+		args = append(args, "--build-arg", "DIND_CPU_LIMIT="+buildInput.DindCPULimit)
+	}
+	if buildInput.DindMemoryLimitMiB != "" {
+		args = append(args, "--build-arg", "DIND_MEMORY_LIMIT_MIB="+buildInput.DindMemoryLimitMiB)
+	}
+	if buildInput.PlaywrightTestAreas != "" {
+		args = append(args, "--build-arg", "PLAYWRIGHT_TEST_AREAS="+buildInput.PlaywrightTestAreas)
+	}
+	if buildInput.CgroupParent != "" {
+		args = append(args, "--cgroup-parent", buildInput.CgroupParent)
 	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
@@ -559,15 +568,15 @@ func DockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer) erro
 func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) error {
 	args := dockerPushArgs(tag, verbosity)
 	pushCmd := Command("docker", args...)
-	output := new(bytes.Buffer)
-	pushCmd.Stdout = commandOutputWriter(stdout, output)
-	pushCmd.Stderr = commandOutputWriter(stderr, output)
+	capture := &commandOutputCapture{}
+	pushCmd.Stdout = teeWriter(stdout, &capture.stdout)
+	pushCmd.Stderr = teeWriter(stderr, &capture.stderr)
 	err := pushCmd.Run()
 	if err == nil {
 		return nil
 	}
 
-	message := output.String()
+	message := capture.combined()
 	if IsDockerPushAuthorizationError(message) {
 		return DockerRegistryAuthError{
 			Tag:      tag,

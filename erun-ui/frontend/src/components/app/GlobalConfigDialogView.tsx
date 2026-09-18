@@ -25,6 +25,7 @@ import { useController } from '@/app/useController';
 import { CloudAliasesSection } from '@/components/app/GlobalConfigDialog.CloudAliases';
 import { CloudContextsSection } from '@/components/app/GlobalConfigDialog.CloudContexts';
 import { NOT_CONFIGURED_VALUE, optionValues } from '@/components/app/GlobalConfigDialog.helpers';
+import { OpenRouterSection } from '@/components/app/GlobalConfigDialog.OpenRouter';
 import { DialogError } from '@/components/app/GlobalConfigDialog.shared';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
@@ -121,6 +122,7 @@ function GlobalConfigBody(): React.ReactElement {
       />
       <CloudAliasesSection dialog={dialog} />
       <CloudContextsSection dialog={dialog} />
+      <OpenRouterSection dialog={dialog} />
     </div>
   );
 }

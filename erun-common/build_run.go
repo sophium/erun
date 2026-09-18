@@ -266,7 +266,21 @@ func reportBuildExecutionOutcome(ctx Context, execution BuildExecutionSpec, stor
 		Version:       NewBuildResult(execution).Version,
 		Successful:    err == nil,
 		FailureDetail: failureDetail,
+		Profile:       buildExecutionProfile(ctx),
 	})
+}
+
+// buildExecutionProfile summarizes this run's own step-timing tree (see
+// traceBuildUmbrella, which stashes the root on ctx.timing) into the bounded
+// shape ReportBuildOutcome carries to the platform. nil when no timing root
+// is active -- a dry run, or a build that hit an error before
+// traceBuildUmbrella started one.
+func buildExecutionProfile(ctx Context) *BuildProfileSummary {
+	if ctx.timing == nil {
+		return nil
+	}
+	summary := SummarizeTimingRecordForProfile(ctx.timing.toRecord("build"))
+	return &summary
 }
 
 // buildExecutionProjectRootAndEnvironment reads the project root and
@@ -294,7 +308,19 @@ func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCo
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
 }
 
+// runBuildExecution is the last point before this run's exit code is decided.
+// A plan that does nothing -- no release, no script, no linux build, no image,
+// no chart -- runs no work and tests nothing, so reporting success for it turns
+// "not tested" into "tested and green" for every caller reading the exit code.
+// That precondition is checked here, before the execution it guards.
 func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+	if !buildExecutionPlansWork(execution) {
+		return newEmptyBuildPlanError("the resolved plan has nothing to build or test")
+	}
+	return runResolvedBuildExecution(ctx, execution, deploySpecs, runGit, runScript, build, push, deploy)
+}
+
+func runResolvedBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if execution.release != nil {
 		// The release owns the publish rather than following it: its stages run
 		// around the build+push so the version's images and charts exist, and
@@ -306,6 +332,12 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 	} else {
 		if execution.skippedLinux {
 			ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
+		}
+		// A release runs this via ensureReleaseReadyToPublish; a plain build has
+		// to run it here. Builds are what actually fill the node between
+		// releases, since every one of them grows the BuildKit cache.
+		if err := ensureBuildDiskHeadroom(ctx); err != nil {
+			return err
 		}
 		if _, err := runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push); err != nil {
 			return err

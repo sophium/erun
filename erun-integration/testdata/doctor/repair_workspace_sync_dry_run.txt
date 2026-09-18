@@ -13,6 +13,7 @@ kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
 kubectl-context-configure: subprocess
 
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 == Workspace sync (host mirror) ==
   host alias: erun-team-dev
   mirror: <TMP>

@@ -101,14 +101,44 @@ type DockerBuildSpec struct {
 	// ERUN_VERSION build arg must name the arch being built or the plain version
 	// reference resolves nowhere.
 	LocalBaseTag string
+	// DindCPULimit / DindMemoryLimitMiB carry this build's actual erun-dind
+	// sidecar resource limits (EnvConfig.RuntimeDindPod, normalized) into a
+	// Dockerfile that declares matching DIND_CPU_LIMIT / DIND_MEMORY_LIMIT_MIB
+	// ARGs, so an in-build gate (the erun-devops runtime image's own `make
+	// check`) can size its concurrent fan-out against what this build's dind
+	// sidecar is actually entitled to, instead of the Dockerfile's own
+	// hardcoded ARG default or the host node's raw, cgroup-invisible capacity
+	// (erun-devops/AGENTS.md's dind cgroup blind-spot notes). Left empty for a
+	// Dockerfile that declares neither ARG, so an unrelated build's docker
+	// command is unchanged. See applyDindResourceBuildArgs.
+	DindCPULimit       string
+	DindMemoryLimitMiB string
+	// PlaywrightTestAreas carries the smoke+area selection resolved from the
+	// Playwright spec-file diff against the merge base (see
+	// applyPlaywrightAreaBuildArgs) into a Dockerfile that declares a matching
+	// PLAYWRIGHT_TEST_AREAS ARG, so the in-build gate runs only the areas whose
+	// specs changed instead of the full suite on every build. Left empty for a
+	// Dockerfile that declares no such ARG, or when the selection could not be
+	// resolved (no git repo, no merge base) -- the Dockerfile's own ARG default
+	// then runs the full suite, the fail-safe direction.
+	PlaywrightTestAreas string
+	// CgroupParent names the cgroup every RUN-instruction container this build
+	// creates should nest under, so it inherits a real, enforced CPU quota
+	// instead of escaping the erun-dind sidecar's own kubelet-declared limit as
+	// a sibling cgroup (erun#2255). Left empty outside an injected runtime pod.
+	// See buildContainerCPUCapCgroupParent.
+	CgroupParent string
 	// PlatformObserver, when set, is called after each platform's build (or
-	// promote+push) finishes, reporting that platform's elapsed time and error.
-	// It lets a caller attach per-architecture timing (see Context.
+	// promote+push) finishes, reporting that platform's elapsed time, error,
+	// build-cgroup cost (nil for a promote, which runs no docker build), and
+	// (when a real `docker build` ran) its captured `--progress=plain`
+	// output, which a caller can mine for a per-Dockerfile-step timing
+	// breakdown. It lets a caller attach per-architecture timing (see Context.
 	// timingPlatformObserver in timing.go) without DockerImageBuilderFunc
 	// needing a signature change, since executeDockerBuild sets this field on
 	// the same buildInput value it hands to the builder — exactly how it already
 	// threads Verbosity through. Never marshaled: a func value has no JSON form.
-	PlatformObserver func(platform string, elapsed time.Duration, err error) `json:"-"`
+	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) `json:"-"`
 }
 
 type DockerPushSpec struct {
@@ -163,7 +193,7 @@ type DockerCommandTarget struct {
 	DisableBuildScriptDiscovery bool
 	// Platforms explicitly overrides the docker --platform targets a non-release
 	// build mints (e.g. ["linux/amd64"]), taking precedence over the project's
-	// configured environments.<env>.docker.platforms. It must be empty when
+	// configured docker.platforms. It must be empty when
 	// Release is set: a release build always publishes every platform erun
 	// supports, regardless of any override.
 	Platforms []string
