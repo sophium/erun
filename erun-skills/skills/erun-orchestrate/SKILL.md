@@ -181,7 +181,10 @@ ID's `wip:<id>` label, not its display name.
 ## Landing work
 
 Finished work lands through the target repository's own review and merge queue.
-A pushed branch is a proposal; a closed pull request is not a merge.
+A pushed branch is a proposal; a closed pull request is not a merge. A pull request
+registers nothing and gates nothing on a repository that runs its own queue —
+however green the forge reports it, because the forge cannot see a queue it does
+not know exists.
 
 - **Invariant.** A branch this orchestrator caused to exist goes `erun-merge`
   (branch → a review at `READY`), then `review record-build`, then the target's
@@ -189,13 +192,21 @@ A pushed branch is a proposal; a closed pull request is not a merge.
   green, report `MERGED`). `MERGED` is verified against the recorded GATE build and
   the remote's own tip; a closed pull request asserts a landing rather than proving
   one, so it is never the finish line.
+- **Dispatch.** Read the target's merge guidance *before* dispatching work that ends
+  in a merge, and make registering the change the last required step of every brief
+  you write. A brief that ends at "open a pull request" has no landing step in it,
+  and the Agent will do exactly what it was asked.
 - **Exception.** A branch that *arrived* with no review — pushed by a peer or an
   earlier session — may be composed into a batch `gate-merge` and landed on green.
   That is handling a condition already in front of you, never licence to create more
   of them. Do not finish delegated work by opening a pull request.
-- **Verification.** Report the queue's shape — OPEN / READY / MERGE, and reviews
-  advanced this session — before any branch count. Branches landed beside
-  "reviews advanced: 0" is a method error, not throughput.
+- **Verification.** Count delivery in landed changes, never in opened proposals. An
+  unlanded proposal is inventory, not output: it decays as its neighbours land under
+  new hashes, and a growing pile of it hides a missing final step behind visible
+  activity. Report the queue's shape — OPEN / READY / MERGE, and reviews advanced
+  this session — before any branch count. When proposals accumulate while nothing
+  lands, stop producing and repair the path first: the pile is the symptom, the
+  unqueried queue is the defect.
 
 ## Fixing erun itself
 
