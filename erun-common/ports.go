@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -62,6 +63,45 @@ func EnvironmentLocalPortsFromRangeStart(rangeStart int) EnvironmentLocalPorts {
 		SSH:           rangeStart + SSHServicePortOffset,
 		ContributeApp: rangeStart + ContributeAppServicePortOffset,
 	}
+}
+
+// overlayInjectedRuntimeLocalPorts prefers the ports the runtime chart injected
+// into this process over the ones derived from the on-disk config.
+//
+// The in-pod config is only the projection the chart writes (see
+// `erun doctor --sync-config`), so an environment that never had a
+// localportrangestart persisted there derives its whole block from the 17000
+// default -- while the ports the pod is actually listening on were injected
+// into the very same process. The injected MCP port is the environment's range
+// start by construction (its service offset is zero), so the block follows from
+// it exactly as it would from a persisted range start; ERUN_SSHD_PORT overrides
+// the ssh entry the way an env's sshd.localport does. Off-pod, and for any
+// environment other than the one this process serves, the injected vars are
+// absent or name someone else and ports is returned unchanged.
+func overlayInjectedRuntimeLocalPorts(ports EnvironmentLocalPorts, env func(string) string, tenant, environment string) EnvironmentLocalPorts {
+	podTenant, podEnvironment, ok := injectedRuntimePodIdentity(env)
+	if !ok || podTenant != strings.TrimSpace(tenant) || podEnvironment != strings.TrimSpace(environment) {
+		return ports
+	}
+	rangeStart := injectedPortValue(env("ERUN_MCP_PORT"))
+	if _, err := environmentPortIndexForRangeStart(rangeStart, environmentPortKey(tenant, environment)); err != nil {
+		return ports
+	}
+	injected := EnvironmentLocalPortsFromRangeStart(rangeStart)
+	if sshPort := injectedPortValue(env("ERUN_SSHD_PORT")); sshPort > 0 {
+		injected.SSH = sshPort
+	} else {
+		injected.SSH = ports.SSH
+	}
+	return injected
+}
+
+func injectedPortValue(value string) int {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 // LocalPortsForResult derives the effective local ports for an OpenResult.
