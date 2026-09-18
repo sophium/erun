@@ -67,12 +67,26 @@ export const test = base.extend<{
   seededRuntimeEnv: SeededEnvironment;
   seededHostEnv: SeededEnvironment;
 }>({
-  app: async ({ page, workerBaseURL, request }, use) => {
-    await resetSharedBaselineObservations(workerBaseURL, request);
-    const app = new AppShell(page);
-    await app.open();
-    await use(app);
-  },
+  // The fixture's own timeout, not the test's: app.open() is a BOOT, and its
+  // cost is the machine's, not the spec's. Every spec pays it in setup, so
+  // charging it to the 30s test budget means a contended gate reports "Test
+  // timeout ... while setting up app" against whichever spec happened to boot
+  // on the busy worker -- which is how titlebar-whip-action.spec.ts:231 failed
+  // two full-suite gates in a row while 554 other specs booted fine.
+  //
+  // playwright.config.ts already raises the global timeout to 90s on Windows
+  // for the same reason, so a slower environment earning a larger boot budget
+  // is this suite's established shape. 60s sits above AppShell.open's own 40s
+  // settle bound so that bound stays reachable; the spec body keeps its 30s.
+  app: [
+    async ({ page, workerBaseURL, request }, use) => {
+      await resetSharedBaselineObservations(workerBaseURL, request);
+      const app = new AppShell(page);
+      await app.open();
+      await use(app);
+    },
+    { timeout: 60_000 },
+  ],
   seededEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedEnvironment(SEED_TENANT, environment);
@@ -136,18 +150,26 @@ export async function waitForSeededRow(
   }).toPass({ timeout: timeoutMs });
 }
 
-// captureHoverCard writes a hover card's own screenshot with a bounded wait.
+// captureHoverCard writes a hover card's own screenshot with a single bounded
+// attempt.
 //
 // A hover card exists only while the pointer rests on the row that raised it,
 // and locator.screenshot() carries no timeout of its own: it waits for the
-// element to be visible and stable for as long as its caller allows. A card
-// that closes or reflows mid-capture therefore does not fail the capture, it
-// silently consumes the entire convergence budget its caller was relying on to
-// re-drive the step -- so the step never gets a second attempt and the spec
-// reports a timeout with every assertion before it having passed. Bounding the
-// capture costs one attempt instead of the whole budget.
+// element to be visible and stable for as long as its caller allows, so an
+// unbounded call risks spending a whole convergence budget on one attempt.
+// Under real contention the stability half of that wait -- two consecutive
+// animation frames with an unchanged bounding box -- can take several seconds
+// to observe even though the card is fine, so the bound here is generous
+// (8s) rather than the tight budget a quiet machine would need. This used to
+// retry itself, but every caller now reads the card's content (and takes this
+// screenshot) from inside its own re-drivable hover+read block -- see
+// sidebar-orchestrator-hover-card-activity.spec.ts's withOrchestratorCard and
+// the live-update test's rehover() -- which already recovers a dropped card
+// by re-hovering. Retrying here too would stack two convergence loops inside
+// one test timeout and risk exceeding it before either one settles; one
+// bounded attempt per outer retry is enough.
 export async function captureHoverCard(card: Locator, filePath: string): Promise<void> {
-  await card.screenshot({ path: filePath, timeout: 2_000 });
+  await card.screenshot({ path: filePath, timeout: 8_000 });
 }
 
 export { expect };

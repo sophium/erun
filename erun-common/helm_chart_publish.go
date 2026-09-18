@@ -1,7 +1,6 @@
 package eruncommon
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -157,15 +156,16 @@ func runHelmCommand(ctx Context, spec commandSpec) error {
 }
 
 // runHelmCommandCapturingOutput streams helm's output as usual while also
-// capturing it, so a caller can classify the failure it reports.
+// capturing it, so a caller can classify the failure it reports. See
+// commandOutputCapture for why stdout and stderr need separate buffers.
 func runHelmCommandCapturingOutput(ctx Context, spec commandSpec) (string, error) {
-	capture := new(bytes.Buffer)
+	capture := &commandOutputCapture{}
 	cmd := Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir
-	cmd.Stdout = commandOutputWriter(ctx.Stdout, capture)
-	cmd.Stderr = commandOutputWriter(ctx.Stderr, capture)
+	cmd.Stdout = teeWriter(ctx.Stdout, &capture.stdout)
+	cmd.Stderr = teeWriter(ctx.Stderr, &capture.stderr)
 	err := cmd.Run()
-	return capture.String(), err
+	return capture.combined(), err
 }
 
 func loadHelmChartName(chartPath string) (string, error) {

@@ -134,6 +134,21 @@ func (r mergeQueueRemote) mainTip(t *testing.T) string {
 	return runGit(t, dir, "rev-parse", r.main)
 }
 
+// pushDirect pushes a commit straight to branch with no review or gate
+// involved — exactly what the release flow's own "[skip ci]" commits do.
+func (r mergeQueueRemote) pushDirect(t *testing.T, branch, filename, message string) string {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "clone", r.url, ".")
+	runGit(t, dir, "checkout", branch)
+	mustNoErr(t, os.WriteFile(dir+"/"+filename, []byte(message), 0o644), "write "+filename)
+	runGit(t, dir, "add", filename)
+	runGit(t, dir, "commit", "-m", message)
+	commit := runGit(t, dir, "rev-parse", "HEAD")
+	runGit(t, dir, "push", "origin", branch)
+	return commit
+}
+
 // merge is exactly what an environment does on promotion to MERGE: fetch
 // target and source, squash-merge the source onto the current target, commit,
 // and push. Real git, against the real (local) remote.
@@ -331,5 +346,46 @@ func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	}
 	if got := readMergeReview(t, srv.URL, reviewC).Status; got == model.ReviewStatusMerged {
 		t.Fatal("review C reached MERGED despite its merge being built against a target tip that was no longer current")
+	}
+}
+
+// TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween is
+// the fix for erun#2250: the release flow enqueued by review A's own MERGED
+// transition pushes its "[skip ci]" commits straight to main — no review, no
+// gate — before review B's merge is reported. Review B's own merge commit is
+// therefore no longer an immediate child of review A's merge commit, but
+// review A's merge commit is still really its ancestor, so the report is
+// accepted rather than refused forever the way strict parent equality used
+// to refuse it.
+func TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+	remote := newMergeQueueRemote(t)
+	branchA := uniqueBranchName(t, "feature-a")
+	branchB := uniqueBranchName(t, "feature-b")
+	remote.branch(t, branchA, "a.txt")
+	remote.branch(t, branchB, "b.txt")
+
+	reviewA := e2eOpenReview(t, srv.URL, "merge-queue-e2e-release-a", remote.main, branchA)
+	e2eReportGreenBuild(t, srv.URL, reviewA)
+	mergeCommitA := remote.merge(t, remote.main, branchA, "merge "+branchA)
+	buildA := e2ePostGateBuild(t, srv.URL, reviewA, mergeCommitA, true, "")
+	if code, merged := e2eReportMerged(t, srv.URL, reviewA, buildA, remote.url); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("review A did not merge: HTTP %d status=%s", code, merged.Status)
+	}
+
+	remote.pushDirect(t, remote.main, "release.txt", "[skip ci] release 1.0.0")
+
+	reviewB := e2eOpenReview(t, srv.URL, "merge-queue-e2e-release-b", remote.main, branchB)
+	e2eReportGreenBuild(t, srv.URL, reviewB)
+	mergeCommitB := remote.merge(t, remote.main, branchB, "merge "+branchB)
+	buildB := e2ePostGateBuild(t, srv.URL, reviewB, mergeCommitB, true, "")
+
+	code, merged := e2eReportMerged(t, srv.URL, reviewB, buildB, remote.url)
+	if code != http.StatusOK {
+		t.Fatalf("report MERGED after an unrelated release commit landed in between: HTTP %d, want 200", code)
+	}
+	if merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", merged.Status)
 	}
 }
