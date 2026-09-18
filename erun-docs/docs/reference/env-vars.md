@@ -86,6 +86,6 @@ only thing that ties a session to its `orchestrators:` entry.
 The following look ERun-related but are not consumed:
 
 - `ERUN_VERSION` — compiled into the binary at build time (`-ldflags -X main.Version=…`). Not read from the environment.
-- `ERUN_HOME` — there is no such variable; per-user config lives under `~/.config/erun/` (or the OS-equivalent path; see [Config locations](/reference/config-locations)).
+- `ERUN_HOME` — there is no such variable; per-user config lives under `<config-root>/`, the platform's own config directory (see [Config locations](/reference/config-locations)), and per-environment state always lives under `~/.erun/`.
 
 A variable not in either table above is ignored.

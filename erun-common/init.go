@@ -915,10 +915,10 @@ func (s *bootstrapRunState) createEnvConfig() error {
 // registry. A host environment must not contact a cluster during init any
 // more than it does at any other time.
 func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
-	envProjectRoot = strings.TrimSpace(envProjectRoot)
-	if envProjectRoot == "" {
-		return fmt.Errorf("cannot create %s/%s as type %s: %s", s.tenant, s.envName, EnvironmentTypeHost, hostRepoPathRequirement(EnvironmentTypeHost))
+	if err := ValidateHostRepoPath(EnvironmentTypeHost, envProjectRoot); err != nil {
+		return fmt.Errorf("cannot create %s/%s as type %s: %w", s.tenant, s.envName, EnvironmentTypeHost, err)
 	}
+	envProjectRoot = strings.TrimSpace(envProjectRoot)
 	// Skipping the cluster/cloud/registry resolution below is what "no cluster
 	// contact" means for host, but creating a new environment still asks for
 	// the same confirmation every other type does — that step is local and
@@ -1231,9 +1231,10 @@ func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType)
 	if err != nil {
 		return err
 	}
-	if projectRoot = strings.TrimSpace(projectRoot); projectRoot == "" {
-		return fmt.Errorf("cannot change %s/%s to type %s: %s", s.tenant, s.envName, requested, hostRepoPathRequirement(requested))
+	if err := ValidateHostRepoPath(requested, projectRoot); err != nil {
+		return fmt.Errorf("cannot change %s/%s to type %s: %w", s.tenant, s.envName, requested, err)
 	}
+	projectRoot = strings.TrimSpace(projectRoot)
 	if s.envConfig.LocalRepoPath == projectRoot {
 		return nil
 	}
@@ -1241,17 +1242,6 @@ func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: local repo path set to " + projectRoot)
 	return nil
-}
-
-// hostRepoPathRequirement names why a type needs a host-machine directory,
-// worded for what that type actually does with it: local-agent hostPath-mounts
-// it into a pod, while a host env has no pod at all and simply is that
-// directory.
-func hostRepoPathRequirement(requested EnvironmentType) string {
-	if requested == EnvironmentTypeHost {
-		return "it needs a host directory to use — run init from the project directory or pass --project-root"
-	}
-	return "it needs a host repo path to mount — run init from the project directory or pass --project-root"
 }
 
 func describeEnvType(envType EnvironmentType) string {

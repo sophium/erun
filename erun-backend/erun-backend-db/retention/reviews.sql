@@ -21,8 +21,8 @@
 -- pinned last_*_build_id columns. Deleting a review while an unpinned
 -- builds/gate_runs row still references it would hit a live FK violation,
 -- so this file's guard checks builds directly rather than trusting that
--- #1956's (not-yet-implemented) sweep already cleared it -- see the header
--- note on effectiveness below.
+-- some other sweep already cleared it -- no policy here covers builds -- see
+-- the header note on effectiveness below.
 --
 -- review_reviewers has no self-cleanup path anywhere in the codebase (see
 -- the design), so this sweep prunes it itself, in the same transaction,
@@ -30,13 +30,13 @@
 -- survives this round, so "who reviewed this" is never lost for a review
 -- still standing.
 --
--- Effectiveness note: until #1956 (builds/gate_runs retention) ships, a
--- CLOSED review that ever had any GATE build attempt keeps at least one
--- builds row forever, which fails this file's own builds guard forever.
--- That is expected, not a bug: this policy is still correct and safe to run
--- now, it will simply find few or no eligible rows on a tenant whose closed
--- reviews all went through at least one gate attempt, until #1956 lands and
--- starts aging those builds/gate_runs rows out.
+-- Effectiveness note: until builds/gate_runs retention exists, a CLOSED
+-- review that ever had any GATE build attempt keeps at least one builds row
+-- forever, which fails this file's own builds guard forever. That is
+-- expected, not a bug: this policy is still correct and safe to run now, it
+-- will simply find few or no eligible rows on a tenant whose closed reviews
+-- all went through at least one gate attempt, until those two tables are
+-- swept and their rows start aging out.
 --
 -- Blast radius if the bound below is misconfigured: an unrecoverable loss
 -- of review history and its reviewer assignments -- not a crash, since
@@ -151,7 +151,7 @@ BEGIN;
 
 -- Null stale last_failed_build_id/last_ready_build_id pins on reviews past
 -- the age/count bound, regardless of whether they pass the guard this
--- round. This is what eventually lets #1956's own sweep (once it exists)
+-- round. This is what will eventually let a builds sweep (once one exists)
 -- prune the now-unpinned build -- see the header note above.
 WITH closed_ranked AS (
   SELECT review_id, tenant_id, updated_at,

@@ -139,6 +139,13 @@ demonstrated:
   ID), and a genuine failure. The orphan warning is not proof of completed work;
   callers must inspect the job's own record. A wrapper's bounded-wait timeout is
   also not the underlying gate verdict (`scripts/agent-gate.sh`).
+- The wrapper's own 124 does not survive `make`: GNU Make collapses any nonzero
+  recipe exit to its generic exit 2, so a caller reading only `make check`'s exit
+  status cannot tell a bounded-wait timeout from a real failure. Keep the default
+  foreground-safe (bail at the first timeout) and let a caller that is not
+  foreground-constrained opt in with `AGENT_GATE_AWAIT_VERDICT=1`, which re-awaits
+  the same job across bounded `job await` calls until it reaches a real verdict.
+  `ERUN_JOB_ID` being set does not distinguish the two callers.
 
 ## Release recovery
 
@@ -148,11 +155,33 @@ demonstrated:
   `release_disk_headroom.go`.
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
+- A push the registry rejects for a blob it does not hold is the concurrent-publisher
+  shape, not a local defect: two releases sharing layers can have the loser's manifest
+  rejected while the peer's upload is still committing. `DockerImagePusher` re-pushes
+  it, bounded, gated on `IsDockerUnknownBlobError` alone. Do not add a second retry
+  for it at a higher layer and do not widen the predicate — an auth, policy, or network
+  failure must still surface on its first occurrence. The promote path's
+  rebuild-from-source fallback remains the deeper recovery for the one blob rejection
+  a re-push cannot clear: a stale local "already pushed" record that skips the upload
+  again.
 - Refuse an existing release tag at a different HEAD. If it is an unpushed,
   unincorporated interrupted-run tag, name that diagnosis and the explicit remedy;
   never automatically delete it. Preserve retryable version state.
 - Recheck the remote branch before building and reconcile a later move through
   bounded final-push recovery. Human scheduling cannot replace those checks.
+- Scope final-push recovery to the ref git actually rejected. One push carries
+  the base branch, develop and the tag, and only the base branch's own rejected
+  ref is repaired by rebasing it. A rejection on any other ref is reported as
+  what it is — the base branch did not move, so rebasing it is a no-op that
+  spends every attempt without ever fetching the rejected ref
+  (`release_remote.go`, `release_remote_push_rejection_test.go`). Keep the
+  integration golden that absorbs a base branch that genuinely moved.
+- Treat a final-push failure as post-publication, not as an interrupted release:
+  the images, charts and tag are already public, and the GitHub Release object is
+  created after the push, so it is absent. The failure must name the ref that did
+  not land, git's own reason, and the missing Release object as the gap; it must
+  never read as the pre-publication shape whose recovery deletes the tag and
+  resets the branch (`real_run_names_the_rejected_develop_and_does_not_rebase_main`).
 - Distinguish pod replacement from a missing supervisor in the same pod using
   the recorded pod identity (`EnvironmentJob.UnknownReasonKind`), not exit-code
   guesses. Preserve that cause through status and recovery reporting.

@@ -122,11 +122,18 @@ func TestFormatGiB(t *testing.T) {
 }
 
 // diskHeadroomRead is one scripted response from a test's fake
-// diskHeadroomFreeSpaceFunc.
+// diskHeadroomFreeSpaceFunc, including the filesystem the fake reports having
+// taken it on.
 type diskHeadroomRead struct {
-	free  uint64
-	total uint64
-	ok    bool
+	free        uint64
+	total       uint64
+	path        string
+	sharedPaths []string
+	ok          bool
+}
+
+func (r diskHeadroomRead) measurement() diskHeadroomMeasurement {
+	return diskHeadroomMeasurement{free: r.free, total: r.total, path: r.path, sharedPaths: r.sharedPaths}
 }
 
 // diskHeadroomCase drives one pass of the decision logic. The floor is pinned
@@ -136,18 +143,30 @@ type diskHeadroomCase struct {
 	policy        diskHeadroomPolicy
 	dryRun        bool
 	reads         []diskHeadroomRead
-	reclaimable   uint64
+	reclaimable   dockerReclaimable
 	reclaimableOK bool
 	pruneErr      error
 	wantErr       bool
 	wantErrSubstr string
-	wantPrune     bool
+	// What the remedy a failure names gets wrong is the whole defect, so the
+	// assertions are on the rendered message: what it must say, and — when the
+	// space is one docker cannot free — what it must not.
+	wantErrContains []string
+	wantErrExcludes []string
+	wantPrune       bool
 }
 
 const (
 	diskHeadroomTestFloor uint64 = 20 << 30 // 20 GiB
 	diskHeadroomBelow            = diskHeadroomTestFloor - (1 << 30)
 	diskHeadroomAbove            = diskHeadroomTestFloor + (1 << 30)
+
+	// The docker root as this check normally resolves it, and the environment's
+	// own space on it — the two things the reported failure had to tell apart.
+	dockerRootPath          = "/var/lib/docker"
+	dindDockerRootPath      = "/dind/docker"
+	environmentWorkCloneDir = "/home/erun/work"
+	environmentCacheDir     = "/home/erun/.cache"
 )
 
 func diskHeadroomCases() []diskHeadroomCase {
@@ -161,16 +180,25 @@ func diskHeadroomCases() []diskHeadroomCase {
 			name:        "free space below floor: prune runs, re-check above floor passes",
 			policy:      releaseDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
-			reclaimable: 1 << 40, reclaimableOK: true,
+			reclaimable: dockerReclaimable{buildCache: 1 << 40, total: 1 << 40}, reclaimableOK: true,
 			wantPrune: true,
 		},
 		{
-			name:          "release still below floor after pruning refuses",
-			policy:        releaseDiskHeadroomPolicy,
-			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
+			name:   "release still below floor after pruning refuses",
+			policy: releaseDiskHeadroomPolicy,
+			reads: []diskHeadroomRead{
+				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
+				{free: diskHeadroomBelow, path: dockerRootPath, ok: true},
+			},
+			// Unreadable: an unknown figure is not evidence the remedy is inert,
+			// so the docker remedy still stands.
 			wantPrune:     true,
 			wantErr:       true,
 			wantErrSubstr: "filling this disk is what evicts the pod running the release",
+			wantErrContains: []string{
+				"docker system prune, remove unused images",
+				dockerRootPath,
+			},
 		},
 		{
 			// A build is small enough that proceeding is usually fine, and
@@ -178,7 +206,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 			name:        "build still below floor after pruning warns but proceeds",
 			policy:      buildDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
-			reclaimable: 1 << 40, reclaimableOK: true,
+			reclaimable: dockerReclaimable{buildCache: 1 << 40, total: 1 << 40}, reclaimableOK: true,
 			wantPrune: true,
 		},
 		{
@@ -186,19 +214,19 @@ func diskHeadroomCases() []diskHeadroomCase {
 			policy:      releaseDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomBelow, ok: true}},
 			pruneErr:    errors.New("boom"),
-			reclaimable: 1 << 40, reclaimableOK: true,
+			reclaimable: dockerReclaimable{buildCache: 1 << 40, total: 1 << 40}, reclaimableOK: true,
 			wantPrune: true,
 			wantErr:   true,
 		},
 		{
 			// docker system df understated real reclaimable build cache by 4.4x
-			// on a real node (erun#2431): a small-but-nonzero reported figure must
-			// not be read as "the prune can't help" — it is only a lower bound, so
-			// the prune still runs, and here it turns out to close the gap.
+			// on a real node: a small-but-nonzero reported figure must not be
+			// read as "the prune can't help" — it is only a lower bound, so the
+			// prune still runs, and here it turns out to close the gap.
 			name:        "reclaimable understated but non-zero: prunes instead of refusing on the stale figure",
 			policy:      releaseDiskHeadroomPolicy,
 			reads:       []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}, {free: diskHeadroomAbove, ok: true}},
-			reclaimable: 1 << 20, reclaimableOK: true,
+			reclaimable: dockerReclaimable{buildCache: 1 << 20, total: 1 << 20}, reclaimableOK: true,
 			wantPrune: true,
 		},
 		{
@@ -208,7 +236,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 			name:          "reclaimable genuinely zero: declined, not attempted",
 			policy:        releaseDiskHeadroomPolicy,
 			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
-			reclaimable:   0,
+			reclaimable:   dockerReclaimable{},
 			reclaimableOK: true,
 			wantPrune:     false,
 			wantErr:       true,
@@ -219,7 +247,7 @@ func diskHeadroomCases() []diskHeadroomCase {
 			name:          "a build declines a genuinely empty prune and proceeds",
 			policy:        buildDiskHeadroomPolicy,
 			reads:         []diskHeadroomRead{{free: diskHeadroomBelow, ok: true}},
-			reclaimable:   0,
+			reclaimable:   dockerReclaimable{},
 			reclaimableOK: true,
 			wantPrune:     false,
 		},
@@ -245,55 +273,191 @@ func diskHeadroomCases() []diskHeadroomCase {
 	}
 }
 
+// diskHeadroomRemedyCases are the shortfalls where the remedy, not the
+// decision, is what is under test.
+func diskHeadroomRemedyCases() []diskHeadroomCase {
+	return []diskHeadroomCase{
+		// The reported failure: every docker store on the node already reported
+		// 0 B reclaimable, so the docker remediation the message named could
+		// not free a byte of the space that was actually short — it is held
+		// outside docker, on the same filesystem, by the environment's own
+		// checkouts and caches. The message must say so instead of sending the
+		// operator through the prune it has already measured as a no-op.
+		{
+			name:   "a shortage docker cannot free drops the docker remedy and names what holds the space",
+			policy: releaseDiskHeadroomPolicy,
+			reads: []diskHeadroomRead{{
+				free:        diskHeadroomBelow,
+				path:        dockerRootPath,
+				sharedPaths: []string{environmentWorkCloneDir, environmentCacheDir},
+				ok:          true,
+			}},
+			reclaimable:   dockerReclaimable{},
+			reclaimableOK: true,
+			wantPrune:     false,
+			wantErr:       true,
+			wantErrContains: []string{
+				"nothing left to reclaim there",
+				"pruning docker cannot free any of it",
+				"held outside docker",
+				environmentWorkCloneDir,
+				environmentCacheDir,
+				dockerRootPath,
+				"grow the volume",
+			},
+			wantErrExcludes: []string{"docker system prune", "remove unused images"},
+		},
+		{
+			// The space docker's wider remedy can still reach: the build-cache
+			// prune is a no-op, but unused images are docker's to remove, so the
+			// docker remedy still gets named.
+			name:   "a shortage docker's stores can still reach keeps the docker remedy",
+			policy: releaseDiskHeadroomPolicy,
+			reads: []diskHeadroomRead{{
+				free: diskHeadroomBelow,
+				path: dockerRootPath,
+				ok:   true,
+			}},
+			reclaimable:   dockerReclaimable{buildCache: 0, total: 2 << 30},
+			reclaimableOK: true,
+			wantPrune:     false,
+			wantErr:       true,
+			wantErrContains: []string{
+				"docker system prune, remove unused images",
+				dockerRootPath,
+			},
+			wantErrExcludes: []string{"held outside docker"},
+		},
+		{
+			// The daemon root is whatever docker reports, not the path this
+			// file's default happens to be: the message names the site the read
+			// was taken at.
+			name:   "the message names the path the read was taken at",
+			policy: releaseDiskHeadroomPolicy,
+			reads: []diskHeadroomRead{
+				{free: diskHeadroomBelow, path: dindDockerRootPath, ok: true},
+				{free: diskHeadroomBelow, path: dindDockerRootPath, ok: true},
+			},
+			reclaimable:     dockerReclaimable{buildCache: 1 << 40, total: 1 << 40},
+			reclaimableOK:   true,
+			wantPrune:       true,
+			wantErr:         true,
+			wantErrContains: []string{dindDockerRootPath},
+			wantErrExcludes: []string{dockerRootPath},
+		},
+	}
+}
+
 // TestEnsureDiskHeadroomWith drives the decision logic with injected
 // fakes instead of a real docker daemon, per erun-common/AGENTS.md's
 // dependency-injection-over-globals guidance (mirroring the existing
 // GitCommandRunnerFunc-injection shape ensureReleaseBaseBranchUnmoved uses).
 func TestEnsureDiskHeadroomWith(t *testing.T) {
-	for _, tc := range diskHeadroomCases() {
+	cases := append(diskHeadroomCases(), diskHeadroomRemedyCases()...)
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
-
-			wantReads := 0
-			if !tc.dryRun {
-				wantReads = len(tc.reads)
-			}
-
-			readCalls := 0
-			readFree := func() (uint64, uint64, bool) {
-				read := tc.reads[readCalls]
-				readCalls++
-				return read.free, read.total, read.ok
-			}
-			readReclaimable := func() (uint64, bool) {
-				return tc.reclaimable, tc.reclaimableOK
-			}
-			pruneCalls := 0
-			var prunedTo uint64
-			prune := func(target uint64) error {
-				pruneCalls++
-				prunedTo = target
-				return tc.pruneErr
-			}
-
-			err := ensureDiskHeadroomWith(Context{DryRun: tc.dryRun}, tc.policy, readFree, readReclaimable, prune)
-
-			if tc.wantErr != (err != nil) {
-				t.Fatalf("error = %v, wantErr = %v", err, tc.wantErr)
-			}
-			if tc.wantErrSubstr != "" && !strings.Contains(err.Error(), tc.wantErrSubstr) {
-				t.Fatalf("expected error to contain %q, got %v", tc.wantErrSubstr, err)
-			}
-			if gotPrune := pruneCalls > 0; gotPrune != tc.wantPrune {
-				t.Fatalf("prune called = %v, want %v (calls=%d)", gotPrune, tc.wantPrune, pruneCalls)
-			}
-			if tc.wantPrune && prunedTo != diskHeadroomTestFloor {
-				t.Fatalf("expected the prune bounded to the floor (%d), got %d", diskHeadroomTestFloor, prunedTo)
-			}
-			if readCalls != wantReads {
-				t.Fatalf("expected %d free-space reads, got %d", wantReads, readCalls)
-			}
+			runDiskHeadroomCase(t, tc)
 		})
+	}
+}
+
+func runDiskHeadroomCase(t *testing.T, tc diskHeadroomCase) {
+	t.Helper()
+	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+
+	wantReads := 0
+	if !tc.dryRun {
+		wantReads = len(tc.reads)
+	}
+
+	readCalls := 0
+	readFree := func() (diskHeadroomMeasurement, bool) {
+		read := tc.reads[readCalls]
+		readCalls++
+		return read.measurement(), read.ok
+	}
+	readReclaimable := func() (dockerReclaimable, bool) {
+		return tc.reclaimable, tc.reclaimableOK
+	}
+	pruneCalls := 0
+	var prunedTo uint64
+	prune := func(target uint64) error {
+		pruneCalls++
+		prunedTo = target
+		return tc.pruneErr
+	}
+
+	err := ensureDiskHeadroomWith(Context{DryRun: tc.dryRun}, tc.policy, readFree, readReclaimable, prune)
+	assertDiskHeadroomMessage(t, tc, err)
+
+	if gotPrune := pruneCalls > 0; gotPrune != tc.wantPrune {
+		t.Fatalf("prune called = %v, want %v (calls=%d)", gotPrune, tc.wantPrune, pruneCalls)
+	}
+	if tc.wantPrune && prunedTo != diskHeadroomTestFloor {
+		t.Fatalf("expected the prune bounded to the floor (%d), got %d", diskHeadroomTestFloor, prunedTo)
+	}
+	if readCalls != wantReads {
+		t.Fatalf("expected %d free-space reads, got %d", wantReads, readCalls)
+	}
+}
+
+// assertDiskHeadroomMessage checks the rendered verdict against what the case
+// expects it to say — and, for space docker was measured unable to free, what
+// it must not say.
+func assertDiskHeadroomMessage(t *testing.T, tc diskHeadroomCase, err error) {
+	t.Helper()
+	if tc.wantErr != (err != nil) {
+		t.Fatalf("error = %v, wantErr = %v", err, tc.wantErr)
+	}
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	if tc.wantErrSubstr != "" && !strings.Contains(message, tc.wantErrSubstr) {
+		t.Fatalf("expected error to contain %q, got %v", tc.wantErrSubstr, err)
+	}
+	for _, want := range tc.wantErrContains {
+		if !strings.Contains(message, want) {
+			t.Fatalf("expected the message to contain %q, got %q", want, message)
+		}
+	}
+	for _, unwanted := range tc.wantErrExcludes {
+		if strings.Contains(message, unwanted) {
+			t.Fatalf("expected the message not to contain %q, got %q", unwanted, message)
+		}
+	}
+}
+
+// TestDiskHeadroomRemedyFollowsTheMeasurement pins the remedy itself, for both
+// callers: a build renders the same derived remedy into its warning that a
+// release renders into its refusal, so neither can name a remediation the
+// measurement has already ruled out.
+func TestDiskHeadroomRemedyFollowsTheMeasurement(t *testing.T) {
+	const (
+		free  = diskHeadroomBelow
+		floor = diskHeadroomTestFloor
+	)
+	dockerCanStillFree := diskHeadroomShortfall{
+		free: free, floor: floor, path: dockerRootPath,
+		dockerReclaimExhausted: false,
+	}
+	if got := dockerCanStillFree.remedy(); !strings.Contains(got, "docker system prune") {
+		t.Fatalf("a shortfall docker can still reach must name the docker remedy, got %q", got)
+	}
+
+	dockerHasNothingToFree := diskHeadroomShortfall{
+		free: free, floor: floor, path: dockerRootPath,
+		sharedPaths:            []string{environmentWorkCloneDir},
+		dockerReclaimExhausted: true,
+	}
+	got := dockerHasNothingToFree.remedy()
+	if strings.Contains(got, "docker system prune") || strings.Contains(got, "remove unused images") {
+		t.Fatalf("a shortfall docker cannot free must not name a docker remedy, got %q", got)
+	}
+	for _, want := range []string{"pruning docker cannot free any of it", environmentWorkCloneDir, "grow the volume"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected the remedy to contain %q, got %q", want, got)
+		}
 	}
 }
 
