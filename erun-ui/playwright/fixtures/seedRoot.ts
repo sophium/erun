@@ -265,7 +265,7 @@ export function createIsolatedLayout(): void {
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun'];
+  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude'];
   for (const name of stubs) {
     writeStubBinary(name);
   }
@@ -392,6 +392,16 @@ export function seedGitRemoteAgentForK3d(
 // - kubectl: answers the context listing with an empty set (the env-init
 //   dialog's deterministic empty state) and reports everything else as
 //   unreachable.
+// - claude: an orchestrator row reads "running" only while its spawned session
+//   is live (ListOrchestrators, erun-ui/orchestrator.go), so the specs that
+//   open an orchestrator need that session to stay up. The real binary cannot
+//   in a non-interactive host — no TTY, no credentials — so it exits at once,
+//   the row reads "stopped", and the spec times out; where a real session does
+//   start (a developer's machine, an agent pod), every orchestrator the suite
+//   opens spends the shared agent account on a nested agent nobody asked for.
+//   The stub prints a shell-prompt line (the action runner's setup-complete
+//   marker, see signalSessionReadyOnLine) and then sleeps, so the session is
+//   live, quiet, and killable.
 function writeStubBinary(name: string): void {
   if (isWindows) {
     // CreateProcess cannot exec a shell script or a .cmd/.bat file, so copy the
@@ -412,6 +422,14 @@ function writeStubBinary(name: string): void {
       '    ;;',
       '  *) exit 0 ;;',
       'esac',
+      '',
+    ].join('\n');
+  } else if (name === 'claude') {
+    body = [
+      '#!/bin/sh',
+      '# claude playwright stub: keeps an orchestrator session alive and inert.',
+      "printf 'claude@playwright:~$ \\n'",
+      'exec sleep 2147483647',
       '',
     ].join('\n');
   } else if (name === 'kubectl') {
@@ -789,7 +807,54 @@ export function addOrchestrators(ids: string[], tenant: string, environment: str
 // YAML marshaller and this suite's hand-written seed disagree on it) rather
 // than assuming a fixed one, and removes the whole entry through whichever
 // line starts the next sibling item or leaves the block.
+// orchestratorOpenStatePath is the desktop's durable open set: which
+// orchestrators to reopen, and the scope each was wired to when it was opened.
+// It is a SEPARATE record from config.yaml -- erun-ui/orchestrator_open_state.go
+// writes it on open and only ever reads it back at launch.
+function orchestratorOpenStatePath(): string {
+  return path.join(isolatedHomeDir(), '.config', 'ERun', 'orchestrator-open.json');
+}
+
+// removeOrchestratorOpenState drops one orchestrator from that open set.
+//
+// Clearing only the config is not enough, and the half-state it leaves is what
+// makes it matter: the next launch reads the surviving entry, finds the
+// orchestrator has no config behind it, and renders "Reopened <id>: its
+// environments changed since its last session (... now no environments)" as a
+// sidebar alert (erun-ui/app_restart.go's orchestratorScopeChangedNotice). That
+// alert is a real role="alert" in the ERUN section, so a later spec asserting on
+// a page-wide role="alert" resolves two elements and fails on the strict-mode
+// violation -- tenant-dashboard-platform-state.spec.ts does exactly that once
+// orchestrator-directories.spec.ts has opened and removed one.
+function removeOrchestratorOpenState(id: string): void {
+  const statePath = orchestratorOpenStatePath();
+  let state: { orchestrators?: Array<{ orchestratorId?: string }> };
+  try {
+    state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as typeof state;
+  } catch {
+    // Absent or unreadable: nothing staged an open orchestrator, so there is
+    // nothing to drop and no file to rewrite.
+    return;
+  }
+  const entries = state.orchestrators ?? [];
+  const kept = entries.filter((entry) => entry.orchestratorId !== id);
+  if (kept.length === entries.length) {
+    return;
+  }
+  if (kept.length === 0) {
+    // writeOpenOrchestrators removes the file rather than writing an empty set,
+    // so match that: a leftover empty file is not a shape the desktop produces.
+    fs.rmSync(statePath, { force: true });
+    return;
+  }
+  fs.writeFileSync(statePath, `${JSON.stringify({ ...state, orchestrators: kept })}\n`);
+}
+
 export function removeOrchestrator(id: string): void {
+  // Before the config edit and outside its early returns: an orchestrator can be
+  // in the open set with no config entry left to find (the desktop re-emits the
+  // whole file through its own marshaller), and that is the case that leaks.
+  removeOrchestratorOpenState(id);
   const configPath = path.join(erunConfigDir(), 'config.yaml');
   const lines = fs.readFileSync(configPath, 'utf8').split('\n');
   const keyIndex = lines.findIndex((line) => line.trimEnd() === ORCHESTRATORS_KEY);

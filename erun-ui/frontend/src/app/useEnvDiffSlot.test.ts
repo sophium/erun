@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 
 import { configureStore } from '@reduxjs/toolkit';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Provider } from 'react-redux';
+import { test } from 'vitest';
 
 import reviewReducer, {
   emptyEnvDiffState,
