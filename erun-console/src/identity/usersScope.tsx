@@ -50,7 +50,7 @@ export function ScopedUsersStatus({
 
 // UsersScopeBadge names which tenant the panel is viewing, the same
 // "unlabeled scoped read is indistinguishable from the caller's own"
-// treatment quota/QuotaPanel.tsx already gives (erun#1816) -- undefined
+// treatment quota/QuotaPanel.tsx already gives -- undefined
 // scopeTenantId (the caller's own tenant) renders nothing.
 export function UsersScopeBadge({
   scopeTenantId,
