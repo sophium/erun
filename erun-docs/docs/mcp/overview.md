@@ -413,6 +413,12 @@ Generating conventional code (a new service, a migration job, an Ingress, …) i
 
 Every call lands in the audit trail with its tool name, so `exec_raw` invocations are immediately distinguishable from typed ones.
 
+### Dry runs {#dry-runs}
+
+A tool that can rehearse an action instead of performing it accepts `preview`. Set it to `true` and the call resolves what it would do — the plan, the commands, the targets — and returns that without touching anything. It is how a caller checks a reconcile before running one against a live environment.
+
+The capability does not follow tool families. Read it from the tool itself: whenever `preview` appears in a tool's `inputSchema`, that tool's description closes with **Supports preview.**, so a description is enough to tell a tool you can rehearse from one you cannot. A tool whose schema omits `preview` has no dry run — never assume one, and never infer one from a sibling tool in the same family.
+
 ### Full tool index {#full-tool-index}
 
 Every tool the server can register, one row each, grouped by `_meta.family` and matching `erun-common`'s `MCPToolDescriptor` table exactly — a scripted test (`TestMCPOverviewDocumentsEveryTool` in `erun-mcp`) fails the build if a tool is registered here without a row below, or a row below names a tool that isn't registered. Retired aliases (`diff`, `raw`, `write`, `commit`, `workspace_sync`) are omitted; see [Working tree](#working-tree--typed-mutations-no-shell) and [Host-served](#host-served) above for those.
