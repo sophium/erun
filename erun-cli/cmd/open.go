@@ -385,7 +385,7 @@ func (r *resolvedOpenRunner) run() error {
 // no shell to fall back on, so the forwards activateForwarders just
 // attempted are the entire deliverable: a forward that stayed unreachable —
 // including a stale one erun could not replace — must fail the run instead
-// of reading as success (erun#2104; root AGENTS.md § "Smooth, Seamless, No
+// of reading as success (root AGENTS.md § "Smooth, Seamless, No
 // Dead Ends"). done reports whether the caller should return immediately;
 // err may be nil on the plain setup-emitted success path.
 func (r *resolvedOpenRunner) emitNoShellFallbackIfNeeded(forwarderErr error) (done bool, err error) {

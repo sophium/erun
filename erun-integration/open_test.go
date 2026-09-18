@@ -239,7 +239,7 @@ func stubKubectlRunState(t *testing.T, setup env.Setup, desired, ready int) []st
 //
 // It also answers any `port-forward` invocation with a real listener, the
 // same technique fixture.StubKubectlDeployed uses: open --no-shell has no
-// shell to fall back on (erun#2104), so the post-wake MCP/API forwards this
+// shell to fall back on, so the post-wake MCP/API forwards this
 // scenario's own run depends on must actually become reachable rather than
 // the run timing out waiting on them. Spawned listener PIDs are recorded in
 // stubsDir/portsim-pids so the returned cleanup can reap them.
@@ -913,7 +913,7 @@ func TestOpen(t *testing.T) {
 		// per the port-bound-scenario rules) because the stub now runs a
 		// real port-forward simulator for the post-wake MCP/API forwards:
 		// open --no-shell has no shell to fall back on, so those forwards
-		// must actually answer or the run fails (erun#2104).
+		// must actually answer or the run fails.
 		skipIfPortsBusy(t, 26100, 26133)
 		setup := env.New(t)
 		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
@@ -1861,7 +1861,7 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("no_shell_real_run_refuses_success_when_a_stale_forward_cannot_be_stopped", func(t *testing.T) {
-		// Regression for erun#2104: erun's own error already names this exact
+		// Regression for the defect: erun's own error already names this exact
 		// shape ("127.0.0.1:PORT is held but the edge never answers -- a
 		// stale port-forward") and tells the operator to run `erun open`,
 		// but running it silently warned and exited 0 while the edge stayed
