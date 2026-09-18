@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from 'erun-kit';
 import type * as React from 'react';
 
 import { BrandMark } from './BrandMark';
+import { consoleBrandLabel } from './brand';
 
 // CenteredCard is the shared frame for every pre-shell screen (sign-in, not
 // enrolled, error, loading): a branded card centered in the viewport, so the
@@ -25,7 +26,7 @@ export function CenteredCard({
           <div className="flex items-center gap-2.5">
             <BrandMark brand={brand} />
             <span className="truncate text-sm font-semibold text-muted-foreground">
-              {brand && brand.length > 0 ? brand : 'ERun console'}
+              {brand && brand.length > 0 ? brand : consoleBrandLabel(undefined)}
             </span>
           </div>
           <CardTitle className="text-lg">{title}</CardTitle>

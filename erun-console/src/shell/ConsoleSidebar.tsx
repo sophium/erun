@@ -7,6 +7,7 @@ import { BrandMark } from './BrandMark';
 import { ScopeSelector } from './ScopeSelector';
 import type { ConsoleSection, ConsoleSectionId } from './sections';
 import { type CurrentTenant, TenantSwitcher } from './TenantSwitcher';
+import { BUNDLED_BRAND, consoleBrandLabel } from './brand';
 
 // NavBadge is the nav-level pending-count pill: a pending count must be
 // visible without opening the view. It is console-shell-owned, not a kit
@@ -93,7 +94,7 @@ export function ConsoleSidebar({
       <div className="flex items-center gap-2 px-1">
         <BrandMark brand={brand} />
         <span className="truncate text-sm font-semibold text-sidebar-foreground">
-          {brand && brand.length > 0 ? brand : 'ERun console'}
+          {brand && brand.length > 0 ? brand : consoleBrandLabel(BUNDLED_BRAND)}
         </span>
       </div>
       <TenantSwitcher token={token} current={currentTenant} oidc={oidc} />
