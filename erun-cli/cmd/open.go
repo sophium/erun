@@ -385,13 +385,18 @@ func (r *resolvedOpenRunner) run() error {
 
 // emitNoShellFallbackIfNeeded handles --no-shell and the non-interactive
 // fallback (an MCP client, an orchestrator, a script — kubectl exec -it
-// would read EOF on a non-TTY stdin and return almost instantly). Both have
-// no shell to fall back on, so the forwards activateForwarders just
-// attempted are the entire deliverable: a forward that stayed unreachable —
-// including a stale one erun could not replace — must fail the run instead
-// of reading as success (root AGENTS.md § "Smooth, Seamless, No
-// Dead Ends"). done reports whether the caller should return immediately;
-// err may be nil on the plain setup-emitted success path.
+// would read EOF on a non-TTY stdin and return almost instantly). done
+// reports whether the caller should return immediately; err may be nil on
+// the plain setup-emitted success path.
+//
+// The two branches treat an unreachable forward differently on purpose.
+// --no-shell is an explicit request for the forwards alone, so one that
+// stayed unreachable must fail the run rather than read as success (root
+// AGENTS.md § "Smooth, Seamless, No Dead Ends"). The non-TTY fallback is
+// reached by callers that asked for none of this — a script or an MCP
+// client that simply has no terminal — and the forwards are a laptop-side
+// convenience for them, not the deliverable, so a degraded one is traced
+// and the run still succeeds.
 func (r *resolvedOpenRunner) emitNoShellFallbackIfNeeded(forwarderErr error) (done bool, err error) {
 	switch {
 	case r.options.NoShell:
@@ -401,9 +406,6 @@ func (r *resolvedOpenRunner) emitNoShellFallbackIfNeeded(forwarderErr error) (do
 		r.ctx.Trace("open: --no-shell selected, emitting setup commands instead of launching shell")
 		return true, r.emitNoShellSetup()
 	case !stdinIsTerminal():
-		if forwarderErr != nil {
-			return true, forwarderErr
-		}
 		r.ctx.Trace("open: stdin is not a TTY, so an interactive shell would read EOF and exit immediately; keeping the port-forwards up and emitting setup commands instead of a shell that cannot stay open")
 		return true, r.emitNoShellSetup()
 	default:
