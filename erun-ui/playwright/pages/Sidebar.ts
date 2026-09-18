@@ -65,8 +65,19 @@ export class Sidebar {
     await this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first().click();
   }
 
+  // Delegates to the keyboard path rather than clicking. A mouse click here
+  // hovers the row first, which opens its IconTooltip, and that popper
+  // intercepts the click that was meant for the edit button:
+  //
+  //   <div data-slot="popover-anchor" ...> intercepts pointer events
+  //   Error: locator.click: Test timeout of 30000ms exceeded
+  //
+  // Whether the popper wins the race depends on how loaded the box is, so this
+  // passed alone and failed in the gate (erun#2399). Every caller here asserts
+  // what the dialog contains, not that a mouse specifically opened it, so the
+  // click bought nothing that the race did not cost back.
   async openManageDialogFor(tenant: string, env: string): Promise<void> {
-    await this.environmentRow(tenant, env).click();
+    await this.openManageDialogViaKeyboard(tenant, env);
   }
 
   // The Outputs button stops propagation, so opening outputs never also opens the env itself.
@@ -79,24 +90,24 @@ export class Sidebar {
   // IconTooltip whose popper would intercept the click. Focusing the row makes
   // the pointer-events-none button interactive; Enter fires it without a hover.
   //
-  // Retry the Enter: a boot-reattached env restores its terminal, which steals
-  // focus asynchronously and can swallow the keydown before the dialog opens.
+  // Retry the Enter as one retryable unit, the same shape hoverEnvironmentRow
+  // and readEnvHoverCard below use: a boot-reattached env restores its
+  // terminal, which steals focus asynchronously and can swallow the keydown
+  // before the dialog opens. The inner probe stays short so a swallowed
+  // keydown is retried quickly, but the fixed 4-attempt loop this replaced
+  // capped the whole wait at 4x2s regardless of the test's real 30s budget --
+  // under contention a merely slow (not swallowed) render blew that cap and
+  // failed the step with over 20s of budget still unused. Wrapping the probe
+  // in toPass converges up to the test's own budget instead.
   async openManageDialogViaKeyboard(tenant: string, env: string): Promise<void> {
     const dialog = this.page
       .getByRole('dialog')
       .filter({ has: this.page.getByRole('tab', { name: /^General/ }) })
       .first();
-    for (let attempt = 0; attempt < 4; attempt++) {
+    await expect(async () => {
       await this.environmentRow(tenant, env).press('Enter');
-      const opened = await dialog.waitFor({ state: 'visible', timeout: 2_000 }).then(
-        () => true,
-        () => false,
-      );
-      if (opened) {
-        return;
-      }
-    }
-    throw new Error(`manage dialog did not open for ${tenant} / ${env} via keyboard`);
+      await dialog.waitFor({ state: 'visible', timeout: 2_000 });
+    }).toPass({ timeout: 25_000 });
   }
 
   // Targets the clickable env-row button, not the edit button environmentRow() returns.
@@ -128,6 +139,29 @@ export class Sidebar {
 
   envHoverCard(tenant: string, env: string): Locator {
     return this.page.getByRole('dialog', { name: `${tenant} / ${env} details` });
+  }
+
+  // readEnvHoverCard hovers `tenant`/`env` and hands the resulting card to
+  // `read` as one retryable unit, instead of a bare hover followed by a
+  // sequence of independent assertions.
+  //
+  // The card's open state belongs to the hovered row's own React state, so a
+  // re-render can drop it while the pointer still rests there -- and nothing
+  // reopens it, since the pointer never left (see hoverEnvironmentRow above).
+  // That re-render is not rare: besides the boot-time auto-open of a
+  // default-landing env, the periodic activity/usage sweep can touch any
+  // environment, not just that one. A sequence of separate `expect(card)...`
+  // calls after a single hover has no way back from a mid-sequence drop;
+  // retrying the whole hover-then-read as one unit recovers by re-hovering.
+  async readEnvHoverCard(
+    tenant: string,
+    env: string,
+    read: (card: Locator) => Promise<void>,
+  ): Promise<void> {
+    await expect(async () => {
+      await this.hoverEnvironmentRow(tenant, env);
+      await read(this.envHoverCard(tenant, env));
+    }).toPass({ timeout: 25_000 });
   }
 
   // Scoped through the row button's parent so it resolves one env's dot even
@@ -302,6 +336,18 @@ export class Sidebar {
     return this.page.getByRole('dialog', { name: `${name} details` });
   }
 
+  // readOrchestratorHoverCard is readEnvHoverCard's orchestrator-row mirror,
+  // convergent for the same reason -- see that method's own comment.
+  async readOrchestratorHoverCard(
+    name: string,
+    read: (card: Locator) => Promise<void>,
+  ): Promise<void> {
+    await expect(async () => {
+      await this.hoverOrchestratorRow(name);
+      await read(this.orchestratorHoverCard(name));
+    }).toPass({ timeout: 25_000 });
+  }
+
   // hoverOrchestratorRow is the orchestrator-row mirror of
   // hoverEnvironmentRow, convergent for the same reason: the card's open state
   // belongs to the row that raised it, and a re-render drops it with no way
@@ -393,19 +439,18 @@ export class Sidebar {
   // edit button it is pointer-events-none until hover/focus and a hover opens
   // the IconTooltip popper that would swallow a click — so focus it and press
   // Enter, retrying because a boot-reattached session can steal focus.
+  // Retry the Enter as one retryable unit, the same shape
+  // openManageDialogViaKeyboard above uses and for the same reason: a fixed
+  // 4-attempt x 2000ms loop caps the whole wait at 8s regardless of the
+  // test's real 30s budget, so a merely slow (not swallowed) render under
+  // contention fails the step with budget still unused. Wrapping the probe
+  // in toPass converges up to the test's own budget instead.
   async openOrchestratorDialog(name: string): Promise<void> {
     const dialog = this.page.getByRole('dialog', { name: 'Edit orchestrator' });
-    for (let attempt = 0; attempt < 4; attempt++) {
+    await expect(async () => {
       await this.orchestratorDetailsButton(name).press('Enter');
-      const opened = await dialog.waitFor({ state: 'visible', timeout: 2_000 }).then(
-        () => true,
-        () => false,
-      );
-      if (opened) {
-        return;
-      }
-    }
-    throw new Error(`orchestrator dialog did not open for ${name} via keyboard`);
+      await dialog.waitFor({ state: 'visible', timeout: 2_000 });
+    }).toPass({ timeout: 25_000 });
   }
 
   async tenants(): Promise<string[]> {

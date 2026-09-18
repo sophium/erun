@@ -21,8 +21,8 @@ type ReviewRepository interface {
 	FindActiveMergeReview(ctx context.Context, targetBranch string) (model.Review, error)
 	// FindLastMergedReview is the platform's own record of what targetBranch's
 	// tip was the last time a queue-driven merge landed on it — condition 2 of
-	// accepting a MERGED report compares a reported commit's parent against
-	// it. repository.ErrNotFound means no review has ever merged onto this
+	// accepting a MERGED report confirms a reported commit descends from it.
+	// repository.ErrNotFound means no review has ever merged onto this
 	// branch through the queue yet.
 	FindLastMergedReview(ctx context.Context, targetBranch string) (model.Review, error)
 	CreateMergeQueueEntry(ctx context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error)
@@ -34,11 +34,13 @@ type ReviewBuildRepository interface {
 }
 
 // MergeVerifier confirms a reported merge commit is really on the target
-// branch's real remote, and reports its actual parent — the fact-about-the-
-// repository check that replaces trusting whoever calls UpdateStatus with
-// MERGED. See AGENTS.md "Merge Queue".
+// branch's real remote, and that the work this review was gated against is
+// still really its ancestor — the fact-about-the-repository check that
+// replaces trusting whoever calls UpdateStatus with MERGED. See AGENTS.md
+// "Merge Queue".
 type MergeVerifier interface {
 	Contains(ctx context.Context, remoteURL, branch, commit string) (ok bool, parent string, err error)
+	IsAncestor(ctx context.Context, remoteURL, branch, ancestor, descendant string) (isAncestor bool, err error)
 }
 
 // ReleaseTrigger enqueues the release a completed merge earns.
@@ -345,9 +347,10 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 // acceptMerged is the one path to MERGED, open to any caller — the guarantee
 // is no longer who calls it, but what it can verify: a successful GATE build
 // already recorded against this exact review and commit (verifyGateBuild),
-// and that commit's real presence on the target branch with the parent this
-// review was gated against (verifyRepositoryState). Any check failing
-// refuses with *MergeNotVerifiedError; nothing about the review changes.
+// and that commit's real presence on the target branch, descended from the
+// tip this review was gated against (verifyRepositoryState). Any check
+// failing refuses with *MergeNotVerifiedError; nothing about the review
+// changes.
 func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, buildID, remoteURL string) (model.Review, error) {
 	if review.Status != model.ReviewStatusMerge {
 		return model.Review{}, &InvalidTransitionError{From: review.Status, To: model.ReviewStatusMerged, ValidTargets: validTargetsFor(review.Status)}
@@ -395,36 +398,56 @@ func (s *ReviewService) verifyGateBuild(review model.Review, build model.Build) 
 }
 
 // verifyRepositoryState is conditions 1 and 2: the reported commit is
-// verifiably on the target branch, and its parent is the target tip this
-// review was gated against — the platform's own record of what that tip was,
-// since only one review may be MERGE per target branch at a time (see
-// AGENTS.md "Merge Queue"), so nothing else could have moved it in the
-// meantime.
+// verifiably on the target branch, and the target tip this review was gated
+// against — the platform's own record of what that tip was, since only one
+// review may be MERGE per target branch at a time (see AGENTS.md "Merge
+// Queue") — is still really its ancestor. This is a reachability check, not
+// a strict parent-equality one: the release flow pushes its own
+// `[skip ci]` commits directly to the target branch between one review
+// landing and the next being reported (erun#2250), and requiring the
+// reported commit's immediate parent to equal the gated tip made every
+// review report unverifiable forever after the first release. Ancestry
+// tolerates any number of unrelated commits landing in between while still
+// refusing a commit whose history never really passed through the gated
+// tip at all — the case that matters, a rewritten or replaced history
+// (a force-push standing in for a buggy or malicious reporter).
 func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.Review, commit, remoteURL string) error {
 	if s.verifier == nil {
 		return &MergeNotVerifiedError{Reason: "this control plane has no way to verify merges against the real repository"}
 	}
-	onBranch, parent, err := s.verifier.Contains(ctx, remoteURL, review.TargetBranch, commit)
+	onBranch, _, err := s.verifier.Contains(ctx, remoteURL, review.TargetBranch, commit)
 	if err != nil {
 		return &MergeNotVerifiedError{Reason: err.Error()}
 	}
 	if !onBranch {
 		return &MergeNotVerifiedError{Reason: fmt.Sprintf("commit %s is not on the target branch %s", commit, review.TargetBranch)}
 	}
-	expectedParent, err := s.gatedTargetTip(ctx, review.TargetBranch)
+	gatedTip, err := s.gatedTargetTip(ctx, review.TargetBranch)
 	if err != nil {
 		return err
 	}
-	if expectedParent != "" && parent != expectedParent {
-		return &MergeNotVerifiedError{Reason: fmt.Sprintf("commit %s's parent %s does not match the target tip %s this review was gated against", commit, parent, expectedParent)}
+	if gatedTip == "" {
+		return nil
+	}
+	descendsFromGatedTip, err := s.verifier.IsAncestor(ctx, remoteURL, review.TargetBranch, gatedTip, commit)
+	if err != nil {
+		return &MergeNotVerifiedError{Reason: err.Error()}
+	}
+	if !descendsFromGatedTip {
+		return &MergeNotVerifiedError{Reason: fmt.Sprintf("commit %s does not descend from %s, the target tip this review was gated against", commit, gatedTip)}
 	}
 	return nil
 }
 
 // gatedTargetTip is the merge commit of the most recently MERGED review on
-// targetBranch. Empty with no error means no review has ever merged onto
-// this branch through the queue yet — the bootstrap case, with nothing
-// recorded to compare against.
+// targetBranch — still the right anchor even though it can no longer be
+// compared by strict equality: the one-MERGE-per-target-branch invariant
+// means nothing else advances the queue's own notion of the branch's tip
+// while a review holds MERGE, so this is the review's actual gated base
+// regardless of what else (a release push) landed on the branch around it.
+// Empty with no error means no review has ever merged onto this branch
+// through the queue yet — the bootstrap case, with nothing recorded to
+// compare against.
 func (s *ReviewService) gatedTargetTip(ctx context.Context, targetBranch string) (string, error) {
 	last, err := s.reviews.FindLastMergedReview(ctx, targetBranch)
 	if errors.Is(err, repository.ErrNotFound) {

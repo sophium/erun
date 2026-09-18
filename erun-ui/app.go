@@ -32,7 +32,7 @@ const (
 	envUsageEvent               = "env-usage"
 	envNodeEvent                = "env-node"
 	appCloseGateEvent           = "app-close-gate"
-	appSessionEnvVar            = "ERUN_UI_SESSION"
+	appSessionEnvVar            = eruncommon.DesktopSessionEnvVar
 )
 
 type erunUIStore interface {
@@ -156,6 +156,10 @@ type App struct {
 	// port-forward that holds its local port while its edge answers nothing.
 	// See environment_forward_repair.go.
 	forwardRepairs map[string]forwardRepairEpisode
+	// edgeOutages tracks, per environment, an "edge is not answering" entry
+	// logged when an orchestrator wired it, until the sweep sees that edge
+	// answer and logs the matching exit. See orchestrator_edge_recovery.go.
+	edgeOutages    map[string]orchestratorEdgeOutage
 	busyEnvs       map[string]int
 	workspaceSyncs map[string]*workspaceSyncWorker
 	orchestrators  map[string]*orchestratorSession
@@ -166,7 +170,10 @@ type App struct {
 	// skillsSourceReported latches the one warning a run posts when the shipped
 	// skills cannot be resolved. The condition is a property of this build, so
 	// restating it on every orchestrator launch would be noise.
-	skillsSourceReported      bool
+	skillsSourceReported bool
+	// agentsSourceReported is skillsSourceReported's counterpart for the
+	// reusable agents (erun-builder/erun-reviewer).
+	agentsSourceReported      bool
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
 	activityStatusPoller      func(activityQueueEntry)
@@ -224,15 +231,16 @@ type App struct {
 	emitMu sync.RWMutex
 	emitFn func(name string, args ...any)
 
+	// restartControlMarkerMu guards the control record against this process's
+	// own shutdown, so an adoption still waiting for a previous owner to exit
+	// cannot republish an endpoint after shutdown has removed it.
+	restartControlMarkerMu       sync.Mutex
+	restartControlMarkerReleased bool
+
 	// restartControl is the loopback server a CLI-triggered restart talks
 	// to (see restart_control.go). nil when the bind failed or startup has not
 	// run yet (unit tests that construct an App directly).
 	restartControl *restartControlServer
-	// desktopControlMarker is this instance's own control marker, kept so the
-	// periodic reconciler (reconcileDesktopControlMarker) can re-assert it
-	// without recomputing pid/port/start time. Zero value when restartControl
-	// is nil.
-	desktopControlMarker eruncommon.DesktopControlMarker
 }
 
 // SetEmitter overrides how the App emits frontend events; the headless server
@@ -631,53 +639,6 @@ func (a *App) startup(ctx context.Context) {
 	go a.reconcileWorkspaceSyncForConfiguredEnvs()
 }
 
-// startRestartControl binds the loopback restart-trigger server and records
-// how to reach it, so a CLI-triggered restart can find and verify this
-// exact process before asking it to restart. A bind failure is logged and
-// left without a marker (see startRestartControlServer): a desktop that
-// cannot expose a restart trigger this launch still works for everything
-// else, and an absent marker is exactly what an external trigger correctly
-// reads as "no running desktop to restart".
-//
-// The marker is claimed, not written outright: if another, currently-alive
-// instance already holds it, this launch leaves it alone rather than
-// stomping the only record that lets anything find the instance that is
-// actually running. A refused claim is logged, not fatal -- this instance's
-// own restart control server still starts and runs, it is simply not the one
-// an external trigger will discover.
-func (a *App) startRestartControl() {
-	server, port := startRestartControlServer(a)
-	if server == nil {
-		return
-	}
-	a.restartControl = server
-	marker := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: port, StartedAtUnix: time.Now().Unix()}
-	a.desktopControlMarker = marker
-	if err := eruncommon.ClaimDesktopControlMarker(a.deps.desktopControlMarkerPath, marker, eruncommon.DesktopProcessAlive); err != nil {
-		log.Printf("erun-app: claim restart control marker: %v", err)
-	}
-}
-
-// reconcileDesktopControlMarker re-asserts this instance's own control marker
-// on every session-heartbeat tick (see session_heartbeat.go). Without this, a
-// marker this instance failed to claim at startup (another instance held it,
-// which has since crashed) would only ever be reclaimed by a fresh launch --
-// and a process that is killed rather than cleanly shut down never runs
-// RemoveDesktopControlMarker/ReleaseDesktopControlMarker at all, so its stale
-// entry would otherwise sit there until somebody else happens to start.
-// Running the same claim this instance already used at startup on the
-// existing reconciler tick means whichever instance is actually alive keeps
-// its own record current, without inventing a second reconcile loop beside
-// session_heartbeat.go's.
-func (a *App) reconcileDesktopControlMarker() {
-	if a.restartControl == nil {
-		return
-	}
-	if err := eruncommon.ClaimDesktopControlMarker(a.deps.desktopControlMarkerPath, a.desktopControlMarker, eruncommon.DesktopProcessAlive); err != nil {
-		log.Printf("erun-app: reconcile restart control marker: %v", err)
-	}
-}
-
 func (a *App) shutdown(context.Context) {
 	a.stopConfigWatcher()
 	a.stopActivityPollers()
@@ -685,9 +646,7 @@ func (a *App) shutdown(context.Context) {
 	a.stopActionRunners()
 	a.investigations.stopTimers()
 	a.restartControl.Close()
-	if err := eruncommon.ReleaseDesktopControlMarker(a.deps.desktopControlMarkerPath, os.Getpid()); err != nil {
-		log.Printf("erun-app: release restart control marker: %v", err)
-	}
+	a.releaseRestartControlMarker()
 	a.mu.Lock()
 	a.stopAllWorkspaceSyncsLocked()
 	a.stopAllCloudCredentialsRefreshersLocked()

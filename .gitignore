@@ -23,6 +23,10 @@ profile.cov
 # env file
 .env
 
+# eslint/prettier --cache output (Makefile's test-frontend target,
+# FRONTEND_LINT_CACHE_DIR)
+/.cache/
+
 .claude
 
 # macOS

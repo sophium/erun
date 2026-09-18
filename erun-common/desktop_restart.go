@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,9 +33,13 @@ const (
 
 // DesktopControlMarker is what a running desktop app (erun-ui) records at
 // startup and removes at a clean shutdown, so an external trigger can find it
-// and verify it before acting. A marker left behind by a crash still names a
-// pid, which is exactly what lets a stale one be told apart from a live one:
-// see DesktopProcessAlive.
+// and verify it before acting. This package owns the contract — the shape, its
+// location, reading it, and the liveness probe that tells a live record from a
+// stale one — while the desktop owns the record itself: it is the only thing
+// that writes one, and it keeps the rule that a record naming a live process is
+// never overwritten or removed by another instance. A marker left behind by a
+// crash still names a pid, which is exactly what lets a stale one be told apart
+// from a live one: see DesktopProcessAlive.
 type DesktopControlMarker struct {
 	PID           int   `json:"pid"`
 	ControlPort   int   `json:"controlPort"`
@@ -52,22 +55,6 @@ func DefaultDesktopControlMarkerPath() string {
 		return ""
 	}
 	return filepath.Join(dir, desktopControlMarkerFileName)
-}
-
-// WriteDesktopControlMarker persists marker at path, creating its directory if
-// needed. Called once by the desktop at startup.
-func WriteDesktopControlMarker(path string, marker DesktopControlMarker) error {
-	if path == "" {
-		return fmt.Errorf("desktop control marker path is unset")
-	}
-	data, err := json.Marshal(marker)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o600)
 }
 
 // ReadDesktopControlMarker reads what a running (or previously running)
@@ -90,65 +77,6 @@ func ReadDesktopControlMarker(path string) (DesktopControlMarker, error) {
 		return DesktopControlMarker{}, fmt.Errorf("desktop control marker %s names no live target", path)
 	}
 	return marker, nil
-}
-
-// RemoveDesktopControlMarker deletes a marker a clean shutdown no longer
-// vouches for. A missing file is not an error: shutdown may run twice, or the
-// marker may never have been written (a build with no network access to bind
-// the control listener).
-func RemoveDesktopControlMarker(path string) error {
-	if path == "" {
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
-// ErrDesktopControlMarkerHeld is what ClaimDesktopControlMarker returns when
-// an existing marker names a different pid that is still alive: writing over
-// it would strand that live instance's own control record.
-var ErrDesktopControlMarkerHeld = errors.New("desktop control marker already claimed by a live instance")
-
-// ClaimDesktopControlMarker writes marker at path unless doing so would
-// overwrite a different, currently-alive instance's own entry. A missing,
-// unreadable, or stale marker (one naming a pid processAlive reports as gone)
-// is always claimed freely; a marker naming this same pid is always
-// refreshed, since a running instance re-asserting its own entry can never
-// strand itself.
-//
-// Before this existed, every launch wrote its own pid/port over whatever was
-// there, so a transient second instance -- started by accident, or racing
-// the first by a few seconds -- could silently take over the control record
-// of an already-running desktop. Both the one-time startup write and the
-// periodic self-heal on erun-ui's existing session-heartbeat reconciler tick
-// (see reconcileDesktopControlMarker) go through this one path, so whichever
-// instance is genuinely running is the one the marker ends up naming.
-func ClaimDesktopControlMarker(path string, marker DesktopControlMarker, processAlive func(int) bool) error {
-	if existing, err := ReadDesktopControlMarker(path); err == nil {
-		if existing.PID != marker.PID && processAlive(existing.PID) {
-			return fmt.Errorf("%w: pid %d", ErrDesktopControlMarkerHeld, existing.PID)
-		}
-	}
-	return WriteDesktopControlMarker(path, marker)
-}
-
-// ReleaseDesktopControlMarker removes the marker at path only if it still
-// names pid, the caller's own. This is the other half of the same fix: an
-// instance whose own claim was refused by ClaimDesktopControlMarker never
-// wrote the marker in the first place, so its shutdown must not delete it
-// either -- an unconditional remove there would strand the live instance on
-// exit just as badly as an unconditional write stranded it at startup.
-func ReleaseDesktopControlMarker(path string, pid int) error {
-	existing, err := ReadDesktopControlMarker(path)
-	if err != nil {
-		return nil
-	}
-	if existing.PID != pid {
-		return nil
-	}
-	return RemoveDesktopControlMarker(path)
 }
 
 // DesktopRestartStatus is the outcome of one RestartDesktopApp call, reported

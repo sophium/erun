@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // "Which conversation is this orchestrator's by convention" and "which
@@ -63,7 +65,7 @@ const orchestratorLiveConversationDirName = "orchestrator-live"
 // it belongs to. Read at run time by the hook for the same reason the
 // orchestrator id is: the settings file is shared by every orchestrator, so
 // nothing about one launch can be baked into it.
-const orchestratorLaunchEnvVar = "ERUN_ORCHESTRATOR_LAUNCH"
+const orchestratorLaunchEnvVar = eruncommon.OrchestratorLaunchEnvVar
 
 // orchestratorLiveConversation is what one orchestrator's file carries: the
 // conversation its session reported, and the launch that session belongs to.

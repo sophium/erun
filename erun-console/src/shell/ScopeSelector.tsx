@@ -1,6 +1,8 @@
 import type * as React from 'react';
 
 import type { PlatformTenant } from '../app/api/tenantsApi';
+import type { ConsoleSectionId } from './sections';
+import { sectionHonorsScope } from './sections';
 import { TenantTargetSelect } from './TenantTargetSelect';
 
 export interface ScopeTenant {
@@ -19,24 +21,32 @@ export interface ScopeTenant {
 // ordinary behavior before this existed); a defined value is a tenant other
 // than the caller's own. `tenants` is fetched once by the caller
 // (shell/AppShell.tsx) and shared with the Environments panel's tenant
-// badges, rather than fetched again here.
+// badges, rather than fetched again here. `active` is the currently rendered
+// section id: the selector renders on every section, but its
+// "Viewing another tenant's rows" claim is only true on the ones that
+// actually thread scopeTenantId server-side (sections.ts's
+// sectionHonorsScope) -- everywhere else it says so plainly instead of
+// implying a reach it does not have.
 export function ScopeSelector({
   tenantType,
   tenants,
   ownTenant,
   value,
+  active,
   onChange,
 }: {
   tenantType: string;
   tenants: PlatformTenant[];
   ownTenant: ScopeTenant;
   value: string | undefined;
+  active: ConsoleSectionId;
   onChange: (tenantId: string | undefined) => void;
 }): React.ReactElement | null {
   if (tenantType !== 'OPERATIONS') {
     return null;
   }
   const scoped = value !== undefined && value !== ownTenant.tenantId;
+  const honored = sectionHonorsScope(active);
   return (
     <div>
       <TenantTargetSelect
@@ -49,9 +59,14 @@ export function ScopeSelector({
           onChange(tenantId === ownTenant.tenantId ? undefined : tenantId);
         }}
       />
-      {scoped && (
+      {scoped && honored && (
         <p className="px-1 pt-1 text-xs text-sidebar-foreground/70" role="status">
           Viewing another tenant's rows. Your own identity is still {ownTenant.name}.
+        </p>
+      )}
+      {scoped && !honored && (
+        <p className="px-1 pt-1 text-xs text-sidebar-foreground/70" role="status">
+          This section doesn't use Administering — it always shows {ownTenant.name}'s own rows.
         </p>
       )}
     </div>
