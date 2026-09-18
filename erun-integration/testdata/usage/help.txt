@@ -26,8 +26,8 @@ It is derived from usage history the environment's own pod monitor retained,
 and this reading does not carry that history back to the caller, so there is
 nothing here to derive a verdict from. Read it from inside the environment
 instead: the `usage` and `resize` tools over its MCP endpoint, or the desktop
-Runtime tab. `erun list` prints it under `runtime-pod:` only for a host that
-has monitored that environment itself.
+Runtime tab. `erun list` prints it under `runtime-pod:` only when run inside
+the environment itself, where that history lives; from a host it prints none.
 
 Usage:
   erun usage [flags]

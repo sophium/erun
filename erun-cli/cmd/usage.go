@@ -38,8 +38,8 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"and this reading does not carry that history back to the caller, so there is\n" +
 			"nothing here to derive a verdict from. Read it from inside the environment\n" +
 			"instead: the `usage` and `resize` tools over its MCP endpoint, or the desktop\n" +
-			"Runtime tab. `erun list` prints it under `runtime-pod:` only for a host that\n" +
-			"has monitored that environment itself.",
+			"Runtime tab. `erun list` prints it under `runtime-pod:` only when run inside\n" +
+			"the environment itself, where that history lives; from a host it prints none.",
 		Example: "  erun usage --tenant team --environment dev\n" +
 			"  erun usage --tenant team --environment dev --interval 3 --output json",
 		Args:          cobra.NoArgs,

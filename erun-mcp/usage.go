@@ -24,11 +24,10 @@ type UsageInput struct {
 // so every existing field stays at the top level; Sizing is additive.
 //
 // Sizing is derived from usage history this environment's own pod monitor
-// retained, so it is populated only where that history is -- here, in the pod
-// this server runs in. A host-run `erun list` reaches the same verdict when
-// that host has monitored the environment itself, and has nothing to derive
-// one from when it has not; `erun usage` carries no sizing block either way,
-// since it never reads the history.
+// retained, which lives in this pod -- so it is populated here, and not on a
+// surface reading from outside. `erun list` reaches the same verdict only when
+// run inside the environment itself; `erun usage` carries no sizing block at
+// all, since it never reads the history.
 type UsageOutput struct {
 	eruncommon.RuntimeUsage
 	Sizing *eruncommon.RuntimeSizingRecommendation `json:"sizing,omitempty"`

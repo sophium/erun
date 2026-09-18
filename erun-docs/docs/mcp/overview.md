@@ -682,7 +682,7 @@ Every field reports its own unavailability rather than failing the call: a clust
 
 `intervalSeconds` (input, default 1, clamped to 0.1–30) sets the CPU sample window: `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter.
 
-When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `resize` reasons from — so a caller checking on an environment does not need a separate `resize` call just to see it. That history is retained by this environment's own pod monitor, which is why the block appears here: a host-run [`erun list`](/cli/list) reports the same verdict only when that host has monitored the environment itself, and [`erun usage`](/cli/usage) carries no sizing block at all, so neither is a substitute for this tool. Omitted when nothing has been observed yet.
+When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `resize` reasons from — so a caller checking on an environment does not need a separate `resize` call just to see it. That history is retained by this environment's own pod monitor and lives in this pod, which is why the block appears here: [`erun list`](/cli/list) reaches the same verdict only when run inside the environment itself, a host-run `erun list` reports none for it, and [`erun usage`](/cli/usage) carries no sizing block at all — so neither is a substitute for this tool. Omitted when nothing has been observed yet.
 
 ### `resize`
 
