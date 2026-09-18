@@ -1339,11 +1339,16 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 }
 
 // resolveGuardedDeploySelection resolves the deploy component selection,
-// traces the tier it came from, and refuses when a saved selection shadows a
-// richer repo plan (see guardSavedSelectionShadowingPlan) — the ordering both
-// the local-repo and sourceless deploy paths share.
+// traces the tier it came from, and refuses when the selection cannot be
+// resolved correctly here — an in-pod runtime-only fallback that cannot see the
+// saved selection (see guardInPodBlindRuntimeOnlySelection) or a saved selection
+// that shadows a richer repo plan (see guardSavedSelectionShadowingPlan) — the
+// ordering both the local-repo and sourceless deploy paths share.
 func resolveGuardedDeploySelection(ctx Context, target DeployTarget, resolvedTarget OpenResult, plan ProjectK8sConfig) ([]string, error) {
 	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
+	if err := guardInPodBlindRuntimeOnlySelection(os.Getenv, resolvedTarget, target, selected, selectionSource); err != nil {
+		return nil, err
+	}
 	traceDeployComponentSelection(ctx, selected, selectionSource)
 	missing := traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, plan)
 	if err := guardSavedSelectionShadowingPlan(missing, selected, resolvedTarget.Tenant, resolvedTarget.Environment); err != nil {
