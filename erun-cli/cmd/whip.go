@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -34,11 +35,13 @@ func newWhipCmd(store common.ListStore, resolveOpen OpenResolver) *cobra.Command
 			"orchestrator definition. Reports each target's outcome — pushed, or skipped\n" +
 			"and why — rather than only reporting that it ran.\n\n" +
 			"A CLI/MCP process has no channel into a desktop-held orchestrator's live PTY,\n" +
-			"so an unscoped pass reports every orchestrator skipped as unreachable from\n" +
-			"this transport; only the desktop's own automatic pass can push those. An\n" +
-			"environment with no currently open MCP edge (nobody has it open in the\n" +
-			"desktop) reports skipped as not alive, since there is no live session there\n" +
-			"to push.\n\n" +
+			"so every orchestrator is reported skipped as unreachable from this transport;\n" +
+			"only the desktop's own automatic pass can push those. An environment whose MCP\n" +
+			"edge is not answering (nobody has it open in the desktop, or its port-forward\n" +
+			"dropped) is reported skipped as channel-down, with the `erun open` that brings\n" +
+			"the edge back, and the sweep carries on to the remaining targets.\n\n" +
+			"A --dry-run never reattaches a channel: the reattach starts a real\n" +
+			"`erun open --reconnect`, and a preview does not start work that outlives it.\n\n" +
 			"Pass TENANT and ENVIRONMENT to whip one environment only; omit both to whip\n" +
 			"every configured environment plus every persisted orchestrator.",
 		Example:       "  erun whip\n  erun whip --tenant team --environment dev\n  erun whip --dry-run",
@@ -70,8 +73,22 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 	}
 
 	report := common.WhipReport{DryRun: commandCtx.DryRun}
+	// Each target's row is written as it is decided rather than only once the
+	// whole sweep finishes: an unreachable channel can take a full reattach
+	// timeout to answer, and a sweep that showed nothing until the last target
+	// resolved would report an empty pass for as long as one target was slow.
+	// JSON stays a single document on stdout, so it is written at the end.
+	emit := func(result common.WhipResult) error {
+		report.Results = append(report.Results, result)
+		if jsonOutput {
+			return nil
+		}
+		return writeWhipResult(commandCtx, result, commandCtx.DryRun)
+	}
 	for _, target := range targets {
-		report.Results = append(report.Results, whipOneEnvironment(ctx, commandCtx, resolveOpen, target.tenant, target.environment))
+		if err := emit(whipOneEnvironment(ctx, commandCtx, resolveOpen, target.tenant, target.environment)); err != nil {
+			return err
+		}
 	}
 
 	// An explicit TENANT/ENVIRONMENT scope narrows every axis, not just the
@@ -83,7 +100,9 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 		now := time.Now()
 		for _, candidate := range common.ListWhipOrchestratorCandidates(globalConfig.Orchestrators) {
 			decision, reason := common.DecideWhip(candidate, now, whipConfig, true)
-			report.Results = append(report.Results, common.WhipResult{Candidate: candidate, Decision: decision, Reason: reason})
+			if err := emit(common.WhipResult{Candidate: candidate, Decision: decision, Reason: reason}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -92,7 +111,7 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
 	}
-	return writeWhipReport(commandCtx, report)
+	return nil
 }
 
 type whipEnvironmentTarget struct {
@@ -184,8 +203,24 @@ func whipOneEnvironment(ctx context.Context, commandCtx common.Context, resolveO
 		}
 	}
 
+	// An edge that does not answer is a named skip carrying the remedy that
+	// brings it up, never a failed call: whip fans out over sessions that are
+	// already live, and this target is simply one of the ones it could not
+	// reach. The sweep reports it and moves on to the next target.
+	channelDown := func(detail string) common.WhipResult {
+		return common.WhipResult{
+			Candidate: common.WhipCandidate{Kind: common.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  common.WhipDecisionNone,
+			Reason:    common.WhipReasonChannelDown,
+			Error:     detail,
+		}
+	}
+
 	result, err := callMCPToolWithReattach(ctx, commandCtx, target, "whip", arguments, false)
 	if err != nil {
+		if errors.Is(err, common.ErrMCPEndpointUnreachable) {
+			return channelDown(mcpEdgeError(target, err).Error())
+		}
 		return failed(err.Error())
 	}
 	var decoded common.WhipResult
@@ -198,13 +233,8 @@ func whipOneEnvironment(ctx context.Context, commandCtx common.Context, resolveO
 	return decoded
 }
 
-func writeWhipReport(ctx common.Context, report common.WhipReport) error {
-	for _, result := range report.Results {
-		if err := writeLabeledValue(ctx, whipResultLabel(result), whipResultValue(result)); err != nil {
-			return err
-		}
-	}
-	return nil
+func writeWhipResult(ctx common.Context, result common.WhipResult, dryRun bool) error {
+	return writeLabeledValue(ctx, whipResultLabel(result), whipResultValue(result, dryRun))
 }
 
 func whipResultLabel(result common.WhipResult) string {
@@ -220,7 +250,7 @@ func whipResultLabel(result common.WhipResult) string {
 	}
 }
 
-func whipResultValue(result common.WhipResult) string {
+func whipResultValue(result common.WhipResult, dryRun bool) string {
 	switch result.Decision {
 	case common.WhipDecisionNudge:
 		if result.Pushed {
@@ -239,6 +269,12 @@ func whipResultValue(result common.WhipResult) string {
 		value := "skipped — " + string(result.Reason)
 		if result.Error != "" {
 			value += ": " + result.Error
+		}
+		// A dry run never reattaches, so a channel it could not reach says
+		// nothing yet about whether a real pass would have pushed this target:
+		// name that difference rather than letting the row read as a verdict.
+		if dryRun && result.Reason == common.WhipReasonChannelDown {
+			value += " (a real run reattaches the channel first)"
 		}
 		return value
 	}
