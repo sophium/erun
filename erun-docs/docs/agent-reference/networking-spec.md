@@ -181,7 +181,7 @@ Either way, `expose` **references** the pre-issued Secret and sets **no** `cert-
 
 ## Cross-namespace traffic semantics
 
-Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny `NetworkPolicy` as a **copy-paste pattern you apply per env** — the runtime chart does **not** auto-deploy one (no `NetworkPolicy` template ships in it). Apply this manifest to an env's namespace to block ingress from outside it. The shape:
+Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny `NetworkPolicy` as a **copy-paste pattern you apply per env**. The runtime chart ships one policy, but it is not this one: it selects only the runtime pod (`app: <release>`), and in exchange for isolating that pod it re-permits `ssh`, `mcp`, and the metrics port by number — see [Metrics spec · Endpoint](/agent-reference/metrics-spec) for the exact permitted set. Every other pod in the namespace, application services included, is ungoverned until you apply the manifest below. Apply it to an env's namespace to block ingress from outside it. The shape:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -223,7 +223,7 @@ Then label the consumer namespace:
 kubectl label namespace <tenant>-env-a allow-shared-<service>=true
 ```
 
-The runtime chart can apply this label via a `values.yaml` flag (`runtime.sharedDbConsumer: true`) so the policy is committed in the source rather than applied ad-hoc.
+The label is applied by hand, per consumer namespace: the runtime chart renders no value for it, so there is nothing to commit in the env's own source.
 
 ## Egress semantics
 
