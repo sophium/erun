@@ -24,6 +24,14 @@ A busy build no longer reads as an idle environment. If the sidecar's own
 cgroup could not be read, the output says so instead; `erun observe` reports
 its resource limits either way.
 
+The environment's standing sizing recommendation is not part of this output.
+It is derived from usage history the environment's own pod monitor retained,
+and this reading does not carry that history back to the caller, so there is
+nothing here to derive a verdict from. Read it from inside the environment
+instead: the `usage` and `resize` tools over its MCP endpoint, or the desktop
+Runtime tab. `erun list` prints it under `runtime-pod:` only when run inside
+the environment itself, where that history lives; from a host it prints none.
+
 Usage:
   erun usage [flags]
 

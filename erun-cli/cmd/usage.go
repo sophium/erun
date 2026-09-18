@@ -35,7 +35,14 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"warnings if the sidecar itself nears its memory limit or records an OOM kill.\n" +
 			"A busy build no longer reads as an idle environment. If the sidecar's own\n" +
 			"cgroup could not be read, the output says so instead; `erun observe` reports\n" +
-			"its resource limits either way.",
+			"its resource limits either way.\n\n" +
+			"The environment's standing sizing recommendation is not part of this output.\n" +
+			"It is derived from usage history the environment's own pod monitor retained,\n" +
+			"and this reading does not carry that history back to the caller, so there is\n" +
+			"nothing here to derive a verdict from. Read it from inside the environment\n" +
+			"instead: the `usage` and `resize` tools over its MCP endpoint, or the desktop\n" +
+			"Runtime tab. `erun list` prints it under `runtime-pod:` only when run inside\n" +
+			"the environment itself, where that history lives; from a host it prints none.",
 		Example: "  erun usage --tenant team --environment dev\n" +
 			"  erun usage --tenant team --environment dev --interval 3 --output json",
 		Args:          cobra.NoArgs,

@@ -25,6 +25,8 @@ A crossed threshold (memory, memory's peak, or disk usage getting close to full)
 
 On an agent env, this reading cannot see the environment's own builds: `erun build`/`erun release` run in a separate sidecar container (`erun-dind`), not the one this reads. The output says so directly on every environment that carries the sidecar — see [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures) for why, and `erun observe` for the sidecar's own limits.
 
+The environment's standing [sizing recommendation](/cli/list#the-sizing-recommendation) is not part of this output. It is derived from usage history the environment's own pod monitor retained, and this reading does not carry that history back to the caller, so there is nothing here to derive a verdict from. Read it from inside the environment instead — the `usage` and `resize` tools over its MCP endpoint, or the desktop Runtime tab.
+
 ## Flags
 
 | Flag | Description |
