@@ -105,3 +105,36 @@ func TestResolveGuardedDeploySelectionRefusesTheBlindRuntimeOnlyFallbackInPod(t 
 		t.Fatalf("selected = %v, want nil alongside the refusal", selected)
 	}
 }
+
+// The blindness is a property of the in-pod projection, not of one environment
+// type: a runtime, local-agent, and remote-agent environment all reach the
+// runtime-only fallback in their own pod for the same missing reason.
+func TestInPodRuntimeOnlySelectionRefusesForEveryEnvironmentType(t *testing.T) {
+	for _, envType := range []EnvironmentType{EnvironmentTypeRuntime, EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent} {
+		t.Run(string(envType), func(t *testing.T) {
+			resolvedTarget := OpenResult{
+				Tenant:      "frs",
+				Environment: "prod",
+				EnvConfig:   EnvConfig{Type: envType},
+			}
+			selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
+			if err := guardInPodBlindRuntimeOnlySelection(inPodEnvLookup("frs", "prod"), resolvedTarget, DeployTarget{}, selected, source); err == nil {
+				t.Fatalf("%s: in-pod runtime-only fallback was not refused", envType)
+			}
+		})
+	}
+}
+
+func TestInPodRuntimeOnlySelectionIgnoresAnIncompleteInjectedIdentity(t *testing.T) {
+	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod"}
+	selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
+	env := func(key string) string {
+		if key == "ERUN_TENANT" {
+			return "frs"
+		}
+		return ""
+	}
+	if err := guardInPodBlindRuntimeOnlySelection(env, resolvedTarget, DeployTarget{}, selected, source); err != nil {
+		t.Fatalf("a half-set injected identity must not be treated as in-pod: %v", err)
+	}
+}
