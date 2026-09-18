@@ -375,7 +375,7 @@ function UnexposeSection({ dialog }: { dialog: ManageDialog }): React.ReactEleme
             dispatch(cancelUnexposeConfirm());
           }}
         >
-          Cancel
+          Keep exposed
         </Button>
         <Button
           type="button"

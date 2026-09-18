@@ -437,6 +437,27 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       path: 'test-results/1351-visual/ports-remove-confirm.png',
     });
 
+    // The negative names its effect rather than reusing the generic word: the
+    // dialog's own footer also renders a Cancel (opposite Save) that closes the
+    // dialog and discards unsaved edits, so two buttons reading "Cancel" a few
+    // pixels apart would do different things. Matches ManageDialogJobCancel's
+    // "Keep running".
+    const keepExposed = dialog.getByRole('button', { name: 'Keep exposed' });
+    await expect(keepExposed).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+
+    // Dismissing keeps every address and issues no write -- the behaviour the
+    // label now names.
+    await keepExposed.click();
+    await expect(dialog.getByRole('button', { name: 'Remove public access' })).toBeVisible();
+    await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
+    expect(unexposeCalls).toBe(0);
+
+    // Re-open the confirm so the committing half of the flow below is unchanged.
+    await removeButton.click();
+    await expect(confirm).toBeVisible();
+    await confirm.scrollIntoViewIfNeeded();
+
     // Step 2: the separate explicit action that actually commits it.
     await confirm.click();
     await expect(dialog.getByRole('button', { name: 'Removing...' })).toBeVisible();
