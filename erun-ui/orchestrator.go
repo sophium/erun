@@ -1183,6 +1183,13 @@ const orchestratorNoAskStopGuardReason = "Your closing message hands the operato
 // end again. It is also what let an operator's own question ("would you like
 // me to…") refuse the reply that answered it. Only what the turn said can
 // decide whether the turn handed back a decision.
+//
+// Within that entry, only the turn's own unquoted words count. A report that
+// quotes an earlier violation -- or the contract, or the operator -- is
+// describing an offer, not making one, and re-firing on it refuses the very
+// turn that documents the fix. Quoted, code-spanned, and blockquoted spans are
+// cut before the trigger phrases are matched, so a genuine offer still fires
+// and a citation of one does not.
 func orchestratorNoAskStopGuardCommand() string {
 	script := `/*` + orchestratorNoAskGuardMarker + `*/` +
 		`let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{try{` +
@@ -1193,8 +1200,13 @@ func orchestratorNoAskStopGuardCommand() string {
 		`const tail=lines.slice(-40);` +
 		`let said="";` +
 		`for(const line of tail){if(/"type"\s*:\s*"assistant"/.test(line))said=line;}` +
+		`let spoken=said;` +
+		`try{const c=JSON.parse(said).message.content;` +
+		`if(typeof c==="string")spoken=c;` +
+		`else if(Array.isArray(c)){let own="";for(const b of c){if(b&&typeof b.text==="string")own+=b.text+"\n";}if(own)spoken=own;}}catch(e){}` +
+		`const cited=/\x60\x60\x60[\s\S]*?\x60\x60\x60|\x60[^\x60]*\x60|"[^"]*"|\u201C[^\u201D]*\u201D|(^|[\s(\[{:,])\u0027[^\u0027\n]*\u0027|^[ \t]*>.*$/gm;` +
 		`const trigger=/say the word|let me know if|let me know whether|shall i |do you want me to|would you like me to|next action is yours|if you.d like me to|your call/i;` +
-		`if(!trigger.test(said))return;` +
+		`if(!trigger.test(spoken.replace(cited," ")))return;` +
 		`process.stderr.write("` + orchestratorNoAskStopGuardReason + `");` +
 		`process.exit(2);` +
 		`}catch(e){}});`
@@ -2262,6 +2274,9 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 	// transient outage per call, so this is reported, never treated as a skip.
 	for _, env := range unreachable {
 		log.Printf("erun-app: orchestrator %s: wired %s but its edge is not answering", id, env.Label)
+		// Record the entry so the sweep can log the exit. Without this the log's
+		// last word on the wiring is the outage, forever.
+		a.recordOrchestratorEdgeOutage(id, env.Label)
 	}
 	if len(unreachable) > 0 {
 		notice := orchestratorMCPUnreachableNotice(name, unreachable)
@@ -2335,7 +2350,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		// The orchestrator's own id, so an agent driving from its shell can
 		// record itself as the return target for a rebuild+restart (see the
 		// erun-orchestrate skill). Empty for transient/Investigate sessions.
-		"ERUN_ORCHESTRATOR_ID=" + id,
+		eruncommon.OrchestratorIDEnvVar + "=" + id,
 		// This launch's nonce, which the session's own hooks stamp onto the
 		// conversation id they report. It is what makes that record this launch's
 		// rather than any session that happens to carry the orchestrator id.

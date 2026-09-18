@@ -67,12 +67,26 @@ export const test = base.extend<{
   seededRuntimeEnv: SeededEnvironment;
   seededHostEnv: SeededEnvironment;
 }>({
-  app: async ({ page, workerBaseURL, request }, use) => {
-    await resetSharedBaselineObservations(workerBaseURL, request);
-    const app = new AppShell(page);
-    await app.open();
-    await use(app);
-  },
+  // The fixture's own timeout, not the test's: app.open() is a BOOT, and its
+  // cost is the machine's, not the spec's. Every spec pays it in setup, so
+  // charging it to the 30s test budget means a contended gate reports "Test
+  // timeout ... while setting up app" against whichever spec happened to boot
+  // on the busy worker -- which is how titlebar-whip-action.spec.ts:231 failed
+  // two full-suite gates in a row while 554 other specs booted fine.
+  //
+  // playwright.config.ts already raises the global timeout to 90s on Windows
+  // for the same reason, so a slower environment earning a larger boot budget
+  // is this suite's established shape. 60s sits above AppShell.open's own 40s
+  // settle bound so that bound stays reachable; the spec body keeps its 30s.
+  app: [
+    async ({ page, workerBaseURL, request }, use) => {
+      await resetSharedBaselineObservations(workerBaseURL, request);
+      const app = new AppShell(page);
+      await app.open();
+      await use(app);
+    },
+    { timeout: 60_000 },
+  ],
   seededEnv: async ({ app }, use, testInfo) => {
     const environment = uniqueEnvironmentName(testInfo.title);
     seedEnvironment(SEED_TENANT, environment);

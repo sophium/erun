@@ -108,7 +108,7 @@ func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string)
 		return func() {}, nil
 	}
 
-	holder := EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env("ERUN_ORCHESTRATOR_ID")), Tenant: tenant}
+	holder := EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env(OrchestratorIDEnvVar)), Tenant: tenant}
 	pid := os.Getpid()
 
 	repoSHA, err := takeReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now())

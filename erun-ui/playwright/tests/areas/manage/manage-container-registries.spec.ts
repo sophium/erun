@@ -61,6 +61,7 @@ test.describe('manage dialog container registries', () => {
     await app.manageDialog.save();
     // The manage dialog stays open after save; the changed registry list is a
     // pod-shaping value, so it raises the pending-redeploy banner.
+    await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

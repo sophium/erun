@@ -86,6 +86,20 @@ export class TenantDashboard {
     return this.activePanel().locator('pre');
   }
 
+  // The Users tab is the tenant's roster, so its rows are the tenant's users —
+  // not the signed-in operator's single row (#2281).
+  usersTable(): Locator {
+    return this.activePanel().getByRole('table');
+  }
+
+  usersRows(): Locator {
+    return this.usersTable().locator('tbody tr');
+  }
+
+  usersEmptyState(): Locator {
+    return this.activePanel().getByText('No signed-in user', { exact: true });
+  }
+
   gatesTable(): Locator {
     return this.activePanel().getByRole('table');
   }

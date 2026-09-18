@@ -55,7 +55,9 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
   test.beforeEach(async ({ app }) => {
     if (!(await app.debugPanel.isOpen())) {
       await app.debugPanel.toggle();
-      await expect(app.debugPanel.resizeHandle()).toBeVisible();
+      // Converge through the panel's own helper rather than expect's fixed
+      // budget, then on the tab the test needs.
+      await app.debugPanel.waitForOpen();
     }
   });
 

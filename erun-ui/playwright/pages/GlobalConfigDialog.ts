@@ -3,8 +3,22 @@ import { expect, type Locator, type Page } from '@playwright/test';
 export class GlobalConfigDialog {
   constructor(public readonly page: Page) {}
 
+  // The dialog is matched even while it is hidden from the accessibility tree.
+  //
+  // Radix's modal Select hides the rest of the document with aria-hidden for as
+  // long as its content is mounted, and that content stays mounted through its
+  // close transition — so for a moment after every gateway-select interaction
+  // every element in this dialog, including the dialog itself, is aria-hidden
+  // while sitting plainly in the DOM. A role query skips those elements, so
+  // anything derived from this locator resolves to a clean, wrong zero: the
+  // catalog's clear loop reads "no rows to remove" and exits without removing
+  // any, a `toHaveCount(0)` guard passes vacuously, and the pre-click index is
+  // taken as 0 against a catalog that already holds a row — one Add then makes
+  // two. Every one of those reads follows a select interaction, which is why the
+  // window lands on all of them. Matching the element rather than what a screen
+  // reader would currently see keeps a count a count.
   locator(): Locator {
-    return this.page.getByRole('dialog', { name: 'ERun settings' });
+    return this.page.getByRole('dialog', { name: 'ERun settings', includeHidden: true });
   }
 
   async waitForOpen(): Promise<void> {

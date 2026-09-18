@@ -118,9 +118,13 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 		Issuer:   whoami.Issuer,
 		Subject:  whoami.Subject,
 	}
-	dashboard.Panels = []uiTenantDashboardPanel{{Tab: tenantDashboardTabUsers}}
 	capabilities := whoami.Capabilities
-	usernames := tenantDashboardUsernames(ctx, client, capabilities)
+	// The Users tab shows the tenant's roster, not the caller's own identity:
+	// whoami above answered "who am I", and this read answers "who else is
+	// here". A caller who may not list users gets that read named on the panel
+	// rather than a table whose one row states a false count for the tenant.
+	roster := loadTenantDashboardUsers(ctx, client, capabilities, dashboard)
+	usernames := tenantDashboardUsernamesFromRoster(roster)
 	reviewFilter := eruncommon.PlatformReviewFilter{}
 	if input.ReviewFilterMine {
 		reviewFilter.AuthorUserID = whoami.UserID
@@ -173,19 +177,59 @@ func loadTenantDashboardInviteRequests(ctx context.Context, client *eruncommon.P
 	dashboard.Panels = append(dashboard.Panels, panel)
 }
 
-// tenantDashboardUsernames resolves every tenant user id to its display
-// username, best effort: a caller who cannot read /v1/users, or a read that
-// fails, gets back an empty map rather than failing the dashboard load — every
-// caller of the map already falls back to the raw id it was given (#1378).
-func tenantDashboardUsernames(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities) map[string]string {
-	names := make(map[string]string)
-	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
-		return names
+// loadTenantDashboardUsers reads the tenant's roster for the Users tab and
+// returns it for the username directory the review panels resolve authors
+// with, so the dashboard pays for GET /v1/users once. Degrades like every
+// other panel: a caller who may not read it gets that read named as the
+// panel's restriction, and a failed read gets the panel's own error — neither
+// silently reduces the tab to the caller's single row, which reads as a
+// one-user tenant.
+func loadTenantDashboardUsers(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) []eruncommon.PlatformUser {
+	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabUsers}
+	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers); restricted != "" {
+		panel.Restricted = restricted
+		dashboard.Panels = append(dashboard.Panels, panel)
+		return nil
 	}
 	users, err := client.ListUsers(ctx, eruncommon.PlatformListUsersParams{})
 	if err != nil {
-		return names
+		panel.Error = tenantDashboardReadError(tenantDashboardReadUsers, err)
+		dashboard.Panels = append(dashboard.Panels, panel)
+		return nil
 	}
+	selfUserID := ""
+	if dashboard.User != nil {
+		selfUserID = strings.TrimSpace(dashboard.User.UserID)
+	}
+	dashboard.Users = make([]uiTenantDashboardUser, 0, len(users))
+	for _, user := range users {
+		row := uiTenantDashboardUser{
+			TenantID:  user.TenantID,
+			UserID:    user.UserID,
+			Username:  user.Username,
+			Issuer:    user.Issuer,
+			Subject:   user.Subject,
+			CreatedAt: tenantDashboardTime(user.CreatedAt),
+			UpdatedAt: tenantDashboardTime(user.UpdatedAt),
+		}
+		// GET /v1/users reports the roster without roles, so a row's roles stay
+		// unset — "not reported" — rather than reading as "none assigned". The
+		// caller's own row is the one the dashboard can answer for, from the
+		// whoami read that already succeeded.
+		if selfUserID != "" && strings.TrimSpace(user.UserID) == selfUserID {
+			row.Roles = dashboard.User.Roles
+		}
+		dashboard.Users = append(dashboard.Users, row)
+	}
+	dashboard.Panels = append(dashboard.Panels, panel)
+	return users
+}
+
+// tenantDashboardUsernamesFromRoster resolves every tenant user id to its
+// display username from an already-read roster. Every caller of the map falls
+// back to the raw id it was given when a name is missing (#1378).
+func tenantDashboardUsernamesFromRoster(users []eruncommon.PlatformUser) map[string]string {
+	names := make(map[string]string)
 	for _, user := range users {
 		userID := strings.TrimSpace(user.UserID)
 		username := strings.TrimSpace(user.Username)
@@ -195,6 +239,21 @@ func tenantDashboardUsernames(ctx context.Context, client *eruncommon.PlatformCl
 		names[userID] = username
 	}
 	return names
+}
+
+// tenantDashboardUsernames is the standalone status of that directory, for
+// callers that resolved no roster of their own (the review detail read). Best
+// effort: a caller who cannot read /v1/users, or a read that fails, gets back
+// an empty map rather than failing the whole load.
+func tenantDashboardUsernames(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities) map[string]string {
+	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
+		return map[string]string{}
+	}
+	users, err := client.ListUsers(ctx, eruncommon.PlatformListUsersParams{})
+	if err != nil {
+		return map[string]string{}
+	}
+	return tenantDashboardUsernamesFromRoster(users)
 }
 
 // loadTenantDashboardReviewFilterCounts reports how many reviews are Mine and

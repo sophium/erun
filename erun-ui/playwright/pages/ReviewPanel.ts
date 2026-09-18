@@ -18,6 +18,25 @@ export class ReviewPanel {
     return splitter.first().isVisible();
   }
 
+  // Converge on the panel's own open/closed state before touching anything
+  // inside it, the same shape DebugPanel.waitForOpen/waitForClosed use: the
+  // titlebar toggle and the panel's render are two separate steps under
+  // React, so an assertion on the changed-files tree or a diff section right
+  // after toggleReviewPanel() races that render against expect's fixed 10s
+  // rather than converging against the enclosing test's own budget.
+  //
+  // Unlike DebugPanel's panel, whose mounted handle is the open state's only
+  // witness, this one is also reachable through isOpen() -- callers that
+  // cannot know which way their toggle went (see the smoke suite's
+  // initiallyVisible) read that first and wait for the state they want.
+  async waitForOpen(): Promise<void> {
+    await this.resizeHandle().waitFor({ state: 'visible' });
+  }
+
+  async waitForClosed(): Promise<void> {
+    await this.resizeHandle().waitFor({ state: 'hidden' });
+  }
+
   // The scrollable diff content region (ReviewPanel.tsx); focusable so a
   // keyboard-only reviewer can scroll past the first screenful of a diff.
   diffContentRegion(): Locator {

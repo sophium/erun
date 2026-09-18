@@ -35,7 +35,11 @@ import (
 //     high-water mark for the current container lifetime, not for the
 //     environment. RuntimeUsageHistory (runtime_usage_history.go) retains the
 //     true peak across restarts; nothing may treat one reading as a lifetime
-//     maximum.
+//     maximum. The warning decision follows from that: memory.events' oom_kill
+//     resets on the same restart, and a restart is often how an OOM manifests,
+//     so a warning read only from the live counters goes quiet at the exact
+//     moment it matters. applyRetainedUsageWarnings adds what the retained
+//     history proves and the live counters cannot.
 //  2. PSI is absent on some kernels -- memory.pressure and cpu.pressure simply
 //     do not exist in every runtime container's cgroup, so nothing here or
 //     downstream may depend on pressure stall information. nr_throttled over
@@ -229,7 +233,85 @@ func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req 
 	if ctx.DryRun {
 		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}, nil
 	}
-	return parseRuntimeUsage(req, result.Stdout, interval), nil
+	return applyRetainedUsageWarnings(parseRuntimeUsage(req, result.Stdout, interval)), nil
+}
+
+// applyRetainedUsageWarnings adds the memory warnings the environment's
+// retained history proves but the current container's cgroup counters cannot.
+//
+// memory.peak and memory.events' oom_kill are per-container counters, and a
+// restart resets both to zero. A restart is also often how an OOM manifests,
+// so deciding the warning from the live counters alone tells an operator the
+// environment is memory-healthy at exactly the moment it most needs attention.
+// That is the same silent loss of the OOM warning an unreadable memory.peak
+// produces, reached by a different route. RuntimeUsageHistory already retains
+// both across restarts -- its aggregates are monotonic and never rolled off --
+// so this consults it instead of deriving a second, parallel signal.
+//
+// The retained figures are still scored against the *current* container's
+// limit, so this cannot latch a warning on forever: raising runtimepod clears
+// the peak warning on the next read, with no stored flag for anyone to reset.
+// The OOM-kill warning is the standing one the documented `oomKills > 0`
+// threshold asks for -- a kill that already happened stays reported -- and
+// only kills the current container does not account for are added, so a live
+// warning is never repeated.
+func applyRetainedUsageWarnings(usage RuntimeUsage) RuntimeUsage {
+	history, err := LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
+	if err != nil {
+		// No readable history is "nothing observed yet", not a warning: a host
+		// that has never monitored this environment must not manufacture one.
+		return usage
+	}
+	for _, warning := range retainedMemoryUsageWarnings(usage.Memory, history) {
+		if !runtimeUsageHasWarning(usage.Warnings, warning) {
+			usage.Warnings = append(usage.Warnings, warning)
+		}
+	}
+	return usage
+}
+
+// retainedMemoryUsageWarnings is the decision itself, pure so the judgement
+// about what survives a restart is testable without a container or a history
+// file.
+func retainedMemoryUsageWarnings(memory RuntimeMemoryUsage, history RuntimeUsageHistory) []string {
+	// Both warnings are a percentage of the limit, so a reading that could not
+	// supply one has nothing to be scored against.
+	if memory.Unavailable != "" || memory.Unlimited || memory.LimitBytes <= 0 {
+		return nil
+	}
+	var warnings []string
+
+	var liveKills int64
+	if memory.OOMKillsObserved {
+		liveKills = memory.OOMKills
+	}
+	if history.ObservedOOMKills > liveKills {
+		warnings = append(warnings, fmt.Sprintf(
+			"the environment's retained history recorded %d OOM kill(s), which the current container does not account for -- memory.events resets when the container restarts",
+			history.ObservedOOMKills))
+	}
+
+	// Guarded on the retained peak exceeding the live one: an uninterrupted
+	// container's own memory.peak still covers it, and the live warning above
+	// already fired for the same crossing.
+	if history.ObservedPeakMemoryBytes > memory.PeakBytes {
+		retainedPercent := 100 * float64(history.ObservedPeakMemoryBytes) / float64(memory.LimitBytes)
+		if retainedPercent >= RuntimeUsageMemoryPeakWarnPercent {
+			warnings = append(warnings, fmt.Sprintf(
+				"the environment's retained memory peak reached %.0f%% of the limit (warns at %.0f%%) before the container restarted -- this environment came close to an OOM kill",
+				retainedPercent, RuntimeUsageMemoryPeakWarnPercent))
+		}
+	}
+	return warnings
+}
+
+func runtimeUsageHasWarning(warnings []string, warning string) bool {
+	for _, existing := range warnings {
+		if existing == warning {
+			return true
+		}
+	}
+	return false
 }
 
 func clampRuntimeUsageInterval(interval time.Duration) time.Duration {

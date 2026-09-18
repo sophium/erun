@@ -1237,7 +1237,7 @@ func (h *jobHeartbeat) renewExclusiveClaim(job EnvironmentJob, name string) {
 		TTL:         h.ttl,
 		Exclusive:   true,
 		Scope:       EnvironmentActivityLeaseScopeEnvironment,
-		Holder:      EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID")), Tenant: h.tenant},
+		Holder:      EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(os.Getenv(OrchestratorIDEnvVar)), Tenant: h.tenant},
 	})
 }
 

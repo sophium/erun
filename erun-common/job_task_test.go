@@ -17,13 +17,18 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 	type taskResult struct {
 		Value string `json:"value"`
 	}
-	done := make(chan struct{})
+	// The work blocks until the test has read the handle back. Asserting the
+	// job reads running is only meaningful while the work is genuinely still
+	// in flight: a task that returns immediately can record its outcome
+	// before StartTaskEnvironmentJob has handed the record back, so the
+	// returned handle would legitimately read exited.
+	release := make(chan struct{})
 	job, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "test-task",
 		Run: func(io.Writer) (any, error) {
-			defer close(done)
+			<-release
 			return taskResult{Value: "ok"}, nil
 		},
 	})
@@ -37,7 +42,9 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 		t.Fatalf("job kind = %q, want %q", job.Kind, EnvironmentJobKindTask)
 	}
 
-	<-done
+	// waitForEnvironmentJobFinished is the await that matters: it waits for
+	// the outcome to be recorded, not merely for the work to return.
+	close(release)
 	waitForEnvironmentJobFinished(t, tenant, environment, job.ID)
 
 	finished, err := LoadEnvironmentJob(tenant, environment, job.ID, time.Now())
