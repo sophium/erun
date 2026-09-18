@@ -874,6 +874,61 @@ exit 0
 		}
 	})
 
+	t.Run("real_run_names_the_rejected_develop_and_does_not_rebase_main", func(t *testing.T) {
+		// The misdiagnosed direction of the release push retry. Releasing 1.0.258, main pushed
+		// and develop was rejected as a non-fast-forward: another release had
+		// advanced origin/develop while this release's own sync-develop added
+		// commits locally. The retry attributed the rejection to origin/main —
+		// which had not moved — and rebased it twice, a no-op each time, never
+		// fetching or merging origin/develop.
+		//
+		// The scenario pins the shape rather than the wording: origin/develop
+		// carries a commit this checkout's develop never will, so the develop
+		// ref is genuinely diverged when the push runs while main is cleanly
+		// ahead of origin/main.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		origin := seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "branch", "develop")
+		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "develop")
+
+		diverging := filepath.Join(setup.Home, "diverging")
+		fixture.RunGit(t, setup.Home, "clone", "-q", "-b", "develop", origin, diverging)
+		fixture.RunGit(t, diverging, "config", "user.email", "test@example")
+		fixture.RunGit(t, diverging, "config", "user.name", "Test")
+		mustWriteFile(t, filepath.Join(diverging, "another-release.txt"), "another release\n")
+		fixture.RunGit(t, diverging, "add", ".")
+		fixture.RunGit(t, diverging, "commit", "-q", "-m", "another release advanced develop")
+		fixture.RunGit(t, diverging, "push", "-q", "origin", "develop")
+
+		envVars := append(setup.Env(), stubPublishToolchain(t, setup)...)
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
+
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when develop is rejected, got 0: %s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "origin/main moved during the release") {
+			t.Fatalf("a develop rejection must not be reported as origin/main having moved:\n%s", result.Combined)
+		}
+		combined := normalize.Apply(result.Combined, normalize.Replacement{Pattern: regexp.MustCompile(`(?m)^hint:.*\n?`), Token: ""})
+		golden.Equal(t, "release/real_run_names_the_rejected_develop_and_does_not_rebase_main", combined)
+
+		// Everything the release publishes landed before the develop rejection:
+		// main carries the release and the prepare commit, and the tag is public.
+		// develop is what did not land, and the failure has to say so.
+		remote := remoteMainSubjects(t, diverging)
+		for _, want := range []string{"[skip ci] release 1.4.2", "[skip ci] prepare 1.4.3"} {
+			if !strings.Contains(remote, want) {
+				t.Fatalf("origin/main is missing %q before the develop rejection:\n%s", want, remote)
+			}
+		}
+		if tags := remoteTags(t, setup); !strings.Contains(tags, "refs/tags/v1.4.2") {
+			t.Fatalf("the release tag should already be public when develop is rejected:\n%s", tags)
+		}
+	})
+
 	t.Run("dry_run_in_a_runtime_pod_claims_the_release_version_lease", func(t *testing.T) {
 		// Inside a runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT injected by the
 		// chart), release claims an exclusive, version-scoped activity lease
