@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 import { ActivityQueueDrawer } from './ActivityQueueDrawer';
 import { AIOccupancyPromptDialog } from './AIOccupancyPromptDialog';
 import { AutoStartPromptDialog } from './AutoStartPromptDialog';
+import { BuildProfileDialog } from './BuildProfileDialog';
 import { CloseConfirmDialog } from './CloseConfirmDialog';
 import { CreateReviewDialog } from './CreateReviewDialog';
 import { DebugPanel } from './DebugPanel';
@@ -36,12 +37,29 @@ export class AppShell {
     // The "Loading environments..." overlay clears only once the tenant list
     // is final; wait it out before asserting on sidebar rows, or the check
     // races the still-loading list.
+    //
+    // This is a settle, not an assertion, so its expiry must not be the thing a
+    // test dies on. Hidden is already satisfied when the overlay never rendered
+    // (a fast machine). A contended gate is the other case: four workers on a
+    // 4-CPU dind keep the overlay up past 30s, and an uncapped wait spends the
+    // enclosing budget here -- which reports as "Test timeout of 30000ms
+    // exceeded while setting up app" at this line, naming neither the overlay
+    // nor the surface under test.
+    //
+    // The bound must be BELOW whatever budget encloses this call, or the
+    // tolerance is unreachable and the budget always wins first. An earlier
+    // revision capped at 45s against a 30s test timeout capped nothing: the run
+    // died at the row wait below with "Target page ... has been closed", the
+    // budget having expired while this wait was still pending. erunApp.ts gives
+    // the app fixture 60s of its own, so 40s here leaves that fixture room to
+    // reach the row wait -- which IS the assertion that has to hold and fails
+    // informatively when the shell genuinely never became usable.
     await this.page
       .getByText('Loading environments...', { exact: true })
-      .waitFor({ state: 'hidden', timeout: 15_000 })
+      .waitFor({ state: 'hidden', timeout: 40_000 })
       .catch(() => {
-        // The overlay may already be gone on a fast machine, so the timeout
-        // here is expected rather than a failure.
+        // Expected when the overlay never rendered at all, and tolerated when a
+        // contended gate keeps it up past the bound: the row wait below decides.
       });
     await this.page
       .locator(
@@ -113,6 +131,10 @@ export class AppShell {
     return new ReviewDetailDialog(this.page);
   }
 
+  get buildProfileDialog(): BuildProfileDialog {
+    return new BuildProfileDialog(this.page);
+  }
+
   get createReviewDialog(): CreateReviewDialog {
     return new CreateReviewDialog(this.page);
   }
@@ -156,11 +178,9 @@ export class AppShell {
   async openEnvironmentTerminal(tenant: string, environment: string): Promise<number> {
     await this.sidebar.openEnvironment(tenant, environment);
     for (const name of ['Local', 'ERun', 'AI']) {
-      await this.page
-        .getByRole('tab', { name, exact: true })
-        .waitFor({ state: 'visible', timeout: 15_000 });
+      await this.tabStrip.waitForTab(name);
     }
-    await this.page.getByRole('tab', { name: 'Local', exact: true }).click();
+    await this.tabStrip.tab('Local').click();
     return this.terminalPane.selectedSessionId();
   }
 }

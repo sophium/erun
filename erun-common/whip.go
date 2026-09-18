@@ -79,6 +79,13 @@ const (
 	// push" and "the call itself failed" describe different problems and call
 	// for different operator action.
 	WhipReasonCallFailed WhipReason = "call-failed"
+	// WhipReasonChannelDown names a target whose MCP edge is not answering, so
+	// nothing was pushed -- distinct from WhipReasonCallFailed, which is a call
+	// that was attempted against a reachable edge and failed there. A caller
+	// that declines to re-establish the channel (a --dry-run must not start a
+	// port-forward) reports this reason and the remedy, so an unreachable
+	// target reads as a named skip with a next action rather than a failure.
+	WhipReasonChannelDown WhipReason = "channel-down"
 )
 
 // DefaultWhipMessage restates the pacing contract verbatim, plus the one

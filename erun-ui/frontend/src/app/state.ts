@@ -599,6 +599,9 @@ export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({
 export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] => ({
   useMantle: false,
   useBedrock: false,
+  // False until the backend reports the erun-level catalog, so the per-env
+  // gateway controls never flash before the read lands.
+  gatewayConfigured: false,
   models: ['sonnet', 'haiku'],
   maxOutputTokens: 4096,
   knownModels: ['opus', 'sonnet', 'haiku', 'fable'],

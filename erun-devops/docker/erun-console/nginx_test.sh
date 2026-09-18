@@ -6,7 +6,7 @@
 # in this directory (rendered by the base image's own envsubst-on-templates
 # entrypoint, exactly as erun-devops/k8s/erun-console/templates/console.yaml
 # configures it), against a synthetic static tree standing in for a Vite
-# `dist/` build. Locks four properties directly against a real running nginx,
+# `dist/` build. Locks five properties directly against a real running nginx,
 # not a config-syntax check:
 #
 #   1. A missing content-hashed asset under /assets/ 404s -- it must never
@@ -26,6 +26,12 @@
 #      carve-out is scoped to "has a file extension", not to the /assets/
 #      prefix alone, or a stale favicon reference or a probed robots.txt would
 #      still masquerade as a 200 HTML SPA shell.
+#   5. /healthz emits exactly one Content-Type header. `return 200 "ok"`
+#      inherits the server's default_type (application/octet-stream from the
+#      base image's nginx.conf), and `add_header` appends rather than
+#      replaces, so pairing it with `add_header Content-Type text/plain`
+#      used to emit both -- a message RFC 9110 section 5.5 calls malformed,
+#      since Content-Type is a singleton field.
 #
 # Lives beside the Dockerfile/template rather than in erun-integration: it
 # needs a real docker daemon to observe actual nginx `location`/`try_files`
@@ -115,6 +121,12 @@ assert_body() {
     [ "${got}" = "${expected}" ] || fail "GET ${path}: expected body '${expected}', got '${got}'"
 }
 
+assert_single_content_type() {
+    path="$1"
+    count="$(curl -sI "${base}${path}" | grep -ic '^content-type:')"
+    [ "${count}" = "1" ] || fail "GET ${path}: expected exactly one Content-Type header, got ${count}"
+}
+
 wait_for_ready || fail "nginx did not become ready"
 
 # --- 1. A missing content-hashed asset is a real 404, never the SPA shell ---
@@ -140,4 +152,7 @@ assert_body "/favicon.svg" "<svg>real favicon</svg>"
 assert_status "/favicon.ico" "404"
 assert_status "/robots.txt" "404"
 
-echo "OK: missing static-looking paths 404 (under /assets/ and at the root), app routes and existing static files serve correctly, healthz/version.json are not swallowed by the SPA fallback"
+# --- 5. /healthz emits exactly one Content-Type header (erun#2402) ---
+assert_single_content_type "/healthz"
+
+echo "OK: missing static-looking paths 404 (under /assets/ and at the root), app routes and existing static files serve correctly, healthz/version.json are not swallowed by the SPA fallback, healthz emits exactly one Content-Type header"

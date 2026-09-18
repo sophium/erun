@@ -13,7 +13,15 @@ COPY erun-docs/package.json erun-docs/yarn.lock /src/erun-docs/
 
 WORKDIR /src/erun-docs
 
+# YARN_CACHE_FOLDER: this stage runs as root with no HOME override, so yarn
+# classic's own default cache dir is $HOME/.cache/yarn (/root/.cache/yarn),
+# never the /usr/local/share/.cache/yarn mounted below -- verified against
+# the repo's own yarn (getCacheDir() falls back to $HOME/.cache/yarn) and
+# reproduced live (a real yarn install with the mount target unset resolved
+# to /root/.cache/yarn). Redirecting via env var keeps the mount target that
+# every other yarn-using Dockerfile in the repo already uses.
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+    YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
 # Copy the rest and build.
@@ -26,7 +34,6 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
 FROM node:20.18.1-alpine
 
 ARG WRANGLER_VERSION=3.87.0
-ARG ERUN_VERSION
 
 RUN apk add --no-cache ca-certificates tini && \
     npm install -g wrangler@${WRANGLER_VERSION} && \
@@ -42,6 +49,7 @@ COPY --chmod=0755 erun-devops/docker/erun-docs/entrypoint.sh /usr/local/bin/erun
 # Written into /site itself so `wrangler pages deploy` uploads it as a plain
 # static file alongside the Docusaurus output; a static site has no server
 # process to answer a version query any other way.
+ARG ERUN_VERSION
 RUN printf '{"version":"%s"}\n' "${ERUN_VERSION}" > /site/version.json && \
     chown erun:erun /site/version.json
 

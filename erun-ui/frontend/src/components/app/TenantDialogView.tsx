@@ -28,9 +28,7 @@ import {
   updateTenantConfig,
 } from '@/app/tenantDialogThunks';
 import { useController } from '@/app/useController';
-
-const dialogErrorClassName =
-  'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 export function TenantDialogView(): React.ReactElement {
   const controller = useController();
@@ -75,11 +73,7 @@ export function TenantDialogView(): React.ReactElement {
             environmentOptions={environmentOptions}
             apiPlaceholder={tenantDefaultAPIURL(tenant)}
           />
-          {dialog.error && (
-            <div className={dialogErrorClassName} role="alert">
-              {dialog.error}
-            </div>
-          )}
+          {dialog.error && <InlineAlert>{dialog.error}</InlineAlert>}
           <DialogFooter>
             <Button
               type="button"
