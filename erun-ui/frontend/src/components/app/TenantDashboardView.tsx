@@ -2,6 +2,7 @@ import { Button, Tabs, TabsList, TabsTrigger } from 'erun-kit';
 import { LoaderCircle, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
+import { accessRemedyFor } from '@/app/accessRemedies';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import {
@@ -16,8 +17,9 @@ import {
   refreshTenantDashboard,
   setTenantDashboardTab,
 } from '@/app/tenantDialogThunks';
-import type { UITenant } from '@/types';
+import type { UIAccessRemedy, UITenant } from '@/types';
 
+import { AccessRemedyNote } from './AccessRemedyNote';
 import { InlineAlert } from './InlineAlert';
 import { DashboardMessage } from './TenantDashboardMessage';
 import { TenantDashboardPanels } from './TenantDashboardPanels';
@@ -210,7 +212,10 @@ function TenantDashboardReadyBody({
             </TabsTrigger>
           ))}
         </TabsList>
-        <RestrictedAccessNote missing={restrictedTenantDashboardReads(dashboard.data)} />
+        <RestrictedAccessNote
+          missing={restrictedTenantDashboardReads(dashboard.data)}
+          remedies={dashboard.data?.accessRemedies}
+        />
       </div>
       <TenantDashboardPanels data={dashboard.data} />
     </Tabs>
@@ -219,15 +224,26 @@ function TenantDashboardReadyBody({
 
 // RestrictedAccessNote is why a short tab strip is not an empty tenant. Hiding
 // the tabs alone would leave the user to infer that the panels do not exist, so
-// the access they are missing is named where they are looking (Nielsen #1).
-function RestrictedAccessNote({ missing }: { missing: string[] }): React.ReactElement | null {
+// the access they are missing is named where they are looking (Nielsen #1) —
+// and, since several reads can be missing at once, so is the grant for each
+// one that a role already covers.
+function RestrictedAccessNote({
+  missing,
+  remedies,
+}: {
+  missing: string[];
+  remedies?: Record<string, UIAccessRemedy>;
+}): React.ReactElement | null {
   if (missing.length === 0) {
     return null;
   }
   return (
-    <p className="text-[13px] leading-[1.4] text-muted-foreground" role="status">
-      {`Some panels are hidden because you do not have access to ${missing.join(', ')}. Ask an administrator for access.`}
-    </p>
+    <div className="text-[13px] leading-[1.4] text-muted-foreground" role="status">
+      <p>{`Some panels are hidden because you do not have access to ${missing.join(', ')}. Ask an administrator for access.`}</p>
+      {missing.map((read) => (
+        <AccessRemedyNote key={read} remedy={accessRemedyFor(remedies, read)} />
+      ))}
+    </div>
   );
 }
 
