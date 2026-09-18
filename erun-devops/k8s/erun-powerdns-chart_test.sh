@@ -10,6 +10,13 @@
 # branch. The CAA/TSIG policies below it already reconciled every run; the SOA
 # did not, and nothing in the render said so.
 #
+# Two layers, because either alone is weak: the rendered text is asserted
+# directly (so a regression is caught without executing anything), and then the
+# rendered script is EXECUTED against a stub pdnsutil (so the reconcile is
+# proven to actually repair an existing zone, bump the serial, and leave a
+# correct zone alone -- a render-only test would pass on a script that never
+# works).
+#
 # Lives beside the chart rather than inside it, like the other k8s chart tests:
 # helm renders every file under templates/, and `make helm-chart-tests` picks up
 # any erun-devops/k8s/*_test.sh with no Makefile edit.
@@ -33,6 +40,7 @@ fail() {
 }
 
 zone="services.erunpaas.com"
+placeholder="a.misconfigured.dns.server.invalid."
 
 render() {
     out="$1"
@@ -45,9 +53,13 @@ render() {
 
 # The zone-bootstrap initContainer's shell script, so an assertion about
 # ordering cannot accidentally match a line belonging to another initContainer
-# or to the pdns_server container.
+# or to the pdns_server container. The YAML preamble is stripped: what lands in
+# $2 is the shell the container actually runs.
 bootstrap_script() {
-    awk '/- name: zone-bootstrap/ { in_block = 1 } in_block && /^ *volumeMounts:$/ { exit } in_block { print }' "$1" >"$2"
+    awk '/- name: zone-bootstrap/ { in_block = 1 }
+         in_block && /^ *- \|$/ { in_shell = 1; next }
+         in_block && /^ *volumeMounts:$/ { exit }
+         in_shell { print }' "$1" >"$2"
     [ -s "$2" ] || fail "the rendered chart must contain a zone-bootstrap initContainer"
 }
 
@@ -75,7 +87,7 @@ grep -q "ns1\.erunpaas\.com\. hostmaster\.${zone}\." "${script}" ||
 # The literal is asserted absent rather than merely unused, so the placeholder
 # cannot survive anywhere in the deploy path -- not as an MNAME, not in a
 # command that a future edit reintroduces.
-grep -q 'a\.misconfigured\.dns\.server\.invalid' "${rendered}" &&
+grep -q "${placeholder}" "${rendered}" &&
     fail "pdnsutil's placeholder SOA MNAME must not appear in any rendered manifest"
 
 # --- 3. The MNAME correction runs on every bootstrap, not only at creation ---
@@ -92,8 +104,6 @@ soa_line=$(line_of 'replace-rrset .* @ SOA' 0 "${script}")
     fail "the SOA MNAME rewrite must sit OUTSIDE the create-only guard (guard closes at line ${guard_fi}, rewrite at ${soa_line}) so existing zones are reconciled too"
 
 # --- 4. The correction is conditional, so an already-correct SOA is untouched ---
-grep -q 'mname' "${script}" ||
-    fail "the bootstrap must read the zone's current MNAME before rewriting"
 grep -q '\[ "\$mname" != "ns1\.erunpaas\.com\." \]' "${script}" ||
     fail "the SOA rewrite must be gated on the MNAME differing from the primary nameserver"
 
@@ -112,5 +122,85 @@ bare_script="${work_root}/bare-bootstrap.sh"
 bootstrap_script "${bare}" "${bare_script}"
 grep -q 'replace-rrset .* @ SOA' "${bare_script}" &&
     fail "the bootstrap must not rewrite the SOA when no nameserver is configured"
+
+# --- 8. Executed against a stub pdnsutil: the reconcile really repairs zones ---
+# The rendered script above is run for real. The stub keeps the zone in a file
+# and records every mutating call, so the assertions below are about what the
+# bootstrap DID, not about what its text looks like.
+stub_bin="${work_root}/bin"
+mkdir -p "${stub_bin}"
+export FAKE_STATE="${work_root}/zone-state"
+export FAKE_LOG="${work_root}/calls.log"
+: >"${FAKE_LOG}"
+
+cat >"${stub_bin}/pdnsutil" <<'STUB'
+#!/bin/sh
+# Stub pdnsutil: state lives in $FAKE_STATE, every mutating call in $FAKE_LOG.
+# Only the gpgsql backend behavior the zone-bootstrap depends on is modeled.
+shift                 # --config-dir=<dir>
+cmd="$1"
+shift
+case "${cmd}" in
+list-zone)
+    [ -f "${FAKE_STATE}" ] || exit 1
+    # Real layout: name, TTL, class, SOA, then the 7-field RDATA.
+    printf '%s\t3600\tIN\tSOA\t%s\n' "$1" "$(cat "${FAKE_STATE}")"
+    printf '%s\t3600\tIN\tNS\tns1.erunpaas.com.\n' "$1"
+    ;;
+create-zone)
+    printf '%s\n' "${FAKE_PLACEHOLDER}" >"${FAKE_STATE}"
+    printf 'create-zone %s\n' "$1" >>"${FAKE_LOG}"
+    ;;
+add-record)
+    printf 'add-record %s\n' "$*" >>"${FAKE_LOG}"
+    ;;
+replace-rrset)
+    printf 'replace-rrset %s %s %s %s\n' "$1" "$3" "$4" "$5" >>"${FAKE_LOG}"
+    case "$3" in
+    SOA) printf '%s\n' "$5" >"${FAKE_STATE}" ;;
+    esac
+    ;;
+import-tsig-key | set-meta)
+    printf '%s %s\n' "${cmd}" "$*" >>"${FAKE_LOG}"
+    ;;
+*)
+    exit 0
+    ;;
+esac
+STUB
+chmod +x "${stub_bin}/pdnsutil"
+
+# A zone created by the pre-#2259 bootstrap: placeholder MNAME, live serial.
+FAKE_PLACEHOLDER="${placeholder} hostmaster.${zone}. 2026090202 10800 3600 604800 3600"
+export FAKE_PLACEHOLDER
+printf '%s\n' "${FAKE_PLACEHOLDER}" >"${FAKE_STATE}"
+
+PATH="${stub_bin}:${PATH}" sh "${script}" ||
+    fail "the zone-bootstrap script must run to completion"
+
+repaired=$(cat "${FAKE_STATE}")
+[ "${repaired}" = "ns1.erunpaas.com. hostmaster.${zone}. 2026090203 10800 3600 604800 3600" ] ||
+    fail "an EXISTING zone must be repaired in place: expected the real MNAME at serial 2026090203, got '${repaired}'"
+
+# Idempotent: a second bootstrap over the repaired zone must change nothing.
+: >"${FAKE_LOG}"
+PATH="${stub_bin}:${PATH}" sh "${script}" ||
+    fail "a second bootstrap run must succeed"
+grep -q '^replace-rrset' "${FAKE_LOG}" &&
+    fail "a second bootstrap must not rewrite an already-correct SOA"
+[ "$(cat "${FAKE_STATE}")" = "${repaired}" ] ||
+    fail "a second bootstrap must leave an already-correct SOA byte-identical"
+
+# A fresh zone (no create-time SOA correction anywhere) must also come out
+# correct, so the reconcile covers the create path it replaced.
+rm -f "${FAKE_STATE}"
+: >"${FAKE_LOG}"
+PATH="${stub_bin}:${PATH}" sh "${script}" ||
+    fail "bootstrapping a missing zone must run to completion"
+fresh=$(cat "${FAKE_STATE}")
+case "${fresh}" in
+ns1.erunpaas.com.\ hostmaster."${zone}".*) : ;;
+*) fail "a freshly created zone must come out with the real MNAME, got '${fresh}'" ;;
+esac
 
 echo "PASS: erun-powerdns chart zone-bootstrap SOA MNAME"
