@@ -63,15 +63,7 @@ func ActivateEnvTrace(ctx Context, tenant, environment string) (Context, func())
 }
 
 func openEnvTraceLog(path string) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	if info, err := os.Stat(path); err == nil && info.Size() > envTraceLogMaxBytes {
-		if err := os.Rename(path, path+".1"); err != nil {
-			return nil, err
-		}
-	}
-	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	return OpenBoundedAppendLog(path, envTraceLogMaxBytes, 0o600)
 }
 
 // stampedLineWriter stamps each line so interleaved invocations stay

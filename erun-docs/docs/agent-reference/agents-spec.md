@@ -99,7 +99,7 @@ The two agents this topology names, both shipped in the runtime image (`/etc/eru
 |---|---|
 | Role | Standing role for an environment where features get built. |
 | Watches for | Assigned work; its own reviews' comment threads. |
-| Does | Implements the assigned work in its own environment. Takes it to `READY` with `/erun-merge` **(Planned.**, [#1516](https://github.com/sophium/erun/issues/1516)**)** rather than hand-rolling the commit/push/open-review sequence. Reads its reviews' threads; for each proposal branch, fetches it, judges it on merit, and merges the ones it accepts — it is not obliged to take a proposal, and replies with why when it declines. Never resolves a thread it did not open; it replies and lets the reviewer close. Once every thread on its review is resolved, runs `erun review queue advance` and lets the gate mint the release. |
+| Does | Implements the assigned work in its own environment. Takes it to `READY` with [`/erun-merge`](/agent-reference/skills-spec#erun-merge) rather than hand-rolling the commit/push/open-review sequence. Reads its reviews' threads; for each proposal branch, fetches it, judges it on merit, and merges the ones it accepts — it is not obliged to take a proposal, and replies with why when it declines. Never resolves a thread it did not open; it replies and lets the reviewer close. Once every thread on its review is resolved, runs `erun review queue advance` and lets the gate mint the release. |
 | Never does | Call `erun review queue override-advance` as routine — that is a deliberate, separately-authorized escape hatch, not a way to skip a slow reviewer. Resolve a thread it did not open. |
 
 ### `erun-reviewer`
@@ -108,10 +108,10 @@ The two agents this topology names, both shipped in the runtime image (`/etc/eru
 |---|---|
 | Role | Standing role for an environment that reviews. |
 | Watches for | `READY` reviews it is a reviewer on. |
-| Does | Runs `/erun-review` **(Planned.**, [#1518](https://github.com/sophium/erun/issues/1518)**)**: reads the diff, posts line-anchored comments, and — where it has a concrete fix — pushes a proposal branch the author can take. Returns to reviews it has already commented on, reads the builder's replies, and resolves its own threads once addressed. Opens threads sparingly — every open thread blocks the merge. |
+| Does | Runs [`/erun-review`](/agent-reference/skills-spec#erun-review): reads the diff, posts line-anchored comments, and — where it has a concrete fix — pushes a proposal branch the author can take. Returns to reviews it has already commented on, reads the builder's replies, and resolves its own threads once addressed. Opens threads sparingly — every open thread blocks the merge. |
 | Never does | Advance the merge queue. Call `override-advance`. Resolve a thread it did not open (it can only resolve its own). |
 
-Both agents pick up their work through `erun review list --waiting-on-me` (the reviewer filter) and the reviews the builder itself opened; assigning a reviewer to a review from any erun client is **(Planned.**, [#1515](https://github.com/sophium/erun/issues/1515)**)**, so populating `--waiting-on-me`'s result today needs direct API access.
+Both agents pick up their work through `erun review list --waiting-on-me` (the reviewer filter) and the reviews the builder itself opened; assigning a reviewer is available from every erun client — [`erun review reviewers`](/cli/review#review-reviewers) on the CLI, the [`review_reviewers_*`](/mcp/overview) MCP tools, and the desktop app's review [**Reviewers**](/desktop/reviews#reviewers) surface — see [Reviews § Author, reviewers, and discovery](/collaboration/reviews#author-reviewers-and-discovery).
 
 ## Docs contract
 

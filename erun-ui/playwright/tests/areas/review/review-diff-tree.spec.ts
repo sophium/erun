@@ -119,6 +119,9 @@ test.describe('review diff/tree consistency', () => {
     await stubDiff(page, diffResult(SMALL_FILES, SMALL_TREE));
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on the tree or the
+    // diffs it renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await expect(review.changedFilesTree()).toBeVisible();
     await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
@@ -133,6 +136,9 @@ test.describe('review diff/tree consistency', () => {
     await stubDiff(page, diffResult(SMALL_FILES, SMALL_TREE));
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on the tree or the
+    // diffs it renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
 
@@ -158,6 +164,9 @@ test.describe('review diff/tree consistency', () => {
     await stubDiff(page, diffResult(SMALL_FILES, SMALL_TREE));
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on the tree or the
+    // diffs it renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
 
@@ -191,6 +200,9 @@ test.describe('review diff/tree consistency', () => {
     await stubDiff(page, diffResult(files, tree));
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on the tree or the
+    // diffs it renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
     await expect.poll(() => review.diffSectionPaths().then((paths) => paths.length)).toBe(30);
 
@@ -296,6 +308,9 @@ test.describe('review diff/tree consistency', () => {
     });
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on the tree or the
+    // diffs it renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     const panelNotice = review.noLocalChangesNotice(review.diffContentRegion());

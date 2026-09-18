@@ -148,6 +148,13 @@ test.describe('the orchestrator dialog can bind a directory of its own', () => {
     app,
     page,
   }) => {
+    // The only case in this file that drives a live session: it starts an
+    // orchestrator, then edits it twice and reads back through the path that
+    // answers from the running session rather than the persisted definition.
+    // That is several round trips more than the suite-wide 30s per-test default
+    // is sized for, so the whole-test clock is raised rather than left as the
+    // shortest budget in the sequence.
+    test.setTimeout(60_000);
     const directory = makeDirectory();
     await stubDirectoryPicker(page, directory);
     const name = 'directories-running-test';
@@ -160,8 +167,13 @@ test.describe('the orchestrator dialog can bind a directory of its own', () => {
       await app.orchestratorDialog.waitForClosed();
 
       // Running before the edit, which is the state the report came from.
+      // Starting a session is a real state transition whose cost is the
+      // backend's, not this assertion's, so it converges against a budget
+      // sized for that rather than against expect's 10s default.
       await app.sidebar.openOrchestratorSession(name);
-      await expect(app.sidebar.orchestratorStatusDot(name, 'running')).toBeVisible();
+      await expect(app.sidebar.orchestratorStatusDot(name, 'running')).toBeVisible({
+        timeout: 25_000,
+      });
 
       await app.sidebar.openOrchestratorDialog(name);
       await app.orchestratorDialog.directoriesAddButton('Edit orchestrator').click();
@@ -172,11 +184,13 @@ test.describe('the orchestrator dialog can bind a directory of its own', () => {
       await app.orchestratorDialog.waitForClosed('Edit orchestrator');
 
       // The Edit form is populated from this payload, so a directory missing here
-      // is indistinguishable from a save that never happened.
+      // is indistinguishable from a save that never happened. This read goes
+      // through the running session rather than the persisted definition, which
+      // is the slower of the two paths, so it gets a budget of its own.
       await app.sidebar.openOrchestratorDialog(name);
-      await expect(
-        app.orchestratorDialog.directoryRow(directory, 'Edit orchestrator'),
-      ).toBeVisible();
+      await expect(app.orchestratorDialog.directoryRow(directory, 'Edit orchestrator')).toBeVisible(
+        { timeout: 25_000 },
+      );
       await app.orchestratorDialog.cancel('Edit orchestrator');
       await app.orchestratorDialog.waitForClosed('Edit orchestrator');
     } finally {

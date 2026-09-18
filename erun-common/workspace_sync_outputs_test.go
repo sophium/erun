@@ -112,6 +112,59 @@ func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testi
 	}
 }
 
+// TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode is a regression
+// test: delivery used to run the writable->extract->sign->read-only cycle
+// unconditionally for every remote
+// artifact on every pass, so an artifact whose content had not changed at all
+// still passed through the 0644 window `makeArtifactsWritable` applies before
+// re-extraction restores it -- on the majority of passes, per the issue's own
+// sampling, since delivery ran every couple of seconds. An operator invoking
+// the artifact directly from a shell during that window saw "permission
+// denied" on an otherwise-correct binary.
+//
+// This locks the fix: when the pod's copy hashes identically to what is already
+// in the mirror, the artifact is never made writable, never re-extracted, and
+// never re-marked read-only -- its mode is untouched start to finish. The tar
+// archive stub below is only ever consulted if the pass decides to transfer,
+// so on the old, unconditional code this test fails: the pass re-fetches the
+// "unchanged" artifact, which lands it back at a writable mode before the
+// read-only re-application.
+func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) {
+	stubWorkspaceSyncSSHForOutputs(t)
+
+	artifactsLocal := t.TempDir()
+	artifact := filepath.Join(artifactsLocal, "erun-darwin-arm64")
+	if err := os.WriteFile(artifact, []byte("already built"), 0o644); err != nil {
+		t.Fatalf("seed artifact: %v", err)
+	}
+	// A settled mirror always ends a pass read-only+executable; a real artifact
+	// between passes carries exactly this mode.
+	if err := os.Chmod(artifact, 0o555); err != nil {
+		t.Fatalf("chmod artifact read-only+executable: %v", err)
+	}
+
+	// The pod's copy hashes identically to the mirror's, so this pass has
+	// nothing to transfer -- and therefore nothing to make writable, extract, or
+	// re-mark.
+	archive := writeWorkspaceSyncArchive(t, map[string][]byte{"erun-darwin-arm64": []byte("already built")})
+	t.Setenv(workspaceSyncStubArchiveEnv, archive)
+	t.Setenv(workspaceSyncStubOutputsEnv, "erun-darwin-arm64")
+
+	copied, _, err := syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
+	requireWorkspaceSyncNoError(t, err, "sync outputs artifacts for an unchanged artifact")
+	if copied != 0 {
+		t.Fatalf("expected 0 artifacts transferred for unchanged content, got %d", copied)
+	}
+
+	after, err := os.Stat(artifact)
+	if err != nil {
+		t.Fatalf("stat artifact after sync: %v", err)
+	}
+	if after.Mode().Perm() != 0o555 {
+		t.Fatalf("unchanged artifact's mode was touched: got %v, want 0o555 (executable never dropped)", after.Mode().Perm())
+	}
+}
+
 // TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass is erun#2387: the
 // outputs lane re-staged its whole set on every pass, byte for byte, even when
 // nothing had changed. workspaceSyncStubFetchMarkerEnv marks the moment the

@@ -170,6 +170,12 @@ COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 # time to lock its -ldflags target to the real release build, so the test
 # stage needs the file even though nothing here builds the eapi image itself.
 COPY erun-devops/docker/erun-backend-api/Dockerfile /src/erun-devops/docker/erun-backend-api/Dockerfile
+# erun-common's TestCloudContextDefaultsMatchEntrypoint reads the expectations
+# table the entrypoint's shell twin is checked against, and the entrypoint's own
+# expressions out of entrypoint.sh, so both files have to be at the same
+# relative path here that they have in a full checkout -- this stage COPYs
+# erun-devops selectively (see the note above), not wholesale.
+COPY erun-devops/docker/erun-devops/cloud_context_defaults.tsv erun-devops/docker/erun-devops/entrypoint.sh /src/erun-devops/docker/erun-devops/
 # The pinned wails CLI, installed into GOPATH/bin where both callers of
 # erun-ui/generate-wailsjs.sh look for it (WAILS_BIN defaults to
 # "$(go env GOPATH)/bin/wails" in that script and in erun-ui/build.sh).
@@ -191,10 +197,39 @@ COPY erun-kit /src/erun-kit
 COPY erun-console /src/erun-console
 COPY Formula /src/Formula
 COPY bucket /src/bucket
-# helm-chart-tests renders every erun-devops/k8s chart with `helm template`;
-# only the charts and their *_test.sh scripts are needed, not the rest of
-# erun-devops (docker/, terraform-erun/, etc.).
+# helm-chart-tests renders every erun-devops/k8s chart with `helm template`.
+# The charts and their *_test.sh scripts are the bulk of what is needed here --
+# not the rest of erun-devops (terraform-erun/, most of docker/) -- but see the
+# VERSION pins immediately below: the k8s tests are NOT render-only.
 COPY erun-devops/k8s /src/erun-devops/k8s
+# image-version_test.sh (under k8s/) compares each chart's image default against
+# the `docker/<image>/VERSION` pin the build publishes, so those pins must be
+# present even though nothing in this stage builds those images. It reads them
+# through a helper that treats a missing file as "the repo ships no such image"
+# and then SKIPS that image, so an omitted pin does not fail loudly -- it
+# quietly narrows the test's coverage until the `checked > 0` guard trips. All
+# seven are copied, not just erun-dind, because the templates pin postgres and
+# powerdns by literal and those are exactly the pairs the second half checks.
+# Missing pins fail the gate here while a full checkout passes: the inverse of
+# the usual in-build drift, and the reason this list must track the pins.
+COPY erun-devops/docker/erun-dind/VERSION /src/erun-devops/docker/erun-dind/VERSION
+COPY erun-devops/docker/erun-backend-postgres/VERSION /src/erun-devops/docker/erun-backend-postgres/VERSION
+COPY erun-devops/docker/erun-powerdns/VERSION /src/erun-devops/docker/erun-powerdns/VERSION
+COPY erun-devops/docker/erun-oci-registry/VERSION /src/erun-devops/docker/erun-oci-registry/VERSION
+COPY erun-devops/docker/erun-ubuntu/VERSION /src/erun-devops/docker/erun-ubuntu/VERSION
+COPY erun-devops/docker/erun-zitadel/VERSION /src/erun-devops/docker/erun-zitadel/VERSION
+COPY erun-devops/docker/erun-zitadel-login/VERSION /src/erun-devops/docker/erun-zitadel-login/VERSION
+# TestPassthroughWrapperDockerfilesReclaimProvenanceLabel (erun-common) globs
+# `erun-devops/docker/*/Dockerfile` and fails loudly when that finds fewer than
+# two wrappers, so this stage needs the Dockerfiles themselves, not just the
+# VERSION pins above (a wrapper is only recognised when its VERSION sibling is
+# present). Without them the glob matches nothing at /src, the canary trips, and
+# a full checkout still passes -- the same in-build-only failure the pins below
+# document. The whole tree is copied rather than a wildcard source: a wildcard
+# (`erun-devops/docker/*/Dockerfile`) flattens every match onto a single file at
+# the destination, which is precisely the empty discovery this copy prevents,
+# and an enumerated list would go stale the moment a wrapper is added.
+COPY erun-devops/docker /src/erun-devops/docker
 # erun-backend-db-chart_test.sh cross-checks the data-retention doc's claimed
 # default and chart-value keys (retention.enabled, retention.dryRun) against
 # what this chart actually renders; only the one page is needed.
@@ -207,6 +242,16 @@ COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
 # checks erun-common's known infrastructure-failure signature list against
 # this page's spec of the gate-run/gate-build failure classifier.
 COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-reference/skills-spec.md
+# TestConfigLocationsDocMatchesResolver (erun-integration) derives the per-user
+# config paths from erun-common's own resolvers and asserts this page documents
+# them; only the one file is needed.
+COPY erun-docs/docs/reference/config-locations.md /src/erun-docs/docs/reference/config-locations.md
+# TestOrchestratorSessionEnvVarsAreDocumented cross-checks the orchestrator
+# session variables erun-common actually sets against this page, which is the
+# one that enumerates them; only the one file is needed, not the built site.
+# Omitting it fails the gate with "no such file or directory" while a full
+# checkout passes, so this COPY is what makes the drift test real in the build.
+COPY erun-docs/docs/reference/env-vars.md /src/erun-docs/docs/reference/env-vars.md
 
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the

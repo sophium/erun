@@ -87,6 +87,12 @@ required** — that is deliberate, because `kubectl top` answers "Metrics API no
 clusters, which are the ones you iterate in all day. The counters are sampled on the same tick the
 [idle monitor](/agent-reference/idle-policy) already runs, and retained per environment.
 
+Retained *inside* the environment: the history is written to the runtime container's own cache by the
+monitor running in that container. So the `sizing:` lines above appear when `erun list` runs in the
+environment they describe, and not from a host, which holds no history to derive a verdict from. The
+[`usage` MCP tool](/mcp/overview#usage) runs in the environment and carries the same verdict as a
+`sizing` field; [`erun usage`](/cli/usage) does not carry it, and says so in its help.
+
 ### What each signal says
 
 | Signal | Direction | Why |

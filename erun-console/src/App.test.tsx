@@ -35,6 +35,38 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   sessionStorage.clear();
+  delete window.__ERUN_PLATFORM_BRAND__;
+});
+
+// The regression this guards: the pre-resolution paint used a bundled name of
+// its own, so the page showed one product name and then another once GET
+// /v1/platform answered — on every load, on the first screen anyone sees. The
+// console image serves the instance's own brand in the page
+// (window.__ERUN_PLATFORM_BRAND__, from the same platform.brand the API
+// serves), so the first paint and the resolved paint are the same value.
+describe('App brand', () => {
+  it('shows the server-supplied brand before discovery resolves and after', async () => {
+    const brand = 'ErunPaaS';
+    window.__ERUN_PLATFORM_BRAND__ = brand;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(jsonResponse({ ...PLATFORM, brand }))),
+    );
+
+    renderWithStore(<App />);
+
+    // The first paint, before the platform request has answered: the same name
+    // the server is about to supply, not a bundled one that then flips.
+    expect(document.title).toBe(`${brand} console`);
+    expect(screen.getAllByText(brand).length).toBeGreaterThan(0);
+
+    await screen.findByRole('heading', { level: 1, name: PLATFORM.tagline });
+
+    // Discovery answered with the very same value, so nothing changed.
+    expect(document.title).toBe(`${brand} console`);
+    expect(screen.getAllByText(brand).length).toBeGreaterThan(0);
+    expect(screen.queryByText('ERun console')).not.toBeInTheDocument();
+  });
 });
 
 describe('App signed-out route', () => {

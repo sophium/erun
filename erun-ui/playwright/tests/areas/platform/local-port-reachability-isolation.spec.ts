@@ -66,8 +66,7 @@ test.describe('local port isolation from a real, unrelated listener', () => {
       // The AI tab starts normally: no occupancy dialog reads the unrelated
       // listener as another job already working here.
       await expect(app.aiOccupancyPromptDialog.locator()).toHaveCount(0);
-      const aiTab = page.getByRole('tab', { name: 'AI', exact: true });
-      await aiTab.waitFor({ state: 'visible', timeout: 20_000 });
+      await app.tabStrip.waitForTab('AI');
 
       // No stray overlay from a wrongly-opened dialog blocks a later click:
       // a dialog-overlay intercepting pointer events on the titlebar.

@@ -77,7 +77,7 @@ An env deployed with a trust anchor requires a **bearer on every request**, incl
 | Lifetime | 5 minutes. Mint per request; do not cache. |
 | Failure | `401` with the verification reason. |
 
-An env deployed before key injection (no anchor configured) stays unauthenticated — loopback-only, behind the namespace's default-deny `NetworkPolicy`.
+An env deployed before key injection (no anchor configured) answers any caller that can reach the port. The edge binds the pod IP rather than loopback — the in-pod Service that `erun expose` fronts has to reach it — and the runtime chart's `NetworkPolicy` re-permits `mcp` from any source, so an unanchored edge is reachable from every pod in the cluster, not just the env's own namespace. Inject a key by redeploying before treating an env as safe to leave running unanchored.
 
 **Don't hand-roll the token.** `erun mcp call` and `erun mcp tools` mint one internally per request; `erun mcp proxy` does the same for a client that speaks MCP itself, relaying its stdio to this endpoint; and `erun mcp token` prints one for a caller driving the protocol directly:
 
@@ -682,7 +682,7 @@ Every field reports its own unavailability rather than failing the call: a clust
 
 `intervalSeconds` (input, default 1, clamped to 0.1–30) sets the CPU sample window: `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter.
 
-When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `erun list` reports under `runtime-pod:` — so a caller checking on an environment does not need a separate `resize` call just to see it. Omitted when nothing has been observed yet.
+When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `resize` reasons from — so a caller checking on an environment does not need a separate `resize` call just to see it. That history is retained by this environment's own pod monitor and lives in this pod, which is why the block appears here: [`erun list`](/cli/list) reaches the same verdict only when run inside the environment itself, a host-run `erun list` reports none for it, and [`erun usage`](/cli/usage) carries no sizing block at all — so neither is a substitute for this tool. Omitted when nothing has been observed yet.
 
 ### `resize`
 
@@ -820,7 +820,7 @@ Trigger a build. Same semantics as the CLI `erun build` — it builds the images
 | `release` | bool (optional) | Pin a bare release version instead of minting a snapshot. |
 | `force` | bool (optional) | Bypass the fingerprint cache. |
 | `dry_run` | bool (optional) | Preview without building. |
-| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `environments.<env>.docker.platforms`. Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
+| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `docker.platforms` (per-environment or project-wide). Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 
 The MCP `build` tool does **not** expose the `--deploy` convenience switch — an Agent composes the rollout by calling `push` and `deploy` itself with the `version` from this tool's output.
 

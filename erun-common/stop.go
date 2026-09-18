@@ -7,7 +7,7 @@ import (
 )
 
 // A stopped environment is one whose runtime Deployment is scaled to zero. That
-// returns both the runtime container's limits and its unlimited dind sidecar's
+// returns both the runtime container's limits and its dind sidecar's
 // real consumption to the node, so the environments an operator is actually
 // using can be offered the capacity. Every PVC survives — the home tree, the
 // docker/buildkit state, and a local-agent env's hostPath worktree — so waking

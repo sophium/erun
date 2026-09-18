@@ -412,16 +412,37 @@ func (s *stepTiming) toRecord(command string) TimingRecord {
 	return record
 }
 
-// timingRecordDir is a sibling of the per-env trace.log tree (~/.erun/...)
-// rather than the trace.log path itself: build/release/push commonly run
-// with no tenant/environment at all (they are pure primitives that do not
-// require a deploy target — root AGENTS.md § "Command primitives vs
-// orchestration"), so a location keyed to tenant+environment would leave
-// most build/release/push runs with no record. A flat, home-relative
-// directory gives every one of the four commands the same, always-available
-// home, without standing up a queryable store this feature does not need:
-// two runs are diffed by reading two small JSON files.
-func timingRecordDir() (string, error) {
+// TimingRecordDirEnv relocates the timing history a run reads and writes. It
+// exists because the destination otherwise derives from the ambient home
+// directory, which a test binary shares with the operator running it: a suite
+// that reaches any timing-instrumented command would append fabricated
+// microsecond records to the operator's real build/deploy history, and — since
+// retention prunes on write — evict a genuine record to do it. A per-module
+// TestMain points this at a temp tree so the isolation holds for every test in
+// the binary, including ones added later, rather than depending on each test to
+// remember; an operator may also set it to keep history somewhere else.
+const TimingRecordDirEnv = "ERUN_TIMING_DIR"
+
+// timingRecordDir resolves the directory timing records are read from and
+// written to. It is a package-level seam, like dockerConfigDir and
+// runECRLoginPassword, so a test can point one call at its own temp tree
+// without moving HOME — which would also move the kubeconfig and cloud
+// credentials those tests still need to read.
+var timingRecordDir = defaultTimingRecordDir
+
+// defaultTimingRecordDir is a sibling of the per-env trace.log tree
+// (~/.erun/...) rather than the trace.log path itself: build/release/push
+// commonly run with no tenant/environment at all (they are pure primitives that
+// do not require a deploy target — root AGENTS.md § "Command primitives vs
+// orchestration"), so a location keyed to tenant+environment would leave most
+// build/release/push runs with no record. A flat, home-relative directory gives
+// every one of the four commands the same, always-available home, without
+// standing up a queryable store this feature does not need: two runs are
+// diffed by reading two small JSON files.
+func defaultTimingRecordDir() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv(TimingRecordDirEnv)); dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

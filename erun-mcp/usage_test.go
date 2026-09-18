@@ -65,15 +65,108 @@ func TestUsageToolOmitsSizingWithNoHistory(t *testing.T) {
 	}
 }
 
+// usageToolDescriptionForTest returns the `usage` tool's wire description, so
+// the cross-references it makes can be checked against the surfaces that
+// actually carry what it names.
+func usageToolDescriptionForTest(t *testing.T) string {
+	t.Helper()
+	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+	for _, tool := range listTools(t, session) {
+		if tool.Name == "usage" {
+			return tool.Description
+		}
+	}
+	t.Fatal("usage tool is not registered")
+	return ""
+}
+
+// TestUsageDescriptionNamesASurfaceThatCarriesTheVerdict covers the dead end
+// this fixes: the description cross-referenced `erun list` as reporting the
+// same raise/lower/hold verdict the `sizing` block carries, so a caller who
+// took it there instead of making a separate resize call found nothing. `list`
+// does read the same retained history, but the history lives in the
+// environment's own pod monitor, so a host that has never monitored the
+// environment has none and prints no verdict at all. The description has to
+// send a caller to a surface that actually carries it, and own that the
+// host-side ones are not it -- in the tool description and in the overview
+// page's sibling prose alike, since a caller reads whichever they reached.
+func TestUsageDescriptionNamesASurfaceThatCarriesTheVerdict(t *testing.T) {
+	const falseClaim = "the same raise/lower/hold verdict and evidence window `erun list` reports"
+	description := usageToolDescriptionForTest(t)
+	if strings.Contains(description, falseClaim) {
+		t.Errorf("usage tool description still sends callers to `erun list` for the sizing verdict:\n%s", description)
+	}
+	if !strings.Contains(description, "pod monitor") {
+		t.Errorf("usage tool description carries `sizing` without saying the history behind it is retained by the environment's own pod monitor, which is what makes a host-side read unable to derive one:\n%s", description)
+	}
+
+	docPath := filepath.Join(repoRootForOverviewDocTest(t), "erun-docs", "docs", "mcp", "overview.md")
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", docPath, err)
+	}
+	page := string(data)
+	if strings.Contains(page, "the same verdicts and evidence window `erun list` reports under `runtime-pod:`") {
+		t.Errorf("%s still sends callers to `erun list` for the sizing verdict", docPath)
+	}
+	if !strings.Contains(page, "pod monitor") {
+		t.Errorf("%s describes the `sizing` field without saying the history behind it is retained by the environment's own pod monitor", docPath)
+	}
+}
+
+// TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment pins the MCP
+// half of the excludes-builds caveat: a build-capable environment's reading
+// cannot see the erun-dind sidecar an image build actually runs in, so the
+// result must carry ExcludesBuilds=true instead of letting the reading imply
+// the environment is idle. The Runtime fixture elsewhere in this file cannot
+// tell a working field from a missing one -- UsesDindSidecar() is false for
+// Runtime either way -- so this is the only case that exercises the disclosure
+// at all, on either transport.
+func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+
+	cases := []struct {
+		name    string
+		envType eruncommon.EnvironmentType
+		want    bool
+	}{
+		{"remote-agent carries the dind sidecar", eruncommon.EnvironmentTypeRemoteAgent, true},
+		{"local-agent carries the dind sidecar", eruncommon.EnvironmentTypeLocalAgent, true},
+		{"runtime builds nowhere in this container", eruncommon.EnvironmentTypeRuntime, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := RuntimeConfig{
+				Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+				Store:   usageTestStoreOfType("tenant-a", "dev", tc.envType, t.TempDir()),
+			}
+			_, output, err := usageTool(runtime)(context.Background(), nil, UsageInput{Preview: true})
+			if err != nil {
+				t.Fatalf("usageTool returned err: %v", err)
+			}
+			if output.ExcludesBuilds != tc.want {
+				t.Fatalf("ExcludesBuilds = %v, want %v (env type %q)", output.ExcludesBuilds, tc.want, tc.envType)
+			}
+		})
+	}
+}
+
 // usageTestStore builds a store that resolves tenant/environment through the
 // same OpenResult path `usage`/`resize` use, which needs both LoadEnvConfig
 // (envConfigs) and the port-range allocator's ListEnvConfigs (envsByTenant)
 // to agree on the one environment.
 func usageTestStore(tenant, environment string) listToolStore {
+	return usageTestStoreOfType(tenant, environment, eruncommon.EnvironmentTypeRuntime, "/home/erun/work")
+}
+
+func usageTestStoreOfType(tenant, environment string, envType eruncommon.EnvironmentType, repoPath string) listToolStore {
 	env := eruncommon.EnvConfig{
 		Name:                environment,
-		Type:                eruncommon.EnvironmentTypeRuntime,
+		Type:                envType,
 		KubernetesContext:   "test-context",
+		LocalRepoPath:       repoPath,
 		LocalPortRangeStart: 17000,
 	}
 	return listToolStore{

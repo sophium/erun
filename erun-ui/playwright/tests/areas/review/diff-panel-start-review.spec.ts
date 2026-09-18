@@ -101,7 +101,10 @@ async function openDiffPanel(
   await app.sidebar.openEnvironment(tenant, environment);
   await dismissAIOccupancyPromptIfShown(app);
   await app.titlebar.toggleReviewPanel();
-  await expect(app.page.getByText('package main')).toBeVisible();
+  // Converge on the panel having opened, then on the diff it fetches: both are
+  // separate renders after the toggle, and expect's own budget is a fixed 10s.
+  await app.reviewPanel.waitForOpen();
+  await app.page.getByText('package main').waitFor({ state: 'visible' });
 }
 
 function startReviewButton(app: import('../../../pages/index.js').AppShell) {

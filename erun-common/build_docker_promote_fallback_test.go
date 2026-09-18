@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -11,22 +12,33 @@ import (
 // newFakeDockerOnPath puts a fake `docker` executable ahead of PATH so these
 // tests exercise the real promote/build/push call graph in
 // build_docker_commands.go without a real daemon or registry. `docker push`
-// fails with pushFailureMessage the first time a given tag is pushed and
-// succeeds on any later push of that same tag (recording state under a temp
-// dir keyed by env var so both this process and the fake script agree on it);
-// every other subcommand (build, tag, manifest) succeeds unconditionally.
+// fails with pushFailureMessage for the first dockerPushUnknownBlobRetries+1
+// pushes of a given tag and succeeds on any later push of that same tag
+// (recording state under a temp dir so both this process and the fake script
+// agree on it); every other subcommand (build, tag, manifest) succeeds
+// unconditionally.
+//
+// The count matters: DockerImagePusher already re-pushes a blob rejection
+// (see build_docker_push_race_test.go), so the failure has to outlast that
+// bounded retry for these tests to reach the promote fallback underneath it —
+// which is the point, since a rebuild is the recovery a stale local
+// "already pushed" record needs and a re-push cannot provide.
 func newFakeDockerOnPath(t *testing.T, pushFailureMessage string) {
 	t.Helper()
 	binDir := t.TempDir()
 	stateDir := t.TempDir()
+	failuresPerTag := dockerPushUnknownBlobRetries + 1
 	script := "#!/bin/bash\n" +
 		"case \"$1\" in\n" +
 		"  push)\n" +
 		"    tag=\"${@: -1}\"\n" +
 		"    safe=$(echo \"$tag\" | tr '/:.' '_')\n" +
 		"    marker=\"" + stateDir + "/pushed_$safe\"\n" +
-		"    if [ ! -f \"$marker\" ]; then\n" +
-		"      touch \"$marker\"\n" +
+		"    n=0\n" +
+		"    if [ -f \"$marker\" ]; then n=$(cat \"$marker\"); fi\n" +
+		"    n=$((n+1))\n" +
+		"    echo \"$n\" > \"$marker\"\n" +
+		"    if [ \"$n\" -le " + strconv.Itoa(failuresPerTag) + " ]; then\n" +
 		"      echo \"" + pushFailureMessage + "\" >&2\n" +
 		"      exit 1\n" +
 		"    fi\n" +
