@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -245,6 +246,39 @@ func TestRunUpgradePlanReportsUnresolvedDistinctly(t *testing.T) {
 	}
 	if len(result.Unresolved) != 1 || result.Unresolved[0].Environment != "unknown" {
 		t.Fatalf("the unresolved member must be reported as unresolved, got %+v", result.Unresolved)
+	}
+}
+
+// TestRunUpgradePlanAnnouncementFollowsDryRun pins the two lines a dry run must
+// not write in the past tense: the per-member banner and the final tally. The
+// run deploys nothing under --dry-run, so an unconditional "N upgraded" leaves
+// an operator who reads only the tail of a long traced plan believing a fleet
+// was rolled. The real run's wording is pinned alongside so the conditional
+// cannot be over-applied into it.
+func TestRunUpgradePlanAnnouncementFollowsDryRun(t *testing.T) {
+	plan := UpgradePlan{Items: []UpgradePlanItem{
+		{Tenant: "team", Environment: "lagging", Channel: "stable", Current: "1.0.0", Target: "2.0.0", Lagging: true},
+	}}
+	noop := func(_ Context, _ UpgradePlanItem) error { return nil }
+
+	dryRun := &bytes.Buffer{}
+	RunUpgradePlan(Context{DryRun: true, Logger: NewLoggerWithWriters(VerbosityInfo, dryRun, dryRun)}, plan, noop)
+	for _, claim := range []string{"==> Upgrading ", "==> Upgrade complete"} {
+		if strings.Contains(dryRun.String(), claim) {
+			t.Errorf("dry run asserted %q after deploying nothing:\n%s", claim, dryRun.String())
+		}
+	}
+	if !strings.Contains(dryRun.String(), "==> Would upgrade team/lagging 1.0.0 -> 2.0.0 (stable)") {
+		t.Errorf("dry run must announce the member conditionally, got:\n%s", dryRun.String())
+	}
+	if !strings.Contains(dryRun.String(), "1 would upgrade, 0 up to date, 0 unresolved, 0 failed") {
+		t.Errorf("dry run must tally conditionally, got:\n%s", dryRun.String())
+	}
+
+	real := &bytes.Buffer{}
+	RunUpgradePlan(Context{Logger: NewLoggerWithWriters(VerbosityInfo, real, real)}, plan, noop)
+	if !strings.Contains(real.String(), "==> Upgrade complete: 1 upgraded") {
+		t.Errorf("a real run still reports completion, got:\n%s", real.String())
 	}
 }
 

@@ -6,4 +6,4 @@ upgrade: team/dev version resolution failed: ghcr token request failed: 403 Forb
 ==> Upgrade plan: 1 member(s), 0 lagging, in this order:
     1. team/dev [stable] <VERSION> -> (unset)  (target unresolved: ghcr token request failed: 403 Forbidden)
 upgrade: team/dev target unresolved, skipping: ghcr token request failed: 403 Forbidden
-==> Upgrade complete: 0 upgraded, 0 up to date, 1 unresolved, 0 failed
+==> Upgrade plan complete (dry run): 0 would upgrade, 0 up to date, 1 unresolved, 0 failed
