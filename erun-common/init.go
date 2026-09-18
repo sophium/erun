@@ -374,6 +374,13 @@ func (s tracedBootstrapStore) SaveERunConfig(config ERunConfig) error {
 }
 
 func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
+	// Validated (and normalized) exactly as the real save does before anything
+	// is traced, so a dry run never reports a mkdir and a write-yaml that the
+	// real run refuses, and the traced path is the one the real run would use.
+	config = NormalizeTenantConfig(config)
+	if err := validateStatePathSegment("tenant", config.Name); err != nil {
+		return err
+	}
 	configPath, err := resolveConfigFilePath(filepath.Join("erun", config.Name, "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -388,6 +395,14 @@ func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
 }
 
 func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config EnvConfig) error {
+	// Same shape rule and order as the real save: refuse before tracing, so a
+	// dry run's mkdir/write-yaml pair is one the real run would actually do.
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return err
+	}
+	if err := validateStatePathSegment("environment", config.Name); err != nil {
+		return err
+	}
 	configPath, err := resolveConfigFilePath(filepath.Join("erun", tenant, config.Name, "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
