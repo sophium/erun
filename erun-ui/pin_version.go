@@ -12,8 +12,10 @@ import (
 )
 
 // Changing an environment's erun version means moving every place that version
-// is recorded — the Terraform refs, each umbrella's erun chart dependencies, the
-// build-env image tag, the env's own runtime version — together. The desktop
+// is recorded — the Terraform module refs, an erun image reference set directly
+// in Terraform variables, each umbrella's erun chart dependencies, the build-env
+// image tag, a stated runtime chart or runtime image naming erun's own stock
+// release, and the env's own runtime version — together. The desktop
 // composes `erun pin` for that rather than reimplementing it: the CLI, the MCP
 // tool and this share one engine, so all three agree on what a re-pin touches.
 

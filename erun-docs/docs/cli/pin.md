@@ -15,6 +15,8 @@ One erun version is written down in several places, and they only work when they
 | Terraform module ref | `?ref=v<version>` on every `github.com/sophium/erun.git//…` module source |
 | Helm chart dependencies | each `<tenant>-<component>` umbrella's `Chart.yaml` erun dependency `version:` |
 | Build-env image | `FROM …/erun-devops:<version>` in a custom runtime image |
+| Terraform variable image reference | an erun image reference a tenant's own Terraform sets directly, e.g. the cluster-edge module's `dns01_webhook_image` |
+| Environment runtime image | the env's `runtimeimage`, when it names erun's own stock `erun-devops` image |
 | Environment runtime version | the env's `runtimeversion` |
 | Environment runtime chart | the env's `runtimechart`, when it names erun's own stock `erun-devops` chart |
 

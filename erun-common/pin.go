@@ -14,7 +14,8 @@ import (
 // One erun version is written down in several places in a tenant repo — the
 // Terraform module refs, an erun image reference a tenant's own Terraform
 // variables set directly (e.g. the cluster-edge module's dns01_webhook_image),
-// every umbrella chart's erun dependencies, the build-env image tag, and the
+// every umbrella chart's erun dependencies, the build-env image tag, a stated
+// runtime chart or runtime image naming erun's own stock release, and the
 // environment's own runtimeversion — and they only work when they agree.
 // Nothing enforced that, so they drifted: a repo was found pinned to three
 // different versions at once, and realigning it meant editing seven files by
@@ -37,6 +38,34 @@ const (
 	PinSiteImageReference PinSiteKind = "image-reference"
 	PinSiteRuntimeChart   PinSiteKind = "runtime-chart"
 )
+
+// PinSiteSummary is the wording one kind of re-pin site is named by on the
+// surfaces an operator reads. It is deliberately not the kind's identifier:
+// what matters here is that a surface saying "every erun reference" is
+// followed by all of them, so each kind carries the distinctive phrase those
+// surfaces have to share.
+type PinSiteSummary struct {
+	Kind   PinSiteKind
+	Phrase string
+}
+
+// PinSiteSummaries is the canonical enumeration of what a re-pin rewrites, in
+// the order the describing surfaces list it. Every surface that enumerates
+// re-pin sites -- the CLI's `pin --help`, the erun-mcp `pin` tool description,
+// the desktop's Change erun version dialog, the erun-pin-version skill, and the
+// public pin page -- carries every phrase here, and
+// TestEverySurfaceDescribingARepinNamesEveryPinSiteKind fails when one does
+// not. A site kind the engine gains must gain a phrase here too: the same test
+// reads the declarations below and refuses a kind no surface is required to
+// name.
+var PinSiteSummaries = []PinSiteSummary{
+	{Kind: PinSiteTerraformRef, Phrase: "Terraform module"},
+	{Kind: PinSiteImageReference, Phrase: "dns01_webhook_image"},
+	{Kind: PinSiteHelmDependency, Phrase: "umbrella"},
+	{Kind: PinSiteRuntimeImage, Phrase: "build-env image"},
+	{Kind: PinSiteRuntimeChart, Phrase: "own stock"},
+	{Kind: PinSiteRuntimeVersion, Phrase: "runtime version"},
+}
 
 // PinSite is one place a version is recorded, and what it would become.
 type PinSite struct {
