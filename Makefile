@@ -695,7 +695,23 @@ check:
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
 # if any of these names is missing from it.
-check-gate: lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
+# The prerequisite ORDER on this line is load-bearing when the resolved fan-out
+# width is narrower than the target list, not cosmetic: `make -j` dispatches
+# prerequisites in the order listed, filling each free slot with the next one,
+# so a target listed late cannot start until enough earlier targets have
+# finished. `test-frontend` heads the single longest chain in the gate --
+# test-frontend -> {test-playwright, test-erun-ui-windows-build}, where
+# test-playwright then builds the wailsjs bindings and the desktop erun-app
+# before any spec can run -- so while it sat seventh it took a slot only after
+# the six lint/module targets ahead of it began to drain, and at the reference
+# 4-CPU build container those are the longest jobs in the gate. Listing the
+# critical-path targets first lets the chain head take a slot in the first
+# dispatch batch. This is a no-op when the width already covers every target
+# (the in-pod gate resolves -j10 and dispatches all ten within 0.32s), which is
+# why it is a scheduling fix and not on its own a wall-time reduction.
+# Reordering this line is safe (nothing keys on the order); DROPPING a name is
+# not -- see the coverage-test note directly above.
+check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
