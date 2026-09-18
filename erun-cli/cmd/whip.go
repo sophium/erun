@@ -76,7 +76,7 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 
 	// An explicit TENANT/ENVIRONMENT scope narrows every axis, not just the
 	// environment list -- a scoped call must never fan out into every
-	// persisted orchestrator too (erun#2082).
+	// persisted orchestrator too.
 	if !scoped {
 		globalConfig, _, _ := store.LoadERunConfig()
 		whipConfig := common.ResolveWhipConfig(globalConfig.Whip)

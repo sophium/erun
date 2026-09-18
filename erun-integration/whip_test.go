@@ -59,7 +59,7 @@ func TestWhip(t *testing.T) {
 	})
 
 	t.Run("dry_run_scoped_environment_excludes_orchestrators", func(t *testing.T) {
-		// erun#2082: an explicit TENANT/ENVIRONMENT scope must narrow every
+		// An explicit TENANT/ENVIRONMENT scope must narrow every
 		// axis, not just the environment list. With an orchestrator
 		// configured alongside the named environment, a scoped call must
 		// name only that environment -- no orchestrator line at all --
