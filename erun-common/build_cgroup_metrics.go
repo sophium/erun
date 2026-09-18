@@ -219,12 +219,17 @@ type BuildCgroupMetrics struct {
 	Unavailable       string  `json:"unavailable,omitempty"`
 	CPUSeconds        float64 `json:"cpuSeconds,omitempty"`
 	CPUPercentOfQuota float64 `json:"cpuPercentOfQuota,omitempty"`
-	ThrottledPeriods  int64   `json:"throttledPeriods,omitempty"`
-	TotalPeriods      int64   `json:"totalPeriods,omitempty"`
-	ThrottledSeconds  float64 `json:"throttledSeconds,omitempty"`
-	IOReadBytes       int64   `json:"ioReadBytes,omitempty"`
-	IOWriteBytes      int64   `json:"ioWriteBytes,omitempty"`
-	PeakMemoryBytes   int64   `json:"peakMemoryBytes,omitempty"`
+	// QuotaCores is the cgroup's own cpu.max ceiling, carried so a caller can
+	// state what CPUPercentOfQuota is a percentage *of*. Without it a report
+	// of "400%" is unattributable: the same number is saturation on a 4-core
+	// environment and idle on a 64-core one.
+	QuotaCores       float64 `json:"quotaCores,omitempty"`
+	ThrottledPeriods int64   `json:"throttledPeriods,omitempty"`
+	TotalPeriods     int64   `json:"totalPeriods,omitempty"`
+	ThrottledSeconds float64 `json:"throttledSeconds,omitempty"`
+	IOReadBytes      int64   `json:"ioReadBytes,omitempty"`
+	IOWriteBytes     int64   `json:"ioWriteBytes,omitempty"`
+	PeakMemoryBytes  int64   `json:"peakMemoryBytes,omitempty"`
 }
 
 // buildCgroupMetricsFromSnapshots never fails a build over unreadable
@@ -242,6 +247,7 @@ func buildCgroupMetricsFromSnapshots(before, after buildCgroupSnapshot, elapsed 
 	metrics := &BuildCgroupMetrics{
 		Available:        true,
 		CPUSeconds:       float64(deltaUsage) / 1e6,
+		QuotaCores:       after.counters.quotaCores,
 		ThrottledPeriods: nonNegativeDelta(before.counters.throttledPeriods, after.counters.throttledPeriods),
 		TotalPeriods:     nonNegativeDelta(before.counters.periods, after.counters.periods),
 		ThrottledSeconds: float64(nonNegativeDelta(before.counters.throttledUsec, after.counters.throttledUsec)) / 1e6,
