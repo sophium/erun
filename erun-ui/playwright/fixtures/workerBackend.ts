@@ -30,7 +30,7 @@ const BIN_PATH = path.join(ERUN_UI_DIR, isWindows ? 'bin/erun-app.exe' : 'bin/er
 // assuming its assigned one is free. A gate that fails partway can leave its
 // erun-app backends running, and the next run then dies on every test in the
 // affected worker with a message that names accessibility specs rather than
-// the real cause (erun#2362):
+// the real cause:
 //
 //   listen tcp 127.0.0.1:34124: bind: address already in use
 //   Error: worker backend exited before becoming ready
