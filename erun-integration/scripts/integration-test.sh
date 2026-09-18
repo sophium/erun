@@ -167,6 +167,9 @@ fi
 
 export GOCOVERDIR="$cover_dir"
 
+test_output="$(mktemp "${TMPDIR:-/tmp}/erun-integration-test-output.XXXXXX")"
+cleanup_dirs+=("$test_output")
+
 test_parallelism="${INTEGRATION_TEST_PARALLELISM:-$("$here/../scripts/parallel-gate.sh" width 32 "")}"
 
 if [[ "$update_golden" -eq 1 ]]; then
@@ -177,7 +180,22 @@ if [[ "$update_golden" -eq 1 ]]; then
 fi
 
 "$here/../scripts/timed-step.sh" "running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)" \
-    go test -count=1 -parallel="$test_parallelism" ./...
+    go test -count=1 -parallel="$test_parallelism" ./... 2>&1 | tee "$test_output"
+
+# A coverage meta-data emit failure (concurrent invocations racing a
+# write-then-rename into a shared GOCOVERDIR) prints this line to the losing
+# invocation's own stdout/stderr without failing the scenario that was
+# running at the time. Left undetected, that invocation's counters never
+# land and the merged total below silently under-reports coverage instead of
+# the gate ever seeing why. Fail loudly here instead of computing a total
+# that quietly omitted data.
+if grep -q "coverage meta-data emit failed" "$test_output"; then
+    echo "!! a coverage meta-data emit failed during the run (see above) -- that" >&2
+    echo "!! invocation's counters never landed, so the merged total below would" >&2
+    echo "!! silently under-report coverage rather than reflect what actually ran." >&2
+    echo "!! Refusing to report a total; re-run the suite." >&2
+    exit 1
+fi
 
 # Every process that ran the instrumented binary wrote into its own private
 # subdirectory of $cover_dir (see the note above on why). Enumerate them and

@@ -42,7 +42,7 @@ Replace `<operator>` with the Operator's name (`rihards-develop`, `alice-hotfix`
 
 ## Where configuration lives
 
-Per-user config lives under `~/.config/erun/` (global defaults, per-tenant, per-environment); per-project config sits at `<repo>/.erun/config.yaml` committed alongside the code. Exact paths per OS: [Config locations](/reference/config-locations).
+Per-user config lives under `<config-root>/` (global defaults, per-tenant, per-environment); per-project config sits at `<repo>/.erun/config.yaml` committed alongside the code. Exact paths per OS: [Config locations](/reference/config-locations).
 
 ## Local tenants and environments vs. a hosted platform's own
 

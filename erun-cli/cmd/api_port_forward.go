@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -144,10 +143,7 @@ func startAPIPortForward(ctx common.Context, statePath string, expectedState mcp
 }
 
 func launchAPIPortForwardProcess(logPath string, args []string) (*os.Process, error) {
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return nil, err
-	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	logFile, err := openPortForwardLog(logPath)
 	if err != nil {
 		return nil, err
 	}

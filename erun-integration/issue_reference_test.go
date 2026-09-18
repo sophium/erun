@@ -380,7 +380,6 @@ var issueReferenceBaseline = map[string]int{
 	"erun-common/registry_versions_oci_test.go":           2,
 	"erun-common/release_anonymous_pullability_test.go":   1,
 	"erun-common/release_claim_test.go":                   1,
-	"erun-common/release_disk_headroom_test.go":           1,
 	"erun-common/release_remote_stderr_test.go":           1,
 	"erun-common/release_repo_claim_stderr_test.go":       1,
 	"erun-common/release_repo_claim_test.go":              2,

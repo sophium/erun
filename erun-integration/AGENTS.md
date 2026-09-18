@@ -83,6 +83,21 @@ cross-repository structural gates, not production helpers.
 - Normalize incidental paths, times, IDs, and ordering without erasing the contract.
   Dynamic server ports use per-server extra rules matching already-normalized
   `<LOOPBACK>`; do not blanket-normalize meaningful fixed ports.
+- **A normalizer that silently stops normalizing is worse than one that never
+  existed.** Do not gate normalization on a shape assertion that can fail closed
+  and silently: the step-timing canonicalizer ended its block at the first row it
+  could not parse, so one unrecognized row shape — a failed step's `" — <error>"`
+  suffix, or a multi-line error — turned canonicalization off for that whole tree
+  *and* reparented the rows after it. That is invisible on an idle machine (every
+  sibling ties inside the production noise floor, so the recorded order already is
+  name order) and surfaces only where timings diverge, under a gate's load
+  (erun#2076). Assert the property the normalizer exists to provide, not the
+  pattern that implements it: `TestGoldenTimingBlocksAreOrderInvariant`
+  (`internal/normalize/timingorder_golden_test.go`) reorders every real golden's
+  timing block with an indentation-derived parser deliberately independent of
+  `timingLinePattern` and requires canonicalization to reproduce it byte for byte.
+  It reads goldens outside its own compiled inputs, so it depends on
+  `scripts/integration-test.sh` running this module with `-count=1`.
 - Record through direct `UPDATE_GOLDEN=1 go test ...` or the script's explicit
   `--update-golden` mode, then read every changed golden against intended behavior
   and compare on clean state. A golden diff is a behavior diff, not generated noise.
@@ -96,11 +111,18 @@ cross-repository structural gates, not production helpers.
 - Root `make integration-test` drives `scripts/integration-test.sh`: fresh raw
   counters, instrumented CLI run, merged CLI/common statement coverage, then the
   script-owned threshold. Keep `CoverPkgs` and enforcement aligned when scope changes.
-- Restore coverage with meaningful CLI scenarios; do not lower thresholds to
-  accommodate a change. Function-touched rate is diagnostic, not the enforced metric.
+- The threshold is a contract, not a target: raise it in the same commit as the
+  scenarios that earned the increase, keeping a small margin below the measured
+  total, and lower it only after the PR has discussed the shortfall — restore
+  coverage with meaningful CLI scenarios first. Function-touched rate is diagnostic,
+  not the enforced metric.
 - Prefer integration coverage for CLI-reachable behavior and remove equivalent
   white-box duplication. Do not invent public code paths merely to reach genuinely
   transport-specific or defensive internals; use the owning suite for those.
+- A branch that looks unreachable from the binary is usually a production defect
+  rather than a missing test: fix the path so `--dry-run` reaches it, then write the
+  scenario. An entry in "Known integration coverage gaps" is a measured structural
+  limit, not an excuse to carve out another exception.
 - Re-measure cited baselines cleanly and without contention, verify zero skips,
   and compare per-file uncovered statements. Matching totals or repeated successful
   exit codes alone do not establish a regression or complete coverage.
@@ -124,14 +146,34 @@ cross-repository structural gates, not production helpers.
   keep real-repository enumeration in the wiring tests. Token presence is only a
   structural lower bound, not proof of usable UI; shared UX review still applies.
 
+- **Flags are audited one level down, not only whole commands.** An own,
+  non-inherited, non-`Hidden` flag on an operator-facing command needs its own
+  operator-surface reference, because a capability delivered as new flags on a
+  command that already has a desktop surface used to clear on the command's name
+  alone — which is how review discovery's seven CLI filters shipped with no
+  filter control (erun#2141). Opt out in `erun-cli/cmd/command_tree.go`:
+  `cliOnlyAgentFacingFlags` when the flag is structurally about the CLI's own
+  invocation and no affordance could exist, or the shrink-only
+  `knownUnsurfacedFlags` baseline only for a gap predating the gate — never a
+  fresh failure. `TestCLIFlagDeclarationsNameRealFlags` fails a key that no
+  longer names a real flag. Bounded honestly: a flag whose token is also an
+  ordinary display word (`--status`, `--source-branch`) clears on unrelated UI
+  copy, so this catches a distinctly-named dimension reliably and a
+  generically-named one only sometimes.
+
 ### Baseline for pre-existing gaps: KnownUnsurfacedRoutes
 
 This is a shrink-only list of real gaps, not an internal-only exemption. Do not
 add fresh omissions to it; remove an entry in the same change that surfaces it.
-Stale entries fail. Read the current list and family-specific reasons in
-`erun-backend-api/internal/routes/route_audit.go`, rather than preserving a count
-here. Remaining administration/release surfaces need designed workflows, not
-bare fetches that satisfy the matcher. Tracking: erun#1497.
+Stale entries fail. `erun-backend-api/internal/routes/route_audit.go` is the
+single source for the tracker, not a pointer to one: its own comment states that
+the map is the tracker of record for the remaining work, and what closing each
+entry out takes. Read the list, its family reasons, and its count there rather
+than preserving any of them here. Do not restore a tracking-issue reference in
+this section: naming an issue here once sent readers to a closed issue while
+eight entries were still in the map, so the entries themselves carry the record
+instead, and every one of them is open. Remaining administration/release
+surfaces need designed workflows, not bare fetches that satisfy the matcher.
 
 ## Role-classification gate
 
@@ -187,9 +229,9 @@ Verify callers and current scenarios before treating a historical gap as still o
 - Live release-archive checksums and anonymous registry probes lack full subprocess
   wire seams; published-chart/upgrade network reads may be shadowed by decision
   overrides. Preserve owning HTTP-level tests and exercise every reachable decision.
-- GitHub status/PR helpers have a wire seam available; remaining unit-only coverage
-  is conversion work, not a structural exemption. Ruleset bypass/reconciliation
-  already has real binary wire scenarios.
+- GitHub status/PR helpers, ruleset bypass/reconciliation, and their wire seams now
+  have real binary scenarios; a helper that is still unit-only is conversion work,
+  not a structural exemption.
 - Desktop/MCP-only common APIs, in-pod whip, and in-process MCP task jobs cannot be
   started by the CLI just to increase coverage. Test their owning transports;
   CLI scenarios can still validate persisted job records and parent outcomes.
