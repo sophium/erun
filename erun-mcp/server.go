@@ -314,7 +314,7 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, activityLeaseTakeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_release",
-		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds. Pass exclusive=true and the same scope to release an exclusive claim; only the id that took it can release it.",
+		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds, and the result's released field reports whether anything was actually held rather than reading the same success either way. Pass exclusive=true and the same scope to release an exclusive claim; only the id that took it can release it, and if a different id holds that scope the call fails naming the actual holder instead of silently leaving it in place.",
 	}, activityLeaseReleaseTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_list",
@@ -498,6 +498,10 @@ func registerPlatformTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Resolve the caller's identity against a hosted erun platform (erun-backend-api) over the erun-type cloud alias erun cloud init erun / erun cloud login set up. Supports preview.",
 	}, platformWhoamiTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "platform_version",
+		Description: "Report the build actually serving a hosted erun platform's own API (erun-backend-api) over GET /v1/platform. Unauthenticated, so it still answers with an expired or missing access token -- useful for telling a stale plane apart from an unreachable one or an authorization failure on some other route. Compare the reported version against the version a route or feature was added in to tell \"merged but not deployed\" apart from a real bug. Supports preview.",
+	}, platformVersionTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "platform_tenant_create",
 		Description: "Register a new tenant on the erun platform. Requires an operations-tenant caller. A real, immediate write, not a preview, unless preview is set.",
 	}, platformTenantCreateTool(runtime))
@@ -594,12 +598,16 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, reviewCloseTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_record-build",
-		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted (from the build tool's result) — required even when successful is false, since release resolves the version before the build step runs. gate records the merge queue's own GATE build kind instead: the environment a review's merge queue promoted to MERGE reports its own build of the prospective merge this way, and omits version since the gate publishes nothing. A successful gate build that changes erun-ui/** is refused unless desktopPlaywrightVerified is also set: the gate's own build does not run the erun-ui/playwright suite (issue #1933), so a green gate build proves nothing about the desktop frontend on its own — build erun-app and run erun-ui/playwright/run.sh against this exact commit first. A gate build reported as failed whose failureDetail names a known erun infrastructure failure (a registry or the network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright — builds.successful has no INCONCLUSIVE, so recording it FAILED would move the review out of the merge queue for a network blip; report the gate run INCONCLUSIVE instead (exec_gate-run_report) and re-drive the review once the signature clears. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted (from the build tool's result) — required even when successful is false, since release resolves the version before the build step runs. gate records the merge queue's own GATE build kind instead: the environment a review's merge queue promoted to MERGE reports its own build of the prospective merge this way, and omits version since the gate publishes nothing. A gate build reported as failed whose failureDetail names a known erun infrastructure failure (a registry or the network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright — builds.successful has no INCONCLUSIVE, so recording it FAILED would move the review out of the merge queue for a network blip; report the gate run INCONCLUSIVE instead (exec_gate-run_report) and re-drive the review once the signature clears. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewRecordBuildTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_report-merged",
 		Description: "Report a review MERGED on the erun platform, for the environment a review's merge queue promoted to MERGE once it has fetched the review's target and source, gate-built the prospective squash merge (review_record-build with gate set), and pushed the result. The platform does not take this on trust: it checks buildId names an already-recorded, successful GATE build for this review, then fetches remoteUrl to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at MERGE. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewReportMergedTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "review_requeue",
+		Description: "Move a review stuck at MERGE back to READY on the erun platform, freeing its target branch's merge-queue slot so a different review can be promoted — only one review may be at MERGE per target branch at a time. For a review whose gate never reaches a terminal state, or one left at MERGE by a batched exec_gate-merge whose other members landed but were never promoted. The review rejoins the queue at the tail, not the head. Refuses, naming the review's actual status, when it is not at MERGE. A real, immediate write, not a preview, unless preview is set.",
+	}, reviewRequeueTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_reviewers_list",
 		Description: "List the users assigned to review a review on the erun platform. Supports preview.",
@@ -790,6 +798,10 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "outputs_download",
 		Description: "Read one entry from the runtime pod's outputs directory and return its bytes inline as base64 (a folder as a tar.gz archive). The server runs in the pod, so it returns the content directly for the caller to save. On a macOS host an unsigned macOS binary is ad-hoc signed first, because the system kills an unsigned one on exec without printing anything; the signing field reports it. Set preview to return name/type/size without the bytes.",
 	}, outputsDownloadTool())
+	addTool(reg, &mcp.Tool{
+		Name:        "build_profile",
+		Description: "List recent erun build runs (newest-first), or return one build's full step tree -- duration, CPU seconds against the build's cgroup quota, throttled periods, and I/O per step -- when id is set. Reads the same ~/.erun/timing/build-*.json records `erun build` already writes. Read-only.",
+	}, buildProfileTool())
 	addTool(reg, &mcp.Tool{
 		Name:        "release",
 		Description: "Cut a project release from the runtime repo root using .erun/config.yaml branch policy. Stamps the release version into the charts and packaging metadata and commits and tags it locally, then builds and publishes that version's images and helm charts and reads each one back from the registry, and only then pushes the tag, prepares the next patch version, and pushes the branches. A release that completes means deploy can resolve the image and the chart at that version; a release that cannot publish fails while nothing is public. Set preview to resolve and return the plan without executing it.",

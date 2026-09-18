@@ -128,16 +128,28 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// Both credential-injection tools are plumbing behind the already-covered
 	// cloud_login flow: the desktop calls these itself to refresh an
 	// environment's credentials, never as a distinct action a human picks.
-	"cloud_inject_aws_credentials":       {Family: "cloud", CLIPath: nil, Title: "Inject AWS credentials into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
-	"cloud_clear_aws_credentials":        {Family: "cloud", CLIPath: nil, Title: "Clear injected AWS credentials", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: false, AgentFacing: true},
-	"context_list":                       {Family: "context", CLIPath: []string{"context", "list"}, Title: "List cloud contexts", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"context_init":                       {Family: "context", CLIPath: []string{"context", "init"}, Title: "Bootstrap a new cloud context", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	"context_start":                      {Family: "context", CLIPath: []string{"context", "start"}, Title: "Start a cloud context", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"context_stop":                       {Family: "context", CLIPath: []string{"context", "stop"}, Title: "Stop a cloud context", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
-	"platform_whoami":                    {Family: "platform", CLIPath: []string{"platform", "whoami"}, Title: "Report the authenticated platform identity", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
-	"platform_tenant_list":               {Family: "platform", CLIPath: []string{"platform", "tenant", "list"}, Title: "List platform tenants", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
-	"platform_tenant_create":             {Family: "platform", CLIPath: []string{"platform", "tenant", "create"}, Title: "Create a platform tenant", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	"platform_tenant_repair-org-mapping": {Family: "platform", CLIPath: []string{"platform", "tenant", "repair-org-mapping"}, Title: "Repair a tenant's dead org mapping", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"cloud_inject_aws_credentials": {Family: "cloud", CLIPath: nil, Title: "Inject AWS credentials into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false, AgentFacing: true},
+	"cloud_clear_aws_credentials":  {Family: "cloud", CLIPath: nil, Title: "Clear injected AWS credentials", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: false, AgentFacing: true},
+	"context_list":                 {Family: "context", CLIPath: []string{"context", "list"}, Title: "List cloud contexts", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"context_init":                 {Family: "context", CLIPath: []string{"context", "init"}, Title: "Bootstrap a new cloud context", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"context_start":                {Family: "context", CLIPath: []string{"context", "start"}, Title: "Start a cloud context", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"context_stop":                 {Family: "context", CLIPath: []string{"context", "stop"}, Title: "Stop a cloud context", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
+	"platform_whoami":              {Family: "platform", CLIPath: []string{"platform", "whoami"}, Title: "Report the authenticated platform identity", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"platform_version":             {Family: "platform", CLIPath: []string{"platform", "version"}, Title: "Report the erun platform's own version and build", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"platform_tenant_list":         {Family: "platform", CLIPath: []string{"platform", "tenant", "list"}, Title: "List platform tenants", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"platform_tenant_create":       {Family: "platform", CLIPath: []string{"platform", "tenant", "create"}, Title: "Create a platform tenant", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	// A break-glass repair, not a recurring operator workflow: it re-org-scopes
+	// an issuer and backfills one already-stuck tenant's own org value, which
+	// changes how every tenant's tokens on that issuer resolve. The operator
+	// runs it directly against the platform whose mapping is dead, the same
+	// shape and the same reasoning as
+	// erun-backend-api/internal/routes/route_audit.go's
+	// "PATCH /v1/tenants/reconcile-bootstrap-name" entry -- there is no ongoing
+	// UI affordance to design here, and erun-console's TenantSwitcher already
+	// names the unreachable membership this repairs. Declared rather than
+	// inferred: the desktop-surface gate used to pass this capability by
+	// accident (see erun-integration/desktop_surface_test.go's capabilityToken).
+	"platform_tenant_repair-org-mapping": {Family: "platform", CLIPath: []string{"platform", "tenant", "repair-org-mapping"}, Title: "Repair a tenant's dead org mapping", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
 	"platform_identity_org_create":       {Family: "platform", CLIPath: []string{"platform", "identity", "org", "create"}, Title: "Create an organization on the platform's identity provider", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_user_list":                 {Family: "platform", CLIPath: []string{"platform", "user", "list"}, Title: "List platform users", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_user_enroll":               {Family: "platform", CLIPath: []string{"platform", "user", "enroll"}, Title: "Enrol a user into a tenant", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
@@ -165,7 +177,12 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// environment a review's merge queue promoted to MERGE ever calls this,
 	// after it has fetched, gate-built, and pushed the prospective merge
 	// itself — no desktop surface authors this report either.
-	"review_report-merged":          {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	// Requeue recovers a merge-queue wedge: a review stuck at
+	// MERGE with no desktop button to move it, only ever hit by whichever
+	// tooling drove gate-merge/the merge queue in the first place — the same
+	// agent-only shape as record-build/report-merged above.
+	"review_requeue":                {Family: "review", CLIPath: []string{"review", "requeue"}, Title: "Move a review stuck at MERGE back to READY", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
 	"review_reviewers_list":         {Family: "review", CLIPath: []string{"review", "reviewers", "list"}, Title: "List a review's assigned reviewers", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_reviewers_add":          {Family: "review", CLIPath: []string{"review", "reviewers", "add"}, Title: "Assign a reviewer to a review", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"review_reviewers_remove":       {Family: "review", CLIPath: []string{"review", "reviewers", "remove"}, Title: "Remove a reviewer from a review", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
@@ -204,11 +221,23 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"ai_sessions":      {Family: "activity", CLIPath: nil, Title: "Report structured AI-session status (busy/idle/awaiting-input/exited/oom-killed)", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"outputs_list":     {Family: "outputs", CLIPath: []string{"outputs", "list"}, Title: "List an environment's build outputs", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	"outputs_download": {Family: "outputs", CLIPath: []string{"outputs", "download"}, Title: "Download a build output", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	// A build-cost investigation tool: reads the per-step CPU/throttling/I/O
+	// already recorded to ~/.erun/timing/. Its primary caller today is
+	// whoever is diagnosing build slowness -- often an agent, same as the
+	// exec_* family above -- and a desktop Builds view over the same records
+	// is deliberately deferred follow-up work, not yet built; revisit
+	// AgentFacing once that view exists.
+	"build_profile":    {Family: "build", CLIPath: []string{"build", "profile"}, Title: "Show where a past build spent its time, CPU, and I/O", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"inputs_upload":    {Family: "inputs", CLIPath: []string{"inputs", "upload"}, Title: "Upload a file into an environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
 	"sshd_sync":        {Family: "sshd", CLIPath: []string{"sshd", "sync"}, Title: "Sync the working tree over SSH", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
 	"contribute_clone": {Family: "contribute", CLIPath: []string{"contribute", "clone"}, Title: "Clone the erun source into the environment", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"version":          {Family: "", CLIPath: []string{"version"}, Title: "Report erun build metadata", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
-	"list":             {Family: "", CLIPath: []string{"list"}, Title: "List tenants, environments, and the effective target", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	// OpenWorld: true because controlPlanes reaches outside this environment
+	// -- GET /v1/platform on each configured erun-hosted control plane, its
+	// linked console's GET /version.json, plus a lookup against erun's own
+	// registry -- even though the plain listing (controlPlanes unset) stays
+	// local.
+	"list": {Family: "", CLIPath: []string{"list"}, Title: "List tenants, environments, and the effective target", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	// The environment read model composes list/idle/doctor into one resolved
 	// lifecycle state for an orchestrator or a future mobile client polling
 	// this environment -- there is no desktop UI over this specific tool call

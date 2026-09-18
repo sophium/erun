@@ -40,6 +40,18 @@ stub_erun() {
 printf '%s\n' "$*" >>"$STUB_ARGV_FILE"
 case "$1 $2 $3" in
 "exec job start")
+	# The capability probe agent-gate.sh reads --exclusive support off. Defaults
+	# to supporting it, so every existing case keeps taking the claim; a case
+	# that sets STUB_NO_EXCLUSIVE=1 stands in for an environment whose installed
+	# erun predates the flag.
+	for a in "$@"; do
+		if [ "$a" = "--help" ]; then
+			if [ "${STUB_NO_EXCLUSIVE:-}" != "1" ]; then
+				printf '      --exclusive   Claim the environment for this job\n'
+			fi
+			exit 0
+		fi
+	done
 	if [ -n "${STUB_START_STDERR:-}" ]; then
 		printf '%s' "$STUB_START_STDERR" >&2
 	fi
@@ -103,6 +115,12 @@ if [ "$verb" = "exec job status" ]; then
 fi
 
 if [ "$verb" = "exec job start" ]; then
+	for a in "$@"; do
+		if [ "$a" = "--help" ]; then
+			printf '      --exclusive   Claim the environment for this job\n'
+			exit 0
+		fi
+	done
 	# Drop everything up to and including the literal "--" separator, leaving
 	# only the real command's own argv (untouched, so quoting survives).
 	while [ $# -gt 0 ]; do
@@ -220,6 +238,7 @@ stub_erun "${case_dir}/bin"
 	grep -q -- '--environment dev' "$STUB_ARGV_FILE" || fail "happy path: environment was not passed through"
 	grep -q -- '--id check' "$STUB_ARGV_FILE" || fail "happy path: job id was not passed through"
 	grep -q -- '--env AGENT_GATE_DETACHED=1' "$STUB_ARGV_FILE" || fail "happy path: recursion guard was not threaded into the job's env"
+	grep -q -- '--exclusive' "$STUB_ARGV_FILE" || fail "happy path: the gate must claim the environment exclusively, or a neighbour job can make its verdict wrong"
 	grep -q -- 'make check-gate' "$STUB_ARGV_FILE" || fail "happy path: the real command was not forwarded to job start"
 	grep -q 'exec job await' "$STUB_ARGV_FILE" || fail "happy path: job await was never called"
 	grep -q 'exec job output' "$STUB_ARGV_FILE" || fail "happy path: job output was never read back"
@@ -648,6 +667,71 @@ stub_erun "${case_dir}/bin"
 	fi
 )
 
+# --- the environment is held exclusively by other work: the start is refused,
+# and the wrapper must surface that refusal and stop. Awaiting here would be
+# the worst outcome available -- the job was never started, so the await would
+# resolve against some other record (or nothing) and report a verdict this
+# gate never produced.
+case_dir="${work_root}/exclusively-held"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=remote-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_START_STATUS=1
+	export STUB_START_STDERR='refusing to start: this environment is held exclusively by orchestrator other-gate (make check, lease id job-exclusive-check-abc)'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 1 ] || fail "exclusively held: expected exit 1, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"held exclusively by orchestrator other-gate"*) ;;
+	*) fail "exclusively held: the refusal must surface verbatim so the holder is named, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"was not started"*) ;;
+	*) fail "exclusively held: expected the wrapper to say the gate never started, got: $OUT" ;;
+	esac
+	if grep -q 'exec job await' "$STUB_ARGV_FILE"; then
+		fail "exclusively held: must not await a job the refusal means was never started"
+	fi
+)
+
+# --- an environment whose installed erun predates --exclusive: the gate must
+# still run, warn that it is unprotected, and never pass a flag that binary
+# would reject. This script runs against whatever erun the pod has, so failing
+# closed here would take the gate out entirely on every environment that has
+# not upgraded yet.
+case_dir="${work_root}/no-exclusive-support"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_NO_EXCLUSIVE=1
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='job output line'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "no exclusive support: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"job output line"*) ;;
+	*) fail "no exclusive support: the gate must still run, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"predates"*) ;;
+	*) fail "no exclusive support: expected a loud warning that the gate is unprotected, got: $OUT" ;;
+	esac
+	if grep -v -- '--help' "$STUB_ARGV_FILE" | grep -q -- '--exclusive'; then
+		fail "no exclusive support: must not pass a flag the installed erun would reject, argv was: $(cat "$STUB_ARGV_FILE")"
+	fi
+)
+
 # --- await timing out must exit 124 and must not read job output yet.
 case_dir="${work_root}/still-running"
 mkdir -p "$case_dir"
@@ -669,6 +753,92 @@ stub_erun "${case_dir}/bin"
 	if grep -q 'exec job output' "$STUB_ARGV_FILE"; then
 		fail "still running: must not read job output before the job finishes"
 	fi
+)
+
+# --- a genuine orphan: the job exited 0 but left unsupervised
+# background work running, so `job await` reports it nonzero (state
+# "abandoned" is never Succeeded, see environmentJobSucceeded in
+# erun-common/job.go) exactly like a real failure would. The wrapper must
+# still tell them apart by re-reading the job record: this must PASS (exit 0)
+# with a named, unmissable warning, not fail like a real red.
+case_dir="${work_root}/abandoned-clean-exit-passes"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='abandoned 0: make check (background work left running: pid 4242 chromium)'
+	export STUB_AWAIT_STATUS=1
+	export STUB_JOB_OUTPUT='job output line'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "abandoned clean exit: expected exit 0 (pass), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"job output line"*) ;;
+	*) fail "abandoned clean exit: expected the job's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"WARNING"*"left background work running behind it"*) ;;
+	*) fail "abandoned clean exit: expected a named, unmissable orphan warning, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"pid 4242 chromium"*) ;;
+	*) fail "abandoned clean exit: warning must name the actual leftover work, got: $OUT" ;;
+	esac
+)
+
+# --- a genuine failure (real nonzero gate exit) must still fail. This is the
+# case the fix above must never widen: only a clean exit (0) with leftover
+# work passes, not every nonzero await outcome.
+case_dir="${work_root}/genuine-failure-still-fails"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='exited 1: make check'
+	export STUB_AWAIT_STATUS=1
+	export STUB_JOB_OUTPUT='job output line'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 1 ] || fail "genuine failure: expected exit 1 (fail), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"WARNING"*) fail "genuine failure: must never print the orphan-pass warning for a real failure, got: $OUT" ;;
+	*) ;;
+	esac
+)
+
+# --- an abandoned job whose gated command itself exited nonzero must still
+# fail: leftover work never turns a real failure into a pass, only a clean
+# (exit 0) abandoned run does.
+case_dir="${work_root}/abandoned-nonzero-exit-still-fails"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='abandoned 2: make check (background work left running: pid 4242 chromium)'
+	export STUB_AWAIT_STATUS=1
+	export STUB_JOB_OUTPUT='job output line'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 1 ] || fail "abandoned nonzero exit: expected exit 1 (fail), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"WARNING"*) fail "abandoned nonzero exit: must never print the orphan-pass warning when the gate itself failed, got: $OUT" ;;
+	*) ;;
+	esac
 )
 
 # --- erun missing from PATH: degrade to running the command directly rather

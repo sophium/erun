@@ -1,0 +1,6 @@
+audit: erun job start --dry-run --environment dev --exclusive --name gate --tenant team work
+job: dev is not exclusively held, claiming it for job gate
+job: detaching "gate" as job gate, output at <TMP>
+job: holding activity lease job-gate for the job's lifetime
+job: holding exclusive claim job-exclusive-gate on scope "environment", refusing every other job start here while it runs
+<TMP> exec job supervise --tenant team --environment dev --id gate --name gate --max-output-bytes 16777216 --lease-ttl 15m0s --exclusive -- work

@@ -137,7 +137,10 @@ func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (EnvironmentJob, e
 		recorder.update(func(job *EnvironmentJob) { job.OutputTruncated = true })
 	}}
 
-	beat, stopBeat := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, params.LeaseTTL, nil)
+	// Never exclusive: a task job is Go work inside this server's own
+	// long-lived process, not a detached supervisor, so it has no start call
+	// that could have claimed the environment on its behalf.
+	beat, stopBeat := startEnvironmentJobHeartbeat(params.Tenant, params.Environment, recorder, params.LeaseTTL, nil, false)
 	stopAlive := startEnvironmentJobAliveBeat(recorder)
 	go runTaskEnvironmentJob(recorder, beat, stopBeat, stopAlive, log, writer, params.Run)
 
@@ -150,13 +153,23 @@ func StartTaskEnvironmentJob(params TaskEnvironmentJobParams) (EnvironmentJob, e
 // writer of this job's outcome, matching every other kind.
 func runTaskEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, stopBeat, stopAlive func(), log *os.File, writer *jobOutputWriter, run func(io.Writer) (any, error)) {
 	defer func() { _ = log.Close() }()
-	defer stopAlive()
-	defer stopBeat()
 
 	result, err := runTaskEnvironmentJobBody(writer, run)
 	// Fold the lease's final renewal before the outcome lands, matching the
 	// command/agent supervisor's own shutdown order.
 	beat.refresh(false)
+
+	// Stop the heartbeat and alive-beat now, before the outcome below makes
+	// this job read as finished to anyone polling it. runTaskEnvironmentJobBody
+	// already recovers any panic from run, so nothing between here and the
+	// recorder.update below can skip this — deferring these instead (as a
+	// nominal safety net) would run them a second time after the job already
+	// reads as finished, which is exactly what let a caller observing the
+	// job as finished race this goroutine's own tail (namely
+	// ReleaseEnvironmentActivityLease releasing the heartbeat's lease)
+	// instead of ever seeing it complete first.
+	stopAlive()
+	stopBeat()
 
 	code := 0
 	reason := ""

@@ -183,6 +183,11 @@ type CloudDependencies struct {
 	PollERunDeviceToken          func(Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error)
 	RunERunAuthCodeLogin         func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 	RefreshERunTokens            func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
+
+	// FetchConsoleVersion resolves a deployed console's own build version
+	// (GET <consoleURL>/version.json, unauthenticated) -- see
+	// control_plane_version_drift.go.
+	FetchConsoleVersion func(Context, string) (string, error)
 }
 
 // DefaultCloudDependencies returns a CloudDependencies with CloudSecretStore
@@ -948,6 +953,9 @@ func normalizeERunCloudDependencies(deps CloudDependencies) CloudDependencies {
 	}
 	if deps.RefreshERunTokens == nil {
 		deps.RefreshERunTokens = defaultRefreshERunTokens
+	}
+	if deps.FetchConsoleVersion == nil {
+		deps.FetchConsoleVersion = defaultFetchConsoleVersion
 	}
 	return deps
 }

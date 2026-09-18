@@ -43,6 +43,11 @@ type GateMergeWorkingTreeParams struct {
 	// Remote is the git remote every branch is fetched from. Empty defaults
 	// to "origin".
 	Remote string
+	// UnderLeaseID names an exclusive environment claim the caller already
+	// holds, so a drive that took the environment for its own whole window is
+	// not refused by its own claim. Empty for a caller holding nothing, which
+	// is then refused by any claim it finds.
+	UnderLeaseID string
 }
 
 // GateMergeLandedSource is one source branch that squash-merged cleanly.
@@ -133,6 +138,18 @@ func GateMergeWorkingTree(ctx Context, root string, params GateMergeWorkingTreeP
 		remote = "origin"
 	}
 	deps = normalizeGateMergeWorkingTreeDependencies(deps)
+
+	// A gate-merge rewrites the environment's one shared worktree onto the
+	// target branch, so two of them in flight at once are not merely slow —
+	// they are wrong: one merge-queue drive reported pushing a commit that
+	// belonged to the other batch's tree, and two pull requests were closed
+	// against work that had not landed. Refused here, before the fetch, so a
+	// drive that has lost the environment stops without touching the tree at
+	// all. Checked in --dry-run too, for the same reason the clean check below
+	// is: it is a read, and a dry run should refuse what a real run refuses.
+	if err := EnsureEnvironmentNotExclusivelyHeld(ctx, "gate-merge", params.UnderLeaseID); err != nil {
+		return GateMergeWorkingTreeResult{}, err
+	}
 
 	// Checked even during --dry-run, the same discipline CommitWorkingTree and
 	// PushWorkingTreeBranch apply to their own branch-mismatch check: it is a

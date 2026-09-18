@@ -24,9 +24,11 @@ Promoting the head of the queue does real work, not a status flip — but the pl
 
 1. **The build is real.** `buildId` names a `GATE`-kind build already recorded against this exact review, and it succeeded — a caller cannot assert `MERGED` off a build that failed, belongs to a different review, or doesn't exist.
 2. **The commit is really there.** Fetching `remoteUrl`, the platform confirms the build's `commitId` is genuinely reachable from the tip of the review's target branch — not just a commit the caller says it made.
-3. **It was built on the right base.** The commit's own parent has to match the target tip this review was gated against — the merge commit of whichever review most recently reached `MERGED` on the same target branch (or, for the first merge through the queue on a branch, nothing to compare against yet). A merge computed against a target that had already moved on is refused even though the commit it produced is genuinely on the branch.
+3. **It was built on the right base.** The target tip this review was gated against — the merge commit of whichever review most recently reached `MERGED` on the same target branch (or, for the first merge through the queue on a branch, nothing to compare against yet) — has to still be a real ancestor of the reported commit. This tolerates unrelated commits landing directly on the branch in between (a release's own commits, for instance) without treating them as evidence the merge was built on the wrong base; it still refuses a merge whose history never really passed through the gated tip at all — computed against a target that had already moved on and then force-pushed into place — even though the commit it produced is genuinely on the branch.
 
 All three have to hold, or the transition is refused with `409 Conflict` and code `MERGE_NOT_VERIFIED` (see [Reviews § Machine error codes](/collaboration/reviews#machine-error-codes)) — nothing about the review changes. This is a strictly stronger guarantee than trusting a privileged caller: it is a fact about the repository, checkable by fetching the same remote yourself, not a claim believed because of who reported it.
+
+**One drive at a time per environment, enforced rather than assumed.** The gate rewrites the environment's one shared worktree onto the target branch, so two drives in flight there do not merely slow each other down — they corrupt each other's accounting. It has happened: one batch reported pushing a commit that belonged to the other batch's tree, and two pull requests were closed against work that had never landed, because `git rev-parse HEAD` answers whichever drive touched the tree last. A drive therefore claims the environment exclusively for its whole window (`erun activity lease take --exclusive --scope environment`) before reading any review, and `erun exec gate-merge` refuses while anything else holds that claim — a drive that skipped the claim still cannot reach the worktree. The same claim refuses every `erun exec job start` in that environment, which keeps a probe or a second gate job from invalidating the verdict; the same gate measured about 7 minutes alone and 17 minutes with two false reds beside a second batch. It is a lease, not a lock: it expires without renewal and is reclaimed once its holder is gone, so an interrupted drive cannot pin the environment.
 
 The gate's build is recorded as a [`GATE`-kind build](/collaboration/builds#merge-queue) via the ordinary `POST /builds` route: it publishes nothing, so it carries no `version`, and a failed one carries `failureDetail` in the gate's own words. A successful gate's build becomes the review's `lastMergedBuildId` once `MERGED` is accepted.
 
@@ -44,11 +46,11 @@ Everything above happens somewhere with no name of its own by default: a gate bu
 
 A gate run is reported independently of a review's own `GATE` build — `erun exec gate-run start`/`erun exec gate-run report` (also `exec_gate-run_start`/`exec_gate-run_report` over MCP) are the two calls that make an attempt visible, whether or not `reviewId` is set. `erun gate list`/`erun gate show` are the CLI view; the desktop's tenant dashboard (see [Reviews § Gates tab](/desktop/reviews#gates-tab)) and the hosted console's own Gate runs section show the identical queue. See [MCP overview § Gate runs](/mcp/overview#gate-runs) for the full tool spec.
 
-### The desktop coverage gap {#desktop-coverage-gap}
+### The desktop app is covered too {#desktop-coverage-gap}
 
-**The gate's `erun build` cannot verify the desktop app.** `erun-devops`'s test stage now carries the Wails/webkit toolchain and can run `erun-ui/playwright` on its own (`make test-playwright`), but that target isn't yet folded into `make check`'s own gate step, so `erun-ui/playwright` still never runs inside a gate build even though `erun-ui/AGENTS.md` makes that suite mandatory for every desktop change — a green `GATE` build proves nothing about `erun-ui/**` on its own today. `erun review record-build --gate` refuses a successful call whose commit changes `erun-ui/**` unless `--desktop-playwright-verified` is also set, attesting the suite was actually run against that commit and passed; `erun-merge-queue-drive` names the gap and the remedy before that refusal happens. This is a fail-closed stopgap, not a fix — see issue #1933 for the tracked follow-up that would let the gate run the suite itself.
+The gate's `erun build` verifies the desktop app the same way it verifies every other module: `erun-devops`'s test stage runs `make check`, and `make check` runs `erun-ui/playwright` as a real `check-gate` prerequisite, so a green `GATE` build against a commit touching `erun-ui/**` means that suite actually ran and passed against that exact commit — not narration, an executed gate. `erun review record-build --gate` no longer takes a desktop-coverage attestation flag; there is nothing left to attest that the build itself doesn't already prove.
 
-That refusal happens on the review's `GATE` build, a record independent of the `gate_runs` row above — so a caller that hits it must report the outcome to both. `erun-merge-queue-drive` reports its `gate-run` `INCONCLUSIVE` (never `FAILED`, since the `erun build` itself genuinely passed; never left `RUNNING`, since that would be exactly the silent gap `erun gate list` exists to close) when it cannot attest desktop coverage, then stops without recording a `GATE` build at all.
+The former manual desktop attestation is no longer used. The gate runs the headless desktop suite with its build dependencies; it does not replace verification of native OS behavior such as macOS GUI integration.
 
 ## Reconciling a bypass {#reconciling-a-bypass}
 
@@ -84,7 +86,7 @@ Two choices the plan deliberately leaves to the operator, because getting them w
 
 A push is matched against **every commit it added** (`before_sha..after_sha`), not only its tip: a release push carries three commits and a batched merge more than one, so tip-only matching would report every release as unaccounted for. Naming `--expected-actor` is what makes the narrowing above observable rather than merely configured — a gated merge pushed by the wrong identity is still a finding.
 
-The command exits non-zero after printing the full report when anything is unaccounted for or any unnamed identity bypassed. Run it on a schedule against the repository's own protected branch and alert on a non-zero exit. A push whose `GATE` build was refused by [the desktop coverage gap](#desktop-coverage-gap) above never records a `PASSED` gate run either (only `INCONCLUSIVE`, or no `gate_runs` row at all) — so it surfaces here as `UNRECONCILED` too, correctly: an unverified desktop build gives this check nothing to reconcile against.
+The command exits non-zero after printing the full report when anything is unaccounted for or any unnamed identity bypassed. Run it on a schedule against the repository's own protected branch and alert on a non-zero exit.
 
 ## The unresolved-thread check {#the-unresolved-thread-check}
 
@@ -146,7 +148,12 @@ Content-Type: application/json
 
 ## When the gate wedges {#when-the-gate-wedges}
 
-If a `MERGE` review's gate never reaches a terminal state — an operator-diagnosed stuck run — requeuing it needs a direct API call today:
+Only one review may be at `MERGE` per target branch at a time (`headOfMergeQueue` refuses to promote a second one), so a review that lands at `MERGE` and never reaches a terminal state wedges the whole queue for that branch — nothing else can be promoted until it clears. Two ways this happens in practice:
+
+- An operator-diagnosed stuck gate run: the environment promoted to `MERGE` never reports back `MERGED`/`FAILED` (crashed, evicted, hung).
+- A batched `erun exec gate-merge --source A --source B` pushes both branches' commits in one go, but the merge queue still promotes and verifies its members one review at a time. If a member that was never promoted to `MERGE` has its commit land this way, no later `report-merged` for it can ever succeed (there is no `MERGE` review to report), which permanently breaks `gatedTargetTip`'s parent check for whichever review gets promoted next — that review reaches `MERGE`, gate-builds and pushes correctly, and still refuses at `report-merged` with `MERGE_NOT_VERIFIED` because its build's parent no longer matches the platform's own record of the target tip.
+
+`PATCH /v1/reviews/{reviewId}/status` with a bare `{ "status": "READY" }` (no `buildId`) is what recovers it — the same missed-merge-window transition, whichever way the wedge happened:
 
 ```
 PATCH /v1/reviews/{reviewId}/status
@@ -155,7 +162,11 @@ Content-Type: application/json
 { "status": "READY" }
 ```
 
-Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. There is no CLI flag or desktop button for this yet; until one exists, an operator (or an Agent with API access) makes this call directly.
+Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. Refused with `404 Not Found` from any status other than `MERGE`.
+
+- **CLI:** `erun review requeue REVIEW_ID` — see [`erun review requeue`](/cli/review#review-requeue). Fetches the review first so a caller-side refusal names its actual status rather than surfacing the API's ambiguous 404.
+- **MCP:** `review_requeue` — same behaviour, `reviewId` the only input.
+- Neither takes a reason: unlike [`override-advance`](#overriding-the-gate), this transition bypasses no safety gate, so there is nothing to make accountable.
 
 ## Failure table {#failure-table}
 

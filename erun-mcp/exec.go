@@ -36,6 +36,7 @@ type RawInput struct {
 	MaxOutputBytes  int64  `json:"maxOutputBytes,omitempty" jsonschema:"cap on captured output in bytes for a backgrounded command; past it output is dropped and the job reports outputTruncated. Only used with wait false. Defaults to 16777216"`
 	LeaseTTLSeconds int64  `json:"leaseTtlSeconds,omitempty" jsonschema:"activity lease TTL a backgrounded command renews inside while it runs; only used with wait false. Defaults to 900"`
 	Handoff         bool   `json:"handoff,omitempty" jsonschema:"mark the backgrounded command as deliberately meant to outlive whatever starts it; only used with wait false. When this call itself runs from inside another job's own work, that job otherwise waits for this one to reach a verdict before reporting its own outcome; set true for work meant to keep running past the caller's own turn on purpose"`
+	Exclusive       bool   `json:"exclusive,omitempty" jsonschema:"declare that the backgrounded command needs the environment to itself; only used with wait false. While it holds the claim, every other job start in this environment is refused and told which job holds it -- plain jobs included, not only other exclusive ones. Set this for work that saturates the environment and whose result a neighbour would invalidate (a full gate run, a build); the claim expires without renewal and is reclaimed once its holder is gone, and work this job itself starts runs under the claim rather than being refused by it"`
 	StartedByJobID  string `json:"startedByJobId,omitempty" jsonschema:"internal: the job this call is being made on behalf of, so that job's own finish check can find this one as work it started; only used with wait false. Only needed when this call itself runs from inside another job's own work AND reaches this tool through this environment's MCP edge rather than as a plain nested subprocess -- a nested subprocess (an agent's own Bash tool calling the erun CLI directly) already gets this for free from its own ERUN_JOB_ID and never needs to set it"`
 	Preview         bool   `json:"preview,omitempty" jsonschema:"when true, trace the command (or, with wait false, the job that would start) without executing it"`
 	Verbosity       int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
@@ -109,6 +110,7 @@ func execRawBackground(runtime RuntimeConfig, input RawInput) (JobEnvelopeOutput
 		MaxOutputBytes: input.MaxOutputBytes,
 		LeaseTTL:       time.Duration(input.LeaseTTLSeconds) * time.Second,
 		Handoff:        input.Handoff,
+		Exclusive:      input.Exclusive,
 		StartedByJobID: input.StartedByJobID,
 		SupervisorPath: supervisor,
 	})

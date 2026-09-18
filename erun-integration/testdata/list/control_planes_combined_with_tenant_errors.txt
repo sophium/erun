@@ -1,0 +1,2 @@
+audit: erun list --control-planes --tenant erun
+--control-planes cannot be combined with --tenant/--gate-environment

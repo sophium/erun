@@ -144,6 +144,7 @@ MCP groups every tool into a family, carried on the wire as `_meta.family` so a 
 | `version` | Build version and commit of the MCP server. |
 | `outputs_list` | List the files an agent produced in the pod's outputs directory (`$ERUN_OUTPUTS_DIR`), newest-first. Read-only. |
 | `outputs_download` | Read one entry from the outputs directory and return its bytes inline as base64 (a folder as a `tar.gz`); the server is co-located with the files, so it returns the content directly. On a macOS host an arriving macOS binary carrying no code signature is signed first — the system kills an unsigned one on exec without printing anything — with the host's stable local identity when it has one and ad-hoc otherwise, and the optional `signing: {path, signed, identity, note}` field reports it (`identity` is empty for an ad-hoc signature); a signing failure is reported in `note` and never fails the call. `preview` returns name/type/size without the bytes. |
+| `build_profile` | List recent `erun build` runs newest-first (`limit`, default 20), or return one build's full step tree — duration, CPU seconds against the build's cgroup quota, throttled periods, and I/O per step — when `id` is set (a listed id, or `"latest"`). Reads the same `~/.erun/timing/build-*.json` records `erun build` already writes; CPU/throttling/I/O are only present for steps that ran inside a runtime pod with the erun-dind sidecar. |
 
 ### Host-served — answered on this host {#host-served}
 
@@ -183,6 +184,8 @@ Take an activity lease before **detaching** long work in the env — a build, a 
 
 `activity_lease_take` also accepts `exclusive: true` (plus `scope`, default `worktree`) to claim a scope exclusively rather than merely holding it busy: a second exclusive take in the same scope is refused and told who the current holder is, and a fresh (non-renewal) claim is also refused while an operator's own SSH session is active in the env. Take this before any mutating work — a git checkout, staging, a commit — in a target env; a plain lease says only "something is here", the exclusive claim says "nobody else may mutate this worktree right now". See [Agent reference · Idle policy · Exclusive claims](/agent-reference/idle-policy#exclusive-claims).
 
+One scope is special: `scope: "environment"` means "no other work here at all", not "not this resource". While it is held, **every** job start in that env is refused and told who holds it — ordinary jobs included, not only other exclusive ones — because what a gate contends for is the pod's CPU and memory, which no worktree boundary divides. Prefer `exec_raw`/`exec_agent`'s own `exclusive: true` over taking this claim by hand for a single job; take it directly only when the hold has to span several separate calls, and pass its id to `exec_gate_merge` as `underLeaseId` so your own hold does not refuse you.
+
 ### Jobs — long work you come back to {#job-tools}
 
 | Tool | Purpose |
@@ -206,6 +209,8 @@ The job tools remove all five:
 - **`exec_job_output` is incremental.** Pass the previous read's `nextOffset` back to continue; progress is visible long before the work exits.
 - **`exec_job_status` is definite or explicitly `unknown`** — never truncated, and never a success nobody recorded.
 - **`exec_job_cancel` targets the pid the record holds**, never a command-line pattern, so it cannot match a process that merely looks like the job or the caller issuing the cancel. It refuses a backgrounded action tool (`build`, `deploy`, `doctor`, and the rest of the [job-envelope tools](#job-envelope) started with `wait: false`): that kind of job runs in-process rather than as a subprocess, so there is nothing to signal.
+
+`exec_raw` (with `wait: false`) and `exec_agent` both take `exclusive: true` for work that needs the env to itself — a full gate run, a build whose result a neighbour would invalidate. While such a job runs, every other job start in that env is refused and told which job holds it. The claim expires without renewal and is reclaimed once its holder is gone, so a crashed job cannot pin an env, and work the holder itself starts runs under the claim rather than being refused by it. Full contract: [Agent reference · Environment exclusivity](/agent-reference/cli-flags#job-exclusivity).
 
 A job also holds an activity lease for its lifetime, so starting one makes the env read as busy and defers auto-stop with nothing extra to call. Finished jobs stay readable for 24 hours, so an orchestrator that reconnects after the work ended still learns the outcome. Full schemas, exit-code contract, retention, and error behaviour: [Agent reference · `erun exec job`](/agent-reference/cli-flags#erun-job).
 
@@ -277,6 +282,7 @@ Talks to a hosted erun platform (`erun-backend-api`) over the `erun`-type cloud 
 | Tool | Read/Work | Purpose |
 |---|---|---|
 | `platform_whoami` | Read | Resolve the caller's identity against the platform. |
+| `platform_version` | Read | Report the build actually serving the platform's own API — unauthenticated, so it still answers with an expired or missing access token. Compare against the version a route or feature was added in to tell "merged but not deployed" apart from a real bug. |
 | `platform_tenant_list` | Read | List tenants visible to the caller — every tenant for an operations-tenant caller, otherwise just the caller's own. |
 | `platform_tenant_create` | Work | Register a new tenant. Requires an operations-tenant caller. |
 | `platform_tenant_repair-org-mapping` | Work | Repair a tenant already stuck with an unresolvable (issuer, org) mapping — one that lists but that no token can ever authenticate into. Converts `issuer` to org-scoped (if not already) and sets `tenantId`'s own org value. Requires an operations-tenant caller. There is no tenant delete on the platform, so this is the only way back short of direct database access. |
@@ -309,8 +315,9 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_resolve` | Work (idempotent) | Resolve a comment thread by closing its root comment. `commentId` must be the thread's root — resolving a reply fails, naming the root to retry against. |
 | `review_unresolve` | Work (idempotent) | Reopen a comment thread by marking its root comment `OPEN` again. Same root-only restriction as `review_resolve`. |
 | `review_close` | Work (idempotent) | Close a review without merging it. |
-| `review_record-build` | Work | Record a build against a review — the only way an erun client transitions a review off `OPEN`. A successful build moves it to `READY` (and on to `MERGE` if it was already the merge queue's head); a failed one moves it to `FAILED`. There is no separate tool to set a review's status directly: a `READY` with no build is a different thing entirely (the missed-merge-window requeue). `commitId` must be the full 40-character commit hash the build ran against, and `version` the version it minted — required even when `successful` is `false`, since `release` resolves the version before the build step runs. `gate` records the merge queue's own `GATE` build kind instead: the environment a review's merge queue promoted to `MERGE` reports its own build of the prospective merge this way, and omits `version` since the gate publishes nothing. A successful `gate` build that changes `erun-ui/**` is refused before any network call unless `desktopPlaywrightVerified` is also set — the gate's own build does not run `erun-ui/playwright` (issue #1933), so a green gate build proves nothing about the desktop frontend without that attestation; `projectRoot` overrides which checkout the change is diffed from, defaulting to the runtime repo path. |
+| `review_record-build` | Work | Record a build against a review — the only way an erun client transitions a review off `OPEN`. A successful build moves it to `READY` (and on to `MERGE` if it was already the merge queue's head); a failed one moves it to `FAILED`. There is no separate tool to set a review's status directly: a `READY` with no build is a different thing entirely (the missed-merge-window requeue). `commitId` must be the full 40-character commit hash the build ran against, and `version` the version it minted — required even when `successful` is `false`, since `release` resolves the version before the build step runs. `gate` records the merge queue's own `GATE` build kind instead: the environment a review's merge queue promoted to `MERGE` reports its own build of the prospective merge this way, and omits `version` since the gate publishes nothing. |
 | `review_report-merged` | Work | Report a review `MERGED`, for the environment a review's merge queue promoted to `MERGE` once it has fetched the review's target and source (`exec_gate-merge`), gate-built the result, recorded that as a successful `GATE` build (`review_record-build` with `gate` set), and pushed it. The platform verifies rather than trusts this: it checks `buildId` names an already-recorded, successful `GATE` build for this review, then fetches `remoteUrl` to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with 409 `MERGE_NOT_VERIFIED` and leaves the review at `MERGE`. |
+| `review_requeue` | Work (idempotent) | Move a review stuck at `MERGE` back to `READY`, freeing its target branch's merge-queue slot so a different review can be promoted — only one review may be at `MERGE` per target branch. For a review whose gate never reaches a terminal state, or one left at `MERGE` by a batched `exec_gate-merge` whose other members landed but were never promoted. The review rejoins the queue at the tail, not the head. Refuses, naming the review's actual status, when it is not at `MERGE`. See [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges). |
 | `review_reviewers_list` | Read | List the users assigned to review a review. |
 | `review_reviewers_add` | Work (idempotent) | Assign a reviewer, so an Agent can assign a peer Agent (or itself). `userId` must already be enrolled in the caller's own tenant — refused before the network call otherwise. Assigning a reviewer gates no status transition; see [merge queue](/collaboration/merge-queue) for what actually blocks a merge. |
 | `review_reviewers_remove` | Work (destructive, idempotent) | Remove a reviewer from a review. |
@@ -318,7 +325,7 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGE`, starting that review's merge-gate build — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`, and refuses with the unresolved comment thread count when the head still has open threads (resolve them with `review_resolve`, or use `review_queue_override-advance`). |
 | `review_queue_override-advance` | Work | Bypass `review_queue_advance`'s unresolved-thread gate and advance anyway. `reason` is required and is recorded in the platform's audit trail alongside the caller's identity — a deliberate, accountable escape hatch, not a routine way to advance the queue. |
 
-All fifteen support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_record-build`, `review_report-merged`, `review_reviewers_add`, `review_reviewers_remove`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
+All sixteen support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_record-build`, `review_report-merged`, `review_requeue`, `review_reviewers_add`, `review_reviewers_remove`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
 
 ### Idle & auto-stop history {#idle-stop-tools}
 
@@ -417,6 +424,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `environment` | *(MCP-only)* | Read |
 | *(top-level)* | `init` | `erun init` | Work |
 | *(top-level)* | `build` | `erun build` | Work |
+| build | `build_profile` | `erun build profile` | Read |
 | *(top-level)* | `push` | `erun push` | Work |
 | *(top-level)* | `deploy` | `erun deploy` | Work |
 | *(top-level)* | `publish` | `erun publish` | Work |
@@ -466,6 +474,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | context | `context_start` | `erun context start` | Work |
 | context | `context_stop` | `erun context stop` | Work |
 | platform | `platform_whoami` | `erun platform whoami` | Read |
+| platform | `platform_version` | `erun platform version` | Read |
 | platform | `platform_tenant_list` | `erun platform tenant list` | Read |
 | platform | `platform_tenant_create` | `erun platform tenant create` | Work |
 | platform | `platform_tenant_repair-org-mapping` | `erun platform tenant repair-org-mapping` | Work |
@@ -491,6 +500,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_close` | `erun review close` | Work |
 | review | `review_record-build` | `erun review record-build` | Work |
 | review | `review_report-merged` | `erun review report-merged` | Work |
+| review | `review_requeue` | `erun review requeue` | Work |
 | review | `review_reviewers_list` | `erun review reviewers list` | Read |
 | review | `review_reviewers_add` | `erun review reviewers add` | Work |
 | review | `review_reviewers_remove` | `erun review reviewers remove` | Work |
@@ -514,7 +524,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | sshd | `sshd_sync` | `erun sshd sync` | Work |
 | contribute | `contribute_clone` | `erun contribute clone` | Work |
 
-77 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
+103 tools in total. `inputs_upload` and `sshd_sync` are [host-served](#host-served): answered by `erun mcp proxy` on the operator's machine, not relayed to the pod edge.
 
 ## Why typed tools
 
@@ -732,6 +742,8 @@ Two string inputs restore a config from its dated backup before any tenant/env w
 
 Same data as the CLI `erun list`, structured. Returns the caller's tenants, envs, and effective target.
 
+Pass `controlPlanes: true` to additionally check every configured erun-hosted control plane's deployed version, and its linked console's deployed version, against the newest version erun's own registry has actually published — deployed-vs-published, not deployed-vs-main; the result gains a `controlPlaneVersionDrift` field alongside the ordinary list result. This makes real network calls (each plane's own `GET /v1/platform`, each plane's linked console's `GET /version.json`, plus a registry lookup); pass `preview: true` to trace which planes, consoles, and registry lookup would be checked instead of making any call. See [CLI flag spec · Control plane versions](/agent-reference/cli-flags#control-plane-versions) for the full field contract.
+
 ```jsonc
 {
   "default_tenant": "myapp",
@@ -808,7 +820,7 @@ Trigger a build. Same semantics as the CLI `erun build` — it builds the images
 | `release` | bool (optional) | Pin a bare release version instead of minting a snapshot. |
 | `force` | bool (optional) | Bypass the fingerprint cache. |
 | `dry_run` | bool (optional) | Preview without building. |
-| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `environments.<env>.docker.platforms`. Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
+| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `docker.platforms` (per-environment or project-wide). Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 
 The MCP `build` tool does **not** expose the `--deploy` convenience switch — an Agent composes the rollout by calling `push` and `deploy` itself with the `version` from this tool's output.
 

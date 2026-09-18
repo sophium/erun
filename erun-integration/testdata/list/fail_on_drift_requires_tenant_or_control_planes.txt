@@ -1,0 +1,2 @@
+audit: erun list --fail-on-drift
+--fail-on-drift requires --tenant or --control-planes

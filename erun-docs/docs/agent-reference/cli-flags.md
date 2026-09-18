@@ -199,7 +199,7 @@ Scheduling honours the `FROM` graph: independent images share a **wave**, and an
 |---|---|---|---|---|
 | `--no-incremental` | bool | `false` | — | Disables the fingerprint cache. Every Docker context rebuilds. |
 | `--version <version>` | string (semver) | Resolved per [Build path resolution · VERSION walking](/reference/configuration-build-paths). | Same as `erun init --version`. Conflicts with `--release` (which resolves the version itself). | Pins a bare version for this build instead of minting a snapshot. |
-| `--platform <platform>` | string[] (repeatable) | Resolved per [Multi-architecture build contract](/agent-reference/conventions-spec#multi-architecture-build-contract). | Rejected together with `--release` (`release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports`). | Overrides the docker `--platform` targets for this build/push, e.g. `linux/amd64`. Absent, falls back to the project's configured `environments.<env>.docker.platforms`, then the default multi-arch pair. |
+| `--platform <platform>` | string[] (repeatable) | Resolved per [Multi-architecture build contract](/agent-reference/conventions-spec#multi-architecture-build-contract). | Rejected together with `--release` (`release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports`). | Overrides the docker `--platform` targets for this build/push, e.g. `linux/amd64`. Absent, falls back to the project's configured `environments.<env>.docker.platforms` (the environment's own pin) or the project-wide `docker.platforms` default it inherits, then the default multi-arch pair. |
 | `--component <name>` | string | Auto-selects the lone [`components:`](/reference/configuration#components-block) entry when the project declares exactly one; empty otherwise. | Must name a declared `components:` entry when the project declares any. Fails naming the declared choices when omitted and more than one entry is declared. | Selects which `components:` root (`docker`/`dockercontext`/`version`) this build resolves, for a monorepo of independent deployables that do not share one `docker`/`k8s` root. Unused (falls through to `paths:`/convention) when the project declares no `components:` map. |
 
 ### `--output json` result
@@ -622,8 +622,9 @@ Pass `--tenant` to switch the command into a distinct read: erun-version drift a
 |---|---|---|---|
 | `--tenant <name>` | string | none | Switches the command to a version-drift report for this tenant. Errors `tenant "<name>" not found` if the tenant has no config. |
 | `--gate-environment <name>` | string | none | Requires `--tenant`. Names the environment driving that tenant's merge-queue gate (erun has no stored concept of which environment gates a tenant's merges — see [merge-queue § the gate](/collaboration/merge-queue#the-gate) — so the caller states it). Errors `--gate-environment requires --tenant` when passed alone, or `gate environment "<name>" not found in tenant "<tenant>"` when the named environment doesn't exist in the tenant. |
+| `--fail-on-drift` | bool | `false` | Requires `--tenant` (or `--control-planes`, see below). Makes this one invocation exit non-zero when the report finds drift, instead of `list`'s usual unconditional `0` — see [Exit codes](#erun-list) below. Errors `--fail-on-drift requires --tenant or --control-planes` if neither is set. |
 
-The MCP `list` tool takes the same two inputs as `versionDriftTenant`/`gateEnvironment`, alongside its existing `verbosity`; when `versionDriftTenant` is set, the structured result carries an additional `versionDrift` field beside the ordinary list result rather than replacing it (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the version-drift report alone.
+The MCP `list` tool takes the same two inputs as `versionDriftTenant`/`gateEnvironment`, alongside its existing `verbosity`; when `versionDriftTenant` is set, the structured result carries an additional `versionDrift` field beside the ordinary list result rather than replacing it (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the version-drift report alone. `--fail-on-drift` has no MCP equivalent: an MCP tool call never fails over a finding, only over the check itself failing to run, so the calling agent reads `versionDrift` and judges it itself.
 
 Each environment's version comes from the same `ResolveErunVersion` config-only resolution the full listing's `runtime-version:` line uses (see [Release lines](/cli/list#release-lines)) — nil (rendered `version=none`) whenever it can't be read from config alone, e.g. a deploy that never recorded a resolved runtime image.
 
@@ -641,12 +642,40 @@ Version drift for tenant erun:
 
 `max version` is the newest version observed among the tenant's *own* environments, not the newest erun has ever published — that's `erun version`'s/`erun upgrade`'s registry-latest concern. `[behind max]` marks an environment whose version parses lower than the max; an unparseable or missing version is shown bare (never guessed at) and excluded from the max computation. The `gate:` block only prints when `--gate-environment` is given, and `behind:` has three readings: `no` (the gate carries the max, or ties it), `yes -- outdated relative to <envs>` (naming every environment running a newer version), and `unknown (gate's own erun version could not be resolved from config)` when the gate's own version can't be read — reported explicitly rather than folded into a silent `no`, since a gate older than the code it gates can pass a change that would fail on current code.
 
+### Control plane versions {#control-plane-versions}
+
+Pass `--control-planes` to switch the command into a third distinct read: every configured erun-hosted control plane's deployed version, compared against the newest version erun's own registry has actually published — deployed-vs-published, not deployed-vs-main. Cannot be combined with `--tenant`/`--gate-environment`.
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--control-planes` | bool | `false` | Switches the command to a control-plane version report instead of the full listing. Errors `--control-planes cannot be combined with --tenant/--gate-environment` if either is also set. |
+| `--dry-run` | bool | `false` | Only meaningful alongside `--control-planes`. Traces which control planes, which of their consoles, and which registry lookup would be checked, without making any network call, and prints `Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.` |
+| `--fail-on-drift` | bool | `false` | Makes this one invocation exit non-zero when any plane or its linked console is behind/ahead of published or unreachable, or the published baseline itself couldn't be resolved — see [Exit codes](#erun-list) below. Never fires under `--dry-run` (nothing was probed). |
+
+The MCP `list` tool exposes the same behavior as `controlPlanes` (bool) and `preview` (bool, the MCP-side equivalent of `--dry-run`); when `controlPlanes` is set, the structured result carries an additional `controlPlaneVersionDrift` field (`eruncommon.ControlPlaneVersionDrift`) beside the ordinary list result (`ListToolResult`, `erun-mcp/list.go`) — the CLI's own `--output json` for this mode instead emits the control-plane version report alone. `--fail-on-drift` has no MCP equivalent, for the same reason as `--tenant`'s above.
+
+Every configured cloud-provider alias with `provider: erun` is treated as a control plane. For each one, the command calls that plane's own unauthenticated `GET /v1/platform` to read its deployed `version`; a plane that does not answer (network failure, non-2xx) is reported `reachable: false` with `unreachableReason` set, and never gets a `behind`/`ahead` verdict — an unreachable plane is never reported current. The published baseline comes from the same registry lookup `erun pin`/`erun upgrade` already use (`ResolveDefaultRuntimeRegistryVersions`, erun's own `ghcr.io/sophium/erun-devops` image tags) rather than a hand-maintained list, so it can never drift from what erun has actually shipped.
+
+**Each reachable plane's own `GET /v1/platform` response also names its linked console's URL** (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias). When that field is non-empty, the command additionally calls the console's own unauthenticated `GET /version.json` (a static file `erun-devops/docker/erun-console`'s image stamps from `ERUN_VERSION` at build time — the console's counterpart to the API's `-ldflags`-baked version) and reports the result nested under the plane as a `console` field (`ConsoleVersionStatus`: `url`, `reachable`, `unreachableReason`, `version`, `behind`, `ahead` — the same shape and the same published baseline as the plane's own fields). A plane whose response carries no `consoleUrl` gets no `console` field at all (omitted from JSON, no `console:` line in text), never a guessed one. The plane's own reachability and the console's are independent: a reachable plane can have an unreachable console and vice versa.
+
+```
+$ erun list --control-planes
+published version: 1.0.247
+Control planes:
+  - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+    console: url="https://console.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+```
+
+`behind` is set only when both the deployed version and the registry's published latest stable parse as plain three-part semver, and the deployed version orders strictly *below* the published one — routine drift, the deployable simply hasn't been rolled onto an already-published release yet. `ahead` is the opposite order: the deployable is running something the registry has never published at all, reported distinctly because it is a more alarming condition than routine drift (an unpublished build reached a live deployable some other way), never folded into `behind`. Neither is set when the registry lookup itself failed (`publishedVersionError`, printed as `published version: unresolved (<reason>)`) or either version fails to parse as plain semver — absent evidence is reported explicitly rather than guessed at. This applies identically to a plane's own fields and to its nested `console` fields, since both compare against the one published baseline the report resolves once per run.
+
 ### Exit codes
+
+`list` is a reporting command, not a gate (see `erun-cli/AGENTS.md` § "Exit-Code Contract: Reporting Commands Vs Gating Checks") — every finding below prints in full regardless of exit code; `--fail-on-drift` only changes whether a finding also turns into a non-zero exit.
 
 | Code | Meaning |
 |---|---|
-| `0` | Full listing, or version-drift report resolved. |
-| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`. |
+| `0` | Full listing, version-drift report, or control-plane version report resolved (including when a plane or its console is unreachable or behind/ahead, or an environment is behind max — those are findings in the report, not command failures) **and** either `--fail-on-drift` was not passed, or it was passed and found nothing to fail on. |
+| `1` | `--gate-environment` without `--tenant`; unknown `--tenant`; unknown `--gate-environment`; `--control-planes` combined with `--tenant`/`--gate-environment`; `--fail-on-drift` without `--tenant`/`--control-planes`; or `--fail-on-drift` was passed and the report found drift (an environment behind max, a behind/unresolved gate, an unreachable/behind/ahead plane or console, or an unresolved published baseline) — never while `--dry-run` is also set, since nothing was actually probed. |
 
 ---
 
@@ -775,6 +804,8 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 | `memory.peak` ÷ `memory.limitBytes` ≥ 95%. | `memory.peak` is a high-water mark, so a near-limit peak matters even after current usage drops back down. |
 | any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. |
 | `memory.oomKills` > 0. | Always reported: a kill already happened. |
+| the environment's *retained* peak ÷ `memory.limitBytes` ≥ 95%, when it exceeds the live `memory.peak`. | `memory.peak` is a per-container counter, so a restart resets it — and a restart is often how an OOM manifests. The retained high-water mark keeps a pre-restart near-limit peak visible. Scored against the current limit, so raising `runtimepod` clears it. |
+| the environment's *retained* OOM-kill total exceeds the live `memory.oomKills`. | `memory.events` resets with the container, so a kill that already happened stays reported after a restart the current container cannot account for. |
 
 ### Error behaviour
 
@@ -859,7 +890,7 @@ Pushes the pacing nudge into every reachable target: every configured environmen
 
 1. If both `--tenant`/`--environment` are given, the target list is that one pair. If neither is given, list every environment across every configured tenant (`ListTenantConfigs` + `ListEnvConfigs`) — never the ambient current-directory default a bare `resolveOpen` would resolve to. Passing only one of the two errors.
 2. For each environment target: resolve its MCP edge the same way `erun idle`/`erun exec` do (a local port-forward state file `erun open` maintains while the environment is open). An edge that cannot be resolved, or whose call fails, resolves to `{decision: none, reason: "not-alive"}` — not a command failure. A resolved edge is called with `whip {preview: <ctx.DryRun>}`; the decoded `eruncommon.WhipResult` is used verbatim.
-3. Load `~/.erun/config.yaml`'s `Orchestrators` list and turn each into a candidate via `eruncommon.ListWhipOrchestratorCandidates` (always `Reachable: false`), then `eruncommon.DecideWhip` against the resolved `WhipConfig` with `explicit: true`. Every orchestrator therefore always resolves to `{decision: none, reason: "unreachable-from-transport"}` from this transport.
+3. Load the [user config](/reference/config-locations)'s `Orchestrators` list and turn each into a candidate via `eruncommon.ListWhipOrchestratorCandidates` (always `Reachable: false`), then `eruncommon.DecideWhip` against the resolved `WhipConfig` with `explicit: true`. Every orchestrator therefore always resolves to `{decision: none, reason: "unreachable-from-transport"}` from this transport.
 4. Render one line per result (`candidate.id`/name, decision, reason, and the write error if any), or the full `WhipReport` JSON with `--json`.
 
 ### `WhipReport` shape
@@ -886,7 +917,7 @@ Pushes the pacing nudge into every reachable target: every configured environmen
 
 ### Configuration: `ERunConfig.whip` {#whip-config}
 
-`~/.erun/config.yaml`'s optional `whip` section (`eruncommon.WhipConfigOverride`) overrides the pacing defaults every surface reads through `eruncommon.ResolveWhipConfig`:
+The [user config](/reference/config-locations)'s optional `whip` section (`eruncommon.WhipConfigOverride`) overrides the pacing defaults every surface reads through `eruncommon.ResolveWhipConfig`:
 
 | Key | Type | Unset behaviour |
 |---|---|---|
@@ -932,7 +963,7 @@ Lists one directory one level deep over `kubectl exec … find <dir> -maxdepth 1
 | `--dest <local-path>` | path | current directory | Local file or directory to write to. (`--dest`, not `--output`, which is the global mode flag.) |
 | `--force` | bool | `false` | Overwrite an existing local destination. |
 
-A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<name>.tar.gz`). The payload is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + script and the planned destination; no I/O).
+A file streams as base64; a folder is staged in the pod as a `tar.gz` archive first and saved as `<name>.tar.gz`. The transfer is read in bounded ranges (8 MiB of payload per `kubectl exec`, gzip-compressed when the pod has gzip), because one exec stream breaks probabilistically as the volume it carries grows — so a whole-file stream fails on anything the size of a real cross-built binary. A range whose stream breaks is retried; a range that never arrives fails the download with the byte count it reached out of the total, and writes no partial file. The reassembled payload is checked against the digest the pod computed before the transfer started. It is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + scripts and the planned destination; no I/O).
 
 ---
 
@@ -1123,7 +1154,9 @@ Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sen
 
 The demotion to `unknown` happens on the next read and is persisted, so every later read gives the same answer. An `unknown` job is never a success: `job await` exits `125` for it, distinct from both `0` and a failure.
 
-`abandoned` sits between the two: like `exited`, the supervisor did observe the process end and recorded a real `exitCode` for it; like `unknown`, it is never a success — even an `exitCode` of `0` is not one, because something the job started is still running and nothing will ever report on it again. Detection happens once, right after the supervisor reaps the job's own process, by checking whether its process group still has a live member; that check is POSIX-only, so on Windows a job that backgrounds work this way still reads back as a plain `exited`. `job status`/`job await` render it as `abandoned <exitCode>: <name> (<reason>)`, distinct from both `exited <exitCode>: <name>` and `unknown: <name> (<reason>)`.
+When the pod is confirmed unchanged (same hostname) and Kubernetes reports no container restart either, there is nothing checkable left to explain why the supervisor process is simply gone — `reason` says so ("... could not be determined") and, when this pod's own cgroup counters are readable, appends its resource state at read time: current/limit memory, how many times the cgroup hit its memory ceiling, OOM kills, and CPU throttling (e.g. `"Environment resource state: memory 4.02/6.00 GiB, ceiling reached 21292 times, 0 OOM kill(s); CPU throttled in 28% of periods (100837/363659)"`). This is evidence for the reader to judge, not a claimed cause: a cgroup pinned at its ceiling under heavy CPU throttling makes resource exhaustion plausible, but nothing here proves the supervisor actually died of it.
+
+`abandoned` sits between the two: like `exited`, the supervisor did observe the process end and recorded a real `exitCode` for it; like `unknown`, it is never a success — even an `exitCode` of `0` is not one, because something the job started is still running and nothing will ever report on it again. Detection happens once, right after the supervisor reaps the job's own process, by checking whether its process group *or* its session still has a live member. The process group alone would miss a further process the work backgrounds into a fresh process group of its own — an agent tool's Bash tool backgrounding a command precisely so it survives the turn that started it does exactly this — which is why the job's own top-level process also gets a fresh session, not just a fresh process group, at start: anything it backgrounds without itself calling `setsid` still shares that session, even once reparented away from its original parent. Both checks are POSIX-only, so on Windows a job that backgrounds work either way still reads back as a plain `exited`. `job status`/`job await` render it as `abandoned <exitCode>: <name> (<reason>)`, distinct from both `exited <exitCode>: <name>` and `unknown: <name> (<reason>)`.
 
 Every state line names why it ended when there is anything recorded to say, `exited` included: `exited <exitCode>: <name> (signal <signal>)` when the work was signalled (the signal *is* the reason), `exited <exitCode>: <name> (<reason>)` otherwise when the record carries one, and the bare `exited <exitCode>: <name>` only when it carries neither. `job await`'s own failure message follows the same rule — `job "<id>" exited <exitCode> (signal <signal>)` or `job "<id>" exited <exitCode>: <reason>`. A job whose work could not be started at all (`failed to start: …`) is the case this matters most for: its exit code is `-1` and the reason is the entire answer.
 
@@ -1141,6 +1174,8 @@ When a job's process ends, the supervisor checks the job store for any non-[hand
 - If the wait ends because the started job finished, its own outcome is folded into this job's record instead: `state` stays whatever this job's own process produced (usually `exited`), and `startedJobFailed` names the started job if — and only if — it did **not** succeed. `succeeded` is `false` whenever `startedJobFailed` is set, regardless of this job's own `exitCode`. This is the common case in practice: a gate that runs long but eventually passes or fails is waited out and reported truthfully, rather than ever surfacing a misleading intermediate `gate-incomplete` a caller would have to separately chase down.
 
 `job status`/`job await` render `gate-incomplete` as `gate-incomplete <exitCode>: <name> (<reason>)`, and append `, <startedJobFailed text>` to an otherwise-`exited`/`abandoned` line when `startedJobFailed` is set.
+
+One case is excluded from `startedJobFailed` on purpose: a started job that finished unsuccessfully because *this same job* cancelled it (`job cancel`) is not a failure of work this job waited for — it is this job's own intent. `job cancel` records the canceller's own `ERUN_JOB_ID` on the target job as `cancelledByJobId` at the moment it signals it; the parent's finish check drops a child from `startedJobFailed` only when that child's `cancelledByJobId` matches the parent's own id, so a cancel issued by anyone else (a different job, or no job at all) still counts as a real failure from this job's perspective.
 
 ### Bounded reinvocation for an agent job {#job-reinvocation}
 
@@ -1162,6 +1197,30 @@ Once either cap is reached, the job finalizes exactly as it would without this f
 ### Deliberate handoff: `--handoff` {#job-handoff}
 
 Not every job a job starts is meant to be waited for. `job start --handoff` marks the new job as deliberately outliving whatever starts it — a release, a long render, anything an agent kicks off on purpose before ending its own turn. A handoff job is excluded from its parent's finish check entirely: it is never counted toward `gate-incomplete`, and its own eventual outcome (success or failure) is never folded into `startedJobFailed`. Without `--handoff`, *every* nested `job start` defaults into the wait-then-report behavior above, which is correct for a gate but wrong for work genuinely meant to keep running past the caller's own turn.
+
+### Environment exclusivity: `--exclusive` {#job-exclusivity}
+
+An activity lease is **presence** — many holders coexist, and taking one says nothing about whether anybody else should. That is the right default for observability and the wrong one for a gate, whose verdict a neighbour changes rather than merely delays. Measured on one 12-CPU/23-GiB agent pod, the same gate ran `GREEN 7m4s`, `GREEN 7m38s`, `GREEN 6m58s` alone, and `GREEN 17m36s`, `RED`, `RED` with a second gate batch and a handful of probe jobs beside it — the two reds on *different* tests, both of which pass standalone (an `erun usage --output json` golden whose actual output carried real OOM warnings, and an auth-retry test that timed out). A contended gate does not report a slow verdict; it reports a wrong one, and the wrong one costs a false attribution before anyone thinks to re-measure alone.
+
+`job start --exclusive` is how work declares it needs the environment to itself:
+
+| Property | Value |
+|---|---|
+| Requested by | `erun exec job start --exclusive`; MCP `exec_raw` (`wait: false`) and `exec_agent` both take `exclusive: true`. |
+| Scope | Always `environment` — the [exclusive-claim](/agent-reference/idle-policy#exclusive-claims) scope that means "no other work here at all". Job exclusivity is deliberately not scope-parameterised: what a gate contends for is the pod's CPU and memory, which no worktree boundary divides. A narrower claim is still available directly through `erun activity lease take --exclusive --scope <scope>`. |
+| Refuses a second exclusive job | Yes. |
+| Refuses an **ordinary** job too | Yes, and this is the point. A gate needs protecting less from another gate than from everything else scheduled beside it; a probe job started during a gate is exactly what the measurement above recorded. |
+| Refusal shape | Never queued and never silently allowed. The error names the holder (`orchestrator`/`user`/`tenant`, lease `name`, lease `id`), how long the claim has left, that it is reclaimed if its holder dies, and the exact `erun exec job cancel` (or `erun activity lease release`) command that clears it. |
+| Lineage exemption | A start whose parent chain (`startedByJobId`, walked transitively) reaches the holder proceeds — that is the holder starting its own work, not contention. Such a job takes **no** second claim, so it cannot drop the ancestor's on its way out, and its record reads `exclusive: false`. |
+| Expiry and reclaim | It is a lease, not a lock. The claim is taken at start time with no pid (the supervisor does not exist yet), and the supervisor's first heartbeat records its own pid on it; from then on a dead supervisor releases the environment on the next read. It also expires at `--lease-ttl` (default `15m`, renewed at TTL/3) and at the 12-hour lease lifetime ceiling. A crashed gate cannot pin an environment. |
+| Release | Explicit, on the supervisor's way out, so the next gate starts immediately rather than waiting out a TTL. A start that fails before its supervisor comes up releases the claim it took. |
+| Storage | `${XDG_CACHE_HOME}/erun/activity/<tenant>/<environment>/leases/exclusive/environment.json`, id `job-exclusive-<jobId>` — keyed by scope, created with `O_CREATE\|O_EXCL`, so of any number of concurrent starts exactly one create lands and the losers are refused with the winner named. |
+
+| Field | Type | Meaning |
+|---|---|---|
+| `exclusive` | bool | Whether this job holds the environment's claim. It is what the job actually holds, not what its caller asked for: a job running under an ancestor's claim reads `false`. `job status` appends `, holding this environment exclusively` to its line. |
+
+`scripts/agent-gate.sh` passes `--exclusive` for every gate it detaches (`make check`, `make integration-test`, `erun-ui/playwright/run.sh`), so the repository's own long gates hold the pod by default. `erun exec gate-merge` is gated by the same claim from the other direction: it rewrites the environment's one shared worktree, so it is refused while anything else holds the environment exclusively — two merge-queue drives racing that worktree is how a batch came to report pushing another batch's commit and closed two pull requests against work that had not landed. A caller that took the claim itself (a drive holding the environment across several separate processes, which cannot be expressed as one job) passes `erun exec gate-merge --under-lease <leaseId>` so its own hold does not refuse it.
 
 ### The alive contract {#alive-contract}
 
@@ -1191,6 +1250,7 @@ In practice the two signals — `state` and `aliveAgeMs` — usually agree, beca
 | `--max-output-bytes <n>` | int64 | `4194304` (4 MiB) | Cap on captured output. |
 | `--lease-ttl <duration>` | duration | `15m` | Activity lease TTL; the supervisor renews at TTL/3 (minimum 5s) for as long as the work runs, and at 2s intervals for an agent job so the lease's name can carry the current activity. |
 | `--handoff` | bool | `false` | Mark this job as deliberately meant to outlive whatever starts it, excluding it from that job's own finish check. See [Deliberate handoff](#job-handoff). |
+| `--exclusive` | bool | `false` | Claim the environment for this job's lifetime; while it is held, **every** other job start here is refused and told which job holds it. See [Environment exclusivity](#job-exclusivity). |
 | `--dry-run` | bool | `false` | Trace the supervisor argv, the log path, and the lease; start nothing. |
 
 erun spawns a supervisor in **its own session**, so the work survives this call returning, the caller exiting, and the transport dropping — nothing needs wrapping in `setsid`, `nohup`, or a redirect. The work itself runs in its own process group, which is what lets [`cancel`](#erun-job-cancel) reach it without touching the supervisor.

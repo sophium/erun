@@ -104,17 +104,141 @@ func TestList(t *testing.T) {
 
 	t.Run("version_drift_gate_environment_version_unresolved", func(t *testing.T) {
 		// The gate environment has never recorded a resolved runtime image, so
-		// its own erun version cannot be read from config alone -- behind must
-		// read "unknown", never a silent "no" that would misreport an unknown
-		// gate as safely current.
+		// its own erun version cannot be read from config alone -- that gap
+		// now falls back to a live helm read rather than assuming
+		// "none" -- stubbed here as a confirmed absence (no release at all),
+		// so behind must still read "unknown" naming why, never a silent "no"
+		// that would misreport an unknown gate as safely current.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "gate")
 		seedTenantEnvOnErunLine(t, setup, "team", "peer", "1.0.247")
-		result := erun.Run(t, []string{"list", "--tenant", "team", "--gate-environment", "gate"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stderr: `Error: release: not found`, ExitCode: 1})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"list", "--tenant", "team", "--gate-environment", "gate"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "list/version_drift_gate_environment_version_unresolved", normalize.Apply(result.Combined))
+	})
+
+	// `version=none` used to collapse three distinct situations -- nothing
+	// deployed, a release deployed but this config never learned its
+	// version, and a cluster erun could not even reach -- and dropped all
+	// three from the drift verdict silently. These four scenarios lock each
+	// rendering plus the dry-run trace that makes the live check auditable.
+
+	t.Run("version_drift_environment_confirmed_not_deployed", func(t *testing.T) {
+		// A live check now backs "none": it is a confirmed absence, not a
+		// guess from an empty config field. code4 has never been deployed
+		// anywhere, and the live helm read confirms exactly that.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
+		fixture.SeedTenantEnv(t, setup, "erun", "code4")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{Stderr: `Error: release: not found`, ExitCode: 1})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"list", "--tenant", "erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_environment_confirmed_not_deployed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_resolves_live_version_from_deployed_release", func(t *testing.T) {
+		// local's own config never recorded a runtime version (e.g. it was
+		// deployed from a different machine or session), but its cluster is
+		// reachable and running 1.0.203 -- newer than build's cached 1.0.100.
+		// The live read must resolve it, fold it into the tenant's own max,
+		// and flag build as behind, not silently report local as "none".
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.100")
+		fixture.SeedTenantEnv(t, setup, "erun", "local")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubHelmObserve(t, stubs, observeHelmStatusStub(), observeHelmListStub("erun-devops-1.0.203", "1.0.203"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"list", "--tenant", "erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_resolves_live_version_from_deployed_release", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_environment_cluster_unreachable", func(t *testing.T) {
+		// petios's cluster cannot be reached at all -- distinct from both a
+		// confirmed absence and a resolved version, and excluded from the max
+		// / behind computation with the exclusion stated, not dropped silently.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
+		fixture.SeedTenantEnv(t, setup, "erun", "petios")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{
+			Stderr:   `Error: Kubernetes cluster unreachable: dial tcp 10.0.0.5:6443: i/o timeout`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"list", "--tenant", "erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_environment_cluster_unreachable", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_with_unresolved_environment_exits_non_zero", func(t *testing.T) {
+		// A drift check that cannot tell whether an environment is behind must
+		// not pass silently: --fail-on-drift treats an unresolved environment
+		// the same as one confirmed behind.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
+		fixture.SeedTenantEnv(t, setup, "erun", "petios")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{
+			Stderr:   `Error: Kubernetes cluster unreachable: dial tcp 10.0.0.5:6443: i/o timeout`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a tenant with an unresolved environment, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_with_unresolved_environment_exits_non_zero", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_dry_run_traces_live_check_for_unresolved_environment", func(t *testing.T) {
+		// Dry run must never touch the network: no helm stub is declared here
+		// at all, so if production code called helm for real this would fail
+		// loudly ("executable file not found") rather than pass by accident.
+		// The two helm calls that would run are traced instead, auditable
+		// before anyone lets the real check dial a cluster.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
+		fixture.SeedTenantEnv(t, setup, "erun", "petios")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_dry_run_traces_live_check_for_unresolved_environment", normalize.Apply(result.Combined))
+	})
+
+	t.Run("version_drift_unresolved_environment_json_output", func(t *testing.T) {
+		// Locks the JSON field names a scripted caller reads:
+		// versionUnresolved/versionUnresolvedReason, distinct from a bare
+		// missing "version" key (which alone cannot tell "none" apart from
+		// "undetermined").
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
+		fixture.SeedTenantEnv(t, setup, "erun", "petios")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "helm", fixture.StubBinarySpec{
+			Stderr:   `Error: Kubernetes cluster unreachable: dial tcp 10.0.0.5:6443: i/o timeout`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/version_drift_unresolved_environment_json_output", normalize.Apply(result.Combined))
 	})
 
 	t.Run("version_drift_json_output", func(t *testing.T) {
@@ -126,6 +250,58 @@ func TestList(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "list/version_drift_json_output", normalize.Apply(result.Combined))
+	})
+
+	// erun#2052: `list` is a reporting command and always exits 0 on its own
+	// findings; --fail-on-drift is the opt-in that lets one invocation of a
+	// drift report be wired into a gate instead (erun-cli/AGENTS.md § "Exit-
+	// Code Contract: Reporting Commands Vs Gating Checks").
+
+	t.Run("fail_on_drift_requires_tenant_or_control_planes", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"list", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --fail-on-drift with neither --tenant nor --control-planes, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_requires_tenant_or_control_planes", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_with_tenant_behind_max_exits_non_zero", func(t *testing.T) {
+		// The real defect this exists to catch: build is behind code4, and
+		// nothing surfaced it before erun#2052 -- with --fail-on-drift, the
+		// report itself is now what a schedule can gate on.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a tenant with an environment behind max, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_with_tenant_behind_max_exits_non_zero", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_with_tenant_no_drift_exits_zero", func(t *testing.T) {
+		// The report still prints in full; --fail-on-drift changes only the
+		// exit code, and only when there is something to fail on.
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.247")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 for a tenant with no environment behind max, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_with_tenant_no_drift_exits_zero", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fail_on_drift_with_gate_environment_behind_exits_non_zero", func(t *testing.T) {
+		setup := env.New(t)
+		seedTenantEnvOnErunLine(t, setup, "erun", "build", "1.0.246")
+		seedTenantEnvOnErunLine(t, setup, "erun", "code4", "1.0.247")
+		result := erun.Run(t, []string{"list", "--tenant", "erun", "--gate-environment", "build", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a gate environment behind what it gates, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/fail_on_drift_with_gate_environment_behind_exits_non_zero", normalize.Apply(result.Combined))
 	})
 
 	t.Run("empty_config", func(t *testing.T) {
@@ -260,6 +436,30 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/runtime_version_line_undetermined_on_malformed_recorded_image", normalize.Apply(result.Combined))
 	})
 
+	t.Run("erun_version_reads_off_a_stated_runtime_chart_reference", func(t *testing.T) {
+		// When an env's runtime chart rides its own version line (rather than
+		// following runtimeversion), ResolveErunVersion reads the version off
+		// the stated runtimechart reference via SplitChartReference. The
+		// chart's version (1.0.201) must render distinctly from the runtime
+		// image's own version (1.0.0, from SeedTenantEnv's default
+		// runtimeversion).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimerunningimage: ghcr.io/sophium/erun-devops:1.0.0\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/erun-devops:1.0.201\n")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/erun_version_reads_off_a_stated_runtime_chart_reference", normalize.Apply(result.Combined))
+	})
+
 	// The undetermined shape (a deployed env whose deploy never recorded a
 	// resolved image -- predates this feature, or went through a repo-local
 	// runtime chart whose own values decide the image) is already covered by
@@ -349,6 +549,26 @@ func TestList(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "list/with_orchestrator_pairing_invalid_before_the_role_gate_existed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("with_orchestrator_directories", func(t *testing.T) {
+		// An orchestrator may be pointed at directories of its own and link no
+		// environment at all -- that is a complete definition, not an empty one.
+		// `erun list` has to report them, or an orchestrator working only in
+		// directories reads as having no scope.
+		setup := env.New(t)
+		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
+			{
+				id:          "scratch",
+				name:        "Scratch",
+				directories: []string{"/opt/operator/notes", "/opt/operator/scratch"},
+			},
+		})
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/with_orchestrator_directories", normalize.Apply(result.Combined))
 	})
 
 	t.Run("corrupted_env_config_errors", func(t *testing.T) {
@@ -887,6 +1107,10 @@ type orchestratorSeed struct {
 	id           string
 	name         string
 	environments []orchestratorEnvSeed
+	// directories are the orchestrator's own: paths that belong to no environment.
+	// A seed may carry these and no environment at all, which is a complete
+	// definition.
+	directories []string
 }
 
 // seedOrchestratorsWithEnvRoles appends a persisted orchestrators list,
@@ -911,13 +1135,21 @@ func seedOrchestratorsWithEnvRoles(t testing.TB, setup env.Setup, orchestrators 
 	for _, orchestrator := range orchestrators {
 		sb.WriteString("  - id: " + orchestrator.id + "\n")
 		sb.WriteString("    name: " + orchestrator.name + "\n")
-		sb.WriteString("    environments:\n")
-		for _, e := range orchestrator.environments {
-			sb.WriteString("      - tenant: " + e.tenant + "\n")
-			sb.WriteString("        environment: " + e.environment + "\n")
-			sb.WriteString("        directory: " + e.directory + "\n")
-			if e.role != "" {
-				sb.WriteString("        role: " + e.role + "\n")
+		if len(orchestrator.environments) > 0 {
+			sb.WriteString("    environments:\n")
+			for _, e := range orchestrator.environments {
+				sb.WriteString("      - tenant: " + e.tenant + "\n")
+				sb.WriteString("        environment: " + e.environment + "\n")
+				sb.WriteString("        directory: " + e.directory + "\n")
+				if e.role != "" {
+					sb.WriteString("        role: " + e.role + "\n")
+				}
+			}
+		}
+		if len(orchestrator.directories) > 0 {
+			sb.WriteString("    directories:\n")
+			for _, directory := range orchestrator.directories {
+				sb.WriteString("      - directory: " + directory + "\n")
 			}
 		}
 	}

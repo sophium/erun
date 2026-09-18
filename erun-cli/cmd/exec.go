@@ -24,6 +24,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		"Repository execution utilities",
 		newExecDiffCmd(findProjectRoot, runGit),
 		newExecRawCmd(findProjectRoot, runRaw),
+		newExecResolvePlaywrightAreasCmd(findProjectRoot),
 		newExecWriteCmd(findProjectRoot),
 		newExecCommitCmd(findProjectRoot),
 		newExecPushCmd(findProjectRoot),
@@ -175,6 +176,42 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text")
 	cmd.Flags().StringVar(&scope, "scope", "", "Diff scope: current (default), all, or commit")
 	cmd.Flags().StringVar(&selectedCommit, "selected-commit", "", "Oldest commit hash to include when --scope=commit")
+	return cmd
+}
+
+// newExecResolvePlaywrightAreasCmd builds `erun exec resolve-playwright-areas`,
+// which lets a local `make check` resolve the same smoke+area Playwright
+// selection `erun build` threads into the gate's own PLAYWRIGHT_TEST_AREAS
+// build-arg (erun-common.ResolvePlaywrightTestAreaSelection), so a developer
+// or agent iterating locally pays the same cost the authoritative gate does
+// instead of always running the full suite.
+func newExecResolvePlaywrightAreasCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "resolve-playwright-areas",
+		Short: "Resolve the smoke+area Playwright test selection for the current diff",
+		Long: "Resolve the same smoke+area Playwright test selection `erun build` computes for the gate's " +
+			"PLAYWRIGHT_TEST_AREAS build-arg, from the current git diff against the merge base " +
+			"(erun-ui/playwright/AGENTS.md's \"Area-scoped gate selection\"). Always exits 0 and prints " +
+			"\"all\" when the selection cannot be resolved (no git repository, or no merge base against any " +
+			"candidate upstream branch) -- the fail-safe direction, matching the Dockerfile's own unset-" +
+			"PLAYWRIGHT_TEST_AREAS default of running everything.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if findProjectRoot == nil {
+				findProjectRoot = common.FindProjectRoot
+			}
+			ctx := commandContext(cmd)
+			selection := "all"
+			if _, projectRoot, err := findProjectRoot(); err == nil {
+				if resolved, ok := common.ResolvePlaywrightTestAreaSelection(ctx, projectRoot); ok {
+					selection = resolved
+				}
+			}
+			_, err := fmt.Fprintln(ctx.Stdout, selection)
+			return err
+		},
+	}
 	return cmd
 }
 
@@ -440,9 +477,10 @@ func runExecMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinde
 
 func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var (
-		sources []string
-		target  string
-		remote  string
+		sources    []string
+		target     string
+		remote     string
+		underLease string
 	)
 	cmd := &cobra.Command{
 		Use:   "gate-merge --source SOURCE_BRANCH [--source SOURCE_BRANCH...]",
@@ -465,6 +503,11 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"state and the conflict recorded in the result, and the rest of the batch still gates against the " +
 			"tree as it stood before that attempt. A batch where every source is skipped lands nothing and " +
 			"exits non-zero.\n\n" +
+			"Refused outright while something else holds this environment exclusively: this rewrites the one " +
+			"shared worktree, so two gate-merges in flight at once do not merely slow each other down, they " +
+			"corrupt each other's accounting — a drive has already reported pushing a commit that belonged to " +
+			"another batch's tree. A caller that took the claim itself passes --under-lease so its own hold " +
+			"does not refuse it.\n\n" +
 			"--dry-run traces the fetch, checkout, and each squash merge and commit without running them.",
 		Example: "  echo 'Add widget' | erun exec gate-merge --source feature/add-widget --target main\n" +
 			"  printf 'Add widget\\0Add gadget' | erun exec gate-merge --source feature/add-widget " +
@@ -473,17 +516,18 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecGateMergeCommand(commandContext(cmd), findProjectRoot, sources, target, remote)
+			return runExecGateMergeCommand(commandContext(cmd), findProjectRoot, sources, target, remote, underLease)
 		},
 	}
 	cmd.Flags().StringArrayVar(&sources, "source", nil, "Branch to fetch and squash-merge in; repeat to batch several branches onto one prospective merge (required, at least once)")
 	cmd.Flags().StringVar(&target, "target", "", "Target branch the squash merge(s) land onto (required)")
 	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to fetch and merge from (defaults to origin)")
+	cmd.Flags().StringVar(&underLease, "under-lease", "", "Id of an exclusive environment claim this caller already holds, so its own hold does not refuse it")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
-func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, sourceBranches []string, targetBranch, remote string) error {
+func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
 	if len(sourceBranches) == 0 {
 		return fmt.Errorf("at least one --source is required")
 	}
@@ -505,6 +549,7 @@ func runExecGateMergeCommand(ctx common.Context, findProjectRoot common.ProjectF
 		Sources:      sources,
 		TargetBranch: targetBranch,
 		Remote:       remote,
+		UnderLeaseID: underLease,
 	}, common.GateMergeWorkingTreeDependencies{})
 	if err != nil {
 		return err

@@ -1,0 +1,6 @@
+audit: erun job start --dry-run --environment dev --exclusive --name check --tenant team work
+job: dev is not exclusively held, claiming it for job check
+job: detaching "check" as job check, output at <TMP>
+job: holding activity lease job-check for the job's lifetime
+job: holding exclusive claim job-exclusive-check on scope "environment", refusing every other job start here while it runs
+<TMP> exec job supervise --tenant team --environment dev --id check --name check --max-output-bytes 16777216 --lease-ttl 15m0s --exclusive -- work

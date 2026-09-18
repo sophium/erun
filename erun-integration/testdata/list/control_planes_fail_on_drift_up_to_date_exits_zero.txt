@@ -1,0 +1,8 @@
+  published version: <VERSION>
+Control planes:
+  - erun+test@erun api-url=<PLANE_API> reachable=yes version=<VERSION>
+audit: erun list --control-planes --fail-on-drift
+list: resolving the published version from erun's own registry
+list: latest published version is <VERSION>
+list: GET <PLANE_API>/v1/platform (control plane version check for erun+test@erun)
+GET <PLANE_API>/v1/platform

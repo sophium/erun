@@ -1,0 +1,12 @@
+running: gate, pid <PID>, holding this environment exclusively, last beat <ALIVE_AGE>ms ago, 0 bytes of output
+audit: erun job status --environment dev --id gate --tenant team
+audit: erun job start --environment dev --name probe --tenant team work
+job: refusing to start probe, job-exclusive-gate holds dev exclusively
+refusing to run job "probe": this environment is held exclusively by tenant team (gate, lease id job-exclusive-gate), and work that claims the environment must not overlap with anything else here
+the claim expires in <ELAPSED> unless its holder renews it, and is reclaimed on the next read if the holder's process is gone or its pod was replaced
+wait for it, or cancel it: erun exec job cancel --tenant team --environment dev --id gate
+audit: erun job start --environment dev --exclusive --name gate-two --tenant team work
+job: refusing to start gate-two, job-exclusive-gate holds dev exclusively
+refusing to run job "gate-two" exclusively: this environment is already held exclusively by tenant team (gate, lease id job-exclusive-gate), and work that claims the environment must not overlap with anything else here
+the claim expires in <ELAPSED> unless its holder renews it, and is reclaimed on the next read if the holder's process is gone or its pod was replaced
+wait for it, or cancel it: erun exec job cancel --tenant team --environment dev --id gate

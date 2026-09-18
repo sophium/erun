@@ -1,0 +1,12 @@
+  published version: <VERSION>
+Control planes:
+  - erun+test@erun api-url=<PLANE_API> reachable=yes version=<VERSION>
+    console: url=<CONSOLE_API> reachable=yes version=<VERSION> [behind published -- roll it]
+audit: erun list --control-planes --fail-on-drift
+list: resolving the published version from erun's own registry
+list: latest published version is <VERSION>
+list: GET <PLANE_API>/v1/platform (control plane version check for erun+test@erun)
+GET <PLANE_API>/v1/platform
+list: GET <CONSOLE_API>/version.json (console version check for erun+test@erun)
+GET <CONSOLE_API>/version.json
+control plane version drift: 1 plane(s) behind published: erun+test@erun (console)

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -47,20 +49,86 @@ func jobRecordPath(setup env.Setup, tenant, environment, id string) string {
 	return filepath.Join(setup.CacheHome, "erun", "activity", tenant, environment, "jobs", id+".json")
 }
 
-// startJob starts a job and registers a cleanup that kills it. The whole point
+// startJob starts a job and registers a cleanup that stops it. The whole point
 // of a job is that it outlives the call that started it, so a scenario that
 // fails before releasing its work would otherwise strand a process past the test
-// run; cancelling an already-finished job is a successful no-op, so the cleanup
+// run; stopping an already-finished job is a successful no-op, so the cleanup
 // is unconditional.
 func startJob(t *testing.T, setup env.Setup, envVars []string, name string, args ...string) erun.Result {
 	t.Helper()
 	start := append([]string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", name}, args...)
 	result := erun.Run(t, start, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 	t.Cleanup(func() {
-		erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", name, "--signal", "KILL"},
-			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		stopJob(t, setup, envVars, name)
 	})
 	return result
+}
+
+// stopJob signals a job to stop and then waits for its supervisor process to
+// actually exit before returning -- see awaitJobSupervisorExit for why the
+// wait matters. Every scenario that starts a real job registers this (rather
+// than a bare "job cancel") as its cleanup, so a still-alive supervisor can
+// never race t.TempDir()'s own removal, which runs only after every
+// registered t.Cleanup callback has returned.
+func stopJob(t *testing.T, setup env.Setup, envVars []string, id string) {
+	t.Helper()
+	erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
+		erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	awaitJobSupervisorExit(t, setup, envVars, id, 30*time.Second)
+}
+
+// awaitJobSupervisorExit blocks until the job's own supervisor process is no
+// longer alive, rather than trusting the instant its record first reads as
+// finished. finishEnvironmentJob (job_supervisor.go) settles a job's terminal
+// state and its clone-reclaim decision together, but the supervisor process
+// itself only exits afterward -- stopping its heartbeat, closing its log,
+// unwinding the rest of its own deferred teardown -- so a caller that returns
+// the moment a job reads as finished can still race a supervisor that is
+// momentarily still alive and still touching files under the scenario's
+// TempDir. That race is exactly the leaked supervisors and
+// "directory not empty" TempDir cleanup failures. A job whose supervisor
+// never registered a pid, or is already gone, is treated as done immediately;
+// this only waits out a supervisor provably still alive.
+func awaitJobSupervisorExit(t *testing.T, setup env.Setup, envVars []string, id string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", id, "--output", "json"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		var payload struct {
+			PID int `json:"pid"`
+		}
+		pid := 0
+		if json.Unmarshal([]byte(result.Stdout), &payload) == nil {
+			pid = payload.PID
+		}
+		if pid <= 0 || !processAlive(pid) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("job %q supervisor (pid %d) is still alive %s after being cancelled", id, pid, timeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// processAlive mirrors erun-common's own unexported helper of the same name
+// (activity_lease.go): signal 0 is the portable "does this pid exist" probe
+// on unix, and EPERM still counts as alive. Duplicated here rather than
+// imported because that helper is package-private to erun-common.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil || errors.Is(err, syscall.EPERM) {
+		return true
+	}
+	return runtime.GOOS == "windows"
 }
 
 // waitForJobActivity blocks until the supervisor has folded enough of an agent's
@@ -211,6 +279,138 @@ func TestJob(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "job/start_handoff_dry_run_plans_the_supervisor_argv", normalize.Apply(result.Combined))
+	})
+
+	t.Run("start_exclusive_dry_run_plans_the_environment_claim", func(t *testing.T) {
+		// --exclusive is a decision the plan has to show, not only an effect at
+		// run time: the claim it takes is what will refuse every other job start
+		// here, and --exclusive must reach the supervisor argv or the supervisor
+		// would neither renew the claim nor release it on the way out.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := jobStubEnv(t, setup, "exit 0")
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "check", "--dry-run", "--exclusive",
+			"--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/start_exclusive_dry_run_plans_the_environment_claim", normalize.Apply(result.Combined))
+		if _, err := os.Stat(jobRecordPath(setup, "team", "dev", "check")); !os.IsNotExist(err) {
+			t.Errorf("a dry-run start must not register a job, stat err: %v", err)
+		}
+	})
+
+	t.Run("an_exclusive_job_refuses_every_other_job_start_and_names_the_holder", func(t *testing.T) {
+		// The whole point of the claim, and the asymmetry that makes it worth
+		// more than a mutex between exclusive jobs: while a gate holds the
+		// environment, an ordinary job start is refused too. Scheduling probe
+		// jobs beside a running gate is exactly what turned a 7-minute green
+		// run into a 17-minute one and two reds on tests that pass standalone.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		release := filepath.Join(setup.Cwd, "release")
+		envVars := jobStubEnv(t, setup, "while [ ! -f '"+release+"' ]; do sleep 0.05; done\nexit 0")
+
+		start := startJob(t, setup, envVars, "gate", "--exclusive", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		held := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "gate"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+
+		plain := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "probe", "--", "work"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if plain.ExitCode == 0 {
+			t.Fatalf("an ordinary job start must be refused while a gate holds the environment, got 0:\n%s", plain.Combined)
+		}
+		if _, err := os.Stat(jobRecordPath(setup, "team", "dev", "probe")); !os.IsNotExist(err) {
+			t.Errorf("a refused start must register nothing, stat err: %v", err)
+		}
+		second := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "gate-two", "--exclusive", "--", "work"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if second.ExitCode == 0 {
+			t.Fatalf("a second exclusive job start must be refused, got 0:\n%s", second.Combined)
+		}
+
+		if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
+			t.Fatalf("release the stub: %v", err)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "gate", "--timeout", "30s"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 0 {
+			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
+		}
+		// Released on the way out rather than left to lapse, so the next gate
+		// starts immediately instead of waiting out a TTL.
+		after := erun.Run(t, []string{"job", "start", "--tenant", "team", "--environment", "dev", "--name", "probe", "--", "work"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if after.ExitCode != 0 {
+			t.Fatalf("a job start after the exclusive job finished must succeed: exit %d: %s", after.ExitCode, after.Combined)
+		}
+		t.Cleanup(func() {
+			stopJob(t, setup, envVars, "probe")
+		})
+		golden.Equal(t, "job/an_exclusive_job_refuses_every_other_job_start_and_names_the_holder",
+			normalize.Apply(held.Combined+plain.Combined+second.Combined))
+	})
+
+	t.Run("an_expired_exclusive_claim_is_reclaimed_rather_than_pinning_the_environment", func(t *testing.T) {
+		// The requirement that keeps this from being a lock that can strand an
+		// environment: a claim nobody renews stops holding anything. Taken with
+		// a TTL that has already elapsed by the time the next read happens, so
+		// the reclaim is observable without waiting for one.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := jobStubEnv(t, setup, "exit 0")
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "abandoned-gate", "--id", "abandoned-gate", "--exclusive", "--scope", "environment", "--ttl", "1ns",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "gate", "--exclusive", "--dry-run", "--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("a lapsed claim must not refuse a new one: exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/an_expired_exclusive_claim_is_reclaimed_rather_than_pinning_the_environment",
+			normalize.Apply(result.Combined))
+	})
+
+	t.Run("a_job_started_by_the_holder_runs_under_its_claim_instead_of_being_refused", func(t *testing.T) {
+		// Lineage is the one exemption, and it has to exist: a gate job that
+		// detaches its own nested work (agent-gate.sh from inside an agent job)
+		// would otherwise be refused by its own ancestor's claim, which would
+		// make the mechanism unusable exactly where it is needed. The nested job
+		// takes no second claim -- releasing one on its way out would drop the
+		// ancestor's.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		release := filepath.Join(setup.Cwd, "release")
+		envVars := jobStubEnv(t, setup, "while [ ! -f '"+release+"' ]; do sleep 0.05; done\nexit 0")
+
+		start := startJob(t, setup, envVars, "gate", "--exclusive", "--", "work")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		// ERUN_JOB_ID is what the gate's own work inherits, so a start made from
+		// inside it names the gate as its parent exactly as a real nested start
+		// would.
+		nested := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "nested", "--dry-run", "--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: append(envVars, "ERUN_JOB_ID=gate")})
+		if nested.ExitCode != 0 {
+			t.Fatalf("the holder's own nested start must not be refused: exit %d: %s", nested.ExitCode, nested.Combined)
+		}
+		if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
+			t.Fatalf("release the stub: %v", err)
+		}
+		golden.Equal(t, "job/a_job_started_by_the_holder_runs_under_its_claim_instead_of_being_refused",
+			normalize.Apply(nested.Combined))
 	})
 
 	t.Run("start_env_refuses_a_name_that_could_redirect_the_job", func(t *testing.T) {
@@ -911,7 +1111,7 @@ func TestJob(t *testing.T) {
 		if await.ExitCode != 1 {
 			t.Fatalf("expected an abandoned job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
 		}
-		// erun#1731: a raw exitCode of 0 sitting beside state "abandoned" is
+		// : a raw exitCode of 0 sitting beside state "abandoned" is
 		// exactly the false-success shape a caller reading only exitCode would
 		// miss; succeeded must say so explicitly rather than leaving it to be
 		// re-derived from state.
@@ -967,8 +1167,7 @@ func TestJob(t *testing.T) {
 			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 		}
 		t.Cleanup(func() {
-			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "gate", "--signal", "KILL"},
-				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			stopJob(t, setup, envVars, "gate")
 		})
 
 		var status erun.Result
@@ -987,7 +1186,7 @@ func TestJob(t *testing.T) {
 		if await.ExitCode != 1 {
 			t.Fatalf("expected a gate-incomplete job to report a failure outcome, got %d:\n%s", await.ExitCode, await.Combined)
 		}
-		// erun#1731: this is the exact shape the issue reported -- exitCode 0
+		// : this is the exact shape the issue reported -- exitCode 0
 		// sitting beside state gate-incomplete, with only state telling the
 		// truth. succeeded must say so explicitly, so exec_agent (and any other
 		// caller reading the job record over MCP or --output json) cannot read
@@ -1115,8 +1314,7 @@ func TestJob(t *testing.T) {
 		}
 		t.Cleanup(func() {
 			for _, id := range []string{"gate-1", "gate-2"} {
-				erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
-					erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+				stopJob(t, setup, envVars, id)
 			}
 		})
 		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1415,8 +1613,7 @@ esac
 		}
 		t.Cleanup(func() {
 			for _, id := range []string{"gate", "gate-2"} {
-				erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
-					erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+				stopJob(t, setup, envVars, id)
 			}
 		})
 		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1469,8 +1666,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 		}
 		t.Cleanup(func() {
 			for _, id := range []string{"gate-1", "gate-2", "gate-3"} {
-				erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
-					erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+				stopJob(t, setup, envVars, id)
 			}
 		})
 		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1516,8 +1712,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 		}
 		t.Cleanup(func() {
-			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "released", "--signal", "KILL"},
-				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			stopJob(t, setup, envVars, "released")
 		})
 
 		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "outer", "--timeout", "10s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1559,8 +1754,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 		}
 		t.Cleanup(func() {
-			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "lane", "--signal", "KILL"},
-				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			stopJob(t, setup, envVars, "lane")
 		})
 
 		var status erun.Result
@@ -1588,7 +1782,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 	t.Run("an_agent_jobs_clean_pushed_clone_under_the_work_root_is_reclaimed_after_it_finishes", func(t *testing.T) {
 		// The reproduction this closes: every agent task clones the repo into
 		// /home/erun/work/<name> and nothing ever reclaims it, so the work
-		// directory grows without bound (erun#1710). A clone under the work
+		// directory grows without bound (). A clone under the work
 		// root whose tree is clean and fully pushed has nothing left to lose,
 		// so the supervisor removes it the moment the job that owned it exits
 		// -- proven here against a real git working tree and a real remote,
@@ -1614,8 +1808,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 		}
 		t.Cleanup(func() {
-			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "lane", "--signal", "KILL"},
-				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			stopJob(t, setup, envVars, "lane")
 		})
 
 		var status erun.Result
@@ -1645,7 +1838,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 	t.Run("an_agent_jobs_dirty_detached_clone_is_kept_and_the_reason_is_named", func(t *testing.T) {
 		// The obvious reclaim is destructive: a detached HEAD with
 		// uncommitted work is exactly the shape the reported environment's
-		// stale clones had (erun#1710). The supervisor must refuse to remove
+		// stale clones had (). The supervisor must refuse to remove
 		// it and say why, rather than leaving an operator to rediscover by
 		// hand that a clone still holds real work.
 		setup := env.New(t)
@@ -1669,8 +1862,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
 		}
 		t.Cleanup(func() {
-			erun.Run(t, []string{"job", "cancel", "--tenant", "team", "--environment", "dev", "--id", "lane", "--signal", "KILL"},
-				erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			stopJob(t, setup, envVars, "lane")
 		})
 
 		var status erun.Result

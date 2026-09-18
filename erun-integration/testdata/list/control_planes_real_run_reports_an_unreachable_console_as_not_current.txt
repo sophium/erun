@@ -1,0 +1,12 @@
+  published version: <VERSION>
+Control planes:
+  - erun+test@erun api-url=<PLANE_API> reachable=yes version=<VERSION>
+    console: url=http://<LOOPBACK>:1 reachable=no reason=fetch console version: Get "http://<LOOPBACK>:1/version.json": dial tcp <LOOPBACK>:1: connect: connection refused
+audit: erun list --control-planes
+list: resolving the published version from erun's own registry
+list: latest published version is <VERSION>
+list: GET <PLANE_API>/v1/platform (control plane version check for erun+test@erun)
+GET <PLANE_API>/v1/platform
+list: GET http://<LOOPBACK>:1/version.json (console version check for erun+test@erun)
+GET http://<LOOPBACK>:1/version.json
+list: console for erun+test@erun unreachable: fetch console version: Get "http://<LOOPBACK>:1/version.json": dial tcp <LOOPBACK>:1: connect: connection refused

@@ -1,18 +1,51 @@
 audit: erun outputs download --dry-run report.pdf
 outputs: downloading <HOME>/.erun/outputs/report.pdf
 kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
-outputs download script:
+outputs probe script:
   target='<HOME>/.erun/outputs/report.pdf'
   if [ -d "$target" ]; then
-    printf 'dir\n'
-    tar czf - --exclude=/dev --exclude=/proc --exclude=/sys -C '<HOME>/.erun/outputs' 'report.pdf' | base64
+    staged=$(mktemp "${TMPDIR:-/tmp}/erun-outputs-XXXXXX") || { echo "erun-outputs: cannot stage an archive of $target" >&2; exit 5; }
+    if ! tar czf "$staged" --exclude=/dev --exclude=/proc --exclude=/sys -C '<HOME>/.erun/outputs' 'report.pdf'; then
+      rm -f "$staged"
+      echo "erun-outputs: cannot archive $target" >&2
+      exit 5
+    fi
+    kind=dir
   elif [ -f "$target" ]; then
-    size=$(stat -c %s "$target" 2>/dev/null || echo 0)
-    if [ "$size" -gt 104857600 ]; then echo "erun-outputs: file exceeds size limit" >&2; exit 4; fi
-    printf 'file\n'
-    base64 "$target"
+    staged="$target"
+    kind=file
   else
     echo "erun-outputs: not found: $target" >&2
     exit 3
+  fi
+  size=$(wc -c < "$staged" | tr -d ' ')
+  if [ "$size" -gt 104857600 ]; then
+    if [ "$kind" = dir ]; then rm -f "$staged"; fi
+    echo "erun-outputs: $target exceeds the 104857600 byte limit ($size bytes)" >&2
+    exit 4
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest=$(sha256sum "$staged" | cut -d' ' -f1)
+  elif command -v openssl >/dev/null 2>&1; then
+    digest=$(openssl dgst -sha256 "$staged" | sed 's/.*[ =]//')
+  else
+    digest=
+  fi
+  printf '%s\n%s\n%s\n%s\n' "$kind" "$size" "$staged" "$digest"
+  if command -v gzip >/dev/null 2>&1; then
+    printf 'gzip\n'
+    tail -c +1 "$staged" | head -c 8388608 | gzip -1 | base64
+  else
+    printf 'raw\n'
+    tail -c +1 "$staged" | head -c 8388608 | base64
+  fi
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+outputs range script:
+  if command -v gzip >/dev/null 2>&1; then
+    printf 'gzip\n'
+    tail -c +1 '<HOME>/.erun/outputs/report.pdf' | head -c 8388608 | gzip -1 | base64
+  else
+    printf 'raw\n'
+    tail -c +1 '<HOME>/.erun/outputs/report.pdf' | head -c 8388608 | base64
   fi
 outputs: would write report.pdf

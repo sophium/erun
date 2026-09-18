@@ -178,6 +178,41 @@ Version drift for tenant my-tenant:
 
 A gate older than the code it gates can pass a change that would fail on current code — this is what catches that before a bad merge slips through. See [collaboration › merge queue](/collaboration/merge-queue#the-gate) for what the gate does. For the exact flag contract and JSON shape, see [Agent reference › CLI flags](/agent-reference/cli-flags#version-drift).
 
+Like the rest of `list`, this report exits `0` on its own — `list` reports, it doesn't gate. Add `--fail-on-drift` to make that one invocation exit non-zero when an environment is behind the tenant's max, or the named gate environment is itself behind (or its version couldn't be resolved), so a script or a schedule can act on it:
+
+```bash
+erun list --tenant my-tenant --fail-on-drift
+```
+
+## Control plane versions {#control-plane-versions}
+
+`--tenant` catches drift *between* your own environments. It has no baseline for a different, easy-to-miss gap: a control plane can simply never get rolled onto a release that has already shipped, and nothing about its own reported version says whether that release exists. Pass `--control-planes` for that check instead: every erun-hosted control plane you've configured (a cloud provider alias with `provider: erun`, e.g. the one `erun cloud init erun` creates), compared against the newest version erun's own registry has actually published.
+
+```bash
+erun list --control-planes
+```
+
+```
+published version: 1.0.247
+Control planes:
+  - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+    console: url="https://console.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+```
+
+Each plane is checked with its own unauthenticated `GET /v1/platform` — the same call `erun cloud init erun` uses to discover a plane in the first place — so a plane that doesn't answer prints `reachable=no reason="..."` instead of a version; an unreachable plane is never reported current. `[behind published -- roll it]` means the plane is running a real, older release than what's published; `[ahead of published -- running an unpublished version]` means the opposite and more unusual case — the plane is running something the registry has never published at all, which is worth investigating on its own rather than "just roll it".
+
+That same `GET /v1/platform` response also names the plane's linked console (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias), so each reachable plane's console is checked the same way, against the same published baseline, and printed nested under it as a `console:` line — a plane can be current while its console lags behind, or vice versa, and before this there was no way to tell. A plane whose response carries no `consoleUrl` prints no `console:` line at all, rather than guessing.
+
+This makes real network calls (each plane and console, plus erun's registry), so add `--dry-run` to preview which planes, consoles, and registry lookup would be checked without making any call.
+
+This report also exits `0` on its own, same as `--tenant`'s above. Add `--fail-on-drift` to make that one invocation exit non-zero when a plane or its console is behind or ahead of published, a plane or console is unreachable, or the published baseline itself couldn't be resolved — none of those confirm a plane and its console are running what erun actually published:
+
+```bash
+erun list --control-planes --fail-on-drift
+```
+
+`--fail-on-drift` never fires under `--dry-run`: nothing was actually probed, so there is nothing to fail on.
+
 ## Common usages
 
 ```bash
@@ -198,3 +233,7 @@ erun list | grep "effective"      # what ERun targets right now
 | `--gate-environment` passed without `--tenant`. | Errors `--gate-environment requires --tenant`; nothing is printed. |
 | `--tenant` names a tenant with no config. | Errors `tenant "<name>" not found`. |
 | `--gate-environment` names an environment not in that tenant. | Errors `gate environment "<name>" not found in tenant "<tenant>"`. |
+| `--control-planes` combined with `--tenant`/`--gate-environment`. | Errors `--control-planes cannot be combined with --tenant/--gate-environment`; nothing is printed. |
+| `--control-planes` and a configured plane or its linked console is unreachable, or the registry lookup fails. | Not an error — printed as a finding (`reachable=no reason="..."`, or `published version: unresolved (...)`); exit code stays `0` unless `--fail-on-drift` is set. |
+| `--fail-on-drift` passed without `--tenant` or `--control-planes`. | Errors `--fail-on-drift requires --tenant or --control-planes`; nothing is printed. |
+| `--fail-on-drift` set and the report finds drift (an environment behind max, a behind gate, an unreachable/behind/ahead plane or console, or an unresolved published baseline). | The full report still prints, then the command exits non-zero naming what it found. Never fires under `--dry-run` — nothing was probed, so there is nothing to fail on. |

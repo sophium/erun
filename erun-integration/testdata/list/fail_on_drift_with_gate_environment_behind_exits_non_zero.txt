@@ -1,0 +1,11 @@
+Version drift for tenant erun:
+  max version: <VERSION>
+  environments:
+    - build version=<VERSION> [behind max]
+    - code4 version=<VERSION>
+  gate:
+    environment: build
+    version: <VERSION>
+    behind: yes -- outdated relative to code4
+audit: erun list --fail-on-drift --gate-environment build --tenant erun
+version drift for tenant erun: 1 environment(s) behind the tenant's max version: build; gate environment build is outdated relative to code4
