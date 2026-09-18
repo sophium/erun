@@ -326,7 +326,7 @@ func runResolvedBuildExecution(ctx Context, execution BuildExecutionSpec, deploy
 		// around the build+push so the version's images and charts exist, and
 		// resolve, before the tag and branch pushes make it public.
 		publisher := newReleasePublisher(execution, deploySpecs, runScript, build, push)
-		if err := runReleaseSpec(ctx, *execution.release, runGit, runScript, nil, publisher); err != nil {
+		if err := runReleaseSpec(ctx, *execution.release, runGit, runScript, nil, &publisher); err != nil {
 			return err
 		}
 	} else {
