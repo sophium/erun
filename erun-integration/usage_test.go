@@ -308,7 +308,7 @@ func TestUsage(t *testing.T) {
 	// the sibling of the two scenarios above: a memory.peak that was actually
 	// read as zero must keep rendering exactly as before this fix, since a
 	// real zero is not the unknown state the two scenarios above cover.
-	// real_run_dind_sidecar_usage_reported_separately is erun#2120's own
+	// real_run_dind_sidecar_usage_reported_separately is its own
 	// regression scenario: an environment mid-release can read idle from the
 	// runtime container while the erun-dind sidecar -- where the actual build
 	// runs -- is close to its own memory limit, and before this fix nothing

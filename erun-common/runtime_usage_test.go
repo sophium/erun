@@ -448,7 +448,7 @@ func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
 }
 
 // TestRunRuntimeUsageReportsTheDindSidecarSeparately is the regression guard
-// for erun#2120: an environment mid-release can read 0.3% CPU / idle memory
+// for this defect: an environment mid-release can read 0.3% CPU / idle memory
 // from the runtime container while the erun-dind sidecar -- where the actual
 // build runs -- saturates its own cores, and before this fix nothing in the
 // reading let an operator tell a genuinely idle environment apart from one
