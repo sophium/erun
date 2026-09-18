@@ -2,6 +2,32 @@ package eruncommon
 
 import "testing"
 
+// TestLocalPortsForResultPrefersInjectedRuntimePorts covers the open path: the
+// pod's own CLI resolves its environment's edge from the same derivation, so a
+// process that carries the chart-injected ports must resolve that environment
+// to them rather than to the defaulted block.
+func TestLocalPortsForResultPrefersInjectedRuntimePorts(t *testing.T) {
+	t.Setenv("ERUN_TENANT", "tenant-a")
+	t.Setenv("ERUN_ENVIRONMENT", "dev")
+	t.Setenv("ERUN_MCP_PORT", "17200")
+	t.Setenv("ERUN_SSHD_PORT", "17222")
+
+	result := OpenResult{
+		Tenant:      "tenant-a",
+		Environment: "dev",
+		LocalPorts:  EnvironmentLocalPortsFromRangeStart(LowerServicePort),
+	}
+	if got := MCPPortForResult(result); got != 17200 {
+		t.Fatalf("expected the injected mcp port, got %d", got)
+	}
+	if got := SSHLocalPortForResult(result); got != 17222 {
+		t.Fatalf("expected the injected ssh port, got %d", got)
+	}
+	if got := APIPortForResult(result); got != 17233 {
+		t.Fatalf("expected the api port within the injected range, got %d", got)
+	}
+}
+
 // TestOverlayInjectedRuntimeLocalPorts covers the in-pod port overlay: an
 // environment's own runtime pod is the only process whose injected ERUN_*_PORT
 // values are authoritative for it, and the on-disk projection that pod reads
