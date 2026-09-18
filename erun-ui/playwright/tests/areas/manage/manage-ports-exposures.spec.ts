@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
+import { expectDistinctFrames, holdResponse } from '../../../fixtures/visualFrames.js';
 
 // The Ports tab's public-exposure surface (issue #1351). The headless harness
 // has no real cluster and no project with a platform block (see
@@ -234,6 +235,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
   }) => {
     let exposeCalls = 0;
     let listCalls = 0;
+    const exposeGate = holdResponse();
     await stubExposureRpcs(page, {
       ListEnvironmentExposures: () => {
         listCalls++;
@@ -241,10 +243,12 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       },
       ExposeEnvironmentService: async () => {
         exposeCalls++;
-        // A real expose round-trips DNS + an Ingress apply; hold the response
-        // open briefly so the in-flight state is actually observable rather
-        // than resolving before the assertion below can catch it.
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // A real expose round-trips DNS + an Ingress apply. Hold the response
+        // open until this spec has captured the in-flight frame below, rather
+        // than for a fixed interval: a sleep races the screenshot, and the
+        // capture that loses writes the settled render into the in-flight
+        // frame, making it byte-identical to ports-populated.png.
+        await exposeGate.held;
         return {
           data: { service: 'api', hostname: 'api.pw-alpha.services.test', scheme: 'https' },
         };
@@ -270,12 +274,20 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await dialog.screenshot({
       path: 'test-results/1351-visual/ports-create-inflight.png',
     });
+    // Only now let the stubbed call settle: the frame above is the evidence
+    // that the pending state renders, so it must be on disk before the
+    // response can reach the renderer.
+    exposeGate.release();
 
     await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
     expect(exposeCalls).toBe(1);
     expect(listCalls).toBe(2);
 
     await dialog.screenshot({ path: 'test-results/1351-visual/ports-populated.png' });
+    await expectDistinctFrames(
+      'test-results/1351-visual/ports-create-inflight.png',
+      'test-results/1351-visual/ports-populated.png',
+    );
 
     const clipboardWrite = page.waitForRequest(
       (req) =>
@@ -385,6 +397,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
   }) => {
     let unexposeCalls = 0;
     let listCalls = 0;
+    const unexposeGate = holdResponse();
     await stubExposureRpcs(page, {
       ListEnvironmentExposures: () => {
         listCalls++;
@@ -392,7 +405,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       },
       UnexposeEnvironment: async () => {
         unexposeCalls++;
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Same gate as the expose path: the removal round-trip a real cluster
+        // performs is held open until this spec has captured the in-flight
+        // frame, so the capture cannot land after the state has settled.
+        await unexposeGate.held;
         return { data: { wildcardName: '*.pw-alpha.services.test' } };
       },
       ListEnvironmentServices: () => NO_SERVICES,
@@ -423,6 +439,11 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await dialog.screenshot({
       path: 'test-results/1351-visual/ports-remove-inflight.png',
     });
+    unexposeGate.release();
+    await expectDistinctFrames(
+      'test-results/1351-visual/ports-remove-confirm.png',
+      'test-results/1351-visual/ports-remove-inflight.png',
+    );
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     expect(unexposeCalls).toBe(1);
