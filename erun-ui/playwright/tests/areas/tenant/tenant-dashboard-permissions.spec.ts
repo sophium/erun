@@ -167,26 +167,29 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
 
       await stubLoadTenantDashboard(
         page,
-        dashboardData(environment, [
-          { tab: 'users', restricted: 'GET /v1/whoami' },
-          { tab: 'reviews', restricted: 'GET /v1/reviews' },
-          { tab: 'queue', restricted: 'GET /v1/reviews/merge-queue' },
-          { tab: 'gates', restricted: 'GET /v1/gate-runs' },
-          { tab: 'builds', restricted: 'GET /v1/reviews' },
-          { tab: 'audit', restricted: 'GET /v1/audit-events' },
-          { tab: 'registration', restricted: 'GET /v1/contexts' },
-          { tab: 'requests', restricted: 'GET /v1/invite-requests' },
-        ]),
-        {
+        dashboardData(
+          environment,
+          [
+            { tab: 'users', restricted: 'GET /v1/whoami' },
+            { tab: 'reviews', restricted: 'GET /v1/reviews' },
+            { tab: 'queue', restricted: 'GET /v1/reviews/merge-queue' },
+            { tab: 'gates', restricted: 'GET /v1/gate-runs' },
+            { tab: 'builds', restricted: 'GET /v1/reviews' },
+            { tab: 'audit', restricted: 'GET /v1/audit-events' },
+            { tab: 'registration', restricted: 'GET /v1/contexts' },
+            { tab: 'requests', restricted: 'GET /v1/invite-requests' },
+          ],
           // The summary names every missing read at once, so it hands over the
           // grant for each one a role covers — here, only the audit read.
-          accessRemedies: {
-            'GET /v1/audit-events': {
-              command: 'erun platform user grant-role --user-id u1 --role-id role-audit',
-              roleName: 'Auditor',
+          {
+            accessRemedies: {
+              'GET /v1/audit-events': {
+                command: 'erun platform user grant-role --user-id u1 --role-id role-audit',
+                roleName: 'Auditor',
+              },
             },
           },
-        },
+        ),
       );
 
       await app.sidebar.openTenantDashboard(SEED_TENANT);
