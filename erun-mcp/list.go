@@ -31,7 +31,7 @@ type ListInput struct {
 	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version, and its linked console's deployed version, against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
 	// Alias, only meaningful alongside ControlPlanes, narrows the control
 	// plane check to one configured erun-hosted alias instead of every
-	// configured one (erun#2130) -- the same --erun-alias every other
+	// configured one -- the same --erun-alias every other
 	// platform-touching command already accepts.
 	Alias   string `json:"erunAlias,omitempty" jsonschema:"only meaningful alongside controlPlanes -- narrow the check to this one configured erun-hosted alias instead of every configured one"`
 	Preview bool   `json:"preview,omitempty" jsonschema:"only meaningful alongside controlPlanes -- trace which planes and registry lookup would be checked without making either network call"`

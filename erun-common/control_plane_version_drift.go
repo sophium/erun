@@ -99,7 +99,7 @@ type ControlPlaneVersionDrift struct {
 // nil) gets the real unauthenticated call.
 //
 // alias, when non-empty, narrows the check to that one configured alias
-// instead of every configured erun-hosted alias (erun#2130): every sibling
+// instead of every configured erun-hosted alias: every sibling
 // platform-touching command (`gate list`, `platform whoami`, ...) accepts
 // --erun-alias to target one plane, but this report had no way to avoid
 // probing every configured one even when the caller only cares about a

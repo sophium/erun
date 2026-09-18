@@ -134,10 +134,10 @@ func TestListControlPlanes(t *testing.T) {
 		golden.Equal(t, "list/control_planes_combined_with_tenant_errors", normalize.Apply(result.Combined))
 	})
 
-	// erun#2130: every other platform-touching command (`gate list`,
-	// `platform whoami`, ...) accepts --erun-alias to narrow its work to one
-	// configured alias, but --control-planes rejected it outright and
-	// unconditionally probed every configured erun-hosted alias instead.
+	// Every other platform-touching command (`gate list`, `platform whoami`,
+	// ...) accepts --erun-alias to narrow its work to one configured alias,
+	// but --control-planes rejected it outright and unconditionally probed
+	// every configured erun-hosted alias instead.
 
 	t.Run("erun_alias_requires_control_planes", func(t *testing.T) {
 		t.Parallel()
