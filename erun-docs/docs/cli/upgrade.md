@@ -32,7 +32,7 @@ For each opted-in environment, `erun upgrade` resolves the latest version for it
 | `--gate-environment <name>` | Name the environment driving `--tenant`'s merge-queue gate; always included and always rolled first (requires `--tenant`). See [Fleet-wide remediation](#fleet). |
 | `--override-lease` | Roll an environment even though it is currently held by another worker. See [Held environments are refused, not overridden](#leases). |
 | `--orchestrator <id>` | The calling orchestrator's own id, recorded on each deploy's activity lease and on any `--override-lease` use. |
-| `--dry-run` | Resolve and print the plan — each member, its channel, current → target, in the exact order it will deploy — and the deploy actions, without executing. |
+| `--dry-run` | Resolve and print the plan — each member, its channel, current → target, in the exact order it will deploy — and the deploy actions, without executing. Nothing deployed means nothing to report as done: each member is announced as `==> Would upgrade ...` and the run closes on `==> Upgrade plan complete (dry run): N would upgrade, ...`, never the past-tense `==> Upgrade complete: N upgraded, ...` a real roll prints. The same applies to the shared pod-watch trace (`deploy: would watch pods in ...`). |
 
 ## Fleet-wide remediation {#fleet}
 
@@ -106,7 +106,7 @@ erun upgrade acme --fleet --version 1.2.3 --gate-environment build
 | No environments opted in (in scope). | Prints "No environments opted into Upgrade all" and exits 0 — nothing to do. |
 | One listed registry can't be listed (not authenticated to a private registry, never published, ghcr 403). | The other listed registries and the canonical `erun-devops` image — the base the tenant's wrapper is rebuilt from — still provide candidates, so a failure on one registry never blocks the upgrade. Authenticate to the registry (`docker login` / `gh auth login`) to have its private images contribute candidates. |
 | More than one listed registry offers a different newer version for the channel. | The environment is reported as **target unresolved** (`multiple newer versions across registries; pick one or pass --version`) and skipped — `erun upgrade` never guesses between them. Pass `--version` to choose, or use the desktop's per-version picker (each candidate is labelled with its source registry). |
-| Channel latest can't be resolved anywhere (every listed registry and the canonical image lookup failed, or no matching tags). | The environment is reported as **target unresolved** with the reason, in the plan line, the skip trace, and the completion accounting (`==> Upgrade complete: N upgraded, N up to date, N unresolved, N failed`) — never as "up to date", and `erun upgrade` never deploys an unknown version. |
+| Channel latest can't be resolved anywhere (every listed registry and the canonical image lookup failed, or no matching tags). | The environment is reported as **target unresolved** with the reason, in the plan line, the skip trace, and the completion accounting (`==> Upgrade complete: N upgraded, ...` for a real run; `==> Upgrade plan complete (dry run): N would upgrade, ...` under `--dry-run`) — never as "up to date", and `erun upgrade` never deploys an unknown version. |
 | `--environment` without `--tenant`. | Errors before any work; exit code 1. |
 | `--fleet` without `--tenant`. | Errors `--fleet requires --tenant` before any work; exit code 1. |
 | `--gate-environment` without `--tenant`. | Errors `--gate-environment requires --tenant` before any work; exit code 1. |
