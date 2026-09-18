@@ -52,6 +52,10 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 			"or --rollback (the two are alternatives — pass only one). Run inside a runtime pod, " +
 			"--sync-config reconciles the on-disk env config with the helm-injected ERUN_* env vars " +
 			"(injected env wins) and rewrites the projected keys, preserving everything else. " +
+			"Without a TTY on stdin (an MCP client, an orchestrator, a script) doctor skips the " +
+			"optional prune prompts instead of blocking on them, reports each one as skipped, and " +
+			"still exits on the health of what it examined; pass --prune-images, --prune-build-cache, " +
+			"or --prune-containers to run one explicitly. " +
 			"For a remote-agent env with workspace sync enabled it reports the host mirror's SSH " +
 			"provisioning, and --repair-workspace-sync repairs it without redeploying (resolve/persist " +
 			"the key, write the ssh config alias, install the pod authorized_keys, ensure the port-forward).",
@@ -274,7 +278,7 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 		}
 	}
 
-	actions, err := selectedDoctorActions(promptRunner, result, options, ctx.DryRun)
+	actions, err := selectedDoctorActions(ctx, promptRunner, result, options, ctx.DryRun)
 	if err != nil {
 		return err
 	}
@@ -498,7 +502,7 @@ func doctorOnlySelectedJetBrainsGatewayRepair(options doctorOptions) bool {
 	return options.repairJetBrainsGateway && !options.pruneImages && !options.pruneBuildCache && !options.pruneContainers
 }
 
-func selectedDoctorActions(promptRunner PromptRunner, result common.OpenResult, options doctorOptions, dryRun bool) ([]common.DoctorAction, error) {
+func selectedDoctorActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions, dryRun bool) ([]common.DoctorAction, error) {
 	selected := make([]common.DoctorAction, 0, 3)
 	if options.pruneImages {
 		selected = append(selected, common.DoctorActionPruneImages)
@@ -512,17 +516,63 @@ func selectedDoctorActions(promptRunner PromptRunner, result common.OpenResult, 
 	if len(selected) > 0 || dryRun || promptRunner == nil {
 		return selected, nil
 	}
+	// doctor is the command reached for when a deploy has already failed, which
+	// is exactly when the caller is an orchestrator, a CI job, or an agent — none
+	// of which have a terminal to answer a prompt on. These prunes are optional
+	// maintenance with explicit flags of their own, so with no terminal they are
+	// skipped and named as skipped, never turned into a failed check: a
+	// diagnostic that reports "environment broken" because nobody answered an
+	// optional prompt is worse than one that says what it did not do.
+	if !stdinIsTerminal() {
+		return selected, writeOptionalDoctorPromptsSkipped(ctx, result)
+	}
+	prompted, unasked, err := promptForDoctorActions(promptRunner, result)
+	if err != nil {
+		return nil, err
+	}
+	if unasked {
+		return selected, writeOptionalDoctorPromptsSkipped(ctx, result)
+	}
+	return append(selected, prompted...), nil
+}
 
+// promptForDoctorActions asks about each optional prune action. unasked reports
+// that the reader hit EOF instead of answering: a terminal that closed mid-run
+// is still nobody declining optional maintenance, so the caller reports those
+// actions as skipped rather than failing the diagnosis over them.
+func promptForDoctorActions(promptRunner PromptRunner, result common.OpenResult) ([]common.DoctorAction, bool, error) {
+	selected := make([]common.DoctorAction, 0, len(common.DoctorActions()))
 	for _, action := range common.DoctorActions() {
 		ok, err := confirmPrompt(promptRunner, common.DoctorActionPromptLabel(action, result))
+		if errors.Is(err, promptui.ErrEOF) {
+			return nil, true, nil
+		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if ok {
 			selected = append(selected, action)
 		}
 	}
-	return selected, nil
+	return selected, false, nil
+}
+
+// writeOptionalDoctorPromptsSkipped names each optional prune action that went
+// unasked and says plainly that it was skipped rather than run or failed. It
+// returns only write errors: a caller that could not be asked anything is not a
+// failed check, and doctor's exit code must reflect the environment's health,
+// not the absence of somebody to answer a prompt.
+func writeOptionalDoctorPromptsSkipped(ctx common.Context, result common.OpenResult) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Optional cleanup steps in %s/%s not checked: stdin is not a terminal, so there was nobody to answer the prompt. These are optional maintenance, not failed checks.\n", result.Tenant, result.Environment); err != nil {
+		return err
+	}
+	for _, action := range common.DoctorActions() {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  skipped: %s (%s)\n", action, common.DoctorActionDescription(action)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, "Pass --prune-images, --prune-build-cache, or --prune-containers to run one explicitly.")
+	return err
 }
 
 func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options doctorOptions) error {
