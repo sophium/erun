@@ -39,7 +39,9 @@ Charts are build source too: `erun build` also packages every Helm chart under `
 
 `--deploy` and `--release` are **convenience shortcuts for an Operator at the terminal** — they compose the pure primitives so you don't have to type three commands. Programmatic callers (the desktop app, scripts, an Agent driving MCP) don't use them; they run `build`, `push`, and `deploy` themselves and thread the version between the steps. See [Command primitives](/concepts/command-primitives).
 
-To capture the minted version for that kind of orchestration, run `erun build --output json`, which prints `{version, baseVersion, images}` on stdout — the version an orchestrator hands to `push` and `deploy`. `--output {text|json}` is a root flag available on every command (see [CLI flag spec · Common flags](/agent-reference/cli-flags)).
+To capture the minted version for that kind of orchestration, run `erun build --output json`, which prints `{version, baseVersion, images, charts, scripts}` on stdout — the version an orchestrator hands to `push` and `deploy`. `--output {text|json}` is a root flag available on every command (see [CLI flag spec · Common flags](/agent-reference/cli-flags)).
+
+`images`, `charts`, and `scripts` are the resolved plan, so a caller reads what the build did from the result rather than from the trace. A project that runs a project `build.sh` instead of building images reports it in `scripts` with an empty `version` — that is a script-only build, which mints no image version by design. A build that resolved nothing at all is not reported there: it fails (see [Error behaviour](#error-behaviour)).
 
 Advanced flags (`--no-incremental`, `--version`, `--component`) and the full build lifecycle (binfmt verification, fingerprint resolution, per-arch build → manifest list, the `--output json` shape) are on [Agent reference · CLI flag spec · `erun build`](/agent-reference/cli-flags#erun-build).
 
@@ -71,7 +73,7 @@ In an agent env:
 
 ```bash
 erun build              # build the current Docker context, minting a fresh snapshot version
-erun build --output json # same, and print {version, baseVersion, images} for an orchestrator
+erun build --output json # same, and print {version, baseVersion, images, charts, scripts} for an orchestrator
 erun build --dry-run    # see exactly what would run
 erun build --deploy     # operator shortcut: build → push → deploy in one shot
 erun build --release    # operator shortcut: pin a stable version, then push + tag it
@@ -103,6 +105,9 @@ When the environment has an erun platform alias configured (`erun cloud init eru
 | Failure | Behaviour |
 |---|---|
 | No Docker build context in scope (e.g. a runtime env with no worktree). | Errors that no build context was found; nothing is built. |
+| The plan resolves to no images, scripts, or charts. | Errors (`build resolved nothing to build`) instead of exiting zero. A build that runs nothing has tested nothing, so its exit code must not read as a pass. |
+| `erun build` from a directory that resolves no images while the project has a `<tenant>-devops/docker` module. | Errors naming the docker module it could not resolve images from, and the remedy. A nested `build.sh` is only a substitute for the image plan when the project has no docker module — otherwise building it would report success without building an image. |
+| Linux package builds on a host that is not Linux. | Errors naming the cause when they were the whole plan. With docker images in the same plan the build proceeds and skips them. |
 | Foreign-arch binfmt missing locally. | Fails with a direct error before the per-arch build, rather than a confusing mid-build failure. |
 | A dependent image's base is not published at the version. | Not a failure: a base this build produces is resolved from the local build, per architecture. Only a base that no build in scope produces has to exist in the registry. |
 | Registry rejects a `--release` push as unauthorised. | Retries with `docker login` (requires a TTY); see [`erun push`](/cli/push) authentication. |
