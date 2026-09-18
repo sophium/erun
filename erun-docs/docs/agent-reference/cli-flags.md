@@ -804,6 +804,8 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 | `memory.peak` ÷ `memory.limitBytes` ≥ 95%. | `memory.peak` is a high-water mark, so a near-limit peak matters even after current usage drops back down. |
 | any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. |
 | `memory.oomKills` > 0. | Always reported: a kill already happened. |
+| the environment's *retained* peak ÷ `memory.limitBytes` ≥ 95%, when it exceeds the live `memory.peak`. | `memory.peak` is a per-container counter, so a restart resets it — and a restart is often how an OOM manifests. The retained high-water mark keeps a pre-restart near-limit peak visible. Scored against the current limit, so raising `runtimepod` clears it. |
+| the environment's *retained* OOM-kill total exceeds the live `memory.oomKills`. | `memory.events` resets with the container, so a kill that already happened stays reported after a restart the current container cannot account for. |
 
 ### Error behaviour
 
