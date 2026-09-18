@@ -32,7 +32,14 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"are scoped to this container alone: every image build actually runs in the\n" +
 			"erun-dind sidecar, a separate cgroup this reading cannot see, so a busy build\n" +
 			"can show as idle here. The output states this exclusion explicitly on those\n" +
-			"environments; `erun observe` reports the sidecar's own resource limits.",
+			"environments; `erun observe` reports the sidecar's own resource limits.\n\n" +
+			"The environment's standing sizing recommendation is not part of this output.\n" +
+			"It is derived from usage history the environment's own pod monitor retained,\n" +
+			"and this reading does not carry that history back to the caller, so there is\n" +
+			"nothing here to derive a verdict from. Read it from inside the environment\n" +
+			"instead: the `usage` and `resize` tools over its MCP endpoint, or the desktop\n" +
+			"Runtime tab. `erun list` prints it under `runtime-pod:` only for a host that\n" +
+			"has monitored that environment itself.",
 		Example: "  erun usage --tenant team --environment dev\n" +
 			"  erun usage --tenant team --environment dev --interval 3 --output json",
 		Args:          cobra.NoArgs,
