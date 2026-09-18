@@ -108,16 +108,17 @@ func reviewCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 }
 
 // ReviewCommentInput's anchor (commitId/filePath/line) is optional, matching
-// `erun review comment`: leaving it out posts a comment on the review as a
-// whole rather than on a line. Only reviewId and body are required. An
-// anchored comment needs all three anchor fields, since a line without a file
-// names no location.
+// `erun review comment`, which sends whatever flags the caller gave it rather
+// than requiring the anchor itself. Only reviewId and body are required here.
+// Whether the platform accepts a comment carrying no anchor is the platform's
+// call, not this transport's: refusing it here made MCP stricter than the CLI
+// over the same shared call, which is the one thing this tool must not do.
 type ReviewCommentInput struct {
 	platformAliasInput
 	ReviewID        string `json:"reviewId" jsonschema:"review id to comment on"`
-	CommitID        string `json:"commitId,omitempty" jsonschema:"commit hash the comment is anchored to; omit for a review-level comment not tied to a line"`
-	FilePath        string `json:"filePath,omitempty" jsonschema:"file path the comment is anchored to; omit for a review-level comment not tied to a line"`
-	Line            int    `json:"line,omitempty" jsonschema:"line number the comment is anchored to; omit for a review-level comment not tied to a line"`
+	CommitID        string `json:"commitId,omitempty" jsonschema:"commit hash the comment is anchored to"`
+	FilePath        string `json:"filePath,omitempty" jsonschema:"file path the comment is anchored to"`
+	Line            int    `json:"line,omitempty" jsonschema:"line number the comment is anchored to"`
 	Body            string `json:"body" jsonschema:"comment text"`
 	ParentCommentID string `json:"parentCommentId,omitempty" jsonschema:"comment id to reply to, making this a reply in that thread"`
 }
