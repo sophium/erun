@@ -18,6 +18,10 @@ The per-user tree lives under the platform's config directory, with an `erun/` r
 
 So on a Mac with no `XDG_CONFIG_HOME` set, `~/.config/erun` does not exist and the tree is under `~/Library/Application Support/erun`. Do not guess the root: [`erun doctor`](/cli/doctor) prints the one ERun actually resolved.
 
+Elsewhere in this documentation, `<config-root>` stands for the per-user config root in the table above.
+
+Every file in the tree is named `config.yaml` — only its directory distinguishes the global, tenant, and environment configs:
+
 ```
 <config-root>/
 ├── config.yaml                           # global defaults (default tenant, default env)
