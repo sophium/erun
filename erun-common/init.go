@@ -238,22 +238,29 @@ type BootstrapInitResult struct {
 }
 
 type BootstrapInitDependencies struct {
-	Store                     BootstrapStore
-	FindProjectRoot           ProjectFinderFunc
-	GetWorkingDir             WorkDirFunc
-	SelectTenant              SelectTenantFunc
-	Confirm                   ConfirmFunc
-	PromptKubernetesContext   PromptValueFunc
-	PromptContainerRegistry   PromptValueFunc
-	PromptRemoteRepositoryURL PromptValueFunc
-	PromptCodeCommitSSHKeyID  PromptValueFunc
-	EnsureKubernetesNamespace NamespaceEnsurerFunc
-	LoadProjectConfig         ProjectConfigLoaderFunc
-	SaveProjectConfig         ProjectConfigSaverFunc
-	WaitForRemoteRuntime      RemoteRuntimeWaitFunc
-	RunRemoteCommand          RemoteCommandRunnerFunc
-	DeployHelmChart           HelmChartDeployerFunc
-	Sleep                     SleepFunc
+	Store           BootstrapStore
+	FindProjectRoot ProjectFinderFunc
+	GetWorkingDir   WorkDirFunc
+	SelectTenant    SelectTenantFunc
+	// TenantSelectionUnavailable tells the tenant-selection policy that this
+	// run's transport has no way to ask anyone which tenant to use -- stdin is
+	// not a terminal and carries no answer, an agent is running unattended. One
+	// tenant is not a choice, so it is used without asking; a real choice is
+	// refused with an error naming the flag that resolves it, instead of
+	// printing a menu nobody can answer and failing on EOF.
+	TenantSelectionUnavailable bool
+	Confirm                    ConfirmFunc
+	PromptKubernetesContext    PromptValueFunc
+	PromptContainerRegistry    PromptValueFunc
+	PromptRemoteRepositoryURL  PromptValueFunc
+	PromptCodeCommitSSHKeyID   PromptValueFunc
+	EnsureKubernetesNamespace  NamespaceEnsurerFunc
+	LoadProjectConfig          ProjectConfigLoaderFunc
+	SaveProjectConfig          ProjectConfigSaverFunc
+	WaitForRemoteRuntime       RemoteRuntimeWaitFunc
+	RunRemoteCommand           RemoteCommandRunnerFunc
+	DeployHelmChart            HelmChartDeployerFunc
+	Sleep                      SleepFunc
 	// ProbeHostedRegistry answers whether erun's hosted registry can be pushed
 	// to. Unset defaults to a real probe, so a caller that wires nothing still
 	// refuses an unreachable registry instead of writing config whose pushes
@@ -1785,6 +1792,27 @@ func (s bootstrapRunner) ensureKubernetesNamespace(tenant, envName, currentConte
 	return s.EnsureKubernetesNamespace(nextContext, namespace)
 }
 
+// TenantSelectionUnavailableError reports that a tenant had to be chosen and the
+// run has nobody to ask. Its message names the flag that resolves it: whoever
+// hits this is by definition not a person looking at a prompt -- a script, an
+// orchestrator, or an unattended agent -- and a menu it cannot answer is a dead
+// end, not an answer.
+type TenantSelectionUnavailableError struct {
+	Tenants []string
+}
+
+func (e TenantSelectionUnavailableError) Error() string {
+	return fmt.Sprintf("a tenant has to be chosen and this run has nobody to ask; pass --tenant with one of: %s", strings.Join(e.Tenants, ", "))
+}
+
+func tenantNameList(tenants []TenantConfig) []string {
+	names := make([]string, 0, len(tenants))
+	for _, tenant := range tenants {
+		names = append(names, tenant.Name)
+	}
+	return names
+}
+
 func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []TenantConfig) (TenantSelectionResult, error) {
 	if params.InitializeCurrentProject {
 		return TenantSelectionResult{Initialize: true}, nil
@@ -1803,6 +1831,15 @@ func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []Tena
 			Label:   "Select tenant",
 			Options: options,
 		}}
+	}
+	if s.TenantSelectionUnavailable {
+		// Nothing can answer a prompt, so asking one would only print a menu
+		// and read EOF. A sole tenant is the option an empty line already
+		// takes, so it needs no answer; a real choice does.
+		if len(tenants) == 1 {
+			return TenantSelectionResult{Tenant: tenants[0].Name}, nil
+		}
+		return TenantSelectionResult{}, TenantSelectionUnavailableError{Tenants: tenantNameList(tenants)}
 	}
 	selection, err := s.SelectTenant(tenants)
 	if err != nil {
