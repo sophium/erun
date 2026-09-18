@@ -225,6 +225,12 @@ COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
 # checks erun-common's known infrastructure-failure signature list against
 # this page's spec of the gate-run/gate-build failure classifier.
 COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-reference/skills-spec.md
+# TestOrchestratorSessionEnvVarsAreDocumented cross-checks the orchestrator
+# session variables erun-common actually sets against this page, which is the
+# one that enumerates them; only the one file is needed, not the built site.
+# Omitting it fails the gate with "no such file or directory" while a full
+# checkout passes, so this COPY is what makes the drift test real in the build.
+COPY erun-docs/docs/reference/env-vars.md /src/erun-docs/docs/reference/env-vars.md
 
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the
