@@ -1056,7 +1056,8 @@ spec:
 # mcp rules below re-permit those two ports by number from any source, keeping
 # the reachability they had before any policy governed them, and every other
 # listener on the pod is closed to other pods. Adding a listener here means
-# adding its port to this policy. A cluster Prometheus living outside this namespace needs its own
+# adding its port to this policy. A cluster Prometheus living outside this
+# namespace needs its own
 # namespace labelled network-policy/erun-metrics-scraper=true to reach it;
 # same-namespace traffic (e.g. `erun open` + a manual curl) is always allowed.
 apiVersion: networking.k8s.io/v1
