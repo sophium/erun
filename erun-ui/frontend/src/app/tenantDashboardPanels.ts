@@ -183,6 +183,60 @@ export function unresolvedThreadsLabel(count: number): string {
   return count === 1 ? '1 unresolved' : `${String(count)} unresolved`;
 }
 
+// threadRootComment is the minimal shape unresolvedThreadCount needs: a
+// thread's status lives entirely on its root, and replies never carry their
+// own, which is the same rule erun-common's CountUnresolvedThreads applies.
+export interface ThreadRootComment {
+  parentCommentId?: string;
+  status?: string;
+}
+
+// unresolvedThreadCount derives the count from a review's own comment list,
+// mirroring erun-common's CountUnresolvedThreads. Surfaces that have the
+// threads must derive from them rather than from a summary field: the two
+// producers of this number (the dashboard row's enrichment and the detail
+// dialog's comment read) could otherwise disagree about the same review, and
+// a list row reading "-" beside a dialog reading "1 unresolved" is exactly
+// that disagreement.
+export function unresolvedThreadCount(comments: readonly ThreadRootComment[] | undefined): number {
+  return (comments ?? []).filter(
+    (comment) => !comment.parentCommentId?.trim() && comment.status === 'OPEN',
+  ).length;
+}
+
+// reviewRowUnresolvedThreads is the reviews list's read of a row's
+// unresolved-thread count: the Go dashboard's own per-review enrichment, or
+// undefined when that enrichment could not compute it for this row.
+export function reviewRowUnresolvedThreads(row: {
+  unresolvedThreads?: number;
+}): number | undefined {
+  return row.unresolvedThreads;
+}
+
+// reviewDetailUnresolvedThreads is the review detail dialog's read of the
+// same quantity. The dialog holds the review's comment threads, so it derives
+// the count from them — the same derivation erun-common's
+// CountUnresolvedThreads applies — instead of trusting a summary field that
+// can drift from the list's. It falls back to the summary only when no
+// comment list was loaded at all, and never guesses zero: a review whose
+// count is unknown is not a review with nothing left open.
+export function reviewDetailUnresolvedThreads(detail: {
+  comments?: readonly ThreadRootComment[];
+  unresolvedThreads?: number;
+}): number | undefined {
+  if (detail.comments) {
+    return unresolvedThreadCount(detail.comments);
+  }
+  return detail.unresolvedThreads;
+}
+
+// unresolvedThreadsCountLabel renders either surface's count. Unknown is
+// spelled out rather than shown as a bare dash, because a dash beside a
+// dialog that reports a count is indistinguishable from "none".
+export function unresolvedThreadsCountLabel(count: number | undefined): string {
+  return count === undefined ? 'Unknown' : unresolvedThreadsLabel(count);
+}
+
 // formatDashboardDate renders a timestamp in the operator's own locale, and
 // falls back to the raw value rather than hiding one the API sent in a shape
 // this build does not recognise. Used as the absolute value behind

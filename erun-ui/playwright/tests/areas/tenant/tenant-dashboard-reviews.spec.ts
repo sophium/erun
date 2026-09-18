@@ -361,6 +361,73 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
   });
 });
 
+// The list row and the dialog over it name the same quantity — how many of a
+// review's threads are still open — so they must report the same number. They
+// come from two different reads: the dashboard row's own per-review
+// enrichment, which is best effort, and the detail dialog's comment load,
+// which holds the threads. A row whose enrichment produced no count used to
+// render a bare dash while the dialog over it said "1 unresolved".
+test.describe('tenant dashboard — the reviews row and the detail dialog agree on thread count', () => {
+  test('a row with no computed count reports the dialog’s count once the review has been opened', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-count-agreement');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            // No unresolvedThreads on the row at all: the exact shape the
+            // dashboard read model produces when its per-review comment read
+            // did not yield a count.
+            reviews: [{ ...REVIEW }],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        if (body.method === 'LoadReviewDetail') {
+          await fulfillJSON(route, {
+            ...reviewDetail([{ ...ROOT_COMMENT, status: 'OPEN' }]),
+            unresolvedThreads: 1,
+            canResolveComments: true,
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+
+      // A row that could not compute its count says so: a dash here reads as
+      // "none" beside a dialog that reports one.
+      const row = app.tenantDashboard.reviewsRows().first();
+      await expect(row).toContainText('Unknown');
+      await expect(row).not.toContainText('1 unresolved');
+
+      await app.tenantDashboard.openReview('Add widget');
+      await app.reviewDetailDialog.waitForOpen();
+      await expect(app.reviewDetailDialog.locator()).toContainText('1 unresolved');
+
+      // Dismissing the dialog leaves the row reporting what the dialog
+      // reported for the same review. The row is behind the modal's inert
+      // subtree while the dialog is open, so this is read after it closes.
+      await page.keyboard.press('Escape');
+      await app.reviewDetailDialog.waitForClosed();
+      await expect(row).toContainText('1 unresolved');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});
+
 // Resolution (#1378): a thread's status is visible and actionable from the
 // review detail dialog, offered only on a thread's root.
 test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {

@@ -22,6 +22,7 @@ import {
 } from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
 import {
+  reviewDetailUnresolvedThreads,
   reviewStatusTone,
   unresolvedThreadsLabel,
   unresolvedThreadsTone,
@@ -162,7 +163,10 @@ function ReviewDetailThreadStatus({
   if (roots.length === 0) {
     return null;
   }
-  const unresolved = data.unresolvedThreads ?? 0;
+  const unresolved = reviewDetailUnresolvedThreads(data);
+  if (unresolved === undefined) {
+    return null;
+  }
   return (
     <div>
       <StatusBadge

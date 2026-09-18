@@ -4,7 +4,9 @@ import { reviewDetailApi } from './api/reviewDetailApi';
 import { readError } from './errors';
 import { showNotification } from './notificationThunks';
 import { patchReviewDetail } from './slices/reviewDetailSlice';
+import { setReviewUnresolvedThreads } from './slices/tenantDashboardSlice';
 import type { AppThunk } from './store';
+import { reviewDetailUnresolvedThreads } from './tenantDashboardPanels';
 
 // ReviewCallerContext is what every write against a review needs: which
 // tenant to resolve the platform for (the platform read/bearer is resolved
@@ -110,6 +112,15 @@ export const loadReviewDetail =
           callerPlatformAlias: context.platformAlias,
         }),
       );
+      // The detail's read holds this review's comment threads, so its count
+      // is the authoritative one; write it back to the dashboard row so the
+      // reviews list and the dialog over it cannot report different numbers
+      // for the same review — including after a resolve changes the threads
+      // without the dashboard's own per-row enrichment re-running.
+      const unresolvedThreads = reviewDetailUnresolvedThreads(data);
+      if (unresolvedThreads !== undefined) {
+        dispatch(setReviewUnresolvedThreads({ reviewId, unresolvedThreads }));
+      }
     } catch (error) {
       if (getState().reviewDetail.reviewId !== reviewId) {
         return;
