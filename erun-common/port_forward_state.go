@@ -80,6 +80,24 @@ func portForwardStatePathInDir(stateDir, kind, tenant, environment string) (stri
 	return filepath.Join(configDir, stateDir, "portforward", kind, tenant, environment+".json"), nil
 }
 
+// PortForwardStatePaths returns every location a forward's record could occupy:
+// the canonical one, plus the legacy lowercase spelling when that is a different
+// file. Callers that remove a record entirely (removePortForwardStateFiles) need
+// both: the CLI reads a forward's state without the configured-environment guard
+// the shared reader applies, so a record left under the legacy spelling would
+// resolve as a live forward for an environment that was deleted.
+func PortForwardStatePaths(kind, tenant, environment string) ([]string, error) {
+	canonical, err := PortForwardStatePath(kind, tenant, environment)
+	if err != nil {
+		return nil, err
+	}
+	legacy, err := LegacyPortForwardStatePath(kind, tenant, environment)
+	if err != nil || legacy == canonical {
+		return []string{canonical}, nil
+	}
+	return []string{canonical, legacy}, nil
+}
+
 // MigrateLegacyPortForwardState moves a forward's record out of the lowercase
 // directory into the canonical one and returns the canonical path, so state an
 // older writer left behind is carried forward instead of reading as "no forward"
