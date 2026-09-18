@@ -23,7 +23,13 @@ erun usage --tenant my-tenant --environment dev --output json
 
 A crossed threshold (memory, memory's peak, or disk usage getting close to full) shows up as a plain-language warning in the output — you don't have to compute the percentages yourself.
 
-On an agent env, this reading cannot see the environment's own builds: `erun build`/`erun release` run in a separate sidecar container (`erun-dind`), not the one this reads. The output says so directly on every environment that carries the sidecar — see [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures) for why, and `erun observe` for the sidecar's own limits.
+On an agent env the CPU and memory lines cover the runtime container alone: `erun build`/`erun release` run in a separate sidecar container (`erun-dind`), not the one they read. Those environments also report **Build CPU** — the build's own cgroup, sampled over its own interval, with the periods it was throttled in:
+
+```
+Build CPU: 100.0% of a 4.00-core quota (sampled over 1.0s), throttled 200/200 periods
+```
+
+That is the figure that moves during a build; the container's own CPU line stays near zero while a build saturates its cap, so a throttled build is also called out as a warning. Where the build cgroup cannot be read — an image whose sidecar predates it, or a caller without access to the sidecar — `Build CPU` says so rather than leaving the near-zero line above to speak for the build. See [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures) for why the two cgroups are separate.
 
 ## Flags
 

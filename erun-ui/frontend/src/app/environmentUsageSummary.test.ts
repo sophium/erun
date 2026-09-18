@@ -99,7 +99,13 @@ test('a saturated build cgroup renders its own figure beside the idle container 
         environment: 'e',
         available: true,
         cpu: { available: true, utilization: '0.2%' },
-        memory: { available: true, current: '512Mi', limit: '2048Mi', percentOfLimit: 25, oomKills: 0 },
+        memory: {
+          available: true,
+          current: '512Mi',
+          limit: '2048Mi',
+          percentOfLimit: 25,
+          oomKills: 0,
+        },
         build: {
           available: true,
           quota: '4.00 cores',

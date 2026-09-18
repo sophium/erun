@@ -110,6 +110,71 @@ test.describe('manage dialog runtime usage panel', () => {
     await app.manageDialog.waitForClosed();
   });
 
+  test('a build pinned at its cap is visible beside the idle container CPU', async ({
+    app,
+    seededEnv,
+  }) => {
+    // The defect this pins: an image build runs in the erun-dind sidecar, so
+    // the environment's own CPU figure sits near zero while the build is at its
+    // cap. A panel showing only that figure tells an operator deciding whether
+    // to move the sliders that nothing is happening, at the exact moment the
+    // environment is at its ceiling.
+    const { tenant, environment } = seededEnv;
+    await stubRuntimeUsage(app.page, {
+      tenant,
+      environment,
+      available: true,
+      message: 'This environment: CPU 0.2% of a 6.00-core quota.',
+      cpu: {
+        available: true,
+        quotaCores: 6,
+        quota: '6.00 cores',
+        utilizationPercent: 0.2,
+        utilization: '0.2%',
+      },
+      // The build's own cap cgroup: pinned at its quota and throttled in every
+      // period, which is the state the container figure above cannot show.
+      build: {
+        available: true,
+        quotaCores: 4,
+        quota: '4.00 cores',
+        utilizationPercent: 100,
+        utilization: '100.0%',
+        periods: 200,
+        throttledPeriods: 200,
+        throttled: '200/200 periods',
+      },
+      memory: {
+        available: true,
+        currentBytes: 536870912,
+        current: '512 MiB',
+        peakBytes: 536870912,
+        peak: '512 MiB',
+        limitBytes: 2147483648,
+        limit: '2.0 GiB',
+        percentOfLimit: 25,
+        oomKills: 0,
+      },
+      disk: [],
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeUsagePanel();
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Build CPU');
+    await expect(panel).toContainText('100.0%');
+    await expect(panel).toContainText('of a 4.00 cores quota');
+    // The throttled ratio is what separates a build working at its cap from
+    // one being starved by it.
+    await expect(panel).toContainText('throttled 200/200 periods');
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
   test('a field the reader could not measure renders as unavailable, never as 0%', async ({
     app,
     seededEnv,

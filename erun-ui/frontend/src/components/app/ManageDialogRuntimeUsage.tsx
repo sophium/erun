@@ -90,6 +90,7 @@ function RuntimeUsageDetails({
     <>
       <div className="grid gap-2.5">
         <CPUMeter cpu={data.cpu} />
+        <BuildCPUMeter build={data.build} />
         <MemoryMeters memory={data.memory} />
         {(data.disk ?? []).map((disk) => (
           <DiskMeter key={disk.mount} disk={disk} />
@@ -171,6 +172,40 @@ function CPUMeter({ cpu }: { cpu: UIRuntimeCPUUsage }): React.ReactElement {
       // quota is normal for a build -- so the meter shows magnitude only.
       warnAt={undefined}
       detail={quota}
+    />
+  );
+}
+
+// BuildCPU is what a build actually consumes, and the only figure here that
+// moves while one runs: an image build executes in the erun-dind sidecar, so
+// CPU above reads near zero at the exact moment this one is pinned at its cap.
+// Absent on an environment with no sidecar at all (there is nothing to show);
+// present and unavailable when the cgroup exists but could not be read, which
+// is rendered as such rather than omitted, because a missing row reads as "no
+// build running" -- the reassuring wrong answer this panel exists to avoid.
+function BuildCPUMeter({
+  build,
+}: {
+  build: UIRuntimeCPUUsage | undefined;
+}): React.ReactElement | null {
+  if (!build) {
+    return null;
+  }
+  if (!build.available) {
+    return <UnavailableRow label="Build CPU" reason={build.unavailable} />;
+  }
+  const quota = build.quota ? `of a ${build.quota} quota` : 'of an unset quota';
+  return (
+    <UsageMeter
+      label="Build CPU"
+      valueText={build.utilization ?? percentText(build.utilizationPercent)}
+      percent={build.utilizationPercent}
+      // Like CPU above, bursting to the quota is what a build is supposed to
+      // do, so the meter shows magnitude only. Starvation is the warning case,
+      // and the backend already names it in `warnings`; this adds the ratio
+      // that warning is about.
+      warnAt={undefined}
+      detail={build.throttled ? `${quota} · throttled ${build.throttled}` : quota}
     />
   );
 }

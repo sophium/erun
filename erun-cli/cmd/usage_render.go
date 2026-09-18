@@ -28,23 +28,26 @@ func writeUsageResult(ctx common.Context, usage common.RuntimeUsage) error {
 // writeUsageBuildsCaveat names the gap CPU/Memory above cannot close on a
 // build-capable environment: an image build runs in the erun-dind sidecar, a
 // separate cgroup this reading cannot see, so those two lines can read idle
-// while a build saturates the sidecar. It names the surface that does answer
-// the question -- writeUsageBuild below, when the cgroup was reachable -- and
-// when it was not, says plainly that no surface in this report can, instead of
-// pointing at `erun observe`, which reports the sidecar's limits and never its
-// usage.
+// while a build saturates the sidecar. It then says which of the two things
+// `Build CPU` below is doing -- the build's own number, or the reason there is
+// none -- so the note never leaves the reader to guess whether the absence of a
+// build figure means "no build" or "could not tell".
+//
+// ExcludesBuilds is exactly the sidecar predicate, and RunRuntimeUsage takes the
+// build reading whenever it holds, so `Build CPU` follows this note in every
+// case but the hand-built one guarded below.
 func writeUsageBuildsCaveat(ctx common.Context, usage common.RuntimeUsage) error {
 	if !usage.ExcludesBuilds {
 		return nil
 	}
 	note := "Note: CPU/Memory above are the runtime container's alone -- an image build runs in the erun-dind sidecar, so this container reads near zero while a build saturates it; "
 	switch {
-	case usage.Build != nil && usage.Build.Unavailable == "":
+	case usage.Build == nil:
+		note += "`Build CPU` below is missing, so this report has no build figure."
+	case usage.Build.Unavailable == "":
 		note += "`Build CPU` below is that build cgroup's own reading."
-	case usage.Build != nil:
-		note += "`Build CPU` below says why the build cgroup could not be read, so this report has no build figure."
 	default:
-		note += "no build cgroup was reachable from here (read from outside the pod, or an image without one), so this report has no build figure; `erun observe` reports the sidecar's limits, not its usage."
+		note += "`Build CPU` below says why the build cgroup could not be read, so this report has no build figure."
 	}
 	_, err := fmt.Fprintln(ctx.Stdout, note)
 	return err
