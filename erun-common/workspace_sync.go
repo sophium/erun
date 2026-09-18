@@ -186,14 +186,13 @@ const workspaceSyncStagingSubdir = ".erun-sync-staging"
 // to them; a missing or empty outputs dir is a no-op, and a pass whose content is
 // unchanged since the last one transfers nothing.
 //
-// Only artifacts whose content hash actually differs from the mirror go through
-// the writable->extract->sign->read-only cycle: delivery used to run that cycle
+// Only the artifacts being refreshed this pass go through the
+// writable->extract->sign->read-only cycle: the cycle used to run
 // unconditionally for every remote artifact on every pass, so an artifact whose
 // content had not changed in weeks still spent most of its time at the 0644 mode
-// `makeArtifactsWritable` applies before the re-extract restores it -- an operator
-// invoking it directly from a shell during that window saw "permission denied" on
-// an otherwise-correct binary, and the executable bit it had settled on went with
-// it.
+// `makeArtifactsWritable` applies before the re-extract restores it — an operator
+// invoking it directly from a shell during that window saw "permission denied"
+// on an otherwise-correct binary.
 func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, hostArtifactSigningSummary, error) {
 	var signing hostArtifactSigningSummary
 	remote, err := remoteOutputsFiles(ctx, hostAlias, outputsRemote)
@@ -205,29 +204,36 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 		if err := os.MkdirAll(artifactsLocal, 0o755); err != nil {
 			return 0, signing, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
 		}
-		localHashes := localArtifactFileHashes(artifactsLocal, remote)
+		// Fetch only what actually changed by content: outputs are agent
+		// deliverables, and an agent can rewrite one byte-for-byte identical to
+		// what is already mirrored (e.g. rerunning a cross-compile) — that still
+		// bumps mtime, the same effect a Docker COPY has on a build context (see
+		// the content-addressed-vs-mtime precedent in
+		// erun-ui/playwright/run.sh's ERUN_PLAYWRIGHT_LINT_CACHE_DIR comment), so
+		// mtime cannot tell "rewritten" from "identical" the way it can for the
+		// source lane's own tar-preserved fetch.
 		remoteHashes := remoteOutputsFileHashes(ctx, hostAlias, outputsRemote, remote)
+		localHashes := localArtifactFileHashes(artifactsLocal, remote)
 		toFetch := changedOutputsPaths(remote, remoteHashes, localHashes)
 		copied = len(toFetch)
 		if len(toFetch) > 0 {
 			// Clear the read-only bit set by the previous pass so the refreshed file
 			// can replace it (matters on Windows, where a read-only attribute
 			// otherwise blocks the rename onto it). Only the paths being refreshed
-			// are touched, so an unchanged artifact never passes through this mode
-			// and keeps both its read-only state and its executable bit.
+			// are touched, so an unchanged artifact never passes through this mode.
 			if err := makeArtifactsWritable(artifactsLocal, toFetch); err != nil {
 				return 0, signing, err
 			}
 			if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, toFetch); err != nil {
 				return 0, signing, err
 			}
-			// The mirror is where a darwin artifact cross-built in the Linux pod first
-			// becomes a file the operator can run, so it is where the signature macOS
-			// demands has to come from. Sign while the files are still writable.
-			signing = signHostArtifacts(localArtifactPaths(artifactsLocal, toFetch))
-			if err := markArtifactsReadOnly(artifactsLocal, toFetch); err != nil {
-				return 0, signing, err
-			}
+		}
+		// The mirror is where a darwin artifact cross-built in the Linux pod first
+		// becomes a file the operator can run, so it is where the signature macOS
+		// demands has to come from. Sign while the files are still writable.
+		signing = signHostArtifacts(localArtifactPaths(artifactsLocal, toFetch))
+		if err := markArtifactsReadOnly(artifactsLocal, toFetch); err != nil {
+			return 0, signing, err
 		}
 	}
 	if err := pruneLocalArtifacts(artifactsLocal, remote); err != nil {

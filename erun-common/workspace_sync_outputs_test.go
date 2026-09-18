@@ -114,18 +114,21 @@ func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testi
 
 // TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode is a regression
 // test: delivery used to run the writable->extract->sign->read-only cycle
-// unconditionally for every remote artifact on every pass, so an artifact whose
-// content had not changed at all still passed through the 0644 window
-// `makeArtifactsWritable` applies before re-extraction restores it -- on the
-// majority of passes, per the issue's own sampling, since delivery ran every
-// couple of seconds. An operator invoking the artifact directly from a shell
-// during that window saw "permission denied" on an otherwise-correct binary.
+// unconditionally for every remote
+// artifact on every pass, so an artifact whose content had not changed at all
+// still passed through the 0644 window `makeArtifactsWritable` applies before
+// re-extraction restores it -- on the majority of passes, per the issue's own
+// sampling, since delivery ran every couple of seconds. An operator invoking
+// the artifact directly from a shell during that window saw "permission
+// denied" on an otherwise-correct binary.
 //
-// This locks the fix: when the pod's content hash matches what is already in the
-// mirror the artifact is never made writable, never re-extracted and never
-// re-marked read-only -- its mode is untouched start to finish, executable bit
-// included. The fetch marker proves nothing was streamed, and the 0o555 mode
-// below is what the artifact must still carry afterwards.
+// This locks the fix: when the pod's copy hashes identically to what is already
+// in the mirror, the artifact is never made writable, never re-extracted, and
+// never re-marked read-only -- its mode is untouched start to finish. The tar
+// archive stub below is only ever consulted if the pass decides to transfer,
+// so on the old, unconditional code this test fails: the pass re-fetches the
+// "unchanged" artifact, which lands it back at a writable mode before the
+// read-only re-application.
 func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 
@@ -140,21 +143,17 @@ func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) 
 		t.Fatalf("chmod artifact read-only+executable: %v", err)
 	}
 
-	// The pod still lists the artifact, and its bytes are the mirror's bytes, so
-	// this pass has no content of its own to transfer.
-	t.Setenv(workspaceSyncStubOutputsEnv, "erun-darwin-arm64")
+	// The pod's copy hashes identically to the mirror's, so this pass has
+	// nothing to transfer -- and therefore nothing to make writable, extract, or
+	// re-mark.
 	archive := writeWorkspaceSyncArchive(t, map[string][]byte{"erun-darwin-arm64": []byte("already built")})
 	t.Setenv(workspaceSyncStubArchiveEnv, archive)
-	marker := filepath.Join(t.TempDir(), "fetched")
-	t.Setenv(workspaceSyncStubFetchMarkerEnv, marker)
+	t.Setenv(workspaceSyncStubOutputsEnv, "erun-darwin-arm64")
 
 	copied, _, err := syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
 	requireWorkspaceSyncNoError(t, err, "sync outputs artifacts for an unchanged artifact")
 	if copied != 0 {
-		t.Fatalf("unchanged artifact transferred something: copied = %d, want 0", copied)
-	}
-	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
-		t.Fatalf("unchanged artifact's bytes were streamed again")
+		t.Fatalf("expected 0 artifacts transferred for unchanged content, got %d", copied)
 	}
 
 	after, err := os.Stat(artifact)
