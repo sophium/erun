@@ -72,6 +72,8 @@ only thing that ties a session to its `orchestrators:` entry.
 | Variable | Type | Default | Purpose |
 |---|---|---|---|
 | `ERUN_IDLE_PROBE` | bool literal `true` | unset | Hint that the CLI is being invoked by the desktop's idle prober. When set, suppresses interactive output. |
+| `ERUN_FORCE_TTY` | bool literal `1` | unset | Internal test seam. Reports stdout as a terminal to a piped run, so an interactive path can be exercised without a TTY. Do not depend on this. |
+| `ERUN_LOCAL_SHELL_OVERRIDE` | bool literal `1` | unset | Internal test seam. Launches the Local tab's shell as a genuine interactive POSIX shell with a pinned prompt and no rc files, so a terminal-content test is not at the mercy of the Operator's own `$SHELL` dotfiles. Do not depend on this. |
 | Docker / Helm / kubectl standard variables | various | per tool | Honoured as documented by each tool (e.g. `DOCKER_HOST`, `KUBECONFIG`, `HELM_NAMESPACE`). |
 
 ## Variables NOT read by ERun

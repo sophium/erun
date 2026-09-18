@@ -2350,7 +2350,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		// The orchestrator's own id, so an agent driving from its shell can
 		// record itself as the return target for a rebuild+restart (see the
 		// erun-orchestrate skill). Empty for transient/Investigate sessions.
-		"ERUN_ORCHESTRATOR_ID=" + id,
+		eruncommon.OrchestratorIDEnvVar + "=" + id,
 		// This launch's nonce, which the session's own hooks stamp onto the
 		// conversation id they report. It is what makes that record this launch's
 		// rather than any session that happens to carry the orchestrator id.

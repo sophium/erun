@@ -349,7 +349,7 @@ func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now ti
 // caller input: a claim must not be able to name someone else as its holder.
 func environmentJobExclusivityHolder(params StartEnvironmentJobParams) EnvironmentActivityLeaseHolder {
 	return EnvironmentActivityLeaseHolder{
-		Orchestrator: strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID")),
+		Orchestrator: strings.TrimSpace(os.Getenv(OrchestratorIDEnvVar)),
 		Tenant:       params.Tenant,
 	}
 }
