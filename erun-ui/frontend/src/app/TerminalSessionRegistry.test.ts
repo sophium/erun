@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+
+import { test } from 'vitest';
 
 import { MAX_RETAINED_BYTES, MAX_RETAINED_LINES } from './terminalBuffers';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';

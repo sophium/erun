@@ -7,7 +7,7 @@ title: Configuration overview
 ERun's configuration lives in three layers. Each layer holds different kinds of settings and is consulted at different points in the lifecycle.
 
 <figure className="erun-hero-figure">
-  <img src="/img/config-layers.svg" alt="Three configuration layer cards side by side. PER-USER (cyan-stroked) at ~/.config/erun/, edited by you / erun init / desktop, read every command, holds ERunConfig · TenantConfig · EnvConfig. PER-PROJECT (cyan-stroked) at &lt;repo&gt;/.erun/config.yaml, edited by team in PRs, read every build/push/deploy, holds ProjectConfig. PER-POD ENV VARS (charcoal) set by helm at deploy, derived automatically, read by erun in the runtime pod, examples ERUN_TENANT and ERUN_NAMESPACE." />
+  <img src="/img/config-layers.svg" alt="Three configuration layer cards side by side. PER-USER (cyan-stroked) at the per-user config root, edited by you / erun init / desktop, read every command, holds ERunConfig · TenantConfig · EnvConfig. PER-PROJECT (cyan-stroked) at &lt;repo&gt;/.erun/config.yaml, edited by team in PRs, read every build/push/deploy, holds ProjectConfig. PER-POD ENV VARS (charcoal) set by helm at deploy, derived automatically, read by erun in the runtime pod, examples ERUN_TENANT and ERUN_NAMESPACE." />
   <figcaption>At deploy time the helm chart derives the per-pod environment variables from the per-user and per-project layers.</figcaption>
 </figure>
 
@@ -17,7 +17,7 @@ For exact file paths see [Config locations](/reference/config-locations). For th
 
 ## Per-user config
 
-### `ERunConfig` (`~/.config/erun/config.yaml`)
+### `ERunConfig` (`<config-root>/config.yaml`) {#erunconfig}
 
 Global defaults that apply across all tenants.
 
@@ -31,8 +31,34 @@ Global defaults that apply across all tenants.
 | `runtimeregistry.baseurl` | string | same as above | Registry HTTP endpoint. Defaults differ for Docker Hub vs GHCR. |
 | `runtimeregistry.tokenurl` | string | same as above | GHCR token endpoint. Only used on the GHCR flow. |
 | `execution.modes.<operation>` | string | Operations with a library alternative (see [Execution modes](#execution-modes)) | `"library"` switches that operation from its CLI subprocess to an equivalent Go library call; anything else (including unset) keeps the subprocess. |
+| `openrouter.baseurl` | URL | `erun deploy`, the in-pod runtime | The gateway every environment's Claude Code is routed through, such as `https://openrouter.ai/api`. Unset leaves each environment on its own Claude sign-in. Set, it renders `ANTHROPIC_BASE_URL` on **every** environment regardless of cloud provider — see [Environment variables](/reference/env-vars). |
+| `openrouter.authtokenref` | string | `erun deploy` | Name of the credential in ERun's **own** operator secret store — the same store the Cloudflare token uses. It is a reference and never the token itself, so this file stays safe to back up and share. **Optional:** leaving it empty uses `claude-gateway`. The value is what an operator sets (in the desktop's ERun settings); when none has been set, `erun deploy` reuses this machine's own Claude Code credential **only when those settings already point at this same `baseurl`** — a credential is scoped to the service it was issued for, so a key belonging to another gateway (or to a direct Anthropic login) is refused rather than sent here, and the deploy says which case it hit. Either way `erun deploy` writes the key into each environment's namespace as the Secret `erun-claude-gateway`, which is why nothing per-environment is named anywhere. |
+| `openrouter.defaultmodel` | string | The desktop's AI tab, `erun open --ai` | The catalog entry an environment selects when it has not chosen one. Ignored when it names no catalog entry, so a stale value cannot route an environment at a model the gateway no longer serves. |
+| `openrouter.models[].id` | string | The desktop's AI tab, `erun open --ai` | One selectable gateway model id. The list is what each environment's AI tab offers; an id the catalog omits can still be typed into that tab. |
+| `openrouter.models[].context` | int | `erun deploy`, the launcher | The context window Claude Code must assume for that id. A gateway id carries none of its own and the real windows differ between models, so this is deliberately per model rather than one environment-wide value. Use the **provider-level** figure, which can be smaller than an advertised maximum: declaring the larger headline lets a conversation grow past what the serving provider accepts, so the request fails with a too-long error instead of compacting cleanly. Empty leaves Claude Code's own assumption in place. |
 
-### `TenantConfig` (`~/.config/erun/<tenant>/tenant.yaml`)
+The gateway catalog is one list the operator maintains and every environment selects from, rather than a per-environment setting:
+
+```yaml
+# <config-root>/config.yaml
+openrouter:
+  baseurl: https://openrouter.ai/api
+  authtokenref: claude-gateway
+  defaultmodel: deepseek/deepseek-v4.1-flash
+  models:
+    - id: deepseek/deepseek-v4.1-flash
+      context: 1048576
+    - id: openai/gpt-6-astra
+      context: 1050000
+```
+
+Choosing a model for one environment is separate from the catalog: the environment's `claude.defaultmodel` selects which entry its AI tab starts on, and the AI tab can also add a model id the catalog does not list.
+
+The **credential Secret is offered rather than recalled**: ERun settings reads the environment namespaces (each on its own Kubernetes context, skipping host environments, which have no namespace) and lists the Secrets that exist, with each Secret's own key names, so a name that has to exist everywhere is picked rather than invented. A namespace that cannot be read is named in the dialog — a Secret whose access is denied must not read as a Secret that is missing.
+
+A catalog that is not yet configured **opens pre-filled from this machine's own Claude Code settings** (`~/.claude/settings.json`, or `CLAUDE_CONFIG_DIR` when set): the gateway's base URL, the model those settings run on, and the context window they declare for it. Nothing is stored by opening the dialog — the operator still saves — and a catalog already configured is never overwritten. The credential is not read from those settings at all: they hold a token *value*, while the catalog names a Secret the pod resolves.
+
+### `TenantConfig` (`<config-root>/<tenant>/config.yaml`)
 
 One per tenant.
 
@@ -44,7 +70,7 @@ One per tenant.
 | `cloudprovideraliases[]` | list of strings | `erun init`, `erun open` | Cloud provider aliases the tenant is allowed to use. |
 | `primarycloudprovideralias` | string | `erun open` (suggesting cloud bindings) | Default cloud provider alias for new envs in this tenant. |
 
-### `EnvConfig` (`~/.config/erun/<tenant>/<env>/config.yaml`) {#envconfig}
+### `EnvConfig` (`<config-root>/<tenant>/<env>/config.yaml`) {#envconfig}
 
 One per environment. This is the most-edited file.
 
@@ -94,6 +120,7 @@ One per environment. This is the most-edited file.
 | `claude.maxoutputtokens` | `*int` | chart (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`) | Max output tokens per Claude response. |
 | `claude.effort` | `*string` | desktop AI launcher (`claude --effort` / `claude --settings`) | Effort level for the env's Claude AI tab, one of `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`. Unset or invalid → `ultracode`. The five `--effort` levels launch as `claude --effort <level>`; `ultracode` is not an `--effort` value — it launches as `claude --settings '{"ultracode":true}'` and enables xhigh effort plus standing multi-agent workflow orchestration. Only the default Claude launch is affected; a non-`claude` `aitool` or a Claude launch the Operator wrote with explicit flags is left untouched. Saving a change from the desktop reopens the env's open AI tabs; the session resumes via `--continue`. |
 | `claude.defaultmodel` | `*string` | desktop AI launcher (`claude --model`) | Model the env's Claude AI tab starts on. Applied while it is one of the env's available models (`claude.models[]`, or the default available set when that list is empty); when unset — or set to a model no longer in that set — the launch falls back to the first available model (`opus` by default) rather than passing no `--model`, so a managed session never defers to Claude Code's own default model (Fable), which erun's pod auth does not serve. Model names are opaque tokens to ERun — resolving one (e.g. `fable`) to a concrete model is Claude's concern. `fable` stays strictly opt-in: it is never in the default available set and launches only when the Operator both lists it under `claude.models[]` and selects it here. The resolved model is also mirrored into `CLAUDE_CODE_SUBAGENT_MODEL` on the launch, so subagents spawned inside that session run on the env's model instead of Claude Code's separate subagent default; it is left unset only when no available model is a usable token. Same verbatim-launch carve-out and save-reopen behaviour as `claude.effort`. |
+| `claude.usegateway` | `*bool` | chart (the gateway env block), desktop AI launcher | Whether this environment uses the erun-level gateway catalog (see [`openrouter`](#erunconfig)). Unset inherits the operator's erun-level decision, so the environment follows it; `false` keeps this one environment on its own Claude sign-in while every other environment still uses the gateway. The catalog is one erun-level list rendered for every environment, so without this an environment could only be moved off the gateway by moving all of them. |
 | `claude.verbosedebug` | bool | desktop AI launcher (`claude --verbose --debug`) | Launch the env's Claude AI tab with Claude's own verbose + debug diagnostics streaming into the tab. Absent means off. Same verbatim-launch carve-out and save-reopen behaviour as `claude.effort`. |
 | `aitool` | string | desktop AI launcher, runtime entrypoint | Which Agent is the default for this env (`claude`, `codex`, …). |
 | `localportrangestart` | int | desktop port allocator | Base port for this env's local forwards (MCP, API, SSH). |
@@ -127,7 +154,8 @@ Committed to the repo, applies to anyone who checks it out. A gitignored copy de
 | `environments` | map | per-env settings (below) | Map of `<env-name> → ProjectEnvironmentConfig`. |
 | `environments.<env>.containerregistries` | list | `erun build`, `erun push`, `erun deploy` | Per-env marked registry list override. Higher precedence than the top-level project list. |
 | `environments.<env>.docker.fingerprints` | map | `erun build`, `erun build --release` | Per-image content fingerprints from the last published build. Drives the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache). |
-| `environments.<env>.docker.platforms` | list | `erun build`, `erun push` | Pins the `docker --platform` targets for a non-release build/push in this env (e.g. `[linux/amd64]`), for a cluster that can only ever run one architecture. `--platform` on the command line overrides it for one invocation. Never applies to `erun build --release` / `erun release`, which always build every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
+| `docker.platforms` | list | `erun build`, `erun push` | Project-wide default for the `docker --platform` targets of a non-release build/push (e.g. `[linux/amd64]`), inherited by every environment that declares no `platforms` of its own — for a project whose machines can only ever run one architecture. Declare it once here instead of repeating it per environment, which silently leaves any environment nobody listed on the multi-arch build. Never applies to `erun build --release` / `erun release`, which always build every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
+| `environments.<env>.docker.platforms` | list | `erun build`, `erun push` | Pins the `docker --platform` targets for a non-release build/push in this env (e.g. `[linux/amd64]`), overriding the project-wide `docker.platforms` default. An explicit empty list (`platforms: []`) opts this env out of that default and keeps the multi-arch build — the escape hatch for a generic env name like `local` that can belong to a machine of any architecture. `--platform` on the command line overrides both for one invocation. Never applies to `erun build --release` / `erun release`. See [Multi-architecture](/cli/build#multi-architecture). |
 | `environments.<env>.k8s.deployments[]` | ordered list | `erun deploy` | The ordered deploy plan for this env. Each step is either a single component name or a list of names deployed in parallel. |
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
 | `release.developbranch` | string | `erun release` | Develop branch name (default `develop`). |
@@ -260,7 +288,7 @@ The helm chart writes these into the runtime pod at deploy time. They're derived
 
 The runtime chart accepts more values than erun manages. At deploy time erun passes two layers to `helm upgrade --install`:
 
-1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing. Environments that deploy the [published `erun-devops` chart](/cli/deploy#where-the-runtime-chart-comes-from) have no local chart directory; for them the overlay lives next to the env's config at `<UserConfigDir>/erun/<tenant>/<environment>/values.yaml` (e.g. `~/.config/erun/<tenant>/<environment>/values.yaml` on Linux) and is optional — when absent, the chart defaults plus erun's `--set` list fully describe the deploy.
+1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing. Environments that deploy the [published `erun-devops` chart](/cli/deploy#where-the-runtime-chart-comes-from) have no local chart directory; for them the overlay lives next to the env's config at `<UserConfigDir>/erun/<tenant>/<environment>/values.yaml` (e.g. `<config-root>/<tenant>/<environment>/values.yaml` on Linux) and is optional — when absent, the chart defaults plus erun's `--set` list fully describe the deploy.
 2. erun's own `--set`/`--set-string` list, derived from `EnvConfig` and the resolved plan.
 
 Helm gives `--set` precedence over `-f`, so for every key erun manages the overlay can never win. The keys below are exactly the ones erun's `--set` list never includes — for them the `values.<env>.yaml` overlay is authoritative, which makes it the supported escape hatch for behaviour erun doesn't model.
@@ -268,6 +296,8 @@ Helm gives `--set` precedence over `-f`, so for every key erun manages the overl
 ### `claude.*` model and Bedrock tuning {#advanced-claude-values}
 
 Each value renders as an env var on the runtime container, and the pod's entrypoint relays it into the Agent's `~/.claude/settings.json`. Both steps are AWS-gated: the chart renders this env block only when the env's cloud provider is `aws` (`cloudContext.provider`), and the entrypoint relay runs only when Bedrock configuration is active — an AWS provider, or `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_MANTLE` set, with a resolvable region.
+
+An erun-level gateway ([`openrouter`](#erunconfig)) is the exception: it routes Claude through a provider the environment config selects rather than through an AWS service, so its variables render for every environment regardless of cloud provider and its own values are `--set` by erun rather than set through this overlay.
 
 | Chart value | Env var | Default | Effect |
 |---|---|---|---|
@@ -440,7 +470,7 @@ For Docker build context / version resolution, see [Build path resolution](/refe
 
 A handful of operations can run either as a subprocess shelling out to a CLI (`aws`, and more tools over time) or through an equivalent Go library call. Both paths trace the identical CLI-equivalent command for `--dry-run`/audit purposes, and produce the same result — the switch only changes what actually executes.
 
-`execution.modes` in `~/.config/erun/config.yaml` is a map from operation name to mode:
+`execution.modes` in `<config-root>/config.yaml` is a map from operation name to mode:
 
 ```yaml
 execution:

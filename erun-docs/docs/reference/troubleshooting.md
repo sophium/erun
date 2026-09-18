@@ -57,7 +57,7 @@ kubectl config get-contexts                     # what's actually configured?
 erun list                                       # what does the env expect?
 ```
 
-If the expected context is missing, restore your `~/.kube/config` from the cloud-provider tool (`aws eks update-kubeconfig`, `gcloud container clusters get-credentials`, etc.). For a managed ERun cloud context, `erun list cloud` will show the status and `erun open` reissues the kubeconfig automatically.
+If the expected context is missing, restore your `~/.kube/config` from the cloud-provider tool (`aws eks update-kubeconfig`, `gcloud container clusters get-credentials`, etc.). For a managed ERun cloud context, `erun context list` will show the status and `erun open` reissues the kubeconfig automatically.
 
 ## Agent can't reach MCP
 
@@ -124,7 +124,7 @@ The message stays counted as unread until you open it, and it stays in the dialo
 **Diagnose:**
 
 ```bash
-erun list cloud                                 # see the resolved status + provider
+erun context list                               # see the resolved status + provider
 kubectl --context <cloud-context> get nodes     # is the cluster reachable directly?
 ```
 

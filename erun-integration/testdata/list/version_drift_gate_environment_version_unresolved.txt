@@ -6,5 +6,6 @@ Version drift for tenant team:
   gate:
     environment: gate
     version: none
-    behind: unknown (gate's own erun version could not be resolved from config)
+    behind: unknown (gate's own erun version could not be resolved: no runtime release is deployed for this environment)
 audit: erun list --gate-environment gate --tenant team
+list: team/gate's runtime version is not recorded locally -- checking its deployed release live

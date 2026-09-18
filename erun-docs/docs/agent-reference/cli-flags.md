@@ -95,8 +95,8 @@ An env created by this same run skips the reconcile entirely — it was written 
 
 `erun init` writes these files in this order:
 
-1. `~/.config/erun/<tenant>/tenant.yaml` (creating `~/.config/erun/<tenant>/` if missing).
-2. `~/.config/erun/<tenant>/<env>/config.yaml`.
+1. `<config-root>/<tenant>/config.yaml` (creating `<config-root>/<tenant>/` if missing).
+2. `<config-root>/<tenant>/<env>/config.yaml`.
 3. `<projectroot>/.erun/config.yaml`. Existing values are preserved; new defaults are merged.
 4. Helm-installs the runtime chart into the namespace `<tenant>-<environment>` — the repo-local chart when the project has one, otherwise the published `oci://<registry>/charts/erun-devops` chart pinned to the runtime version (see [`erun deploy`](/cli/deploy#where-the-runtime-chart-comes-from)).
 5. With `--remote`: writes the in-pod marker at `/home/erun/.erun/<tenant>/<env>/bootstrap.yaml`.
@@ -165,7 +165,7 @@ An env created by this same run skips the reconcile entirely — it was written 
 
 | Code | Cause | Exit code |
 |---|---|---|
-| `TENANT_NOT_CONFIGURED` | Resolved tenant has no `~/.config/erun/<tenant>/tenant.yaml`. | `1` |
+| `TENANT_NOT_CONFIGURED` | Resolved tenant has no `<config-root>/<tenant>/config.yaml`. | `1` |
 | `HOST_ENV_NO_SHELL` | The environment is a [host env](/concepts/environment-types#host) — no pod and no cluster to open a kubectl-exec shell into. Checked before every other step (before `KUBE_CONTEXT_MISSING`, before any port-forward). Message names the worktree directory to open directly instead. | `1` |
 | `KUBE_CONTEXT_MISSING` | `EnvConfig.kubernetescontext` is absent from `~/.kube/config`. | `1` |
 | `CLUSTER_UNREACHABLE` | Cluster API does not respond after 5 minutes. | `2` |
@@ -199,7 +199,7 @@ Scheduling honours the `FROM` graph: independent images share a **wave**, and an
 |---|---|---|---|---|
 | `--no-incremental` | bool | `false` | — | Disables the fingerprint cache. Every Docker context rebuilds. |
 | `--version <version>` | string (semver) | Resolved per [Build path resolution · VERSION walking](/reference/configuration-build-paths). | Same as `erun init --version`. Conflicts with `--release` (which resolves the version itself). | Pins a bare version for this build instead of minting a snapshot. |
-| `--platform <platform>` | string[] (repeatable) | Resolved per [Multi-architecture build contract](/agent-reference/conventions-spec#multi-architecture-build-contract). | Rejected together with `--release` (`release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports`). | Overrides the docker `--platform` targets for this build/push, e.g. `linux/amd64`. Absent, falls back to the project's configured `environments.<env>.docker.platforms`, then the default multi-arch pair. |
+| `--platform <platform>` | string[] (repeatable) | Resolved per [Multi-architecture build contract](/agent-reference/conventions-spec#multi-architecture-build-contract). | Rejected together with `--release` (`release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports`). | Overrides the docker `--platform` targets for this build/push, e.g. `linux/amd64`. Absent, falls back to the project's configured `environments.<env>.docker.platforms` (the environment's own pin) or the project-wide `docker.platforms` default it inherits, then the default multi-arch pair. |
 | `--component <name>` | string | Auto-selects the lone [`components:`](/reference/configuration#components-block) entry when the project declares exactly one; empty otherwise. | Must name a declared `components:` entry when the project declares any. Fails naming the declared choices when omitted and more than one entry is declared. | Selects which `components:` root (`docker`/`dockercontext`/`version`) this build resolves, for a monorepo of independent deployables that do not share one `docker`/`k8s` root. Unused (falls through to `paths:`/convention) when the project declares no `components:` map. |
 
 ### `--output json` result
@@ -349,7 +349,7 @@ The dry-run trace names the decision per spec: `deploy: version <v> pinned; inst
 A tenant that publishes its own artifacts ships **umbrella** charts — the runtime `<tenant>-devops` and each `<tenant>-<component>` — that wrap the canonical `erun-<base>` chart as a subchart (dependency name `erun-<base>`, no alias; the `erun-build-env` / `erun-blueprint-platform` pattern). helm does **not** pass top-level `--set` values into subchart scope, so a by-reference deploy of such a chart would leave the wrapped subchart's `{{ required }}` `tenant`/`environment` unset (`tenant is required` at render). Deploy closes that gap for any chart it installs by reference whose name is tenant-prefixed (not the canonical `erun-<base>`):
 
 1. **Re-scopes the threaded `--set`s** under the subchart key `erun-<base>` (`--set-string erun-backend-api.tenant=<t>`, …), so every value erun resolves at deploy time — `tenant`/`environment`, ports, cloud context, MCP auth, `imageOverrides`, registry — reaches the wrapped subchart exactly as it would a chart installed directly. A canonical `erun-<base>` chart installed directly (the `erun` product tenant, or an explicitly selected `erun-*` chart) is **not** re-scoped — its top-level `--set`s already reach it.
-2. **Applies the chart's bundled `values.<env>.yaml`.** Before the rollout, deploy runs `helm pull <ref> --version <v> --untar --untardir <tmp>` and adds `-f <tmp>/<chart>/values.<env>.yaml`, forwarding the tenant's own authored per-env subchart values (pod-shape: `extraContainers`/`extraVolumes`/`extraEnv`/`extraRules`, and any overrides authored under the subchart key). This is the by-reference analogue of a worktree deploy's local `values.<env>.yaml`. The file is `-f`'d **before** any config-dir overlay (`~/.config/erun/<tenant>/<env>/values.yaml`), and the re-scoped `--set`s win over both — so erun-resolved values are authoritative and a key authored in the bundled file that erun also threads (e.g. `api.oidcAllowedIssuers`) is owned by erun, not the file.
+2. **Applies the chart's bundled `values.<env>.yaml`.** Before the rollout, deploy runs `helm pull <ref> --version <v> --untar --untardir <tmp>` and adds `-f <tmp>/<chart>/values.<env>.yaml`, forwarding the tenant's own authored per-env subchart values (pod-shape: `extraContainers`/`extraVolumes`/`extraEnv`/`extraRules`, and any overrides authored under the subchart key). This is the by-reference analogue of a worktree deploy's local `values.<env>.yaml`. The file is `-f`'d **before** any config-dir overlay (`<config-root>/<tenant>/<env>/values.yaml`), and the re-scoped `--set`s win over both — so erun-resolved values are authoritative and a key authored in the bundled file that erun also threads (e.g. `api.oidcAllowedIssuers`) is owned by erun, not the file.
 
 The dry-run trace shows the `helm pull … --untar` line before the `helm upgrade` line; the temp dir is removed after the rollout. Local (worktree) deploys are unchanged: a local runtime umbrella re-scopes via its Chart.yaml `erun-devops` dependency and `-f`s its worktree `values.<env>.yaml`; a local component umbrella `-f`s its worktree `values.<env>.yaml` (which is why authoring the nested subchart values there is still required for the worktree path).
 
@@ -556,8 +556,8 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 
 | Check id | What it inspects | Recovery if missing |
 |---|---|---|
-| `config.tenant` | `~/.config/erun/<tenant>/tenant.yaml` exists and parses. | Suggests `erun init <tenant>`. |
-| `config.environment` | `~/.config/erun/<tenant>/<env>/config.yaml` exists and parses. | Suggests `erun init <tenant> <env>`. |
+| `config.tenant` | `<config-root>/<tenant>/config.yaml` exists and parses. | Suggests `erun init <tenant>`. |
+| `config.environment` | `<config-root>/<tenant>/<env>/config.yaml` exists and parses. | Suggests `erun init <tenant> <env>`. |
 | `config.project` | `<projectroot>/.erun/config.yaml` exists. | Suggests `erun init`. |
 | `cluster.kube_context` | `EnvConfig.kubernetescontext` is in `~/.kube/config`. | Lists available contexts. |
 | `cluster.runtime_pod` | A pod matching the runtime-chart's labels is `Running` in `<tenant>-<env>`. | Suggests `erun open`. |
@@ -804,6 +804,8 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 | `memory.peak` ÷ `memory.limitBytes` ≥ 95%. | `memory.peak` is a high-water mark, so a near-limit peak matters even after current usage drops back down. |
 | any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. |
 | `memory.oomKills` > 0. | Always reported: a kill already happened. |
+| the environment's *retained* peak ÷ `memory.limitBytes` ≥ 95%, when it exceeds the live `memory.peak`. | `memory.peak` is a per-container counter, so a restart resets it — and a restart is often how an OOM manifests. The retained high-water mark keeps a pre-restart near-limit peak visible. Scored against the current limit, so raising `runtimepod` clears it. |
+| the environment's *retained* OOM-kill total exceeds the live `memory.oomKills`. | `memory.events` resets with the container, so a kill that already happened stays reported after a restart the current container cannot account for. |
 
 ### Error behaviour
 
@@ -888,7 +890,7 @@ Pushes the pacing nudge into every reachable target: every configured environmen
 
 1. If both `--tenant`/`--environment` are given, the target list is that one pair. If neither is given, list every environment across every configured tenant (`ListTenantConfigs` + `ListEnvConfigs`) — never the ambient current-directory default a bare `resolveOpen` would resolve to. Passing only one of the two errors.
 2. For each environment target: resolve its MCP edge the same way `erun idle`/`erun exec` do (a local port-forward state file `erun open` maintains while the environment is open). An edge that cannot be resolved, or whose call fails, resolves to `{decision: none, reason: "not-alive"}` — not a command failure. A resolved edge is called with `whip {preview: <ctx.DryRun>}`; the decoded `eruncommon.WhipResult` is used verbatim.
-3. Load `~/.erun/config.yaml`'s `Orchestrators` list and turn each into a candidate via `eruncommon.ListWhipOrchestratorCandidates` (always `Reachable: false`), then `eruncommon.DecideWhip` against the resolved `WhipConfig` with `explicit: true`. Every orchestrator therefore always resolves to `{decision: none, reason: "unreachable-from-transport"}` from this transport.
+3. Load the [user config](/reference/config-locations)'s `Orchestrators` list and turn each into a candidate via `eruncommon.ListWhipOrchestratorCandidates` (always `Reachable: false`), then `eruncommon.DecideWhip` against the resolved `WhipConfig` with `explicit: true`. Every orchestrator therefore always resolves to `{decision: none, reason: "unreachable-from-transport"}` from this transport.
 4. Render one line per result (`candidate.id`/name, decision, reason, and the write error if any), or the full `WhipReport` JSON with `--json`.
 
 ### `WhipReport` shape
@@ -915,7 +917,7 @@ Pushes the pacing nudge into every reachable target: every configured environmen
 
 ### Configuration: `ERunConfig.whip` {#whip-config}
 
-`~/.erun/config.yaml`'s optional `whip` section (`eruncommon.WhipConfigOverride`) overrides the pacing defaults every surface reads through `eruncommon.ResolveWhipConfig`:
+The [user config](/reference/config-locations)'s optional `whip` section (`eruncommon.WhipConfigOverride`) overrides the pacing defaults every surface reads through `eruncommon.ResolveWhipConfig`:
 
 | Key | Type | Unset behaviour |
 |---|---|---|
@@ -961,7 +963,7 @@ Lists one directory one level deep over `kubectl exec … find <dir> -maxdepth 1
 | `--dest <local-path>` | path | current directory | Local file or directory to write to. (`--dest`, not `--output`, which is the global mode flag.) |
 | `--force` | bool | `false` | Overwrite an existing local destination. |
 
-A file streams as base64; a folder streams as a `tar.gz` archive (saved as `<name>.tar.gz`). The payload is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + script and the planned destination; no I/O).
+A file streams as base64; a folder is staged in the pod as a `tar.gz` archive first and saved as `<name>.tar.gz`. The transfer is read in bounded ranges (8 MiB of payload per `kubectl exec`, gzip-compressed when the pod has gzip), because one exec stream breaks probabilistically as the volume it carries grows — so a whole-file stream fails on anything the size of a real cross-built binary. A range whose stream breaks is retried; a range that never arrives fails the download with the byte count it reached out of the total, and writes no partial file. The reassembled payload is checked against the digest the pod computed before the transfer started. It is SHA-256'd and capped at 100 MB (`MaxRuntimeOutputBytes`) — a larger file errors before transfer. `--output json` emits `{name, dest, size, sha256, isArchive, archiveFormat}`. Both subcommands support `--dry-run` (traces the `kubectl exec` argv + scripts and the planned destination; no I/O).
 
 ---
 
@@ -1116,7 +1118,7 @@ a pod start rather than a cold rebuild. In-pod processes are not: a stop ends wh
 ### What is removed
 
 1. The Kubernetes namespace `<tenant>-<env>` (cascades to every Deployment, PVC, Service, ConfigMap, Secret inside).
-2. The per-user env config directory `~/.config/erun/<tenant>/<env>/`.
+2. The per-user env config directory `<config-root>/<tenant>/<env>/`.
 3. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
 
 The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` are **not** removed; a later env with the same name overwrites them (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
@@ -1152,7 +1154,9 @@ Use it instead of hand-rolling detachment, a log redirect, a polling loop, a sen
 
 The demotion to `unknown` happens on the next read and is persisted, so every later read gives the same answer. An `unknown` job is never a success: `job await` exits `125` for it, distinct from both `0` and a failure.
 
-`abandoned` sits between the two: like `exited`, the supervisor did observe the process end and recorded a real `exitCode` for it; like `unknown`, it is never a success — even an `exitCode` of `0` is not one, because something the job started is still running and nothing will ever report on it again. Detection happens once, right after the supervisor reaps the job's own process, by checking whether its process group still has a live member; that check is POSIX-only, so on Windows a job that backgrounds work this way still reads back as a plain `exited`. `job status`/`job await` render it as `abandoned <exitCode>: <name> (<reason>)`, distinct from both `exited <exitCode>: <name>` and `unknown: <name> (<reason>)`.
+When the pod is confirmed unchanged (same hostname) and Kubernetes reports no container restart either, there is nothing checkable left to explain why the supervisor process is simply gone — `reason` says so ("... could not be determined") and, when this pod's own cgroup counters are readable, appends its resource state at read time: current/limit memory, how many times the cgroup hit its memory ceiling, OOM kills, and CPU throttling (e.g. `"Environment resource state: memory 4.02/6.00 GiB, ceiling reached 21292 times, 0 OOM kill(s); CPU throttled in 28% of periods (100837/363659)"`). This is evidence for the reader to judge, not a claimed cause: a cgroup pinned at its ceiling under heavy CPU throttling makes resource exhaustion plausible, but nothing here proves the supervisor actually died of it.
+
+`abandoned` sits between the two: like `exited`, the supervisor did observe the process end and recorded a real `exitCode` for it; like `unknown`, it is never a success — even an `exitCode` of `0` is not one, because something the job started is still running and nothing will ever report on it again. Detection happens once, right after the supervisor reaps the job's own process, by checking whether its process group *or* its session still has a live member. The process group alone would miss a further process the work backgrounds into a fresh process group of its own — an agent tool's Bash tool backgrounding a command precisely so it survives the turn that started it does exactly this — which is why the job's own top-level process also gets a fresh session, not just a fresh process group, at start: anything it backgrounds without itself calling `setsid` still shares that session, even once reparented away from its original parent. Both checks are POSIX-only, so on Windows a job that backgrounds work either way still reads back as a plain `exited`. `job status`/`job await` render it as `abandoned <exitCode>: <name> (<reason>)`, distinct from both `exited <exitCode>: <name>` and `unknown: <name> (<reason>)`.
 
 Every state line names why it ended when there is anything recorded to say, `exited` included: `exited <exitCode>: <name> (signal <signal>)` when the work was signalled (the signal *is* the reason), `exited <exitCode>: <name> (<reason>)` otherwise when the record carries one, and the bare `exited <exitCode>: <name>` only when it carries neither. `job await`'s own failure message follows the same rule — `job "<id>" exited <exitCode> (signal <signal>)` or `job "<id>" exited <exitCode>: <reason>`. A job whose work could not be started at all (`failed to start: …`) is the case this matters most for: its exit code is `-1` and the reason is the entire answer.
 
@@ -1170,6 +1174,8 @@ When a job's process ends, the supervisor checks the job store for any non-[hand
 - If the wait ends because the started job finished, its own outcome is folded into this job's record instead: `state` stays whatever this job's own process produced (usually `exited`), and `startedJobFailed` names the started job if — and only if — it did **not** succeed. `succeeded` is `false` whenever `startedJobFailed` is set, regardless of this job's own `exitCode`. This is the common case in practice: a gate that runs long but eventually passes or fails is waited out and reported truthfully, rather than ever surfacing a misleading intermediate `gate-incomplete` a caller would have to separately chase down.
 
 `job status`/`job await` render `gate-incomplete` as `gate-incomplete <exitCode>: <name> (<reason>)`, and append `, <startedJobFailed text>` to an otherwise-`exited`/`abandoned` line when `startedJobFailed` is set.
+
+One case is excluded from `startedJobFailed` on purpose: a started job that finished unsuccessfully because *this same job* cancelled it (`job cancel`) is not a failure of work this job waited for — it is this job's own intent. `job cancel` records the canceller's own `ERUN_JOB_ID` on the target job as `cancelledByJobId` at the moment it signals it; the parent's finish check drops a child from `startedJobFailed` only when that child's `cancelledByJobId` matches the parent's own id, so a cancel issued by anyone else (a different job, or no job at all) still counts as a real failure from this job's perspective.
 
 ### Bounded reinvocation for an agent job {#job-reinvocation}
 

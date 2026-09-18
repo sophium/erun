@@ -611,8 +611,13 @@ esac
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for low disk headroom, got 0: %s", result.Combined)
 		}
-		if !strings.Contains(result.Combined, "only 1.0 GiB free at the docker root, below the 20.0 GiB a multi-arch release build needs") {
-			t.Fatalf("expected the disk-headroom refusal in output:\n%s", result.Combined)
+		if !strings.Contains(result.Combined, "only 1.0 GiB free at "+dockerRoot+", below the 20.0 GiB a multi-arch release build needs") {
+			t.Fatalf("expected the disk-headroom refusal, naming the filesystem it measured, in output:\n%s", result.Combined)
+		}
+		// docker's own stores were not measured here, so the remedy a docker-root
+		// shortage can still use must survive.
+		if !strings.Contains(result.Combined, "free up space (docker system prune, remove unused images)") {
+			t.Fatalf("expected the docker remediation a docker-root shortage can still use:\n%s", result.Combined)
 		}
 		if !strings.Contains(result.Combined, "filling this disk is what evicts the pod running the release") {
 			t.Fatalf("expected the eviction-risk explanation in output:\n%s", result.Combined)
@@ -621,6 +626,56 @@ esac
 		// Outside the captured streams: the refusal must leave the version
 		// file on the version it was releasing, so re-running retries it.
 		assertVersionFile(t, setup, "1.4.2\n")
+	})
+
+	t.Run("real_run_refusal_does_not_name_a_docker_remedy_docker_cannot_perform", func(t *testing.T) {
+		// The reported failure: the headroom that ran out was on the home PVC,
+		// with every docker store on the node already empty — so the docker
+		// remediation the refusal named could not free a byte of it, the number
+		// did not move, and the real cause was never named. A docker prune is a
+		// remedy only when docker was measured still holding space on the
+		// filesystem that is short; here it is measured holding none, and the
+		// only nonzero row is local volumes, which `docker system prune` does
+		// not reclaim either.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		seedBareOrigin(t, setup)
+		dockerRoot := filepath.Join(setup.Cwd, "fake-docker-root")
+		if err := os.MkdirAll(dockerRoot, 0o755); err != nil {
+			t.Fatalf("mkdir fake docker root: %v", err)
+		}
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "info -f") printf '%s' '` + dockerRoot + `' ;;`,
+			`  "system df") printf '%s\n' 'Images|0B' 'Containers|0B' 'Local Volumes|5.8GB (100%)' 'Build Cache|0B' ;;`,
+			`  "builder prune") exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// 1 GiB available, well under the 20 GiB default floor.
+		fixture.StubBinaryAdvanced(t, stubs, "df", fixture.StubBinarySpec{
+			Stdout: "Filesystem     1024-blocks     Used Available Capacity Mounted on\n" +
+				"overlay          104857600 93763584   1048576      99% " + dockerRoot + "\n",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "df")...)
+
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for low disk headroom, got 0: %s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "only 1.0 GiB free at "+dockerRoot+", below the 20.0 GiB a multi-arch release build needs") {
+			t.Fatalf("expected the disk-headroom refusal, naming the filesystem it measured, in output:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "docker's own stores have nothing left to reclaim there, so pruning docker cannot free any of it") {
+			t.Fatalf("expected the refusal to say the docker remedy is spent, in output:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "the space this gate measured is held outside docker") {
+			t.Fatalf("expected the refusal to name the space it measured, in output:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "docker system prune") {
+			t.Fatalf("refusal names a docker remedy docker was measured unable to perform:\n%s", result.Combined)
+		}
 	})
 
 	t.Run("real_run_dirty_worktree_fails", func(t *testing.T) {
@@ -871,6 +926,61 @@ exit 0
 		assertVersionFile(t, setup, "1.4.3\n")
 		if _, err := os.Stat(releaseScriptRan); err != nil {
 			t.Fatalf("the linux release script never ran, so the GitHub release entry was stranded: %v", err)
+		}
+	})
+
+	t.Run("real_run_names_the_rejected_develop_and_does_not_rebase_main", func(t *testing.T) {
+		// The misdiagnosed direction of the release push retry. Releasing 1.0.258, main pushed
+		// and develop was rejected as a non-fast-forward: another release had
+		// advanced origin/develop while this release's own sync-develop added
+		// commits locally. The retry attributed the rejection to origin/main —
+		// which had not moved — and rebased it twice, a no-op each time, never
+		// fetching or merging origin/develop.
+		//
+		// The scenario pins the shape rather than the wording: origin/develop
+		// carries a commit this checkout's develop never will, so the develop
+		// ref is genuinely diverged when the push runs while main is cleanly
+		// ahead of origin/main.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		origin := seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "branch", "develop")
+		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "develop")
+
+		diverging := filepath.Join(setup.Home, "diverging")
+		fixture.RunGit(t, setup.Home, "clone", "-q", "-b", "develop", origin, diverging)
+		fixture.RunGit(t, diverging, "config", "user.email", "test@example")
+		fixture.RunGit(t, diverging, "config", "user.name", "Test")
+		mustWriteFile(t, filepath.Join(diverging, "another-release.txt"), "another release\n")
+		fixture.RunGit(t, diverging, "add", ".")
+		fixture.RunGit(t, diverging, "commit", "-q", "-m", "another release advanced develop")
+		fixture.RunGit(t, diverging, "push", "-q", "origin", "develop")
+
+		envVars := append(setup.Env(), stubPublishToolchain(t, setup)...)
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
+
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when develop is rejected, got 0: %s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "origin/main moved during the release") {
+			t.Fatalf("a develop rejection must not be reported as origin/main having moved:\n%s", result.Combined)
+		}
+		combined := normalize.Apply(result.Combined, normalize.Replacement{Pattern: regexp.MustCompile(`(?m)^hint:.*\n?`), Token: ""})
+		golden.Equal(t, "release/real_run_names_the_rejected_develop_and_does_not_rebase_main", combined)
+
+		// Everything the release publishes landed before the develop rejection:
+		// main carries the release and the prepare commit, and the tag is public.
+		// develop is what did not land, and the failure has to say so.
+		remote := remoteMainSubjects(t, diverging)
+		for _, want := range []string{"[skip ci] release 1.4.2", "[skip ci] prepare 1.4.3"} {
+			if !strings.Contains(remote, want) {
+				t.Fatalf("origin/main is missing %q before the develop rejection:\n%s", want, remote)
+			}
+		}
+		if tags := remoteTags(t, setup); !strings.Contains(tags, "refs/tags/v1.4.2") {
+			t.Fatalf("the release tag should already be public when develop is rejected:\n%s", tags)
 		}
 	})
 

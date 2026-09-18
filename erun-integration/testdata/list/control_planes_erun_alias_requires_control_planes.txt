@@ -1,0 +1,2 @@
+audit: erun list --erun-alias erun+test@erun
+--erun-alias requires --control-planes

@@ -80,18 +80,36 @@ var InternalAPIRoutes = map[string]bool{
 // permanently internal (most need a real surface, not an exemption) or
 // weakening the gate itself. It is the opposite claim from InternalAPIRoutes
 // above: an entry here asserts nothing about whether the route deserves a
-// surface, only that it does not have one yet. See erun-integration/AGENTS.md
-// § "Desktop-surface gate" § "Baseline for pre-existing gaps" for the
-// tracking issue and the shrink-only enforcement
-// (desktopsurface.FindStaleBaselineEntries): a route that gains a real
-// reference in either tree must be removed from this map in the same change,
-// or the gate fails. What remains today needs a surface too large for a
-// single change: erun's own hosted release view (the four "GET /v1/releases"
-// family entries -- no console/desktop UI exists anywhere for the release
-// system itself, unlike reviews/builds/merge-queue which already have one),
-// tenant-issuer administration and the usage-event log (both need a new
-// admin surface designed, not just a fetch wired up), and the DNS-01 token
-// mint (needs `erun expose` itself redesigned to call it, not a bare button).
+// surface, only that it does not have one yet.
+//
+// This map is the tracker of record for that remaining work, and its entries
+// are the whole answer to "is this still open?": every one of them is work
+// nobody has done yet -- not a settled decision, and not deferred to a
+// document or an issue that can move on without it. Nothing here cites a
+// tracking issue, deliberately: root AGENTS.md § "Code Comments" keeps
+// tracker references out of source (enforced by
+// erun-integration/issue_reference_test.go), and the one indirect pointer
+// this map used to carry -- a document naming the issue that tracked it --
+// was followed to a closed issue while entries remained here, which taught a
+// reader nothing about whether the rest was abandoned or forgotten. What
+// keeps the list honest is the shrink-only enforcement
+// (desktopsurface.FindStaleBaselineEntries, erun-integration/AGENTS.md
+// § "Desktop-surface gate" § "Baseline for pre-existing gaps"): a route that
+// gains a real reference in either tree must be removed from this map in the
+// same change, or the gate fails. That check reads the routes the API
+// registers, so it catches an entry whose gap has since been closed, but not
+// one whose route no longer exists at all: remove an entry here by hand when
+// the route itself goes. Closing one out means giving it that surface, or
+// moving it to InternalAPIRoutes above with the reason it needs none.
+//
+// What remains needs a surface too large for a single change: erun's own
+// hosted release view (the "GET /v1/releases" family entries, plus the
+// single build's detail route that reads the same way -- no console/desktop
+// UI exists anywhere for the release system itself, unlike
+// reviews/builds/merge-queue which already have one), tenant-issuer
+// administration and the usage-event log (both need a new admin surface
+// designed, not just a fetch wired up), and the DNS-01 token mint (needs
+// `erun expose` itself redesigned to call it, not a bare button).
 var KnownUnsurfacedRoutes = map[string]bool{
 	// Creating an org on the platform's own IdP is what makes a second tenant
 	// possible: an org-scoped issuer resolves tenants by the org claim, so a new

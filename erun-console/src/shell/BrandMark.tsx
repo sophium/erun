@@ -1,6 +1,8 @@
 import { cn } from 'erun-kit';
 import * as React from 'react';
 
+import { BUNDLED_BRAND } from './brand';
+
 // BrandMark renders an instance's logo when platform discovery (GET
 // /v1/platform) carries one (`logoUrl`), and falls back to the product
 // initial otherwise — the fallback must never assume a hardcoded instance
@@ -24,7 +26,7 @@ export function BrandMark({
   React.useEffect(() => {
     setLogoFailed(false);
   }, [logoUrl]);
-  const label = brand && brand.length > 0 ? brand : 'ERun';
+  const label = brand && brand.length > 0 ? brand : BUNDLED_BRAND;
   if (logoUrl !== undefined && logoUrl.length > 0 && !logoFailed) {
     return (
       <img
