@@ -231,10 +231,15 @@ test.describe('diff panel — starting a review (#1315)', () => {
         });
         return;
       }
+      if (body.method === 'EnvironmentWorkingIssue') {
+        await fulfillJSON(route, { available: true, branch: 'feature/777-thing' });
+        return;
+      }
       await route.continue();
     });
 
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
+    await expect(startReviewButton(app)).toBeVisible();
     await startReviewButton(app).click();
 
     const dialog = app.createReviewDialog;

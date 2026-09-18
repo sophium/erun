@@ -29,10 +29,12 @@ export function AccessRemedyNote({
   return (
     <div className="mt-2 grid gap-1">
       <div className="flex flex-wrap items-center justify-center gap-2">
+        {/* The sentence above already says to ask an administrator, so this
+            half is the artifact itself rather than a second request for one. */}
         <span>
           {remedy.roleName
-            ? `or ask an administrator to grant you ${remedy.roleName} by running`
-            : 'or ask an administrator to run'}
+            ? `Send an administrator the command that grants you ${remedy.roleName}:`
+            : 'Send an administrator the command that grants it:'}
         </span>
         <Button
           type="button"
