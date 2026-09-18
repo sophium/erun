@@ -282,6 +282,77 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/no_shell_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("no_shell_stdout_carries_only_the_eval_able_shell", func(t *testing.T) {
+		t.Parallel()
+		// The documented alias is
+		// `alias team-dev='eval "$(erun open team dev --no-shell)"'`, so stdout
+		// IS the script: command substitution hands the child a pipe, never a
+		// terminal. An sshd-enabled env used to prepend the human-readable SSH
+		// block ("SSH:", "  host: ...", ...) to stdout, and eval ran those
+		// prose lines as commands — seven `command not found` errors per alias
+		// invocation. Moving the block to stderr is not the fix (#394 silenced
+		// stderr on purpose, and the alias does not capture it), so the block
+		// must simply be terminal-only.
+		//
+		// `bash -n` accepts the tainted stdout — the block is syntactically
+		// valid shell and only fails at run time — so assert the exact script
+		// instead of a syntax check.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
+		envVars := append(stubKubectlNotFound(t, setup), "SHELL=/bin/bash")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The remote env's workspace maps to a local worktree under this
+		// scenario's private HOME, which is what the script cds into.
+		want := "kubectl config use-context 'test-context' >/dev/null &&\n" +
+			"kubectl config set-context --current --namespace='team-dev' >/dev/null &&\n" +
+			"cd '" + filepath.Join(setup.Home, "git", "team") + "'\n"
+		if result.Stdout != want {
+			t.Errorf("stdout must be only the eval-able setup script\nwant:\n%s\ngot:\n%s", want, result.Stdout)
+		}
+	})
+
+	t.Run("no_shell_interactive_terminal_still_shows_the_ssh_block", func(t *testing.T) {
+		t.Parallel()
+		// The counterpart to the scenario above: the terminal-only gate must
+		// not delete the block. A human running --no-shell at a terminal still
+		// needs the host, alias, port, user, key and workspace, so the same run
+		// that stays clean for eval keeps printing it. ERUN_FORCE_TTY=1 is the
+		// TTY seam writerIsTerminal already honors, the same lift the
+		// alias-prompt scenarios above rely on.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/bash")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// Normalize first: the host address, HOME and temp paths in the block
+		// are host-specific, so the assertions below name the normalized tokens
+		// the goldens use.
+		normalizedStdout := normalize.Apply(result.Stdout)
+		for _, wantLine := range []string{
+			"SSH:\n",
+			"  host: <LOOPBACK>",
+			"  alias: erun-team-dev",
+			"  port: 17022",
+			"  user: erun",
+			"  key: none",
+			"  workspace: <HOME>/git/team",
+		} {
+			if !strings.Contains(normalizedStdout, wantLine) {
+				t.Errorf("interactive stdout must still show the SSH block; missing %q in:\n%s", wantLine, result.Stdout)
+			}
+		}
+		// The script the alias evaluates must still be there too — the block is
+		// additional human output, not a replacement for it.
+		if !strings.Contains(result.Stdout, "cd '"+filepath.Join(setup.Home, "git", "team")+"'\n") {
+			t.Errorf("interactive stdout must still end with the setup script, got:\n%s", result.Stdout)
+		}
+	})
+
 	t.Run("no_tty_dry_run_falls_back_to_no_shell", func(t *testing.T) {
 		t.Parallel()
 		// The stale-forward recovery advice names bare `erun open <tenant>
@@ -1794,13 +1865,12 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("previews_reaping_a_recorded_forward_that_never_bound_its_port", func(t *testing.T) {
-		// Regression for erun#1847: a `kubectl port-forward` that is still
-		// retrying against a pod that never answers holds no port at all —
-		// unlike the bound-but-dead shape above, nothing binds, but the
-		// process itself is alive. Bound state alone can't tell that corpse
-		// apart from one that already exited, so the plan must still name
-		// it. Dry-run only plans: the process must still be alive when the
-		// run ends.
+		// A `kubectl port-forward` that is still retrying against a pod that
+		// never answers holds no port at all — unlike the bound-but-dead shape
+		// above, nothing binds, but the process itself is alive. Bound state
+		// alone can't tell that corpse apart from one that already exited, so
+		// the plan must still name it. Dry-run only plans: the process must
+		// still be alive when the run ends.
 		skipIfPortsBusy(t, 26100, 26133)
 		setup := env.New(t)
 		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
