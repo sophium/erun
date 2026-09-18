@@ -1051,11 +1051,12 @@ spec:
 # convention), and every series it exposes is labelled by tenant+environment,
 # so leaving it reachable from every namespace would let any other tenant's
 # pod on the cluster read this one's idle/audit/MCP-call activity. Selecting
-# this pod with a NetworkPolicy makes every other port on it default-deny
-# unless a rule says otherwise, so the ssh/mcp rules below exist purely to
-# preserve their current unrestricted reachability (no NetworkPolicy governed
-# them before this one existed) -- only the new metrics port is actually
-# restricted. A cluster Prometheus living outside this namespace needs its own
+# this pod with an Ingress NetworkPolicy makes it default-deny for every port
+# no rule names, so this policy is what isolates the pod's ingress: the ssh and
+# mcp rules below re-permit those two ports by number from any source, keeping
+# the reachability they had before any policy governed them, and every other
+# listener on the pod is closed to other pods. Adding a listener here means
+# adding its port to this policy. A cluster Prometheus living outside this namespace needs its own
 # namespace labelled network-policy/erun-metrics-scraper=true to reach it;
 # same-namespace traffic (e.g. `erun open` + a manual curl) is always allowed.
 apiVersion: networking.k8s.io/v1
