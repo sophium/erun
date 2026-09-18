@@ -379,7 +379,7 @@ function useEnvironmentRowState(
   // — the tenant dashboard and an orchestrator's session both take priority
   // over an environment selection (see selectSidebarFocus), so a stale
   // selection.selected left over from before either took the pane can never
-  // paint this row as selected too (#1204).
+  // paint this row as selected too.
   const focus = useAppSelector(selectSidebarFocus);
   return {
     ...derived,
