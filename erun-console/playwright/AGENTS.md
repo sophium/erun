@@ -8,12 +8,13 @@ This is a separate Yarn package, not part of the app's Vitest/tsc collection.
 Each suite stands up only its own dependencies and proves a boundary mocked
 fetch/WebSocket tests cannot:
 
-| Runner | Real boundary | Opt-in variable |
-| --- | --- | --- |
-| `yarn test` / `run.sh` | Browser OIDC/PKCE, Zitadel, JWKS, first-user bootstrap | `ERUN_E2E_CONSOLE_OIDC` |
-| `yarn test:mcp-operate-scope` | Cross-origin JSON-RPC and capability refusal | `ERUN_E2E_CONSOLE_MCP_OPERATE` |
-| `yarn test:mcp-attach-session` | TLS WebSocket, fresh-pod dtach/PTY | `ERUN_E2E_CONSOLE_MCP_ATTACH` |
-| `yarn test:rest-surfaces` | Alias/context/tenant API writes | `ERUN_E2E_CONSOLE_REST` |
+| Runner                         | Real boundary                                          | Opt-in variable                   |
+| ------------------------------ | ------------------------------------------------------ | --------------------------------- |
+| `yarn test` / `run.sh`         | Browser OIDC/PKCE, Zitadel, JWKS, first-user bootstrap | `ERUN_E2E_CONSOLE_OIDC`           |
+| `yarn test:mcp-operate-scope`  | Cross-origin JSON-RPC and capability refusal           | `ERUN_E2E_CONSOLE_MCP_OPERATE`    |
+| `yarn test:mcp-attach-session` | TLS WebSocket, fresh-pod dtach/PTY                     | `ERUN_E2E_CONSOLE_MCP_ATTACH`     |
+| `yarn test:rest-surfaces`      | Alias/context/tenant API writes                        | `ERUN_E2E_CONSOLE_REST`           |
+| `yarn test:landing-layout`     | Real-engine CSS layout of the signed-out front door    | `ERUN_E2E_CONSOLE_LANDING_LAYOUT` |
 
 ## Gating
 
@@ -81,3 +82,18 @@ even when the issuer survives the run. Never reuse operator identities.
 - Identity administration against a real Management API remains a disclosed gap;
   OIDC sign-in's Zitadel topology does not itself prove administration.
 - Local edge/TLS tests do not prove public services-zone ingress.
+
+## The landing-layout e2e
+
+- Provision no backend. The signed-out landing page renders from bundled
+  defaults, and platform discovery failing is its documented fallback path, so
+  this suite builds the bundle and serves it statically.
+- Assert `documentElement.scrollWidth - clientWidth`, the measurement the bug
+  was reported with. jsdom implements no layout — `scrollWidth` is always 0 —
+  so neither the Vitest suite nor a geometry sweep can substitute for this.
+- `overflow: clip` clips painting, not layout: a clipped element's bounding box
+  still overflows its parent. Assert the scroll region, never a bounding-box
+  sweep, for this defect class.
+- Keep the bleed assertions. A fix that deletes the decorative element, or
+  shrinks it back inside its parent's box, must fail rather than pass as "no
+  more overflow".

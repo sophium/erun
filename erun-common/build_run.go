@@ -276,7 +276,19 @@ func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCo
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
 }
 
+// runBuildExecution is the last point before this run's exit code is decided.
+// A plan that does nothing -- no release, no script, no linux build, no image,
+// no chart -- runs no work and tests nothing, so reporting success for it turns
+// "not tested" into "tested and green" for every caller reading the exit code.
+// That precondition is checked here, before the execution it guards.
 func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+	if !buildExecutionPlansWork(execution) {
+		return newEmptyBuildPlanError("the resolved plan has nothing to build or test")
+	}
+	return runResolvedBuildExecution(ctx, execution, deploySpecs, runGit, runScript, build, push, deploy)
+}
+
+func runResolvedBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if execution.release != nil {
 		// The release owns the publish rather than following it: its stages run
 		// around the build+push so the version's images and charts exist, and

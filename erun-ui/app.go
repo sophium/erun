@@ -32,7 +32,7 @@ const (
 	envUsageEvent               = "env-usage"
 	envNodeEvent                = "env-node"
 	appCloseGateEvent           = "app-close-gate"
-	appSessionEnvVar            = "ERUN_UI_SESSION"
+	appSessionEnvVar            = eruncommon.DesktopSessionEnvVar
 )
 
 type erunUIStore interface {

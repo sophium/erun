@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
@@ -649,7 +650,9 @@ type ProjectEnvironmentConfig struct {
 	K8s                 ProjectK8sConfig    `yaml:"k8s,omitempty"`
 }
 
-// ProjectDockerConfig holds project-level docker settings per environment.
+// ProjectDockerConfig holds docker settings. In `docker:` at the top level of
+// .erun/config.yaml it is the project-wide default every environment inherits;
+// in environments.<env>.docker it is that environment's own settings.
 // Fingerprints maps an image name to its canonical content fingerprint as
 // published by release CI, so fresh dev clones can promote pinned base images
 // without rebuilding them while local Dockerfile edits still force a rebuild
@@ -657,11 +660,21 @@ type ProjectEnvironmentConfig struct {
 type ProjectDockerConfig struct {
 	Fingerprints map[string]string `yaml:"fingerprints,omitempty"`
 	// Platforms pins the docker --platform targets a non-release build/push mints
-	// for this environment (e.g. ["linux/amd64"]), for an environment whose
-	// cluster can only ever run one architecture. It never applies to a release
-	// build (`erun build --release`, `erun release`): those always publish every
-	// platform erun supports, since a release artifact must be deployable
-	// anywhere. Empty keeps the default multi-arch build.
+	// (e.g. ["linux/amd64"]), for a machine or cluster that can only ever run one
+	// architecture. It never applies to a release build (`erun build --release`,
+	// `erun release`): those always publish every platform erun supports, since a
+	// release artifact must be deployable anywhere.
+	//
+	// At the top level it is the project default, inherited by every environment
+	// that declares no platforms of its own — so a project whose machines are all
+	// single-architecture states that once instead of listing each environment,
+	// and an environment nobody remembered to list cannot silently fall back to
+	// the slow multi-arch path. An environment's own list wins outright, and an
+	// explicit empty list (`platforms: []`) opts that environment out of the
+	// project default and restores the built-in multi-arch build — the escape
+	// hatch for a generic environment name such as `local`, which can belong to a
+	// contributor's machine of any architecture. Absent or empty everywhere keeps
+	// the default multi-arch build.
 	Platforms []string `yaml:"platforms,omitempty"`
 }
 
@@ -675,9 +688,12 @@ type ReleaseConfig struct {
 }
 
 type ProjectConfig struct {
-	ContainerRegistries ContainerRegistries                 `yaml:"containerregistries,omitempty"`
-	Environments        map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
-	Release             ReleaseConfig                       `yaml:"release,omitempty"`
+	ContainerRegistries ContainerRegistries `yaml:"containerregistries,omitempty"`
+	// Docker holds project-wide docker defaults. An environment inherits any
+	// setting it does not declare itself; see DockerPlatformsForEnvironment.
+	Docker       ProjectDockerConfig                 `yaml:"docker,omitempty"`
+	Environments map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
+	Release      ReleaseConfig                       `yaml:"release,omitempty"`
 	// Platform holds the per-instance erunpaas platform configuration; empty for
 	// projects that do not run a platform deployment.
 	Platform PlatformConfig `yaml:"platform,omitempty"`
@@ -795,20 +811,45 @@ func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[
 	return out
 }
 
-// DockerPlatformsForEnvironment returns the configured docker --platform targets
-// for the given environment, or nil when none is set (keeping the default
-// multi-arch build).
+// DockerPlatformsForEnvironment returns the docker --platform targets a
+// non-release build/push mints for the given environment, or nil when the
+// environment is unpinned (keeping the default multi-arch build).
+//
+// An environment's own environments.<env>.docker.platforms wins outright. An
+// environment that declares none inherits the project-wide docker.platforms
+// default, so a project whose machines are all single-architecture does not
+// have to list each environment by name and a new environment cannot silently
+// fall back to the slow multi-arch path. A declared-but-empty list
+// (`platforms: []`) is the explicit opt-out from that default, which is how a
+// generic environment name such as `local` — one that can belong to a
+// contributor's machine of any architecture — stays unpinned.
 func (c ProjectConfig) DockerPlatformsForEnvironment(environment string) []string {
 	environment = strings.TrimSpace(environment)
-	if environment == "" || c.Environments == nil {
-		return nil
+	if environment != "" && c.Environments != nil {
+		if envConfig, ok := c.Environments[environment]; ok && envConfig.Docker.Platforms != nil {
+			return normalizedDockerPlatforms(envConfig.Docker.Platforms)
+		}
 	}
-	envConfig, ok := c.Environments[environment]
-	if !ok || len(envConfig.Docker.Platforms) == 0 {
-		return nil
+	return normalizedDockerPlatforms(c.Docker.Platforms)
+}
+
+// DockerPlatformsOrigin names where DockerPlatformsForEnvironment's value came
+// from, so a build trace says which config key decided the platform list.
+func (c ProjectConfig) DockerPlatformsOrigin(environment string) string {
+	environment = strings.TrimSpace(environment)
+	if environment != "" && c.Environments != nil {
+		if envConfig, ok := c.Environments[environment]; ok && envConfig.Docker.Platforms != nil {
+			return "environments." + environment + ".docker.platforms"
+		}
 	}
-	out := make([]string, 0, len(envConfig.Docker.Platforms))
-	for _, platform := range envConfig.Docker.Platforms {
+	return "docker.platforms (project default)"
+}
+
+// normalizedDockerPlatforms trims a configured platform list and reports an
+// empty result as nil, which reads as "unpinned" to every caller.
+func normalizedDockerPlatforms(platforms []string) []string {
+	out := make([]string, 0, len(platforms))
+	for _, platform := range platforms {
 		if platform = strings.TrimSpace(platform); platform != "" {
 			out = append(out, platform)
 		}
@@ -836,7 +877,53 @@ var (
 	ErrConfigCorrupted    = errors.New("config file cannot be unmarshaled")
 	ErrFailedToSaveConfig = errors.New("could not save struct to yaml file")
 	ErrNotInGitRepository = errors.New("cannot find git project")
+	// ErrUnusableStateName reports a tenant or environment that cannot name
+	// exactly one directory in the state tree. See validateStatePathSegment.
+	ErrUnusableStateName = errors.New("unusable tenant or environment name")
 )
+
+// validateStatePathSegment refuses a value the state tree cannot name a single
+// directory after. Every path under the config root is keyed by a tenant and an
+// environment, so each has to be one plain path segment: a value carrying
+// whitespace, a separator, a NUL, or no characters at all is not a name, and
+// joining a path with it does not fail -- it creates a directory beside the
+// real one. That is how display-shaped strings accumulate as stray state
+// directories nobody ever writes into: "<tenant> <environment>", or that pair
+// with a port appended, is how a label and a port-forward read, not how a path
+// is spelled. Refusing at the point the path is built tells the caller instead
+// of leaving the residue behind.
+func validateStatePathSegment(kind, value string) error {
+	switch {
+	case strings.TrimSpace(value) == "":
+		return fmt.Errorf("%w: %s is required", ErrUnusableStateName, kind)
+	case strings.TrimSpace(value) != value:
+		return fmt.Errorf("%w: %s %q has leading or trailing whitespace; pass the name itself", ErrUnusableStateName, kind, value)
+	case value == "." || value == "..":
+		return fmt.Errorf("%w: %s %q names no directory", ErrUnusableStateName, kind, value)
+	}
+	for _, r := range value {
+		switch {
+		case unicode.IsSpace(r):
+			return fmt.Errorf("%w: %s %q contains whitespace, so it names no single directory; a tenant and an environment are separate names, not one label", ErrUnusableStateName, kind, value)
+		case r == '/' || r == '\\':
+			return fmt.Errorf("%w: %s %q contains a path separator", ErrUnusableStateName, kind, value)
+		case r == 0:
+			return fmt.Errorf("%w: %s %q contains a NUL byte", ErrUnusableStateName, kind, value)
+		}
+	}
+	return nil
+}
+
+// validateReadableStatePathSegment is validateStatePathSegment for a read:
+// a name the state tree cannot hold is reported the way an environment that was
+// never configured is, so listing the tree skips a stray directory instead of
+// failing on it, and no read resolves outside the tree.
+func validateReadableStatePathSegment(kind, value string) error {
+	if err := validateStatePathSegment(kind, value); err != nil {
+		return fmt.Errorf("%w: %v", ErrNotInitialized, err)
+	}
+	return nil
+}
 
 func ERunConfigDir() (string, error) {
 	configHome := strings.TrimSpace(xdg.ConfigHome)
@@ -953,7 +1040,7 @@ func SaveERunConfig(config ERunConfig) error {
 	// Idempotent across repeated saves within one local day.
 	_ = writeRootConfigBackupIfDue(configFilePath, timeNow)
 
-	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, configFilePerm); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -983,6 +1070,9 @@ func LoadERunConfig() (ERunConfig, string, error) {
 
 func SaveTenantConfig(config TenantConfig) error {
 	config = NormalizeTenantConfig(config)
+	if err := validateStatePathSegment("tenant", config.Name); err != nil {
+		return err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -998,7 +1088,7 @@ func SaveTenantConfig(config TenantConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, configFilePerm); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -1014,6 +1104,9 @@ func NormalizeTenantConfig(config TenantConfig) TenantConfig {
 }
 
 func DeleteTenantConfig(tenant string) error {
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -1027,6 +1120,9 @@ func DeleteTenantConfig(tenant string) error {
 
 func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 	config := TenantConfig{}
+	if err := validateReadableStatePathSegment("tenant", tenant); err != nil {
+		return config, "", err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
@@ -1080,6 +1176,12 @@ func ListTenantConfigs() ([]TenantConfig, error) {
 }
 
 func SaveEnvConfig(tenant string, config EnvConfig) error {
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return err
+	}
+	if err := validateStatePathSegment("environment", config.Name); err != nil {
+		return err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -1103,7 +1205,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 	// backup dir is unwritable would be worse.
 	_ = writeEnvConfigBackupIfDue(configFilePath, timeNow)
 
-	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, configFilePerm); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -1111,6 +1213,12 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 }
 
 func DeleteEnvConfig(tenant, envName string) error {
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return err
+	}
+	if err := validateStatePathSegment("environment", envName); err != nil {
+		return err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -1124,6 +1232,12 @@ func DeleteEnvConfig(tenant, envName string) error {
 
 func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	config := EnvConfig{}
+	if err := validateReadableStatePathSegment("tenant", tenant); err != nil {
+		return config, "", err
+	}
+	if err := validateReadableStatePathSegment("environment", envName); err != nil {
+		return config, "", err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
@@ -1192,6 +1306,8 @@ func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
+	// Project config is the repository .erun/config.yaml: often tracked and
+	// shared, and carrying no credential, it keeps the ordinary 0644 mode.
 	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -1257,6 +1373,12 @@ func projectConfigPath(projectRoot string) (string, error) {
 	}
 	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
 }
+
+// configFilePerm is the mode for every file under the user config root: the root,
+// tenant and per-environment config.yaml and their dated backups. Those files hold
+// cluster admin tokens, and a file mode travels with the file into backups, tarballs
+// and support bundles, so it must not rely on the containing directory being 0700.
+const configFilePerm os.FileMode = 0o600
 
 // WriteFileAtomic writes via a sibling temp file, fsync, then rename so a crash
 // or kill mid-write leaves either the previous contents or no change at all —
