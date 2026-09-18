@@ -497,11 +497,17 @@ func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason 
 		session.pacingLastReason = reason
 	}
 	a.mu.Unlock()
-	label := strings.TrimSpace(row.name)
-	if label == "" {
-		label = row.id
+	// The id leads because it is the stable key every other surface uses — the
+	// nudge history state file, ERUN_ORCHESTRATOR_ID, and review-directory
+	// lookups. The display name is allowed to differ from it, so naming only the
+	// name left a log line and its state record uncorrelatable without reading
+	// config.yaml. The name follows parenthetically, but only when it adds
+	// information; the common id == name case stays exactly as it read before.
+	subject := strings.TrimSpace(row.id)
+	if name := strings.TrimSpace(row.name); name != "" && name != subject {
+		subject += " (" + name + ")"
 	}
-	log.Printf("erun-app: orchestrator %s pacing decision=%s quiet=%s", label, reason, elapsed.Round(time.Second))
+	log.Printf("erun-app: orchestrator %s pacing decision=%s quiet=%s", subject, reason, elapsed.Round(time.Second))
 }
 
 // rearmOrchestratorPacing clears the nudge count and the cap, so the next
