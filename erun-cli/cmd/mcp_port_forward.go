@@ -53,7 +53,7 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return localPort, nil
 	}
 
-	if reusableRecordedPortForward(ctx, "mcp", state, expectedState, localPort, canReachLocalMCPEndpoint) {
+	if reusableRecordedPortForward(ctx, "mcp", mcpPortForwardLogPath(statePath), state, expectedState, localPort, canReachLocalMCPEndpoint) {
 		return localPort, nil
 	}
 	args := kubectlMCPPortForwardArgs(result, localPort)
@@ -96,6 +96,7 @@ func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected m
 	adopted := expected
 	adopted.ProcessID = pid
 	adopted.LogPath = mcpPortForwardLogPath(statePath)
+	rotatePortForwardLogIfOversized(ctx, "mcp", adopted.LogPath)
 	if err := saveMCPPortForwardState(statePath, adopted); err != nil {
 		return false, fmt.Errorf("adopt MCP port-forward (PID %d): %w", pid, err)
 	}
@@ -109,12 +110,16 @@ func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected m
 // keeps holding the local port and answers nothing through it, so reusing it on
 // the strength of the recorded state alone leaves the environment unreachable
 // with nothing left to notice.
-func reusableRecordedPortForward(ctx common.Context, kind string, state, expected mcpPortForwardState, localPort int, carriesTraffic func(int) bool) bool {
+func reusableRecordedPortForward(ctx common.Context, kind, logPath string, state, expected mcpPortForwardState, localPort int, carriesTraffic func(int) bool) bool {
 	bound := canConnectLocalPort(localPort)
 	matches := stateMatchesMCPTarget(state, expected)
 	health := common.ClassifyPortForward(matches, bound, bound && carriesTraffic(localPort))
 	switch health {
 	case common.PortForwardServing:
+		// A serving forward is reused as-is and keeps writing to the log it
+		// opened when it started, so this touch is the only chance to re-apply
+		// the cap for as long as it stays up.
+		rotatePortForwardLogIfOversized(ctx, kind, logPath)
 		return true
 	case common.PortForwardStale:
 		ctx.Trace(fmt.Sprintf("%s: the port-forward on 127.0.0.1:%d holds the local port but its edge does not answer; re-establishing it", kind, localPort))

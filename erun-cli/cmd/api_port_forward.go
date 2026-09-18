@@ -51,7 +51,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return 0, nil
 	}
 
-	if reusableRecordedPortForward(ctx, "api", state, expectedState, localPort, canReachLocalAPIEndpoint) {
+	if reusableRecordedPortForward(ctx, "api", mcpPortForwardLogPath(statePath), state, expectedState, localPort, canReachLocalAPIEndpoint) {
 		return localPort, nil
 	}
 	args := kubectlAPIPortForwardArgs(result, localPort)
@@ -110,6 +110,7 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 	adopted := expected
 	adopted.ProcessID = pid
 	adopted.LogPath = mcpPortForwardLogPath(statePath)
+	rotatePortForwardLogIfOversized(ctx, "api", adopted.LogPath)
 	if err := saveMCPPortForwardState(statePath, adopted); err != nil {
 		return false, fmt.Errorf("adopt API port-forward (PID %d): %w", pid, err)
 	}

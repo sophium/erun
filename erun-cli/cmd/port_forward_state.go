@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,4 +75,24 @@ const portForwardLogMaxBytes = 5 * 1024 * 1024
 // cannot drift between them.
 func openPortForwardLog(logPath string) (*os.File, error) {
 	return common.OpenBoundedAppendLog(logPath, portForwardLogMaxBytes, 0o644)
+}
+
+// rotatePortForwardLogIfOversized re-applies that cap to a forward that is
+// already running. openPortForwardLog bounds the log only when a fresh one is
+// opened, and a healthy forward is deliberately reused rather than restarted
+// -- it holds the file it opened at start as its own stdout/stderr -- so a
+// forward that stays up for weeks never reaches that rotation again and grows
+// its log without bound. Called from the paths that find or adopt a live
+// forward, so every touch of one re-applies the same cap, and it also reclaims
+// a log that had already grown past it before this existed.
+//
+// Best-effort and silent on failure: rotation is diagnostics housekeeping and
+// must never stop a healthy forward from being reused.
+func rotatePortForwardLogIfOversized(ctx common.Context, kind, logPath string) {
+	if strings.TrimSpace(logPath) == "" {
+		return
+	}
+	if common.RotateOversizedLog(logPath, portForwardLogMaxBytes) {
+		ctx.Trace(fmt.Sprintf("%s: rotated oversized port-forward log %s (kept a %s.1 backup)", kind, logPath, logPath))
+	}
 }

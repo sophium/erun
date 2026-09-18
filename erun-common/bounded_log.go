@@ -20,16 +20,26 @@ func OpenBoundedAppendLog(path string, maxBytes int64, perm os.FileMode) (*os.Fi
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	rotateOversizedLog(path, maxBytes)
+	RotateOversizedLog(path, maxBytes)
 	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, perm)
 }
 
-// rotateOversizedLog replaces path+".1" with path when path has outgrown
-// maxBytes, so the live file the next writer appends to starts empty.
-func rotateOversizedLog(path string, maxBytes int64) {
+// RotateOversizedLog replaces path+".1" with path when path has outgrown
+// maxBytes, so the live file the next writer appends to starts empty. It
+// reports whether it actually rotated, which a caller re-checking a
+// long-lived writer's log -- rather than opening it -- needs in order to say
+// so; OpenBoundedAppendLog ignores the result because the open that follows is
+// what it is there for.
+//
+// Exported for the callers that hold an already-open file: a writer that is
+// deliberately reused (a healthy port-forward, say) keeps appending to the
+// file it opened at start, so the open-time rotation never runs again for as
+// long as it lives, and this is the only way to re-apply the cap.
+func RotateOversizedLog(path string, maxBytes int64) bool {
 	info, err := os.Stat(path)
 	if err != nil || info.Size() <= maxBytes {
-		return
+		return false
 	}
 	_ = os.Rename(path, path+".1")
+	return true
 }
