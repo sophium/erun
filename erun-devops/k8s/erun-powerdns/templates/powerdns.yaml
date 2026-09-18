@@ -306,7 +306,14 @@ spec:
               # NF-6 and the serial NF-4 whatever the leading name/TTL/class
               # columns look like.
               mname=$(printf '%s\n' "$soa" | awk '{ print $(NF-6) }')
-              if [ -n "$soa" ] && [ "$mname" != {{ printf "%s." . | quote }} ]; then
+              # pdnsutil prints the SOA MNAME relative to the zone's $ORIGIN, so
+              # an already-correct MNAME comes back WITHOUT the trailing dot a
+              # nameserver value is written with. Compare with a trailing dot
+              # stripped from both sides: a raw comparison never matches a real
+              # zone, so every bootstrap would rewrite the SOA and bump its
+              # serial while the stub-backed test still passed.
+              want_mname={{ . | quote }}
+              if [ -n "$soa" ] && [ "${mname%.}" != "${want_mname%.}" ]; then
                 serial=$(printf '%s\n' "$soa" | awk '{ print $(NF-4) }')
                 case "$serial" in '' | *[!0-9]*) serial=1 ;; esac
                 # The record content is changing, so move the serial forward: a

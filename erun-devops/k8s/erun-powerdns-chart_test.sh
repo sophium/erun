@@ -104,8 +104,16 @@ soa_line=$(line_of 'replace-rrset .* @ SOA' 0 "${script}")
     fail "the SOA MNAME rewrite must sit OUTSIDE the create-only guard (guard closes at line ${guard_fi}, rewrite at ${soa_line}) so existing zones are reconciled too"
 
 # --- 4. The correction is conditional, so an already-correct SOA is untouched ---
-grep -q '\[ "\$mname" != "ns1\.erunpaas\.com\." \]' "${script}" ||
-    fail "the SOA rewrite must be gated on the MNAME differing from the primary nameserver"
+# The guard must compare dot-insensitively. pdnsutil prints the SOA MNAME
+# relative to the zone's $ORIGIN, i.e. WITHOUT the trailing dot the configured
+# nameserver carries, so a raw field comparison never matches a real zone: the
+# SOA is rewritten -- and its serial bumped -- on every bootstrap, while an
+# idempotency assertion run only against a verbatim-round-tripping stub still
+# passes. Both sides are stripped.
+grep -qF '[ "${mname%.}" != "${want_mname%.}" ]' "${script}" ||
+    fail "the SOA rewrite must compare the MNAME with its trailing dot stripped on both sides"
+grep -qF 'want_mname="ns1.erunpaas.com"' "${script}" ||
+    fail "the expected MNAME must come from the primary platform.nameservers entry"
 
 # --- 5. The serial moves forward rather than back ---
 grep -q 'serial=\$((serial + 1))' "${script}" ||
@@ -143,7 +151,9 @@ shift
 case "${cmd}" in
 list-zone)
     [ -f "${FAKE_STATE}" ] || exit 1
-    # Real layout: name, TTL, class, SOA, then the 7-field RDATA.
+    # Real layout: a literal $ORIGIN header, then records as
+    # name, TTL, class, type, then the 7-field SOA RDATA.
+    printf '$ORIGIN .\n'
     printf '%s\t3600\tIN\tSOA\t%s\n' "$1" "$(cat "${FAKE_STATE}")"
     printf '%s\t3600\tIN\tNS\tns1.erunpaas.com.\n' "$1"
     ;;
@@ -157,7 +167,13 @@ add-record)
 replace-rrset)
     printf 'replace-rrset %s %s %s %s\n' "$1" "$3" "$4" "$5" >>"${FAKE_LOG}"
     case "$3" in
-    SOA) printf '%s\n' "$5" >"${FAKE_STATE}" ;;
+    SOA)
+        # Real pdnsutil prints the SOA MNAME/RNAME relative to the zone's
+        # $ORIGIN, i.e. with their trailing dots stripped. Model that here; a
+        # stub that round-trips the content verbatim hides the difference and
+        # passes a reconcile that churns on a real server.
+        printf '%s\n' "$5" | awk '{ sub(/\.$/, "", $1); sub(/\.$/, "", $2); print }' >"${FAKE_STATE}"
+        ;;
     esac
     ;;
 import-tsig-key | set-meta)
@@ -171,7 +187,8 @@ STUB
 chmod +x "${stub_bin}/pdnsutil"
 
 # A zone created by the pre-#2259 bootstrap: placeholder MNAME, live serial.
-FAKE_PLACEHOLDER="${placeholder} hostmaster.${zone}. 2026090202 10800 3600 604800 3600"
+# Undotted, exactly as pdnsutil prints it (it strips the trailing dot).
+FAKE_PLACEHOLDER="${placeholder%.} hostmaster.${zone} 2026090202 10800 3600 604800 3600"
 export FAKE_PLACEHOLDER
 printf '%s\n' "${FAKE_PLACEHOLDER}" >"${FAKE_STATE}"
 
@@ -179,7 +196,7 @@ PATH="${stub_bin}:${PATH}" sh "${script}" ||
     fail "the zone-bootstrap script must run to completion"
 
 repaired=$(cat "${FAKE_STATE}")
-[ "${repaired}" = "ns1.erunpaas.com. hostmaster.${zone}. 2026090203 10800 3600 604800 3600" ] ||
+[ "${repaired}" = "ns1.erunpaas.com hostmaster.${zone} 2026090203 10800 3600 604800 3600" ] ||
     fail "an EXISTING zone must be repaired in place: expected the real MNAME at serial 2026090203, got '${repaired}'"
 
 # Idempotent: a second bootstrap over the repaired zone must change nothing.
@@ -199,7 +216,7 @@ PATH="${stub_bin}:${PATH}" sh "${script}" ||
     fail "bootstrapping a missing zone must run to completion"
 fresh=$(cat "${FAKE_STATE}")
 case "${fresh}" in
-ns1.erunpaas.com.\ hostmaster."${zone}".*) : ;;
+ns1.erunpaas.com\ hostmaster."${zone}"\ *) : ;;
 *) fail "a freshly created zone must come out with the real MNAME, got '${fresh}'" ;;
 esac
 
