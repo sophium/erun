@@ -64,6 +64,13 @@ this file for the conventions below.
   `AISessionLaunchCommand`; do not add `--fork-session` on reattach.
 - Host bootstrap may seed missing pod config, never overwrite existing values.
   Environment-owned reconciliation belongs to `doctor --sync-config`.
+- An in-cluster cloud context names the cluster the current process itself runs
+  in, so it is already running: `CloudContextPreflight` must not refresh or
+  start it, and no working-hours gate applies (`isInClusterCloudContext` in
+  `cloud_context.go`, `cloud_context_in_cluster_test.go`). The default a pod's
+  injected env produces is that same sentinel. A power-managed context with no
+  instance ID is still a genuine `has no instance ID` error — the distinction
+  is in-cluster versus power-managed, never present versus missing.
 - Route an off-environment operation to where its state lives without requiring
   an interactive shell. Remote dispatch is routing, not convenience orchestration.
   Confirm mutations before dispatch, then pass the resolved confirmation to the
@@ -146,6 +153,19 @@ demonstrated:
   never automatically delete it. Preserve retryable version state.
 - Recheck the remote branch before building and reconcile a later move through
   bounded final-push recovery. Human scheduling cannot replace those checks.
+- Scope final-push recovery to the ref git actually rejected. One push carries
+  the base branch, develop and the tag, and only the base branch's own rejected
+  ref is repaired by rebasing it. A rejection on any other ref is reported as
+  what it is — the base branch did not move, so rebasing it is a no-op that
+  spends every attempt without ever fetching the rejected ref
+  (`release_remote.go`, `release_remote_push_rejection_test.go`). Keep the
+  integration golden that absorbs a base branch that genuinely moved.
+- Treat a final-push failure as post-publication, not as an interrupted release:
+  the images, charts and tag are already public, and the GitHub Release object is
+  created after the push, so it is absent. The failure must name the ref that did
+  not land, git's own reason, and the missing Release object as the gap; it must
+  never read as the pre-publication shape whose recovery deletes the tag and
+  resets the branch (`real_run_names_the_rejected_develop_and_does_not_rebase_main`).
 - Distinguish pod replacement from a missing supervisor in the same pod using
   the recorded pod identity (`EnvironmentJob.UnknownReasonKind`), not exit-code
   guesses. Preserve that cause through status and recovery reporting.

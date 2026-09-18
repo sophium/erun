@@ -21,7 +21,10 @@ composition and release invariants belong to root/shared logic, not chart policy
   `docker.fingerprints`. Derive, never guess, the fingerprint; update it with the
   published content. A changed base requires a new tag because `IfNotPresent`
   may retain the old digest. For dind, advance the trailing revision, update the
-  chart default, and clear/recompute the fingerprint.
+  chart default, and clear/recompute the fingerprint. Bumping `VERSION` alone
+  builds an image nothing deploys; `image-version_test.sh` fails the render gate
+  when a chart default and its `docker/<image>/VERSION` disagree, so the bump and
+  the default move together or neither lands.
 - Keep `ERUN_OUTPUTS_DIR` creation/export aligned in Dockerfile, chart, and
   entrypoint. Deliverables persist on the home PVC, separate from git work and
   paste attachments.

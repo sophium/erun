@@ -365,12 +365,18 @@ type uiTenantDashboard struct {
 	// PlatformIssuer/PlatformSubject prefill an enrollment request from the
 	// identity already in hand, once a bearer minted successfully — set even
 	// when the subsequent identity read itself failed (not-enrolled).
-	PlatformIssuer  string                    `json:"platformIssuer,omitempty"`
-	PlatformSubject string                    `json:"platformSubject,omitempty"`
-	User            *uiTenantDashboardUser    `json:"user,omitempty"`
-	Reviews         []uiTenantDashboardReview `json:"reviews,omitempty"`
-	MergeQueue      []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
-	Builds          []uiTenantDashboardBuild  `json:"builds,omitempty"`
+	PlatformIssuer  string                 `json:"platformIssuer,omitempty"`
+	PlatformSubject string                 `json:"platformSubject,omitempty"`
+	User            *uiTenantDashboardUser `json:"user,omitempty"`
+	// Users is the Users tab's roster: the tenant's users, read from
+	// GET /v1/users. Distinct from User above, which is the caller's own
+	// identity from whoami — the tab lists the tenant, not the caller, and an
+	// unreadable roster is reported on the panel rather than collapsing back
+	// to that one row.
+	Users      []uiTenantDashboardUser   `json:"users,omitempty"`
+	Reviews    []uiTenantDashboardReview `json:"reviews,omitempty"`
+	MergeQueue []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
+	Builds     []uiTenantDashboardBuild  `json:"builds,omitempty"`
 	// GateRuns is the Gates tab's own queue: what is being gated right now,
 	// and what recent gates decided, independent of whether the change
 	// gated is an erun review at all — see erun-backend-api/AGENTS.md's

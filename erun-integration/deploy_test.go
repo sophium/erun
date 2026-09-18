@@ -4429,6 +4429,55 @@ esac
 		golden.Equal(t, "deploy/in_pod_remote_agent_runtime_deploy_allowed", normalize.Apply(result.Combined))
 	})
 
+	t.Run("in_pod_runtime_env_runtime_deploy_refused", func(t *testing.T) {
+		// Regression: a runtime env's pod carries only the config projection the
+		// chart injected, which has no deploy block — so `deploy.components` is
+		// empty in there even when the env has a saved selection, the
+		// runtime-chart-alone fallback is reached for lack of information rather
+		// than by choice, and the deploy exited 0 having rolled one chart of the
+		// nine the operator selected. The refusal names the runtime chart it would
+		// have rolled alone and both remedies.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a blind in-pod runtime deploy:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_runtime_deploy_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_runtime_env_explicit_runtime_component_allowed", func(t *testing.T) {
+		// The other remedy the refusal names: naming the runtime release rolls the
+		// runtime chart alone from inside the pod, deliberately rather than by
+		// inference. The runtime-only rollout this env's bootstrap/heal path needs
+		// stays reachable in-pod.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--components", "team-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_explicit_runtime_component_allowed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_runtime_env_saved_selection_still_resolves", func(t *testing.T) {
+		// The guard fires on the empty-selection fallback, not on being in a pod:
+		// a runtime env whose deploy.components resolved to something — the host
+		// case, where the operator's own config store is the one being read — is a
+		// real selection and deploys exactly as before, in-pod identity and all.
+		// Only the runtime-chart-alone inference is refused.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"team-devops"})
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_saved_selection_still_resolves", normalize.Apply(result.Combined))
+	})
+
 	t.Run("in_pod_local_agent_component_deploy_allowed", func(t *testing.T) {
 		// A component chart carries no environment shape, so an in-pod
 		// local-agent deploy that selects only components keeps working — the
