@@ -95,8 +95,8 @@ An env created by this same run skips the reconcile entirely — it was written 
 
 `erun init` writes these files in this order:
 
-1. `~/.config/erun/<tenant>/tenant.yaml` (creating `~/.config/erun/<tenant>/` if missing).
-2. `~/.config/erun/<tenant>/<env>/config.yaml`.
+1. `<config-root>/<tenant>/config.yaml` (creating `<config-root>/<tenant>/` if missing).
+2. `<config-root>/<tenant>/<env>/config.yaml`.
 3. `<projectroot>/.erun/config.yaml`. Existing values are preserved; new defaults are merged.
 4. Helm-installs the runtime chart into the namespace `<tenant>-<environment>` — the repo-local chart when the project has one, otherwise the published `oci://<registry>/charts/erun-devops` chart pinned to the runtime version (see [`erun deploy`](/cli/deploy#where-the-runtime-chart-comes-from)).
 5. With `--remote`: writes the in-pod marker at `/home/erun/.erun/<tenant>/<env>/bootstrap.yaml`.
@@ -165,7 +165,7 @@ An env created by this same run skips the reconcile entirely — it was written 
 
 | Code | Cause | Exit code |
 |---|---|---|
-| `TENANT_NOT_CONFIGURED` | Resolved tenant has no `~/.config/erun/<tenant>/tenant.yaml`. | `1` |
+| `TENANT_NOT_CONFIGURED` | Resolved tenant has no `<config-root>/<tenant>/config.yaml`. | `1` |
 | `HOST_ENV_NO_SHELL` | The environment is a [host env](/concepts/environment-types#host) — no pod and no cluster to open a kubectl-exec shell into. Checked before every other step (before `KUBE_CONTEXT_MISSING`, before any port-forward). Message names the worktree directory to open directly instead. | `1` |
 | `KUBE_CONTEXT_MISSING` | `EnvConfig.kubernetescontext` is absent from `~/.kube/config`. | `1` |
 | `CLUSTER_UNREACHABLE` | Cluster API does not respond after 5 minutes. | `2` |
@@ -349,7 +349,7 @@ The dry-run trace names the decision per spec: `deploy: version <v> pinned; inst
 A tenant that publishes its own artifacts ships **umbrella** charts — the runtime `<tenant>-devops` and each `<tenant>-<component>` — that wrap the canonical `erun-<base>` chart as a subchart (dependency name `erun-<base>`, no alias; the `erun-build-env` / `erun-blueprint-platform` pattern). helm does **not** pass top-level `--set` values into subchart scope, so a by-reference deploy of such a chart would leave the wrapped subchart's `{{ required }}` `tenant`/`environment` unset (`tenant is required` at render). Deploy closes that gap for any chart it installs by reference whose name is tenant-prefixed (not the canonical `erun-<base>`):
 
 1. **Re-scopes the threaded `--set`s** under the subchart key `erun-<base>` (`--set-string erun-backend-api.tenant=<t>`, …), so every value erun resolves at deploy time — `tenant`/`environment`, ports, cloud context, MCP auth, `imageOverrides`, registry — reaches the wrapped subchart exactly as it would a chart installed directly. A canonical `erun-<base>` chart installed directly (the `erun` product tenant, or an explicitly selected `erun-*` chart) is **not** re-scoped — its top-level `--set`s already reach it.
-2. **Applies the chart's bundled `values.<env>.yaml`.** Before the rollout, deploy runs `helm pull <ref> --version <v> --untar --untardir <tmp>` and adds `-f <tmp>/<chart>/values.<env>.yaml`, forwarding the tenant's own authored per-env subchart values (pod-shape: `extraContainers`/`extraVolumes`/`extraEnv`/`extraRules`, and any overrides authored under the subchart key). This is the by-reference analogue of a worktree deploy's local `values.<env>.yaml`. The file is `-f`'d **before** any config-dir overlay (`~/.config/erun/<tenant>/<env>/values.yaml`), and the re-scoped `--set`s win over both — so erun-resolved values are authoritative and a key authored in the bundled file that erun also threads (e.g. `api.oidcAllowedIssuers`) is owned by erun, not the file.
+2. **Applies the chart's bundled `values.<env>.yaml`.** Before the rollout, deploy runs `helm pull <ref> --version <v> --untar --untardir <tmp>` and adds `-f <tmp>/<chart>/values.<env>.yaml`, forwarding the tenant's own authored per-env subchart values (pod-shape: `extraContainers`/`extraVolumes`/`extraEnv`/`extraRules`, and any overrides authored under the subchart key). This is the by-reference analogue of a worktree deploy's local `values.<env>.yaml`. The file is `-f`'d **before** any config-dir overlay (`<config-root>/<tenant>/<env>/values.yaml`), and the re-scoped `--set`s win over both — so erun-resolved values are authoritative and a key authored in the bundled file that erun also threads (e.g. `api.oidcAllowedIssuers`) is owned by erun, not the file.
 
 The dry-run trace shows the `helm pull … --untar` line before the `helm upgrade` line; the temp dir is removed after the rollout. Local (worktree) deploys are unchanged: a local runtime umbrella re-scopes via its Chart.yaml `erun-devops` dependency and `-f`s its worktree `values.<env>.yaml`; a local component umbrella `-f`s its worktree `values.<env>.yaml` (which is why authoring the nested subchart values there is still required for the worktree path).
 
@@ -556,8 +556,8 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 
 | Check id | What it inspects | Recovery if missing |
 |---|---|---|
-| `config.tenant` | `~/.config/erun/<tenant>/tenant.yaml` exists and parses. | Suggests `erun init <tenant>`. |
-| `config.environment` | `~/.config/erun/<tenant>/<env>/config.yaml` exists and parses. | Suggests `erun init <tenant> <env>`. |
+| `config.tenant` | `<config-root>/<tenant>/config.yaml` exists and parses. | Suggests `erun init <tenant>`. |
+| `config.environment` | `<config-root>/<tenant>/<env>/config.yaml` exists and parses. | Suggests `erun init <tenant> <env>`. |
 | `config.project` | `<projectroot>/.erun/config.yaml` exists. | Suggests `erun init`. |
 | `cluster.kube_context` | `EnvConfig.kubernetescontext` is in `~/.kube/config`. | Lists available contexts. |
 | `cluster.runtime_pod` | A pod matching the runtime-chart's labels is `Running` in `<tenant>-<env>`. | Suggests `erun open`. |
@@ -1118,7 +1118,7 @@ a pod start rather than a cold rebuild. In-pod processes are not: a stop ends wh
 ### What is removed
 
 1. The Kubernetes namespace `<tenant>-<env>` (cascades to every Deployment, PVC, Service, ConfigMap, Secret inside).
-2. The per-user env config directory `~/.config/erun/<tenant>/<env>/`.
+2. The per-user env config directory `<config-root>/<tenant>/<env>/`.
 3. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
 
 The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` are **not** removed; a later env with the same name overwrites them (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
