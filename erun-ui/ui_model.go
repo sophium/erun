@@ -383,11 +383,11 @@ type uiTenantDashboard struct {
 	// that would give the caller the access they were refused, so a restricted
 	// tab hands over the request instead of only naming what is missing.
 	// Absent when no role covers the access or the roles could not be read.
-	AccessRemedies map[string]uiAccessRemedy `json:"accessRemedies,omitempty"`
-	User           *uiTenantDashboardUser    `json:"user,omitempty"`
-	Reviews        []uiTenantDashboardReview `json:"reviews,omitempty"`
-	MergeQueue     []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
-	Builds         []uiTenantDashboardBuild  `json:"builds,omitempty"`
+	AccessRemedies map[string]eruncommon.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
+	User           *uiTenantDashboardUser                     `json:"user,omitempty"`
+	Reviews        []uiTenantDashboardReview                  `json:"reviews,omitempty"`
+	MergeQueue     []uiTenantDashboardReview                  `json:"mergeQueue,omitempty"`
+	Builds         []uiTenantDashboardBuild                   `json:"builds,omitempty"`
 	// GateRuns is the Gates tab's own queue: what is being gated right now,
 	// and what recent gates decided, independent of whether the change
 	// gated is an erun review at all — see erun-backend-api/AGENTS.md's
@@ -693,15 +693,15 @@ type uiReviewDetail struct {
 	// that would give the caller the access they were refused, so a denial
 	// hands over the request instead of only naming what is missing. Absent
 	// when no role covers the access or the roles could not be read.
-	AccessRemedies     map[string]uiAccessRemedy `json:"accessRemedies,omitempty"`
-	Error              string                    `json:"error,omitempty"`
-	Review             *uiTenantDashboardReview  `json:"review,omitempty"`
-	Comments           []uiReviewComment         `json:"comments,omitempty"`
-	CommentsRestricted string                    `json:"commentsRestricted,omitempty"`
-	CommentsError      string                    `json:"commentsError,omitempty"`
-	Builds             []uiTenantDashboardBuild  `json:"builds,omitempty"`
-	BuildsRestricted   string                    `json:"buildsRestricted,omitempty"`
-	BuildsError        string                    `json:"buildsError,omitempty"`
+	AccessRemedies     map[string]eruncommon.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
+	Error              string                                     `json:"error,omitempty"`
+	Review             *uiTenantDashboardReview                   `json:"review,omitempty"`
+	Comments           []uiReviewComment                          `json:"comments,omitempty"`
+	CommentsRestricted string                                     `json:"commentsRestricted,omitempty"`
+	CommentsError      string                                     `json:"commentsError,omitempty"`
+	Builds             []uiTenantDashboardBuild                   `json:"builds,omitempty"`
+	BuildsRestricted   string                                     `json:"buildsRestricted,omitempty"`
+	BuildsError        string                                     `json:"buildsError,omitempty"`
 	// QueuePosition is 1-based; 0 means the review is not in its target
 	// branch's merge queue right now.
 	QueuePosition int `json:"queuePosition,omitempty"`

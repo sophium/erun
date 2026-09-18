@@ -7,22 +7,11 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// uiAccessRemedy is the copyable hand-over a capability denial offers, keyed in
-// uiTenantDashboard.AccessRemedies/uiReviewDetail.AccessRemedies by the
-// restricted route it answers for. A denial that only names what the caller
-// lacks makes them work out who to ask, what to ask for in the platform's own
-// vocabulary, and how the administrator should run it; this is that work done
-// for them, the same hand-off the not-enrolled screen makes.
-type uiAccessRemedy struct {
-	Command  string `json:"command,omitempty"`
-	RoleName string `json:"roleName,omitempty"`
-}
-
 // loadAccessRemedy resolves the copyable grant for a single restricted route,
 // for the surfaces that record one refusal rather than a panel's set. nil
 // means there is no command to hand over, which every caller renders as the
 // plain sentence it already had.
-func loadAccessRemedy(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, userID string, read string) *uiAccessRemedy {
+func loadAccessRemedy(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, userID string, read string) *eruncommon.PlatformAccessRemedy {
 	remedies := loadAccessRemedies(ctx, client, capabilities, userID, read)
 	if len(remedies) == 0 {
 		return nil
@@ -40,6 +29,10 @@ func canReadTenantRoles(capabilities eruncommon.PlatformCapabilities) bool {
 	return !capabilities.Known() || capabilities.Allows(http.MethodGet, "/v1/roles")
 }
 
+// The remedy values are eruncommon.PlatformAccessRemedy, the one type both
+// this and a denial's own sentence name the role from — a second local shape
+// would be a copy that can drift from the command it describes.
+//
 // loadAccessRemedies resolves the copyable grant for each restricted route in
 // reads. It reads the tenant's roles once, and only when at least one read was
 // actually refused and the caller may read the role list at all: a caller who
@@ -51,7 +44,7 @@ func canReadTenantRoles(capabilities eruncommon.PlatformCapabilities) bool {
 // the caller's own user id is unknown, or no role covers the missing access —
 // in that last case there is genuinely no command to hand over, since a role
 // has to exist before anyone can be granted it.
-func loadAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, userID string, reads ...string) map[string]uiAccessRemedy {
+func loadAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, userID string, reads ...string) map[string]eruncommon.PlatformAccessRemedy {
 	missing := make([]string, 0, len(reads))
 	for _, read := range reads {
 		if read != "" {
@@ -65,7 +58,7 @@ func loadAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, 
 	if err != nil {
 		return nil
 	}
-	remedies := make(map[string]uiAccessRemedy, len(missing))
+	remedies := make(map[string]eruncommon.PlatformAccessRemedy, len(missing))
 	for _, read := range missing {
 		method, apiPath, ok := eruncommon.SplitCapabilityRead(read)
 		if !ok {
@@ -75,7 +68,7 @@ func loadAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, 
 		if !found {
 			continue
 		}
-		remedies[read] = uiAccessRemedy{Command: remedy.Command, RoleName: remedy.RoleName}
+		remedies[read] = remedy
 	}
 	if len(remedies) == 0 {
 		return nil
