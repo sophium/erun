@@ -52,6 +52,14 @@ composition and release invariants belong to root/shared logic, not chart policy
   mount-source clones. Keep mutable Terraform state, plans, and provider data on
   the home PVC, outside the read-only baked tree. Test adoption/linking preservation
   and interrupted-run recovery.
+- Agent MCP configuration is reconciled once per container boot, never per shell.
+  The shell hook is sourced by every interactive shell and every `sh -lc` remote
+  exec, so run each configure script under one container-lifetime claim
+  (`/tmp/erun-agent-config`, tests via `ERUN_AGENT_CONFIG_STATE_DIR`), never the
+  home PVC. `entrypoint_test.sh` locks exactly-once structurally, not by wall clock.
+- The IMDS region probe pays one timeout, not two. Where nothing answers the
+  link-local address the probe drains curl's whole budget; skip the IMDSv1 fallback
+  on that timeout and bound the connect phase. Keep both halves.
 
 ## Runtime Chart Rules
 
@@ -144,8 +152,11 @@ composition and release invariants belong to root/shared logic, not chart policy
   Enable with either a base domain or explicit apex, support explicit disable, and
   record the resolved state/reason in the status ConfigMap. Share certificate SANs
   and Secret without racing a second issuer request; DNS is separate configuration.
-  Preserve canonical OIDC origin. Nginx's SPA fallback must not return HTML for
-  missing hashed assets.
+  Preserve canonical OIDC origin. Nginx's SPA fallback must not return HTML for a
+  missing static asset: carve out any request whose final path segment carries a
+  file extension, not just the `/assets/` prefix, so a root-level file
+  (`favicon.svg`) or a probed `/favicon.ico` 404s instead of serving the shell.
+  The `/v1/` proxy location takes `^~` so it stays ahead of that regex location.
 
 ## Wrapping And Pinning Third-Party Service Images
 
@@ -190,8 +201,52 @@ composition and release invariants belong to root/shared logic, not chart policy
   is a different artifact even without source changes. Snapshot identity uses its
   stable base-snapshot value. Promotion requires every requested architecture;
   do not silently reuse an incomplete platform set.
+- **Incremental promotion never skips a Dockerfile matching the test-stage-gate
+  convention (`AS test` plus a later `COPY --from=test`), however unchanged its
+  inputs are.** A matching fp-tagged image proves the *inputs* are unchanged, not
+  that the gate ran: promoting one reports the same exit 0 as a build that actually
+  ran `make check`. Detect the convention by Dockerfile content
+  (`dockerfileHasGateTestStage`), always rebuild such a Dockerfile instead of
+  promoting it, and refuse outright if a build is ever marked both `GateTestStage`
+  and `Promote`. This is deliberately narrower than disabling the Docker build
+  cache generally: BuildKit's per-instruction layer cache inside a real
+  `docker build` is untouched. `build_gate_test_stage_test.go` locks the detection
+  and the refusal.
 - Previews show concrete commands for the operations selected, without adding
   build/push actions to a pure deploy.
+- **A test needing a real container runtime is reachable from a `RUN` step only
+  once the BuildKit `network.host` entitlement is granted, which `erun build` does
+  not pass yet (#2091).** Plain `docker build` refuses `RUN --network=host` with
+  `network.host is not allowed`; `docker build --allow network.host` lifts it, with
+  no separate container-driver builder instance needed. Verified live in this repo's
+  own `remote-agent` pod: with the flag, a `RUN --network=host` step reached the
+  pod's own dind sidecar at `DOCKER_HOST=tcp://127.0.0.1:2375` and ran a real
+  container end to end. That TCP endpoint is not deliberately wired up — it exists
+  because the dind sidecar always runs with `DOCKER_TLS_CERTDIR=""`, and the
+  vendored `docker:*-dind` image then adds an insecure `--host=tcp://0.0.0.0:2375`
+  listener bound to *all* interfaces, with no authentication, reachable by anything
+  sharing the pod's network namespace. That is a real pre-existing exposure this
+  repo has not hardened to loopback-only. Until `erun build` passes the flag
+  itself, a component Dockerfile adding `RUN --network=host` fails an `erun build`
+  with that exact refusal even though the daemon behind it is already reachable.
+- **Under that entitlement a test may start its own container-runtime fixture; two
+  classes never belong in a `test` stage.** In scope: a Testcontainers-style
+  ephemeral dependency (a postgres, a compose-style sidecar) via
+  `RUN --network=host` + `DOCKER_HOST=tcp://127.0.0.1:2375` — it needs a daemon, not
+  a deployment, and the build already has one. Out of scope permanently: a test
+  needing the build's own output (`erun-ui/playwright` needs a built `erun-app`, and
+  this stage cannot depend on the `builder` stage it gates without inverting the
+  marker order), and a test asserting a deployed version (that runs after `deploy`,
+  per the `/pipeline` convention, never during build). The concrete in-scope
+  instances are `erun-backend-db/migrate_test.sh`, `retention*_test.sh`,
+  `schema_drift_test.sh`, and `erun-console/nginx_test.sh` — each needs only a real
+  docker daemon (`migrate_test.sh` additionally needs the atlas CLI, a toolchain
+  `COPY` away) — and none is migrated into a component `test` stage yet: they remain
+  the root Makefile's `test-postgres-restart`/`test-retention`/
+  `test-retention-grants`/`test-schema-drift`/`test-console-nginx` targets, run by
+  hand or via `erun exec job` before merging a change to the behavior they cover.
+  Retiring them in favor of in-build test stages is tracked at the same issue as the
+  `erun build` entitlement above.
 
 ## Release Workflow
 

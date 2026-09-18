@@ -62,3 +62,16 @@ func migrateLegacyPortForwardState(legacyPath, newPath string) {
 func portForwardLogPath(statePath string) string {
 	return strings.TrimSuffix(statePath, filepath.Ext(statePath)) + ".log"
 }
+
+// portForwardLogMaxBytes bounds each kubectl port-forward log. A log that
+// outgrows it is rolled to its ".1" generation before the next forward appends,
+// so the busiest environment cannot fill the disk, while a log under the cap is
+// left untouched and stays readable.
+const portForwardLogMaxBytes = 5 * 1024 * 1024
+
+// openPortForwardLog opens the log a kubectl port-forward writes to, rotating
+// an over-cap log first. All three forwards share it so the bounding rule
+// cannot drift between them.
+func openPortForwardLog(logPath string) (*os.File, error) {
+	return common.OpenBoundedAppendLog(logPath, portForwardLogMaxBytes, 0o644)
+}

@@ -6,7 +6,7 @@
 # in this directory (rendered by the base image's own envsubst-on-templates
 # entrypoint, exactly as erun-devops/k8s/erun-console/templates/console.yaml
 # configures it), against a synthetic static tree standing in for a Vite
-# `dist/` build. Locks three properties directly against a real running nginx,
+# `dist/` build. Locks five properties directly against a real running nginx,
 # not a config-syntax check:
 #
 #   1. A missing content-hashed asset under /assets/ 404s -- it must never
@@ -19,7 +19,14 @@
 #      serving to get (1).
 #   3. /healthz and /version.json serve their own content and are not
 #      swallowed by the SPA catch-all either.
-#   4. /healthz emits exactly one Content-Type header. `return 200 "ok"`
+#   4. A real root-level static file copied from erun-console/public/ (e.g.
+#      favicon.svg) still serves, and a missing one, or a conventional path a
+#      browser/crawler probes but this build never shipped (/favicon.ico,
+#      /robots.txt), 404s the same as a missing /assets/ file -- the static
+#      carve-out is scoped to "has a file extension", not to the /assets/
+#      prefix alone, or a stale favicon reference or a probed robots.txt would
+#      still masquerade as a 200 HTML SPA shell.
+#   5. /healthz emits exactly one Content-Type header. `return 200 "ok"`
 #      inherits the server's default_type (application/octet-stream from the
 #      base image's nginx.conf), and `add_header` appends rather than
 #      replaces, so pairing it with `add_header Content-Type text/plain`
@@ -61,6 +68,7 @@ mkdir -p "${workdir}/html/assets"
 printf 'SPA-SHELL\n' >"${workdir}/html/index.html"
 printf '// real asset\n' >"${workdir}/html/assets/real.js"
 printf '{"version":"test-1.2.3"}\n' >"${workdir}/html/version.json"
+printf '<svg>real favicon</svg>\n' >"${workdir}/html/favicon.svg"
 
 # Render the real template ourselves (the same three substitutions the base
 # image's own docker-entrypoint.d/20-envsubst-on-templates.sh performs) rather
@@ -138,7 +146,13 @@ assert_body "/healthz" "ok"
 assert_status "/version.json" "200"
 assert_body "/version.json" '{"version":"test-1.2.3"}'
 
-# --- 4. /healthz emits exactly one Content-Type header (erun#2402) ---
+# --- 4. Root-level static files (outside /assets/) follow the same rule ---
+assert_status "/favicon.svg" "200"
+assert_body "/favicon.svg" "<svg>real favicon</svg>"
+assert_status "/favicon.ico" "404"
+assert_status "/robots.txt" "404"
+
+# --- 5. /healthz emits exactly one Content-Type header (erun#2402) ---
 assert_single_content_type "/healthz"
 
-echo "OK: missing assets 404, app routes and existing assets serve correctly, healthz/version.json are not swallowed by the SPA fallback, healthz emits exactly one Content-Type header"
+echo "OK: missing static-looking paths 404 (under /assets/ and at the root), app routes and existing static files serve correctly, healthz/version.json are not swallowed by the SPA fallback, healthz emits exactly one Content-Type header"

@@ -1,6 +1,7 @@
 import type * as React from 'react';
 
 import type { OidcConfig } from '../auth/auth';
+import { BUNDLED_BRAND } from './brand';
 import { BrandMark } from './BrandMark';
 import { DEFAULT_DESCRIPTION, DEFAULT_TAGLINE } from './landingContent';
 import { LandingDifferentiators } from './LandingDifferentiators';
@@ -31,7 +32,7 @@ export function LandingScreen({
   oidc: OidcConfig | undefined;
   fallbackReason: string | undefined;
 }): React.ReactElement {
-  const brandLabel = brand !== undefined && brand.length > 0 ? brand : 'ERun';
+  const brandLabel = brand !== undefined && brand.length > 0 ? brand : BUNDLED_BRAND;
   const heroTagline = tagline !== undefined && tagline.length > 0 ? tagline : DEFAULT_TAGLINE;
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground">

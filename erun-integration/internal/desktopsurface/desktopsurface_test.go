@@ -292,6 +292,60 @@ func TestFindMissingDesktopSurfaceStillFlagsAWailsBoundRouteWithNoRealReference(
 	}
 }
 
+// TestFindMissingDesktopSurfaceClearsAFlagSpelledInCamelCase locks the second
+// spelling a CLI flag legitimately appears under: a frontend request model
+// names the same dimension "waitingOnMe", never the kebab-case flag name the
+// CLI parses.
+func TestFindMissingDesktopSurfaceClearsAFlagSpelledInCamelCase(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "review list --waiting-on-me", Source: "CLI flag", Tokens: []string{"waiting-on-me", "waitingOnMe"}},
+	}
+	frontend := FrontendSource("const filter = { waitingOnMe: true }")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 0 {
+		t.Fatalf("want the flag cleared by its camelCase spelling, got %+v", missing)
+	}
+}
+
+// TestFindMissingDesktopSurfaceFlagsAFlagWhoseCommandIsSurfacedButDimensionIsNot
+// is the classifier-level statement of the granularity change: the command
+// token is all over the source and the flag's own dimension is nowhere, and
+// the flag must still be flagged. Command granularity cleared exactly this.
+func TestFindMissingDesktopSurfaceFlagsAFlagWhoseCommandIsSurfacedButDimensionIsNot(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "review_list", Source: "MCP tool", Token: "list"},
+		{Name: "review list --author-user-id", Source: "CLI flag", Tokens: []string{"author-user-id", "authorUserId"}},
+	}
+	frontend := FrontendSource("export function ReviewList() { return reviewList() }")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 1 || missing[0].Capability.Name != "review list --author-user-id" {
+		t.Fatalf("want only the flag flagged while its command clears, got %+v", missing)
+	}
+	if msg := missing[0].Message(); !strings.Contains(msg, "authorUserId") {
+		t.Fatalf("want Message() to name every spelling it searched for, got %q", msg)
+	}
+}
+
+// TestFindMissingDesktopSurfaceRequiresEveryTokenToBeAbsentBeforeFlagging is
+// the any-of half of the Tokens contract: one spelling present is enough, so
+// the gate does not demand a frontend use both.
+func TestFindMissingDesktopSurfaceRequiresEveryTokenToBeAbsentBeforeFlagging(t *testing.T) {
+	capabilities := []Capability{
+		{Name: "expose --no-tls", Source: "CLI flag", Tokens: []string{"no-tls", "noTls"}},
+	}
+	frontend := FrontendSource("<Checkbox name=\"no-tls\" />")
+
+	missing := FindMissingDesktopSurface(capabilities, frontend)
+
+	if len(missing) != 0 {
+		t.Fatalf("want the flag cleared by its kebab-case spelling alone, got %+v", missing)
+	}
+}
+
 func TestFindUnboundAppMethodsFlagsAnUnexportedMethodWithNoOtherCaller(t *testing.T) {
 	decls := []AppMethodDecl{
 		{Name: "whipOrchestratorNow", Exported: false, File: "orchestrator_pacing.go", Line: 289, IdentUses: 0},

@@ -252,7 +252,7 @@ erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops
 Require the environment's MCP edge to authenticate, recording the key for later deploys:
 
 ```bash
-erun deploy team dev --version 1.2.3 --mcp-auth-public-key ~/.config/erun/desktopid.pub
+erun deploy team dev --version 1.2.3 --mcp-auth-public-key ~/.config/ERun/desktopid.pub
 ```
 
 Turn that authentication back off on purpose:
