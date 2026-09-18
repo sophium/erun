@@ -689,8 +689,29 @@ func runtimeUsageWarnings(u RuntimeUsage) []string {
 	}
 	if u.Dind != nil {
 		warnings = append(warnings, runtimeMemoryUsageWarnings("erun-dind: ", u.Dind.Memory)...)
+		warnings = append(warnings, runtimeBuildThrottleWarnings(u.Dind)...)
 	}
 	return warnings
+}
+
+// runtimeBuildThrottleWarnings reports a build the sidecar's own cap is
+// starving. The sidecar's CPU line alone cannot raise this: throttling is
+// visible only in cpu.stat's nr_throttled, and a build held at its cap and a
+// build merely busy at it read the same utilisation percentage. It matters
+// operationally -- starvation is what turns a lint step into a timeout -- so a
+// throttled build is named as starvation rather than left for an operator to
+// infer from a percentage that happens to sit at 100.
+//
+// Both counters are cumulative for the sidecar's lifetime, so any throttling
+// at all is worth saying out loud; an unreadable CPU reading has no counters
+// to speak from and stays silent.
+func runtimeBuildThrottleWarnings(dind *RuntimeDindUsage) []string {
+	if dind == nil || dind.CPU.Unavailable != "" || dind.CPU.Periods <= 0 || dind.CPU.ThrottledPeriods <= 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"the build was throttled in %d of %d cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment",
+		dind.CPU.ThrottledPeriods, dind.CPU.Periods)}
 }
 
 // runtimeMemoryUsageWarnings takes a scope label ("" for the runtime

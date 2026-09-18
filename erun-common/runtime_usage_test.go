@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -625,6 +626,111 @@ func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 	}
 	if usage.Memory.CurrentBytes != 100 {
 		t.Errorf("expected the runtime container's own reading to still come through, got %+v", usage.Memory)
+	}
+}
+
+// TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap is the regression
+// guard for this defect: a build pinned at its cap and a build merely busy at
+// it report the same utilisation percentage, so a build starved by its own
+// quota reads as a running build making no progress and nothing in the
+// reading says why. nr_throttled over nr_periods is the counter that
+// separates the two, and it has to be said out loud rather than left for an
+// operator to infer from a percentage that happens to sit at 100.
+func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
+	runtimeReading := strings.Join([]string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=104857600",
+		"memory_max=24696061952",
+		"memory_peak=104857600",
+		"memory_oom_kill=0",
+		"cpu_max=1200000 100000",
+		"cpu_usage_before=1000000",
+		"cpu_usage_after=1003000",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	}, "\n")
+	dindReading := func(cpuMax string, periods, throttled int64) string {
+		return strings.Join([]string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=2040109465",
+			"memory_max=15032385536",
+			"memory_peak=3435973836",
+			"memory_oom_kill=0",
+			"cpu_max=" + cpuMax,
+			"cpu_usage_before=1000000",
+			"cpu_usage_after=2900000",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			fmt.Sprintf("cpu_periods=%d", periods),
+			fmt.Sprintf("cpu_throttled_periods=%d", throttled),
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		}, "\n")
+	}
+
+	const throttleWarning = "the build was throttled in 200 of 200 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
+
+	cases := []struct {
+		name        string
+		dindReading string
+		wantWarning string
+	}{
+		{
+			// The reported failure: every period the cap granted was throttled,
+			// and the reading carried no warning saying so.
+			name:        "a build throttled in every period",
+			dindReading: dindReading("400000 100000", 200, 200),
+			wantWarning: throttleWarning,
+		},
+		{
+			name:        "a build working at its cap without being throttled",
+			dindReading: dindReading("400000 100000", 200, 0),
+			wantWarning: "",
+		},
+		{
+			name:        "no scheduling periods observed",
+			dindReading: dindReading("400000 100000", 0, 0),
+			wantWarning: "",
+		},
+		{
+			// The counters parse even when the quota does not, so an
+			// unavailable CPU reading must not warn off numbers it could not
+			// interpret.
+			name:        "an unreadable quota with throttled periods behind it",
+			dindReading: dindReading("max 100000", 200, 200),
+			wantWarning: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+			runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+				if container == runtimeDindContainerName {
+					return RemoteCommandResult{Stdout: tc.dindReading}, nil
+				}
+				return RemoteCommandResult{Stdout: runtimeReading}, nil
+			}
+
+			usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+			if err != nil {
+				t.Fatalf("RunRuntimeUsage: %v", err)
+			}
+			if tc.wantWarning == "" {
+				for _, warning := range usage.Warnings {
+					if strings.Contains(warning, "throttled in") {
+						t.Fatalf("expected no build-throttling warning, got %q", warning)
+					}
+				}
+				return
+			}
+			for _, warning := range usage.Warnings {
+				if warning == tc.wantWarning {
+					return
+				}
+			}
+			t.Fatalf("expected the build-throttling warning\n  %q\ngot warnings %q", tc.wantWarning, usage.Warnings)
+		})
 	}
 }
 
