@@ -31,8 +31,8 @@ func ResolveCurrentDockerBuildSpecs(ctx Context, store DockerStore, findProjectR
 // ErrBuildPlanEmpty reports a build that resolved no work at all: no docker
 // images, no linux package builds, no project build script, no charts, no
 // release. Nothing about such a plan is a pass -- running it builds nothing and
-// tests nothing -- so resolution refuses it here rather than letting the
-// caller's exit code read as a green gate.
+// tests nothing -- so both the resolution and execution boundaries refuse it
+// rather than letting the caller's exit code read as a green gate.
 var ErrBuildPlanEmpty = errors.New("build resolved nothing to build")
 
 func newEmptyBuildPlanError(reason string) error {
