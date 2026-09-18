@@ -1,3 +1,4 @@
+Dry run: erun upgrade planned.
 audit: erun upgrade --dry-run team
 upgrade: tenant=team environment= version-override= force=false fleet=false gate-environment=
 upgrade: team/agent opted in, channel=snapshot current=<VERSION>
@@ -11,4 +12,4 @@ upgrade: team/prod up to date at <VERSION>
     2. team/prod [stable] <VERSION> -> <VERSION>  (up to date)
 upgrade: team/agent up to date at <VERSION>, skipping
 upgrade: team/prod up to date at <VERSION>, skipping
-==> Upgrade complete: 0 upgraded, 2 up to date, 0 unresolved, 0 failed
+==> Dry run: would upgrade 0, 2 up to date, 0 unresolved, 0 failed

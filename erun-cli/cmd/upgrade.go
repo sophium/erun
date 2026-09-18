@@ -108,7 +108,7 @@ func runUpgrade(ctx common.Context, store common.DeployStore, target common.Upgr
 	}
 	if len(plan.Items) == 0 {
 		ctx.Info("==> No environments" + upgradeScopeReason(target) + scopeSuffix(target))
-		return nil
+		return printUpgradeDryRunMarker(ctx)
 	}
 	lagging := plan.Lagging()
 	ctx.Info(fmt.Sprintf("==> Upgrade plan: %d member(s), %d lagging, in this order:", len(plan.Items), len(lagging)))
@@ -120,6 +120,9 @@ func runUpgrade(ctx common.Context, store common.DeployStore, target common.Upgr
 	}
 
 	result := common.RunUpgradePlan(ctx, plan, deploy)
+	if err := printUpgradeDryRunMarker(ctx); err != nil {
+		return err
+	}
 	if len(result.Failed) > 0 {
 		names := make([]string, 0, len(result.Failed))
 		for _, failure := range result.Failed {
@@ -128,6 +131,18 @@ func runUpgrade(ctx common.Context, store common.DeployStore, target common.Upgr
 		return fmt.Errorf("upgrade: %d environment(s) failed: %s", len(result.Failed), strings.Join(names, ", "))
 	}
 	return nil
+}
+
+// printUpgradeDryRunMarker prints the unambiguous terminal line the dry-run
+// convention uses elsewhere (e.g. `erun exec plan-ruleset-bypass --dry-run`),
+// so a fleet-wide "--fleet"/"--gate-environment" preview can never read as a
+// completed rollout no matter how many members the resolved plan announces.
+func printUpgradeDryRunMarker(ctx common.Context) error {
+	if !ctx.DryRun {
+		return nil
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun upgrade planned.")
+	return err
 }
 
 func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, force bool) common.UpgradeItemDeployer {
