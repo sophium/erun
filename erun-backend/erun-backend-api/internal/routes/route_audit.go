@@ -96,9 +96,11 @@ var InternalAPIRoutes = map[string]bool{
 // (desktopsurface.FindStaleBaselineEntries, erun-integration/AGENTS.md
 // § "Desktop-surface gate" § "Baseline for pre-existing gaps"): a route that
 // gains a real reference in either tree must be removed from this map in the
-// same change, or the gate fails, so an entry cannot outlive the gap it
-// records. Closing one out means giving it that surface, or moving it to
-// InternalAPIRoutes above with the reason it needs none.
+// same change, or the gate fails. That check reads the routes the API
+// registers, so it catches an entry whose gap has since been closed, but not
+// one whose route no longer exists at all: remove an entry here by hand when
+// the route itself goes. Closing one out means giving it that surface, or
+// moving it to InternalAPIRoutes above with the reason it needs none.
 //
 // What remains needs a surface too large for a single change: erun's own
 // hosted release view (the "GET /v1/releases" family entries, plus the
