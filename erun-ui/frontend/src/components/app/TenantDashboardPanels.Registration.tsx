@@ -100,22 +100,34 @@ function ContextsList({ data }: { data: TenantDashboardData }): React.ReactEleme
   }
   const contexts = data?.contexts ?? [];
   if (contexts.length === 0) {
+    // "Register one below" is only true for the caller who gets
+    // CreateContextForm; for everyone else that section is a permission
+    // notice, which is what this copy points at instead.
     return (
       <EmptyState
         icon={<Cloud />}
         heading="No cloud contexts registered"
-        body="A cloud context is the managed cluster a hosted environment deploys into. Register one below."
+        body={
+          data?.canCreateContext === true
+            ? 'A cloud context is the managed cluster a hosted environment deploys into. Register one below.'
+            : 'A cloud context is the managed cluster a hosted environment deploys into. Registering one needs additional access — the notice below says what is missing.'
+        }
       />
     );
   }
   return <ContextsTable contexts={contexts} />;
 }
 
-function CreateContextForm({ data }: { data: TenantDashboardData }): React.ReactElement | null {
+function CreateContextForm({ data }: { data: TenantDashboardData }): React.ReactElement {
   const dispatch = useAppDispatch();
   const draft = useAppSelector((state) => state.tenantDashboard.registration);
   if (data?.canCreateContext !== true) {
-    return null;
+    return (
+      <PermissionNotice>
+        You can see this tab, but registering a cloud context needs additional access. Ask an
+        administrator.
+      </PermissionNotice>
+    );
   }
   const busy = draft.creatingContext;
   const canSubmit =
