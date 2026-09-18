@@ -72,9 +72,12 @@ export function PinVersionDialog(): React.ReactElement {
           <DialogTitle>Change erun version</DialogTitle>
           <DialogDescription>
             Re-pins every erun reference for <span className="font-mono">{label}</span> together —
-            the Terraform module refs, each umbrella chart’s erun dependencies, the build-env image
-            tag, and the environment’s runtime version. Nothing is deployed: realizing the version
-            stays a separate <span className="font-mono">terraform apply</span> and{' '}
+            the Terraform module refs, an erun image reference set directly in Terraform variables
+            (e.g. the cluster-edge module’s <span className="font-mono">dns01_webhook_image</span>),
+            each umbrella chart’s erun dependencies, the build-env image tag, a stated runtime chart
+            or runtime image naming erun’s own stock release, and the environment’s runtime version.
+            Nothing is deployed: realizing the version stays a separate{' '}
+            <span className="font-mono">terraform apply</span> and{' '}
             <span className="font-mono">deploy</span>.
           </DialogDescription>
         </DialogHeader>

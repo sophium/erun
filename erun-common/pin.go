@@ -14,7 +14,8 @@ import (
 // One erun version is written down in several places in a tenant repo — the
 // Terraform module refs, an erun image reference a tenant's own Terraform
 // variables set directly (e.g. the cluster-edge module's dns01_webhook_image),
-// every umbrella chart's erun dependencies, the build-env image tag, and the
+// every umbrella chart's erun dependencies, the build-env image tag, a stated
+// runtime chart or runtime image naming erun's own stock release, and the
 // environment's own runtimeversion — and they only work when they agree.
 // Nothing enforced that, so they drifted: a repo was found pinned to three
 // different versions at once, and realigning it meant editing seven files by
