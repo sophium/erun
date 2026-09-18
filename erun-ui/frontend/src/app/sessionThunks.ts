@@ -11,11 +11,17 @@ import {
 } from '../../wailsjs/go/main/App';
 import { startAITabOrPrompt } from './aiOccupancyThunks';
 import { resolveAutoStartGate } from './autoStartGate';
+import { environmentTypeIsHost } from './environmentType';
 import { readError } from './errors';
 import { hideTerminalMessage, showTerminalError, showTerminalMessage } from './notificationThunks';
 import { reattachRemoteTerminalTabs } from './remoteSessionTabsThunks';
 import { loadReviewDiff } from './reviewThunks';
-import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
+import {
+  selectActiveSlotForSelection,
+  selectEnvironmentExists,
+  selectEnvironmentType,
+} from './selectors';
+import { createIsCurrentSelection, isStaleDefaultLandingOpen } from './sessionOpenGuards';
 import { isNewSessionSelection } from './sessionSelection';
 import { setAutoStartPrompt } from './slices/autoStartPromptSlice';
 import { setIdleStatus } from './slices/idleSlice';
@@ -138,7 +144,24 @@ const ensureLiveDefaultTab =
 
 export const ensureDefaultEnvTabs =
   (runSelection: UISelection, key: string, cols: number, rows: number): AppThunk<Promise<void>> =>
-  async (dispatch) => {
+  async (dispatch, getState) => {
+    // A host env has no pod, so two of the three default tabs have nothing to
+    // attach to: the ERun tab's `erun open` refuses the env outright ("it has no
+    // pod and no cluster to open a shell into"), and an AI tab has no pod to run
+    // its harness in. Spawning either would leave a refused tab plus a
+    // runtime-ensure warning about an environment that will never have a
+    // runtime. The Local tab is a shell in the directory, which is what opening
+    // a host env means — the same decision resolveAutoStartGate makes, so the
+    // two paths agree on what opening one produces.
+    const envType = selectEnvironmentType(
+      getState(),
+      runSelection.tenant,
+      runSelection.environment,
+    );
+    if (environmentTypeIsHost(envType)) {
+      await dispatch(ensureLiveDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
+      return;
+    }
     await dispatch(ensureLiveDefaultTab(key, runSelection, 'erun', 'ERun', cols, rows));
     await dispatch(ensureLiveDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
     await dispatch(ensureLiveDefaultTab(key, runSelection, 'ai', 'AI', cols, rows));
@@ -261,8 +284,14 @@ const showOpenSelectionStatus =
   };
 
 export const openSelection =
-  (selection: UISelection): AppThunk<Promise<void>> =>
+  (
+    selection: UISelection,
+    options: { isDefaultLandingOpen?: boolean } = {},
+  ): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
+    if (isStaleDefaultLandingOpen(getState, options)) {
+      return;
+    }
     const controller = requireController(extra);
     dispatch(resetTenantDashboard());
     const runSelection = { ...selection };
@@ -303,7 +332,11 @@ export const openSelection =
     }
     const shouldSpawnERun = verdict !== 'skip-erun';
 
-    const isCurrentSelection = createIsCurrentSelection(getState, selection);
+    const isCurrentSelection = createIsCurrentSelection(
+      getState,
+      selection,
+      options.isDefaultLandingOpen,
+    );
 
     // The previous click's openSelection is still in flight; reset before the
     // new selection paints its spinner so the sidebar spinner does not linger
@@ -354,22 +387,6 @@ export const openSelection =
       dispatch(clearEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     }
   };
-
-// Returns a predicate that post-await dispatches poll to decide whether the
-// user is still on this env or has navigated away. It reads getState()
-// afresh each call so it tracks setSelected dispatches that fire between awaits.
-function createIsCurrentSelection(
-  getState: () => import('./store').RootState,
-  selection: UISelection,
-): () => boolean {
-  return () => {
-    const current = getState().selection.selected;
-    if (current === null) {
-      return false;
-    }
-    return current.tenant === selection.tenant && current.environment === selection.environment;
-  };
-}
 
 // When the user has navigated away (isCurrentSelection() === false), the
 // spawned session is recorded for later reuse but not promoted to the visible

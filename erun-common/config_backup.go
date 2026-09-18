@@ -52,7 +52,7 @@ func writeConfigBackupIfDue(livePath string, keep int, now func() time.Time) err
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := WriteFileAtomic(backupPath, current, 0o644); err != nil {
+	if err := WriteFileAtomic(backupPath, current, configFilePerm); err != nil {
 		return err
 	}
 	return pruneOldConfigBackups(dir, base, keep)
@@ -107,7 +107,7 @@ func restoreConfigFromBackup(backupPath, livePath string, validate func(backupPa
 	if err := os.MkdirAll(filepath.Dir(livePath), 0o755); err != nil {
 		return ErrNoUserDataFolder
 	}
-	if err := WriteFileAtomic(livePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(livePath, data, configFilePerm); err != nil {
 		return ErrFailedToSaveConfig
 	}
 	return nil
@@ -260,6 +260,12 @@ func RestoreEnvConfigFromBackup(backupPath, tenant, environment string) error {
 
 // EnvConfigPath resolves the on-disk path of one environment's config file.
 func EnvConfigPath(tenant, environment string) (string, error) {
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return "", err
+	}
+	if err := validateStatePathSegment("environment", environment); err != nil {
+		return "", err
+	}
 	path, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, environment, configFile))
 	if err != nil {
 		return "", ErrNoUserDataFolder

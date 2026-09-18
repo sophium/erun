@@ -81,6 +81,10 @@ start_run() {
         ERUN_MCP_ENABLED="${_enabled}" \
         ERUN_APP_SESSION_DIR="${session_dir_override:-}" \
         ERUN_AGENT_CONFIG_STATE_DIR="${agent_config_dir_override:-${run_dir}/agent-config}" \
+        ANTHROPIC_BASE_URL="${anthropic_base_url_override:-}" \
+        ANTHROPIC_MODEL="${anthropic_model_override:-}" \
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS="${claude_max_context_override:-}" \
+        ERUN_CLAUDE_AVAILABLE_MODELS="${claude_available_models_override:-}" \
         setsid sh "${entrypoint}" "$@" >"${log}" 2>&1 &
     run_pid=$!
 }
@@ -281,7 +285,131 @@ case "${config}" in
 esac
 stop_run
 
-# --- 9. Agent MCP configuration is reconciled once per container boot, not once
+# --- 8a. The cloud-context defaults the entrypoint emits match the Go path ---
+# entrypoint.sh re-derives in shell the cloud-context name/kubernetes-context
+# fallback that erun-common owns (ResolveInjectedRuntimeConfig routing through
+# NormalizeCloudContextConfig). Nothing asserted the two agreed, which is how
+# #1662 stayed silent -- doctor --sync-config reported phantom drift on every
+# run, never reached InSync, and no test went red. Both sides read
+# cloud_context_defaults.tsv, so editing one fallback without the other turns
+# the other's test red (the Go twin is
+# erun-common/cloud_context_entrypoint_parity_test.go).
+defaults_fixture="${script_dir}/cloud_context_defaults.tsv"
+[ -f "${defaults_fixture}" ] || fail "the shared cloud-context fixture is missing: ${defaults_fixture}"
+defaults_cases=0
+while IFS="$(printf '\t')" read -r label want_name want_kube expected_name expected_kube; do
+    case "${label}" in '' | '#'*) continue ;; esac
+    defaults_cases=$((defaults_cases + 1))
+    prepare_run "cloudctx_${label}"
+    run_dir="${work_root}/cloudctx_${label}"
+
+    # "-" is the fixture's "unset", so the variable is omitted entirely rather
+    # than passed empty -- an empty value is not the same input state here.
+    cloud_context_env=""
+    [ "${want_name}" = "-" ] || cloud_context_env="ERUN_CLOUD_CONTEXT_NAME=${want_name}"
+    kubernetes_context_env=""
+    [ "${want_kube}" = "-" ] || kubernetes_context_env="ERUN_KUBERNETES_CONTEXT=${want_kube}"
+
+    # shellcheck disable=SC2086 # the two vars must word-split away when unset
+    env -i \
+        HOME="${run_dir}/home" \
+        PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+        ERUN_TENANT=team \
+        ERUN_ENVIRONMENT=dev \
+        ERUN_MCP_PORT=17000 \
+        ERUN_MCP_ENABLED=false \
+        ERUN_CLOUD_PROVIDER=aws \
+        ERUN_CLOUD_PROVIDER_ALIAS=operator@aws \
+        ERUN_CLOUD_REGION=us-east-1 \
+        ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+        ${cloud_context_env} ${kubernetes_context_env} \
+        setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+    run_pid=$!
+    wait_for booted || fail "the devops path should reach its idle foreground"
+
+    emitted=$(sed -n '/^cloudcontexts:/,/^[a-z]/p' "${run_dir}/home/.config/erun/config.yaml")
+    case "${emitted}" in
+        *"  - name: ${expected_name}"*) ;;
+        *) fail "${label}: the emitted cloud context name should be '${expected_name}', matching the Go normalizer: ${emitted}" ;;
+    esac
+    case "${emitted}" in
+        *"kubernetescontext: ${expected_kube}"*) ;;
+        *) fail "${label}: the emitted kubernetescontext should be '${expected_kube}', matching the Go normalizer: ${emitted}" ;;
+    esac
+    stop_run
+done <"${defaults_fixture}"
+[ "${defaults_cases}" -gt 0 ] || fail "the shared cloud-context fixture yielded no cases"
+stop_run
+
+# --- 9. A configured gateway relays Claude Code's routing settings ---
+# The gateway's address and credential reach the container as environment
+# variables, but two things have to land in Claude Code's settings file: the
+# model list, which is what makes the catalog selectable, and the model's
+# context window, because Claude Code assumes one for an id it cannot size.
+# The credential is deliberately absent — it stays in the pod environment via
+# its Secret reference, so it never reaches a settings file erun wrote.
+prepare_run gateway
+run_dir="${work_root}/gateway"
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+    ANTHROPIC_BASE_URL=https://openrouter.ai/api \
+    ANTHROPIC_MODEL=deepseek/deepseek-v4.1-flash \
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS=1048576 \
+    ERUN_CLAUDE_AVAILABLE_MODELS='anthropic/claude-fable-5.1,deepseek/deepseek-v4.1-flash' \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings=$(cat "${run_dir}/home/.claude/settings.json")
+case "${settings}" in
+    *'claude-fable-5.1'*) ;;
+    *) fail "the catalog's models should reach the settings model list: ${settings}" ;;
+esac
+case "${settings}" in
+    *'deepseek/deepseek-v4.1-flash'*) ;;
+    *) fail "the catalog's default model should be relayed into settings: ${settings}" ;;
+esac
+case "${settings}" in
+    *'1048576'*) ;;
+    *) fail "the model's context window should be relayed into settings: ${settings}" ;;
+esac
+case "${settings}" in
+    *ANTHROPIC_AUTH_TOKEN*) fail "the credential must never be written into a settings file: ${settings}" ;;
+    *) ;;
+esac
+stop_run
+
+# --- 10. Without a gateway the relay writes no routing values ---
+# An install that has configured no gateway must land in exactly the settings
+# shape it did before, or every env without one changes behaviour.
+prepare_run no_gateway
+run_dir="${work_root}/no_gateway"
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings=$(cat "${run_dir}/home/.claude/settings.json")
+for name in ANTHROPIC_BASE_URL ANTHROPIC_MODEL CLAUDE_CODE_MAX_CONTEXT_TOKENS; do
+    case "${settings}" in
+        *"${name}"*) fail "no ${name} should be relayed without a gateway: ${settings}" ;;
+        *) ;;
+    esac
+done
+stop_run
+
+# --- 11. Agent MCP configuration is reconciled once per container boot, not once
 # per shell ---
 # Both configure scripts rewrite ~/.claude and ~/.codex from the image's baked
 # skills/agents and the container's env — none of which move while the container
@@ -363,12 +491,14 @@ source_hook
 [ "$(count_lines "${run_dir}/install-skills-argv")" -gt "${skills_after_boot}" ] ||
     fail "a fresh container must reconcile the agent configuration again"
 
-# --- 10. An unreachable IMDS costs one timeout, not two ---
+# --- 12. An unreachable IMDS costs one timeout, not two ---
 # The region probe only runs on AWS, and where the link-local address answers
 # nothing it drains curl's whole timeout; the unauthenticated fallback can only
 # help an IMDSv1-only instance, which refuses the token immediately instead of
 # timing out. Paying both timeouts is what made this the single largest item in
-# the profile.
+# the profile. The probe runs in the run directory the boot above already
+# populated, so the stub is installed after that boot -- the boot's own calls
+# must not be counted.
 cat >"${run_dir}/bin/curl" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >>"${run_dir}/curl-argv"
@@ -388,4 +518,4 @@ imds_calls=$(count_lines "${run_dir}/curl-argv")
 grep -q -- '--connect-timeout' "${run_dir}/curl-argv" ||
     fail "the IMDS probe should bound its connect phase: $(cat "${run_dir}/curl-argv")"
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, and once-per-boot agent configuration"
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, cloud-context default parity with the Go normalizer, and once-per-boot agent configuration"

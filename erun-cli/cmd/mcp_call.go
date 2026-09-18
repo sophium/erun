@@ -21,6 +21,12 @@ import (
 // treat-anything-not-running-as-terminal watcher falls into.
 const mcpChannelUnreachableExitCode = 126
 
+// reattachMCPChannel is the spawn the reattach path performs. It is a variable
+// so the decision that keeps a --dry-run from starting real work can be tested
+// by asserting the spawn is never invoked, which is the only observable a
+// preview leaves behind.
+var reattachMCPChannel = reattachEnvironmentMCPChannel
+
 // callMCPToolWithReattach is the shared choke point for every host-side call
 // into an environment's MCP edge (mcp call and the job/idle/activity verbs
 // via callEnvironmentTool): a channel that has dropped or gone stale gets
@@ -42,7 +48,14 @@ func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, tar
 	}
 	result, err := call()
 	if err != nil && errors.Is(err, common.ErrMCPEndpointUnreachable) {
-		if reattachErr := reattachEnvironmentMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
+		// A preview resolves and traces; it never executes. Reattaching spawns a
+		// real `erun open --reconnect` child that keeps running past the
+		// preview, so a --dry-run reports the channel as unreachable instead of
+		// re-establishing it.
+		if commandCtx.DryRun {
+			return result, err
+		}
+		if reattachErr := reattachMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
 			result, err = call()
 		}
 	}

@@ -2,9 +2,9 @@
 // seedRoot.ts. Windows CreateProcess cannot exec a "#!/bin/sh" file or a
 // .cmd/.bat batch file, so the backend (and every erun/shell child it spawns)
 // needs a real PE executable on PATH. This single binary is copied to
-// kubectl.exe / helm.exe / docker.exe / aws.exe / erun.exe in the isolated
-// stub dir and dispatches on its own base name. Keep its behaviour in lockstep
-// with writeStubBinary in fixtures/seedRoot.ts.
+// kubectl.exe / helm.exe / docker.exe / aws.exe / erun.exe / claude.exe in the
+// isolated stub dir and dispatches on its own base name. Keep its behaviour in
+// lockstep with writeStubBinary in fixtures/seedRoot.ts.
 package main
 
 import (
@@ -55,6 +55,15 @@ func main() {
 			blockForever() // stay alive like `exec sleep`; killed on env close via taskkill
 		}
 		os.Exit(0)
+	case "claude":
+		// An orchestrator row reads "running" only while the session the desktop
+		// spawned is live, and the real binary cannot stay up on a harness host
+		// (no TTY, no credentials) — it exits at once and the spec that opened
+		// the orchestrator times out waiting for the running dot. Block instead,
+		// printing the same setup-complete marker the POSIX stub does.
+		fmt.Print("claude@playwright:~$ \n")
+		_ = os.Stdout.Sync()
+		blockForever() // stay alive like `exec sleep`; killed on session close
 	case "kubectl":
 		// Answer the context listing with an empty set (the dialog's
 		// deterministic empty state); report everything else as unreachable.
