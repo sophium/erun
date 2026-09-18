@@ -422,6 +422,11 @@ func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 }
 
 func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, versionOverride, reason, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
+	// Every chart probe below (the runtime ladder and the tenant-chart check)
+	// reads a registry. A deploy running inside the target env's own runtime pod
+	// resolves the credential that env declared for itself first, so a private
+	// namespace read is definitive instead of anonymous-and-therefore-refused.
+	configureInPodDeclaredRegistryAuth(ctx, target)
 	registry := publishedDevopsChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
