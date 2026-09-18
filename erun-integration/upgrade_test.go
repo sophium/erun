@@ -70,7 +70,7 @@ func TestUpgrade(t *testing.T) {
 		// confirms erun-devops published so it upgrades instead of refusing.
 		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:2.0.0")
 		result := erun.Run(t, []string{"upgrade", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		// erun#2053: a dry run must be unmistakable from a real rollout. The
+		// A dry run must be unmistakable from a real rollout. The
 		// terminal summary must carry an explicit "Dry run:" marker and speak
 		// in the conditional ("would upgrade"), and no line may claim a
 		// deploy/rollout/watch action as already performed.
