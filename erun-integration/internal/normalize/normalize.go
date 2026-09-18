@@ -131,6 +131,9 @@ var defaultRules = []Replacement{
 	// a diff's `index <blob>..<blob>` — content-derived and stable — survives.
 	{regexp.MustCompile(`\[([^\s\]]+) [0-9a-f]{7,40}\]`), "[$1 <SHORTSHA>]"},
 	{regexp.MustCompile(`(?m)^(\s+)[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>..<SHORTSHA>"},
+	// A fast-forward merge prints its own short shas on an unindented
+	// "Updating <old>..<new>" line, so the indented range rule above never sees it.
+	{regexp.MustCompile(`(?m)^Updating [0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "Updating <SHORTSHA>..<SHORTSHA>"},
 	// A forced ref update (`git push --force`/`--force-with-lease`, as the
 	// release tag's repoint-after-rebase does) prints a three-dot range, not
 	// the fast-forward push status line's two-dot range above, and

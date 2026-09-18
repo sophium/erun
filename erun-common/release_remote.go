@@ -125,7 +125,7 @@ func isReleaseBranchPush(stage ReleaseStage, command ReleaseCommandSpec) bool {
 func runReleaseBranchPush(ctx Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	var pushOutput strings.Builder
-	err := runGit(command.Dir, ctx.Stdout, io.MultiWriter(ctx.Stderr, &pushOutput), command.Args...)
+	err := runGit(command.Dir, ctx.Stdout, releasePushStderrWriter(ctx, &pushOutput), command.Args...)
 	for attempt := 1; err != nil && branch != "" && attempt <= releasePushRebaseAttempts; attempt++ {
 		rejections := parseReleasePushRejections(pushOutput.String())
 		if !releasePushRejectedTheMovedBaseBranch(rejections, branch) {
@@ -137,13 +137,24 @@ func runReleaseBranchPush(ctx Context, spec ReleaseSpec, command ReleaseCommandS
 				err, branch, rebaseErr, spec.Version, branch)
 		}
 		if repointErr := repointReleaseTagIfRebased(ctx, spec, command.Dir, runGit); repointErr != nil {
-			return fmt.Errorf("%w\nreleasing onto origin/%s absorbed the move, but re-pointing the already-published release tag failed: %v\nversion %s is already published, so move tag v%s onto the rebased release commit by hand and force-push it",
+			return fmt.Errorf("%w\nrebasing onto origin/%s absorbed the move, but re-pointing the already-published release tag failed: %v\nversion %s is already published, so move tag v%s onto the rebased release commit by hand and force-push it",
 				err, branch, repointErr, spec.Version, spec.Version)
 		}
 		pushOutput.Reset()
-		err = runGit(command.Dir, ctx.Stdout, io.MultiWriter(ctx.Stderr, &pushOutput), releaseBranchPushArgs(spec, command)...)
+		err = runGit(command.Dir, ctx.Stdout, releasePushStderrWriter(ctx, &pushOutput), releaseBranchPushArgs(spec, command)...)
 	}
 	return err
+}
+
+// releasePushStderrWriter streams git's push output to the operator while
+// keeping a copy for the rejection parse. A caller with no stderr sink (tests,
+// embedding callers) would make io.MultiWriter panic on a nil writer, so the
+// capture stands alone there.
+func releasePushStderrWriter(ctx Context, capture *strings.Builder) io.Writer {
+	if ctx.Stderr == nil {
+		return capture
+	}
+	return io.MultiWriter(ctx.Stderr, capture)
 }
 
 // releasePushRejection is one ref git refused to update, as git reported it on
@@ -179,7 +190,7 @@ func parseReleasePushRejections(output string) []releasePushRejection {
 // rebasing the base branch. A develop rejected as a non-fast-forward is a
 // different failure — the branch diverged, and rebasing main onto an origin/main
 // that never moved is a no-op that spends every retry without ever fetching or
-// merging origin/develop (erun#2342). Anything unrecognised, including a
+// merging origin/develop. Anything unrecognised, including a
 // rejection whose reason is a hook rather than a moved branch, is left to the
 // operator with git's own reason attached.
 func releasePushRejectedTheMovedBaseBranch(rejections []releasePushRejection, branch string) bool {
@@ -210,7 +221,7 @@ func releasePushReasonIsMovedBranch(reason string) bool {
 // The unqualified failure that used to be reported here reads as the
 // pre-publication shape "Recovering an interrupted release" covers, and acting
 // on that shape would delete a public tag and reset a branch that already
-// landed (erun#2342). So the error says which ref did not land, why git refused
+// landed. So the error says which ref did not land, why git refused
 // it, and that the tag must not be deleted.
 func releasePushRejectedError(spec ReleaseSpec, rejections []releasePushRejection, cause error) error {
 	described := make([]string, 0, len(rejections))
@@ -222,6 +233,14 @@ func releasePushRejectedError(spec ReleaseSpec, rejections []releasePushRejectio
 		described = append(described, rejection.Ref)
 	}
 	refs := strings.Join(described, ", ")
+	names := make([]string, 0, len(rejections))
+	for _, rejection := range rejections {
+		names = append(names, rejection.Ref)
+	}
+	unlanded := strings.Join(names, ", ")
+	if unlanded == "" {
+		unlanded = refs
+	}
 	if refs == "" {
 		refs = "a ref git did not name"
 	}
@@ -232,7 +251,7 @@ func releasePushRejectedError(spec ReleaseSpec, rejections []releasePushRejectio
 		"Recover by hand — do not delete tag v%s and do not reset %s, both are already public:\n"+
 		"  git -C %s fetch origin\n"+
 		"  reconcile %s with its remote, push it, then create the GitHub Release for the existing tag v%s",
-		cause, refs, spec.Branch, version, refs, version, version, spec.Branch, spec.ProjectRoot, refs, version)
+		cause, refs, spec.Branch, version, refs, version, version, spec.Branch, spec.ProjectRoot, unlanded, version)
 }
 
 // repointReleaseTagIfRebased brings the release's own annotated tag back onto
