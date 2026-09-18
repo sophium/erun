@@ -96,11 +96,18 @@ cross-repository structural gates, not production helpers.
 - Root `make integration-test` drives `scripts/integration-test.sh`: fresh raw
   counters, instrumented CLI run, merged CLI/common statement coverage, then the
   script-owned threshold. Keep `CoverPkgs` and enforcement aligned when scope changes.
-- Restore coverage with meaningful CLI scenarios; do not lower thresholds to
-  accommodate a change. Function-touched rate is diagnostic, not the enforced metric.
+- The threshold is a contract, not a target: raise it in the same commit as the
+  scenarios that earned the increase, keeping a small margin below the measured
+  total, and lower it only after the PR has discussed the shortfall — restore
+  coverage with meaningful CLI scenarios first. Function-touched rate is diagnostic,
+  not the enforced metric.
 - Prefer integration coverage for CLI-reachable behavior and remove equivalent
   white-box duplication. Do not invent public code paths merely to reach genuinely
   transport-specific or defensive internals; use the owning suite for those.
+- A branch that looks unreachable from the binary is usually a production defect
+  rather than a missing test: fix the path so `--dry-run` reaches it, then write the
+  scenario. An entry in "Known integration coverage gaps" is a measured structural
+  limit, not an excuse to carve out another exception.
 - Re-measure cited baselines cleanly and without contention, verify zero skips,
   and compare per-file uncovered statements. Matching totals or repeated successful
   exit codes alone do not establish a regression or complete coverage.
@@ -192,9 +199,9 @@ Verify callers and current scenarios before treating a historical gap as still o
 - Live release-archive checksums and anonymous registry probes lack full subprocess
   wire seams; published-chart/upgrade network reads may be shadowed by decision
   overrides. Preserve owning HTTP-level tests and exercise every reachable decision.
-- GitHub status/PR helpers have a wire seam available; remaining unit-only coverage
-  is conversion work, not a structural exemption. Ruleset bypass/reconciliation
-  already has real binary wire scenarios.
+- GitHub status/PR helpers, ruleset bypass/reconciliation, and their wire seams now
+  have real binary scenarios; a helper that is still unit-only is conversion work,
+  not a structural exemption.
 - Desktop/MCP-only common APIs, in-pod whip, and in-process MCP task jobs cannot be
   started by the CLI just to increase coverage. Test their owning transports;
   CLI scenarios can still validate persisted job records and parent outcomes.
