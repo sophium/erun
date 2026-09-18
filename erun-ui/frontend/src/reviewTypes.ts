@@ -184,3 +184,14 @@ export interface UIPushWorkingTreeBranchResult {
   remote: string;
   commit: string;
 }
+
+// UIReviewCreateCapability is TenantReviewCreateCapability's answer as the
+// frontend consumes it. accessRemedy is the copyable grant that would give the
+// caller the write they were refused — absent when no role covers it — so the
+// dialog's notice hands over the request rather than only naming the
+// capability.
+export interface UIReviewCreateCapability {
+  canCreate: boolean;
+  restricted?: string;
+  accessRemedy?: UIAccessRemedy;
+}

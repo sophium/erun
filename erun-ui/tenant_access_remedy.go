@@ -18,6 +18,19 @@ type uiAccessRemedy struct {
 	RoleName string `json:"roleName,omitempty"`
 }
 
+// loadAccessRemedy resolves the copyable grant for a single restricted route,
+// for the surfaces that record one refusal rather than a panel's set. nil
+// means there is no command to hand over, which every caller renders as the
+// plain sentence it already had.
+func loadAccessRemedy(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, userID string, read string) *uiAccessRemedy {
+	remedies := loadAccessRemedies(ctx, client, capabilities, userID, read)
+	if len(remedies) == 0 {
+		return nil
+	}
+	remedy := remedies[read]
+	return &remedy
+}
+
 // canReadTenantRoles reports whether the caller may read the role list the
 // remedy resolves against. An unknown capability set answers yes: a client
 // that could not learn its permissions attempts the read and reports what the

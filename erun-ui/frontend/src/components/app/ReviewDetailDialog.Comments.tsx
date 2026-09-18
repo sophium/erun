@@ -526,11 +526,7 @@ function ReplyComposer({ detail }: { detail: ReviewDetailState }): React.ReactEl
 // CommentsRestrictedNotice is the thread list's denial. It says what is
 // missing and hands over the grant that would lift it, so a caller refused
 // this read is not left to work out which command an administrator runs.
-function CommentsRestrictedNotice({
-  detail,
-}: {
-  detail: ReviewDetailState;
-}): React.ReactElement {
+function CommentsRestrictedNotice({ detail }: { detail: ReviewDetailState }): React.ReactElement {
   const restricted = detail.data?.commentsRestricted ?? '';
   return (
     <EmptyState
