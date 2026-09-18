@@ -522,6 +522,10 @@ func registerPlatformTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Enroll a user in a tenant on the erun platform. tenantId targets another tenant and is honored only for an operations-tenant caller. Supports preview.",
 	}, platformUserEnrollTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "platform_user_grant-role",
+		Description: "Grant a role to a user already enrolled in the caller's tenant. This is the post-enrollment grant platform_user_enroll cannot perform: enrolling an identity that is already enrolled is a no-op that leaves its roles untouched. Find the role id in the tenant's role list; the role whose permissions cover what the user needs is the one to name. Requires a caller whose own role includes the grant route. A real, immediate write, not a preview, unless preview is set.",
+	}, platformUserGrantRoleTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "platform_user_list",
 		Description: "List a tenant's users on the erun platform. tenantId targets another tenant and is honored only for an operations-tenant caller. Supports preview.",
 	}, platformUserListTool(runtime))

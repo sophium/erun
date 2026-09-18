@@ -290,6 +290,7 @@ Talks to a hosted erun platform (`erun-backend-api`) over the `erun`-type cloud 
 | `platform_identity_org_create` | Work | Create an organization on the platform's own identity provider — the org an org-scoped tenant mapping needs before `platform_tenant_create`'s `orgFieldValue` can produce a mapping any token will ever resolve to. Requires an operations-tenant caller. |
 | `platform_user_list` | Read | List a tenant's users. `tenantId` targets another tenant and is honored only for an operations-tenant caller. |
 | `platform_user_enroll` | Work | Enrol a user into a tenant. Same `tenantId` scoping as `platform_user_list`; `roleIds` names the roles to grant instead of the platform's default. |
+| `platform_user_grant-role` | Work | Grant a role to a user already enrolled in the caller's tenant — the post-enrollment grant `platform_user_enroll` cannot perform, since re-enrolling an enrolled identity is a no-op that leaves its roles untouched. `roleId` comes from the tenant's role list. |
 | `platform_env_list` | Read | List the caller's tenant's hosted environments. |
 | `platform_env_get` | Read | Fetch one hosted environment by id. |
 | `platform_env_register` | Work | Register a hosted environment. For a runtime environment with `runtimeVersion` and a deploy executor configured, this also starts a server-side deploy — poll `platform_env_get` to watch it converge. |
@@ -489,6 +490,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | platform | `platform_identity_org_create` | `erun platform identity org create` | Work |
 | platform | `platform_user_list` | `erun platform user list` | Read |
 | platform | `platform_user_enroll` | `erun platform user enroll` | Work |
+| platform | `platform_user_grant-role` | `erun platform user grant-role` | Work |
 | platform | `platform_env_list` | `erun platform env list` | Read |
 | platform | `platform_env_get` | `erun platform env get` | Read |
 | platform | `platform_env_register` | `erun platform env register` | Work |
