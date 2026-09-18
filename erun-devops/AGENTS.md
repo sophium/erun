@@ -192,6 +192,39 @@ composition and release invariants belong to root/shared logic, not chart policy
   do not silently reuse an incomplete platform set.
 - Previews show concrete commands for the operations selected, without adding
   build/push actions to a pure deploy.
+- **A test needing a real container runtime is reachable from a `RUN` step only
+  once the BuildKit `network.host` entitlement is granted, which `erun build` does
+  not pass yet (#2091).** Plain `docker build` refuses `RUN --network=host` with
+  `network.host is not allowed`; `docker build --allow network.host` lifts it, with
+  no separate container-driver builder instance needed. Verified live in this repo's
+  own `remote-agent` pod: with the flag, a `RUN --network=host` step reached the
+  pod's own dind sidecar at `DOCKER_HOST=tcp://127.0.0.1:2375` and ran a real
+  container end to end. That TCP endpoint is not deliberately wired up — it exists
+  because the dind sidecar always runs with `DOCKER_TLS_CERTDIR=""`, and the
+  vendored `docker:*-dind` image then adds an insecure `--host=tcp://0.0.0.0:2375`
+  listener bound to *all* interfaces, with no authentication, reachable by anything
+  sharing the pod's network namespace. That is a real pre-existing exposure this
+  repo has not hardened to loopback-only. Until `erun build` passes the flag
+  itself, a component Dockerfile adding `RUN --network=host` fails an `erun build`
+  with that exact refusal even though the daemon behind it is already reachable.
+- **Under that entitlement a test may start its own container-runtime fixture; two
+  classes never belong in a `test` stage.** In scope: a Testcontainers-style
+  ephemeral dependency (a postgres, a compose-style sidecar) via
+  `RUN --network=host` + `DOCKER_HOST=tcp://127.0.0.1:2375` — it needs a daemon, not
+  a deployment, and the build already has one. Out of scope permanently: a test
+  needing the build's own output (`erun-ui/playwright` needs a built `erun-app`, and
+  this stage cannot depend on the `builder` stage it gates without inverting the
+  marker order), and a test asserting a deployed version (that runs after `deploy`,
+  per the `/pipeline` convention, never during build). The concrete in-scope
+  instances are `erun-backend-db/migrate_test.sh`, `retention*_test.sh`,
+  `schema_drift_test.sh`, and `erun-console/nginx_test.sh` — each needs only a real
+  docker daemon (`migrate_test.sh` additionally needs the atlas CLI, a toolchain
+  `COPY` away) — and none is migrated into a component `test` stage yet: they remain
+  the root Makefile's `test-postgres-restart`/`test-retention`/
+  `test-retention-grants`/`test-schema-drift`/`test-console-nginx` targets, run by
+  hand or via `erun exec job` before merging a change to the behavior they cover.
+  Retiring them in favor of in-build test stages is tracked at the same issue as the
+  `erun build` entitlement above.
 
 ## Release Workflow
 
