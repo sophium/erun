@@ -185,6 +185,14 @@ const workspaceSyncStagingSubdir = ".erun-sync-staging"
 // of artifact files actually transferred this pass plus what ad-hoc signing did
 // to them; a missing or empty outputs dir is a no-op, and a pass whose content is
 // unchanged since the last one transfers nothing.
+//
+// Only the artifacts being refreshed this pass go through the
+// writable->extract->sign->read-only cycle: the cycle used to run
+// unconditionally for every remote artifact on every pass, so an artifact whose
+// content had not changed in weeks still spent most of its time at the 0644 mode
+// `makeArtifactsWritable` applies before the re-extract restores it — an operator
+// invoking it directly from a shell during that window saw "permission denied"
+// on an otherwise-correct binary.
 func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, hostArtifactSigningSummary, error) {
 	var signing hostArtifactSigningSummary
 	remote, err := remoteOutputsFiles(ctx, hostAlias, outputsRemote)
@@ -195,12 +203,6 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 	if len(remote) > 0 {
 		if err := os.MkdirAll(artifactsLocal, 0o755); err != nil {
 			return 0, signing, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
-		}
-		// Clear the read-only bit set by the previous pass so the refreshed file
-		// can replace it (matters on Windows, where a read-only attribute
-		// otherwise blocks the rename onto it).
-		if err := makeArtifactsWritable(artifactsLocal); err != nil {
-			return 0, signing, err
 		}
 		// Fetch only what actually changed by content: outputs are agent
 		// deliverables, and an agent can rewrite one byte-for-byte identical to
@@ -215,6 +217,13 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 		toFetch := changedOutputsPaths(remote, remoteHashes, localHashes)
 		copied = len(toFetch)
 		if len(toFetch) > 0 {
+			// Clear the read-only bit set by the previous pass so the refreshed file
+			// can replace it (matters on Windows, where a read-only attribute
+			// otherwise blocks the rename onto it). Only the paths being refreshed
+			// are touched, so an unchanged artifact never passes through this mode.
+			if err := makeArtifactsWritable(artifactsLocal, toFetch); err != nil {
+				return 0, signing, err
+			}
 			if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, toFetch); err != nil {
 				return 0, signing, err
 			}
@@ -222,8 +231,8 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 		// The mirror is where a darwin artifact cross-built in the Linux pod first
 		// becomes a file the operator can run, so it is where the signature macOS
 		// demands has to come from. Sign while the files are still writable.
-		signing = signHostArtifacts(localArtifactPaths(artifactsLocal, remote))
-		if err := markArtifactsReadOnly(artifactsLocal, remote); err != nil {
+		signing = signHostArtifacts(localArtifactPaths(artifactsLocal, toFetch))
+		if err := markArtifactsReadOnly(artifactsLocal, toFetch); err != nil {
 			return 0, signing, err
 		}
 	}
@@ -410,15 +419,15 @@ func ListLocalArtifactFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-// makeArtifactsWritable restores the write bit on mirrored artifact files so the
-// next sync pass can overwrite them; markArtifactsReadOnly re-applies read-only
-// after the refresh. Directories stay writable throughout.
-func makeArtifactsWritable(artifactsLocal string) error {
-	files, err := ListLocalArtifactFiles(artifactsLocal)
-	if err != nil {
-		return err
-	}
-	for _, item := range files {
+// makeArtifactsWritable restores the write bit on the given mirrored artifact
+// files so this pass can overwrite them; markArtifactsReadOnly re-applies
+// read-only after the refresh. Only the listed paths are touched — an artifact
+// not being refreshed this pass must never spend time at this mode.
+func makeArtifactsWritable(artifactsLocal string, paths []string) error {
+	for _, item := range paths {
+		if !SafeWorkspaceSyncPath(item) {
+			continue
+		}
 		full := filepath.Join(artifactsLocal, filepath.FromSlash(item))
 		if err := os.Chmod(full, 0o644); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("prepare artifact for refresh %s: %w", full, err)

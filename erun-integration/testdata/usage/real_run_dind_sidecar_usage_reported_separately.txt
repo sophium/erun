@@ -1,0 +1,47 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "cpu": {
+    "quotaCores": 12,
+    "utilizationPercent": 0.024999999999999998,
+    "intervalSeconds": 1,
+    "usageUsec": 1003000
+  },
+  "memory": {
+    "currentBytes": 104857600,
+    "peakBytes": 104857600,
+    "peakObserved": true,
+    "limitBytes": 24696061952,
+    "percentOfLimit": 0.42459239130434784,
+    "oomKillsObserved": true
+  },
+  "disk": [
+    {
+      "mount": "<HOME>",
+      "totalBytes": 202991730688,
+      "usedBytes": 91142750208,
+      "percentUsed": 44.899735520796746
+    }
+  ],
+  "warnings": [
+    "erun-dind: memory is at 89% of its 14336Mi limit (warns at 85%)"
+  ],
+  "excludesBuilds": true,
+  "dind": {
+    "cpu": {
+      "quotaCores": 4,
+      "utilizationPercent": 47.5,
+      "intervalSeconds": 1,
+      "usageUsec": 2900000
+    },
+    "memory": {
+      "currentBytes": 13421772800,
+      "peakBytes": 13958643712,
+      "peakObserved": true,
+      "limitBytes": 15032385536,
+      "percentOfLimit": 89.28571428571429,
+      "oomKillsObserved": true
+    }
+  }
+}
+audit: erun usage --output json

@@ -12,6 +12,8 @@ entrypoint="${script_dir}/entrypoint.sh"
 
 work_root="$(mktemp -d 2>/dev/null || mktemp -d -t entrypoint-test)"
 run_pid=""
+session_dir_override=""
+agent_config_dir_override=""
 trap 'stop_run; rm -rf "${work_root}"' EXIT INT TERM
 
 fail() {
@@ -78,6 +80,7 @@ start_run() {
         ERUN_MCP_PORT=17000 \
         ERUN_MCP_ENABLED="${_enabled}" \
         ERUN_APP_SESSION_DIR="${session_dir_override:-}" \
+        ERUN_AGENT_CONFIG_STATE_DIR="${agent_config_dir_override:-${run_dir}/agent-config}" \
         ANTHROPIC_BASE_URL="${anthropic_base_url_override:-}" \
         ANTHROPIC_MODEL="${anthropic_model_override:-}" \
         CLAUDE_CODE_MAX_CONTEXT_TOKENS="${claude_max_context_override:-}" \
@@ -195,6 +198,7 @@ env -i \
     ERUN_TENANT=team \
     ERUN_ENVIRONMENT=dev \
     ERUN_APP_SESSION_DIR="${session_dir_override}" \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
     sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 || true
 [ "$(wc -l <"${run_dir}/prune-argv")" -eq 1 ] ||
     fail "an in-container shell must not prune live session sockets"
@@ -229,6 +233,7 @@ env -i \
     ERUN_ENVIRONMENT=dev \
     ERUN_MCP_PORT=17000 \
     ERUN_MCP_ENABLED=true \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
     ERUN_REGISTRY_CREDENTIAL_SRC_OVERRIDE="${credential_src}" \
     setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
 run_pid=$!
@@ -264,6 +269,7 @@ env -i \
     ERUN_ENVIRONMENT=dev \
     ERUN_MCP_PORT=17000 \
     ERUN_MCP_ENABLED=true \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
     ERUN_REGISTRY_CREDENTIAL_SRC_OVERRIDE="${credential_src}" \
     setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
 run_pid=$!
@@ -315,6 +321,7 @@ while IFS="$(printf '\t')" read -r label want_name want_kube expected_name expec
         ERUN_CLOUD_PROVIDER=aws \
         ERUN_CLOUD_PROVIDER_ALIAS=operator@aws \
         ERUN_CLOUD_REGION=us-east-1 \
+        ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
         ${cloud_context_env} ${kubernetes_context_env} \
         setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
     run_pid=$!
@@ -350,6 +357,7 @@ env -i \
     ERUN_ENVIRONMENT=dev \
     ERUN_MCP_PORT=17000 \
     ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
     ANTHROPIC_BASE_URL=https://openrouter.ai/api \
     ANTHROPIC_MODEL=deepseek/deepseek-v4.1-flash \
     CLAUDE_CODE_MAX_CONTEXT_TOKENS=1048576 \
@@ -388,6 +396,7 @@ env -i \
     ERUN_ENVIRONMENT=dev \
     ERUN_MCP_PORT=17000 \
     ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
     setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
 run_pid=$!
 wait_for booted || fail "the devops path should reach its idle foreground"
@@ -400,4 +409,113 @@ for name in ANTHROPIC_BASE_URL ANTHROPIC_MODEL CLAUDE_CODE_MAX_CONTEXT_TOKENS; d
 done
 stop_run
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, and cloud-context default parity with the Go normalizer"
+# --- 11. Agent MCP configuration is reconciled once per container boot, not once
+# per shell ---
+# Both configure scripts rewrite ~/.claude and ~/.codex from the image's baked
+# skills/agents and the container's env — none of which move while the container
+# lives — so re-running them from the shell hook charged every shell start (and
+# every `sh -lc` remote exec) the full reconcile. Assert the structural property
+# rather than a wall-clock bound: each configure script runs exactly once for a
+# given container-lifetime state directory, however many shells source the hook.
+prepare_run agent_config_once
+cat >"${run_dir}/bin/erun-install-skills" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"${run_dir}/install-skills-argv"
+EOF
+cat >"${run_dir}/bin/erun-install-agents" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"${run_dir}/install-agents-argv"
+EOF
+cat >"${run_dir}/bin/node" <<EOF
+#!/bin/sh
+cat >/dev/null
+printf 'ran\n' >>"${run_dir}/node-runs"
+EOF
+chmod +x "${run_dir}/bin/erun-install-skills" "${run_dir}/bin/erun-install-agents" "${run_dir}/bin/node"
+
+boot_shell() {
+    env -i \
+        HOME="${run_dir}/home" \
+        PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+        ERUN_TENANT=team \
+        ERUN_ENVIRONMENT=dev \
+        ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+        sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 || true
+}
+
+# source_hook runs the installed hook the way a login shell does, in its own
+# process, so nothing but the state directory carries between invocations.
+source_hook() {
+    env -i \
+        HOME="${run_dir}/home" \
+        PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+        ERUN_TENANT=team \
+        ERUN_ENVIRONMENT=dev \
+        ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+        sh -c ". \"\${HOME}/.erun-shell-hook.bashrc\"" >/dev/null 2>&1 || true
+}
+
+count_lines() {
+    [ -f "$1" ] || { echo 0; return; }
+    wc -l <"$1" | tr -d ' '
+}
+
+boot_shell
+[ -x "${run_dir}/home/.erun-shell-hook.bashrc" ] || [ -r "${run_dir}/home/.erun-shell-hook.bashrc" ] ||
+    fail "the boot should install the shell hook"
+skills_after_boot=$(count_lines "${run_dir}/install-skills-argv")
+agents_after_boot=$(count_lines "${run_dir}/install-agents-argv")
+[ "${skills_after_boot}" -eq 2 ] ||
+    fail "boot should reconcile skills once per agent (codex + claude), got ${skills_after_boot}"
+[ "${agents_after_boot}" -eq 1 ] ||
+    fail "boot should reconcile agents exactly once, got ${agents_after_boot}"
+
+source_hook
+source_hook
+source_hook
+[ "$(count_lines "${run_dir}/install-skills-argv")" -eq "${skills_after_boot}" ] ||
+    fail "a shell sourcing the hook must not re-run the configure scripts: $(count_lines "${run_dir}/install-skills-argv") skill installs after 3 shells"
+[ "$(count_lines "${run_dir}/install-agents-argv")" -eq "${agents_after_boot}" ] ||
+    fail "a shell sourcing the hook must not re-run the claude configure script"
+
+# A second entrypoint invocation in the same container — every `erun open` is
+# one — is the same boot, so it must not repay either.
+boot_shell
+[ "$(count_lines "${run_dir}/install-skills-argv")" -eq "${skills_after_boot}" ] ||
+    fail "a second entrypoint run in the same container must not re-run the configure scripts"
+
+# A fresh container (the state directory is container-lifetime) reconciles again,
+# so a rebuilt image's skills still reach the pod.
+rm -rf "${run_dir}/agent-config"
+source_hook
+[ "$(count_lines "${run_dir}/install-skills-argv")" -gt "${skills_after_boot}" ] ||
+    fail "a fresh container must reconcile the agent configuration again"
+
+# --- 12. An unreachable IMDS costs one timeout, not two ---
+# The region probe only runs on AWS, and where the link-local address answers
+# nothing it drains curl's whole timeout; the unauthenticated fallback can only
+# help an IMDSv1-only instance, which refuses the token immediately instead of
+# timing out. Paying both timeouts is what made this the single largest item in
+# the profile. The probe runs in the run directory the boot above already
+# populated, so the stub is installed after that boot -- the boot's own calls
+# must not be counted.
+cat >"${run_dir}/bin/curl" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"${run_dir}/curl-argv"
+exit 28
+EOF
+chmod +x "${run_dir}/bin/curl"
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_CLOUD_PROVIDER=aws \
+    sh "${run_dir}/home/.erun/configure-claude-code.sh" >/dev/null 2>&1 || true
+imds_calls=$(count_lines "${run_dir}/curl-argv")
+[ "${imds_calls}" -eq 1 ] ||
+    fail "an unreachable IMDS should cost one timeout, not ${imds_calls}: $(cat "${run_dir}/curl-argv")"
+grep -q -- '--connect-timeout' "${run_dir}/curl-argv" ||
+    fail "the IMDS probe should bound its connect phase: $(cat "${run_dir}/curl-argv")"
+
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, cloud-context default parity with the Go normalizer, and once-per-boot agent configuration"

@@ -16,6 +16,15 @@
       "percentUsed": 44.899735520796746
     }
   ],
-  "excludesBuilds": true
+  "excludesBuilds": true,
+  "dind": {
+    "cpu": {
+      "intervalSeconds": 1,
+      "unavailable": "cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat"
+    },
+    "memory": {
+      "unavailable": "cgroup v2 not detected under /sys/fs/cgroup; memory usage needs memory.current/memory.max"
+    }
+  }
 }
 audit: erun usage --output json

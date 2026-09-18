@@ -7,7 +7,7 @@ title: Configuration overview
 ERun's configuration lives in three layers. Each layer holds different kinds of settings and is consulted at different points in the lifecycle.
 
 <figure className="erun-hero-figure">
-  <img src="/img/config-layers.svg" alt="Three configuration layer cards side by side. PER-USER (cyan-stroked) at ~/.config/erun/, edited by you / erun init / desktop, read every command, holds ERunConfig · TenantConfig · EnvConfig. PER-PROJECT (cyan-stroked) at &lt;repo&gt;/.erun/config.yaml, edited by team in PRs, read every build/push/deploy, holds ProjectConfig. PER-POD ENV VARS (charcoal) set by helm at deploy, derived automatically, read by erun in the runtime pod, examples ERUN_TENANT and ERUN_NAMESPACE." />
+  <img src="/img/config-layers.svg" alt="Three configuration layer cards side by side. PER-USER (cyan-stroked) at the per-user config root, edited by you / erun init / desktop, read every command, holds ERunConfig · TenantConfig · EnvConfig. PER-PROJECT (cyan-stroked) at &lt;repo&gt;/.erun/config.yaml, edited by team in PRs, read every build/push/deploy, holds ProjectConfig. PER-POD ENV VARS (charcoal) set by helm at deploy, derived automatically, read by erun in the runtime pod, examples ERUN_TENANT and ERUN_NAMESPACE." />
   <figcaption>At deploy time the helm chart derives the per-pod environment variables from the per-user and per-project layers.</figcaption>
 </figure>
 
@@ -17,7 +17,7 @@ For exact file paths see [Config locations](/reference/config-locations). For th
 
 ## Per-user config
 
-### `ERunConfig` (`~/.config/erun/config.yaml`) {#erunconfig}
+### `ERunConfig` (`<config-root>/config.yaml`) {#erunconfig}
 
 Global defaults that apply across all tenants.
 
@@ -40,7 +40,7 @@ Global defaults that apply across all tenants.
 The gateway catalog is one list the operator maintains and every environment selects from, rather than a per-environment setting:
 
 ```yaml
-# ~/.config/erun/config.yaml
+# <config-root>/config.yaml
 openrouter:
   baseurl: https://openrouter.ai/api
   authtokenref: claude-gateway
@@ -58,7 +58,7 @@ The **credential Secret is offered rather than recalled**: ERun settings reads t
 
 A catalog that is not yet configured **opens pre-filled from this machine's own Claude Code settings** (`~/.claude/settings.json`, or `CLAUDE_CONFIG_DIR` when set): the gateway's base URL, the model those settings run on, and the context window they declare for it. Nothing is stored by opening the dialog — the operator still saves — and a catalog already configured is never overwritten. The credential is not read from those settings at all: they hold a token *value*, while the catalog names a Secret the pod resolves.
 
-### `TenantConfig` (`~/.config/erun/<tenant>/tenant.yaml`)
+### `TenantConfig` (`<config-root>/<tenant>/config.yaml`)
 
 One per tenant.
 
@@ -70,7 +70,7 @@ One per tenant.
 | `cloudprovideraliases[]` | list of strings | `erun init`, `erun open` | Cloud provider aliases the tenant is allowed to use. |
 | `primarycloudprovideralias` | string | `erun open` (suggesting cloud bindings) | Default cloud provider alias for new envs in this tenant. |
 
-### `EnvConfig` (`~/.config/erun/<tenant>/<env>/config.yaml`) {#envconfig}
+### `EnvConfig` (`<config-root>/<tenant>/<env>/config.yaml`) {#envconfig}
 
 One per environment. This is the most-edited file.
 
@@ -288,7 +288,7 @@ The helm chart writes these into the runtime pod at deploy time. They're derived
 
 The runtime chart accepts more values than erun manages. At deploy time erun passes two layers to `helm upgrade --install`:
 
-1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing. Environments that deploy the [published `erun-devops` chart](/cli/deploy#where-the-runtime-chart-comes-from) have no local chart directory; for them the overlay lives next to the env's config at `<UserConfigDir>/erun/<tenant>/<environment>/values.yaml` (e.g. `~/.config/erun/<tenant>/<environment>/values.yaml` on Linux) and is optional — when absent, the chart defaults plus erun's `--set` list fully describe the deploy.
+1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing. Environments that deploy the [published `erun-devops` chart](/cli/deploy#where-the-runtime-chart-comes-from) have no local chart directory; for them the overlay lives next to the env's config at `<UserConfigDir>/erun/<tenant>/<environment>/values.yaml` (e.g. `<config-root>/<tenant>/<environment>/values.yaml` on Linux) and is optional — when absent, the chart defaults plus erun's `--set` list fully describe the deploy.
 2. erun's own `--set`/`--set-string` list, derived from `EnvConfig` and the resolved plan.
 
 Helm gives `--set` precedence over `-f`, so for every key erun manages the overlay can never win. The keys below are exactly the ones erun's `--set` list never includes — for them the `values.<env>.yaml` overlay is authoritative, which makes it the supported escape hatch for behaviour erun doesn't model.
@@ -470,7 +470,7 @@ For Docker build context / version resolution, see [Build path resolution](/refe
 
 A handful of operations can run either as a subprocess shelling out to a CLI (`aws`, and more tools over time) or through an equivalent Go library call. Both paths trace the identical CLI-equivalent command for `--dry-run`/audit purposes, and produce the same result — the switch only changes what actually executes.
 
-`execution.modes` in `~/.config/erun/config.yaml` is a map from operation name to mode:
+`execution.modes` in `<config-root>/config.yaml` is a map from operation name to mode:
 
 ```yaml
 execution:

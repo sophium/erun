@@ -3,6 +3,7 @@ import type * as React from 'react';
 
 import type { PlatformTenant } from '../app/api/tenantsApi';
 import type { OidcConfig } from '../auth/auth';
+import { BUNDLED_BRAND, consoleBrandLabel } from './brand';
 import { BrandMark } from './BrandMark';
 import { ScopeSelector } from './ScopeSelector';
 import type { ConsoleSection, ConsoleSectionId } from './sections';
@@ -93,7 +94,7 @@ export function ConsoleSidebar({
       <div className="flex items-center gap-2 px-1">
         <BrandMark brand={brand} />
         <span className="truncate text-sm font-semibold text-sidebar-foreground">
-          {brand && brand.length > 0 ? brand : 'ERun console'}
+          {brand && brand.length > 0 ? brand : consoleBrandLabel(BUNDLED_BRAND)}
         </span>
       </div>
       <TenantSwitcher token={token} current={currentTenant} oidc={oidc} />

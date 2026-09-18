@@ -14,8 +14,18 @@ import (
 
 const fingerprintTagPrefix = "fp-"
 
+// errGateTestStagePromoted is a defense-in-depth backstop: applyIncrementalPromotion
+// never sets Promote on a GateTestStage build, so this branch should be
+// unreachable. If some future code path ever produces the combination anyway, fail
+// loudly rather than silently skip the build's own gate — an exit-0 build that never
+// ran its test stage is indistinguishable from a passing one otherwise.
+var errGateTestStagePromoted = errors.New("refusing to promote from a cached fingerprint image: this Dockerfile's test stage runs the build's own gate, and promoting would skip it without ever running make check")
+
 func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
 	if buildInput.Promote {
+		if buildInput.GateTestStage {
+			return fmt.Errorf("%s: %w", strings.TrimSpace(buildInput.Image.Tag), errGateTestStagePromoted)
+		}
 		return promoteDockerImage(buildInput, stdout, stderr)
 	}
 	return runMultiPlatformBuild(buildInput, stdout, stderr)
@@ -540,12 +550,59 @@ func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, st
 	return cmd.Run()
 }
 
+// dockerPushUnknownBlobRetries bounds the re-push that absorbs a concurrent
+// publisher. Two releases pushing overlapping layers to the same repository at
+// the same time can have one lose the race: the registry reports a layer as
+// present because the peer's upload of it is in flight but not yet committed,
+// and the manifest that references that layer is then rejected with "unknown
+// blob" even though this run built and uploaded everything it published. The
+// condition is transient by construction — it clears once the peer's upload
+// commits — so the same push is run again. Two retries cover a peer that is
+// still mid-upload; past that the failure is not this race and belongs to the
+// caller.
+const dockerPushUnknownBlobRetries = 2
+
+// dockerPushUnknownBlobBackoff is the pause before each retry, multiplied by
+// the attempt number. It is wall-clock because the condition waited on (the
+// peer's blob commit) lives in the registry; there is no local state to poll.
+const dockerPushUnknownBlobBackoff = 2 * time.Second
+
+// dockerPushWaitFunc pauses before a retry, injected so tests exercise the
+// retry decision without paying the backoff.
+type dockerPushWaitFunc func(attempt int)
+
 func DockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer) error {
+	return dockerImagePusher(tag, verbosity, stdout, stderr, func(attempt int) {
+		time.Sleep(time.Duration(attempt) * dockerPushUnknownBlobBackoff)
+	})
+}
+
+// dockerImagePusher runs one push, then re-runs that same push for the two
+// failures running it again can actually fix: a GHCR token without
+// write:packages (after the namespace re-login that mints a better one), and
+// the "unknown blob" cross-publisher race above. The two are distinct and do
+// not compound — a blob rejection is not an authorization failure, so at most
+// one of them applies to any given error.
+//
+// Every other failure is returned as it failed, on its first occurrence. The
+// retry is gated on IsDockerUnknownBlobError, which matches only the
+// registry-refused-a-blob-it-lacks shape; an auth, policy, or network failure
+// never reaches the loop, so a genuine error cannot be hidden by it.
+func dockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer, wait dockerPushWaitFunc) error {
 	err := runDockerPushOnce(tag, verbosity, stdout, stderr)
 	if err == nil {
 		return nil
 	}
 	if shouldRetryAfterGHCRNamespaceLogin(err, tag, stdout, stderr) {
+		if retryErr := runDockerPushOnce(tag, verbosity, stdout, stderr); retryErr == nil {
+			return nil
+		} else {
+			err = retryErr
+		}
+	}
+	for attempt := 1; attempt <= dockerPushUnknownBlobRetries && IsDockerUnknownBlobError(err.Error()); attempt++ {
+		_, _ = fmt.Fprintf(stderr, "==> push of %s was rejected with an unknown blob, which a concurrent publisher pushing the same repository can cause while its layer upload is still committing; re-pushing (%d/%d)\n", tag, attempt, dockerPushUnknownBlobRetries)
+		wait(attempt)
 		if retryErr := runDockerPushOnce(tag, verbosity, stdout, stderr); retryErr == nil {
 			return nil
 		} else {
