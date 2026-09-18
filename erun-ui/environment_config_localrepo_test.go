@@ -9,9 +9,9 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// TestManageDialogRepoPathMatchesInit is the property #2383 is about: any path
-// the Manage dialog accepts, init accepts, and any path init rejects, the dialog
-// rejects with a comparable message.
+// TestManageDialogRepoPathMatchesInit pins the property that the dialog and init
+// agree on a repository path: any path the Manage dialog accepts, init accepts,
+// and any path init rejects, the dialog rejects with a comparable message.
 //
 // It drives the dialog's save path (updatedEnvironmentConfig, the function
 // SaveEnvironmentConfig persists through) over the fixture set declared in
