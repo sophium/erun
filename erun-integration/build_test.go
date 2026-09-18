@@ -838,6 +838,30 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_disable_build_script_ignores_project_build_sh", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_refuses_script_fallback_when_the_project_has_a_docker_module", func(t *testing.T) {
+		// A project whose docker module holds images must never degrade to a
+		// nested project build script: that exits zero having built no image and
+		// run no gate, which the caller reading the exit code cannot tell from a
+		// real pass. Running from a directory that resolves no images is the
+		// shape of that false green, and it must fail loudly instead.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		nestedDir := filepath.Join(setup.Cwd, "erun-ui")
+		if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+			t.Fatalf("mkdir nested dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(nestedDir, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write nested build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", ".")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add nested build script")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: nestedDir, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit (project has a docker module, no image resolved), got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_refuses_script_fallback_when_the_project_has_a_docker_module", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_with_project_build_script_executes_script", func(t *testing.T) {
 		// Real-run companion to the dry-run script scenario: without --dry-run the
 		// build flow actually invokes ./build.sh. The marker file the script writes

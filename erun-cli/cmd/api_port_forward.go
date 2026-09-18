@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -118,9 +119,33 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 
 func startAPIPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
+	var process *os.Process
+	if err := retryTransientPortForwardStart(func() error {
+		p, err := launchAPIPortForwardProcess(logPath, args)
+		if err != nil {
+			return err
+		}
+		process = p
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	expectedState.ProcessID = process.Pid
+	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
+		releaseUnreachablePortForward(ctx, "api", process, localPort, err)
+		return 0, err
+	}
+	if err := waitForAPIPortForward(localPort, logPath); err != nil {
+		releaseUnreachablePortForward(ctx, "api", process, localPort, err)
+		return 0, err
+	}
+	return localPort, nil
+}
+
+func launchAPIPortForwardProcess(logPath string, args []string) (*os.Process, error) {
 	logFile, err := openPortForwardLog(logPath)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer func() {
 		_ = logFile.Close()
@@ -131,18 +156,9 @@ func startAPIPortForward(ctx common.Context, statePath string, expectedState mcp
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
-		return 0, err
+		return nil, err
 	}
-	expectedState.ProcessID = cmd.Process.Pid
-	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
-		releaseUnreachablePortForward(ctx, "api", cmd.Process, localPort, err)
-		return 0, err
-	}
-	if err := waitForAPIPortForward(localPort, logPath); err != nil {
-		releaseUnreachablePortForward(ctx, "api", cmd.Process, localPort, err)
-		return 0, err
-	}
-	return localPort, nil
+	return cmd.Process, nil
 }
 
 func waitForAPIPortForward(localPort int, logPath string) error {

@@ -170,6 +170,12 @@ COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 # time to lock its -ldflags target to the real release build, so the test
 # stage needs the file even though nothing here builds the eapi image itself.
 COPY erun-devops/docker/erun-backend-api/Dockerfile /src/erun-devops/docker/erun-backend-api/Dockerfile
+# erun-common's TestCloudContextDefaultsMatchEntrypoint reads the expectations
+# table the entrypoint's shell twin is checked against, and the entrypoint's own
+# expressions out of entrypoint.sh, so both files have to be at the same
+# relative path here that they have in a full checkout -- this stage COPYs
+# erun-devops selectively (see the note above), not wholesale.
+COPY erun-devops/docker/erun-devops/cloud_context_defaults.tsv erun-devops/docker/erun-devops/entrypoint.sh /src/erun-devops/docker/erun-devops/
 # The pinned wails CLI, installed into GOPATH/bin where both callers of
 # erun-ui/generate-wailsjs.sh look for it (WAILS_BIN defaults to
 # "$(go env GOPATH)/bin/wails" in that script and in erun-ui/build.sh).
