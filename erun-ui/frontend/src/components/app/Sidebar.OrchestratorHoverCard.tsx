@@ -16,6 +16,7 @@ import {
   HOVER_CARD_CAPTION_CLASS,
   HOVER_CARD_CAPTION_DEGRADED_CLASS,
   HOVER_CARD_GRID_CLASS,
+  HOVER_CARD_TRUNCATE_CLASS,
   HOVER_CARD_VALUE_STACK_CLASS,
   HoverCardBadge,
   HoverCardMuted,
@@ -197,8 +198,20 @@ function OrchestratorEnvironments({
               {line.dot && <StatusDotGlyph state={line.dot} />}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-semibold">{line.name}</span>
-              <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>{line.status}</span>
+              {/* Identifier: its tail is recoverable from the row it names, so it
+                  clips on one line with the full value in `title` -- the rule
+                  HOVER_CARD_TRUNCATE_CLASS owns (Sidebar.HoverCardRow.tsx). */}
+              <span className={`${HOVER_CARD_TRUNCATE_CLASS} font-semibold`} title={line.name}>
+                {line.name}
+              </span>
+              {/* Prose, not an identifier: the check-failed line's second clause
+                  names the remedy ("open it to check directly"), which is the
+                  only thing this row exists to deliver. Prose wraps rather than
+                  clips -- the `dd`'s own `break-words`, the deploy overlay's
+                  behaviour, and InlineAlert's `[overflow-wrap:anywhere]` -- so a
+                  narrow card cannot discard the actionable half of the string
+                  while keeping the part the operator cannot act on. */}
+              <span className={`block ${HOVER_CARD_CAPTION_CLASS}`}>{line.status}</span>
               {line.roleLabel && (
                 <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>
                   {line.roleLabel}
