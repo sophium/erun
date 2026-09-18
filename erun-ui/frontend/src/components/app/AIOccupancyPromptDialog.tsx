@@ -12,6 +12,7 @@ import * as React from 'react';
 
 import { cancelAIOccupancyPrompt, confirmAIOccupancyPrompt } from '@/app/aiOccupancyThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 // heldSince renders a lease's age in the coarsest unit that stays readable —
 // "started just now" reads better than "started 0m ago" for a fresh lease.
@@ -65,14 +66,7 @@ export function AIOccupancyPromptDialog(): React.ReactElement {
             </li>
           ))}
         </ul>
-        {prompt.error && (
-          <div
-            role="alert"
-            className="rounded-[var(--radius)] border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-[13px] leading-[1.4] text-destructive"
-          >
-            {prompt.error}
-          </div>
-        )}
+        {prompt.error && <InlineAlert>{prompt.error}</InlineAlert>}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button
             type="button"
