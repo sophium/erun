@@ -21,6 +21,12 @@ import (
 // treat-anything-not-running-as-terminal watcher falls into.
 const mcpChannelUnreachableExitCode = 126
 
+// reattachMCPChannel is the spawn the reattach path performs. It is a variable
+// so the decision that keeps a --dry-run from starting real work can be tested
+// by asserting the spawn is never invoked, which is the only observable a
+// preview leaves behind.
+var reattachMCPChannel = reattachEnvironmentMCPChannel
+
 // callMCPToolWithReattach is the shared choke point for every host-side call
 // into an environment's MCP edge (mcp call and the job/idle/activity verbs
 // via callEnvironmentTool): a channel that has dropped or gone stale gets
@@ -29,12 +35,6 @@ const mcpChannelUnreachableExitCode = 126
 // hand-rolled retry loop falls into — probing the port binding is worthless
 // (a stale forward still accepts the connection), and a bare `erun open`
 // would silently start an environment the operator deliberately stopped.
-// reattachMCPChannel is the spawn the reattach path performs. It is a variable
-// so the decision that keeps a --dry-run from starting real work can be tested
-// by asserting the spawn is never invoked, which is the only observable a
-// preview leaves behind.
-var reattachMCPChannel = reattachEnvironmentMCPChannel
-
 func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, target mcpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (common.MCPToolCallResult, error) {
 	call := func() (common.MCPToolCallResult, error) {
 		return common.CallMCPTool(ctx, common.MCPToolCallParams{
