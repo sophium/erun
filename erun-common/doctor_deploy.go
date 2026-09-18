@@ -131,6 +131,21 @@ func DeployRecoveryActionPromptLabel(action DeployRecoveryAction, req ShellLaunc
 	}
 }
 
+// DeployRecoveryActionWithoutPromptHint names the flag that runs this recovery
+// with no prompt, so a caller whose stdin reached EOF is told how to proceed
+// rather than only that the action did not run. It sits beside the prompt label
+// because it is the same question's non-interactive answer.
+func DeployRecoveryActionWithoutPromptHint(action DeployRecoveryAction) string {
+	switch action {
+	case DeployRecoveryClearPendingHelm:
+		return "Re-run with --clear-pending-helm to run it without a prompt."
+	case DeployRecoveryRollback:
+		return "Re-run with --rollback to run it without a prompt."
+	default:
+		return "Re-run with the matching flag to run it without a prompt."
+	}
+}
+
 // DeployRecoveryActionDescription is the one-line "Running: …" label.
 func DeployRecoveryActionDescription(action DeployRecoveryAction) string {
 	switch action {

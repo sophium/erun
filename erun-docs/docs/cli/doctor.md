@@ -58,7 +58,7 @@ See [Configuration reference · Execution modes](/reference/configuration#execut
 
 ## What it can repair
 
-Beyond reporting, `doctor` offers these fixes (each prompts first, or runs non-interactively with its flag):
+Beyond reporting, `doctor` offers these fixes (each prompts first, or runs non-interactively with its flag). Without a TTY on stdin — an MCP client, an orchestrator, a CI step, or `erun doctor … </dev/null` — `doctor` skips the optional prune prompts instead of blocking on them, names each skipped step in the report, and still exits on the health of what it examined. Nothing is pruned without either an explicit `--prune-*` flag or an answer to the prompt, and a skipped optional step is never reported as a failed check: `doctor` is the command you reach for when a deploy has already failed, which is exactly when nobody is at a terminal to answer it.
 
 - **Deploy recovery** — when the diagnosis shows the runtime release is unhealthy, `doctor` recommends the **one** recovery that fits: clearing a stuck pending helm release when a deploy died mid-upgrade and left it locked, or rolling back to the last successful revision when the current one is bad. It prompts for that single action (never both — they are alternative fixes, and running both would roll the release back a revision too far). These mutate the live release and are offered only when the release looks unhealthy, never on a healthy env. To rebuild and roll out fresh images instead, re-run `erun deploy --force`.
 - **Docker cleanup** — prune the environment's unused images, build cache, or stopped containers. These run against the environment's Docker, not your laptop's.
@@ -148,5 +148,7 @@ The check format is fixed (`<category>: <name> <status> <detail>`); machine-read
 | `--rollback` with no prior successful revision. | `helm rollback` reports it has no revision to roll back to; nothing changes. Use `--clear-pending-helm` then `erun deploy --force` instead. |
 | Both `--clear-pending-helm` and `--rollback` passed. | Aborts immediately with `--clear-pending-helm and --rollback are alternative recoveries; pass only one`; exit code 1; nothing runs. |
 | Prune not confirmed and no `--prune-*` flag. | No Docker state is touched — prunes run only on confirmation or with the matching flag. |
+| No TTY on stdin, so the optional prune prompts cannot be answered. | Each optional prune is reported as `skipped:` with its flag named as the way to run it explicitly. This is not a failed check: the run completes and the exit code reflects the health of what was actually examined, so an orchestrator or CI step gets the diagnosis instead of `Doctor failed …: ^D`. |
+| Stdin reaches EOF at a prompt `doctor` cannot skip — a recovery that mutates the live release, or a repair you asked for with a flag. | The step is **not run**: a missing answer is not consent. The report says the prompt went unconfirmed and names the flag that runs it without one (`--clear-pending-helm`, `--rollback`, `--repair-config`, …), and the rest of the diagnosis still runs. An unanswered prompt is never reported as a failed environment. |
 | Run inside a runtime pod with a complete init. | Reports "nothing to finish" and exits 0. |
 | Cluster unreachable. | Reports the pod check as failed; config and workspace checks still run. |
