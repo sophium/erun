@@ -260,8 +260,6 @@ export const issueReferenceBaseline = {
   'erun-ui/frontend/src/components/app/DebugPanel.tsx': 1,
   'erun-ui/frontend/src/components/app/DiffList.CommentAction.tsx': 1,
   'erun-ui/frontend/src/components/app/DiffList.tsx': 3,
-  'erun-ui/frontend/src/components/app/InlineAlert.tsx': 1,
-  'erun-ui/frontend/src/components/app/ManageDialogJobsTab.tsx': 1,
   'erun-ui/frontend/src/components/app/ManageDialogRuntimeSizing.tsx': 1,
   'erun-ui/frontend/src/components/app/OrchestratorDialog.Conversations.helpers.test.ts': 1,
   'erun-ui/frontend/src/components/app/OrchestratorDialog.Conversations.helpers.ts': 1,
