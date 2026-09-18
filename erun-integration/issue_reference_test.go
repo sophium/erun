@@ -444,7 +444,6 @@ var issueReferenceBaseline = map[string]int{
 	"erun-ui/app_test.go":                                 7,
 	"erun-ui/cloud_context_cache_test.go":                 1,
 	"erun-ui/codesign_script_test.go":                     1,
-	"erun-ui/config_handlers.go":                          1,
 	"erun-ui/config_watcher_test.go":                      1,
 	"erun-ui/env_ensure_test.go":                          2,
 	"erun-ui/environment_activity.go":                     1,
