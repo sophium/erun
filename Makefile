@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -588,6 +588,25 @@ test-retention-grants:
 test-schema-drift:
 	sh erun-devops/docker/erun-backend-db/schema_drift_test.sh
 
+# Proof that erun-backend-db's baked migration directory is internally
+# consistent -- every migrations/default/*.sql file hashes to the atlas.sum
+# entry recorded for it -- checked purely against the files on disk, no
+# postgres and no docker. Unlike test-schema-drift/test-postgres-restart/
+# test-retention* above, this needs only the `atlas` CLI, which the
+# erun-devops image test stage already installs (for erun-integration's
+# gate-merge scenarios) and the final runtime image installs too, so it runs
+# inside `make check` itself rather than needing a separate by-hand/job
+# invocation. This is the release gate that was missing when v1.0.247
+# shipped with `20260902130000_gate_runs.sql`'s atlas.sum entry not matching
+# its own file content (the migration was edited after `atlas migrate hash`
+# was run for it, and the mismatch landed on main undetected through a
+# squash-merge), and nothing validated the baked migration directory before
+# that image was built and published. `atlas migrate validate` reports
+# exactly the "checksum mismatch" atlas reports at deploy time, before an
+# image is ever built.
+test-atlas-validate:
+	sh erun-devops/docker/erun-backend-db/atlas_validate_test.sh
+
 # End-to-end proof that the console's nginx config (default.conf.template)
 # never resolves a missing content-hashed asset or a health/version request to
 # the SPA shell (erun#2064). Same "needs a real docker daemon" exclusion from
@@ -687,12 +706,12 @@ check:
 # it to bypass failures; diagnose against comparable state and fix them under
 # root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
-# These ten run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# These eleven run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
 # rather than scripts/parallel-gate.sh is what drives it here, and where the
 # two real ordering dependencies -- test-playwright and
 # test-erun-ui-windows-build each needing test-frontend -- are declared).
-# Do not drop any of the ten from this line to move the fan-out elsewhere:
+# Do not drop any of the eleven from this line to move the fan-out elsewhere:
 # erun-integration/build_check_coverage_test.go and
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
@@ -709,11 +728,11 @@ check:
 # 4-CPU build container those are the longest jobs in the gate. Listing the
 # critical-path targets first lets the chain head take a slot in the first
 # dispatch batch. This is a no-op when the width already covers every target
-# (the in-pod gate resolves -j10 and dispatches all ten within 0.32s), which is
+# (the in-pod gate resolves -j10 and dispatches all eleven within 0.32s), which is
 # why it is a scheduling fix and not on its own a wall-time reduction.
 # Reordering this line is safe (nothing keys on the order); DROPPING a name is
 # not -- see the coverage-test note directly above.
-check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests integration-test-gate
+check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests test-atlas-validate integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
