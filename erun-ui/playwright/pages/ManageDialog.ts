@@ -49,6 +49,17 @@ export class ManageDialog {
     return this.locator().getByRole('alert').filter({ hasText: 'Pending redeploy' });
   }
 
+  // Converge on the banner actually having rendered before asserting on it.
+  // The save click and the banner's appearance are two separate steps (a save
+  // round-trip, then a re-render), so a bare `expect(...).toBeVisible()`
+  // right after save() races that render against expect's fixed timeout
+  // instead of the enclosing test's own budget — waitFor with no explicit
+  // timeout defers to the test's budget instead, the same shape
+  // ManageDialog.waitForOpen/waitForClosed already use.
+  async waitForRedeployBanner(): Promise<void> {
+    await this.redeployBanner().waitFor({ state: 'visible' });
+  }
+
   // The "Include in Upgrade all" opt-in is selection metadata for a future
   // `erun upgrade`, never a pod input.
   autoUpgradeCheckbox(): Locator {
@@ -61,8 +72,9 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-disablebuildscript');
   }
 
-  // The "Platform account" toggle binds the env's runtime SA to cluster-admin;
-  // env-type agnostic, so it renders for every environment type.
+  // The "Platform account" toggle binds the env's runtime SA to cluster-admin,
+  // so it renders for every pod-backed type. A host env has no runtime SA to
+  // bind, and its Runtime tab offers only the build-script opt-out below.
   platformAccountCheckbox(): Locator {
     return this.locator().locator('#environment-config-platformaccount');
   }
@@ -276,8 +288,18 @@ export class ManageDialog {
     return this.page.locator('#environment-config-runtimechart-notice-panel-adopt');
   }
 
+  // Converges on the popover actually being open before returning, the same
+  // way openVersionPicker does for its own popover: the click and the
+  // popover's render are two separate steps, so a caller that asserts on an
+  // option right after the click races that render against its own fixed
+  // budget instead of this wait's (which defers to the enclosing test's).
+  // The paired-default option always renders first regardless of what other
+  // charts a spec stubs in, so it is a stable "the picker is open" signal.
   async openRuntimeChartPicker(): Promise<void> {
     await this.locator().getByRole('button', { name: 'Show runtime chart choices' }).click();
+    await this.page
+      .getByRole('option', { name: /Published with the deployed version/ })
+      .waitFor({ state: 'visible' });
   }
 
   // Picks an offered chart. The options carry both the label and the reference,
@@ -519,6 +541,22 @@ export class ManageDialog {
   // AWS alias now delivers credentials); this locator asserts it never renders.
   hostAwsCredentialsCheckbox(): Locator {
     return this.locator().getByLabel('Use host AWS credentials inside this env');
+  }
+
+  // --- Per-environment gateway overrides ---
+  //
+  // Rendered only when the erun-level catalog names a gateway: without one
+  // there is nothing for an environment to override, so the controls are absent
+  // rather than offering a switch that changes nothing.
+
+  claudeGatewayField(): Locator {
+    return this.locator().locator('#environment-config-claude-gateway');
+  }
+
+  // The gateway credential is one erun-level value, so this control no longer
+  // exists and every use of it asserts that absence rather than filling it in.
+  claudeGatewaySecretInput(): Locator {
+    return this.locator().locator('#environment-config-claude-gateway-secret');
   }
 
   // Always renders; with no per-env override it shows "Default (ultracode)".

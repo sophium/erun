@@ -448,7 +448,10 @@ done
 # --- 24. A build-capable env (local-agent / remote-agent) gets the dind
 # sidecar, its docker state PVC, and the socket volume; the sidecar declares
 # explicit resource limits rather than inheriting whatever the namespace's
-# LimitRange hands an unbounded container. ---
+# LimitRange hands an unbounded container. The runtime container also reads
+# the sidecar's real cpu/memory limit back via the downward API, so an
+# in-pod build can see it without the config store the pod has no
+# environment entry in. ---
 for storage_args in "--set worktreeStorage=pvc --set worktreeRepoName=petios" "--set worktreeStorage=host --set-string worktreeHostPath=/host/git/petios"; do
     # shellcheck disable=SC2086
     rendered=$(render ${storage_args})
@@ -471,6 +474,16 @@ erun-dind" ] || fail "a build-capable env (${storage_args}) should render erun-d
         fail "the dind sidecar should declare an explicit cpu limit"
     grep -A3 '^          resources:$' "${dind_block}" | grep -q 'memory:' ||
         fail "the dind sidecar should declare an explicit memory limit"
+
+    runtime_block="${work_root}/runtime-dind-env.yaml"
+    runtime_container "${rendered}" >"${runtime_block}"
+    grep -A4 '^            - name: ERUN_DIND_CPU_LIMIT$' "${runtime_block}" | grep -q 'containerName: erun-dind' &&
+        grep -A4 '^            - name: ERUN_DIND_CPU_LIMIT$' "${runtime_block}" | grep -q 'resource: limits.cpu' ||
+        fail "the runtime container should read the dind sidecar's real cpu limit via the downward API"
+    grep -A5 '^            - name: ERUN_DIND_MEMORY_LIMIT_MIB$' "${runtime_block}" | grep -q 'containerName: erun-dind' &&
+        grep -A5 '^            - name: ERUN_DIND_MEMORY_LIMIT_MIB$' "${runtime_block}" | grep -q 'resource: limits.memory' &&
+        grep -A5 '^            - name: ERUN_DIND_MEMORY_LIMIT_MIB$' "${runtime_block}" | grep -q 'divisor: 1Mi' ||
+        fail "the runtime container should read the dind sidecar's real memory limit (in MiB) via the downward API"
 done
 
 # --- 25. A `type: runtime` env (worktreeStorage=none) never builds, so it gets
@@ -490,6 +503,9 @@ grep -q '^  name: test-docker$' "${rendered}" &&
 
 grep -q 'docker-socket' "${rendered}" &&
     fail "a runtime env should render no docker-socket volume or mount"
+
+grep -q 'ERUN_DIND_CPU_LIMIT\|ERUN_DIND_MEMORY_LIMIT_MIB' "${rendered}" &&
+    fail "a runtime env has no dind sidecar, so it should read no downward-API limit for one"
 
 init_containers_section "${rendered}" >"${init_block}"
 grep -q 'install-binfmt' "${init_block}" &&
@@ -596,5 +612,55 @@ grep -A2 '^          args:$' "${dind_block}" | grep -q -- '--insecure-registry' 
 rendered=$(render --set worktreeStorage=none)
 grep -q 'dockerd-entrypoint.sh' "${rendered}" &&
     fail "a runtime env builds nothing, so it needs no dind entrypoint wrapper"
+
+# --- 12. A configured gateway routes the env through it, on any cloud provider ---
+# Gateway routing is not AWS routing: an operator's gateway replaces the model
+# provider wherever the env runs, so these render for a non-AWS env too.
+rendered=$(render \
+    --set-string claude.openRouterBaseURL=https://openrouter.ai/api \
+    --set-string 'claude.openRouterAvailableModels=anthropic/claude-fable-5.1\,deepseek/deepseek-v4.1-flash' \
+    --set-string claude.openRouterAuthTokenSecret=erun-claude-gateway \
+    --set-string claude.openRouterModel=deepseek/deepseek-v4.1-flash \
+    --set-string claude.openRouterModelContext=1048576)
+grep -A1 '^            - name: ANTHROPIC_BASE_URL$' "${rendered}" | grep -q '"https://openrouter.ai/api"' ||
+    fail "a configured gateway base URL should reach ANTHROPIC_BASE_URL on any provider"
+grep -A1 '^            - name: ANTHROPIC_API_KEY$' "${rendered}" | grep -q '""' ||
+    fail "the API key must be present and empty so Claude Code cannot fall back to a direct provider"
+grep -A1 '^            - name: CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY$' "${rendered}" | grep -q '"1"' ||
+    fail "gateway model discovery should be enabled so the catalog is selectable"
+grep -A1 '^            - name: ERUN_CLAUDE_AVAILABLE_MODELS$' "${rendered}" | grep -q 'anthropic/claude-fable-5.1' ||
+    fail "the catalog's models should reach ERUN_CLAUDE_AVAILABLE_MODELS"
+# The model and its window are set pod-wide, not only at launch: Claude invoked
+# outside the AI tab would otherwise fall back to a model the gateway need not
+# serve, and would assume a window for an id it cannot size.
+grep -A1 '^            - name: ANTHROPIC_MODEL$' "${rendered}" | grep -q '"deepseek/deepseek-v4.1-flash"' ||
+    fail "the catalog's default model should be set pod-wide"
+grep -A1 '^            - name: CLAUDE_CODE_MAX_CONTEXT_TOKENS$' "${rendered}" | grep -q '"1048576"' ||
+    fail "the default model's context window should be set pod-wide"
+
+# The credential travels as a Secret reference; no value reaches the manifest.
+grep -A3 '^            - name: ANTHROPIC_AUTH_TOKEN$' "${rendered}" | grep -q 'secretKeyRef' ||
+    fail "the gateway credential must be a Secret reference, not a value"
+grep -A4 '^            - name: ANTHROPIC_AUTH_TOKEN$' "${rendered}" | grep -q 'name: "erun-claude-gateway"' ||
+    fail "the credential Secret name should be rendered"
+grep -A3 '^            - name: ANTHROPIC_AUTH_TOKEN$' "${rendered}" | grep -q '^              value:' &&
+    fail "the credential must never render as a literal value"
+
+# --- 13. An env with no gateway is unchanged ---
+rendered=$(render)
+for name in ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY; do
+    grep -q "^            - name: ${name}\$" "${rendered}" &&
+        fail "no gateway variables should render without a configured gateway (${name})"
+done
+
+# --- 14. The available-models variable renders exactly once, whichever path sets it ---
+# Emitting it twice would leave the container spec ambiguous about which wins.
+rendered=$(render \
+    --set-string cloudContext.provider=aws \
+    --set-string claude.openRouterBaseURL=https://openrouter.ai/api \
+    --set-string claude.openRouterAvailableModels=anthropic/claude-fable-5.1)
+count=$(grep -c '^            - name: ERUN_CLAUDE_AVAILABLE_MODELS$' "${rendered}")
+[ "${count}" = "1" ] ||
+    fail "ERUN_CLAUDE_AVAILABLE_MODELS should render exactly once with a gateway on an AWS env, got ${count}"
 
 echo "PASS: erun-devops chart pod shape"

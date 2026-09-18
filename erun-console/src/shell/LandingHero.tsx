@@ -33,7 +33,11 @@ export function LandingHero({
   const docsBase = docsUrl !== undefined && docsUrl.length > 0 ? docsUrl : PUBLIC_DOCS_URL;
   const configureOidcHref = `${docsBase}${CONFIGURE_OIDC_DOCS_PATH}`;
   return (
-    <section className="border-b border-border bg-gradient-to-b from-muted/40 to-background px-6 py-12 sm:py-16">
+    // The hero visual's decorative glow bleeds 2rem past its own box; below
+    // ~504px that exceeds the section padding and widens the scroll region.
+    // Clip it here with `clip` rather than `hidden`: clip creates no scroll
+    // container, so focusing the CTAs below cannot scroll this section.
+    <section className="overflow-x-clip border-b border-border bg-gradient-to-b from-muted/40 to-background px-6 py-12 sm:py-16">
       <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-2 lg:items-center lg:gap-16">
         <div className="flex flex-col items-center gap-6 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-4 motion-safe:duration-700 motion-safe:fill-mode-both lg:items-start lg:text-left">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-accent-brand/30 bg-accent-brand/10 px-3 py-1 text-xs font-medium text-accent-brand">

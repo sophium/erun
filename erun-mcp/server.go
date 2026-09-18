@@ -314,7 +314,7 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, activityLeaseTakeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_release",
-		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds. Pass exclusive=true and the same scope to release an exclusive claim; only the id that took it can release it.",
+		Description: "Release a lease taken by activity_lease_take once the work is done, so the env can go idle again. Releasing an unknown or already-expired lease succeeds, and the result's released field reports whether anything was actually held rather than reading the same success either way. Pass exclusive=true and the same scope to release an exclusive claim; only the id that took it can release it, and if a different id holds that scope the call fails naming the actual holder instead of silently leaving it in place.",
 	}, activityLeaseReleaseTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_list",
@@ -798,6 +798,10 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "outputs_download",
 		Description: "Read one entry from the runtime pod's outputs directory and return its bytes inline as base64 (a folder as a tar.gz archive). The server runs in the pod, so it returns the content directly for the caller to save. On a macOS host an unsigned macOS binary is ad-hoc signed first, because the system kills an unsigned one on exec without printing anything; the signing field reports it. Set preview to return name/type/size without the bytes.",
 	}, outputsDownloadTool())
+	addTool(reg, &mcp.Tool{
+		Name:        "build_profile",
+		Description: "List recent erun build runs (newest-first), or return one build's full step tree -- duration, CPU seconds against the build's cgroup quota, throttled periods, and I/O per step -- when id is set. Reads the same ~/.erun/timing/build-*.json records `erun build` already writes. Read-only.",
+	}, buildProfileTool())
 	addTool(reg, &mcp.Tool{
 		Name:        "release",
 		Description: "Cut a project release from the runtime repo root using .erun/config.yaml branch policy. Stamps the release version into the charts and packaging metadata and commits and tags it locally, then builds and publishes that version's images and helm charts and reads each one back from the registry, and only then pushes the tag, prepares the next patch version, and pushes the branches. A release that completes means deploy can resolve the image and the chart at that version; a release that cannot publish fails while nothing is public. Set preview to resolve and return the plan without executing it.",

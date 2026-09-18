@@ -11,7 +11,14 @@
 .vscode
 .claude
 .codex
-.erun
+# .erun/config.yaml is checked into git (the repo's own project config) and
+# TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments reads
+# it inside the erun-devops test stage, so it is carved out with the same
+# ".erun/*" plus negation shape ProjectConfigGitIgnoreFix documents for
+# .gitignore -- a bare ".erun" exclusion cannot be un-excluded per file
+# (docker cannot re-include a file whose parent directory is excluded).
+.erun/*
+!.erun/config.yaml
 # Root .gitignore excludes this unanchored (any depth); computeBuildFingerprint
 # (erun-common/build_incremental.go) honours nested .gitignores too, so a
 # macOS checkout that leaves one of these under a COPYd module would enter the

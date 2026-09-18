@@ -144,6 +144,7 @@ MCP groups every tool into a family, carried on the wire as `_meta.family` so a 
 | `version` | Build version and commit of the MCP server. |
 | `outputs_list` | List the files an agent produced in the pod's outputs directory (`$ERUN_OUTPUTS_DIR`), newest-first. Read-only. |
 | `outputs_download` | Read one entry from the outputs directory and return its bytes inline as base64 (a folder as a `tar.gz`); the server is co-located with the files, so it returns the content directly. On a macOS host an arriving macOS binary carrying no code signature is signed first — the system kills an unsigned one on exec without printing anything — with the host's stable local identity when it has one and ad-hoc otherwise, and the optional `signing: {path, signed, identity, note}` field reports it (`identity` is empty for an ad-hoc signature); a signing failure is reported in `note` and never fails the call. `preview` returns name/type/size without the bytes. |
+| `build_profile` | List recent `erun build` runs newest-first (`limit`, default 20), or return one build's full step tree — duration, CPU seconds against the build's cgroup quota, throttled periods, and I/O per step — when `id` is set (a listed id, or `"latest"`). Reads the same `~/.erun/timing/build-*.json` records `erun build` already writes; CPU/throttling/I/O are only present for steps that ran inside a runtime pod with the erun-dind sidecar. |
 
 ### Host-served — answered on this host {#host-served}
 
@@ -423,6 +424,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `environment` | *(MCP-only)* | Read |
 | *(top-level)* | `init` | `erun init` | Work |
 | *(top-level)* | `build` | `erun build` | Work |
+| build | `build_profile` | `erun build profile` | Read |
 | *(top-level)* | `push` | `erun push` | Work |
 | *(top-level)* | `deploy` | `erun deploy` | Work |
 | *(top-level)* | `publish` | `erun publish` | Work |
@@ -818,7 +820,7 @@ Trigger a build. Same semantics as the CLI `erun build` — it builds the images
 | `release` | bool (optional) | Pin a bare release version instead of minting a snapshot. |
 | `force` | bool (optional) | Bypass the fingerprint cache. |
 | `dry_run` | bool (optional) | Preview without building. |
-| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `environments.<env>.docker.platforms`. Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
+| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `docker.platforms` (per-environment or project-wide). Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 
 The MCP `build` tool does **not** expose the `--deploy` convenience switch — an Agent composes the rollout by calling `push` and `deploy` itself with the `version` from this tool's output.
 

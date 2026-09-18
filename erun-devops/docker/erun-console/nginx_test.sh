@@ -19,6 +19,12 @@
 #      serving to get (1).
 #   3. /healthz and /version.json serve their own content and are not
 #      swallowed by the SPA catch-all either.
+#   4. /healthz emits exactly one Content-Type header. `return 200 "ok"`
+#      inherits the server's default_type (application/octet-stream from the
+#      base image's nginx.conf), and `add_header` appends rather than
+#      replaces, so pairing it with `add_header Content-Type text/plain`
+#      used to emit both -- a message RFC 9110 section 5.5 calls malformed,
+#      since Content-Type is a singleton field.
 #
 # Lives beside the Dockerfile/template rather than in erun-integration: it
 # needs a real docker daemon to observe actual nginx `location`/`try_files`
@@ -107,6 +113,12 @@ assert_body() {
     [ "${got}" = "${expected}" ] || fail "GET ${path}: expected body '${expected}', got '${got}'"
 }
 
+assert_single_content_type() {
+    path="$1"
+    count="$(curl -sI "${base}${path}" | grep -ic '^content-type:')"
+    [ "${count}" = "1" ] || fail "GET ${path}: expected exactly one Content-Type header, got ${count}"
+}
+
 wait_for_ready || fail "nginx did not become ready"
 
 # --- 1. A missing content-hashed asset is a real 404, never the SPA shell ---
@@ -126,4 +138,7 @@ assert_body "/healthz" "ok"
 assert_status "/version.json" "200"
 assert_body "/version.json" '{"version":"test-1.2.3"}'
 
-echo "OK: missing assets 404, app routes and existing assets serve correctly, healthz/version.json are not swallowed by the SPA fallback"
+# --- 4. /healthz emits exactly one Content-Type header (erun#2402) ---
+assert_single_content_type "/healthz"
+
+echo "OK: missing assets 404, app routes and existing assets serve correctly, healthz/version.json are not swallowed by the SPA fallback, healthz emits exactly one Content-Type header"

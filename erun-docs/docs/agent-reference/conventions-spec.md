@@ -121,6 +121,8 @@ Why ERun expects this:
 - **Build cache stays effective** — BuildKit `--mount=type=cache` persists across builds in the runtime pod's dind PVC.
 - **Security separation** — production images don't ship a build toolchain.
 
+The skeleton above shows the required *shape*, not an optimal layer order. Two choices dominate rebuild cost in any real Dockerfile: copy dependency manifests and resolve them **before** copying source, so an ordinary source edit reuses the dependency layer rather than re-resolving; and declare `ARG TARGETARCH` **below** any architecture-independent step such as the test run, so the per-architecture build invocations share one cached test layer instead of repeating the work per arch. The `erun-blueprint-service` skill ships a template and a "Build speed" section covering the full set.
+
 Single-stage Dockerfiles are not rejected, but the multi-arch and cache benefits don't apply.
 
 ### Tests run in the builder stage
@@ -185,7 +187,7 @@ The `docker/` root the algorithm scans is the convention default (`<tenant>-devo
 
 1. **`--release` in effect** (`erun build --release`, or `erun push`/`erun build` as run by `erun release`): always `linux/amd64` + `linux/arm64`, unconditionally. A released artifact is published for anyone and must be deployable on any cluster, so neither `--platform` nor the config below is consulted — combining `--release` with `--platform` is rejected outright.
 2. **`--platform <platform>` given** (repeatable, CLI/MCP): exactly the named platform(s), for that invocation only.
-3. **`environments.<env>.docker.platforms` configured** in the project's `.erun/config.yaml` (see [Configuration spec](/reference/configuration)): exactly the configured platform(s), for every non-release build/push in that environment — the durable pin for a cluster that can only ever run one architecture. `erun build --dry-run` traces the decision: `build: platforms configured as <platforms> (.erun/config.yaml environments.<env>.docker.platforms)`.
+3. **`docker.platforms` configured** in the project's `.erun/config.yaml` (see [Configuration spec](/reference/configuration)): exactly the configured platform(s), for every non-release build/push — the durable pin for a machine or cluster that can only ever run one architecture. The environment's own `environments.<env>.docker.platforms` wins outright; otherwise the project-wide top-level `docker.platforms` is the default every environment inherits, so a project whose machines are all single-architecture states the pin once and an environment nobody listed cannot silently fall back to the multi-arch build. An environment that declares `platforms: []` opts out of the project default and keeps the default multi-arch build. `erun build --dry-run` traces the decision, naming the key that decided it: `build: platforms configured as <platforms> (.erun/config.yaml environments.<env>.docker.platforms)` or `build: platforms configured as <platforms> (.erun/config.yaml docker.platforms (project default))`.
 4. **Neither set**: `linux/amd64` + `linux/arm64`.
 
 The build-graph order, for the resolved platform list:

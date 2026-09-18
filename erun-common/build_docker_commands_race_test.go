@@ -50,7 +50,8 @@ func TestRunDockerBuildOnceDrainsHeavyOutputConcurrently(t *testing.T) {
 	for _, verbosity := range []int{VerbosityInfo, VerbosityDebug} {
 		var stdout, stderr strings.Builder
 		err := runWithHangGuard(t, 20*time.Second, func() error {
-			return runDockerBuildOnce([]string{"build"}, ".", "tag", false, verbosity, &stdout, &stderr)
+			_, err := runDockerBuildOnce([]string{"build"}, ".", "tag", false, verbosity, &stdout, &stderr)
+			return err
 		})
 		if err != nil {
 			t.Fatalf("verbosity %d: runDockerBuildOnce: %v", verbosity, err)
