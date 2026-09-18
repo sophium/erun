@@ -10,7 +10,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 // its own content width, dragging the titlebar row wider than the viewport
 // and pushing the dismiss button off-screen -- exactly the mechanism the
 // code comment at Titlebar.tsx's root div describes. This is one of the
-// four independently-filed-and-fixed instances erun#2164 catalogues; the
+// four independently-filed-and-fixed instances of this defect; the
 // message-centre escalation path (titlebar-status-overflow.spec.ts) covers
 // the *long* (>160 char, popover-escalated) case, not this one -- a message
 // under that threshold stays in the inline pill this spec targets.
