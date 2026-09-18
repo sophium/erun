@@ -253,6 +253,16 @@ COPY erun-docs/docs/reference/config-locations.md /src/erun-docs/docs/reference/
 # checkout passes, so this COPY is what makes the drift test real in the build.
 COPY erun-docs/docs/reference/env-vars.md /src/erun-docs/docs/reference/env-vars.md
 
+# TestEverySurfaceDescribingARepinNamesEveryPinSiteKind (erun-common) reads
+# every surface that enumerates what a re-pin rewrites and asserts each names
+# every kind; the pin-version skill and the `erun pin` CLI page are two of
+# those surfaces, and only those two files are needed, not the built docs
+# site. Omitting them fails the gate with "no such file or directory" while a
+# full checkout passes, so these COPYs are what make the drift test real in
+# the build -- same reasoning as every COPY above.
+COPY erun-skills/skills/erun-pin-version/SKILL.md /src/erun-skills/skills/erun-pin-version/SKILL.md
+COPY erun-docs/docs/cli/pin.md /src/erun-docs/docs/cli/pin.md
+
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the
 # integration suite + coverage gate. A failing step fails the build, the
