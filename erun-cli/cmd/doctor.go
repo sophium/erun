@@ -338,7 +338,7 @@ func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) (commo
 // mutate the live release, so prompts are gated on an unhealthy diagnosis —
 // `erun doctor` never offers rollback on a healthy env.
 func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult) error {
-	actions, err := selectedDeployRecoveryActions(promptRunner, req, options, diagnosis, ctx.DryRun)
+	actions, err := selectedDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis, ctx.DryRun)
 	if err != nil {
 		return err
 	}
@@ -366,7 +366,7 @@ func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req
 // win, else the interactive path offers a single confirm for the one recovery
 // that fits the diagnosis — clearing a pending lock and rolling back are
 // alternative fixes, and running both is wrong.
-func selectedDeployRecoveryActions(promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult, dryRun bool) ([]common.DeployRecoveryAction, error) {
+func selectedDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult, dryRun bool) ([]common.DeployRecoveryAction, error) {
 	if options.clearPendingHelm {
 		return []common.DeployRecoveryAction{common.DeployRecoveryClearPendingHelm}, nil
 	}
@@ -380,7 +380,7 @@ func selectedDeployRecoveryActions(promptRunner PromptRunner, req common.ShellLa
 	if !ok {
 		return nil, nil
 	}
-	confirmed, err := confirmPrompt(promptRunner, common.DeployRecoveryActionPromptLabel(action, req))
+	confirmed, err := doctorConfirm(ctx, promptRunner, common.DeployRecoveryActionPromptLabel(action, req), common.DeployRecoveryActionWithoutPromptHint(action))
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +448,8 @@ func shouldRepairJetBrainsGateway(ctx common.Context, promptRunner PromptRunner,
 	if promptRunner == nil || ctx.DryRun {
 		return false, nil
 	}
-	return confirmPrompt(promptRunner, fmt.Sprintf("Clear cached JetBrains Gateway backend metadata for %s/%s?", result.Tenant, result.Environment))
+	return doctorConfirm(ctx, promptRunner, fmt.Sprintf("Clear cached JetBrains Gateway backend metadata for %s/%s?", result.Tenant, result.Environment),
+		"Re-run with --repair-jetbrains-gateway to run it without a prompt.")
 }
 
 func runJetBrainsGatewayRepair(ctx common.Context, repair jetBrainsGatewayDoctorRepair) (bool, error) {
@@ -543,6 +544,24 @@ const (
 	doctorPromptsNoTerminal  = "stdin is not a terminal, so there was nobody to answer the prompt"
 	doctorPromptsStdinClosed = "stdin closed before the prompt could be answered"
 )
+
+// doctorConfirm answers a confirm doctor offers for a step it cannot simply
+// skip, such as a recovery that mutates the live release. A reader that went
+// away is a declined answer -- the default these prompts already document --
+// and not a diagnosis: letting EOF surface as an error turns it into "Doctor
+// failed <tenant>/<env>", which reads as a verdict on an environment nothing
+// was wrong with, to the caller that never got the report it asked for. The
+// line names the step that was not run and how to run it without a prompt, so
+// the caller still has a next action. A real prompt failure still propagates.
+func doctorConfirm(ctx common.Context, promptRunner PromptRunner, label, withoutPrompt string) (bool, error) {
+	confirmed, err := confirmPrompt(promptRunner, label)
+	if !errors.Is(err, promptui.ErrEOF) {
+		return confirmed, err
+	}
+	_, writeErr := fmt.Fprintf(ctx.Stdout, "Not run: stdin reached EOF before %q could be confirmed. %s\n",
+		strings.TrimRight(strings.TrimSpace(label), "?"), withoutPrompt)
+	return false, writeErr
+}
 
 // promptForDoctorActions asks about each optional prune action. unasked reports
 // that the reader hit EOF instead of answering: a terminal that closed mid-run
@@ -640,7 +659,8 @@ func confirmRemoteInitFinish(ctx common.Context, promptRunner PromptRunner, opti
 		_, err := fmt.Fprintln(ctx.Stdout, "Run `erun doctor --finish-remote-init` inside this pod to finish the missing steps.")
 		return false, err
 	}
-	return confirmPrompt(promptRunner, "Finish missing remote-init steps now")
+	return doctorConfirm(ctx, promptRunner, "Finish missing remote-init steps now",
+		"Re-run with --finish-remote-init to run it without a prompt.")
 }
 
 func remoteInitPromptFunc(promptRunner PromptRunner) common.RemoteInitFinishPrompt {

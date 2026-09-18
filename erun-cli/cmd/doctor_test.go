@@ -131,6 +131,27 @@ func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 	}
 }
 
+// The invariant the reported bug violated: no prompt doctor cannot skip may
+// turn an absent answer into "Doctor failed". A step that mutates the live
+// release is not run without consent, but the caller still gets the diagnosis
+// and the flag that would run it.
+func TestDoctorConfirmDeclinesOnEOFWithoutFailing(t *testing.T) {
+	runner := func(promptui.Prompt) (string, error) { return "", promptui.ErrEOF }
+	var out bytes.Buffer
+	ctx := common.Context{Stdout: &out}
+
+	confirmed, err := doctorConfirm(ctx, runner, "Roll back team/dev to its last successful revision?", "Re-run with --rollback to run it without a prompt.")
+	if err != nil {
+		t.Fatalf("EOF from a doctor confirm failed the run: %v", err)
+	}
+	if confirmed {
+		t.Fatal("EOF was taken as consent to mutate the live release")
+	}
+	if !strings.Contains(out.String(), "--rollback") {
+		t.Errorf("declined step did not name the flag that runs it without a prompt:\n%s", out.String())
+	}
+}
+
 // An error that is not EOF still fails: a genuinely broken prompt runner is a
 // real failure, and must not be laundered into a quiet skip.
 func TestDoctorStillReportsRealPromptErrors(t *testing.T) {

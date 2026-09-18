@@ -1632,6 +1632,46 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_without_tty_skips_optional_prune_prompts", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_without_tty_declines_pending_helm_recovery", func(t *testing.T) {
+		// The other prompt doctor offers unasked: a stuck pending release makes
+		// RecommendedDeployRecovery suggest one mutating recovery. With no TTY
+		// that must read as "not confirmed", named, and never as a failed
+		// environment -- doctor is reached for precisely when a deploy failed,
+		// so a missing terminal must not cost the caller the diagnosis.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "pending-install")
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{
+			Cwd:              setup.Cwd,
+			Env:              envVars,
+			StdinFromDevNull: true,
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("no-TTY doctor exited %d on a pending release: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Doctor failed") {
+			t.Fatalf("no-TTY doctor reported the environment as failed: %s", result.Combined)
+		}
+		// The diagnosis recommends exactly one recovery, so the flag named is
+		// the one that fits it -- not both alternatives.
+		if !strings.Contains(result.Combined, "--clear-pending-helm") {
+			t.Errorf("report does not name --clear-pending-helm as the way to run the recommended recovery explicitly:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Could not confirm") && !strings.Contains(result.Combined, "Not run") {
+			t.Errorf("report does not say the recovery went unconfirmed:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "Running: Clear pending helm release") {
+			t.Errorf("a recovery nobody confirmed was run:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "==> Doctor done team/dev") {
+			t.Errorf("doctor did not complete the run:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_without_tty_declines_pending_helm_recovery", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_clear_pending_helm_via_prompt_then_prune_containers", func(t *testing.T) {
 		// The helm stub reports STATUS: pending-install, so the
 		// diagnosis recommends exactly one recovery and the interactive
