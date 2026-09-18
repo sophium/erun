@@ -177,7 +177,7 @@ func cloudflareCloudProviderTokenStatus(provider CloudProviderConfig, deps Cloud
 	if err != nil || strings.TrimSpace(token) == "" {
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusNotConfigured, Message: "cloudflare api token is not available on this machine"}
 	}
-	if _, err := deps.VerifyCloudflareToken(Context{}, token); err != nil {
+	if _, err := deps.VerifyCloudflareToken(stderrOnlyContext(), token); err != nil {
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusExpired, Message: err.Error()}
 	}
 	return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}

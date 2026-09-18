@@ -601,6 +601,54 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_configured_platforms_narrows_build_to_one_architecture", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_project_platform_default_narrows_unlisted_environment", func(t *testing.T) {
+		// docker.platforms at the top level of .erun/config.yaml is the project
+		// default, inherited by every environment that declares no platforms of
+		// its own. A project whose machines are all single-architecture states
+		// the pin once, so an environment nobody listed (here "code1", which has
+		// no entry at all) cannot silently fall back to the multi-arch build and
+		// pay for an emulated architecture its node cannot run.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"docker:\n"+
+				"  platforms: [linux/amd64]\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "code1"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected the project-wide docker.platforms default to exclude arm64 from the build plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_project_platform_default_narrows_unlisted_environment", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_empty_platform_list_opts_environment_out_of_project_default", func(t *testing.T) {
+		// The explicit opt-out: an environment declaring platforms: [] is not
+		// pinned by the project default, so the generic environment name `erun
+		// init` assigns keeps building every platform a contributor's own
+		// machine may need.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"docker:\n"+
+				"  platforms: [linux/amd64]\n"+
+				"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      platforms: []\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected an explicit platforms: [] to restore the multi-arch build:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_empty_platform_list_opts_environment_out_of_project_default", normalize.Apply(result.Combined))
+	})
+
 	t.Run("release_platform_flag_conflict_errors", func(t *testing.T) {
 		// --release always publishes every platform erun supports, so combining
 		// it with an explicit --platform override is refused rather than
@@ -697,6 +745,42 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_step_timing_breaks_a_platform_build_down_into_dockerfile_steps_and_make_phases", func(t *testing.T) {
+		// A gate build renders one image as ~99% of total wall clock, so the
+		// per-platform timing row used to be the finest granularity available --
+		// it could say a build was slow, never which part. BuildKit's own
+		// --progress=plain output (already captured for the two scenarios above)
+		// carries a per-Dockerfile-step DONE line, and the Makefile's own
+		// `>> <phase>` markers ride inside the `RUN make check` step's own output
+		// lines. Both must now surface as their own rows in the step timing table
+		// instead of collapsing into the platform's one duration.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) echo "#4 [3/3] RUN make check"; echo "#4 0.10 >> golangci-lint"; echo "#4 5.00 >> go test"; echo "#4 DONE 12.00s"; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "step timing") {
+			t.Fatalf("expected the step timing table, got:\n%s", result.Combined)
+		}
+		for _, want := range []string{"RUN make check", "golangci-lint", "go test"} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected the step timing table to name %q as its own row (a Dockerfile step / make phase, not just the whole platform build), got:\n%s", want, result.Combined)
+			}
+		}
+	})
+
 	t.Run("dry_run_no_incremental_skips_fingerprint_short_circuit", func(t *testing.T) {
 		// --no-incremental forces `docker build` for every image even when a
 		// fingerprint tag exists — no `docker image inspect` short-circuit, no
@@ -752,6 +836,30 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("expected non-zero exit (build.sh ignored, no docker context), got 0: %s", result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_disable_build_script_ignores_project_build_sh", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_refuses_script_fallback_when_the_project_has_a_docker_module", func(t *testing.T) {
+		// A project whose docker module holds images must never degrade to a
+		// nested project build script: that exits zero having built no image and
+		// run no gate, which the caller reading the exit code cannot tell from a
+		// real pass. Running from a directory that resolves no images is the
+		// shape of that false green, and it must fail loudly instead.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		nestedDir := filepath.Join(setup.Cwd, "erun-ui")
+		if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+			t.Fatalf("mkdir nested dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(nestedDir, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write nested build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", ".")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add nested build script")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: nestedDir, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit (project has a docker module, no image resolved), got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_refuses_script_fallback_when_the_project_has_a_docker_module", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_with_project_build_script_executes_script", func(t *testing.T) {
@@ -1043,6 +1151,128 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_build_deploy_erun_devops_component_resolves_runtime_image_memo", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_dind_args_resolve_configured_runtime_dind_pod", func(t *testing.T) {
+		// erun#2081: a Dockerfile that declares ARG DIND_CPU_LIMIT / ARG
+		// DIND_MEMORY_LIMIT_MIB (the erun-devops Dockerfile's own in-build gate
+		// sizing) must have those ARGs fed from the *building* environment's
+		// actual configured erun-dind sidecar resources
+		// (EnvConfig.RuntimeDindPod), not the Dockerfile's own hardcoded
+		// defaults and never the host's raw node capacity. team/dev's config
+		// sets a non-default runtimedindpod (6 CPU / 24Gi) so the golden can't
+		// be satisfied by accident from the 4-core/20Gi fallback default.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		appendEnvConfigForTest(t, setup, "team", "dev", "runtimedindpod:\n  cpu: \"6\"\n  memory: 24Gi\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"),
+			"FROM alpine:3.22\nARG DIND_CPU_LIMIT=4\nARG DIND_MEMORY_LIMIT_MIB=20480\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--build-arg DIND_CPU_LIMIT=6 --build-arg DIND_MEMORY_LIMIT_MIB=24576") {
+			t.Errorf("expected the docker build to carry the configured runtimedindpod values:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_dind_args_resolve_configured_runtime_dind_pod", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", func(t *testing.T) {
+		// erun#2081: an environment with no configured runtimedindpod must not
+		// fall back to the host node's real CPU/memory capacity (the bug this
+		// issue is about) -- it must fall back to the same small, fixed
+		// constant the sidecar's own chart default and the Dockerfile's own
+		// ARG default use (4 CPU / 20480Mi), regardless of how large the
+		// machine actually running this test is.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"),
+			"FROM alpine:3.22\nARG DIND_CPU_LIMIT=4\nARG DIND_MEMORY_LIMIT_MIB=20480\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--build-arg DIND_CPU_LIMIT=4 --build-arg DIND_MEMORY_LIMIT_MIB=20480") {
+			t.Errorf("expected the docker build to fall back to the conservative constant, not the host's real capacity:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_without_dind_args_is_unaffected", func(t *testing.T) {
+		// erun#2081: a Dockerfile that declares neither ARG must not get either
+		// build-arg, even when the building environment has a configured
+		// runtimedindpod -- the regex-gated detection in
+		// dockerfileConsumesDindCPULimit/dockerfileConsumesDindMemoryLimit
+		// must not fire for an unrelated Dockerfile.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		appendEnvConfigForTest(t, setup, "team", "dev", "runtimedindpod:\n  cpu: \"6\"\n  memory: 24Gi\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"), "FROM alpine:3.22\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "DIND_CPU_LIMIT") || strings.Contains(result.Combined, "DIND_MEMORY_LIMIT_MIB") {
+			t.Errorf("expected no DIND build-args for a Dockerfile that declares neither ARG:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_without_dind_args_is_unaffected", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_cgroup_parent_applies_inside_injected_runtime_pod", func(t *testing.T) {
+		// erun#2255: DIND_CPU_LIMIT (erun#2081, above) only fixes derivations
+		// *inside* the image -- the RUN-instruction containers themselves still
+		// escape the sidecar's kubelet-declared CPU limit as sibling cgroups.
+		// Inside an injected runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT set, the
+		// same marker inInjectedRuntimePod already uses elsewhere), every docker
+		// build must carry --cgroup-parent so its RUN containers nest under the
+		// cgroup dind-entrypoint.sh mirrors this sidecar's own live cpu.max into.
+		// Applies regardless of whether the Dockerfile declares DIND_CPU_LIMIT at
+		// all, since the OS-level escape is not specific to that ARG.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"), "FROM alpine:3.22\n")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		envVars = append(envVars, stubDockerNoLocalImages(t, setup)...)
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		hostname, err := os.Hostname()
+		if err != nil || strings.TrimSpace(hostname) == "" {
+			t.Fatalf("os.Hostname(): %v", err)
+		}
+		if !strings.Contains(result.Combined, "--cgroup-parent /docker/erun-build-cpu-cap-"+hostname) {
+			t.Errorf("expected the docker build to carry --cgroup-parent for this pod:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_cgroup_parent_applies_inside_injected_runtime_pod", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_cgroup_parent_absent_outside_injected_runtime_pod", func(t *testing.T) {
+		// erun#2255: a bare host build (no ERUN_TENANT/ERUN_ENVIRONMENT injected)
+		// has no dind sidecar limit to escape, so it must not carry
+		// --cgroup-parent -- forcing one would throttle a developer's own
+		// machine for a problem that does not exist there.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "VERSION"), "1.0.0\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops", "Dockerfile"), "FROM alpine:3.22\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "--cgroup-parent") {
+			t.Errorf("expected no --cgroup-parent outside an injected runtime pod:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_cgroup_parent_absent_outside_injected_runtime_pod", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_linux_package_from_component_dir", func(t *testing.T) {

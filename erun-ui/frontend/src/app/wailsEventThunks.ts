@@ -1,7 +1,7 @@
 import type { TerminalExitPayload, UISelection } from '@/types';
 
 import { reloadStateAfterEnvironmentChange } from './bootThunks';
-import { environmentTypeIsRemoteWorktree } from './environmentType';
+import { environmentTypeIsHost, environmentTypeIsRemoteWorktree } from './environmentType';
 import { readError } from './errors';
 import type {
   AIActivityPayload,
@@ -289,6 +289,9 @@ const reloadUntilEnvironmentVisible =
 //     become Available before emitting this, so we OPEN directly. Composing a
 //     second deploy here re-rendered the chart (MCP-auth + cluster registry) and
 //     rolled the pod init had just created.
+//   - host envs: the env IS a directory on this machine, with no pod and no
+//     cluster, so there is nothing to deploy and `erun deploy` refuses it. We
+//     OPEN directly — opening a host env is a shell in that directory.
 //   - local-agent (builds-here) envs: init does NOT deploy (no in-pod build), so
 //     the desktop composes the single build→push→deploy and opens the env's tabs
 //     on the matching `environment-deployed` signal (handleEnvironmentDeployed).
@@ -312,7 +315,23 @@ export const handleEnvironmentInitialized =
       return;
     }
     dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
-    if (environmentTypeIsRemoteWorktree(selectEnvironmentType(getState(), tenant, environment))) {
+    const envType = selectEnvironmentType(getState(), tenant, environment);
+    if (environmentTypeIsHost(envType)) {
+      // A host env is a directory on this machine: no pod and no cluster, so
+      // init had nothing to stand up and there is no deploy to compose. Running
+      // the local-agent arm here made `erun deploy` refuse it ("is a host
+      // environment — it has no pod and no cluster to deploy against") and left
+      // pendingOpenAfterDeploy set, so the env showed a failed deploy and never
+      // opened. Opening a host env is a shell in its own directory, which needs
+      // no deploy to have happened first.
+      try {
+        await dispatch(openSelection({ tenant, environment }));
+      } catch (error) {
+        dispatch(showTerminalError(readError(error)));
+      }
+      return;
+    }
+    if (environmentTypeIsRemoteWorktree(envType)) {
       // init already deployed + waited; open directly.
       try {
         await dispatch(openSelection({ tenant, environment }));

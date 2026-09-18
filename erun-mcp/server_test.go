@@ -155,7 +155,7 @@ var wantRegisteredTools = []string{
 	// disappearing outright.
 	"activity_lease_list", "activity_lease_release", "activity_lease_take",
 	"ai_sessions",
-	"build", "cloud_clear_aws_credentials", "cloud_init_aws",
+	"build", "build_profile", "cloud_clear_aws_credentials", "cloud_init_aws",
 	"cloud_init_cloudflare", "cloud_init_erun", "cloud_inject_aws_credentials",
 	"cloud_list", "cloud_login", "cloud_oidc", "cloud_set", "commit",
 	"context_init", "context_list", "context_start", "context_stop",
@@ -172,7 +172,7 @@ var wantRegisteredTools = []string{
 	"platform_user_list", "platform_version", "platform_whoami", "publish", "push", "raw",
 	"release", "resize", "review_close", "review_comment", "review_create", "review_list",
 	"review_queue_advance", "review_queue_list", "review_queue_override-advance", "review_record-build",
-	"review_report-merged", "review_resolve",
+	"review_report-merged", "review_requeue", "review_resolve",
 	"review_reviewers_add", "review_reviewers_list", "review_reviewers_remove", "review_show",
 	"review_unresolve", "terraform", "unexpose", "upgrade", "usage", "version", "whip", "write",
 }
@@ -591,7 +591,13 @@ func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T
 	if output.Write == nil {
 		t.Fatalf("expected Write result, got %+v", output)
 	}
+	// Canonical, for the same reason exec_test.go compares canonical paths: on
+	// macOS t.TempDir() returns the TMPDIR spelling (/var/folders/...) while the
+	// tool reports the real one (/private/var/folders/...).
 	wantPath := filepath.Join(projectRoot, "config", "values.yaml")
+	if resolved, evalErr := filepath.EvalSymlinks(wantPath); evalErr == nil {
+		wantPath = resolved
+	}
 	if output.Write.Path != wantPath {
 		t.Fatalf("Path = %q, want %q", output.Write.Path, wantPath)
 	}

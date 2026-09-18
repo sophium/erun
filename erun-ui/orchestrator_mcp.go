@@ -37,6 +37,16 @@ type mcpPortResolver func(tenant, environment string) int
 // live port-forward.
 type mcpReachabilityProber func(port int) bool
 
+// mcpEnvTypeResolver reports an environment's resolved type (an
+// eruncommon.EnvironmentType constant, or its zero value when the environment
+// no longer resolves), so the builder can tell an environment that has no MCP
+// edge AT ALL from one whose edge merely failed to answer. A host environment
+// is the former: it has no pod, so nothing runs the erun MCP edge for it and no
+// port-forward can ever reach one. A seam rather than a field on
+// eruncommon.OrchestratorEnvConfig, which records where an orchestrator reviews
+// an environment, not what the environment is.
+type mcpEnvTypeResolver func(tenant, environment string) eruncommon.EnvironmentType
+
 // orchestratorMCPSkip is one linked environment that produced no MCP server
 // entry, and why. Carried out of the builder rather than dropped: an
 // orchestrator is told by its own operating contract to know which environments
@@ -45,6 +55,47 @@ type mcpReachabilityProber func(port int) bool
 type orchestratorMCPSkip struct {
 	Label  string
 	Reason string
+	// HostEnv marks a skip that is not a defect: a host environment has no pod,
+	// so it has no MCP edge by design and the orchestrator drives it through its
+	// review directory instead. Kept apart from the other skip reasons so an
+	// orchestrator whose linked environments are all host environments — a
+	// working configuration — is not reported as the failure every other skip
+	// reason describes.
+	HostEnv bool
+}
+
+// orchestratorMCPOnlyHostSkips reports that the only reason nothing wired is
+// that every linked environment is a host environment. That is a working
+// configuration rather than a failure, so it must not take the "no linked
+// environment resolved an MCP port" error path meant for a real resolution
+// failure.
+func orchestratorMCPOnlyHostSkips(skipped []orchestratorMCPSkip) bool {
+	if len(skipped) == 0 {
+		return false
+	}
+	for _, skip := range skipped {
+		if !skip.HostEnv {
+			return false
+		}
+	}
+	return true
+}
+
+// splitOrchestratorMCPHostSkips separates the linked environments that have no
+// MCP edge by design from those that failed to wire. The two need different
+// words and different recoveries: a host environment exists and works, and
+// restarting the orchestrator would change nothing, while every other skip is a
+// real problem the partial notice's "check those environments still exist"
+// advice does fit.
+func splitOrchestratorMCPHostSkips(skipped []orchestratorMCPSkip) (hostEnvs, problems []orchestratorMCPSkip) {
+	for _, skip := range skipped {
+		if skip.HostEnv {
+			hostEnvs = append(hostEnvs, skip)
+			continue
+		}
+		problems = append(problems, skip)
+	}
+	return hostEnvs, problems
 }
 
 // orchestratorMCPUnreachable is one linked environment that got a wired MCP
@@ -79,7 +130,13 @@ type orchestratorMCPWiredEnv struct {
 // An env whose port resolves but whose edge does not answer a quick probe is
 // wired anyway and reported as unreachable rather than skipped — see
 // orchestratorMCPUnreachable.
-func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, executable string, mcpPort mcpPortResolver, reachable mcpReachabilityProber) (orchestratorMCPConfig, []orchestratorMCPSkip, []orchestratorMCPUnreachable) {
+//
+// A host env is skipped before the port lookup, flagged as a host skip rather
+// than one of the failure reasons: it has no pod, so it has no MCP edge at all
+// and never will. It is still reported — as an informational line, not a
+// warning — because an environment absent from the toolset otherwise reads as
+// "not linked".
+func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, executable string, mcpPort mcpPortResolver, envType mcpEnvTypeResolver, reachable mcpReachabilityProber) (orchestratorMCPConfig, []orchestratorMCPSkip, []orchestratorMCPUnreachable) {
 	servers := map[string]orchestratorMCPServer{}
 	var skipped []orchestratorMCPSkip
 	executable = strings.TrimSpace(executable)
@@ -94,6 +151,20 @@ func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, executa
 			skipped = append(skipped, orchestratorMCPSkip{
 				Label:  orchestratorEnvLabel(tenant, environment),
 				Reason: "the linked entry names no tenant or environment",
+			})
+			continue
+		}
+		// A host env has no pod, so no erun MCP edge runs for it and no
+		// port-forward can ever reach one. Checked before the port lookup
+		// because port allocation is type-blind: a host env does resolve a
+		// port, so it would otherwise be wired and then reported as merely
+		// unreachable — naming a deploy-or-reopen recovery that a host env
+		// refuses outright.
+		if envType != nil && envType(tenant, environment) == eruncommon.EnvironmentTypeHost {
+			skipped = append(skipped, orchestratorMCPSkip{
+				Label:   orchestratorEnvLabel(tenant, environment),
+				Reason:  "it is a host environment, which has no pod and so no MCP edge to reach",
+				HostEnv: true,
 			})
 			continue
 		}
@@ -203,8 +274,15 @@ func orchestratorMCPUnwiredAction(err error) string {
 // that got SOME of its environments' tools. Distinct from the unwired notice
 // because the session is usable and will look entirely healthy: the missing
 // environment surfaces only as a tool that is not there, which an agent reads as
-// "not linked" rather than "failed to wire" (#1185).
-func orchestratorMCPPartialNotice(name string, wired int, skipped []orchestratorMCPSkip) string {
+// "not linked" rather than "failed to wire".
+//
+// wired and total both count the orchestrator's LINKED environments, host ones
+// included, so the sentence stays literally true. Counting only the environments
+// that could have had tools is simpler and false: it makes a three-environment
+// orchestrator read as a two-environment one. hostEnvs is taken only to name
+// them, so the gap between wired and total is not left for the operator to
+// account for.
+func orchestratorMCPPartialNotice(name string, wired, total int, hostEnvs, skipped []orchestratorMCPSkip) string {
 	label := strings.TrimSpace(name)
 	if label == "" {
 		label = "The orchestrator"
@@ -213,8 +291,37 @@ func orchestratorMCPPartialNotice(name string, wired int, skipped []orchestrator
 	for _, skip := range skipped {
 		missing = append(missing, fmt.Sprintf("%s (%s)", skip.Label, skip.Reason))
 	}
-	return fmt.Sprintf("%s started with tools for %d of %d linked environments. Missing: %s. Check those environments still exist, then restart the orchestrator.",
-		label, wired, wired+len(skipped), strings.Join(missing, "; "))
+	// Absent when no host env is linked, so the message an orchestrator without
+	// one has always shown stays byte-for-byte unchanged.
+	hostNote := ""
+	if len(hostEnvs) > 0 {
+		names := make([]string, 0, len(hostEnvs))
+		for _, env := range hostEnvs {
+			names = append(names, env.Label)
+		}
+		hostNote = fmt.Sprintf(" (no MCP edge is expected for %s)", strings.Join(names, ", "))
+	}
+	return fmt.Sprintf("%s started with tools for %d of %d linked environments%s. Missing: %s. Check those environments still exist, then restart the orchestrator.",
+		label, wired, total, hostNote, strings.Join(missing, "; "))
+}
+
+// orchestratorMCPHostEnvNotice is the operator-facing line for an orchestrator
+// linked to host environments, which have no MCP edge to wire. Informational
+// rather than a warning: this is a working configuration, and the recovery is
+// not to fix anything but to work in the environment's own directory. It is
+// still said out loud because an environment absent from the toolset otherwise
+// reads as "not linked" rather than "not applicable".
+func orchestratorMCPHostEnvNotice(name string, hostEnvs []orchestratorMCPSkip) string {
+	label := strings.TrimSpace(name)
+	if label == "" {
+		label = "The orchestrator"
+	}
+	names := make([]string, 0, len(hostEnvs))
+	for _, env := range hostEnvs {
+		names = append(names, env.Label)
+	}
+	return fmt.Sprintf("%s links %s without MCP tools: a host environment has no pod, so it has no MCP edge. "+
+		"Work in its directory directly.", label, strings.Join(names, ", "))
 }
 
 // orchestratorMCPUnreachableNotice is the operator-facing line for an
@@ -261,7 +368,11 @@ func singleOrchestratorMCPUnreachableEnv(unreachable []orchestratorMCPUnreachabl
 // file wiring each linked env's erun MCP into the orchestrator session, so it
 // drives its envs through the MCP rather than raw kubectl. Returns "" with an
 // error naming why when nothing could be wired, so the caller skips
-// --mcp-config and can tell the operator which fix applies.
+// --mcp-config and can tell the operator which fix applies -- except when the
+// only reason nothing wired is that every linked env is a host env, which is a
+// working configuration and returns no error. Because a host env is a skip like
+// any other, the caller gets every skip either way, host ones included, and can
+// name what is absent instead of leaving it to read as "not linked".
 func (a *App) writeOrchestratorMCPConfig(id string, envs []eruncommon.OrchestratorEnvConfig) (string, []orchestratorMCPSkip, []orchestratorMCPUnreachable, error) {
 	// An orchestrator with no linked envs has nothing to wire, and that is normal.
 	if len(envs) == 0 {
@@ -281,9 +392,26 @@ func (a *App) writeOrchestratorMCPConfig(id string, envs []eruncommon.Orchestrat
 			}
 			return ports.MCP
 		},
+		func(tenant, environment string) eruncommon.EnvironmentType {
+			env, _, loadErr := a.deps.store.LoadEnvConfig(tenant, environment)
+			if loadErr != nil {
+				// An env whose config no longer resolves has no known type, so it
+				// falls through to the port path and is reported as the wiring
+				// failure it is -- never silently excused as a host env.
+				return ""
+			}
+			return env.ResolvedType()
+		},
 		a.deps.canReachMCPEndpoint,
 	)
 	if len(config.MCPServers) == 0 {
+		// Nothing wired because every linked env is a host env is a working
+		// configuration, not a failure: a host env has no MCP edge by design and
+		// the orchestrator drives it through its review directory. Only a real
+		// failure to resolve a port takes the unwired-error path.
+		if orchestratorMCPOnlyHostSkips(skipped) {
+			return "", skipped, nil, nil
+		}
 		return "", skipped, nil, errOrchestratorMCPNoPort
 	}
 	data, err := json.MarshalIndent(config, "", "  ")
