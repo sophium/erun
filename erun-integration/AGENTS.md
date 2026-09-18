@@ -128,10 +128,15 @@ cross-repository structural gates, not production helpers.
 
 This is a shrink-only list of real gaps, not an internal-only exemption. Do not
 add fresh omissions to it; remove an entry in the same change that surfaces it.
-Stale entries fail. Read the current list and family-specific reasons in
-`erun-backend-api/internal/routes/route_audit.go`, rather than preserving a count
-here. Remaining administration/release surfaces need designed workflows, not
-bare fetches that satisfy the matcher. Tracking: erun#1497.
+Stale entries fail. `erun-backend-api/internal/routes/route_audit.go` is the
+single source for the tracker, not a pointer to one: its own comment states that
+the map is the tracker of record for the remaining work, and what closing each
+entry out takes. Read the list, its family reasons, and its count there rather
+than preserving any of them here. Do not restore a tracking-issue reference in
+this section: naming an issue here once sent readers to a closed issue while
+eight entries were still in the map, so the entries themselves carry the record
+instead, and every one of them is open. Remaining administration/release
+surfaces need designed workflows, not bare fetches that satisfy the matcher.
 
 ## Role-classification gate
 
