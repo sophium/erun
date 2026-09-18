@@ -157,9 +157,9 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
       // Version row always renders the version, never the "Not set" empty case.
       await expect(card).toContainText('1.0.0', { timeout: 1_000 });
 
-      // Version used to render through the `wide` variant (erun#1860) so its
-      // longest identifier got the card's full content width instead of
-      // breaking mid-token in the narrow shared-row column. #1901 removed
+      // Version used to render through the `wide` variant so its longest
+      // identifier got the card's full content width instead of breaking
+      // mid-token in the narrow shared-row column. The unified layout removed
       // `font-mono` (freeing width) and truncates identifiers instead, so
       // `wide` was retired from this card -- Version now shares the same
       // fixed label column and single-row layout every other row uses, and

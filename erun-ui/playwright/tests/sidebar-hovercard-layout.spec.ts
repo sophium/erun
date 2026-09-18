@@ -9,7 +9,7 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// #1901 unified the env hover card to one row layout with a spacing
+// The env hover card was unified to one row layout with a spacing
 // hierarchy (Sidebar.HoverCardRow.tsx): a fixed label column shared by every
 // row regardless of which conditional rows are present, and two zones
 // (stable identity vs live state) separated by a hairline so a conditional
@@ -151,7 +151,7 @@ test.describe('sidebar env hover card layout (#1901)', () => {
   // A stale usage reading is degraded (muted, reduced opacity), never amber:
   // nothing the operator did caused it and no action follows from it, so it
   // must not look more alarming than an unmeasured number actually is (also
-  // relevant to #1805 -- the percentage itself is not authoritative for a
+  // relevant here too -- the percentage itself is not authoritative for a
   // build-capable environment).
   test('a stale usage reading renders degraded, not as an amber warning', async ({ app, page }) => {
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);

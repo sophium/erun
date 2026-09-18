@@ -3,9 +3,9 @@ import type { Page, Route } from '@playwright/test';
 import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../fixtures/seedRoot.js';
 
-// #1901 replaced the three-treatment scale this spec used to lock (a 12px
-// label/caption, a 14px value, a 10px badge) with a stricter invariant: one
-// size, one face, always -- every element in both sidebar hover cards
+// The card's current scale replaced the three-treatment one this spec used
+// to lock (a 12px label/caption, a 14px value, a 10px badge) with a stricter
+// invariant: one size, one face, always -- every element in both hover cards
 // (Sidebar.HoverCardRow.tsx) renders at 10px in the shared sans face, and an
 // element earns emphasis only through colour, weight or state, never a
 // second size or face. This spec asserts that computationally rather than by
@@ -182,8 +182,8 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       const version = card.locator('dd').first();
       await expect(version).toContainText('1.0.0', { timeout: READ_TIMEOUT_MS });
-      // tabular-nums is declared once on the card's wrapping container
-      // (#1901), not per value -- font-variant-numeric inherits, so the
+      // tabular-nums is declared once on the card's wrapping container, not
+      // per value -- font-variant-numeric inherits, so the
       // version span itself carries no class of its own and still reads
       // tabular through inheritance.
       const variant = await version

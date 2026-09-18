@@ -106,7 +106,7 @@ test.describe('sidebar env hover card version rows', () => {
   // The longest literal identifier on the card used to sit in the narrow
   // value column it shares with the label, so a version this long broke
   // mid-token across two lines -- the `wide` layout (col-spanning both grid
-  // columns) existed to prevent exactly that. #1901 retired `wide` from this
+  // columns) existed to prevent exactly that. The current layout retired `wide` from this
   // card and truncates identifiers instead (with the full value in `title`),
   // which is a stronger guarantee: `white-space: nowrap` makes a mid-token
   // break structurally impossible, not merely unlikely at this card's width.
