@@ -2,7 +2,7 @@ import { boundingBoxOf } from '../fixtures/boundingBox.js';
 import { expect, test } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/AppShell.js';
 
-// Regression coverage for #359: the Cloud provider `SelectField` wrapper
+// Regression coverage for the Cloud provider `SelectField` wrapper
 // inside GlobalConfigDialog.CloudContexts.tsx's `grid gap-2 sm:grid-cols-2`
 // is a grid item that defaults to `min-width: auto`, so it refused to shrink
 // below its own long alias text and bled across the column boundary into the

@@ -5,7 +5,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 import { SEED_TENANT, removeEnvironment, seedEnvironment } from '../fixtures/seedRoot.js';
 import type { AppShell } from '../pages/AppShell.js';
 
-// Regression coverage for #431: the reconnect status panel's header
+// Regression coverage for the reconnect status panel's header
 // (ReconnectStatusPanel.tsx's ReconnectStatusHeader) is a flex row whose
 // text column carries `flex-1`. A `flex-1` item still defaults to
 // `min-width: auto`, so a long, unbroken target label refused to shrink and

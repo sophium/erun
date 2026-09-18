@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 import { boundingBoxOf } from '../fixtures/boundingBox.js';
 import { expect, test } from '../fixtures/erunApp.js';
 
-// Regression coverage for #373: the titlebar's status pill and its
+// Regression coverage for the titlebar's status pill and its
 // surrounding flex rows (Titlebar.tsx, Titlebar.Status.tsx) are `flex`
 // containers whose children default to `min-width: auto`. An unbroken
 // status string with no `min-w-0` anywhere above it refuses to shrink below
