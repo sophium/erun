@@ -11,11 +11,11 @@ import (
 
 // The canonical location is shared (erun-common) because the desktop reads the
 // same files to tell a reachable environment from one nobody opened. Only the
-// migration off the old cache-dir location stays here, with the writer.
+// migrations off the old locations stay here, with the writer.
 //
-// dryRun must skip the migration itself — a dry run resolving this path must
-// not move the operator's own file on disk — but still needs to report where
-// the state actually lives today, so an unmigrated legacy path is returned
+// dryRun must skip a migration itself — a dry run resolving this path must not
+// move the operator's own file on disk — but still needs to report where the
+// state actually lives today, so an unmigrated legacy path is returned
 // as-is rather than the not-yet-existing new one.
 func portForwardStatePath(kind, tenant, environment string, dryRun bool) (string, error) {
 	newPath, err := common.PortForwardStatePath(kind, tenant, environment)
@@ -25,6 +25,9 @@ func portForwardStatePath(kind, tenant, environment string, dryRun bool) (string
 
 	if _, err := os.Stat(newPath); err == nil {
 		return newPath, nil
+	}
+	if legacy, ok := lowercaseSpelledPortForwardStatePath(kind, tenant, environment, dryRun); ok {
+		return legacy, nil
 	}
 	legacyPath, err := legacyPortForwardStatePath(kind, tenant, environment)
 	if err != nil {
@@ -38,6 +41,34 @@ func portForwardStatePath(kind, tenant, environment string, dryRun bool) (string
 	}
 	migrateLegacyPortForwardState(legacyPath, newPath)
 	return newPath, nil
+}
+
+// lowercaseSpelledPortForwardStatePath resolves a record left under the former
+// lowercase spelling of the state directory, which on a case-sensitive volume is
+// a different directory rather than the same one. A real run moves it to the
+// canonical spelling and reports that path; a dry run reports the legacy path
+// as-is, because resolving it must not move the operator's file. It reports
+// false when there is no such record, leaving the cache-dir migration below to
+// run.
+func lowercaseSpelledPortForwardStatePath(kind, tenant, environment string, dryRun bool) (string, bool) {
+	if dryRun {
+		legacy, err := common.LegacyPortForwardStatePath(kind, tenant, environment)
+		if err != nil {
+			return "", false
+		}
+		if _, err := os.Stat(legacy); err != nil {
+			return "", false
+		}
+		return legacy, true
+	}
+	migrated, err := common.MigrateLegacyPortForwardState(kind, tenant, environment)
+	if err != nil || migrated == "" {
+		return "", false
+	}
+	if _, err := os.Stat(migrated); err != nil {
+		return "", false
+	}
+	return migrated, true
 }
 
 func legacyPortForwardStatePath(kind, tenant, environment string) (string, error) {
