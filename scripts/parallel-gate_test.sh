@@ -209,9 +209,10 @@ echo "ok: parallel-gate.sh cpu-quota"
 # concurrent tasks, a freed slot left unfilled. #1690 made the reporting
 # aggregate and the output buffered; both are pinned here.
 #
-# The gate is always invoked directly, never under an outer `timeout`: this
-# suite asserts on that timeout's absence, so a wrapped run fails for a reason
-# that is not the behaviour under test.
+# The gate is always invoked directly, never under an outer `timeout`: a run
+# clipped by one reports a failure that is not the behaviour under test, and
+# tells the next reader nothing about the runner. (agent-gate_test.sh covers
+# the outer-timeout case for its own gate, which distinguishes one.)
 
 runner_dir="${work_root}/runner"
 mkdir -p "$runner_dir"
