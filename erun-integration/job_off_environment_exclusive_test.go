@@ -14,7 +14,7 @@ import (
 )
 
 // TestJobOffEnvironmentExclusiveClaimIsEnforced is the exact reproduction
-// erun#2080 reported, run against a real MCP edge rather than a dry-run
+// that was reported, run against a real MCP edge rather than a dry-run
 // trace: an exclusive job started from a host caller (no ERUN_REPO_REMOTE,
 // exactly `erun exec job start --exclusive` typed on an operator's machine)
 // used to leave a caller in the same off-environment path free to start a
