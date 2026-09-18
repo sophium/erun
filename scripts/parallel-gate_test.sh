@@ -299,19 +299,29 @@ run_gate 2 some-gate "$ok_out" "$ok_err" \
 	fail "runner all-pass: expected three blocks in input order, got: $(marker_names "$ok_out" | tr '\n' ' ')"
 
 # --- output atomicity and emission order under concurrency. Three tasks at
-# width 3, each emitting 40 lines; alpha sleeps, so it finishes LAST even
-# though it is first in the list. Each task's output must land as one unbroken
-# block, in INPUT order, under its own marker carrying the job's measured
-# "[<secs>s]" duration. Unbuffered concurrent writes fragment these blocks
-# into interleaved runs -- the unreadability #1690 set out to remove -- and a
-# completion-ordered replay would put alpha last.
+# width 3, each emitting 40 lines; the first waits for both of the others to
+# finish before emitting anything, so it is the LAST to complete while being
+# the FIRST in the list -- an input-ordered replay and a completion-ordered one
+# cannot be confused for each other. Each task's output must land as one
+# unbroken block, in input order, under its own marker. Unbuffered concurrent
+# writes fragment these blocks into interleaved runs -- the unreadability
+# #1690 set out to remove.
+atomic_dir="${runner_dir}/atomic"
 atomic_out="${runner_dir}/atomic.out"
+mkdir -p "$atomic_dir"
+# alpha's block is emitted only once both writers are done; the wait is
+# bounded so a regression fails this suite instead of hanging it.
+atomic_ready="[ -e \"$atomic_dir/bravo-done\" ] && [ -e \"$atomic_dir/charlie-done\" ]"
+alpha_cmd="i=0; while [ \"\$i\" -lt 100 ]; do if $atomic_ready; then break; fi; sleep 0.1; i=\$((i+1)); done; $atomic_ready || { echo alpha-starved; exit 1; }; n=0; while [ \"\$n\" -lt 40 ]; do echo alpha-line; n=\$((n+1)); done"
+bravo_cmd="n=0; while [ \"\$n\" -lt 40 ]; do echo bravo-line; n=\$((n+1)); done; : > \"$atomic_dir/bravo-done\""
+charlie_cmd="n=0; while [ \"\$n\" -lt 40 ]; do echo charlie-line; n=\$((n+1)); done; : > \"$atomic_dir/charlie-done\""
 run_gate 3 atomic "$atomic_out" "${runner_dir}/atomic.err" \
-	"$(task alpha alpha 'sleep 1; n=0; while [ "$n" -lt 40 ]; do echo alpha-line; n=$((n+1)); done')" \
-	"$(task bravo bravo 'n=0; while [ "$n" -lt 40 ]; do echo bravo-line; n=$((n+1)); done')" \
-	"$(task charlie charlie 'n=0; while [ "$n" -lt 40 ]; do echo charlie-line; n=$((n+1)); done')"
+	"$(task alpha alpha "$alpha_cmd")" \
+	"$(task bravo bravo "$bravo_cmd")" \
+	"$(task charlie charlie "$charlie_cmd")"
 
-[ "$rc" -eq 0 ] || fail "runner atomicity: expected exit 0, got $rc"
+[ "$rc" -eq 0 ] ||
+	fail "runner atomicity: expected exit 0, got $rc (stderr: $(cat "${runner_dir}/atomic.err"))"
 want_body=$(for name in alpha bravo charlie; do n=0; while [ "$n" -lt 40 ]; do echo "${name}-line"; n=$((n+1)); done; done)
 got_body=$(bodies "$atomic_out")
 [ "$got_body" = "$want_body" ] ||
