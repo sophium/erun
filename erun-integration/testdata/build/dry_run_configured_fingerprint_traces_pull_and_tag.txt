@@ -6,6 +6,7 @@ docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64
 docker manifest inspect ghcr.io/sophium/base:<VERSION>
 docker pull --platform linux/arm64 ghcr.io/sophium/base:<VERSION>
 docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-arm64
+docker info -f '{{.DockerRootDir}}'
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64

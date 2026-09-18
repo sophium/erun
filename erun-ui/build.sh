@@ -60,7 +60,7 @@ if [ -d frontend ]; then
 	# yarn install` resolves against frontend's own stale, pre-workspaces
 	# lockfile instead, silently dropping deps the root lockfile hoists
 	# (e.g. radix-ui) from node_modules.
-	(cd "$SCRIPT_DIR/.." && "$YARN_BIN" install --frozen-lockfile)
+	(cd "$SCRIPT_DIR/.." && "$YARN_BIN" install --frozen-lockfile --prefer-offline --network-timeout 600000)
 	cd frontend
 	# Gate the bundle on the same checks CI would run. `--skip-lint` escapes
 	# the gates for one invocation when iterating locally; CI never passes it.
@@ -134,12 +134,16 @@ fi
 # Single-quoted so a checkout path containing spaces survives -ldflags splitting.
 SKILLS_SOURCE="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)/erun-skills/skills"
 
+# Same reasoning as SKILLS_SOURCE above, for the reusable agent definitions
+# (erun-builder/erun-reviewer) the desktop installs into ~/.claude/agents.
+AGENTS_SOURCE="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)/erun-skills/agents"
+
 # `main.`, not the module path. -X addresses a symbol by package path, and these
 # vars are declared in package main, whose symbols the compiler names `main.x`
 # whatever the module is called. A path nothing declares is not an error — the
 # linker drops it in silence and the binary keeps its default, which is how the
 # desktop shipped build info and a skills source it never actually carried.
-LDFLAGS="-s -w -X main.buildVersion=${BUILD_VERSION} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE} -X 'main.buildSkillsSource=${SKILLS_SOURCE}'"
+LDFLAGS="-s -w -X main.buildVersion=${BUILD_VERSION} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE} -X 'main.buildSkillsSource=${SKILLS_SOURCE}' -X 'main.buildAgentsSource=${AGENTS_SOURCE}'"
 if [ "$TARGET_GOOS" = "windows" ]; then
 	LDFLAGS="${LDFLAGS} -H windowsgui"
 fi

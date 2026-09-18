@@ -26,6 +26,11 @@ type stepTiming struct {
 	errMsg   string
 	cache    *cacheDecision
 	children []*stepTiming
+	// cgroupBefore is sampled at step creation so finish() can diff against it;
+	// cgroupMetrics is that diff, computed once the step ends. See
+	// build_cgroup_metrics.go.
+	cgroupBefore  buildCgroupSnapshot
+	cgroupMetrics *BuildCgroupMetrics
 }
 
 // cacheDecision records whether an image build promoted from the fingerprint
@@ -40,7 +45,7 @@ func newStepTiming(name string, now func() time.Time) *stepTiming {
 	if now == nil {
 		now = time.Now
 	}
-	return &stepTiming{name: name, now: now, start: now()}
+	return &stepTiming{name: name, now: now, start: now(), cgroupBefore: captureBuildCgroupSnapshot()}
 }
 
 // child starts a new named step under s, safe to call from concurrent
@@ -57,10 +62,13 @@ func (s *stepTiming) child(name string) *stepTiming {
 // addFinishedChild records a step whose duration is already known — used for
 // per-architecture image builds, where the only timing available is the
 // elapsed time the platform loop measured around a builder call that has no
-// access to the timing tree itself.
-func (s *stepTiming) addFinishedChild(name string, elapsed time.Duration, err error, cache *cacheDecision) *stepTiming {
+// access to the timing tree itself. cgroup is computed by that same caller
+// (it straddles the real docker build subprocess with its own before/after
+// samples — see timingPlatformObserver) since this call happens after the
+// fact, too late to take a start-of-step sample itself.
+func (s *stepTiming) addFinishedChild(name string, elapsed time.Duration, err error, cache *cacheDecision, cgroup *BuildCgroupMetrics) *stepTiming {
 	now := s.now()
-	child := &stepTiming{name: name, now: s.now, start: now.Add(-elapsed), end: now, ended: true, cache: cache}
+	child := &stepTiming{name: name, now: s.now, start: now.Add(-elapsed), end: now, ended: true, cache: cache, cgroupMetrics: cgroup}
 	if err != nil {
 		child.failed = true
 		child.errMsg = err.Error()
@@ -83,6 +91,7 @@ func (s *stepTiming) finish(err error) {
 		s.failed = true
 		s.errMsg = err.Error()
 	}
+	s.cgroupMetrics = buildCgroupMetricsFromSnapshots(s.cgroupBefore, captureBuildCgroupSnapshot(), s.end.Sub(s.start))
 }
 
 func (s *stepTiming) setCache(hit bool, missReason string) {
@@ -110,6 +119,7 @@ type stepSnapshot struct {
 	failed   bool
 	errMsg   string
 	cache    *cacheDecision
+	cgroup   *BuildCgroupMetrics
 	children []*stepTiming
 }
 
@@ -129,6 +139,7 @@ func (s *stepTiming) snapshot() stepSnapshot {
 		failed:   s.failed,
 		errMsg:   s.errMsg,
 		cache:    s.cache,
+		cgroup:   s.cgroupMetrics,
 		children: children,
 	}
 }
@@ -174,18 +185,40 @@ func (c Context) recordTimingCache(hit bool, missReason string) {
 
 // timingPlatformObserver returns a callback that records one finished
 // per-architecture child under the context's current step, tagged with the
-// same cache decision every architecture of one image build shares. It is
-// wired onto DockerBuildSpec.PlatformObserver rather than threaded through
+// same cache decision every architecture of one image build shares, and
+// breaks that child down further into the Dockerfile steps (and, inside
+// `RUN make check`, the Makefile's own phases) BuildKit's own captured
+// `--progress=plain` output already names — see build_progress_phases.go. It
+// is wired onto DockerBuildSpec.PlatformObserver rather than threaded through
 // DockerImageBuilderFunc, so builder implementations that build every
 // platform in one call (the shared default, and any test double or retry
 // wrapper around it) need no signature change to report per-platform timing.
-func (c Context) timingPlatformObserver(cache *cacheDecision) func(platform string, elapsed time.Duration, err error) {
+func (c Context) timingPlatformObserver(cache *cacheDecision) func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) {
 	if c.timing == nil {
-		return func(string, time.Duration, error) {}
+		return func(string, time.Duration, error, *BuildCgroupMetrics, string) {}
 	}
 	step := c.timing
-	return func(platform string, elapsed time.Duration, err error) {
-		step.addFinishedChild(platform, elapsed, err, cache)
+	return func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) {
+		child := step.addFinishedChild(platform, elapsed, err, cache, cgroup)
+		attachBuildProgressPhases(child, buildOutput)
+	}
+}
+
+// attachBuildProgressPhases records the parsed Dockerfile-step (and, where
+// present, make-phase) breakdown as already-finished children of a
+// platform's timing step — a phase that cannot be attributed reports
+// duration only, exactly like every other node addFinishedChild builds; there
+// is no cgroup or other metric here to omit.
+func attachBuildProgressPhases(step *stepTiming, buildOutput string) {
+	for _, phase := range buildKitProgressPhases(buildOutput) {
+		attachProgressPhase(step, phase)
+	}
+}
+
+func attachProgressPhase(parent *stepTiming, phase buildProgressPhase) {
+	child := parent.addFinishedChild(phase.name, phase.duration, nil, nil, nil)
+	for _, sub := range phase.children {
+		attachProgressPhase(child, sub)
 	}
 }
 
@@ -284,7 +317,7 @@ func renderStepTimingRows(step *stepTiming, depth int) []string {
 			label += " (cache miss: " + snap.cache.missReason + ")"
 		}
 	}
-	row := strings.Repeat("  ", depth) + label + " [" + snap.dur.String() + "]"
+	row := strings.Repeat("  ", depth) + label + " [" + snap.dur.String() + "]" + buildCgroupSummary(snap.cgroup)
 	if snap.failed && snap.errMsg != "" {
 		row += " — " + snap.errMsg
 	}
@@ -303,13 +336,14 @@ func renderStepTimingRows(step *stepTiming, depth int) []string {
 // the step-timing table, so two runs (e.g. a fast release and a 22x-slower
 // one) can be diffed by tooling instead of compared by eye across logs.
 type TimingRecord struct {
-	Command         string           `json:"command"`
-	StartedAt       time.Time        `json:"startedAt"`
-	DurationSeconds float64          `json:"durationSeconds"`
-	Duration        string           `json:"duration"`
-	Failed          bool             `json:"failed"`
-	Error           string           `json:"error,omitempty"`
-	Steps           []TimingStepJSON `json:"steps,omitempty"`
+	Command         string              `json:"command"`
+	StartedAt       time.Time           `json:"startedAt"`
+	DurationSeconds float64             `json:"durationSeconds"`
+	Duration        string              `json:"duration"`
+	Failed          bool                `json:"failed"`
+	Error           string              `json:"error,omitempty"`
+	Cgroup          *BuildCgroupMetrics `json:"cgroup,omitempty"`
+	Steps           []TimingStepJSON    `json:"steps,omitempty"`
 }
 
 // TimingStepJSON is one node of the timing tree in the JSON record. Unlike
@@ -318,16 +352,17 @@ type TimingRecord struct {
 // same step in the same place even when a regression changed the ordering a
 // human-facing table would show.
 type TimingStepJSON struct {
-	Name               string           `json:"name"`
-	DurationSeconds    float64          `json:"durationSeconds"`
-	Duration           string           `json:"duration"`
-	Failed             bool             `json:"failed,omitempty"`
-	Error              string           `json:"error,omitempty"`
-	CacheHit           *bool            `json:"cacheHit,omitempty"`
-	CacheMissReason    string           `json:"cacheMissReason,omitempty"`
-	UnaccountedSeconds float64          `json:"unaccountedSeconds,omitempty"`
-	OverlapSeconds     float64          `json:"overlapSeconds,omitempty"`
-	Steps              []TimingStepJSON `json:"steps,omitempty"`
+	Name               string              `json:"name"`
+	DurationSeconds    float64             `json:"durationSeconds"`
+	Duration           string              `json:"duration"`
+	Failed             bool                `json:"failed,omitempty"`
+	Error              string              `json:"error,omitempty"`
+	CacheHit           *bool               `json:"cacheHit,omitempty"`
+	CacheMissReason    string              `json:"cacheMissReason,omitempty"`
+	UnaccountedSeconds float64             `json:"unaccountedSeconds,omitempty"`
+	OverlapSeconds     float64             `json:"overlapSeconds,omitempty"`
+	Cgroup             *BuildCgroupMetrics `json:"cgroup,omitempty"`
+	Steps              []TimingStepJSON    `json:"steps,omitempty"`
 }
 
 func (s *stepTiming) toStepJSON() TimingStepJSON {
@@ -338,6 +373,7 @@ func (s *stepTiming) toStepJSON() TimingStepJSON {
 		Duration:        snap.dur.String(),
 		Failed:          snap.failed,
 		Error:           snap.errMsg,
+		Cgroup:          snap.cgroup,
 	}
 	if snap.cache != nil {
 		hit := snap.cache.hit
@@ -368,6 +404,7 @@ func (s *stepTiming) toRecord(command string) TimingRecord {
 		Duration:        snap.dur.String(),
 		Failed:          snap.failed,
 		Error:           snap.errMsg,
+		Cgroup:          snap.cgroup,
 	}
 	for _, child := range snap.children {
 		record.Steps = append(record.Steps, child.toStepJSON())
@@ -375,16 +412,37 @@ func (s *stepTiming) toRecord(command string) TimingRecord {
 	return record
 }
 
-// timingRecordDir is a sibling of the per-env trace.log tree (~/.erun/...)
-// rather than the trace.log path itself: build/release/push commonly run
-// with no tenant/environment at all (they are pure primitives that do not
-// require a deploy target — root AGENTS.md § "Command primitives vs
-// orchestration"), so a location keyed to tenant+environment would leave
-// most build/release/push runs with no record. A flat, home-relative
-// directory gives every one of the four commands the same, always-available
-// home, without standing up a queryable store this feature does not need:
-// two runs are diffed by reading two small JSON files.
-func timingRecordDir() (string, error) {
+// TimingRecordDirEnv relocates the timing history a run reads and writes. It
+// exists because the destination otherwise derives from the ambient home
+// directory, which a test binary shares with the operator running it: a suite
+// that reaches any timing-instrumented command would append fabricated
+// microsecond records to the operator's real build/deploy history, and — since
+// retention prunes on write — evict a genuine record to do it. A per-module
+// TestMain points this at a temp tree so the isolation holds for every test in
+// the binary, including ones added later, rather than depending on each test to
+// remember; an operator may also set it to keep history somewhere else.
+const TimingRecordDirEnv = "ERUN_TIMING_DIR"
+
+// timingRecordDir resolves the directory timing records are read from and
+// written to. It is a package-level seam, like dockerConfigDir and
+// runECRLoginPassword, so a test can point one call at its own temp tree
+// without moving HOME — which would also move the kubeconfig and cloud
+// credentials those tests still need to read.
+var timingRecordDir = defaultTimingRecordDir
+
+// defaultTimingRecordDir is a sibling of the per-env trace.log tree
+// (~/.erun/...) rather than the trace.log path itself: build/release/push
+// commonly run with no tenant/environment at all (they are pure primitives that
+// do not require a deploy target — root AGENTS.md § "Command primitives vs
+// orchestration"), so a location keyed to tenant+environment would leave most
+// build/release/push runs with no record. A flat, home-relative directory gives
+// every one of the four commands the same, always-available home, without
+// standing up a queryable store this feature does not need: two runs are
+// diffed by reading two small JSON files.
+func defaultTimingRecordDir() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv(TimingRecordDirEnv)); dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -397,6 +455,13 @@ func timingRecordDir() (string, error) {
 func timingRecordFileName(command string, startedAt time.Time) string {
 	return command + "-" + startedAt.UTC().Format("20060102T150405.000000000Z") + ".json"
 }
+
+// maxTimingRecordsRetained is the number of records kept per command, so a
+// before/after comparison is a command reading two small files rather than
+// an operator hand-copying numbers out of a log before they scroll away.
+// Pruning happens on write, best-effort: a prune failure must not fail the
+// build whose record it was about to write.
+const maxTimingRecordsRetained = 50
 
 func writeTimingRecord(command string, root *stepTiming) (string, error) {
 	dir, err := timingRecordDir()
@@ -415,7 +480,46 @@ func writeTimingRecord(command string, root *stepTiming) (string, error) {
 	if err := os.WriteFile(path, encoded, 0o600); err != nil {
 		return "", err
 	}
+	pruneTimingRecords(dir, command)
 	return path, nil
+}
+
+// timingRecordFileNamesForCommand lists a directory's record file names
+// belonging to one command, in whatever order os.ReadDir returned them
+// (alphabetical -- which sorts chronologically too, since the timestamp in
+// the name is zero-padded and UTC).
+func timingRecordFileNamesForCommand(entries []os.DirEntry, command string) []string {
+	prefix := command + "-"
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".json") {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// pruneTimingRecords removes a command's oldest records beyond
+// maxTimingRecordsRetained. Never fatal: a directory that cannot be listed or
+// a file that cannot be removed just means retention doesn't happen this
+// time, not that the record just written is lost.
+func pruneTimingRecords(dir, command string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	names := timingRecordFileNamesForCommand(entries, command)
+	if len(names) <= maxTimingRecordsRetained {
+		return
+	}
+	sort.Strings(names)
+	for _, name := range names[:len(names)-maxTimingRecordsRetained] {
+		_ = os.Remove(filepath.Join(dir, name))
+	}
 }
 
 // incrementalCacheDecision derives the same hit/reason a build's fingerprint

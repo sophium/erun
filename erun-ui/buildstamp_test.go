@@ -19,6 +19,7 @@ var stampTargets = map[string]*string{
 	"buildCommit":       &buildCommit,
 	"buildDate":         &buildDate,
 	"buildSkillsSource": &buildSkillsSource,
+	"buildAgentsSource": &buildAgentsSource,
 }
 
 // buildScriptsProducingTheDesktop is every script that builds erun-app,
@@ -61,6 +62,19 @@ func TestDesktopBuildScriptsStampTheSkillsSource(t *testing.T) {
 	for _, script := range []string{"build.sh", "build.ps1"} {
 		if !strings.Contains(readBuildScript(t, script), "main.buildSkillsSource=") {
 			t.Errorf("%s does not stamp main.buildSkillsSource; a desktop built by it installs no skills once it runs outside its checkout", script)
+		}
+	}
+}
+
+// TestDesktopBuildScriptsStampTheAgentsSource is
+// TestDesktopBuildScriptsStampTheSkillsSource's counterpart for the reusable
+// agent definitions (erun-builder/erun-reviewer): a script that drops this
+// stamp silently returns the desktop to installing no agents once it runs
+// outside its checkout.
+func TestDesktopBuildScriptsStampTheAgentsSource(t *testing.T) {
+	for _, script := range []string{"build.sh", "build.ps1"} {
+		if !strings.Contains(readBuildScript(t, script), "main.buildAgentsSource=") {
+			t.Errorf("%s does not stamp main.buildAgentsSource; a desktop built by it installs no reusable agents once it runs outside its checkout", script)
 		}
 	}
 }
