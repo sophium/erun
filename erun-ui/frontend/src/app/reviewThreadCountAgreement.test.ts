@@ -7,6 +7,10 @@
 // that mismatch: one review, one thread, still OPEN.
 import { describe, expect, it } from 'vitest';
 
+import type { UITenantDashboard } from '@/types';
+
+import { setReviewUnresolvedThreads, tenantDashboardSlice } from './slices/tenantDashboardSlice';
+import { defaultTenantDashboard, type TenantDashboardState } from './state';
 import {
   reviewDetailUnresolvedThreads,
   reviewRowUnresolvedThreads,
@@ -77,5 +81,30 @@ describe('unresolved-thread count agrees across the reviews list and the detail 
   it('spells out an unknown count instead of showing a dash that reads as none', () => {
     expect(unresolvedThreadsCountLabel(reviewRowUnresolvedThreads({}))).toBe('Unknown');
     expect(unresolvedThreadsCountLabel(undefined)).not.toBe('-');
+  });
+
+  it('brings a row with no computed count to the dialog’s count when the detail load writes back', () => {
+    // The exact defect: the dashboard row carries no count while the dialog
+    // over it reports one. Loading the detail is what makes them agree, so
+    // the reducer that carries that write-back is where this is pinned.
+    const dashboard: UITenantDashboard = {
+      reviews: [{ reviewId: 'review-1', name: 'Add widget' }],
+    } as UITenantDashboard;
+    const withRow = { ...defaultTenantDashboard(), data: dashboard } as TenantDashboardState;
+    const stagedRow = dashboard.reviews?.[0] ?? {};
+    expect(unresolvedThreadsCountLabel(reviewRowUnresolvedThreads(stagedRow))).toBe('Unknown');
+
+    const detailCount = reviewDetailUnresolvedThreads(detail);
+    if (detailCount === undefined) {
+      throw new Error('the dialog derives its count from the comments it loaded');
+    }
+    const next = tenantDashboardSlice.reducer(
+      withRow,
+      setReviewUnresolvedThreads({ reviewId: 'review-1', unresolvedThreads: detailCount }),
+    );
+
+    const row = next.data?.reviews?.[0];
+    expect(reviewRowUnresolvedThreads(row ?? {})).toBe(detailCount);
+    expect(unresolvedThreadsCountLabel(reviewRowUnresolvedThreads(row ?? {}))).toBe('1 unresolved');
   });
 });

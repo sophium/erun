@@ -410,12 +410,24 @@ test.describe('tenant dashboard — resolving a comment thread (#1378)', () => {
       await expect(app.reviewDetailDialog.locator()).toContainText('1 unresolved');
       await expect(app.reviewDetailDialog.locator()).toContainText('Unresolved');
 
+      // The list row and the dialog describe the same review, so opening the
+      // dialog must leave the row reporting the count the dialog reports.
+      // LoadTenantDashboard here stages a row with no unresolvedThreads at
+      // all, which is the shape that made the row render a bare dash while
+      // the dialog said "1 unresolved" (#2272).
+      const row = app.tenantDashboard.reviewsRows().first();
+      await expect(row).toContainText('1 unresolved');
+
       await app.reviewDetailDialog.resolveButton(0).click();
 
       await expect(app.reviewDetailDialog.locator()).toContainText('All resolved');
       await expect(app.reviewDetailDialog.locator()).toContainText('Resolved');
       await expect(app.reviewDetailDialog.reopenButton(0)).toBeVisible();
       await expect(app.reviewDetailDialog.resolveButton(0)).toHaveCount(0);
+      // The row follows the resolve too: a stale "1 unresolved" beside an
+      // "All resolved" dialog is the same disagreement from the other side.
+      await expect(row).toContainText('All resolved');
+      await expect(row).not.toContainText('1 unresolved');
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
