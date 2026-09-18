@@ -3656,6 +3656,9 @@ func tracePodWatchAction(ctx Context, releaseName, namespace, kubernetesContext 
 		return
 	}
 	descriptor := "deploy: watching pods in " + namespace
+	if ctx.DryRun {
+		descriptor = "deploy: would watch pods in " + namespace
+	}
 	if c := strings.TrimSpace(kubernetesContext); c != "" {
 		descriptor += " on context " + c
 	}

@@ -510,8 +510,16 @@ type UpgradeResult struct {
 // untouched. An unresolved target is reported as unresolved, not up to date:
 // its latest couldn't be determined (or an ambiguous env needs a pick). The
 // run continues past per-env failures and reports them.
+//
+// Under --dry-run nothing is deployed, so the per-member announcement and the
+// final tally stay in the conditional: reporting a rollout the run declined to
+// perform is worse than reporting nothing at all.
 func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) UpgradeResult {
 	result := UpgradeResult{Plan: plan}
+	announcement := "==> Upgrading"
+	if ctx.DryRun {
+		announcement = "==> Would upgrade"
+	}
 	for _, item := range plan.Items {
 		if strings.TrimSpace(item.Target) == "" {
 			ctx.Trace(fmt.Sprintf("upgrade: %s/%s target unresolved, skipping%s", item.Tenant, item.Environment, unresolvedReasonSuffix(item)))
@@ -523,7 +531,7 @@ func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) U
 			result.UpToDate = append(result.UpToDate, item)
 			continue
 		}
-		ctx.Info(fmt.Sprintf("==> Upgrading %s/%s %s -> %s (%s)", item.Tenant, item.Environment, displayVersion(item.Current), item.Target, item.Channel))
+		ctx.Info(fmt.Sprintf("%s %s/%s %s -> %s (%s)", announcement, item.Tenant, item.Environment, displayVersion(item.Current), item.Target, item.Channel))
 		if err := deploy(ctx, item); err != nil {
 			ctx.Trace(fmt.Sprintf("upgrade: %s/%s failed: %s", item.Tenant, item.Environment, err.Error()))
 			result.Failed = append(result.Failed, UpgradeItemFailure{Item: item, Error: err.Error()})
@@ -531,7 +539,11 @@ func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) U
 		}
 		result.Upgraded = append(result.Upgraded, item)
 	}
-	ctx.Info(fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed)))
+	if ctx.DryRun {
+		ctx.Info(fmt.Sprintf("==> Upgrade plan complete (dry run): %d would upgrade, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed)))
+	} else {
+		ctx.Info(fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed)))
+	}
 	return result
 }
 
