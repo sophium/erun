@@ -143,7 +143,7 @@ function NotConnectedState(): React.ReactElement {
             {connecting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
             {connecting ? 'Connecting…' : 'Connect'}
           </Button>
-          {error && <InlineAlert>{error}</InlineAlert>}
+          {error && <InlineAlert id="platform-connect-error">{error}</InlineAlert>}
         </div>
       }
     />
@@ -254,7 +254,7 @@ function NotEnrolledState({ data }: { data: UITenantDashboard }): React.ReactEle
               {enrolling && <LoaderCircle className="animate-spin" aria-hidden="true" />}
               {enrolling ? 'Enrolling…' : 'Try to enroll myself'}
             </Button>
-            {enrollError && <InlineAlert>{enrollError}</InlineAlert>}
+            {enrollError && <InlineAlert id="platform-enroll-error">{enrollError}</InlineAlert>}
           </div>
           <RequestInvitationAction data={data} />
           <div className="grid gap-2 rounded-[var(--radius)] border border-border bg-muted/30 p-3 text-left">

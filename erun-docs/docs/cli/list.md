@@ -98,7 +98,7 @@ environment they describe, and not from a host, which holds no history to derive
 | Signal | Direction | Why |
 |---|---|---|
 | `memory.events` `oom_kill` above zero | **raise memory**, high confidence | Something was already killed. One kill is enough. The suggestion is sized from the limit that proved too small, not from the observed peak — the allocation that triggered the kill was refused, so it never reached `memory.peak`. |
-| Observed memory peak at 90% of the limit or more | **raise memory**, high confidence | Sampling means the true peak is at least the peak observed. An environment already this close has plausibly gone further between two reads. |
+| Observed memory peak at 85% of the limit or more | **raise memory**, high confidence | This is [the same 85% a memory warning fires at](/agent-reference/cli-flags#usage-thresholds), deliberately: the alarm and the advisory answer one question about one reading, so a peak that warns is never left without the size that would fix it. Sampling means the true peak is at least the peak observed, so an environment already this close has plausibly gone further between two reads. |
 | Observed memory peak below about two-thirds of the limit, over a long quiet window, no kills | **lower memory**, low confidence | The suggestion keeps 1.5× the observed peak. |
 | 5% or more of scheduling periods throttled | **raise CPU**, high confidence | `nr_throttled`/`nr_periods` is real starvation: the container wanted CPU and the quota refused it. |
 | Any throttling below that threshold | **hold CPU** | Tolerable, but not unused — the quota does bind sometimes, so this is not grounds to shrink. |
@@ -115,6 +115,23 @@ consumes cluster capacity. An under-provisioned one kills a running agent — th
 *"was killed (exit 137) — likely out of memory"*. So ERun raises on modest evidence and shrinks only
 on a long, quiet window, never below 1.5× the peak it actually observed, and never at better than low
 confidence. A quiet window is an argument from silence, and it is labelled as one.
+
+That asymmetry decides how much observation each direction needs. **A raise needs one reading, not a
+window.** A peak at the limit, or a recorded OOM kill, is a fact about something that already
+happened; waiting a day to confirm it would withhold the answer exactly when it is wanted. Only the
+lower direction is gated on the 24-hour window and the sample count behind it — and the
+`insufficient-evidence` line names whichever of the two fell short.
+
+### A warning always arrives with its recommendation
+
+Wherever ERun reports a reading — [`erun usage`](/cli/usage), the `usage` [MCP tool](/mcp/overview),
+`erun list` — a crossed memory threshold and the sizing advice that answers it are derived together,
+from the same counters, in the same call. You will not see *"memory is at 99% of its limit"* without
+the line that says what to resize it to.
+
+The two cannot disagree because there is only one of them: the reading is folded into the retained
+history as one more observation before a single verdict is computed. A live `erun usage` on a host
+with no history at all still answers, because the reading in front of you is evidence on its own.
 
 A raise is also bounded by what the environment's namespace quota can admit, where one is
 configured: a `ResourceQuota` counts every container in the pod, so the `erun-dind` sidecar's own
@@ -145,6 +162,10 @@ runtime pod. Running `erun list` from your laptop shows no sizing lines for a re
 there is no history there to read. Ask the environment (over
 [MCP](/mcp/overview) or an [`erun open`](/cli/open) shell) and it answers about itself; the MCP
 `list` tool carries the same recommendation as a structured `sizing` field on each environment.
+
+[`erun usage`](/cli/usage) is the exception, and deliberately so: it reads the environment live, so
+the reading it just took is itself the evidence, and it prints the recommendation whether or not a
+history happens to exist on the host you ran it from.
 
 A newly created environment prints nothing either, until its monitor has taken a sample.
 

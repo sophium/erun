@@ -48,6 +48,39 @@
       "oomKills": 1,
       "oomKillsObserved": true
     }
+  },
+  "sizing": {
+    "knob": "runtimepod",
+    "verdicts": [
+      {
+        "resource": "memory",
+        "action": "raise",
+        "current": "2048Mi",
+        "suggested": "3072Mi",
+        "confidence": "high",
+        "reason": "1 oom kill(s) at 2048Mi"
+      },
+      {
+        "resource": "cpu",
+        "action": "insufficient-evidence",
+        "current": "1",
+        "reason": "n/a of scheduling periods throttled (0 of 0), but only 0m observed of the 24h0m a shrink needs"
+      }
+    ],
+    "evidence": {
+      "observedSeconds": 0,
+      "samples": 1,
+      "restarts": 0,
+      "memoryLimitBytes": 2147483648,
+      "observedPeakMemoryBytes": 2100000000,
+      "observedOomKills": 1,
+      "cpuQuotaMilli": 1000,
+      "signals": [
+        "cgroup memory.peak",
+        "cgroup memory.events oom_kill",
+        "cgroup cpu.stat usage_usec/nr_throttled"
+      ]
+    }
   }
 }
 audit: erun usage --output json

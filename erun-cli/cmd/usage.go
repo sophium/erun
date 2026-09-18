@@ -79,8 +79,9 @@ func runUsageCommand(ctx common.Context, resolveOpen OpenResolver, params common
 	if ctx.DryRun {
 		return nil
 	}
+	report := common.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
 	if ctx.Output == common.OutputJSON {
-		return ctx.WriteResult(usage)
+		return ctx.WriteResult(report)
 	}
-	return writeUsageResult(ctx, usage)
+	return writeUsageResult(ctx, report)
 }

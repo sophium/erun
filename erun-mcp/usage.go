@@ -18,20 +18,18 @@ type UsageInput struct {
 }
 
 // UsageOutput carries the live reading plus the environment's standing sizing
-// recommendation -- the same verdict and evidence `resize` reasons from -- so
-// a caller checking on an environment's health learns both numbers in one call
-// instead of a separate resize just to see the reasoning. Embeds RuntimeUsage
-// so every existing field stays at the top level; Sizing is additive.
+// recommendation -- the same verdict and evidence `erun list` reports under
+// `runtime-pod:` -- so a caller checking on an environment's health learns
+// both numbers in one call instead of a separate `resize --preview` just to
+// see the reasoning. Embeds RuntimeUsage so every existing field stays at the
+// top level; Sizing is additive.
 //
-// Sizing is derived from usage history this environment's own pod monitor
-// retained, which lives in this pod -- so it is populated here, and not on a
-// surface reading from outside. `erun list` reaches the same verdict only when
-// run inside the environment itself; `erun usage` carries no sizing block at
-// all, since it never reads the history.
-type UsageOutput struct {
-	eruncommon.RuntimeUsage
-	Sizing *eruncommon.RuntimeSizingRecommendation `json:"sizing,omitempty"`
-}
+// It is an alias of the shared report rather than a parallel struct so the
+// pairing, and the recommendation inside it, is produced by one call from one
+// body of evidence. A warning that named the problem while a separately
+// computed recommendation named a different one would be worse than either
+// alone, and two structs is exactly how that starts.
+type UsageOutput = eruncommon.RuntimeUsageReport
 
 // usageTool reads CPU quota utilisation, memory against the container's own
 // cgroup limit, and disk usage for the workspace mount, straight from the
@@ -58,8 +56,10 @@ func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 		if err != nil {
 			return nil, UsageOutput{}, err
 		}
-		sizing := eruncommon.EnvironmentRuntimeSizing(target.Tenant, target.EnvConfig)
-		return nil, UsageOutput{RuntimeUsage: result, Sizing: sizing}, nil
+		// The reading is paired with the recommendation in one call, so the
+		// warnings in `result` and the sizing advice beside them are derived
+		// from the same evidence and cannot contradict each other.
+		return nil, eruncommon.ResolveRuntimeUsageReport(target.Tenant, target.EnvConfig, result), nil
 	}
 }
 

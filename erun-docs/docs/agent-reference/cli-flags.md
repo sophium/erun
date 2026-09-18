@@ -780,13 +780,22 @@ Resolves tenant/environment/namespace the same way every other typed command doe
   "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
   "disk": [ { "mount": "/home/erun", "nodeShared": true, "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0, "ownUsedBytes": 45097156608, "ownUsageObserved": true } ],
   "warnings": [],
-  "excludesBuilds": true
+  "excludesBuilds": true,
+  "sizing": {
+    "knob": "runtimepod",
+    "verdicts": [
+      { "resource": "memory", "action": "hold", "current": "2048Mi", "reason": "peak 1010Mi of 2048Mi (49%) leaves no room to shrink at 1.5x headroom" },
+      { "resource": "cpu", "action": "insufficient-evidence", "current": "1", "reason": "n/a of scheduling periods throttled (0 of 0), but only 4m observed of the 24h0m a shrink needs" }
+    ],
+    "evidence": { "observedSeconds": 240, "samples": 8, "restarts": 0, "memoryLimitBytes": 2147483648, "observedPeakMemoryBytes": 1059061760, "observedOomKills": 0, "cpuQuotaMilli": 1000, "signals": ["cgroup memory.peak", "cgroup memory.events oom_kill", "cgroup cpu.stat usage_usec/nr_throttled"] }
+  }
 }
 ```
 
 `cpu.quotaCores` is `cpu.max`'s quota ÷ period; `memory.percentOfLimit` is `memory.current` ÷ `memory.max`; `disk[].percentUsed` is `df`'s used ÷ total for the watched mount (the runtime chart's `HOME`, `/home/erun`, is the only mount watched today). `warnings` is omitted (empty) unless a threshold below is crossed.
 
 **`disk[].totalBytes`/`usedBytes`/`percentUsed` describe the node, not this environment (`nodeShared: true`).** `df` statfs's the whole mount, which every environment scheduled on the same node shares — two environments on the same node report the identical total/used/percent even though only one of them may actually be filling it. `disk[].ownUsedBytes` (a `du` of the watched mount, scoped to this environment's own directory tree, bounded to 30s) is the figure this environment can actually reduce by cleaning up its own files; `ownUsageObserved` distinguishes a genuine reading from `du` timing out or being unreadable, the same pattern `memory.peak`'s `peakObserved` already uses.
+`sizing` is the environment's standing sizing recommendation — the same `knob`/`verdicts`/`evidence` contract [`erun list`](/cli/list#the-sizing-recommendation) reports under `runtime-pod:`, and the same one the `resize` tool applies. It is omitted only when there is nothing observed to reason from at all. The reading above is folded into the retained history as one further observation before the verdicts are computed, so `sizing` and `warnings` are always derived from the same counters in the same call and cannot contradict each other; a memory warning therefore always carries a `memory` verdict whose `action` is `raise`. `evidence.samples` counts the reading itself when no history was retained alongside it.
 
 `excludesBuilds` is `true` whenever the environment's type carries the `erun-dind` sidecar (every type except `runtime` and `host` — `EnvironmentType.UsesDindSidecar`), omitted (false) otherwise. `cpu`/`memory` above are read from the `erun-devops` container's own cgroup alone; an image build (`erun build`/`erun release`) actually runs in `erun-dind`, a separate cgroup whose build containers are cgroup siblings rather than descendants of this one, so there is no path from inside `erun-devops` to read them. `excludesBuilds` names that gap explicitly rather than let a busy build read as an idle environment — the same disclosure the desktop's Runtime tab caption makes (`usageExcludesBuilds` in `erun-ui/frontend/src/components/app/Sidebar.helpers.ts`) and the non-JSON output states as a `Note:` line. [`erun observe`](/agent-reference/cli-flags#erun-observe) reports the sidecar's own resource limits.
 
@@ -817,6 +826,29 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 | `memory.oomKills` > 0. | Always reported: a kill already happened. |
 | the environment's *retained* peak ÷ `memory.limitBytes` ≥ 95%, when it exceeds the live `memory.peak`. | `memory.peak` is a per-container counter, so a restart resets it — and a restart is often how an OOM manifests. The retained high-water mark keeps a pre-restart near-limit peak visible. Scored against the current limit, so raising `runtimepod` clears it. |
 | the environment's *retained* OOM-kill total exceeds the live `memory.oomKills`. | `memory.events` resets with the container, so a kill that already happened stays reported after a restart the current container cannot account for. |
+
+Every memory entry above is answered by the `sizing` recommendation in the same result, and the 85% memory threshold is deliberately the same figure the memory raise is decided at — see [§ Raised by an alarm](#usage-warning-remedy).
+
+### Raised by an alarm {#usage-warning-remedy}
+
+A memory warning and the memory raise that answers it are two readings of one threshold, and the
+guarantee is that the first never appears without the second:
+
+- The `memory.percentOfLimit` warning fires at `memory.current` ÷ `memory.max` ≥ 85%, and the raise
+  is decided at `max(memory.peak, memory.current)` ÷ `memory.max` ≥ 85% — the same 85%, and the peak
+  is never below the current reading. So every memory warning implies a raise.
+- `memory.peak` ÷ `memory.limitBytes` ≥ 95% implies the same, for the same reason.
+- `memory.oomKills` > 0 raises on its own, sized from the limit that proved too small.
+
+The raise is high confidence in all three cases, because all three are facts about something that
+already happened rather than an argument from a quiet window. Acting on it is
+[`erun resize --apply-recommendation`](/cli/resize).
+
+Two boundaries worth stating exactly. The guarantee covers memory; a `disk[].percentUsed` warning has
+no sizing verdict behind it, because `runtimepod` does not size the workspace volume — disk pressure
+is answered by pruning, not resizing. And a raise needs no observation window: only the *lower*
+direction is gated on the 24-hour window and its sample count, so an environment ERun has watched for
+one reading can still be told to grow.
 
 ### Error behaviour
 

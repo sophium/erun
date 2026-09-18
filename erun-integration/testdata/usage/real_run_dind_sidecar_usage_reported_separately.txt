@@ -43,6 +43,37 @@
       "percentOfLimit": 89.28571428571429,
       "oomKillsObserved": true
     }
+  },
+  "sizing": {
+    "knob": "runtimepod",
+    "verdicts": [
+      {
+        "resource": "memory",
+        "action": "insufficient-evidence",
+        "current": "23552Mi",
+        "reason": "peak 100Mi of 23552Mi (0%), but only 0m observed of the 24h0m a shrink needs"
+      },
+      {
+        "resource": "cpu",
+        "action": "insufficient-evidence",
+        "current": "12",
+        "reason": "n/a of scheduling periods throttled (0 of 0), but only 0m observed of the 24h0m a shrink needs"
+      }
+    ],
+    "evidence": {
+      "observedSeconds": 0,
+      "samples": 1,
+      "restarts": 0,
+      "memoryLimitBytes": 24696061952,
+      "observedPeakMemoryBytes": 104857600,
+      "observedOomKills": 0,
+      "cpuQuotaMilli": 12000,
+      "signals": [
+        "cgroup memory.peak",
+        "cgroup memory.events oom_kill",
+        "cgroup cpu.stat usage_usec/nr_throttled"
+      ]
+    }
   }
 }
 audit: erun usage --output json
