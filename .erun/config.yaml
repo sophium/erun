@@ -11,8 +11,6 @@ environments:
     code2:
         docker:
             fingerprints:
-                erun-backend-postgres: cb6d9b701f4ad75b
-                erun-powerdns: 28aba123cf9f7c73
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
@@ -40,8 +38,6 @@ environments:
     code1:
         docker:
             fingerprints:
-                erun-backend-postgres: cb6d9b701f4ad75b
-                erun-powerdns: 28aba123cf9f7c73
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
@@ -50,8 +46,6 @@ environments:
     code3:
         docker:
             fingerprints:
-                erun-backend-postgres: cb6d9b701f4ad75b
-                erun-powerdns: 28aba123cf9f7c73
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
@@ -60,8 +54,6 @@ environments:
     code4:
         docker:
             fingerprints:
-                erun-backend-postgres: cb6d9b701f4ad75b
-                erun-powerdns: 28aba123cf9f7c73
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
@@ -83,8 +75,6 @@ environments:
                 - deploy
         docker:
             fingerprints:
-                erun-backend-postgres: cb6d9b701f4ad75b
-                erun-powerdns: 28aba123cf9f7c73
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
