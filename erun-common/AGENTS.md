@@ -139,6 +139,13 @@ demonstrated:
   ID), and a genuine failure. The orphan warning is not proof of completed work;
   callers must inspect the job's own record. A wrapper's bounded-wait timeout is
   also not the underlying gate verdict (`scripts/agent-gate.sh`).
+- The wrapper's own 124 does not survive `make`: GNU Make collapses any nonzero
+  recipe exit to its generic exit 2, so a caller reading only `make check`'s exit
+  status cannot tell a bounded-wait timeout from a real failure. Keep the default
+  foreground-safe (bail at the first timeout) and let a caller that is not
+  foreground-constrained opt in with `AGENT_GATE_AWAIT_VERDICT=1`, which re-awaits
+  the same job across bounded `job await` calls until it reaches a real verdict.
+  `ERUN_JOB_ID` being set does not distinguish the two callers.
 
 ## Release recovery
 
