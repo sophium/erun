@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// reconcile_bypass.go implements the read half of erun#1912's recorded
-// decision (see erun-backend-api/AGENTS.md "GitHub branch protection cannot
+// reconcile_bypass.go implements the read half of the recorded decision
+// (see erun-backend-api/AGENTS.md "GitHub branch protection cannot
 // tell the queue's push from a bypass"): narrowing who holds the ruleset's
 // bypass grant to a dedicated queue identity is ops-side work outside this
 // codebase, but a bypass is structurally unavoidable for the pull_request
@@ -22,7 +22,7 @@ import (
 //
 // GitHub's rule-suites API (`GET .../rulesets/rule-suites`) is the ledger of
 // every push GitHub evaluated against a ruleset, including which ones used a
-// bypass; gate_runs (erun#1931) is erun's own record of what actually gated
+// bypass; gate_runs is erun's own record of what actually gated
 // green. This cross-references the two: a bypassed push whose landed commit
 // (after_sha) matches no PASSED gate run's mergeCommit for the same target
 // branch is reported unreconciled, loudly.
