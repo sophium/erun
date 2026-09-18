@@ -96,7 +96,7 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	}
 	kubernetesContext := get("ERUN_KUBERNETES_CONTEXT")
 	if kubernetesContext == "" {
-		kubernetesContext = "in-cluster"
+		kubernetesContext = inClusterKubernetesContext
 	}
 	provider := get("ERUN_CLOUD_PROVIDER")
 	alias := get("ERUN_CLOUD_PROVIDER_ALIAS")

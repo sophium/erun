@@ -64,6 +64,13 @@ this file for the conventions below.
   `AISessionLaunchCommand`; do not add `--fork-session` on reattach.
 - Host bootstrap may seed missing pod config, never overwrite existing values.
   Environment-owned reconciliation belongs to `doctor --sync-config`.
+- An in-cluster cloud context names the cluster the current process itself runs
+  in, so it is already running: `CloudContextPreflight` must not refresh or
+  start it, and no working-hours gate applies (`isInClusterCloudContext` in
+  `cloud_context.go`, `cloud_context_in_cluster_test.go`). The default a pod's
+  injected env produces is that same sentinel. A power-managed context with no
+  instance ID is still a genuine `has no instance ID` error — the distinction
+  is in-cluster versus power-managed, never present versus missing.
 - Route an off-environment operation to where its state lives without requiring
   an interactive shell. Remote dispatch is routing, not convenience orchestration.
   Confirm mutations before dispatch, then pass the resolved confirmation to the
