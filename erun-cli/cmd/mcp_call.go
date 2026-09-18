@@ -29,6 +29,12 @@ const mcpChannelUnreachableExitCode = 126
 // hand-rolled retry loop falls into — probing the port binding is worthless
 // (a stale forward still accepts the connection), and a bare `erun open`
 // would silently start an environment the operator deliberately stopped.
+// reattachMCPChannel is the spawn the reattach path performs. It is a variable
+// so the decision that keeps a --dry-run from starting real work can be tested
+// by asserting the spawn is never invoked, which is the only observable a
+// preview leaves behind.
+var reattachMCPChannel = reattachEnvironmentMCPChannel
+
 func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, target mcpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (common.MCPToolCallResult, error) {
 	call := func() (common.MCPToolCallResult, error) {
 		return common.CallMCPTool(ctx, common.MCPToolCallParams{
@@ -42,7 +48,14 @@ func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, tar
 	}
 	result, err := call()
 	if err != nil && errors.Is(err, common.ErrMCPEndpointUnreachable) {
-		if reattachErr := reattachEnvironmentMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
+		// A preview resolves and traces; it never executes. Reattaching spawns a
+		// real `erun open --reconnect` child that keeps running past the
+		// preview, so a --dry-run reports the channel as unreachable instead of
+		// re-establishing it.
+		if commandCtx.DryRun {
+			return result, err
+		}
+		if reattachErr := reattachMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
 			result, err = call()
 		}
 	}
