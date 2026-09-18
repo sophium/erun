@@ -55,7 +55,7 @@ func TestDockerfileHasGateTestStageRequiresBothTheStageAndTheDependency(t *testi
 }
 
 // TestApplyIncrementalPromotionNeverPromotesAGateDockerfile reproduces
-// erun#2090: a `docker build` promotion decision is a pure function of
+// The defect: a `docker build` promotion decision is a pure function of
 // whether the fp-tagged image already exists locally, with no way to prove
 // the gate that image's Dockerfile runs (make check, in the `test` stage) was
 // ever actually executed against the current tree. Before the fix, an

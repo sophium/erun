@@ -166,7 +166,7 @@ func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build Do
 // the project's own gate (make check, see dockerfileHasGateTestStage), whether
 // this run's docker build actually invokes that test stage or — the state
 // applyIncrementalPromotion and DockerImageBuilder should together make
-// unreachable, see erun#2090 — reused a promoted image instead. Deliberately
+// unreachable — reused a promoted image instead. Deliberately
 // separate from the per-image incremental trace, which can carry dozens of
 // look-alike cache-hit lines: an orchestrator deciding whether to trust this
 // build's exit code should not have to find this fact buried among them.
