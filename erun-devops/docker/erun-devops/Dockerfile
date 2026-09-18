@@ -219,6 +219,17 @@ COPY erun-devops/docker/erun-oci-registry/VERSION /src/erun-devops/docker/erun-o
 COPY erun-devops/docker/erun-ubuntu/VERSION /src/erun-devops/docker/erun-ubuntu/VERSION
 COPY erun-devops/docker/erun-zitadel/VERSION /src/erun-devops/docker/erun-zitadel/VERSION
 COPY erun-devops/docker/erun-zitadel-login/VERSION /src/erun-devops/docker/erun-zitadel-login/VERSION
+# TestPassthroughWrapperDockerfilesReclaimProvenanceLabel (erun-common) globs
+# `erun-devops/docker/*/Dockerfile` and fails loudly when that finds fewer than
+# two wrappers, so this stage needs the Dockerfiles themselves, not just the
+# VERSION pins above (a wrapper is only recognised when its VERSION sibling is
+# present). Without them the glob matches nothing at /src, the canary trips, and
+# a full checkout still passes -- the same in-build-only failure the pins below
+# document. The whole tree is copied rather than a wildcard source: a wildcard
+# (`erun-devops/docker/*/Dockerfile`) flattens every match onto a single file at
+# the destination, which is precisely the empty discovery this copy prevents,
+# and an enumerated list would go stale the moment a wrapper is added.
+COPY erun-devops/docker /src/erun-devops/docker
 # erun-backend-db-chart_test.sh cross-checks the data-retention doc's claimed
 # default and chart-value keys (retention.enabled, retention.dryRun) against
 # what this chart actually renders; only the one page is needed.
@@ -231,6 +242,10 @@ COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
 # checks erun-common's known infrastructure-failure signature list against
 # this page's spec of the gate-run/gate-build failure classifier.
 COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-reference/skills-spec.md
+# TestConfigLocationsDocMatchesResolver (erun-integration) derives the per-user
+# config paths from erun-common's own resolvers and asserts this page documents
+# them; only the one file is needed.
+COPY erun-docs/docs/reference/config-locations.md /src/erun-docs/docs/reference/config-locations.md
 # TestOrchestratorSessionEnvVarsAreDocumented cross-checks the orchestrator
 # session variables erun-common actually sets against this page, which is the
 # one that enumerates them; only the one file is needed, not the built site.

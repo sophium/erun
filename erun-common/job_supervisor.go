@@ -918,7 +918,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 			reason = reason + " (" + note + ")"
 		}
 	}
-	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot())
+	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot(), recorder.dir)
 	// Captured once resolveEnvironmentJobOutcome returns, before the reclaim
 	// decision runs, so EndedAt reflects when this job's own outcome was
 	// actually settled — which, for a job that waited out one it started (see
@@ -1207,6 +1207,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 		ID:          job.LeaseID,
 		PID:         job.PID,
 		TTL:         h.ttl,
+		Holder:      environmentJobHolder(h.tenant),
 	})
 	h.renewExclusiveClaim(job, name)
 	h.leaseName = name
@@ -1237,7 +1238,7 @@ func (h *jobHeartbeat) renewExclusiveClaim(job EnvironmentJob, name string) {
 		TTL:         h.ttl,
 		Exclusive:   true,
 		Scope:       EnvironmentActivityLeaseScopeEnvironment,
-		Holder:      EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(os.Getenv(OrchestratorIDEnvVar)), Tenant: h.tenant},
+		Holder:      environmentJobHolder(h.tenant),
 	})
 }
 
@@ -1358,6 +1359,7 @@ func AttachEnvironmentJob(ctx Context, params AttachEnvironmentJobParams) (Envir
 		ID:          job.LeaseID,
 		PID:         job.PID,
 		TTL:         ttl,
+		Holder:      environmentJobHolder(params.Tenant),
 	}); err != nil {
 		return EnvironmentJob{}, err
 	}

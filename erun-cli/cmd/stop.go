@@ -14,8 +14,8 @@ func newStopCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 		Use:   "stop [TENANT] [ENVIRONMENT]",
 		Short: "Stop an environment's runtime and return its capacity to the node",
 		Long: "Stop an environment's runtime and return its capacity to the node.\n\n" +
-			"Scales the environment's runtime Deployment to zero, so both the runtime container's " +
-			"resource limits and its unlimited dind sidecar's real usage go back to the cluster and " +
+			"Scales the environment's runtime Deployment to zero, so the runtime container's and its " +
+			"dind sidecar's resource limits and requests both go back to the cluster and " +
 			"the environments you are actually using can be given more. Running work in the pod is " +
 			"terminated. Persistent state is not touched — the home volume, the Docker/build caches, " +
 			"and a builds-here environment's worktree all survive — so waking is a pod start, not a " +
