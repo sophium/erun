@@ -72,9 +72,13 @@ func startAgentJobInEnvironment(ctx context.Context, commandCtx common.Context, 
 	putEnvironmentToolArgument(arguments, "maxOutputBytes", params.MaxOutputBytes)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
 	putEnvironmentToolArgument(arguments, "handoff", params.Handoff)
+	putEnvironmentToolArgument(arguments, "exclusive", params.Exclusive)
 	putEnvironmentToolArgument(arguments, "startedByJobId", startedByJobIDForOffEnvironmentStart(params))
 	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_agent", arguments, false)
-	return result.Job, resolved, err
+	if err != nil {
+		return common.EnvironmentJob{}, resolved, common.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
+	}
+	return result.Job, resolved, nil
 }
 
 // startedByJobIDForOffEnvironmentStart is what an off-environment start (this
@@ -101,11 +105,15 @@ func startCommandJobInEnvironment(ctx context.Context, commandCtx common.Context
 	putEnvironmentToolArgument(arguments, "maxOutputBytes", params.MaxOutputBytes)
 	putEnvironmentToolArgument(arguments, "leaseTtlSeconds", leaseTTLSeconds(params.LeaseTTL))
 	putEnvironmentToolArgument(arguments, "handoff", params.Handoff)
+	putEnvironmentToolArgument(arguments, "exclusive", params.Exclusive)
 	putEnvironmentToolArgument(arguments, "startedByJobId", startedByJobIDForOffEnvironmentStart(params))
 	arguments["wait"] = false
 	started, resolved, err := callEnvironmentTool[environmentJobEnvelopeResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_raw", arguments, false)
-	if err != nil || !resolved {
-		return common.EnvironmentJob{}, resolved, err
+	if err != nil {
+		return common.EnvironmentJob{}, resolved, common.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
+	}
+	if !resolved {
+		return common.EnvironmentJob{}, resolved, nil
 	}
 	if started.JobID == "" {
 		return common.EnvironmentJob{}, resolved, fmt.Errorf("%s/%s started the job but returned no jobId", params.Tenant, params.Environment)
