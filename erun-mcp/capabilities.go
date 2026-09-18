@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -67,12 +68,75 @@ func addTool[In, Out any](reg toolRegistrar, tool *mcp.Tool, handler mcp.ToolHan
 		return
 	}
 	describeTool(tool)
+	advertisePreview[In](tool)
 	if tool.OutputSchema == nil {
 		if schema := outputSchemaFor[Out](); schema != nil {
 			tool.OutputSchema = schema
 		}
 	}
 	mcp.AddTool(reg.server, tool, guardTool(reg.identity, tool.Name, reg.metrics, handler))
+}
+
+// previewAdvertised is the exact trailing sentence a tool description carries
+// when its input schema accepts `preview`. Callers scan descriptions for this
+// phrase, so it is added and checked verbatim.
+const previewAdvertised = "Supports preview."
+
+// advertisePreview makes "Supports preview." follow from the tool's input type,
+// in both directions.
+//
+// The sentence used to be typed by hand onto some descriptions and not others:
+// 22 tools advertised a dry run while 58 more accepted `preview` silently. A
+// caller reading that split reasonably concludes the silent ones have no dry
+// run, which is the one direction that costs something -- the tools it hides
+// include the destructive ones. Deriving the sentence from In instead of from
+// an author's memory means the description cannot drift from the schema.
+func advertisePreview[In any](tool *mcp.Tool) {
+	description := strings.TrimSpace(tool.Description)
+	claims := strings.HasSuffix(description, previewAdvertised)
+	accepts := inputAcceptsPreview[In]()
+	if !accepts {
+		// The reverse direction. A description that promises a dry run the
+		// schema cannot deliver is the same defect mirrored, and registration
+		// is where it is still cheap to catch.
+		if claims {
+			panic(fmt.Sprintf("erun-mcp: tool %q advertises preview but its input type has no preview property", tool.Name))
+		}
+		return
+	}
+	if claims {
+		return
+	}
+	tool.Description = description + " " + previewAdvertised
+}
+
+// inputAcceptsPreview reports whether In -- the type the SDK derives a tool's
+// input schema from -- declares a `preview` property.
+func inputAcceptsPreview[In any]() bool {
+	return structHasJSONField(reflect.TypeFor[In](), "preview", map[reflect.Type]bool{})
+}
+
+func structHasJSONField(rt reflect.Type, name string, seen map[reflect.Type]bool) bool {
+	for rt.Kind() == reflect.Pointer {
+		rt = rt.Elem()
+	}
+	if rt.Kind() != reflect.Struct || seen[rt] {
+		return false
+	}
+	seen[rt] = true
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+		if field.Anonymous {
+			if structHasJSONField(field.Type, name, seen) {
+				return true
+			}
+			continue
+		}
+		if tag, _, _ := strings.Cut(field.Tag.Get("json"), ","); tag == name {
+			return true
+		}
+	}
+	return false
 }
 
 // rawJSONSchemaOverrides widens json.RawMessage fields to accept any JSON
