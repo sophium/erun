@@ -32,6 +32,7 @@ Available Commands:
   deploy       Install a published version into an environment
   devops       DevOps utilities
   doctor       Diagnose and repair an environment's runtime and config
+  e2e          Run the project's Playwright suite against a deployed environment
   exec         Repository execution utilities
   expose       Expose an environment's Service at a public HTTPS hostname
   gate         See what is being gated, and what recent gates decided
