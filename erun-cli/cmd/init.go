@@ -8,6 +8,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
 
@@ -405,12 +406,54 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 	return result
 }
 
+// tenantSelectionUnavailableExitCode marks a run that needed a tenant chosen
+// but had no way to ask for one: stdin is not a terminal and holds no answer to
+// read, so the prompt would print its menu, read EOF, and fail. Distinct from
+// the ordinary failure code so a caller that discards stderr can tell "this run
+// is waiting on a choice only I can make" apart from "the command ran and
+// failed" -- and distinct from platformAliasUnusableExitCode (127), which
+// answers a different question, so neither condition can be mistaken for the
+// other. Continues the sequence jobAwaitTimeoutExitCode (124),
+// jobAwaitUnknownExitCode (125), and mcpChannelUnreachableExitCode (126) set.
+const tenantSelectionUnavailableExitCode = 128
+
+// tenantPromptHasAnswer reports whether a non-terminal stdin carries an answer
+// to read. Piped input must keep driving the plain select exactly as it always
+// has, so this peeks rather than declaring every non-terminal stdin unanswerable:
+// only an exhausted stdin (the "< /dev/null" case) is.
+var tenantPromptHasAnswer = func() bool {
+	_, err := plainPromptInput().Peek(1)
+	return err == nil
+}
+
+func tenantSelectionUnavailableError(tenants []common.TenantConfig) error {
+	names := make([]string, 0, len(tenants))
+	for _, tenant := range tenants {
+		names = append(names, tenant.Name)
+	}
+	return internal.WithExitCode(fmt.Errorf(
+		"tenant selection needs an interactive terminal, and stdin is not a TTY with an answer to read, "+
+			"so the prompt would list the tenants and then fail on EOF; pass --tenant with one of: %s",
+		strings.Join(names, ", ")), tenantSelectionUnavailableExitCode)
+}
+
 func selectTenantPrompt(run SelectRunner, tenants []common.TenantConfig) (common.TenantSelectionResult, error) {
 	items := make([]string, 0, len(tenants)+1)
 	for _, tenant := range tenants {
 		items = append(items, tenant.Name)
 	}
 	items = append(items, initializeCurrentProjectOption)
+
+	if !stdinIsTerminal() && !tenantPromptHasAnswer() {
+		// Nothing can answer the prompt. Refuse before printing a menu nobody
+		// can reply to, and name the flag that resolves it.
+		if len(tenants) == 1 {
+			// Nothing to choose either: an empty line takes the prompt's
+			// starting option, so the sole tenant is the documented default.
+			return common.TenantSelectionResult{Tenant: tenants[0].Name}, nil
+		}
+		return common.TenantSelectionResult{}, tenantSelectionUnavailableError(tenants)
+	}
 
 	prompt := promptui.Select{
 		Label: "Select tenant",
