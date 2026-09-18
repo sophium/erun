@@ -83,8 +83,16 @@ export function isolatedHomeDir(): string {
   return path.join(isolatedRoot(), 'home');
 }
 
-function stubsDir(): string {
+export function stubsDir(): string {
   return path.join(isolatedRoot(), 'stubs');
+}
+
+// stubRegistryPath is the file every long-lived stub appends its own pid to
+// before parking itself. It lives in the isolated root (per worker, removed with
+// it) and is what makes the stub population observable and reapable —
+// fixtures/stubProcesses.ts owns reading and reaping it.
+export function stubRegistryPath(): string {
+  return path.join(isolatedRoot(), 'stub-pids');
 }
 
 // stubBinPath is the on-disk path of a stub tool. On Windows the backend
@@ -170,6 +178,10 @@ export function backendEnv(): Record<string, string> {
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_CACHE_HOME: path.join(home, '.cache'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    // Where a long-lived stub records the pid it parks under, so the harness can
+    // reap a session it opened and never closed (fixtures/stubProcesses.ts).
+    // Inherited by every child the backend spawns, the stubs included.
+    ERUN_PLAYWRIGHT_STUB_REGISTRY: stubRegistryPath(),
   };
   if (e2eK3dEnabled()) {
     // k3d mode drives a live cluster with the real docker/kubectl/helm and
@@ -402,6 +414,24 @@ export function seedGitRemoteAgentForK3d(
 //   The stub prints a shell-prompt line (the action runner's setup-complete
 //   marker, see signalSessionReadyOnLine) and then sleeps, so the session is
 //   live, quiet, and killable.
+//
+// Both long-lived stubs register the pid they park under before blocking, so the
+// harness can end a session it opened and never closed — see
+// fixtures/stubProcesses.ts. Keep that in lockstep on POSIX and win32 (the
+// prebuilt PE's registerStub call in fixtures/winstub/main.go).
+// STUB_REGISTER_PREAMBLE heads every long-lived stub: it records the pid the
+// stub is about to park under in the registry the harness reaps
+// (fixtures/stubProcesses.ts). `exec` keeps that pid, so the number recorded
+// here is the parked process itself. Best-effort by design — a stub invoked
+// outside the harness has no registry in its environment and must still run.
+const STUB_REGISTER_PREAMBLE = [
+  '#!/bin/sh',
+  'register_stub() {',
+  '  [ -n "$ERUN_PLAYWRIGHT_STUB_REGISTRY" ] || return 0',
+  '  printf \'%s\\n\' "$$" >> "$ERUN_PLAYWRIGHT_STUB_REGISTRY"',
+  '}',
+];
+
 function writeStubBinary(name: string): void {
   if (isWindows) {
     // CreateProcess cannot exec a shell script or a .cmd/.bat file, so copy the
@@ -413,10 +443,11 @@ function writeStubBinary(name: string): void {
   let body: string;
   if (name === 'erun') {
     body = [
-      '#!/bin/sh',
+      ...STUB_REGISTER_PREAMBLE,
       '# erun playwright stub: keeps ERun/AI tabs alive and inert.',
       'case "$1" in',
       '  open)',
+      '    register_stub',
       "    printf 'erun@playwright:~$ \\n'",
       '    exec sleep 2147483647',
       '    ;;',
@@ -426,8 +457,9 @@ function writeStubBinary(name: string): void {
     ].join('\n');
   } else if (name === 'claude') {
     body = [
-      '#!/bin/sh',
+      ...STUB_REGISTER_PREAMBLE,
       '# claude playwright stub: keeps an orchestrator session alive and inert.',
+      'register_stub',
       "printf 'claude@playwright:~$ \\n'",
       'exec sleep 2147483647',
       '',
