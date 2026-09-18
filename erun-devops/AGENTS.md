@@ -152,8 +152,11 @@ composition and release invariants belong to root/shared logic, not chart policy
   Enable with either a base domain or explicit apex, support explicit disable, and
   record the resolved state/reason in the status ConfigMap. Share certificate SANs
   and Secret without racing a second issuer request; DNS is separate configuration.
-  Preserve canonical OIDC origin. Nginx's SPA fallback must not return HTML for
-  missing hashed assets.
+  Preserve canonical OIDC origin. Nginx's SPA fallback must not return HTML for a
+  missing static asset: carve out any request whose final path segment carries a
+  file extension, not just the `/assets/` prefix, so a root-level file
+  (`favicon.svg`) or a probed `/favicon.ico` 404s instead of serving the shell.
+  The `/v1/` proxy location takes `^~` so it stays ahead of that regex location.
 
 ## Wrapping And Pinning Third-Party Service Images
 
