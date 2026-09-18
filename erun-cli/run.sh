@@ -38,6 +38,28 @@ for arg in "$@"; do
 	esac
 done
 
+# The first non-flag argument names the subcommand, and `-h`/`--help` or the
+# `help`/completion commands mark a request for usage text. Both are read here,
+# before anything is built, because together they decide what has to be built:
+# a help request prints static text that does not depend on this checkout.
+COMMAND_NAME=
+HELP_REQUEST=0
+for arg in "$@"; do
+	case "$arg" in
+	-- ) break ;;
+	-h | --help ) HELP_REQUEST=1 ;;
+	-* ) ;;
+	* )
+		if [ -z "$COMMAND_NAME" ]; then
+			COMMAND_NAME=$arg
+		fi
+		case "$arg" in
+		help | __complete | __completeNoDesc ) HELP_REQUEST=1 ;;
+		esac
+		;;
+	esac
+done
+
 BUILD_VERSION=dev
 if [ -f "$VERSION_FILE" ]; then
 	BUILD_VERSION=$(tr -d '\n' < "$VERSION_FILE")
@@ -76,10 +98,29 @@ if [ "$IN_GIT_TREE" -eq 1 ] && [ "$QUIET_REBUILD" -eq 0 ]; then
 	if [ -n "$UPSTREAM_REF" ]; then
 		BEHIND_COUNT=$(git -C "$SCRIPT_DIR" rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo 0)
 		if [ "$BEHIND_COUNT" -gt 0 ]; then
-			printf '>> WARNING: build source is %s commit(s) behind %s (as of the last fetch) -- rebuilding now will NOT include what moved upstream. Run git fetch/pull in %s to catch up.\n' \
-				"$BEHIND_COUNT" "$UPSTREAM_REF" "$SCRIPT_DIR" >&2
+			# A help request is answered from the binary already on disk, so the
+			# warning has to describe what that binary is missing rather than a
+			# rebuild that is not going to happen.
+			if [ "$HELP_REQUEST" -eq 1 ]; then
+				STALENESS_REMEDY=$(printf 'answering from the binary already built, which does not include what moved upstream. Run git fetch/pull in %s, then rerun without --help to rebuild.' "$SCRIPT_DIR")
+			else
+				STALENESS_REMEDY=$(printf 'rebuilding now will NOT include what moved upstream. Run git fetch/pull in %s to catch up.' "$SCRIPT_DIR")
+			fi
+			printf '>> WARNING: build source is %s commit(s) behind %s (as of the last fetch) -- %s\n' \
+				"$BEHIND_COUNT" "$UPSTREAM_REF" "$STALENESS_REMEDY" >&2
 		fi
 	fi
+fi
+
+# Help and completion are answered from the binary already built: the text is
+# static, and `app --help` in particular must not pay for the desktop build
+# below, which is the cost this wrapper exists to keep off an exploratory
+# invocation. With no binary yet there is nothing to answer with, so the
+# request still falls through to a CLI build -- never to the desktop one, which
+# no help request can reach.
+if [ "$HELP_REQUEST" -eq 1 ] && [ -x "$TARGET" ]; then
+	cd "$ORIGINAL_DIR"
+	exec "$TARGET" "$@"
 fi
 
 if [ "$QUIET_REBUILD" -eq 0 ]; then
@@ -95,22 +136,7 @@ if [ "$QUIET_REBUILD" -eq 0 ]; then
 	printf 'ok (%ss) -> %s\n' "$((build_finished_at - build_started_at))" "$TARGET" >&2
 fi
 
-COMMAND_NAME=
-for arg in "$@"; do
-	case "$arg" in
-	-- )
-		break
-		;;
-	-* )
-		;;
-	* )
-		COMMAND_NAME=$arg
-		break
-		;;
-	esac
-done
-
-if [ "$COMMAND_NAME" = "app" ]; then
+if [ "$COMMAND_NAME" = "app" ] && [ "$HELP_REQUEST" -eq 0 ]; then
 	# The desktop build needs Wails CLI + yarn + node; in environments
 	# missing that toolchain (e.g. a runtime pod) build.sh exits non-zero
 	# under `set -eu`. Don't take down `erun` itself when that happens —

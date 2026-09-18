@@ -41,13 +41,31 @@ if (git -C $ScriptDir rev-parse --is-inside-work-tree 2>$null) {
     $buildDate = (git -C $ScriptDir show -s --format=%cI HEAD).Trim()
 }
 
-# --- detect subcommand (first non-flag arg) and --no-shell quiet mode ------
+# --- detect subcommand (first non-flag arg), help requests, quiet mode -----
+# The first non-flag argument names the subcommand, and -h/--help or the
+# help/completion commands mark a request for usage text. Both are read here,
+# before anything is built, because together they decide what has to be built:
+# a help request prints static text that does not depend on this checkout.
 $commandName = ""
+$helpRequest = $false
 foreach ($a in $CliArgs) {
     if ($a -eq "--") { break }
-    if ($a -notlike "-*") { $commandName = $a; break }
+    if ($a -eq "-h" -or $a -eq "--help") { $helpRequest = $true; continue }
+    if ($a -like "-*") { continue }
+    if ($commandName -eq "") { $commandName = $a }
+    if ($a -eq "help" -or $a -eq "__complete" -or $a -eq "__completeNoDesc") { $helpRequest = $true }
 }
 $quiet = ($CliArgs -contains "--no-shell")
+
+# Help and completion are answered from the binary already built: the text is
+# static, and `app --help` in particular must not pay for the desktop build
+# below. With no binary yet there is nothing to answer with, so the request
+# still falls through to a CLI build -- never to the desktop one, which no help
+# request can reach.
+if ($helpRequest -and (Test-Path $CliExe)) {
+    & $CliExe @CliArgs
+    exit $LASTEXITCODE
+}
 
 # --- always rebuild the CLI (CGO disabled; fast) ---------------------------
 $ldflags = "-X github.com/sophium/erun/cmd.buildVersion=$buildVersion " +
@@ -66,7 +84,7 @@ if (-not $quiet) { [Console]::Error.WriteLine("ok -> $CliExe") }
 # --- for `erun app`, rebuild the desktop bundle into the same bin ----------
 # Non-fatal like run.sh: a missing wails/yarn/node/gcc toolchain warns but still
 # lets the CLI run (its `app` subcommand emits a clear not-found message).
-if ($commandName -eq "app") {
+if ($commandName -eq "app" -and -not $helpRequest) {
     try {
         & $UiBuild -Target $AppExe
         if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) { throw "build.ps1 returned $LASTEXITCODE" }
