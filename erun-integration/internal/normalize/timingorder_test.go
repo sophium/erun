@@ -106,6 +106,48 @@ func TestStepTimingSiblingsCanonicalizeToNameOrder(t *testing.T) {
 				"timing record written to somewhere\n",
 		},
 		{
+			// The shallowest level is duration order too. These rows are
+			// siblings that tie, not three independent trees, so a run with no
+			// single recognised parent must still canonicalize: leaving them in
+			// wall-clock order is exactly the variance this function exists to
+			// remove, and the closest-run rows are the likeliest to swap.
+			"same-depth rows with no common parent sort by name too",
+			"  publish [1.0s]\n" +
+				"    api (cache hit) [0.9s]\n" +
+				"  post-release-version-bump [1.1s]\n" +
+				"  push (failed) [0.8s] — exit status 1\n",
+			"  post-release-version-bump [<ELAPSED>]\n" +
+				"  publish [<ELAPSED>]\n" +
+				"    api (cache hit) [<ELAPSED>]\n" +
+				"  push (failed) [<ELAPSED>] — exit status 1\n",
+		},
+		{
+			// A failed row records its status after the duration. It is a
+			// timing row like any other, so it has to be recognised, sorted
+			// among its siblings, and carry its suffix through unchanged.
+			"a failed row's status suffix does not stop it being a timing row",
+			"  push [1.0s]\n" +
+				"    publish [0.9s]\n" +
+				"    api (failed) [0.8s] — denied: token does not match expected scopes\n",
+			"  push [<ELAPSED>]\n" +
+				"    api (failed) [<ELAPSED>] — denied: token does not match expected scopes\n" +
+				"    publish [<ELAPSED>]\n",
+		},
+		{
+			// A multi-line step failure interleaves its message between two
+			// rows of the same tree, so a run ends at a non-timing line rather
+			// than at a shallower one; each fragment still canonicalizes.
+			"a run broken by an interleaved message sorts each fragment",
+			"  release (failed) [1.0s] — exit status 1\n" +
+				"recover by hand\n" +
+				"  sync-develop [0.4s]\n" +
+				"  release [0.5s]\n",
+			"  release (failed) [<ELAPSED>] — exit status 1\n" +
+				"recover by hand\n" +
+				"  release [<ELAPSED>]\n" +
+				"  sync-develop [<ELAPSED>]\n",
+		},
+		{
 			"a single root with one child is untouched beyond redaction",
 			"step timing (ordered by duration):\n  deploy [2.1s]\n    the-release [1.9s]\n",
 			"step timing (ordered by duration):\n  deploy [<ELAPSED>]\n    the-release [<ELAPSED>]\n",

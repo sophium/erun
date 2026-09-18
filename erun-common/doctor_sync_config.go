@@ -96,7 +96,7 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	}
 	kubernetesContext := get("ERUN_KUBERNETES_CONTEXT")
 	if kubernetesContext == "" {
-		kubernetesContext = "in-cluster"
+		kubernetesContext = inClusterKubernetesContext
 	}
 	provider := get("ERUN_CLOUD_PROVIDER")
 	alias := get("ERUN_CLOUD_PROVIDER_ALIAS")
@@ -476,5 +476,5 @@ func writeRuntimeYAML(ctx Context, path string, config any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return ErrNoUserDataFolder
 	}
-	return WriteFileAtomic(path, data, 0o644)
+	return WriteFileAtomic(path, data, configFilePerm)
 }

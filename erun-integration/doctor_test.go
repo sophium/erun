@@ -58,6 +58,24 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_prune_images_traces_dind_exec", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_deploy_diagnosis", func(t *testing.T) {
+		// Regression coverage for erun#2403: --dry-run withholds mutations,
+		// not reads, so the helm/kubectl diagnosis reads must still run and
+		// their sections must still print -- the same content a real run
+		// would show -- instead of the diagnosis being silently suppressed.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "failed")
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_deploy_diagnosis", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_unaffected_by_kubectl_deployment_wait_library_execution_mode", func(t *testing.T) {
 		// Locks the dry-run/audit contract for kubectl-deployment-wait: the
 		// kubectl trace lines must stay byte-identical to the
@@ -1585,6 +1603,75 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_prune_images_and_build_cache_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_without_tty_skips_optional_prune_prompts", func(t *testing.T) {
+		// Regression coverage for the no-TTY run: doctor is the command reached
+		// for when a deploy has already failed, so its caller is often an
+		// orchestrator or CI step with no terminal. Reaching the optional prune
+		// prompts with stdin bound to /dev/null read EOF and exited 1 with
+		// "Doctor failed team/dev: ^D" -- a verdict on an environment nothing
+		// was wrong with. With no TTY each optional prune must be reported as
+		// skipped, named, and left unrun, and the run must exit 0 on the health
+		// of what it did examine.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{
+			Cwd:              setup.Cwd,
+			Env:              envVars,
+			StdinFromDevNull: true,
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("no-TTY doctor exited %d; a skipped optional prompt is not a failed environment: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Doctor failed") {
+			t.Fatalf("no-TTY doctor reported the environment as failed: %s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_without_tty_skips_optional_prune_prompts", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_without_tty_declines_pending_helm_recovery", func(t *testing.T) {
+		// The other prompt doctor offers unasked: a stuck pending release makes
+		// RecommendedDeployRecovery suggest one mutating recovery. With no TTY
+		// that must read as "not confirmed", named, and never as a failed
+		// environment -- doctor is reached for precisely when a deploy failed,
+		// so a missing terminal must not cost the caller the diagnosis.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "pending-install")
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{
+			Cwd:              setup.Cwd,
+			Env:              envVars,
+			StdinFromDevNull: true,
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("no-TTY doctor exited %d on a pending release: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Doctor failed") {
+			t.Fatalf("no-TTY doctor reported the environment as failed: %s", result.Combined)
+		}
+		// The diagnosis recommends exactly one recovery, so the flag named is
+		// the one that fits it -- not both alternatives.
+		if !strings.Contains(result.Combined, "--clear-pending-helm") {
+			t.Errorf("report does not name --clear-pending-helm as the way to run the recommended recovery explicitly:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Could not confirm") && !strings.Contains(result.Combined, "Not run") {
+			t.Errorf("report does not say the recovery went unconfirmed:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "Running: Clear pending helm release") {
+			t.Errorf("a recovery nobody confirmed was run:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "==> Doctor done team/dev") {
+			t.Errorf("doctor did not complete the run:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_without_tty_declines_pending_helm_recovery", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_clear_pending_helm_via_prompt_then_prune_containers", func(t *testing.T) {
 		// The helm stub reports STATUS: pending-install, so the
 		// diagnosis recommends exactly one recovery and the interactive
@@ -1610,6 +1697,29 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_clear_pending_helm_via_prompt_then_prune_containers", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", func(t *testing.T) {
+		// Once the helm release status read confirms the Kubernetes API
+		// server itself is unreachable, doctor must not rediscover that fact
+		// in the Pods, Host AWS credentials, Git push
+		// access, or Docker storage sections -- before the fix each paid its
+		// own multi-minute kubectl timeout to relearn what the helm read
+		// already established (~8 minutes and 17 klog frames across the four
+		// sections in the reported run). kubectl is deliberately left
+		// unstubbed (absent from fixture.StubEnv below): if any of the four
+		// sections still probes for real, erun.Run's own
+		// "executable file not found" detection fails this test outright.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithAWSAlias(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatusUnreachable(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_storage_unhealthy_diagnostic_error", func(t *testing.T) {
@@ -2063,6 +2173,24 @@ func stubDoctorHelmStatus(t *testing.T, stubsDir, releaseStatus string) {
 	script := strings.Join([]string{
 		`case "$1" in`,
 		`  status) printf '%s\n' 'NAME: team-devops' 'STATUS: ` + releaseStatus + `' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "helm", script)
+}
+
+// stubDoctorHelmStatusUnreachable stubs `helm status` to fail with the
+// unreachable-API-server error a real cluster reports, matching the reported
+// run's exact wording. No other helm command is expected to run once this
+// fails.
+func stubDoctorHelmStatusUnreachable(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$1" in`,
+		`  status)`,
+		`    echo 'Error: kubernetes cluster unreachable: Get "https://198.51.100.10:6443/version?timeout=32s": dial tcp 198.51.100.10:6443: i/o timeout' >&2`,
+		`    exit 1`,
+		`    ;;`,
 		`esac`,
 		`exit 0`,
 	}, "\n")

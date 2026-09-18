@@ -32,7 +32,7 @@ cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 git -C <TMP> rev-parse HEAD
 release tag already exists at HEAD; skipping <VERSION>
-docker builder prune -f
+docker info -f '{{.DockerRootDir}}'
 release: docker root free disk space is not observable from this process; skipping the headroom check
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
 docker manifest inspect ghcr.io/sophium/base:<VERSION>

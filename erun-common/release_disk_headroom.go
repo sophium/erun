@@ -16,107 +16,314 @@ import (
 // itself, in the same spirit as the registry-permission preflight in
 // build_run.go: a knowable, avoidable failure caught before the build spends
 // anything, not discovered by the build itself running out of room.
+//
+// Ordinary builds run the same check. They are individually far smaller than a
+// release, but they are also far more frequent, and the BuildKit cache they
+// leave behind grows monotonically — so between two releases a run of plain
+// builds can walk the node all the way to the eviction threshold with nothing
+// on that path ever looking at free space. Guarding only the release leaves the
+// common case unguarded.
+//
+// The floor has to sit *above* kubelet's eviction threshold to be worth
+// anything. kubelet's evictionHard for nodefs defaults to 5% available, and it
+// evicts every pod on the node when it is crossed; a floor below that line can
+// only ever prune after the eviction it exists to prevent has already started.
+// So the floor is proportional to the filesystem, at kubelet's own
+// evictionMinimumReclaim level, with the absolute byte floor as a lower bound
+// for small disks where a percentage is too little to fit a release.
 
-// releaseMinDiskHeadroomEnv overrides releaseMinDiskHeadroomBytes. Not a
+// releaseMinDiskHeadroomEnv overrides the resolved floor outright. Not a
 // production knob to reach for casually — it exists so a constrained test or
 // a genuinely small node can tune the floor without recompiling.
 const releaseMinDiskHeadroomEnv = "ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES"
 
-// releaseMinDiskHeadroomBytes is the default floor: a released multi-arch,
-// many-image build has consumed tens of gigabytes on the reported incident
-// node, so headroom well under that is already too little to safely absorb
-// one more release.
+// releaseMinDiskHeadroomBytes is the absolute lower bound on the floor: a
+// released multi-arch, many-image build has consumed tens of gigabytes on the
+// reported incident node, so headroom well under that is already too little to
+// safely absorb one more release.
 const releaseMinDiskHeadroomBytes uint64 = 20 << 30 // 20 GiB
 
-// ensureReleaseDiskHeadroom prunes reclaimable docker build cache before a
-// release's build starts, and — where the docker root's free space is
-// actually observable from this process — refuses up front when it is
-// already too low, rather than letting the build itself trigger the eviction
-// it cannot recover from.
-//
-// The docker daemon a release builds against often lives in a separate
-// container (the erun-dind sidecar) with its own filesystem, so the docker
-// root's free space is frequently not visible from this process at all; the
-// prune still runs regardless, but the numeric refusal only fires when the
-// read is conclusive. An inconclusive read is not an answer — the same
-// "known failure over invented behavior" posture as
-// ensureReleaseBaseBranchUnmoved — so it lets the release proceed exactly as
-// it does today.
+// minDiskHeadroomPercent is the floor as a share of the whole filesystem.
+// It matches kubelet's default evictionMinimumReclaim for nodefs — the level
+// kubelet itself reclaims *to* once it has started evicting — so holding that
+// line proactively keeps the node off the 5% evictionHard cliff entirely
+// rather than reacting after pods are already being killed.
+const minDiskHeadroomPercent uint64 = 10
+
+// diskHeadroomFreeSpaceFunc reads the docker root's current free and total
+// space, returning ok=false when the read is inconclusive. Total is what makes
+// the floor proportional; it is 0 when the read could not determine it, which
+// falls back to the absolute floor. Injectable so the decision logic in
+// ensureDiskHeadroomWith can be unit-tested without a real docker daemon.
+type diskHeadroomFreeSpaceFunc func() (free, total uint64, ok bool)
+
+// diskHeadroomReclaimableFunc reports whether a build-cache prune has
+// anything at all to free, so the caller can decline a prune that would be a
+// pure no-op. The reported figure is a lower bound, not a size estimate — see
+// reclaimableBuildCacheBytes — so it is only trusted to say "zero", never to
+// say "not enough". ok is false when the figure is unreadable, which is
+// treated as "prune anyway" rather than "never prune": an unknown is not a
+// reason to skip the remedy.
+type diskHeadroomReclaimableFunc func() (uint64, bool)
+
+// diskHeadroomPruneFunc bounds a build-cache prune to leave at least floor
+// bytes free. Injectable for the same reason as diskHeadroomFreeSpaceFunc.
+type diskHeadroomPruneFunc func(floor uint64) error
+
+// diskHeadroomPolicy is what differs between the two callers: the word used in
+// traces, and whether a disk still below the floor after the prune stops the
+// run. A release refuses, because it is about to spend tens of minutes and tens
+// of gigabytes and would take the node down with it. A build only warns: it is
+// small enough that proceeding is usually fine, the prune it just ran is the
+// protective act, and refusing every build on a full node would block the
+// operator from the very work that clears it.
+type diskHeadroomPolicy struct {
+	label  string
+	refuse bool
+}
+
+var (
+	releaseDiskHeadroomPolicy = diskHeadroomPolicy{label: "release", refuse: true}
+	buildDiskHeadroomPolicy   = diskHeadroomPolicy{label: "build", refuse: false}
+)
+
+// ensureReleaseDiskHeadroom reads the docker root's free space before a
+// release's build starts and, only when it is actually below the floor,
+// prunes reclaimable build cache down to that floor and refuses if the disk
+// is still too full afterward — rather than letting the build itself trigger
+// the eviction it cannot recover from.
 func ensureReleaseDiskHeadroom(ctx Context) error {
-	ctx.TraceCommand("", "docker", "builder", "prune", "-f")
+	return ensureDiskHeadroomWith(ctx, releaseDiskHeadroomPolicy, dockerRootDiskBytes, reclaimableBuildCacheBytes, runDiskHeadroomPrune)
+}
+
+// ensureBuildDiskHeadroom is the same preflight for an ordinary build, which
+// warns instead of refusing. It is the one that actually runs between releases,
+// where the cache growth that fills a node happens.
+func ensureBuildDiskHeadroom(ctx Context) error {
+	return ensureDiskHeadroomWith(ctx, buildDiskHeadroomPolicy, dockerRootDiskBytes, reclaimableBuildCacheBytes, runDiskHeadroomPrune)
+}
+
+// ensureDiskHeadroomWith holds the decision logic: read first, prune only when
+// below the floor, then re-check before refusing. The docker daemon a build
+// runs against often lives in a separate container (the erun-dind sidecar)
+// with its own filesystem, so readFree makes its own attempt to reach that
+// daemon's filesystem before giving up; when it still cannot, that
+// inconclusive read is not an answer — the same "known failure over invented
+// behavior" posture as ensureReleaseBaseBranchUnmoved — so it lets the run
+// proceed exactly as it does today, with no prune at all.
+func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree diskHeadroomFreeSpaceFunc, readReclaimable diskHeadroomReclaimableFunc, prune diskHeadroomPruneFunc) error {
+	ctx.TraceCommand("", "docker", "info", "-f", "{{.DockerRootDir}}")
 	if ctx.DryRun {
 		return nil
 	}
-	if err := Command("docker", "builder", "prune", "-f").Run(); err != nil {
-		ctx.Trace("release: docker builder prune failed, continuing: " + err.Error())
-	}
 
-	free, ok := dockerRootFreeDiskBytes()
+	free, total, ok := readFree()
 	if !ok {
-		ctx.Trace("release: docker root free disk space is not observable from this process; skipping the headroom check")
+		ctx.Trace(policy.label + ": docker root free disk space is not observable from this process; skipping the headroom check")
 		return nil
 	}
-	floor := resolveReleaseMinDiskHeadroomBytes()
-	ctx.Trace(fmt.Sprintf("release: docker root has %s free (floor %s)", formatGiB(free), formatGiB(floor)))
-	if free < floor {
-		return fmt.Errorf("only %s free at the docker root, below the %s a multi-arch release build needs: "+
-			"free up space (docker system prune, remove unused images) or grow the volume before retrying — "+
-			"filling this disk is what evicts the pod running the release",
-			formatGiB(free), formatGiB(floor))
+	floor := resolveMinDiskHeadroomBytes(total)
+	ctx.Trace(fmt.Sprintf("%s: docker root has %s free of %s (floor %s)", policy.label, formatGiB(free), formatGiB(total), formatGiB(floor)))
+	if free >= floor {
+		return nil
 	}
-	return nil
+
+	// The reported figure is only ever trusted to detect "nothing to
+	// reclaim", never to size whether a prune can close the gap: docker's own
+	// accounting for build cache has understated what a real prune frees by
+	// several times over on a real node, and declining on a figure that
+	// understates in that direction refuses releases a prune would have
+	// rescued. That is a worse failure than the one the opposite bound
+	// guards against — a prune that destroys a real, sizeable cache and still
+	// leaves the release below the floor (the floor is node-wide; this prune
+	// only reaches this environment's own cache) ends in the same refusal it
+	// would have ended in anyway, just after spending the cache. So skip the
+	// prune only when it is confidently a no-op.
+	if reclaimable, known := readReclaimable(); known && reclaimable == 0 {
+		ctx.Trace(fmt.Sprintf(
+			"%s: a build-cache prune has nothing reclaimable; skipping it rather than running a no-op",
+			policy.label))
+		return diskHeadroomVerdict(ctx, policy, free, floor)
+	}
+
+	ctx.Trace(fmt.Sprintf("%s: docker root free disk is below the %s floor; pruning reclaimable build cache down to it", policy.label, formatGiB(floor)))
+	ctx.TraceCommand("", "docker", "builder", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10))
+	if err := prune(floor); err != nil {
+		ctx.Trace(policy.label + ": docker builder prune failed, continuing: " + err.Error())
+	}
+
+	free, _, ok = readFree()
+	if !ok {
+		return nil
+	}
+	return diskHeadroomVerdict(ctx, policy, free, floor)
 }
 
-func resolveReleaseMinDiskHeadroomBytes() uint64 {
-	raw := strings.TrimSpace(os.Getenv(releaseMinDiskHeadroomEnv))
-	if raw == "" {
-		return releaseMinDiskHeadroomBytes
+// diskHeadroomVerdict is what the caller does once no further reclaim is going
+// to happen: a release refuses, a build warns and proceeds. Shared so the
+// declined-prune path and the pruned-anyway path cannot drift apart.
+func diskHeadroomVerdict(ctx Context, policy diskHeadroomPolicy, free, floor uint64) error {
+	if free >= floor {
+		return nil
 	}
-	value, err := strconv.ParseUint(raw, 10, 64)
+	if !policy.refuse {
+		ctx.Info(fmt.Sprintf("warning: only %s free at the docker root, below the %s floor; "+
+			"this node is close to the disk pressure that evicts pods — free up space "+
+			"(docker system prune, remove unused images) or grow the volume", formatGiB(free), formatGiB(floor)))
+		return nil
+	}
+	return fmt.Errorf("only %s free at the docker root, below the %s a multi-arch release build needs: "+
+		"free up space (docker system prune, remove unused images) or grow the volume before retrying — "+
+		"filling this disk is what evicts the pod running the release",
+		formatGiB(free), formatGiB(floor))
+}
+
+// reclaimableBuildCacheBytes reads what `docker builder prune` could free.
+// Only the build-cache row is consulted, because that is all the prune this
+// file runs can touch — images are frequently the larger consumer and are not
+// its to reclaim.
+//
+// Treat the returned figure as a lower bound only, never an estimate of the
+// true yield: measured on a real node, `docker system df`'s reclaimable
+// figure for build cache undercounted what `docker builder prune -a`
+// actually freed by 4.4x (22.57GB reported, 98.27GB freed). The exact
+// accounting gap behind that understatement is not confirmed, so callers
+// must not assume a particular cause — only that the number can be short.
+func reclaimableBuildCacheBytes() (uint64, bool) {
+	out, err := Command("docker", "system", "df", "--format", "{{.Type}}|{{.Reclaimable}}").Output()
 	if err != nil {
-		return releaseMinDiskHeadroomBytes
+		return 0, false
 	}
-	return value
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name, value, found := strings.Cut(strings.TrimSpace(line), "|")
+		if !found || !strings.EqualFold(strings.TrimSpace(name), "build cache") {
+			continue
+		}
+		return parseDockerSize(value)
+	}
+	return 0, false
 }
 
-// dockerRootFreeDiskBytes asks the docker daemon where its root directory is,
-// then reads that path's free space with `df` — a real filesystem read, not a
+// dockerSizeUnits are the suffixes docker renders sizes with, longest first so
+// "kB" is never matched as "B". Decimal, matching docker's own HumanSize.
+var dockerSizeUnits = []struct {
+	suffix string
+	scale  float64
+}{
+	{"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"KB", 1e3}, {"B", 1},
+}
+
+// parseDockerSize reads one docker-rendered size ("8.914GB", "0B"), ignoring
+// any trailing percentage docker appends to some rows ("77.29GB (100%)").
+func parseDockerSize(value string) (uint64, bool) {
+	value = strings.TrimSpace(value)
+	if idx := strings.Index(value, " "); idx >= 0 {
+		value = value[:idx]
+	}
+	for _, unit := range dockerSizeUnits {
+		if !strings.HasSuffix(value, unit.suffix) {
+			continue
+		}
+		number, err := strconv.ParseFloat(strings.TrimSuffix(value, unit.suffix), 64)
+		if err != nil || number < 0 {
+			return 0, false
+		}
+		return uint64(number * unit.scale), true
+	}
+	return 0, false
+}
+
+// runDiskHeadroomPrune is diskHeadroomPruneFunc's real implementation:
+// --min-free-space makes the prune a no-op once free space reaches floor,
+// rather than reclaiming everything reclaimable the way an unqualified
+// `docker builder prune -f` does.
+func runDiskHeadroomPrune(floor uint64) error {
+	return Command("docker", "builder", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10)).Run()
+}
+
+// resolveMinDiskHeadroomBytes takes the larger of the absolute floor and the
+// proportional one, so a big disk gets a floor that clears kubelet's
+// percentage-based eviction threshold and a small one still reserves enough
+// bytes for a release. An explicit env override replaces both outright.
+func resolveMinDiskHeadroomBytes(total uint64) uint64 {
+	if raw := strings.TrimSpace(os.Getenv(releaseMinDiskHeadroomEnv)); raw != "" {
+		if value, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			return value
+		}
+	}
+	floor := releaseMinDiskHeadroomBytes
+	// Divide before multiplying: total is a byte count of a whole filesystem
+	// and total*percent would overflow on a large enough disk.
+	if proportional := total / 100 * minDiskHeadroomPercent; proportional > floor {
+		floor = proportional
+	}
+	return floor
+}
+
+// diskHeadroomProbeImage is a tiny, pinned image with a `df` binary, used
+// only to read the docker daemon's own filesystem from the inside when this
+// process cannot see the daemon's root directory itself (see
+// dockerRootDiskBytesViaProbe).
+const diskHeadroomProbeImage = "busybox:1.36.1"
+
+// dockerRootDiskBytes asks the docker daemon where its root directory is,
+// then reads that path's free and total space — a real filesystem read, not a
 // guess from image/cache sizes docker itself reports, since none of those add
-// up to "how much room is actually left on this node". Windows has no `df`;
-// or/anywhere the read fails or the root is not a path this process can see,
-// ok is false and the caller treats the check as inconclusive.
-func dockerRootFreeDiskBytes() (free uint64, ok bool) {
+// up to "how much room is actually left on this node". Windows has no `df`.
+//
+// The docker daemon a build runs against often lives in a separate container
+// (the erun-dind sidecar) with its own filesystem, so the root this process
+// just resolved is frequently not a path it can stat directly. That case falls
+// back to asking the daemon itself: it can always reach its own filesystem, so
+// running a throwaway container with that root bind-mounted turns "not visible
+// from here" into a real read instead of a reason to give up. Only when both
+// routes fail is ok false.
+func dockerRootDiskBytes() (free, total uint64, ok bool) {
 	if runtime.GOOS == "windows" {
-		return 0, false
+		return 0, 0, false
 	}
 	rootOut, err := Command("docker", "info", "-f", "{{.DockerRootDir}}").Output()
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
 	root := strings.TrimSpace(string(rootOut))
 	if root == "" {
-		return 0, false
+		return 0, 0, false
 	}
-	if _, statErr := os.Stat(root); statErr != nil {
-		return 0, false
+	if _, statErr := os.Stat(root); statErr == nil {
+		dfOut, err := Command("df", "-Pk", root).Output()
+		if err != nil {
+			return 0, 0, false
+		}
+		return parseDFDiskBytes(string(dfOut))
 	}
-	dfOut, err := Command("df", "-Pk", root).Output()
-	if err != nil {
-		return 0, false
-	}
-	return parseDFAvailableBytes(string(dfOut))
+	return dockerRootDiskBytesViaProbe(root)
 }
 
-// parseDFAvailableBytes reads the "Available" column (in 1024-byte blocks,
-// guaranteed by -Pk) from the last line of `df`'s POSIX-format output — the
-// data row, whether or not the filesystem name pushed it onto its own line.
-// A long filesystem identifier wrapping the name onto its own line shifts
-// every later column left by one, so the column is found by its neighbor
-// (the "Capacity" percentage) rather than by a fixed index.
-func parseDFAvailableBytes(output string) (uint64, bool) {
+// dockerRootDiskBytesViaProbe reads free space at root as the docker
+// daemon itself sees it, by asking the daemon to run a throwaway container
+// with root bind-mounted read-only and df'd from inside. This is what makes
+// the read conclusive when the daemon lives in a different filesystem
+// namespace than this process (the erun-dind sidecar case): the daemon can
+// always reach its own root, even when this process cannot.
+func dockerRootDiskBytesViaProbe(root string) (free, total uint64, ok bool) {
+	out, err := Command("docker", "run", "--rm", "-v", root+":/host:ro", diskHeadroomProbeImage, "df", "-Pk", "/host").Output()
+	if err != nil {
+		return 0, 0, false
+	}
+	return parseDFDiskBytes(string(out))
+}
+
+// parseDFDiskBytes reads the "Available" and "1024-blocks" columns (in
+// 1024-byte blocks, guaranteed by -Pk) from the last line of `df`'s
+// POSIX-format output — the data row, whether or not the filesystem name
+// pushed it onto its own line. A long filesystem identifier wrapping the name
+// onto its own line shifts every column left, so the columns are located
+// relative to the Capacity percentage rather than by absolute index.
+func parseDFDiskBytes(output string) (free, total uint64, ok bool) {
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 	if len(lines) < 2 {
-		return 0, false
+		return 0, 0, false
 	}
 	fields := strings.Fields(lines[len(lines)-1])
 	for i, field := range fields {
@@ -128,11 +335,21 @@ func parseDFAvailableBytes(output string) (uint64, bool) {
 		}
 		availableKB, err := strconv.ParseUint(fields[i-1], 10, 64)
 		if err != nil {
-			return 0, false
+			return 0, 0, false
 		}
-		return availableKB * 1024, true
+		// blocks, used, available, capacity% — so the total sits three fields
+		// left of the percentage in both the wrapped and unwrapped shapes.
+		// A row too narrow to hold all four still yields a usable available
+		// figure, and total stays 0 so the floor falls back to the absolute one.
+		var totalBytes uint64
+		if i >= 3 {
+			if totalKB, parseErr := strconv.ParseUint(fields[i-3], 10, 64); parseErr == nil {
+				totalBytes = totalKB * 1024
+			}
+		}
+		return availableKB * 1024, totalBytes, true
 	}
-	return 0, false
+	return 0, 0, false
 }
 
 func formatGiB(bytes uint64) string {
