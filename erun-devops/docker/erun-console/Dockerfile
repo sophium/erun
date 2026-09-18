@@ -31,7 +31,15 @@ COPY erun-kit/package.json /src/erun-kit/
 COPY erun-console/package.json /src/erun-console/
 COPY erun-ui/frontend/package.json /src/erun-ui/frontend/
 
+# YARN_CACHE_FOLDER: this stage runs as root with no HOME override, so yarn
+# classic's own default cache dir is $HOME/.cache/yarn (/root/.cache/yarn),
+# never the /usr/local/share/.cache/yarn mounted below -- verified against
+# the repo's own yarn (getCacheDir() falls back to $HOME/.cache/yarn) and
+# reproduced live (a real yarn install with the mount target unset resolved
+# to /root/.cache/yarn). Redirecting via env var keeps the mount target that
+# every other yarn-using Dockerfile in the repo already uses.
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+    YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
 # erun-kit's package.json main points at ./src/index.ts, so the console's vite
@@ -50,8 +58,6 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
 # needed (the API sets no CORS headers by design).
 FROM nginx:1.27.4-alpine3.21
 
-ARG ERUN_VERSION
-
 COPY --from=builder /src/erun-console/dist /usr/share/nginx/html
 COPY erun-devops/docker/erun-console/default.conf.template /etc/nginx/templates/default.conf.template
 
@@ -59,6 +65,7 @@ COPY erun-devops/docker/erun-console/default.conf.template /etc/nginx/templates/
 # GET /version.json (see default.conf.template) — the console's counterpart to
 # erun-backend-api's GET /v1/platform "version" field, since a static SPA has
 # no server process to bake a -ldflags version into.
+ARG ERUN_VERSION
 RUN printf '{"version":"%s"}\n' "${ERUN_VERSION}" > /usr/share/nginx/html/version.json
 
 # Rendered from the template at container start by the base image's own

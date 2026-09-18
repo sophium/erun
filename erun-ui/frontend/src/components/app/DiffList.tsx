@@ -2,7 +2,6 @@ import { Button, cn } from 'erun-kit';
 import { AlertCircle, CheckCircle2, Copy, Info, Play, PlugZap, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
-import { loadDiffReviewStatus } from '@/app/diffReviewStatusThunks';
 import {
   compactDiffError,
   diffLineMark,
@@ -12,18 +11,17 @@ import {
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
 import { loadReviewDiff, requestReconnect, selectReviewRange } from '@/app/reviewThunks';
-import { type ReviewEnvTarget, selectReviewEnvTargets } from '@/app/selectors';
+import { type ReviewTarget, selectReviewTargets } from '@/app/selectors';
 import { diffPathKey, type EnvDiffState, type ReviewScope } from '@/app/slices/reviewSlice';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
 import type { DiffFile, DiffHunk, DiffResult } from '@/types';
 
 import { DiffLineCommentAction } from './DiffList.CommentAction';
-import { DiffReviewAction, DiffReviewStatusChip } from './DiffList.ReviewAction';
-import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
+import { DiffEnvSectionHeader } from './DiffList.EnvSectionHeader';
 
 export function DiffList(): React.ReactElement {
-  const targets = useAppSelector(selectReviewEnvTargets);
+  const targets = useAppSelector(selectReviewTargets);
   if (targets.length === 0) {
     return <ReviewStatus>No environment selected</ReviewStatus>;
   }
@@ -40,70 +38,35 @@ export function DiffList(): React.ReactElement {
   );
 }
 
-// DiffEnvSection renders one environment's diff, owning its own loading, error
-// and empty states. That containment is the load-bearing part: the single-slot
-// panel cleared one shared diff on any failure, so one stopped environment
-// blanked every other linked env's diff -- and an orchestrator's environments
-// are rarely all running at once, so that was the everyday state (#1178).
+// DiffEnvSection renders one target's section -- its header, and its own
+// loading, error and empty states -- owning those states per target. That
+// containment is the load-bearing part: the single-slot panel cleared one
+// shared diff on any failure, so one stopped environment blanked every other
+// linked env's diff -- and an orchestrator's environments are rarely all
+// running at once, so that was the everyday state.
+//
+// The header lives in DiffList.EnvSectionHeader.tsx, split off for the shared
+// function-size and complexity budget (eslint.config.mjs) as much as for the
+// file's own line budget.
 function DiffEnvSection({
   target,
   showHeader,
 }: {
-  target: ReviewEnvTarget;
+  target: ReviewTarget;
   showHeader: boolean;
 }): React.ReactElement {
-  const dispatch = useAppDispatch();
   const slot = useEnvDiffSlot(target.envKey);
   const diffFilter = useAppSelector((state) => state.review.diffFilter);
   const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
   const selectedDiffPath = useAppSelector((state) => state.review.selectedDiffPath);
 
-  // The same ReviewEnvLabel treatment the review-layers block and the
-  // changed-files tree use (#1314), so all three per-environment surfaces
-  // read as one group instead of three independently-labelled ones. The
-  // sticky wrapper stays: it is a real functional need (this header keeps the
-  // active environment identity visible while a long diff scrolls), unlike
-  // the label styling it wraps.
-  //
-  // Unlike the label, the chip and action render unconditionally — a
-  // persistent affordance per environment section rather than one that only
-  // appears once files have loaded, so it never flickers in and out as the
-  // diff itself loads, errors, or comes back empty.
   const targetBranchHint = slot.diff?.reviewBase?.branch?.trim() ?? '';
-  // Resolves the chip once the target branch is known and whenever it
-  // changes -- a background enrichment read, not a user action, the same way
-  // the diff itself auto-loads. loadDiffReviewStatus is a no-op with no
-  // effect on dependency identity when targetBranchHint is still empty.
-  React.useEffect(() => {
-    if (!targetBranchHint) {
-      return;
-    }
-    void dispatch(
-      loadDiffReviewStatus(target.envKey, target.tenant, target.environment, targetBranchHint),
-    );
-  }, [dispatch, target.envKey, target.tenant, target.environment, targetBranchHint]);
   const header = (
-    <div
-      // data-env-key lets keyboard navigation (TerminalController's
-      // startReviewForFocusedDiffEnv) find this section's own "Start a
-      // review" button without duplicating the dialog-opening logic here.
-      data-env-key={target.envKey}
-      className={cn(
-        'sticky top-0 z-10 flex items-center gap-3 border-b border-border bg-background px-3 py-1',
-        showHeader ? 'justify-between' : 'justify-end',
-      )}
-    >
-      {showHeader && <ReviewEnvLabel tenant={target.tenant} environment={target.environment} />}
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
-        <DiffReviewStatusChip envKey={target.envKey} tenant={target.tenant} />
-        <DiffReviewAction
-          tenant={target.tenant}
-          environment={target.environment}
-          targetBranch={targetBranchHint}
-          envKey={target.envKey}
-        />
-      </div>
-    </div>
+    <DiffEnvSectionHeader
+      target={target}
+      targetBranchHint={targetBranchHint}
+      showHeader={showHeader}
+    />
   );
 
   return (
@@ -130,7 +93,7 @@ function DiffEnvSectionBody({
   collapsedDiffDirs,
   selectedDiffPath,
 }: {
-  target: ReviewEnvTarget;
+  target: ReviewTarget;
   slot: EnvDiffState;
   diffFilter: string;
   collapsedDiffDirs: string[];
@@ -150,9 +113,7 @@ function DiffEnvSectionBody({
         onRetry={() => {
           void dispatch(loadReviewDiff());
         }}
-        onReconnect={() => {
-          dispatch(requestReconnect(target.tenant, target.environment, slot.errorKind));
-        }}
+        onReconnect={reconnectActionFor(target, slot.errorKind, dispatch)}
       />
     );
   }
@@ -190,11 +151,36 @@ function DiffEnvSectionBody({
           envKey={target.envKey}
           selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
           commitHash={commitHash}
-          tenant={target.tenant}
+          tenant={targetTenant(target)}
         />
       ))}
     </>
   );
+}
+
+// targetTenant is the tenant a target's platform affordances anchor to, and "" for
+// a directory -- which has none -- so the diff renderer can leave a tenant-scoped
+// affordance out rather than render one that could only fail.
+function targetTenant(target: ReviewTarget): string {
+  return target.kind === 'env' ? target.tenant : '';
+}
+
+// reconnectActionFor is the error alert's reconnect action, and it exists only
+// for a target that has an environment to reconnect: reconnecting re-establishes
+// that environment's MCP forward, and a directory has no environment and no edge,
+// so the action would have nothing to re-establish. The alert takes it as
+// optional, so a directory's alert renders without one.
+function reconnectActionFor(
+  target: ReviewTarget,
+  kind: ReachabilityKind,
+  dispatch: ReturnType<typeof useAppDispatch>,
+): (() => void) | undefined {
+  if (target.kind !== 'env') {
+    return undefined;
+  }
+  return () => {
+    dispatch(requestReconnect(target.tenant, target.environment, kind));
+  };
 }
 
 // resolveDiffCommitHash is the commit a new diff-line thread anchors to: the
@@ -400,9 +386,9 @@ function DiffFileView({
     <section
       className="diff-file scroll-mt-4"
       data-path={file.path}
-      // Lets keyboard navigation resolve which environment section a
-      // focused hunk belongs to (TerminalController.startReviewForFocusedDiffEnv)
-      // without threading envKey through every hunk element individually.
+      // Lets keyboard navigation resolve which section a focused hunk belongs
+      // to (reviewDiffKeyboardNav's startReviewForFocusedEnv) without threading
+      // envKey through every hunk element individually.
       data-env-key={envKey}
       data-selected={selected || undefined}
     >
@@ -469,12 +455,20 @@ function DiffHunkView({
             {/* Leads the row: a trailing column sits past the content width, so
                 on any diff wider than the panel the affordance was only
                 reachable by scrolling right. */}
-            <DiffLineCommentAction
-              filePath={filePath}
-              line={line}
-              commitHash={commitHash}
-              tenant={tenant}
-            />
+            {/* A line comment anchors to a hosted review record on the tenant's
+                platform, so it is offered only where there is a tenant to anchor
+                to. A directory has none (that is what makes it a directory
+                rather than an environment), and an affordance that opened a
+                tenant-scoped dialog with no tenant would be worse than its
+                absence. */}
+            {tenant === '' ? null : (
+              <DiffLineCommentAction
+                filePath={filePath}
+                line={line}
+                commitHash={commitHash}
+                tenant={tenant}
+              />
+            )}
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
               {line.oldLine ?? ''}
             </span>

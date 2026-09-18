@@ -11,6 +11,7 @@ usage:
   printf 'memory_max=%s\n' "$(read_value $cg/memory.max)"
   printf 'memory_peak=%s\n' "$(read_value $cg/memory.peak)"
   printf 'memory_oom_kill=%s\n' "$(awk '$1=="oom_kill"{print $2}' $cg/memory.events 2>/dev/null || true)"
+  printf 'memory_ceiling_hits=%s\n' "$(awk '$1=="max"{print $2}' $cg/memory.events 2>/dev/null || true)"
   printf 'cpu_max=%s\n' "$(read_value $cg/cpu.max)"
   cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
   time_before=$(date +%s%N)

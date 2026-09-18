@@ -1,0 +1,21 @@
+# Cloud-context name/kubernetes-context defaults, shared by the two
+# implementations that must agree:
+#
+#   - erun-common: ResolveInjectedRuntimeConfig + NormalizeCloudContextConfig
+#     (the Go path; see erun-common/cloud_context_entrypoint_parity_test.go)
+#   - erun-devops/docker/erun-devops/entrypoint.sh:402,487 (the shell twin;
+#     see entrypoint_test.sh case 8a)
+#
+# Columns, tab-separated:
+#   label                   the input state, for failure messages
+#   ERUN_CLOUD_CONTEXT_NAME "-" when unset
+#   ERUN_KUBERNETES_CONTEXT "-" when unset
+#   expected name:          the cloudcontexts[0].name both sides must emit
+#   expected kubernetescontext:  the cloudcontexts[0].kubernetescontext both must emit
+#
+# Both tests read this file, so editing one implementation's fallback without
+# editing the other turns the other's test red. Keep the two in lockstep.
+both-unset	-	-	in-cluster	in-cluster
+kubernetes-context-only	-	kube-ctx	kube-ctx	kube-ctx
+cloud-context-name-set	outer-ctx	-	outer-ctx	in-cluster
+both-set	outer-ctx	kube-ctx	outer-ctx	kube-ctx

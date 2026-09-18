@@ -1,0 +1,4 @@
+audit: erun outputs download erun-darwin-arm64
+outputs: downloading <HOME>/.erun/outputs/erun-darwin-arm64
+outputs: transferring 20000000 bytes in ranges of up to 8388608
+Downloaded erun-darwin-arm64 (19.1MB, sha256 <HEX>) to erun-darwin-arm64

@@ -65,15 +65,59 @@ func TestUsageToolOmitsSizingWithNoHistory(t *testing.T) {
 	}
 }
 
+// TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment pins the MCP
+// half of the excludes-builds caveat: a build-capable environment's reading
+// cannot see the erun-dind sidecar an image build actually runs in, so the
+// result must carry ExcludesBuilds=true instead of letting the reading imply
+// the environment is idle. The Runtime fixture elsewhere in this file cannot
+// tell a working field from a missing one -- UsesDindSidecar() is false for
+// Runtime either way -- so this is the only case that exercises the disclosure
+// at all, on either transport.
+func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+
+	cases := []struct {
+		name    string
+		envType eruncommon.EnvironmentType
+		want    bool
+	}{
+		{"remote-agent carries the dind sidecar", eruncommon.EnvironmentTypeRemoteAgent, true},
+		{"local-agent carries the dind sidecar", eruncommon.EnvironmentTypeLocalAgent, true},
+		{"runtime builds nowhere in this container", eruncommon.EnvironmentTypeRuntime, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := RuntimeConfig{
+				Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+				Store:   usageTestStoreOfType("tenant-a", "dev", tc.envType, t.TempDir()),
+			}
+			_, output, err := usageTool(runtime)(context.Background(), nil, UsageInput{Preview: true})
+			if err != nil {
+				t.Fatalf("usageTool returned err: %v", err)
+			}
+			if output.ExcludesBuilds != tc.want {
+				t.Fatalf("ExcludesBuilds = %v, want %v (env type %q)", output.ExcludesBuilds, tc.want, tc.envType)
+			}
+		})
+	}
+}
+
 // usageTestStore builds a store that resolves tenant/environment through the
 // same OpenResult path `usage`/`resize` use, which needs both LoadEnvConfig
 // (envConfigs) and the port-range allocator's ListEnvConfigs (envsByTenant)
 // to agree on the one environment.
 func usageTestStore(tenant, environment string) listToolStore {
+	return usageTestStoreOfType(tenant, environment, eruncommon.EnvironmentTypeRuntime, "/home/erun/work")
+}
+
+func usageTestStoreOfType(tenant, environment string, envType eruncommon.EnvironmentType, repoPath string) listToolStore {
 	env := eruncommon.EnvConfig{
 		Name:                environment,
-		Type:                eruncommon.EnvironmentTypeRuntime,
+		Type:                envType,
 		KubernetesContext:   "test-context",
+		LocalRepoPath:       repoPath,
 		LocalPortRangeStart: 17000,
 	}
 	return listToolStore{

@@ -103,3 +103,85 @@ func TestRemoteVerifierRejectsInvalidCommitHash(t *testing.T) {
 		t.Fatalf("expected an error for a malformed commit hash")
 	}
 }
+
+func TestRemoteVerifierIsAncestorForDirectAncestor(t *testing.T) {
+	remoteURL, root, tip := newRemoteRepo(t, "main")
+
+	ok, err := NewRemoteVerifier().IsAncestor(context.Background(), remoteURL, "main", root, tip)
+	if err != nil {
+		t.Fatalf("IsAncestor: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected the root commit to be reported as an ancestor of the tip")
+	}
+}
+
+// TestRemoteVerifierIsAncestorTolerantOfCommitsInBetween is the property
+// erun#2250 depends on: an ancestor commit stays an ancestor of a
+// descendant even when unrelated commits (e.g. a release's own pushes) land
+// on the branch between them, unlike a strict immediate-parent comparison.
+func TestRemoteVerifierIsAncestorTolerantOfCommitsInBetween(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--initial-branch=main")
+	runGit(t, dir, "commit", "--allow-empty", "-m", "gated tip")
+	gatedTip := runGit(t, dir, "rev-parse", "HEAD")
+	runGit(t, dir, "commit", "--allow-empty", "-m", "release commit 1")
+	runGit(t, dir, "commit", "--allow-empty", "-m", "release commit 2")
+	reportedCommit := runGit(t, dir, "rev-parse", "HEAD")
+
+	ok, err := NewRemoteVerifier().IsAncestor(context.Background(), "file://"+dir, "main", gatedTip, reportedCommit)
+	if err != nil {
+		t.Fatalf("IsAncestor: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected the gated tip to still be reported as an ancestor across the unrelated commits in between")
+	}
+}
+
+func TestRemoteVerifierIsAncestorTrueForTheSameCommit(t *testing.T) {
+	remoteURL, _, tip := newRemoteRepo(t, "main")
+
+	ok, err := NewRemoteVerifier().IsAncestor(context.Background(), remoteURL, "main", tip, tip)
+	if err != nil {
+		t.Fatalf("IsAncestor: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected a commit to be reported as an ancestor of itself")
+	}
+}
+
+func TestRemoteVerifierIsAncestorRefusesWhenAncestorNeverLed(t *testing.T) {
+	remoteURL, root, tip := newRemoteRepo(t, "main")
+
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--initial-branch=other")
+	runGit(t, dir, "commit", "--allow-empty", "-m", "unrelated")
+	unrelated := runGit(t, dir, "rev-parse", "HEAD")
+
+	ok, err := NewRemoteVerifier().IsAncestor(context.Background(), remoteURL, "main", unrelated, tip)
+	if err != nil {
+		t.Fatalf("IsAncestor: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected a commit from an unrelated repository to be refused as not an ancestor")
+	}
+
+	// The reverse direction is also refused: the tip is not an ancestor of
+	// its own root.
+	ok, err = NewRemoteVerifier().IsAncestor(context.Background(), remoteURL, "main", tip, root)
+	if err != nil {
+		t.Fatalf("IsAncestor: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected the tip to be refused as an ancestor of its own root")
+	}
+}
+
+func TestRemoteVerifierIsAncestorRejectsInvalidCommitHash(t *testing.T) {
+	remoteURL, _, tip := newRemoteRepo(t, "main")
+
+	_, err := NewRemoteVerifier().IsAncestor(context.Background(), remoteURL, "main", "not-a-hash", tip)
+	if err == nil {
+		t.Fatalf("expected an error for a malformed ancestor hash")
+	}
+}

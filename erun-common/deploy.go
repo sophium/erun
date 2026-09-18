@@ -201,7 +201,13 @@ type HelmDeploySpec struct {
 	ResetDatabase                bool
 	Idle                         EnvironmentIdleConfig
 	Claude                       EnvironmentClaudeConfig
-	RuntimePod                   RuntimePodResources
+	// OpenRouter is the erun-level gateway catalog stamped from root config (see
+	// openrouter.go). It is deliberately not read from EnvConfig: the catalog is
+	// one list the operator maintains and every environment selects from it. Nil
+	// renders no gateway values at all, so an unconfigured install deploys
+	// byte-for-byte as before.
+	OpenRouter *OpenRouterConfig
+	RuntimePod RuntimePodResources
 	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
 	// mirroring RuntimePod but for the sidecar container that runs the actual
 	// docker builds. Zero normalizes to DefaultRuntimeDindCPU/Memory, so an env
@@ -1000,6 +1006,9 @@ func applyPreRolloutResources(ctx Context, deployInput HelmDeploySpec) error {
 	if err := applyCloudflareCredentialsSecret(ctx, deployInput); err != nil {
 		return err
 	}
+	if err := applyGatewayCredentialsSecret(ctx, deployInput); err != nil {
+		return err
+	}
 	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
 		return err
 	}
@@ -1330,11 +1339,16 @@ func resolveSelectedLocalDeploySpecs(ctx Context, store DeployStore, findProject
 }
 
 // resolveGuardedDeploySelection resolves the deploy component selection,
-// traces the tier it came from, and refuses when a saved selection shadows a
-// richer repo plan (see guardSavedSelectionShadowingPlan) — the ordering both
-// the local-repo and sourceless deploy paths share.
+// traces the tier it came from, and refuses when the selection cannot be
+// resolved correctly here — an in-pod runtime-only fallback that cannot see the
+// saved selection (see guardInPodBlindRuntimeOnlySelection) or a saved selection
+// that shadows a richer repo plan (see guardSavedSelectionShadowingPlan) — the
+// ordering both the local-repo and sourceless deploy paths share.
 func resolveGuardedDeploySelection(ctx Context, target DeployTarget, resolvedTarget OpenResult, plan ProjectK8sConfig) ([]string, error) {
 	selected, selectionSource := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, plan)
+	if err := guardInPodBlindRuntimeOnlySelection(os.Getenv, resolvedTarget, target, selected, selectionSource); err != nil {
+		return nil, err
+	}
 	traceDeployComponentSelection(ctx, selected, selectionSource)
 	missing := traceSavedSelectionShadowingPlan(ctx, selected, selectionSource, plan)
 	if err := guardSavedSelectionShadowingPlan(missing, selected, resolvedTarget.Tenant, resolvedTarget.Environment); err != nil {
@@ -1764,6 +1778,11 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 	}
 	deployInput.ManagedCloud = managedCloud
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
+	gateway, err := ResolveOpenRouterConfig(store)
+	if err != nil {
+		return err
+	}
+	deployInput.OpenRouter = gateway
 	applyCloudProviderDeployMetadata(store, target.EnvConfig, deployInput)
 	applyCloudflareDeployMetadata(store, target.EnvConfig, deployInput)
 	if managedCloud {
@@ -1846,7 +1865,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 // requires that the current directory is a docker build context
 // (<module>/docker/<component>). Returns nil when there is no such context.
 func resolveCurrentDockerComponentBuildForDeploy(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, versionOverride string) (*DockerBuildSpec, error) {
-	_, _, resolveDockerBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
+	store, _, resolveDockerBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveDockerBuildContext, now)
 	if resolveDockerBuildContext == nil {
 		return nil, nil
 	}
@@ -1859,7 +1878,7 @@ func resolveCurrentDockerComponentBuildForDeploy(ctx Context, store DockerStore,
 		return nil, nil
 	}
 
-	build, err := newDockerBuildSpec(ctx, now, projectRoot, environment, buildContext, versionOverride, nil, "")
+	build, err := newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, versionOverride, nil, "")
 	if err != nil {
 		return nil, err
 	}
@@ -2316,7 +2335,7 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 		ImagePullSecrets:    append([]string(nil), target.EnvConfig.ImagePullSecrets...),
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
-		RuntimePod:          NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
+		RuntimePod:          NormalizeRuntimePodResources(resolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, DefaultCgroupRoot)),
 		RuntimeDindPod:      NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
 		NamespaceQuota:      target.EnvConfig.NamespaceQuota,
 		Stopped:             target.EnvConfig.Stopped,
@@ -2670,7 +2689,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "runtime.dind.resources.limits.cpu="+NormalizeRuntimeDindPodResources(d.RuntimeDindPod).CPU,
 		"--set-string", "runtime.dind.resources.limits.memory="+NormalizeRuntimeDindPodResources(d.RuntimeDindPod).Memory,
 	)
-	args = append(args, helmClaudeSetArgs(d.Claude)...)
+	args = append(args, helmClaudeSetArgs(d.Claude, d.OpenRouter)...)
 	// When the chart is an umbrella wrapping a canonical erun-<base> chart, every
 	// --set targets the wrapped subchart's value scope, so prefix each key with
 	// the subchart key. No-op (empty prefix) for a chart installed directly.
@@ -3003,8 +3022,8 @@ func helmRegistryCredentialSecretSetArgs(name string) []string {
 	return []string{"--set-string", "registryCredentialSecretName=" + name}
 }
 
-func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
-	args := make([]string, 0, 8)
+func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) []string {
+	args := make([]string, 0, 12)
 	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(resolveClaudeBool(config.UseMantle, DefaultClaudeUseMantle)))
 	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(resolveClaudeBool(config.UseBedrock, DefaultClaudeUseBedrock)))
 	if models := formatClaudeModels(config.Models); models != "" {
@@ -3012,6 +3031,31 @@ func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
 	}
 	if config.MaxOutputTokens != nil {
 		args = append(args, "--set-string", "claude.maxOutputTokens="+strconv.Itoa(*config.MaxOutputTokens))
+	}
+	// The gateway is erun-level, so these render for every environment that
+	// selects from the catalog; one that opted out renders none of them. Only
+	// the Secret's name travels here, and that name is a fixed constant rather
+	// than an operator entry — the credential is one erun-level value, delivered
+	// into this namespace by applyGatewayCredentialsSecret, so there is nothing
+	// per-environment to name. The value itself never passes through helm.
+	if gateway := EffectiveGateway(config, gateway); gateway.Configured() {
+		args = append(args, "--set-string", "claude.openRouterBaseURL="+escapeHelmSetValue(strings.TrimSpace(gateway.BaseURL)))
+		if ids := formatClaudeModels(gateway.ModelIDs()); ids != "" {
+			args = append(args, "--set-string", "claude.openRouterAvailableModels="+escapeHelmSetValue(ids))
+		}
+		// The pod-wide default, so Claude invoked outside the AI tab (an exec
+		// agent job) does not fall back to a model the gateway may not serve.
+		if model := gateway.ResolveDefaultModel(); model != "" {
+			args = append(args, "--set-string", "claude.openRouterModel="+escapeHelmSetValue(model))
+			if context := gateway.ContextFor(model); context > 0 {
+				args = append(args, "--set-string", "claude.openRouterModelContext="+strconv.Itoa(context))
+			}
+		}
+		// Both names are erun's own constants, not operator entries: erun creates
+		// this Secret from the erun-level credential, so there is nothing here
+		// to supply and nothing to get out of step with what deploy creates.
+		args = append(args, "--set-string", "claude.openRouterAuthTokenSecret="+GatewaySecretName)
+		args = append(args, "--set-string", "claude.openRouterAuthTokenKey="+GatewaySecretKey)
 	}
 	return args
 }
@@ -3921,6 +3965,21 @@ func checkKubernetesDeploymentWithContext(ctx Context, params KubernetesDeployme
 	return false, output, fmt.Errorf("could not determine whether deployment %q is deployed (%s): %s", params.Name, detail, sanitized)
 }
 
+// kubernetesAPIServerUnreachableSignal reports whether kubectl/helm's raw
+// output signals that the Kubernetes API server itself could not be
+// reached, as opposed to any other failure (RBAC, a missing resource, a
+// malformed chart). kubernetesDeploymentCheckFailureDetail and the doctor
+// deploy diagnosis (doctor_deploy.go) both classify off this same signal so
+// "cluster unreachable" cannot drift between the two call sites.
+func kubernetesAPIServerUnreachableSignal(output string) bool {
+	message := strings.ToLower(output)
+	return strings.Contains(message, "unable to connect to the server") ||
+		strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "no such host") ||
+		strings.Contains(message, "i/o timeout") ||
+		strings.Contains(message, "no configuration has been provided")
+}
+
 // kubernetesDeploymentCheckFailureDetail names why a kubectl deployment
 // presence check failed to resolve a definite answer, distinguishing causes
 // where erun could not ask the cluster at all (no context, an unreachable
@@ -3938,11 +3997,7 @@ func kubernetesDeploymentCheckFailureDetail(output, kubectlContext string) strin
 	}
 	message := strings.ToLower(output)
 	switch {
-	case strings.Contains(message, "unable to connect to the server"),
-		strings.Contains(message, "connection refused"),
-		strings.Contains(message, "no such host"),
-		strings.Contains(message, "i/o timeout"),
-		strings.Contains(message, "no configuration has been provided"):
+	case kubernetesAPIServerUnreachableSignal(message):
 		if kubectlContext = strings.TrimSpace(kubectlContext); kubectlContext != "" {
 			return fmt.Sprintf("the kubernetes api server could not be reached (context %q)", kubectlContext)
 		}

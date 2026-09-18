@@ -22,7 +22,10 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"the peak high-water mark, and a real OOM-kill count from the cgroup, replacing\n" +
 			"a post-mortem guess); CPU utilisation is measured against its quota over a\n" +
 			"sample interval. A named warning fires when memory, memory's peak, or disk\n" +
-			"usage cross a fixed threshold. Every field reports its own unavailability\n" +
+			"usage cross a fixed threshold; the memory-peak and OOM-kill warnings also\n" +
+			"consult the environment's retained history, because those cgroup counters\n" +
+			"reset when the container restarts and an environment that has been\n" +
+			"OOM-killed would otherwise read as memory-healthy. Every field reports its own unavailability\n" +
 			"(cgroup v1, an unlimited limit, a file that could not be read) rather than\n" +
 			"failing the call, since those are normal on some clusters, not errors.\n\n" +
 			"Disk is reported for the whole mount (node, shared): every environment\n" +

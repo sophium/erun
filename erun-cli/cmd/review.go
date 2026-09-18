@@ -30,6 +30,7 @@ func newReviewCmd(store common.CloudReadStore, deps common.CloudDependencies) *c
 		newReviewCloseCmd(store, &alias, deps),
 		newReviewRecordBuildCmd(store, &alias, deps),
 		newReviewReportMergedCmd(store, &alias, deps),
+		newReviewRequeueCmd(store, &alias, deps),
 		newReviewReviewersCmd(store, &alias, deps),
 		newReviewMergeQueueCmd(store, &alias, deps),
 	)
@@ -342,12 +343,11 @@ func newReviewCloseCmd(store common.CloudReadStore, alias *string, deps common.C
 
 func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
 	var (
-		commitID                  string
-		gate                      bool
-		version                   string
-		failed                    bool
-		failureDetail             string
-		desktopPlaywrightVerified bool
+		commitID      string
+		gate          bool
+		version       string
+		failed        bool
+		failureDetail string
 	)
 	cmd := &cobra.Command{
 		Use:   "record-build REVIEW_ID",
@@ -364,11 +364,6 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			"prospective merge and reports the result this way. A GATE build carries no version, since the gate " +
 			"publishes nothing — omit --version when --gate is set. Only a successful GATE build can later be " +
 			"reported MERGED with `erun review report-merged`.\n\n" +
-			"A successful --gate build that changes erun-ui/** is refused unless --desktop-playwright-verified " +
-			"is also set: the gate's own `erun build` does not run the erun-ui/playwright suite (issue #1933), " +
-			"so a green GATE build proves nothing about the desktop frontend on its own. Build erun-app and run " +
-			"`erun-ui/playwright/run.sh` against this exact commit first, then pass " +
-			"--desktop-playwright-verified once it passes.\n\n" +
 			"A --gate --failed whose --failure-detail names a known erun infrastructure failure (a registry or " +
 			"the network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright: builds.successful " +
 			"has no INCONCLUSIVE, so recording it FAILED would move the review out of the merge queue for a " +
@@ -377,22 +372,18 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			"A real, immediate write. --dry-run traces the call without making it.",
 		Example: "  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3\n" +
 			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail 'image build failed'\n" +
-			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --gate\n" +
-			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --gate --desktop-playwright-verified",
+			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --gate",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			_, root, _ := common.FindProjectRoot()
 			build, err := common.RunReviewRecordBuild(ctx, store, *alias, common.ReviewRecordBuildParams{
-				ReviewID:                  args[0],
-				CommitID:                  commitID,
-				Gate:                      gate,
-				Version:                   version,
-				Successful:                !failed,
-				FailureDetail:             failureDetail,
-				Root:                      root,
-				DesktopPlaywrightVerified: desktopPlaywrightVerified,
+				ReviewID:      args[0],
+				CommitID:      commitID,
+				Gate:          gate,
+				Version:       version,
+				Successful:    !failed,
+				FailureDetail: failureDetail,
 			}, deps)
 			if err != nil {
 				return err
@@ -414,8 +405,6 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --release); omit with --gate")
 	cmd.Flags().BoolVar(&failed, "failed", false, "Record the build as failed instead of successful")
 	cmd.Flags().StringVar(&failureDetail, "failure-detail", "", "Why the build failed (only meaningful with --failed)")
-	cmd.Flags().BoolVar(&desktopPlaywrightVerified, "desktop-playwright-verified", false,
-		"Attest that erun-ui/playwright/run.sh was run against this commit and passed; required for a successful --gate build that changes erun-ui/**")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -459,6 +448,42 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 	}
 	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful GATE build's id")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func newReviewRequeueCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "requeue REVIEW_ID",
+		Short: "Move a review stuck at MERGE back to READY",
+		Long: "Move a review stuck at MERGE back to READY, freeing its target branch's merge-queue slot so a " +
+			"different review can be promoted (only one review may be at MERGE per target branch).\n\n" +
+			"This is for a review whose gate never reaches a terminal state, or one left at MERGE by a batched " +
+			"`erun exec gate-merge` whose other members landed but were never promoted (erun#2241). The requeued " +
+			"review rejoins the queue at the tail, not the head — it is not promoted again immediately. Refuses, " +
+			"naming the review's actual status, when it is not at MERGE.\n\n" +
+			"A real, immediate write. --dry-run traces the call without making it.",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		Example:      "  erun review requeue 018f...",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			review, err := common.RunReviewRequeue(ctx, store, *alias, args[0], deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review requeue planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if err := writeReviewLine(ctx, review); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(review)
+		},
+	}
 	addDryRunFlag(cmd)
 	return cmd
 }

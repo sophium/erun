@@ -8,7 +8,10 @@ cluster. Memory is reported against the container's own limit (current usage,
 the peak high-water mark, and a real OOM-kill count from the cgroup, replacing
 a post-mortem guess); CPU utilisation is measured against its quota over a
 sample interval. A named warning fires when memory, memory's peak, or disk
-usage cross a fixed threshold. Every field reports its own unavailability
+usage cross a fixed threshold; the memory-peak and OOM-kill warnings also
+consult the environment's retained history, because those cgroup counters
+reset when the container restarts and an environment that has been
+OOM-killed would otherwise read as memory-healthy. Every field reports its own unavailability
 (cgroup v1, an unlimited limit, a file that could not be read) rather than
 failing the call, since those are normal on some clusters, not errors.
 
