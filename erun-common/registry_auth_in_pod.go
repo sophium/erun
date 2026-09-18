@@ -41,7 +41,7 @@ var readDeclaredImagePullSecretAuths = func(namespace, kubernetesContext, name s
 // `containerregistries` entry states which registry needs it. The pod's service
 // account can read the Secret. Without this, every read of a private namespace
 // is anonymous, ghcr refuses to mint a token, and because an inconclusive read
-// is not evidence of absence, deploy refuses rather than guessing (#2246).
+// is not evidence of absence, deploy refuses rather than guessing.
 //
 // Deliberately narrow: only in the target env's own runtime pod (the injected
 // ERUN_TENANT/ERUN_ENVIRONMENT pair), only for the Secrets that env declared,
