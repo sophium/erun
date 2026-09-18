@@ -56,7 +56,9 @@ locals {
 locals {
   # permanent=true renders 301 rather than Traefik's default 302: this is a
   # standing policy, not a momentary move, and 301 is what an already-correct
-  # host in the same estate answers with.
+  # host in the same estate answers with. Every ACME challenge in this estate
+  # is solved over DNS-01 (chart-issuer), so redirecting the plaintext
+  # entrypoint starves no HTTP-01 challenge.
   traefik_redirect_args = local.arg_http_redirect_enabled ? [
     "--entryPoints.web.http.redirections.entryPoint.to=websecure",
     "--entryPoints.web.http.redirections.entryPoint.scheme=https",
