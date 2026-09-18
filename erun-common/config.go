@@ -649,7 +649,9 @@ type ProjectEnvironmentConfig struct {
 	K8s                 ProjectK8sConfig    `yaml:"k8s,omitempty"`
 }
 
-// ProjectDockerConfig holds project-level docker settings per environment.
+// ProjectDockerConfig holds docker settings. In `docker:` at the top level of
+// .erun/config.yaml it is the project-wide default every environment inherits;
+// in environments.<env>.docker it is that environment's own settings.
 // Fingerprints maps an image name to its canonical content fingerprint as
 // published by release CI, so fresh dev clones can promote pinned base images
 // without rebuilding them while local Dockerfile edits still force a rebuild
@@ -657,11 +659,21 @@ type ProjectEnvironmentConfig struct {
 type ProjectDockerConfig struct {
 	Fingerprints map[string]string `yaml:"fingerprints,omitempty"`
 	// Platforms pins the docker --platform targets a non-release build/push mints
-	// for this environment (e.g. ["linux/amd64"]), for an environment whose
-	// cluster can only ever run one architecture. It never applies to a release
-	// build (`erun build --release`, `erun release`): those always publish every
-	// platform erun supports, since a release artifact must be deployable
-	// anywhere. Empty keeps the default multi-arch build.
+	// (e.g. ["linux/amd64"]), for a machine or cluster that can only ever run one
+	// architecture. It never applies to a release build (`erun build --release`,
+	// `erun release`): those always publish every platform erun supports, since a
+	// release artifact must be deployable anywhere.
+	//
+	// At the top level it is the project default, inherited by every environment
+	// that declares no platforms of its own — so a project whose machines are all
+	// single-architecture states that once instead of listing each environment,
+	// and an environment nobody remembered to list cannot silently fall back to
+	// the slow multi-arch path. An environment's own list wins outright, and an
+	// explicit empty list (`platforms: []`) opts that environment out of the
+	// project default and restores the built-in multi-arch build — the escape
+	// hatch for a generic environment name such as `local`, which can belong to a
+	// contributor's machine of any architecture. Absent or empty everywhere keeps
+	// the default multi-arch build.
 	Platforms []string `yaml:"platforms,omitempty"`
 }
 
@@ -675,9 +687,12 @@ type ReleaseConfig struct {
 }
 
 type ProjectConfig struct {
-	ContainerRegistries ContainerRegistries                 `yaml:"containerregistries,omitempty"`
-	Environments        map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
-	Release             ReleaseConfig                       `yaml:"release,omitempty"`
+	ContainerRegistries ContainerRegistries `yaml:"containerregistries,omitempty"`
+	// Docker holds project-wide docker defaults. An environment inherits any
+	// setting it does not declare itself; see DockerPlatformsForEnvironment.
+	Docker       ProjectDockerConfig                 `yaml:"docker,omitempty"`
+	Environments map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
+	Release      ReleaseConfig                       `yaml:"release,omitempty"`
 	// Platform holds the per-instance erunpaas platform configuration; empty for
 	// projects that do not run a platform deployment.
 	Platform PlatformConfig `yaml:"platform,omitempty"`
@@ -795,20 +810,45 @@ func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[
 	return out
 }
 
-// DockerPlatformsForEnvironment returns the configured docker --platform targets
-// for the given environment, or nil when none is set (keeping the default
-// multi-arch build).
+// DockerPlatformsForEnvironment returns the docker --platform targets a
+// non-release build/push mints for the given environment, or nil when the
+// environment is unpinned (keeping the default multi-arch build).
+//
+// An environment's own environments.<env>.docker.platforms wins outright. An
+// environment that declares none inherits the project-wide docker.platforms
+// default, so a project whose machines are all single-architecture does not
+// have to list each environment by name and a new environment cannot silently
+// fall back to the slow multi-arch path. A declared-but-empty list
+// (`platforms: []`) is the explicit opt-out from that default, which is how a
+// generic environment name such as `local` — one that can belong to a
+// contributor's machine of any architecture — stays unpinned.
 func (c ProjectConfig) DockerPlatformsForEnvironment(environment string) []string {
 	environment = strings.TrimSpace(environment)
-	if environment == "" || c.Environments == nil {
-		return nil
+	if environment != "" && c.Environments != nil {
+		if envConfig, ok := c.Environments[environment]; ok && envConfig.Docker.Platforms != nil {
+			return normalizedDockerPlatforms(envConfig.Docker.Platforms)
+		}
 	}
-	envConfig, ok := c.Environments[environment]
-	if !ok || len(envConfig.Docker.Platforms) == 0 {
-		return nil
+	return normalizedDockerPlatforms(c.Docker.Platforms)
+}
+
+// DockerPlatformsOrigin names where DockerPlatformsForEnvironment's value came
+// from, so a build trace says which config key decided the platform list.
+func (c ProjectConfig) DockerPlatformsOrigin(environment string) string {
+	environment = strings.TrimSpace(environment)
+	if environment != "" && c.Environments != nil {
+		if envConfig, ok := c.Environments[environment]; ok && envConfig.Docker.Platforms != nil {
+			return "environments." + environment + ".docker.platforms"
+		}
 	}
-	out := make([]string, 0, len(envConfig.Docker.Platforms))
-	for _, platform := range envConfig.Docker.Platforms {
+	return "docker.platforms (project default)"
+}
+
+// normalizedDockerPlatforms trims a configured platform list and reports an
+// empty result as nil, which reads as "unpinned" to every caller.
+func normalizedDockerPlatforms(platforms []string) []string {
+	out := make([]string, 0, len(platforms))
+	for _, platform := range platforms {
 		if platform = strings.TrimSpace(platform); platform != "" {
 			out = append(out, platform)
 		}
