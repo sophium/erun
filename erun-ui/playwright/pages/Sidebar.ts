@@ -73,7 +73,7 @@ export class Sidebar {
   //   Error: locator.click: Test timeout of 30000ms exceeded
   //
   // Whether the popper wins the race depends on how loaded the box is, so this
-  // passed alone and failed in the gate (erun#2399). Every caller here asserts
+  // passed alone and failed in the gate. Every caller here asserts
   // what the dialog contains, not that a mouse specifically opened it, so the
   // click bought nothing that the race did not cost back.
   async openManageDialogFor(tenant: string, env: string): Promise<void> {
