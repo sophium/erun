@@ -1604,8 +1604,8 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("real_run_without_tty_skips_optional_prune_prompts", func(t *testing.T) {
-		// Regression coverage for erun#2231: doctor is the command reached for
-		// when a deploy has already failed, so its caller is often an
+		// Regression coverage for the no-TTY run: doctor is the command reached
+		// for when a deploy has already failed, so its caller is often an
 		// orchestrator or CI step with no terminal. Reaching the optional prune
 		// prompts with stdin bound to /dev/null read EOF and exited 1 with
 		// "Doctor failed team/dev: ^D" -- a verdict on an environment nothing
