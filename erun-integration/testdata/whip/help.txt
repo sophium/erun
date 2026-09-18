@@ -5,9 +5,13 @@ pushed, or skipped and why — rather than only reporting that it ran.
 
 A CLI/MCP process has no channel into a desktop-held orchestrator's live PTY,
 so every orchestrator is reported skipped as unreachable from this transport;
-only the desktop's own automatic pass can push those. An environment with no
-currently open MCP edge (nobody has it open in the desktop) reports skipped as
-not alive, since there is no live session there to push.
+only the desktop's own automatic pass can push those. An environment whose MCP
+edge is not answering (nobody has it open in the desktop, or its port-forward
+dropped) is reported skipped as channel-down, with the `erun open` that brings
+the edge back, and the sweep carries on to the remaining targets.
+
+A --dry-run never reattaches a channel: the reattach starts a real
+`erun open --reconnect`, and a preview does not start work that outlives it.
 
 Pass TENANT and ENVIRONMENT to whip one environment; omit both to whip every
 configured environment plus every persisted orchestrator.

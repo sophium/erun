@@ -132,7 +132,18 @@ emitted; type is the single source of truth.
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $devopsImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
-{{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1-1" (index $imageOverrides "erun-dind") -}}
+{{- /* The dind sidecar's tag is its own image VERSION, not the erun release
+       version, so it cannot come from .Chart.AppVersion the way $devopsImage
+       above does. It was previously a hardcoded literal here, which drifted:
+       bumping erun-devops/docker/erun-dind/VERSION built and published the new
+       image while this line kept deploying the old one, so a daemon.json fix
+       shipped and was never run. Kept as a value so the two can be reconciled
+       in one place, and so an env can pin a different sidecar without
+       overriding the whole image reference. This default is not left to
+       memory: k8s/image-version_test.sh fails the render gate when it and
+       erun-devops/docker/erun-dind/VERSION disagree. */ -}}
+{{- $dindImageTag := default "28.1.1-4" .Values.dindImageTag -}}
+{{- $dindImage := default (printf "%s/erun-dind:%s" $containerRegistry $dindImageTag) (index $imageOverrides "erun-dind") -}}
 {{- /* The gid of the `docker` group baked into the docker:<ver>-dind base, which
        owns the daemon socket. Surfaced as a value so an env can follow the base
        if that group ever moves, rather than losing the daemon on the next
@@ -190,6 +201,23 @@ emitted; type is the single source of truth.
 {{- /* Mirrors eruncommon.DefaultClaudeMaxOutputTokens (erun-common/claude.go); move both together. */ -}}
 {{- $claudeMaxOutputTokens := default "32000" $claude.maxOutputTokens -}}
 {{- $claudeMaxThinkingTokens := default "1024" $claude.maxThinkingTokens -}}
+{{- /* Gateway routing is deliberately independent of cloud provider: a gateway
+       the operator configured replaces the model provider wherever the env
+       runs, so these render for every env. The credential is carried as a
+       Secret *reference* — only its name and key pass through helm, never a
+       value, so nothing sensitive reaches helm argv or the release manifest. */}}
+{{- $claudeOpenRouterBaseURL := default "" $claude.openRouterBaseURL -}}
+{{- $claudeOpenRouterAuthTokenSecret := default "" $claude.openRouterAuthTokenSecret -}}
+{{- $claudeOpenRouterAuthTokenKey := default "token" $claude.openRouterAuthTokenKey -}}
+{{- /* With a gateway configured the catalog is the selectable set: the operator
+       curates one list at erun level and every environment selects from it. */}}
+{{- $claudeOpenRouterAvailableModels := default "" $claude.openRouterAvailableModels -}}
+{{- /* The catalog's default model and its window are set pod-wide, not only at
+       launch: Claude Code falls back to its own default model otherwise, which a
+       gateway need not serve, and it assumes a context window for an id it does
+       not recognise. */}}
+{{- $claudeOpenRouterModel := default "" $claude.openRouterModel -}}
+{{- $claudeOpenRouterModelContext := default "" $claude.openRouterModelContext -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -581,6 +609,34 @@ spec:
               value: unix:///var/run/docker.sock
             - name: DOCKER_BUILDKIT
               value: "1"
+            {{- /* The erun-dind sidecar's cgroup is a sibling of any RUN step's
+                   own cgroup during an in-pod docker build, not an ancestor of
+                   it, so a build reading the sidecar's real limit off its own
+                   filesystem sees an unrelated/unlimited cgroup. The config
+                   store has the same blind spot from the other direction
+                   inside the pod: it carries no environment entry there, so a
+                   build that resolved the sidecar's size from the config
+                   store alone always fell back to the hardcoded default, even
+                   after `erun resize --dind-cpu`/`--dind-memory` moved the
+                   sidecar's real limit. The downward API reads the sidecar's
+                   declared limit directly from the API server, so it's
+                   correct regardless of which cgroup this container's own
+                   build process runs in. CPU rounds up to a whole core with
+                   no divisor; memory uses divisor 1Mi so the value is a plain
+                   MiB integer matching ERUN_DIND_MEMORY_LIMIT_MIB's own unit
+                   (build_dind_resources.go suffixes it with "Mi" before
+                   parsing). */}}
+            - name: ERUN_DIND_CPU_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: erun-dind
+                  resource: limits.cpu
+            - name: ERUN_DIND_MEMORY_LIMIT_MIB
+              valueFrom:
+                resourceFieldRef:
+                  containerName: erun-dind
+                  resource: limits.memory
+                  divisor: 1Mi
             {{- end }}
             - name: ERUN_REPO_PATH
               value: {{ $repoPath | quote }}
@@ -625,6 +681,36 @@ spec:
               value: {{ $claudeMaxOutputTokens | quote }}
             - name: MAX_THINKING_TOKENS
               value: {{ $claudeMaxThinkingTokens | quote }}
+            {{- if $claudeOpenRouterBaseURL }}
+            {{- /* An API key left unset lets Claude Code fall back to a direct
+                   provider and bypass the gateway, so it is set explicitly
+                   empty rather than omitted. */}}
+            - name: ANTHROPIC_BASE_URL
+              value: {{ $claudeOpenRouterBaseURL | quote }}
+            - name: ANTHROPIC_API_KEY
+              value: ""
+            - name: CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY
+              value: "1"
+            {{- if $claudeOpenRouterAvailableModels }}
+            - name: ERUN_CLAUDE_AVAILABLE_MODELS
+              value: {{ $claudeOpenRouterAvailableModels | quote }}
+            {{- end }}
+            {{- if $claudeOpenRouterModel }}
+            - name: ANTHROPIC_MODEL
+              value: {{ $claudeOpenRouterModel | quote }}
+            {{- end }}
+            {{- if $claudeOpenRouterModelContext }}
+            - name: CLAUDE_CODE_MAX_CONTEXT_TOKENS
+              value: {{ $claudeOpenRouterModelContext | quote }}
+            {{- end }}
+            {{- if $claudeOpenRouterAuthTokenSecret }}
+            - name: ANTHROPIC_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $claudeOpenRouterAuthTokenSecret | quote }}
+                  key: {{ $claudeOpenRouterAuthTokenKey | quote }}
+            {{- end }}
+            {{- end }}
             {{ if eq $cloudProvider "aws" }}
             {{ if $useHostCredentials }}
             - name: AWS_PROFILE
@@ -651,12 +737,18 @@ spec:
             - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
               value: {{ $claudeSmallFastRegion | quote }}
             {{- end }}
+            {{- /* Skipped when a gateway set it above: emitting the name twice
+                   would leave the container spec ambiguous about which wins. */}}
+            {{- if not $claudeOpenRouterBaseURL }}
             - name: ERUN_CLAUDE_AVAILABLE_MODELS
               value: {{ $claudeAvailableModels | quote }}
+            {{- end }}
+            {{- if not $claudeOpenRouterBaseURL }}
             {{ if $claudeModel }}
             - name: ANTHROPIC_MODEL
               value: {{ $claudeModel | quote }}
             {{ end }}
+            {{- end }}
             {{ if $claudeDefaultOpusModel }}
             - name: ANTHROPIC_DEFAULT_OPUS_MODEL
               value: {{ $claudeDefaultOpusModel | quote }}
