@@ -224,8 +224,13 @@ func releasePushReasonIsMovedBranch(reason string) bool {
 // landed. So the error says which ref did not land, why git refused
 // it, and that the tag must not be deleted.
 func releasePushRejectedError(spec ReleaseSpec, rejections []releasePushRejection, cause error) error {
+	// described carries git's own reason for the reader; names is the bare ref
+	// for the recovery command, where a parenthesised reason would not be a
+	// ref that can be reconciled.
 	described := make([]string, 0, len(rejections))
+	names := make([]string, 0, len(rejections))
 	for _, rejection := range rejections {
+		names = append(names, rejection.Ref)
 		if rejection.Reason != "" {
 			described = append(described, fmt.Sprintf("%s (%s)", rejection.Ref, rejection.Reason))
 			continue
@@ -233,16 +238,12 @@ func releasePushRejectedError(spec ReleaseSpec, rejections []releasePushRejectio
 		described = append(described, rejection.Ref)
 	}
 	refs := strings.Join(described, ", ")
-	names := make([]string, 0, len(rejections))
-	for _, rejection := range rejections {
-		names = append(names, rejection.Ref)
+	if refs == "" {
+		refs = "a ref git did not name"
 	}
 	unlanded := strings.Join(names, ", ")
 	if unlanded == "" {
 		unlanded = refs
-	}
-	if refs == "" {
-		refs = "a ref git did not name"
 	}
 	version := strings.TrimSpace(spec.Version)
 	return fmt.Errorf("%w\nrelease: the push was rejected for %s, which is not origin/%s having moved during the release, so nothing is rebased or retried.\n"+

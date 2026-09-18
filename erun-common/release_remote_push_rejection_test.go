@@ -188,6 +188,63 @@ func TestParseReleasePushRejections(t *testing.T) {
 	}
 }
 
+// The half-release that must never read as an interrupted release: the version
+// is already public, so the recovery is to name the missing GitHub Release
+// object and the ref that did not land, never to delete the tag and reset a
+// branch that already landed.
+func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationShape(t *testing.T) {
+	cases := []struct {
+		name       string
+		rejections []releasePushRejection
+		wantIn     []string
+		notIn      []string
+	}{
+		{
+			name:       "a develop rejection",
+			rejections: []releasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}},
+			wantIn: []string{
+				"develop (non-fast-forward)",
+				"reconcile develop with its remote",
+				"GitHub Release",
+				"do not delete tag v1.4.2",
+			},
+			notIn: []string{
+				"origin/main moved during the release",
+				"reconcile develop (non-fast-forward) with its remote",
+			},
+		},
+		{
+			name:       "a rejection git did not name",
+			rejections: nil,
+			wantIn: []string{
+				"a ref git did not name",
+				"reconcile a ref git did not name with its remote",
+				"GitHub Release",
+			},
+			// The bare-instruction slot must never be filled with nothing: an
+			// empty ref makes the recovery command unrunnable.
+			notIn: []string{"reconcile  with its remote", "is  ."},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := releasePushRejectedError(releasePushTestSpec(), testCase.rejections, errors.New("exit status 1"))
+			message := err.Error()
+			for _, want := range testCase.wantIn {
+				if !strings.Contains(message, want) {
+					t.Fatalf("error must contain %q, got:\n%s", want, message)
+				}
+			}
+			for _, unwanted := range testCase.notIn {
+				if strings.Contains(message, unwanted) {
+					t.Fatalf("error must not contain %q, got:\n%s", unwanted, message)
+				}
+			}
+		})
+	}
+}
+
 func TestReleasePushRejectedTheMovedBaseBranch(t *testing.T) {
 	cases := []struct {
 		name       string
