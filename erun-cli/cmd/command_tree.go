@@ -176,7 +176,6 @@ var knownUnsurfacedFlags = map[string]bool{
 	"init --mcp-auth-public-key":   true,
 	// Remaining init inputs with no field in the desktop's setup flow.
 	"init --codecommit-ssh-key-id": true,
-	"init --project-root":          true,
 	// Doctor's non-interactive repair and prune actions. The desktop has a
 	// doctor panel, but these specific remedies are reachable only by running
 	// the CLI with the flag.
