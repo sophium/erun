@@ -27,12 +27,12 @@ func blockForever() {
 	}
 }
 
-// registerStub records this process's pid in the harness's stub registry, so a
-// session the suite opened and never closed can be reaped (fixtures/
-// stubProcesses.ts). Best-effort: outside the harness there is no registry in
-// the environment and the stub must still run. Keep in lockstep with the POSIX
-// register_stub preamble in fixtures/seedRoot.ts.
-func registerStub() {
+// registerStub records this process's pid, and which stub it is, in the
+// harness's stub registry, so a session the suite opened and never closed can be
+// reaped (fixtures/stubProcesses.ts). Best-effort: outside the harness there is
+// no registry in the environment and the stub must still run. Keep in lockstep
+// with the POSIX register_stub preamble in fixtures/seedRoot.ts.
+func registerStub(name string) {
 	registry := os.Getenv("ERUN_PLAYWRIGHT_STUB_REGISTRY")
 	if registry == "" {
 		return
@@ -42,7 +42,7 @@ func registerStub() {
 		return
 	}
 	defer func() { _ = f.Close() }()
-	_, _ = fmt.Fprintf(f, "%d\n", os.Getpid())
+	_, _ = fmt.Fprintf(f, "%d %s\n", os.Getpid(), name)
 }
 
 func main() {
@@ -68,7 +68,7 @@ func main() {
 			// as the setup-complete marker (see signalSessionReadyOnLine in
 			// activity_queue_app.go), then block so the tab behaves like a healthy,
 			// quiet, killable session.
-			registerStub()
+			registerStub(name)
 			fmt.Print("erun@playwright:~$ \n")
 			_ = os.Stdout.Sync()
 			blockForever() // stay alive like `exec sleep`; ended by the harness reap or env close
@@ -80,7 +80,7 @@ func main() {
 		// (no TTY, no credentials) — it exits at once and the spec that opened
 		// the orchestrator times out waiting for the running dot. Block instead,
 		// printing the same setup-complete marker the POSIX stub does.
-		registerStub()
+		registerStub(name)
 		fmt.Print("claude@playwright:~$ \n")
 		_ = os.Stdout.Sync()
 		blockForever() // stay alive like `exec sleep`; ended by the harness reap or session close

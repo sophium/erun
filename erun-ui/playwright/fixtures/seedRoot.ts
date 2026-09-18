@@ -419,18 +419,21 @@ export function seedGitRemoteAgentForK3d(
 // harness can end a session it opened and never closed — see
 // fixtures/stubProcesses.ts. Keep that in lockstep on POSIX and win32 (the
 // prebuilt PE's registerStub call in fixtures/winstub/main.go).
-// STUB_REGISTER_PREAMBLE heads every long-lived stub: it records the pid the
-// stub is about to park under in the registry the harness reaps
-// (fixtures/stubProcesses.ts). `exec` keeps that pid, so the number recorded
-// here is the parked process itself. Best-effort by design — a stub invoked
-// outside the harness has no registry in its environment and must still run.
-const STUB_REGISTER_PREAMBLE = [
-  '#!/bin/sh',
-  'register_stub() {',
-  '  [ -n "$ERUN_PLAYWRIGHT_STUB_REGISTRY" ] || return 0',
-  '  printf \'%s\\n\' "$$" >> "$ERUN_PLAYWRIGHT_STUB_REGISTRY"',
-  '}',
-];
+// stubRegisterPreamble heads every long-lived stub: it records the pid the stub
+// is about to park under, and which stub it is, in the registry the harness
+// reaps (fixtures/stubProcesses.ts). `exec` keeps that pid, so the number
+// recorded here is the parked process itself. Best-effort by design — a stub
+// invoked outside the harness has no registry in its environment and must still
+// run.
+function stubRegisterPreamble(name: string): string[] {
+  return [
+    '#!/bin/sh',
+    'register_stub() {',
+    '  [ -n "$ERUN_PLAYWRIGHT_STUB_REGISTRY" ] || return 0',
+    `  printf '%s ${name}\\n' "$$" >> "$ERUN_PLAYWRIGHT_STUB_REGISTRY"`,
+    '}',
+  ];
+}
 
 function writeStubBinary(name: string): void {
   if (isWindows) {
@@ -443,7 +446,7 @@ function writeStubBinary(name: string): void {
   let body: string;
   if (name === 'erun') {
     body = [
-      ...STUB_REGISTER_PREAMBLE,
+      ...stubRegisterPreamble(name),
       '# erun playwright stub: keeps ERun/AI tabs alive and inert.',
       'case "$1" in',
       '  open)',
@@ -457,7 +460,7 @@ function writeStubBinary(name: string): void {
     ].join('\n');
   } else if (name === 'claude') {
     body = [
-      ...STUB_REGISTER_PREAMBLE,
+      ...stubRegisterPreamble(name),
       '# claude playwright stub: keeps an orchestrator session alive and inert.',
       'register_stub',
       "printf 'claude@playwright:~$ \\n'",

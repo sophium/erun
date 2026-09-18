@@ -14,13 +14,13 @@ import { stubRegistryPath, stubsDir } from './seedRoot.js';
 // left a live `sleep` behind for the rest of the run: a full ALL run reached 117
 // of them, every one competing with the suite for the gate's CPUs (#2512).
 //
-// So every long-lived stub records the pid it is about to park under, in an
-// append-only file inside the isolated root, and the harness reaps that registry
-// on each spec's teardown (fixtures/erunApp.ts), with the worker teardown as the
-// backstop (fixtures/workerBackend.ts). Registry + signal is deliberately the
-// same shape the rest of this harness uses — the stub itself owns the pid,
-// exactly as it owns its own prompt line — rather than scanning the process
-// table for something that looks like a stub.
+// So every long-lived stub records the pid it is about to park under, and which
+// stub it is, in an append-only file inside the isolated root, and the harness
+// reaps that registry on each spec's teardown (fixtures/erunApp.ts), with the
+// worker teardown as the backstop (fixtures/workerBackend.ts). Registry + signal
+// is deliberately the same shape the rest of this harness uses — the stub itself
+// owns the pid, exactly as it owns its own prompt line — rather than scanning
+// the process table for something that looks like a stub.
 
 const isWindows = process.platform === 'win32';
 
@@ -37,34 +37,41 @@ const STUB_NAMES = ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude'];
 // already decisive and this is a bound, not a wait.
 const REAP_GRACE_MS = 2_000;
 
-// stubsOpenedByTheHarness is the file each stub appends its pid to; see
-// stubRegistryPath in fixtures/seedRoot.ts for why it lives in the isolated root.
+interface StubEntry {
+  pid: number;
+  name: string;
+}
 
-function registeredPids(): number[] {
+// registeredStubs reads the registry. A line is `<pid> <name>`; the name is what
+// lets a caller ask for one kind of session — an orchestrator's `claude` rather
+// than an env tab's `erun` — when the machine has both parked.
+function registeredStubs(): StubEntry[] {
   let raw: string;
   try {
     raw = fs.readFileSync(stubRegistryPath(), 'utf8');
   } catch {
     return [];
   }
-  const pids = new Set<number>();
+  const entries = new Map<number, StubEntry>();
   for (const line of raw.split('\n')) {
-    const pid = Number.parseInt(line.trim(), 10);
+    const [pidField, nameField] = line.trim().split(/\s+/);
+    const pid = Number.parseInt(pidField ?? '', 10);
     if (Number.isInteger(pid) && pid > 0) {
-      pids.add(pid);
+      entries.set(pid, { pid, name: nameField ?? '' });
     }
   }
-  return [...pids];
+  return [...entries.values()];
 }
 
-// writeRegistry replaces the registry with exactly the pids still worth
+// writeRegistry replaces the registry with exactly the entries still worth
 // tracking. The temp-file rename keeps a concurrent stub append from observing a
 // torn file; a stub that appends into the window between the two loses its own
 // line, which costs one un-reaped stub, never a signalled stranger.
-function writeRegistry(pids: number[]): void {
+function writeRegistry(entries: StubEntry[]): void {
   const file = stubRegistryPath();
   const tmp = `${file}.tmp-${String(process.pid)}`;
-  fs.writeFileSync(tmp, pids.map((pid) => `${String(pid)}\n`).join(''));
+  const body = entries.map((entry) => `${String(entry.pid)} ${entry.name}\n`).join('');
+  fs.writeFileSync(tmp, body);
   fs.renameSync(tmp, file);
 }
 
@@ -104,11 +111,11 @@ function commandLine(pid: number): string {
   }
 }
 
-function isStubProcess(pid: number): boolean {
-  if (!isProcessAlive(pid)) {
+function isStubProcess(entry: StubEntry): boolean {
+  if (!isProcessAlive(entry.pid)) {
     return false;
   }
-  const cmd = commandLine(pid);
+  const cmd = commandLine(entry.pid);
   if (!cmd) {
     return false;
   }
@@ -120,35 +127,48 @@ function isStubProcess(pid: number): boolean {
   return cmd.includes(STUB_SLEEP_ARG) || cmd.includes(stubsDir());
 }
 
+function liveStubs(name?: string): StubEntry[] {
+  return registeredStubs()
+    .filter((entry) => (name ? entry.name === name : true))
+    .filter(isStubProcess);
+}
+
 // liveStubProcesses is the observable stub population: the registered pids that
-// are still running, and still running *as* a stub.
-export function liveStubProcesses(): number[] {
-  return registeredPids().filter(isStubProcess);
+// are still running, and still running *as* a stub. Pass a name to ask for one
+// kind of session rather than every parked stub on the machine.
+export function liveStubProcesses(name?: string): number[] {
+  return liveStubs(name).map((entry) => entry.pid);
 }
 
 // reapStubProcesses ends every live stub the harness still owns and returns the
 // pids that would not die, so a caller can surface them instead of pretending
 // the sweep worked.
-export function reapStubProcesses(): number[] {
-  const live = liveStubProcesses();
-  for (const pid of live) {
-    killPid(pid, 'SIGTERM');
+export function reapStubProcesses(name?: string): number[] {
+  const live = liveStubs(name);
+  for (const entry of live) {
+    killPid(entry.pid, 'SIGTERM');
   }
-  for (const pid of live) {
-    waitForExit(pid, REAP_GRACE_MS);
+  for (const entry of live) {
+    waitForExit(entry.pid, REAP_GRACE_MS);
   }
-  const survivors = live.filter(isProcessAlive);
-  for (const pid of survivors) {
-    killPid(pid, 'SIGKILL');
+  const survivors = live.filter((entry) => isProcessAlive(entry.pid));
+  for (const entry of survivors) {
+    killPid(entry.pid, 'SIGKILL');
   }
-  for (const pid of survivors) {
-    waitForExit(pid, REAP_GRACE_MS);
+  for (const entry of survivors) {
+    waitForExit(entry.pid, REAP_GRACE_MS);
   }
-  const stubborn = survivors.filter(isProcessAlive);
-  // Only the stubborn stay registered: everything else is really gone, and the
-  // next reap must not forget a process that is still there.
-  writeRegistry(stubborn);
-  return stubborn;
+  // An entry leaves the registry only once its process is really gone, so the
+  // next reap cannot forget a stub that is still there. Entries this call did
+  // not target are carried over untouched.
+  const stubborn = new Set(
+    survivors.filter((entry) => isProcessAlive(entry.pid)).map((entry) => entry.pid),
+  );
+  const targeted = new Set(live.map((entry) => entry.pid));
+  writeRegistry(
+    registeredStubs().filter((entry) => !targeted.has(entry.pid) || stubborn.has(entry.pid)),
+  );
+  return [...stubborn];
 }
 
 function killPid(pid: number, signal: NodeJS.Signals): void {
@@ -171,4 +191,3 @@ function waitForExit(pid: number, timeoutMs: number): void {
 function sleepSync(ms: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
-
