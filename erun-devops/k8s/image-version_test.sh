@@ -4,9 +4,9 @@
 # it. `erun-devops/docker/<image>/VERSION` is the pin the build publishes
 # under; the charts repeat that tag as a template default. Nothing tied the two
 # together, so a bump could build and publish an image no environment ever
-# deployed: erun #2334, where the dind sidecar's BuildKit GC ceiling shipped in
-# 28.1.1-3 while the chart kept defaulting to 28.1.1-2, leaving the fix inert
-# on every environment rolled onto that release.
+# deployed: the dind sidecar's BuildKit GC ceiling shipped in 28.1.1-3 while
+# the chart kept defaulting to 28.1.1-2, leaving the fix inert on every
+# environment rolled onto that release.
 #
 # Two checks, because the coupling breaks in two places:
 #
