@@ -106,21 +106,19 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 // as "no forward" the way a missing file does.
 func removePortForwardStateFiles(ctx Context, tenant, environment string) error {
 	for _, kind := range portForwardStateKinds {
-		paths, err := PortForwardStatePaths(kind, tenant, environment)
+		path, err := PortForwardStatePath(kind, tenant, environment)
 		if err != nil {
 			return err
 		}
-		for _, path := range paths {
-			if _, statErr := os.Stat(path); statErr != nil {
-				continue
-			}
-			ctx.TraceCommand("", "rm", "-f", path)
-			if ctx.DryRun {
-				continue
-			}
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return err
-			}
+		if _, statErr := os.Stat(path); statErr != nil {
+			continue
+		}
+		ctx.TraceCommand("", "rm", "-f", path)
+		if ctx.DryRun {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
 		}
 	}
 	return nil
