@@ -90,7 +90,7 @@ test.describe('tenant dashboard — gates tab (erun#1932)', () => {
     }
   });
 
-  // The one thing to get right above all (erun#1932): INCONCLUSIVE must not
+  // The one thing to get right above all: INCONCLUSIVE must not
   // render as a failure. It exists precisely because a wrapper hitting its
   // own timeout, or an environment fault, is not a verdict on the change --
   // so it must read as its own distinct state, never folded into FAILED's.
