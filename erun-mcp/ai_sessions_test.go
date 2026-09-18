@@ -54,8 +54,8 @@ func TestAISessionsToolResolvesAgainstServerContext(t *testing.T) {
 }
 
 // TestAISessionsToolEmptyEnvironmentReturnsEmptyArrayNotNull pins the exact
-// shape reported in erun#2128: an environment with no recorded AI sessions
-// must return "sessions": [] like idle_stop_history's "entries": [], never
+// shape: an environment with no recorded AI sessions must return
+// "sessions": [] like idle_stop_history's "entries": [], never
 // "sessions": null, which forces every caller to special-case this one tool.
 func TestAISessionsToolEmptyEnvironmentReturnsEmptyArrayNotNull(t *testing.T) {
 	isolateLeaseCache(t)

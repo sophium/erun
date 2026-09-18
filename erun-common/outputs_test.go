@@ -12,7 +12,7 @@ import (
 // directory that has never been created (the ordinary case for an
 // environment that has never written anything to it): Entries must marshal
 // to "[]", not "null" - the same nil-slice-on-empty-collection defect fixed
-// in LoadAISessionStatuses (erun#2128).
+// in LoadAISessionStatuses.
 func TestResolveLocalOutputsEmptyDirectorySerializesAsEmptyArray(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "never-created")
 

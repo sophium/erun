@@ -1280,7 +1280,7 @@ func TestActivityAISession(t *testing.T) {
 
 	// status_json_reports_empty_array_when_none_recorded pins the actual JSON
 	// text emitted for an environment with no recorded sessions: it must be
-	// "[]", never "null" (erun#2128) - a caller doing result.length or
+	// "[]", never "null" - a caller doing result.length or
 	// ranging over the field must not have to special-case this one command.
 	// json.Unmarshal happily decodes "null" into a nil slice with no error,
 	// so statusJSON's []map[string]any helper cannot tell the two apart;
