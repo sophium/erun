@@ -39,10 +39,10 @@ func writeUsageBuildsCaveat(ctx common.Context, usage common.RuntimeUsage) error
 	}
 	note := "Note: CPU/Memory above are the runtime container's alone -- an image build runs in the erun-dind sidecar, so this container reads near zero while a build saturates it; "
 	switch {
-	case usage.Build != nil && usage.Build.Available:
+	case usage.Build != nil && usage.Build.Unavailable == "":
 		note += "`Build CPU` below is that build cgroup's own reading."
 	case usage.Build != nil:
-		note += "the build cgroup exists but `Build CPU` below could not be read, so this report has no build figure."
+		note += "`Build CPU` below says why the build cgroup could not be read, so this report has no build figure."
 	default:
 		note += "no build cgroup was reachable from here (read from outside the pod, or an image without one), so this report has no build figure; `erun observe` reports the sidecar's limits, not its usage."
 	}
@@ -56,35 +56,27 @@ func writeUsageBuildsCaveat(ctx common.Context, usage common.RuntimeUsage) error
 // reading that tells an operator whether a build is running, working, and
 // starved. Nothing is printed when no build cgroup applies at all: an
 // environment without the sidecar has no build figure to be missing.
-func writeUsageBuild(ctx common.Context, build *common.BuildCgroupMetrics) error {
+func writeUsageBuild(ctx common.Context, build *common.RuntimeCPUUsage) error {
 	if build == nil {
 		return nil
 	}
-	if !build.Available {
-		reason := build.Unavailable
-		if reason == "" {
-			reason = "the build cgroup's counters were not readable from this process"
-		}
-		_, err := fmt.Fprintf(ctx.Stdout, "Build CPU: unavailable (%s)\n", reason)
+	if build.Unavailable != "" {
+		_, err := fmt.Fprintf(ctx.Stdout, "Build CPU: unavailable (%s)\n", build.Unavailable)
 		return err
 	}
-	if build.QuotaCores <= 0 {
-		// A readable cgroup whose cpu.max was not: report the CPU actually
-		// consumed rather than borrowing a percentage of an unknown quota.
-		_, err := fmt.Fprintf(ctx.Stdout, "Build CPU: %.1fs of CPU used over the sample window (quota not readable)%s\n",
-			build.CPUSeconds, buildUsageThrottleSuffix(build))
-		return err
-	}
-	_, err := fmt.Fprintf(ctx.Stdout, "Build CPU: %.0f%% of a %.2f-core quota%s\n",
-		build.CPUPercentOfQuota, build.QuotaCores, buildUsageThrottleSuffix(build))
+	_, err := fmt.Fprintf(ctx.Stdout, "Build CPU: %.1f%% of a %.2f-core quota (sampled over %.1fs)%s\n",
+		build.UtilizationPercent, build.QuotaCores, build.IntervalSeconds, buildUsageThrottleSuffix(build))
 	return err
 }
 
-func buildUsageThrottleSuffix(build *common.BuildCgroupMetrics) string {
-	if build.TotalPeriods <= 0 {
+// buildUsageThrottleSuffix adds the starvation figure the percentage cannot
+// carry: a build held at its cap and a build merely busy at it read the same
+// number, and only nr_throttled separates them.
+func buildUsageThrottleSuffix(build *common.RuntimeCPUUsage) string {
+	if build.Periods <= 0 {
 		return ""
 	}
-	return fmt.Sprintf(" (throttled %d/%d periods, %.1fs)", build.ThrottledPeriods, build.TotalPeriods, build.ThrottledSeconds)
+	return fmt.Sprintf(", throttled %d/%d periods", build.ThrottledPeriods, build.Periods)
 }
 
 func writeUsageCPU(ctx common.Context, cpu common.RuntimeCPUUsage) error {

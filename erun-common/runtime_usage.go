@@ -53,14 +53,15 @@ import (
 //     RuntimeUsage.ExcludesBuilds (EnvironmentType.UsesDindSidecar) discloses.
 //
 //     The build's own number is not unreachable, though: it is the cap cgroup
-//     build_cpu_cap.go names, and the only container in the pod that can see
-//     it is the sidecar itself, which runs with the host's cgroup namespace.
-//     RuntimeUsage.Build carries that reading, taken through
-//     build_cgroup_metrics.go's existing sidecar exec. Where it cannot be
-//     taken -- a host-side read of a remote environment, or an image whose
-//     entrypoint never created the cap cgroup -- Build is nil or unavailable,
-//     and the transports say so rather than printing this container's
-//     near-zero reading as though it were the environment's. See
+//     build_cpu_cap.go names, and the only container in the pod that can see it
+//     is the sidecar itself, which runs with the host's cgroup namespace.
+//     RuntimeUsage.Build carries that reading, taken by a second exec into that
+//     sidecar -- the same deployment-level exec this reader already uses, so it
+//     is as reachable from an operator's host as from inside the pod. Where it
+//     cannot be taken -- an image whose entrypoint never created the cap cgroup,
+//     or a sidecar the caller cannot exec into -- Build is nil or unavailable,
+//     and the transports say so rather than printing this container's near-zero
+//     reading as though it were the environment's. See
 //     erun-cli/cmd/usage_render.go and the desktop's matching
 //     Sidebar.EnvHoverCard.tsx caveat.
 //
@@ -152,19 +153,20 @@ type RuntimeUsage struct {
 	// under-reporting relative to the other. See the file-level comment for
 	// why the sidecar's own cgroup cannot be read as a fix instead.
 	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
-	// Build is the build cgroup's own CPU reading for a build-capable
-	// environment, sampled over the same window as CPU above -- the number
-	// CPU and Memory structurally cannot see, and the only one that reflects
-	// a build actually consuming its cap (a saturated build cgroup reads 100%
-	// of its quota here while CPU above reads near zero).
+	// Build is the build cap cgroup's own CPU reading for a build-capable
+	// environment, sampled over its own interval -- the number CPU and Memory
+	// structurally cannot see, and the only one that reflects a build actually
+	// consuming its cap: a saturated build cgroup reads 100% of its quota here
+	// while CPU above reads a fraction of a percent.
 	//
-	// Nil means no build cgroup applies or was reachable from this process: a
-	// non-dind environment, a bare host build, or a host-side read of a remote
-	// environment, where nothing local can exec into that pod's sidecar.
-	// ExcludesBuilds still names the gap in that case. Non-nil with Available
-	// false means the cgroup exists but its counters could not be read, which
-	// a transport must report as unavailable rather than as a zero.
-	Build *BuildCgroupMetrics `json:"build,omitempty"`
+	// Nil means no build cgroup applies to this process at all: a
+	// non-dind environment, or a read from outside the pod (a host-side
+	// `erun usage` against a remote environment), where nothing local can exec
+	// into that pod's sidecar. ExcludesBuilds still names the gap in that
+	// case. Non-nil with Unavailable set means the cgroup exists but could not
+	// be read, which a transport must report as unavailable rather than as a
+	// zero.
+	Build *RuntimeCPUUsage `json:"build,omitempty"`
 }
 
 // HasCounters reports whether the read found anything worth retaining. A host
@@ -241,33 +243,111 @@ type RuntimeDiskUsage struct {
 }
 
 // RunRuntimeUsage execs the reading script into the runtime container and
-// parses its output. Dry-run traces the exec and returns an empty reading,
-// matching RunObservation's dry-run contract.
+// parses its output, then -- on an environment that carries the erun-dind
+// sidecar -- execs the build cap cgroup's own reading into that sidecar. Two
+// cgroups, one reader, because an environment whose CPU line covers only the
+// runtime container reports a build saturating its cap as an idle environment.
+//
+// The two execs are sequential rather than concurrent: the trace goes through
+// one Context and a second writer would interleave it. The cost is one extra
+// sample interval on build-capable environments, paid once per reading.
+//
+// Dry-run traces both execs -- the plan really is two commands -- and returns
+// an empty reading, matching RunObservation's dry-run contract.
 func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, params RuntimeUsageParams) (RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
-	script := runtimeUsageScript(interval)
-	// The build cgroup is sampled around the container read rather than over a
-	// second sleep of its own: the container script already holds for the
-	// sample interval, so bracketing it gives the build cgroup the same window
-	// at no extra latency. Skipped under dry-run, which must trace a command,
-	// not exec into a sidecar.
-	var buildBefore buildCgroupSnapshot
-	var buildWindowStart time.Time
-	if !ctx.DryRun {
-		buildBefore = captureBuildCgroupSnapshot()
-		buildWindowStart = time.Now()
-	}
-	result, err := RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)
+	result, err := RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", runtimeUsageScript(interval))
 	if err != nil {
 		return RuntimeUsage{}, err
+	}
+	// Traced (and, in a real run, executed) before the dry-run return, so a
+	// dry-run trace shows the whole plan rather than only its first command.
+	buildScript, buildApplicable := buildRuntimeUsageScript(req, interval)
+	var buildResult RemoteCommandResult
+	var buildErr error
+	if buildApplicable {
+		buildResult, buildErr = RunTracedRuntimeContainerCommand(ctx, runner, req, buildCgroupDindContainerName, "build-usage", buildScript)
 	}
 	if ctx.DryRun {
 		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}, nil
 	}
 	usage := parseRuntimeUsage(req, result.Stdout, interval)
-	usage.Build = buildCgroupMetricsFromSnapshots(buildBefore, captureBuildCgroupSnapshot(), time.Since(buildWindowStart))
+	usage.Build = buildRuntimeCPUUsage(buildApplicable, buildResult, buildErr, interval)
 	usage.Warnings = append(usage.Warnings, runtimeBuildUsageWarnings(usage.Build)...)
 	return applyRetainedUsageWarnings(usage), nil
+}
+
+// buildRuntimeUsageScript returns the script that samples the build cap
+// cgroup's cpu.stat, and whether it applies at all: only an environment
+// carrying the erun-dind sidecar has a build cgroup, because only there does an
+// image build run outside this container.
+//
+// The script resolves the cgroup directory itself, from the sidecar's own
+// hostname -- a Kubernetes pod's hostname is its pod name, and the sidecar is
+// the one container in the pod sharing the host's cgroup namespace (see
+// build_cgroup_metrics.go). Deriving it remotely instead of handing the caller
+// a local path is what lets every surface ask the same question: an operator's
+// `erun usage`, the desktop's probe, and the MCP tool all exec into the same
+// deployment, and none of them knows the pod name where they run.
+//
+// The key names match runtimeUsageScriptTemplate's, so runtimeCPUUsageFromValues
+// parses both readings -- one CPU parser, two cgroups. The dir fallback matches
+// buildCgroupReadScriptTemplate's: the cap directory does not populate its own
+// stat files on every cgroup driver, and the buildkit child holds the same
+// counters when it does not.
+const buildRuntimeUsageScriptTemplate = `set -eu
+cg=/sys/fs/cgroup
+cap="$cg/docker/erun-build-cpu-cap-$(hostname)"
+[ -d "$cap" ] || printf 'build_cgroup_dir_missing=1\n'
+dir="$cap"
+grep -q '^usage_usec ' "$dir/cpu.stat" 2>/dev/null || dir="$cap/buildkit"
+printf 'cgroup_type=%s\n' "$(stat -fc %T "$cg" 2>/dev/null || true)"
+printf 'cpu_max=%s\n' "$(cat "$dir/cpu.max" 2>/dev/null || true)"
+cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)
+time_before=$(date +%s%N)
+sleep __RUNTIME_USAGE_INTERVAL_SECONDS__
+cpu_usage_after=$(awk '$1=="usage_usec"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)
+time_after=$(date +%s%N)
+printf 'cpu_usage_before=%s\n' "$cpu_usage_before"
+printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
+printf 'cpu_time_before_ns=%s\n' "$time_before"
+printf 'cpu_time_after_ns=%s\n' "$time_after"
+printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)"
+printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)"
+`
+
+func buildRuntimeUsageScript(req ShellLaunchParams, interval time.Duration) (string, bool) {
+	if !req.Type.UsesDindSidecar() {
+		return "", false
+	}
+	seconds := strconv.FormatFloat(interval.Seconds(), 'f', -1, 64)
+	return strings.Replace(buildRuntimeUsageScriptTemplate, "__RUNTIME_USAGE_INTERVAL_SECONDS__", seconds, 1), true
+}
+
+// buildRuntimeCPUUsage turns the sidecar's answer into the reading a transport
+// shows, or into the reason there is none. It never fails the caller: the
+// environment's own CPU and memory are the primary reading, and a sidecar this
+// process cannot reach must not cost an operator those. Every way the build
+// read can come up short is therefore reported in Unavailable, which is what
+// keeps "there is no build cgroup here" distinguishable from "there is one and
+// it is idle" -- and both distinguishable from a build cgroup that is
+// saturated, which is the reading this whole path exists to stop hiding.
+func buildRuntimeCPUUsage(applicable bool, result RemoteCommandResult, err error, interval time.Duration) *RuntimeCPUUsage {
+	if !applicable {
+		return nil
+	}
+	if err != nil {
+		return &RuntimeCPUUsage{Unavailable: "the erun-dind sidecar could not be reached to read the build cgroup: " + err.Error()}
+	}
+	values := parseRuntimeUsageValues(result.Stdout)
+	if values["build_cgroup_dir_missing"] != "" {
+		return &RuntimeCPUUsage{Unavailable: "the erun-dind sidecar has no build cgroup -- no build has run there under the cap, or its image predates it"}
+	}
+	cpu := runtimeCPUUsageFromValues(values, interval)
+	if cpu.Unavailable != "" {
+		return &RuntimeCPUUsage{Unavailable: "the build cgroup was not readable: " + cpu.Unavailable}
+	}
+	return &cpu
 }
 
 // applyRetainedUsageWarnings adds the memory warnings the environment's
@@ -603,13 +683,13 @@ func parseRuntimeDFUsage(line string) (totalBytes, usedBytes int64, ok bool) {
 // starvation is what turns a lint step into a timeout -- so a throttled build
 // is named as starvation rather than left for an operator to infer from a
 // percentage that happens to sit at 100.
-func runtimeBuildUsageWarnings(build *BuildCgroupMetrics) []string {
-	if build == nil || !build.Available || build.TotalPeriods <= 0 || build.ThrottledPeriods <= 0 {
+func runtimeBuildUsageWarnings(build *RuntimeCPUUsage) []string {
+	if build == nil || build.Unavailable != "" || build.Periods <= 0 || build.ThrottledPeriods <= 0 {
 		return nil
 	}
 	return []string{fmt.Sprintf(
-		"the build cgroup was throttled in %d of %d periods (%.1fs of throttled time) -- the build is CPU-starved by its own cap, not idle",
-		build.ThrottledPeriods, build.TotalPeriods, build.ThrottledSeconds)}
+		"the build was throttled in %d of %d cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment",
+		build.ThrottledPeriods, build.Periods)}
 }
 
 func runtimeUsageWarnings(u RuntimeUsage) []string {

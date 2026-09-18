@@ -159,7 +159,7 @@ var defaultRules = []Replacement{
 	// The build CPU-cap cgroup path is keyed by the running machine's own
 	// hostname (buildContainerCPUCapCgroupParent), so it differs per host and
 	// per test run rather than being a stable value a golden can pin.
-	{regexp.MustCompile(`/docker/erun-build-cpu-cap-\S+`), "/docker/erun-build-cpu-cap-<POD>"},
+	{regexp.MustCompile(`/docker/erun-build-cpu-cap-[^\s"]+`), "/docker/erun-build-cpu-cap-<POD>"},
 	{regexp.MustCompile(`[ \t]+\n`), "\n"},
 }
 

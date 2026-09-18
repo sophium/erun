@@ -64,6 +64,12 @@ export interface UIRuntimeUsage {
   memory: UIRuntimeMemoryUsage;
   disk?: UIRuntimeDiskUsage[];
   warnings?: string[];
+  // build is the build cap cgroup's own reading — what a build actually
+  // consumes. cpu above is the runtime container's alone and reads near zero
+  // while a build saturates its cap. Absent when no build cgroup applies to
+  // this environment; present with available=false when one applies but could
+  // not be read, which is disclosed rather than rendered as a zero.
+  build?: UIRuntimeCPUUsage;
 }
 
 export interface UIRuntimeCPUUsage {
@@ -73,6 +79,9 @@ export interface UIRuntimeCPUUsage {
   quota?: string;
   utilizationPercent?: number;
   utilization?: string;
+  periods?: number;
+  throttledPeriods?: number;
+  throttled?: string;
 }
 
 // `unlimited` is a real, available reading (no ceiling declared), distinct

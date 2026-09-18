@@ -19,6 +19,9 @@
       "percentUsed": 44.899735520796746
     }
   ],
-  "excludesBuilds": true
+  "excludesBuilds": true,
+  "build": {
+    "unavailable": "the erun-dind sidecar has no build cgroup -- no build has run there under the cap, or its image predates it"
+  }
 }
 audit: erun usage --output json

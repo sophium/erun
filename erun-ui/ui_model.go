@@ -1167,6 +1167,13 @@ type uiRuntimeUsage struct {
 	Memory      uiRuntimeMemoryUsage `json:"memory"`
 	Disk        []uiRuntimeDiskUsage `json:"disk,omitempty"`
 	Warnings    []string             `json:"warnings,omitempty"`
+	// Build is the build cap cgroup's own CPU reading, which is what a build
+	// actually consumes: CPU above is the runtime container's alone, so it
+	// reads near zero while a build saturates its cap. Nil when no build cgroup
+	// applies to this environment at all (no erun-dind sidecar); present with
+	// Available false when one applies but could not be read, which the card
+	// discloses rather than rendering as a zero.
+	Build *uiRuntimeCPUUsage `json:"build,omitempty"`
 }
 
 // uiRuntimeCPUUsage carries Available=false with Unavailable set when the
@@ -1180,6 +1187,13 @@ type uiRuntimeCPUUsage struct {
 	Quota              string  `json:"quota,omitempty"`
 	UtilizationPercent float64 `json:"utilizationPercent,omitempty"`
 	Utilization        string  `json:"utilization,omitempty"`
+	// Periods/ThrottledPeriods/Throttled carry the cgroup's throttle
+	// accounting. A reading pinned at its quota and one merely busy at it are
+	// the same number without them, and this is the pair that says a build is
+	// being starved rather than working.
+	Periods          int64  `json:"periods,omitempty"`
+	ThrottledPeriods int64  `json:"throttledPeriods,omitempty"`
+	Throttled        string `json:"throttled,omitempty"`
 }
 
 // uiRuntimeMemoryUsage mirrors the reader's own fail-soft shape: Unlimited is

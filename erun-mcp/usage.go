@@ -39,7 +39,10 @@ type UsageOutput struct {
 // sidecar an image build actually runs in -- a separate cgroup, not a
 // descendant of this container's -- so `excludesBuilds` is true in the
 // output on every environment that carries one, naming the gap instead of
-// letting the reading imply the environment is idle.
+// letting the reading imply the environment is idle. The `build` field closes
+// that gap where it can be closed: the build cap cgroup's own utilisation and
+// throttled-period count, read from inside the pod, or an unavailable reason
+// when this process is not in the environment's pod at all.
 func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UsageInput) (*mcp.CallToolResult, UsageOutput, error) {
 		target, err := resolveUsageOpenResult(runtime, input)

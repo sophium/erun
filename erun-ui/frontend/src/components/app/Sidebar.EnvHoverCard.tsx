@@ -372,17 +372,16 @@ function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
 // from it, so it should recede rather than alarm (see the TYPE note in
 // Sidebar.HoverCardRow.tsx).
 //
-// The reading itself is scoped to the runtime container's own cgroup, which
-// is never where a build runs -- every image build executes in the erun-dind
-// sidecar instead, so this figure can read idle while that sidecar saturates
-// the node. Reading the sidecar's own cgroup would not fix it either: its
-// build containers run as cgroup siblings, not descendants, so nothing this
-// card could read would ever account for them, and the one place that view
-// is reachable is a host-wide path shared by every build-capable pod on the
-// node -- not attributable to this environment alone. Qualifying the reading
-// is the only honest option left, so `excludesBuilds` (environmentUsesDindSidecar
-// in Sidebar.helpers.ts) makes the caption say so on every build-capable
-// environment, not just the ones currently building.
+// The CPU figure is scoped to the runtime container's own cgroup, which is
+// never where a build runs -- every image build executes in the erun-dind
+// sidecar instead, so that figure alone reads idle while a build saturates its
+// cap. The card therefore renders the build cap cgroup's own reading beside it
+// when it is readable (the Build figure summarised by environmentUsageSummary),
+// and `excludesBuilds` (environmentUsesDindSidecar in Sidebar.helpers.ts) makes
+// the caption say so whenever it is not: a build-capable environment whose
+// build figure could not be read must never look like an idle one, and a
+// caption claiming the figures exclude builds would be false once the build's
+// own number is on the card.
 function UsageState({
   usage,
   excludesBuilds,
@@ -394,7 +393,7 @@ function UsageState({
   if (!summary.hasReading || !summary.headline) {
     return <Muted>{summary.detail}</Muted>;
   }
-  const scopeCaveat = excludesBuilds ? ' — excludes builds' : '';
+  const scopeCaveat = excludesBuilds && !usage?.usage.build?.available ? ' — excludes builds' : '';
   if (summary.stale) {
     return (
       <span className={HOVER_CARD_VALUE_STACK_CLASS}>

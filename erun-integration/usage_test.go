@@ -177,6 +177,58 @@ func TestUsage(t *testing.T) {
 		golden.Equal(t, "usage/real_run_local_agent_env_states_the_builds_caveat", normalize.Apply(result.Combined))
 	})
 
+	// real_run_build_saturated_env_reports_build_cpu is the defect this fix
+	// exists for: an environment pinned at its 4-core build cap by a running
+	// build used to report ~0.1% CPU on every surface, because the reading
+	// samples the runtime container's cgroup and the build runs in a sibling
+	// one under the erun-dind sidecar. The operator reading this command must
+	// see the build's own number -- saturated, and throttled -- rather than a
+	// near-idle environment. Both cgroups are stubbed: the runtime container
+	// genuinely is idle (its CPU is the modest figure the runtime line
+	// reports), and only the build cgroup read, which needs the pod's own
+	// identity to be reachable at all, shows the work.
+	t.Run("real_run_build_saturated_env_reports_build_cpu", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExecWithBuildCgroup(t, stubs, []string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=413589504",
+			"memory_max=2147483648",
+			"memory_peak=1027301376",
+			"memory_oom_kill=0",
+			"cpu_max=100000 100000",
+			"cpu_usage_before=581511501",
+			"cpu_usage_after=581611501",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			"cpu_periods=376556",
+			"cpu_throttled_periods=425",
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		}, []string{
+			// 400000/100000 is the 4-core cap dind-entrypoint.sh mirrors from
+			// the sidecar's own cpu.max; 4.0 CPU-seconds over the script's own
+			// 1s window is exactly that cap, throttled in every period.
+			"cgroup_type=cgroup2fs",
+			"cpu_max=400000 100000",
+			"cpu_usage_before=1000000",
+			"cpu_usage_after=5000000",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			"cpu_periods=200",
+			"cpu_throttled_periods=200",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Build CPU: 100.0% of a 4.00-core quota") {
+			t.Fatalf("a build pinned at its cap must report its own CPU, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "usage/real_run_build_saturated_env_reports_build_cpu", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_cgroup_v1_reports_unavailable_not_an_error", func(t *testing.T) {
 		// A cluster whose runtime image predates cgroup v2 (or any host where
 		// /sys/fs/cgroup is not cgroup2fs) must still succeed: CPU and memory
@@ -337,13 +389,38 @@ func TestUsage(t *testing.T) {
 // the script itself only runs for real inside a live cgroup v2 container,
 // which this harness does not have. Every other kubectl invocation exits 0
 // silently.
+//
+// The build-cgroup exec a build-capable environment also makes is answered
+// with "no such cgroup" rather than the same body: the two execs read different
+// cgroups, so answering both alike would parse the runtime container's counters
+// as the build's and put a fabricated build figure in these goldens. A scenario
+// that is about the build reading supplies its own via
+// stubUsageKubectlExecWithBuildCgroup.
 func stubUsageKubectlExec(t testing.TB, stubsDir string, lines []string) {
 	t.Helper()
-	body := make([]string, 0, len(lines)+4)
-	body = append(body, `case "$*" in`, `  *" exec "*)`)
-	for _, line := range lines {
-		body = append(body, `    printf '%s\n' '`+line+`'`)
+	stubUsageKubectlExecWithBuildCgroup(t, stubsDir, lines, []string{"build_cgroup_dir_missing=1"})
+}
+
+// stubUsageKubectlExecWithBuildCgroup answers both cgroups a build-capable
+// environment's usage reading asks for: the runtime container's, and the build
+// cap cgroup's, which is read through a separate exec into the erun-dind
+// sidecar. The two are distinguishable only by the container the exec names,
+// so the build branch has to match that first -- a stub that answered both
+// with the same body would silently hide the very read this scenario exists to
+// exercise.
+func stubUsageKubectlExecWithBuildCgroup(t testing.TB, stubsDir string, runtimeLines, buildLines []string) {
+	t.Helper()
+	quote := func(lines []string) []string {
+		out := make([]string, 0, len(lines))
+		for _, line := range lines {
+			out = append(out, `    printf '%s\n' '`+line+`'`)
+		}
+		return out
 	}
+	body := []string{`case "$*" in`, `  *" -c erun-dind "*)`}
+	body = append(body, quote(buildLines)...)
+	body = append(body, `    ;;`, `  *" exec "*)`)
+	body = append(body, quote(runtimeLines)...)
 	body = append(body, `    ;;`, `esac`, `exit 0`)
 	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", strings.Join(body, "\n"))
 }

@@ -108,6 +108,7 @@ func uiRuntimeUsageFromReading(reading eruncommon.RuntimeUsage) uiRuntimeUsage {
 		CPU:         uiRuntimeCPUUsageFromReading(reading.CPU),
 		Memory:      uiRuntimeMemoryUsageFromReading(reading.Memory),
 		Warnings:    reading.Warnings,
+		Build:       uiRuntimeBuildCPUUsageFromReading(reading.Build),
 	}
 	for _, disk := range reading.Disk {
 		usage.Disk = append(usage.Disk, uiRuntimeDiskUsageFromReading(disk))
@@ -120,13 +121,31 @@ func uiRuntimeCPUUsageFromReading(cpu eruncommon.RuntimeCPUUsage) uiRuntimeCPUUs
 	if cpu.Unavailable != "" {
 		return uiRuntimeCPUUsage{Unavailable: cpu.Unavailable}
 	}
-	return uiRuntimeCPUUsage{
+	result := uiRuntimeCPUUsage{
 		Available:          true,
 		QuotaCores:         cpu.QuotaCores,
 		Quota:              fmt.Sprintf("%.2f cores", cpu.QuotaCores),
 		UtilizationPercent: cpu.UtilizationPercent,
 		Utilization:        fmt.Sprintf("%.1f%%", cpu.UtilizationPercent),
 	}
+	if cpu.Periods > 0 {
+		result.Periods = cpu.Periods
+		result.ThrottledPeriods = cpu.ThrottledPeriods
+		result.Throttled = fmt.Sprintf("%d/%d periods", cpu.ThrottledPeriods, cpu.Periods)
+	}
+	return result
+}
+
+// uiRuntimeBuildCPUUsageFromReading maps the build cap cgroup's own reading.
+// A nil reading means the question does not apply here -- no erun-dind sidecar
+// -- and stays nil, so the card can tell "this environment does not build"
+// apart from "it builds and the figure is unavailable".
+func uiRuntimeBuildCPUUsageFromReading(build *eruncommon.RuntimeCPUUsage) *uiRuntimeCPUUsage {
+	if build == nil {
+		return nil
+	}
+	mapped := uiRuntimeCPUUsageFromReading(*build)
+	return &mapped
 }
 
 func uiRuntimeMemoryUsageFromReading(memory eruncommon.RuntimeMemoryUsage) uiRuntimeMemoryUsage {

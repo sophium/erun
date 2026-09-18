@@ -25,3 +25,24 @@ usage:
   printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
   printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
   printf 'disk_workspace=%s\n' "$(df -Pk <HOME> 2>/dev/null | tail -n1 || true)"
+kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
+build-usage:
+  set -eu
+  cg=/sys/fs/cgroup
+  cap="$cg/docker/erun-build-cpu-cap-<POD>"
+  [ -d "$cap" ] || printf 'build_cgroup_dir_missing=1\n'
+  dir="$cap"
+  grep -q '^usage_usec ' "$dir/cpu.stat" 2>/dev/null || dir="$cap/buildkit"
+  printf 'cgroup_type=%s\n' "$(stat -fc %T "$cg" 2>/dev/null || true)"
+  printf 'cpu_max=%s\n' "$(cat "$dir/cpu.max" 2>/dev/null || true)"
+  cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)
+  time_before=$(date +%s%N)
+  sleep 1
+  cpu_usage_after=$(awk '$1=="usage_usec"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)
+  time_after=$(date +%s%N)
+  printf 'cpu_usage_before=%s\n' "$cpu_usage_before"
+  printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
+  printf 'cpu_time_before_ns=%s\n' "$time_before"
+  printf 'cpu_time_after_ns=%s\n' "$time_after"
+  printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)"
+  printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' "$dir/cpu.stat" 2>/dev/null || true)"

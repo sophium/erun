@@ -91,6 +91,42 @@ func TestRuntimeUsageDiskUnavailableRendersAsStatedUnavailable(t *testing.T) {
 	}
 }
 
+// TestRuntimeUsageFromReadingCarriesTheBuildCgroup pins what the card shows
+// for a build-saturating environment: the build cap cgroup's own figure and
+// its throttling, mapped alongside the runtime container's near-idle CPU. A
+// nil build reading means the question does not apply here (no erun-dind
+// sidecar) and must stay absent, not become an unavailable one, so the card
+// can tell "this environment does not build" from "it builds and the number
+// is missing".
+func TestRuntimeUsageFromReadingCarriesTheBuildCgroup(t *testing.T) {
+	usage := uiRuntimeUsageFromReading(eruncommon.RuntimeUsage{
+		Tenant:      "petios",
+		Environment: "code2",
+		CPU:         eruncommon.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 0.2},
+		Memory:      eruncommon.RuntimeMemoryUsage{CurrentBytes: 1024, LimitBytes: 2048},
+		Build: &eruncommon.RuntimeCPUUsage{
+			QuotaCores:         4,
+			UtilizationPercent: 100,
+			Periods:            200,
+			ThrottledPeriods:   200,
+		},
+	})
+	if usage.Build == nil || !usage.Build.Available {
+		t.Fatalf("a readable build cgroup must render as an available figure, got %+v", usage.Build)
+	}
+	if usage.Build.Utilization != "100.0%" || usage.Build.Quota != "4.00 cores" {
+		t.Fatalf("the build figure must carry its own utilisation and quota, got %+v", usage.Build)
+	}
+	if usage.Build.Throttled != "200/200 periods" {
+		t.Fatalf("the throttled-period ratio is what separates a starved build from a busy one, got %q", usage.Build.Throttled)
+	}
+
+	withoutSidecar := uiRuntimeUsageFromReading(eruncommon.RuntimeUsage{Tenant: "petios", Environment: "prod"})
+	if withoutSidecar.Build != nil {
+		t.Fatalf("an environment with no build cgroup must not carry a build reading, got %+v", withoutSidecar.Build)
+	}
+}
+
 // TestRuntimeUsageFromReadingMixedAvailability covers a realistic reading
 // where CPU is unavailable but memory and disk are not, pinning that the
 // top-level mapping keeps each field's own unavailability independent rather

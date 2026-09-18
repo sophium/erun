@@ -24,6 +24,17 @@ interface UsageEvent {
     available: boolean;
     message?: string;
     cpu: { available: boolean; utilization?: string; quota?: string };
+    // The build cap cgroup's own reading, present only where an image build
+    // can run in the erun-dind sidecar. Absent means this environment does not
+    // build; present-and-unavailable means it does and the figure is missing.
+    build?: {
+      available: boolean;
+      unavailable?: string;
+      utilization?: string;
+      quota?: string;
+      periods?: number;
+      throttledPeriods?: number;
+    };
     memory: {
       available: boolean;
       unlimited?: boolean;
@@ -119,6 +130,65 @@ test.describe('environment usage on the hover cards', () => {
         'test-results/environment-usage-visual/env-hover-card-fresh.png',
       );
     });
+  });
+
+  test('a build saturating its cap is visible, not just the idle container CPU', async ({
+    app,
+    page,
+  }) => {
+    // The defect this pins: an image build runs in the erun-dind sidecar, so
+    // the runtime container's own CPU figure reads near zero while the build is
+    // pinned at its cap. A card showing only that figure tells an operator the
+    // environment is idle at the exact moment it is at its ceiling, and "is the
+    // build actually running?" is answerable from no surface at all.
+    test.setTimeout(60_000);
+    await app.reboot();
+
+    const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await driveEnvUsage(
+      page,
+      freshUsagePayload({
+        usage: {
+          tenant: SEED_TENANT,
+          environment: SEED_ENV_ALPHA,
+          available: true,
+          cpu: { available: true, utilization: '0.2%', quota: '4.00 cores' },
+          memory: {
+            available: true,
+            current: '512Mi',
+            limit: '2048Mi',
+            percentOfLimit: 25,
+            oomKills: 0,
+          },
+          build: {
+            available: true,
+            utilization: '100.0%',
+            quota: '4.00 cores',
+            periods: 200,
+            throttledPeriods: 200,
+          },
+        },
+      }),
+      async () => {
+        // Move off first: a retry that re-hovers a row the pointer never
+        // left is a no-op (no genuine mouseenter fires), so a popover that
+        // closed for any other reason would never reopen.
+        await page.mouse.move(0, 0);
+        await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+        await expect(dialog).toBeVisible({ timeout: 1_000 });
+        await expect(dialog).toContainText('Build 100.0% of 4.00 cores', { timeout: 1_000 });
+        // The throttled ratio is the difference between a build working at its
+        // cap and one being starved by it.
+        await expect(dialog).toContainText('throttled 200/200', { timeout: 1_000 });
+        // The caption must not still claim the figures exclude builds once the
+        // build's own figure is on the card.
+        await expect(dialog).not.toContainText('excludes builds', { timeout: 1_000 });
+        await captureHoverCard(
+          dialog,
+          'test-results/environment-usage-visual/env-hover-card-build-saturated.png',
+        );
+      },
+    );
   });
 
   test('a reading older than the sweep interval is marked stale, not shown as live', async ({

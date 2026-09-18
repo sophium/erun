@@ -1,0 +1,8 @@
+CPU: 10.0% of a 1.00-core quota (sampled over 1.0s)
+Memory: 394.4MiB / 2.0GiB (19.3%), peak 979.7MiB, OOM kills 0
+Note: CPU/Memory above are the runtime container's alone -- an image build runs in the erun-dind sidecar, so this container reads near zero while a build saturates it; `Build CPU` below is that build cgroup's own reading.
+Build CPU: 100.0% of a 4.00-core quota (sampled over 1.0s), throttled 200/200 periods
+Disk <HOME> 84.9GiB / 189.1GiB (44.9%)
+Warnings (1):
+  the build was throttled in 200 of 200 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment
+audit: erun usage

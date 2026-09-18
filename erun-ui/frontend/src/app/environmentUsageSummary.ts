@@ -1,4 +1,5 @@
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
+import type { UIRuntimeCPUUsage } from '@/uiRuntimeTypes';
 
 import { formatElapsed } from './activityQueueState';
 
@@ -75,7 +76,32 @@ function usageFigureParts(usage: UIEnvironmentUsageSnapshot['usage']): string[] 
         : `Mem ${percentLabel(usage.memory.percentOfLimit)} of ${usage.memory.limit ?? '—'}`,
     );
   }
+  const build = buildFigurePart(usage.build);
+  if (build) {
+    parts.push(build);
+  }
   return parts;
+}
+
+// buildFigurePart renders the build cap cgroup's own reading, because on a
+// build-capable environment it is the figure that moves: an image build runs in
+// the erun-dind sidecar, so a saturated build shows here at its cap while the
+// CPU figure beside it sits near zero. Without it an operator comparing
+// environments sees a busy builder as an idle one and adds work to it.
+function buildFigurePart(build: UIRuntimeCPUUsage | undefined): string {
+  if (!build?.available) {
+    return '';
+  }
+  return `Build ${build.utilization ?? '—'} of ${build.quota ?? '—'}${throttleLabel(build)}`;
+}
+
+// throttleLabel names starvation, which the percentage alone cannot: a build
+// pinned at its cap and one merely busy at it read the same utilization.
+function throttleLabel(cpu: UIRuntimeCPUUsage): string {
+  if (!cpu.periods || !cpu.throttledPeriods) {
+    return '';
+  }
+  return ` (throttled ${String(cpu.throttledPeriods)}/${String(cpu.periods)})`;
 }
 
 function percentLabel(value: number | undefined): string {

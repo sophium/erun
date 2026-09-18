@@ -27,6 +27,9 @@
     "memory.peak reached 98% of the limit (warns at 95%) -- this environment came close to an OOM kill",
     "the cgroup recorded 1 OOM kill(s)"
   ],
-  "excludesBuilds": true
+  "excludesBuilds": true,
+  "build": {
+    "unavailable": "the erun-dind sidecar has no build cgroup -- no build has run there under the cap, or its image predates it"
+  }
 }
 audit: erun usage --output json

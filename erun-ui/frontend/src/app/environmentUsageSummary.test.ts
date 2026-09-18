@@ -85,6 +85,79 @@ test('unlimited memory renders as a real reading, not a failure', () => {
   assert.equal(summary.headline, 'Mem 512Mi (no limit)');
 });
 
+// The defect these pin: a build saturating its cap runs in the erun-dind
+// sidecar, so the runtime container's CPU figure beside it reads near zero. A
+// headline without the build's own number tells an operator the environment is
+// idle at the exact moment it is at its ceiling -- and the answer to "is the
+// build running?" would be nowhere on the card.
+test('a saturated build cgroup renders its own figure beside the idle container CPU', () => {
+  const now = Date.now();
+  const summary = summarizeEnvironmentUsage(
+    {
+      usage: {
+        tenant: 't',
+        environment: 'e',
+        available: true,
+        cpu: { available: true, utilization: '0.2%' },
+        memory: { available: true, current: '512Mi', limit: '2048Mi', percentOfLimit: 25, oomKills: 0 },
+        build: {
+          available: true,
+          quota: '4.00 cores',
+          utilization: '100.0%',
+          periods: 200,
+          throttledPeriods: 200,
+        },
+      },
+      observedAtUnix: Math.floor(now / 1000),
+      staleAfterSeconds: 90,
+    },
+    now,
+  );
+  assert.equal(
+    summary.headline,
+    'CPU 0.2% · Mem 25% of 2048Mi · Build 100.0% of 4.00 cores (throttled 200/200)',
+  );
+});
+
+test('an unreadable build cgroup adds no figure rather than a zero', () => {
+  const now = Date.now();
+  const summary = summarizeEnvironmentUsage(
+    {
+      usage: {
+        tenant: 't',
+        environment: 'e',
+        available: true,
+        cpu: { available: true, utilization: '0.2%' },
+        memory: { available: false, oomKills: 0 },
+        build: { available: false, unavailable: 'the erun-dind sidecar has no build cgroup' },
+      },
+      observedAtUnix: Math.floor(now / 1000),
+      staleAfterSeconds: 90,
+    },
+    now,
+  );
+  assert.equal(summary.headline, 'CPU 0.2%');
+});
+
+test('an environment with no build cgroup at all renders as before', () => {
+  const now = Date.now();
+  const summary = summarizeEnvironmentUsage(
+    {
+      usage: {
+        tenant: 't',
+        environment: 'e',
+        available: true,
+        cpu: { available: true, utilization: '0.2%' },
+        memory: { available: false, oomKills: 0 },
+      },
+      observedAtUnix: Math.floor(now / 1000),
+      staleAfterSeconds: 90,
+    },
+    now,
+  );
+  assert.equal(summary.headline, 'CPU 0.2%');
+});
+
 test('a reading older than staleAfterSeconds is flagged stale', () => {
   const now = Date.now();
   const summary = summarizeEnvironmentUsage(

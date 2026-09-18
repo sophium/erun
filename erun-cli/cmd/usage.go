@@ -31,8 +31,12 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"On a build-capable environment (local-agent, remote-agent), CPU and memory\n" +
 			"are scoped to this container alone: every image build actually runs in the\n" +
 			"erun-dind sidecar, a separate cgroup this reading cannot see, so a busy build\n" +
-			"can show as idle here. The output states this exclusion explicitly on those\n" +
-			"environments; `erun observe` reports the sidecar's own resource limits.",
+			"can show as idle here. Those environments also report Build CPU, sampled from\n" +
+			"the build's own cgroup over its own interval and labelled with the periods it\n" +
+			"was throttled in, so a build pinned at its cap is visible instead of looking\n" +
+			"like an idle environment. Where that cgroup cannot be read -- a host-side\n" +
+			"read of a remote environment, or an image without one -- Build CPU says so\n" +
+			"rather than leaving the near-zero CPU line above to speak for the build.",
 		Example: "  erun usage --tenant team --environment dev\n" +
 			"  erun usage --tenant team --environment dev --interval 3 --output json",
 		Args:          cobra.NoArgs,
