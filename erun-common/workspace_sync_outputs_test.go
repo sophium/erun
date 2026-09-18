@@ -2,7 +2,6 @@ package eruncommon
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,22 +114,20 @@ func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testi
 
 // TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode is a regression
 // test: delivery used to run the writable->extract->sign->read-only cycle
-// unconditionally for every remote
-// artifact on every pass, so an artifact whose content had not changed at all
-// still passed through the 0644 window `makeArtifactsWritable` applies before
-// re-extraction restores it -- on the majority of passes, per the issue's own
-// sampling, since delivery ran every couple of seconds. An operator invoking
-// the artifact directly from a shell during that window saw "permission
-// denied" on an otherwise-correct binary.
+// unconditionally for every remote artifact on every pass, so an artifact whose
+// content had not changed at all still passed through the 0644 window
+// `makeArtifactsWritable` applies before re-extraction restores it -- on the
+// majority of passes, per the issue's own sampling, since delivery ran every
+// couple of seconds. An operator invoking the artifact directly from a shell
+// during that window saw "permission denied" on an otherwise-correct binary.
 //
-// This locks the fix: when the remote fingerprint (size + mtime) matches what
-// is already in the mirror, the artifact is never made writable, never
-// re-extracted, and never re-marked read-only -- its mode is untouched start to
-// finish. Deliberately configuring no tar archive stub proves this: on the old,
-// unconditional code this test fails, because the pass still tries to
-// re-fetch the "unchanged" artifact and the tar stub has nothing to serve.
+// This locks the fix: when the pod's content hash matches what is already in the
+// mirror the artifact is never made writable, never re-extracted and never
+// re-marked read-only -- its mode is untouched start to finish, executable bit
+// included. The fetch marker proves nothing was streamed, and the 0o555 mode
+// below is what the artifact must still carry afterwards.
 func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) {
-	stubWorkspaceSyncSSH(t, nil, nil)
+	stubWorkspaceSyncSSHForOutputs(t)
 
 	artifactsLocal := t.TempDir()
 	artifact := filepath.Join(artifactsLocal, "erun-darwin-arm64")
@@ -142,20 +139,22 @@ func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) 
 	if err := os.Chmod(artifact, 0o555); err != nil {
 		t.Fatalf("chmod artifact read-only+executable: %v", err)
 	}
-	info, err := os.Stat(artifact)
-	if err != nil {
-		t.Fatalf("stat seeded artifact: %v", err)
-	}
 
+	// The pod still lists the artifact, and its bytes are the mirror's bytes, so
+	// this pass has no content of its own to transfer.
 	t.Setenv(workspaceSyncStubOutputsEnv, "erun-darwin-arm64")
-	t.Setenv(workspaceSyncStubStatEnv, fmt.Sprintf("%d %d erun-darwin-arm64\n", info.Size(), info.ModTime().Unix()))
-	// Deliberately no workspaceSyncStubArchiveEnv: an unchanged artifact must
-	// never be re-fetched, so nothing here ever asks the tar stub for bytes.
+	archive := writeWorkspaceSyncArchive(t, map[string][]byte{"erun-darwin-arm64": []byte("already built")})
+	t.Setenv(workspaceSyncStubArchiveEnv, archive)
+	marker := filepath.Join(t.TempDir(), "fetched")
+	t.Setenv(workspaceSyncStubFetchMarkerEnv, marker)
 
 	copied, _, err := syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
 	requireWorkspaceSyncNoError(t, err, "sync outputs artifacts for an unchanged artifact")
-	if copied != 1 {
-		t.Fatalf("expected 1 artifact reported present, got %d", copied)
+	if copied != 0 {
+		t.Fatalf("unchanged artifact transferred something: copied = %d, want 0", copied)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("unchanged artifact's bytes were streamed again")
 	}
 
 	after, err := os.Stat(artifact)
@@ -164,6 +163,57 @@ func TestSyncOutputsArtifactsNeverTouchesAnUnchangedArtifactsMode(t *testing.T) 
 	}
 	if after.Mode().Perm() != 0o555 {
 		t.Fatalf("unchanged artifact's mode was touched: got %v, want 0o555 (executable never dropped)", after.Mode().Perm())
+	}
+}
+
+// TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass is erun#2387: the
+// outputs lane re-staged its whole set on every pass, byte for byte, even when
+// nothing had changed. workspaceSyncStubFetchMarkerEnv marks the moment the
+// pod's archive is actually streamed (the real ssh/tar transfer), so this test
+// proves the transfer itself is skipped for unchanged content -- not just that
+// the reported count looks right -- and that a genuine content change still
+// triggers a real transfer.
+func TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass(t *testing.T) {
+	stubWorkspaceSyncSSHForOutputs(t)
+	t.Setenv(workspaceSyncStubOutputsEnv, "bin/tool")
+	marker := filepath.Join(t.TempDir(), "fetched")
+	t.Setenv(workspaceSyncStubFetchMarkerEnv, marker)
+
+	artifactsLocal := t.TempDir()
+	archive := writeWorkspaceSyncArchive(t, map[string][]byte{"bin/tool": []byte("build output v1")})
+	t.Setenv(workspaceSyncStubArchiveEnv, archive)
+
+	copied, _, err := syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
+	requireWorkspaceSyncNoError(t, err, "first sync pass")
+	if copied != 1 {
+		t.Fatalf("first pass: copied = %d, want 1 (nothing mirrored yet)", copied)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("first pass should have transferred the file: %v", statErr)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("clear transfer marker: %v", err)
+	}
+
+	copied, _, err = syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
+	requireWorkspaceSyncNoError(t, err, "second sync pass")
+	if copied != 0 {
+		t.Fatalf("second pass: copied = %d, want 0 for unchanged content", copied)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("second pass re-transferred unchanged content instead of skipping it")
+	}
+
+	changedArchive := writeWorkspaceSyncArchive(t, map[string][]byte{"bin/tool": []byte("build output v2, genuinely different")})
+	t.Setenv(workspaceSyncStubArchiveEnv, changedArchive)
+
+	copied, _, err = syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
+	requireWorkspaceSyncNoError(t, err, "third sync pass")
+	if copied != 1 {
+		t.Fatalf("third pass: copied = %d, want 1 for genuinely changed content", copied)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("third pass should have transferred the genuinely changed content: %v", statErr)
 	}
 }
 

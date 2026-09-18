@@ -94,11 +94,15 @@ try {
     # package declares is dropped in silence, so the wrong prefix stamps nothing
     # and leaves the binary looking correctly built.
     $skillsSource = Join-Path $RepoRoot "erun-skills\skills"
+    # Same reasoning as $skillsSource above, for the reusable agent definitions
+    # (erun-builder/erun-reviewer) the desktop installs into ~/.claude/agents.
+    $agentsSource = Join-Path $RepoRoot "erun-skills\agents"
     $ldflags = "-s -w -H windowsgui " +
                "-X main.buildVersion=$buildVersion " +
                "-X main.buildCommit=$buildCommit " +
                "-X main.buildDate=$buildDate " +
-               "-X 'main.buildSkillsSource=$skillsSource'"
+               "-X 'main.buildSkillsSource=$skillsSource' " +
+               "-X 'main.buildAgentsSource=$agentsSource'"
     go build -trimpath -tags "desktop,production" -ldflags $ldflags -o $Target .
     if ($LASTEXITCODE -ne 0) { throw "failed to build erun-app.exe" }
 } finally { Pop-Location }

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -24,7 +23,8 @@ import (
 const DefaultRuntimeOutputsDir = "/home/erun/.erun/outputs"
 
 // MaxRuntimeOutputBytes caps a single download: the whole payload is buffered in
-// memory, so an unbounded download could exhaust it.
+// memory, so an unbounded download could exhaust it. It is not what bounds one
+// transfer over the wire — see runtimeOutputChunkBytes for that.
 const MaxRuntimeOutputBytes = 100 * 1024 * 1024
 
 const outputDownloadArchiveFormat = "tar.gz"
@@ -162,51 +162,6 @@ func ResolveRuntimeOutputs(ctx Context, req ShellLaunchParams, params RuntimeOut
 	return result, nil
 }
 
-// DownloadRuntimeOutput fetches one entry from the env's runtime pod as bytes;
-// a directory arrives as a gzip tarball (IsArchive=true). Dry-run returns a
-// preview result with no bytes and no transfer.
-func DownloadRuntimeOutput(ctx Context, req ShellLaunchParams, params RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
-	dir, err := resolveOutputsDir(params.Dir)
-	if err != nil {
-		return RuntimeOutputResult{}, err
-	}
-	name, err := sanitizeOutputEntryName(params.Name)
-	if err != nil {
-		return RuntimeOutputResult{}, err
-	}
-	if run == nil {
-		run = RunRemoteCommand
-	}
-	target := path.Join(dir, name)
-	ctx.Trace("outputs: downloading " + target)
-	script := runtimeOutputDownloadScript(dir, name)
-	if traced := traceRuntimeOutputsScript(ctx, req, "outputs download script", script); traced {
-		return RuntimeOutputResult{Name: name}, nil
-	}
-	out, err := run(req, script)
-	if err != nil {
-		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q%s: %w", name, formatRemoteCommandStderr(out.Stderr), err)
-	}
-	return parseRuntimeOutputDownload(name, out.Stdout)
-}
-
-// parseRuntimeOutputDownload decodes the download script's response: a type-marker
-// line ("dir"/"file") followed by the base64 payload.
-func parseRuntimeOutputDownload(name, stdout string) (RuntimeOutputResult, error) {
-	kind, encoded, ok := strings.Cut(strings.TrimSpace(stdout), "\n")
-	if !ok && kind == "" {
-		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q: empty response", name)
-	}
-	data, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(encoded), ""))
-	if err != nil {
-		return RuntimeOutputResult{}, fmt.Errorf("decode runtime output %q: %w", name, err)
-	}
-	if len(data) > MaxRuntimeOutputBytes {
-		return RuntimeOutputResult{}, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, len(data), MaxRuntimeOutputBytes)
-	}
-	return newRuntimeOutputResult(name, strings.TrimSpace(kind) == "dir", data), nil
-}
-
 func newRuntimeOutputResult(name string, isDir bool, data []byte) RuntimeOutputResult {
 	sum := sha256.Sum256(data)
 	result := RuntimeOutputResult{
@@ -240,31 +195,6 @@ func traceRuntimeOutputsScript(ctx Context, req ShellLaunchParams, label, script
 func runtimeOutputsListScript(dir string) string {
 	quoted := shellQuote(dir)
 	return fmt.Sprintf("if [ -d %s ]; then find %s -mindepth 1 -maxdepth 1 -printf '%%y\\t%%s\\t%%T@\\t%%f\\n'; fi", quoted, quoted)
-}
-
-// runtimeOutputDownloadScript streams one entry: a directory as a gzip tarball,
-// a file raw, each base64-encoded after a single type-marker line. /dev, /proc,
-// and /sys are excluded defensively from the archive.
-func runtimeOutputDownloadScript(dir, name string) string {
-	quotedDir := shellQuote(dir)
-	quotedName := shellQuote(name)
-	target := shellQuote(path.Join(dir, name))
-	limit := strconv.Itoa(MaxRuntimeOutputBytes)
-	return strings.Join([]string{
-		"target=" + target,
-		"if [ -d \"$target\" ]; then",
-		"  printf 'dir\\n'",
-		"  tar czf - --exclude=/dev --exclude=/proc --exclude=/sys -C " + quotedDir + " " + quotedName + " | base64",
-		"elif [ -f \"$target\" ]; then",
-		"  size=$(stat -c %s \"$target\" 2>/dev/null || echo 0)",
-		"  if [ \"$size\" -gt " + limit + " ]; then echo \"erun-outputs: file exceeds size limit\" >&2; exit 4; fi",
-		"  printf 'file\\n'",
-		"  base64 \"$target\"",
-		"else",
-		"  echo \"erun-outputs: not found: $target\" >&2",
-		"  exit 3",
-		"fi",
-	}, "\n")
 }
 
 // parseRuntimeOutputsListing skips malformed lines rather than failing the whole

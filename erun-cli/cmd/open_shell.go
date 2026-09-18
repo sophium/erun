@@ -13,7 +13,7 @@ import (
 
 type OpenShellRunner func(common.Context, common.ShellLaunchParams) error
 
-const desktopAppSessionEnvVar = "ERUN_UI_SESSION"
+const desktopAppSessionEnvVar = common.DesktopSessionEnvVar
 
 func newOpenShellRunner(waitForShellDeployment func(common.ShellLaunchParams) error, execShell common.ShellLauncherFunc) OpenShellRunner {
 	if waitForShellDeployment == nil {
