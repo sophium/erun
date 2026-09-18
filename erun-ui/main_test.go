@@ -167,3 +167,41 @@ func TestUnknownFlagFailsExitsNonZeroAndHasNoSideEffects(t *testing.T) {
 	}
 	assertNoSideEffects(t, home)
 }
+
+// Help must short-circuit main wherever the flag sits, not only as the sole
+// argument: the binary is launched with its flags in any order, and a help
+// probe that slips past the check starts a whole desktop.
+func TestParseHeadlessFlagsRecognizesHelpInAnyPosition(t *testing.T) {
+	for _, args := range [][]string{
+		{"--help"},
+		{"-h"},
+		{"-help"},
+		{"--port", "34123", "--help"},
+		{"--headless", "-h"},
+	} {
+		if result := parseHeadlessFlags(args); !result.Help {
+			t.Errorf("parseHeadlessFlags(%v): Help = false, want true", args)
+		}
+	}
+	for _, args := range [][]string{
+		{},
+		{"--headless"},
+		{"--headless", "--port", "34123"},
+		{"--port=34123"},
+		{"help"},
+	} {
+		if result := parseHeadlessFlags(args); result.Help {
+			t.Errorf("parseHeadlessFlags(%v): Help = true, want false", args)
+		}
+	}
+}
+
+// cliUsage is the only thing the binary prints for a help probe, so a flag it
+// does not name is a flag an operator cannot discover.
+func TestCLIUsageDocumentsTheRealFlags(t *testing.T) {
+	for _, want := range []string{"--headless", "--port", "--help"} {
+		if !strings.Contains(cliUsage, want) {
+			t.Errorf("usage does not document %s:\n%s", want, cliUsage)
+		}
+	}
+}

@@ -55,7 +55,7 @@ func guardInPodLocalAgentRuntimeDeploy(env func(string) string, resolvedTarget O
 		return nil
 	}
 	return fmt.Errorf("deploy %s/%s: refusing to deploy the runtime chart from inside this environment's own pod — %s/%s is a local-agent environment, whose ports, worktree host path, runtime resources, and chart registry are defined by the host config store, not by the in-pod projection this process reads. Run `erun deploy --tenant %s --environment %s --version %s` from the host CLI instead",
-		podTenant, podEnvironment, podTenant, podEnvironment, podTenant, podEnvironment, inPodGuardVersionHint(spec))
+		podTenant, podEnvironment, podTenant, podEnvironment, podTenant, podEnvironment, inPodGuardVersionHint(spec.Deploy.Version))
 }
 
 func firstRuntimeChartSpec(specs []DeploySpec) (DeploySpec, bool) {
@@ -67,8 +67,8 @@ func firstRuntimeChartSpec(specs []DeploySpec) (DeploySpec, bool) {
 	return DeploySpec{}, false
 }
 
-func inPodGuardVersionHint(spec DeploySpec) string {
-	if version := strings.TrimSpace(spec.Deploy.Version); version != "" {
+func inPodGuardVersionHint(version string) string {
+	if version = strings.TrimSpace(version); version != "" {
 		return version
 	}
 	return "<version>"

@@ -90,7 +90,7 @@ func newAppRestartCmd() *cobra.Command {
 func runAppRestartCommand(ctx eruncommon.Context, orchestratorID string) error {
 	id := strings.TrimSpace(orchestratorID)
 	if id == "" {
-		id = strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID"))
+		id = strings.TrimSpace(os.Getenv(eruncommon.OrchestratorIDEnvVar))
 	}
 	ctx.Trace(fmt.Sprintf("app restart: orchestrator=%q", id))
 	markerPath := eruncommon.DefaultDesktopControlMarkerPath()

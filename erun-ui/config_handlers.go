@@ -35,6 +35,11 @@ func (a *App) SaveERunConfig(config uiERunConfig) (uiERunConfig, error) {
 	// user manages elsewhere. Only DefaultTenant is editable here.
 	updated := existing
 	updated.DefaultTenant = strings.TrimSpace(config.DefaultTenant)
+	// Only replace the catalog when the dialog sent one, so a caller that does
+	// not edit it cannot silently drop the operator's gateway configuration.
+	if config.OpenRouter != nil {
+		updated.OpenRouter = openRouterConfigFromUI(config.OpenRouter)
+	}
 	if err := a.deps.store.SaveERunConfig(updated); err != nil {
 		return uiERunConfig{}, err
 	}
@@ -275,7 +280,56 @@ func (a *App) erunConfigToUI(config eruncommon.ERunConfig) uiERunConfig {
 		DefaultTenant:  strings.TrimSpace(config.DefaultTenant),
 		CloudProviders: cloudProviderStatusesToUI(a.statusesForCloudProviders(config.CloudProviders)),
 		CloudContexts:  cloudContextStatusesToUI(statusesForCloudContexts(config.CloudContexts)),
+		OpenRouter:     openRouterConfigToUI(config.OpenRouter),
+		// Best-effort: a machine with no user settings file has no gateway to
+		// offer, and an unreadable one must not stop the settings dialog opening.
+		OpenRouterDefaults: a.hostGatewayDefaults(),
 	}
+}
+
+// hostGatewayDefaults reports this machine's own Claude Code gateway, or nil
+// when there is none to offer. The read is best-effort by design: it supplies a
+// pre-fill, and a pre-fill that cannot be read is the unconfigured case.
+func (a *App) hostGatewayDefaults() *uiHostGatewayDefaults {
+	defaults, err := a.LoadHostGatewayDefaults()
+	if err != nil || defaults.BaseURL == "" {
+		return nil
+	}
+	return &defaults
+}
+
+func openRouterConfigToUI(config *eruncommon.OpenRouterConfig) *uiOpenRouterConfig {
+	if config == nil {
+		return nil
+	}
+	out := &uiOpenRouterConfig{
+		BaseURL:      strings.TrimSpace(config.BaseURL),
+		AuthTokenRef: strings.TrimSpace(config.AuthTokenRef),
+		DefaultModel: strings.TrimSpace(config.DefaultModel),
+	}
+	for _, m := range config.Models {
+		out.Models = append(out.Models, uiOpenRouterModel{ID: strings.TrimSpace(m.ID), Context: m.Context})
+	}
+	return out
+}
+
+func openRouterConfigFromUI(config *uiOpenRouterConfig) *eruncommon.OpenRouterConfig {
+	if config == nil {
+		return nil
+	}
+	out := &eruncommon.OpenRouterConfig{
+		BaseURL:      strings.TrimSpace(config.BaseURL),
+		AuthTokenRef: strings.TrimSpace(config.AuthTokenRef),
+		DefaultModel: strings.TrimSpace(config.DefaultModel),
+	}
+	for _, m := range config.Models {
+		id := strings.TrimSpace(m.ID)
+		if id == "" {
+			continue
+		}
+		out.Models = append(out.Models, eruncommon.OpenRouterModel{ID: id, Context: m.Context})
+	}
+	return out
 }
 
 func (a *App) tenantConfigToUI(config eruncommon.TenantConfig, fallbackName string) uiTenantConfig {

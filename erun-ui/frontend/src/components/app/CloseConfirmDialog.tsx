@@ -7,12 +7,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from 'erun-kit';
-import { AlertTriangle, LoaderCircle } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { cancelCloseGate, confirmCloseGate } from '@/app/windowCloseThunks';
 import { activityTargetLabel } from '@/components/app/ActivityQueueDrawer.helpers';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 // Shown when the operator tries to close the window while a build, deploy, or
 // release is still running. Closing used to SIGKILL every one of these with
@@ -54,13 +55,9 @@ export function CloseConfirmDialog(): React.ReactElement {
           ))}
         </ul>
         {gate.error && (
-          <div
-            role="alert"
-            className="rounded-[var(--radius)] border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-[13px] leading-[1.4] text-destructive"
-          >
-            <AlertTriangle className="mr-1.5 inline size-3.5" aria-hidden="true" />
+          <InlineAlert>
             Could not record the interrupted work: {gate.error}. Closing anyway.
-          </div>
+          </InlineAlert>
         )}
         <DialogFooter className="gap-2 sm:gap-2">
           <Button

@@ -5,4 +5,5 @@ playwright-report/
 .cache-mcp-operate-scope/
 .cache-mcp-attach-session/
 .cache-rest-surfaces/
+.cache-landing-layout/
 .e2e-oidc.env

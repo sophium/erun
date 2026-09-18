@@ -40,6 +40,15 @@ func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 	if kind == "" || tenant == "" || environment == "" {
 		return "", fmt.Errorf("kind, tenant and environment are required")
 	}
+	for _, segment := range []struct{ kind, value string }{
+		{"port-forward kind", kind},
+		{"tenant", tenant},
+		{"environment", environment},
+	} {
+		if err := validateStatePathSegment(segment.kind, segment.value); err != nil {
+			return "", err
+		}
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err

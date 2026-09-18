@@ -30,7 +30,8 @@ func newOrchestratorSetRoleCmd(store common.OrchestratorRoleStore) *cobra.Comman
 			"pushed branches, runs the gates, and cuts releases; the runtime role means the " +
 			"orchestrator operates the environment directly -- deploy, pin, observe -- with no " +
 			"worktree to review and no in-pod agent to delegate to, which is the only role -- " +
-			"including undeclared -- a runtime-type environment may take. Pass \"" + common.OrchestratorEnvRoleNone +
+			"including undeclared -- a runtime-type environment may take; a host environment " +
+			"takes any role except that one, having no pod for those to act on. Pass \"" + common.OrchestratorEnvRoleNone +
 			"\" to declare it undeclared again; refused for a runtime-type environment, the same " +
 			"way code or build is. The role is re-checked against the linked environment's type " +
 			"every time, so this refuses the same pairings the desktop's link dialog would. The " +
