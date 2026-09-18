@@ -54,7 +54,7 @@ test.describe('app-notification message centre', () => {
     await page.clock.fastForward(5_000);
     await expect(icon).toBeVisible();
 
-    await icon.click();
+    await app.titlebar.openMessageCenter('error');
     await expect(app.titlebar.messageCenterRow(message)).toBeVisible();
   });
 
@@ -77,7 +77,7 @@ test.describe('app-notification message centre', () => {
     await page.clock.fastForward(5_000);
     await expect(icon).toBeVisible();
 
-    await icon.click();
+    await app.titlebar.openMessageCenter('warning');
     const row = app.titlebar.messageCenterRow(message);
     await expect(row).toBeVisible();
     await expect(row.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
@@ -108,7 +108,7 @@ test.describe('app-notification message centre', () => {
     await page.clock.fastForward(5_000);
     await expect(icon).toBeVisible();
 
-    await icon.click();
+    await app.titlebar.openMessageCenter('warning');
     // The dialog carries the full sentence untruncated -- the message centre
     // retires the pill's LONG_STATUS_THRESHOLD escalation for
     // notification-channel messages entirely, so there is no separate
@@ -149,7 +149,7 @@ test.describe('app-notification message centre', () => {
 
     const icon = app.titlebar.messageCenterIcon('error');
     await expect(icon).toHaveAccessibleName('Error: 5 unread');
-    await icon.click();
+    await app.titlebar.openMessageCenter('error');
 
     for (const message of messages) {
       await expect(app.titlebar.messageCenterRow(message)).toBeVisible();

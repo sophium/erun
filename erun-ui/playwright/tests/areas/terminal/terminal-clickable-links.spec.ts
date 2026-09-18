@@ -150,8 +150,8 @@ test.describe('clickable terminal links (#1354)', () => {
   // "just os.Stat the path" implementation would happily open it.
   test('an in-pod path never opens the same-named host file', async ({ app, page, seededEnv }) => {
     await app.sidebar.openEnvironment(SEED_TENANT, seededEnv.environment);
-    const erunTab = page.getByRole('tab', { name: 'ERun', exact: true });
-    await erunTab.waitFor({ state: 'visible', timeout: 15_000 });
+    const erunTab = app.tabStrip.tab('ERun');
+    await app.tabStrip.waitForTab('ERun');
     await erunTab.click();
     const sessionId = await app.terminalPane.selectedSessionId();
     expect(sessionId).toBeGreaterThan(0);

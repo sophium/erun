@@ -20,8 +20,10 @@ test.describe('terminal tab strip', () => {
 
     // Local spawns eagerly ahead of the slower ERun open, so it reliably
     // appears for any env where the auto-start gate did not pop a prompt.
-    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
-    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
+    // Converge on it through the strip's own wait (no cap of its own) rather
+    // than a 15s one, which is below this test's 30s budget.
+    const localTab = app.tabStrip.tab('Local');
+    await app.tabStrip.waitForTab('Local');
     await localTab.click();
 
     await expect(page.getByText(/Reopening Local shell/i)).toBeHidden();

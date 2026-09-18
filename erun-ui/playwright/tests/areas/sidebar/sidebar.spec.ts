@@ -5,10 +5,16 @@ test.describe('sidebar', () => {
   test('tenant toggle flips aria-expanded', async ({ app }) => {
     const before = await app.sidebar.isTenantExpanded(SEED_TENANT);
     await app.sidebar.toggleTenant(SEED_TENANT);
-    const after = await app.sidebar.isTenantExpanded(SEED_TENANT);
-    expect(after).toBe(!before);
-    // Restore state so subsequent assertions in the suite don't drift.
+    // isTenantExpanded is a bare attribute read, not an auto-retrying
+    // assertion, so it must not run right after the click: the toggle's
+    // re-render is a separate step under React, and a read that lands before
+    // it lands would report the pre-click value under contention.
+    await expect.poll(() => app.sidebar.isTenantExpanded(SEED_TENANT)).toBe(!before);
+    // Restore state so subsequent assertions in the suite don't drift --
+    // converge on the restore too, so a slow one can't leak into the next
+    // test in this worker.
     await app.sidebar.toggleTenant(SEED_TENANT);
+    await expect.poll(() => app.sidebar.isTenantExpanded(SEED_TENANT)).toBe(before);
   });
 
   // The tenant row's only prior affordance was the folder-group header
