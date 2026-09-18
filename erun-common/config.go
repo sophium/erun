@@ -1040,7 +1040,7 @@ func SaveERunConfig(config ERunConfig) error {
 	// Idempotent across repeated saves within one local day.
 	_ = writeRootConfigBackupIfDue(configFilePath, timeNow)
 
-	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, configFilePerm); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -1088,7 +1088,7 @@ func SaveTenantConfig(config TenantConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, configFilePerm); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -1205,7 +1205,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 	// backup dir is unwritable would be worse.
 	_ = writeEnvConfigBackupIfDue(configFilePath, timeNow)
 
-	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
+	if err := WriteFileAtomic(configFilePath, data, configFilePerm); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -1306,6 +1306,8 @@ func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
+	// Project config is the repository .erun/config.yaml: often tracked and
+	// shared, and carrying no credential, it keeps the ordinary 0644 mode.
 	if err := WriteFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -1371,6 +1373,12 @@ func projectConfigPath(projectRoot string) (string, error) {
 	}
 	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
 }
+
+// configFilePerm is the mode for every file under the user config root: the root,
+// tenant and per-environment config.yaml and their dated backups. Those files hold
+// cluster admin tokens, and a file mode travels with the file into backups, tarballs
+// and support bundles, so it must not rely on the containing directory being 0700.
+const configFilePerm os.FileMode = 0o600
 
 // WriteFileAtomic writes via a sibling temp file, fsync, then rename so a crash
 // or kill mid-write leaves either the previous contents or no change at all —
