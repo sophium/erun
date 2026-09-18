@@ -191,10 +191,28 @@ COPY erun-kit /src/erun-kit
 COPY erun-console /src/erun-console
 COPY Formula /src/Formula
 COPY bucket /src/bucket
-# helm-chart-tests renders every erun-devops/k8s chart with `helm template`;
-# only the charts and their *_test.sh scripts are needed, not the rest of
-# erun-devops (docker/, terraform-erun/, etc.).
+# helm-chart-tests renders every erun-devops/k8s chart with `helm template`.
+# The charts and their *_test.sh scripts are the bulk of what is needed here --
+# not the rest of erun-devops (terraform-erun/, most of docker/) -- but see the
+# VERSION pins immediately below: the k8s tests are NOT render-only.
 COPY erun-devops/k8s /src/erun-devops/k8s
+# image-version_test.sh (under k8s/) compares each chart's image default against
+# the `docker/<image>/VERSION` pin the build publishes, so those pins must be
+# present even though nothing in this stage builds those images. It reads them
+# through a helper that treats a missing file as "the repo ships no such image"
+# and then SKIPS that image, so an omitted pin does not fail loudly -- it
+# quietly narrows the test's coverage until the `checked > 0` guard trips. All
+# seven are copied, not just erun-dind, because the templates pin postgres and
+# powerdns by literal and those are exactly the pairs the second half checks.
+# Missing pins fail the gate here while a full checkout passes: the inverse of
+# the usual in-build drift, and the reason this list must track the pins.
+COPY erun-devops/docker/erun-dind/VERSION /src/erun-devops/docker/erun-dind/VERSION
+COPY erun-devops/docker/erun-backend-postgres/VERSION /src/erun-devops/docker/erun-backend-postgres/VERSION
+COPY erun-devops/docker/erun-powerdns/VERSION /src/erun-devops/docker/erun-powerdns/VERSION
+COPY erun-devops/docker/erun-oci-registry/VERSION /src/erun-devops/docker/erun-oci-registry/VERSION
+COPY erun-devops/docker/erun-ubuntu/VERSION /src/erun-devops/docker/erun-ubuntu/VERSION
+COPY erun-devops/docker/erun-zitadel/VERSION /src/erun-devops/docker/erun-zitadel/VERSION
+COPY erun-devops/docker/erun-zitadel-login/VERSION /src/erun-devops/docker/erun-zitadel-login/VERSION
 # erun-backend-db-chart_test.sh cross-checks the data-retention doc's claimed
 # default and chart-value keys (retention.enabled, retention.dryRun) against
 # what this chart actually renders; only the one page is needed.
