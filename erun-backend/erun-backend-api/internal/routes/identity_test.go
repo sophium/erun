@@ -206,8 +206,8 @@ func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 	}
 }
 
-// TestListUsersReportsErunUsernameAlongsideIdPUsername locks erun#2050's
-// backend half: an enrolled row's own erun username travels alongside the
+// TestListUsersReportsErunUsernameAlongsideIdPUsername locks the backend
+// half: an enrolled row's own erun username travels alongside the
 // IdP's own username field rather than being merged away, so a client can
 // render both when they diverge instead of rendering only the IdP one under
 // a caller who is used to seeing their erun username everywhere else

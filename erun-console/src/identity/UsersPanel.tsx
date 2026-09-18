@@ -280,11 +280,11 @@ function MembershipBadge({ user }: { user: IdentityUser }): React.ReactElement {
 // header (whoami's own `username`) -- is the primary label whenever the row
 // is enrolled, with the IdP's own username shown as a secondary line only
 // when the two actually diverge: rendering just one name is the defect
-// erun#2050 reports, since an operator seeing a different name here than in
+// that was reported, since an operator seeing a different name here than in
 // the header cannot tell it is their own row. The OIDC subject (`user.id`)
 // is always shown too, in small monospace text -- the one stable value that
 // actually joins the erun and IdP directories, and previously nowhere an
-// operator could read it from at all (erun#2050's item 3). isCaller marks
+// operator could read it from at all (item 3). isCaller marks
 // the row matching the signed-in operator's own erun user id (item 1).
 function UsernameCell({
   user,
@@ -484,7 +484,7 @@ export function UsersPanel({
   tenantType: string;
   // The signed-in operator's own erun user id (GET /v1/whoami's `userId`).
   // Matched against each row's erunUserId to mark the caller's own row
-  // (erun#2050 item 1) -- undefined while whoami hasn't resolved yet, which
+  // (item 1) -- undefined while whoami hasn't resolved yet, which
   // simply renders no "You" badge rather than guessing.
   callerErunUserId?: string;
 }): React.ReactElement {

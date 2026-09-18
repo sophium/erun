@@ -29,7 +29,7 @@ export interface IdentityUser {
   // erunUsername is the enrolled erun user's own username (erun-backend-api's
   // identity.go identityUserView) -- an independent string from `username`
   // above (the IdP's own username), chosen at enrolment rather than mirrored
-  // from the IdP (erun#2050). Undefined whenever enrolled is false.
+  // from the IdP. Undefined whenever enrolled is false.
   erunUsername?: string;
 }
 

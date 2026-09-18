@@ -137,7 +137,7 @@ func (r IdentityRoutes) securityContext(w http.ResponseWriter, req *http.Request
 // account that cannot use erun, not a tenant member, and must not render as
 // one.
 //
-// The embedded zitadel.User's own ID is the OIDC subject (erun#2050): it is
+// The embedded zitadel.User's own ID is the OIDC subject: it is
 // the same value security.Context.ExternalUserID/model.User.ExternalUserID
 // carries for an enrolled row (mergeIdentityUsers below joins on exactly
 // that equality), and the same value GET /v1/whoami reports as `subject`
@@ -151,7 +151,7 @@ type identityUserView struct {
 	ErunUserID string `json:"erunUserId,omitempty"`
 	// ErunUsername is the enrolled erun user's own username (users.username)
 	// -- an independent string from the embedded zitadel.User.Username above,
-	// chosen at enrolment rather than mirrored from the IdP (erun#2050).
+	// chosen at enrolment rather than mirrored from the IdP.
 	// Empty whenever Enrolled is false, since there is no erun user row to
 	// read it from.
 	ErunUsername string `json:"erunUsername,omitempty"`

@@ -30,7 +30,7 @@ async function stubLoadTenantDashboard(
   });
 }
 
-// erun#2050: the Users tab shows the signed-in operator's own erun username
+// The Users tab shows the signed-in operator's own erun username
 // (whoami's own `username`, the same one the console's identity-header and
 // audit trail use) and, now, the OIDC subject too -- the one value that
 // reliably joins this row against the same person's entry in the console's

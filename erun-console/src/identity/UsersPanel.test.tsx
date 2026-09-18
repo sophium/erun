@@ -551,7 +551,7 @@ describe('UsersPanel', () => {
   });
 });
 
-// erun#2050: the header names the signed-in identity by its erun username
+// The header names the signed-in identity by its erun username
 // (whoami's own `username`) while this table used to render only the IdP's
 // own username, so an operator's own row was unrecognizable, and looked
 // entirely absent when the two names shared nothing in common. These lock
