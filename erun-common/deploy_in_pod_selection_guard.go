@@ -20,6 +20,14 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 	if selectionSource != deploySelectionSourceDefault || len(selected) > 0 {
 		return false
 	}
+	// Only a runtime environment's pod is a projection of an environment the
+	// host owns. A local-agent env is covered by its own in-pod guard, which
+	// fires first and names the environment shape that resolve would get wrong
+	// (guardInPodLocalAgentRuntimeDeploy), and a remote-agent env owns its
+	// worktree inside the pod, so it keeps deploying itself.
+	if resolvedTarget.EnvConfig.ResolvedType() != EnvironmentTypeRuntime {
+		return false
+	}
 	podTenant, podEnvironment, inPod := injectedRuntimePodIdentity(env)
 	if !inPod {
 		return false
@@ -38,9 +46,9 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 // (guardInPodLocalAgentRuntimeDeploy) and the saved-selection shadow guard: the
 // deploy is not resolvable from here, so it is not attempted from here.
 //
-// Deliberately narrow: only this environment's own runtime pod, and only the
-// empty-selection default. An explicit --components selection is one-shot and
-// deliberate, a saved or plan-derived selection is a real selection, and an
+// Deliberately narrow: only a runtime environment, only its own pod, and only
+// the empty-selection default. An explicit --components selection is one-shot
+// and deliberate, a saved or plan-derived selection is a real selection, and an
 // off-pod resolve reads the operator's own config store — none of them are
 // touched.
 func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget OpenResult, target DeployTarget, selected []string, selectionSource string) error {

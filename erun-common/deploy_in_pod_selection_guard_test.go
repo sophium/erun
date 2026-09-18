@@ -19,7 +19,7 @@ func inPodEnvLookup(tenant, environment string) func(string) string {
 }
 
 func TestInPodRuntimeOnlySelectionRefusesRatherThanRollingOneChartSilently(t *testing.T) {
-	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod"}
+	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}
 	selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
 	if len(selected) != 0 || source != deploySelectionSourceDefault {
 		t.Fatalf("precondition: got (%v, %q), want the runtime-only default", selected, source)
@@ -38,7 +38,7 @@ func TestInPodRuntimeOnlySelectionRefusesRatherThanRollingOneChartSilently(t *te
 }
 
 func TestInPodRuntimeOnlySelectionLeavesARealSelectionUnchanged(t *testing.T) {
-	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod"}
+	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}
 	inPod := inPodEnvLookup("frs", "prod")
 	components := []string{"frs-devops", "frs-backend-api", "frs-docs"}
 
@@ -69,7 +69,7 @@ func TestInPodRuntimeOnlySelectionLeavesARealSelectionUnchanged(t *testing.T) {
 }
 
 func TestInPodRuntimeOnlySelectionLeavesTheOffPodFallbackAlone(t *testing.T) {
-	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod"}
+	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}
 	selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
 
 	for _, tc := range []struct {
@@ -97,7 +97,7 @@ func TestResolveGuardedDeploySelectionRefusesTheBlindRuntimeOnlyFallbackInPod(t 
 	t.Setenv("ERUN_TENANT", "frs")
 	t.Setenv("ERUN_ENVIRONMENT", "prod")
 
-	selected, err := resolveGuardedDeploySelection(Context{}, DeployTarget{}, OpenResult{Tenant: "frs", Environment: "prod"}, ProjectK8sConfig{})
+	selected, err := resolveGuardedDeploySelection(Context{}, DeployTarget{}, OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}, ProjectK8sConfig{})
 	if err == nil {
 		t.Fatal("resolveGuardedDeploySelection returned the runtime-only default in-pod without refusing")
 	}
@@ -106,27 +106,40 @@ func TestResolveGuardedDeploySelectionRefusesTheBlindRuntimeOnlyFallbackInPod(t 
 	}
 }
 
-// The blindness is a property of the in-pod projection, not of one environment
-// type: a runtime, local-agent, and remote-agent environment all reach the
-// runtime-only fallback in their own pod for the same missing reason.
-func TestInPodRuntimeOnlySelectionRefusesForEveryEnvironmentType(t *testing.T) {
-	for _, envType := range []EnvironmentType{EnvironmentTypeRuntime, EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent} {
-		t.Run(string(envType), func(t *testing.T) {
+// The guard is scoped to runtime environments, whose pod projects an
+// environment the host owns. A local-agent env has its own in-pod guard
+// (environment shape, not selection), and a remote-agent env owns its worktree
+// inside the pod and keeps deploying itself — asserting both stay allowed is
+// the "the set that is rolled is unchanged" direction for the env-type axis.
+func TestInPodRuntimeOnlySelectionIsScopedToRuntimeEnvironments(t *testing.T) {
+	for _, tc := range []struct {
+		envType EnvironmentType
+		refused bool
+	}{
+		{EnvironmentTypeRuntime, true},
+		{EnvironmentTypeLocalAgent, false},
+		{EnvironmentTypeRemoteAgent, false},
+	} {
+		t.Run(string(tc.envType), func(t *testing.T) {
 			resolvedTarget := OpenResult{
 				Tenant:      "frs",
 				Environment: "prod",
-				EnvConfig:   EnvConfig{Type: envType},
+				EnvConfig:   EnvConfig{Type: tc.envType},
 			}
 			selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
-			if err := guardInPodBlindRuntimeOnlySelection(inPodEnvLookup("frs", "prod"), resolvedTarget, DeployTarget{}, selected, source); err == nil {
-				t.Fatalf("%s: in-pod runtime-only fallback was not refused", envType)
+			err := guardInPodBlindRuntimeOnlySelection(inPodEnvLookup("frs", "prod"), resolvedTarget, DeployTarget{}, selected, source)
+			if tc.refused && err == nil {
+				t.Fatalf("%s: in-pod runtime-only fallback was not refused", tc.envType)
+			}
+			if !tc.refused && err != nil {
+				t.Fatalf("%s: guard fired outside its scope: %v", tc.envType, err)
 			}
 		})
 	}
 }
 
 func TestInPodRuntimeOnlySelectionIgnoresAnIncompleteInjectedIdentity(t *testing.T) {
-	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod"}
+	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}
 	selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
 	env := func(key string) string {
 		if key == "ERUN_TENANT" {
