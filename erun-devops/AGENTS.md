@@ -52,6 +52,14 @@ composition and release invariants belong to root/shared logic, not chart policy
   mount-source clones. Keep mutable Terraform state, plans, and provider data on
   the home PVC, outside the read-only baked tree. Test adoption/linking preservation
   and interrupted-run recovery.
+- Agent MCP configuration is reconciled once per container boot, never per shell.
+  The shell hook is sourced by every interactive shell and every `sh -lc` remote
+  exec, so run each configure script under one container-lifetime claim
+  (`/tmp/erun-agent-config`, tests via `ERUN_AGENT_CONFIG_STATE_DIR`), never the
+  home PVC. `entrypoint_test.sh` locks exactly-once structurally, not by wall clock.
+- The IMDS region probe pays one timeout, not two. Where nothing answers the
+  link-local address the probe drains curl's whole budget; skip the IMDSv1 fallback
+  on that timeout and bound the connect phase. Keep both halves.
 
 ## Runtime Chart Rules
 
