@@ -121,6 +121,14 @@ func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 	if !strings.Contains(out.String(), "skipped: "+string(common.DoctorActionPruneImages)) {
 		t.Errorf("EOF was not reported as a skipped optional step:\n%s", out.String())
 	}
+	// The cause differs from a run that never had a terminal, and the report
+	// must name the one that happened instead of prescribing the wrong fix.
+	if !strings.Contains(out.String(), doctorPromptsStdinClosed) {
+		t.Errorf("EOF was reported with the wrong cause:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), doctorPromptsNoTerminal) {
+		t.Errorf("a terminal that closed was reported as no terminal at all:\n%s", out.String())
+	}
 }
 
 // An error that is not EOF still fails: a genuinely broken prompt runner is a

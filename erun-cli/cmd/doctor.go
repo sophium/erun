@@ -524,17 +524,25 @@ func selectedDoctorActions(ctx common.Context, promptRunner PromptRunner, result
 	// diagnostic that reports "environment broken" because nobody answered an
 	// optional prompt is worse than one that says what it did not do.
 	if !stdinIsTerminal() {
-		return selected, writeOptionalDoctorPromptsSkipped(ctx, result)
+		return selected, writeOptionalDoctorPromptsSkipped(ctx, result, doctorPromptsNoTerminal)
 	}
 	prompted, unasked, err := promptForDoctorActions(promptRunner, result)
 	if err != nil {
 		return nil, err
 	}
 	if unasked {
-		return selected, writeOptionalDoctorPromptsSkipped(ctx, result)
+		return selected, writeOptionalDoctorPromptsSkipped(ctx, result, doctorPromptsStdinClosed)
 	}
 	return append(selected, prompted...), nil
 }
+
+// The two reasons the optional prompts went unasked differ in cause and so in
+// what the reader should do about them, and the report says which one happened
+// rather than prescribing a fix for the wrong one.
+const (
+	doctorPromptsNoTerminal  = "stdin is not a terminal, so there was nobody to answer the prompt"
+	doctorPromptsStdinClosed = "stdin closed before the prompt could be answered"
+)
 
 // promptForDoctorActions asks about each optional prune action. unasked reports
 // that the reader hit EOF instead of answering: a terminal that closed mid-run
@@ -562,8 +570,8 @@ func promptForDoctorActions(promptRunner PromptRunner, result common.OpenResult)
 // returns only write errors: a caller that could not be asked anything is not a
 // failed check, and doctor's exit code must reflect the environment's health,
 // not the absence of somebody to answer a prompt.
-func writeOptionalDoctorPromptsSkipped(ctx common.Context, result common.OpenResult) error {
-	if _, err := fmt.Fprintf(ctx.Stdout, "Optional cleanup steps in %s/%s not checked: stdin is not a terminal, so there was nobody to answer the prompt. These are optional maintenance, not failed checks.\n", result.Tenant, result.Environment); err != nil {
+func writeOptionalDoctorPromptsSkipped(ctx common.Context, result common.OpenResult, reason string) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Optional cleanup steps in %s/%s not checked: %s. These are optional maintenance, not failed checks.\n", result.Tenant, result.Environment, reason); err != nil {
 		return err
 	}
 	for _, action := range common.DoctorActions() {
