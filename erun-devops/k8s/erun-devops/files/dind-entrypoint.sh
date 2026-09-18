@@ -98,8 +98,11 @@ cap_build_container_cpu() {
 		return 0
 	}
 	if ! has_controller "${cap_parent}/cgroup.subtree_control" cpu; then
-		echo '+cpu' >"${cap_parent}/cgroup.subtree_control" 2>/dev/null &&
-			has_controller "${cap_parent}/cgroup.subtree_control" cpu || {
+		# Additive, so whatever else the parent already delegates stays
+		# delegated, and idempotent, so restarts are free. A delegation the
+		# kernel refuses shows up immediately below, as a cpu.max that cannot
+		# be written or does not read back.
+		echo '+cpu' >"${cap_parent}/cgroup.subtree_control" 2>/dev/null || {
 			report_uncapped "cpu could not be delegated via ${cap_parent}/cgroup.subtree_control"
 			return 0
 		}
