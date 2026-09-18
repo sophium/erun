@@ -316,7 +316,7 @@ func reportUnconfirmedTenantCharts(required []string, registry string, insecure 
 		return fmt.Errorf("deploy could not confirm whether these tenant charts are published at version %s in %s: %s; deploy refuses to guess rather than treat an unanswered probe as published -- check registry access and retry", version, registry, strings.Join(unresolved, "; "))
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("deploy rolls out the tenant's own artifacts, which run on the tenant's version line, but these charts are not published at version %s in %s: %s; `erun push --version %s` (or `erun release`) publishes the tenant's runtime and component charts together, so publish the missing chart(s) then deploy", version, registry, strings.Join(missing, ", "), version)
+		return fmt.Errorf("deploy rolls out the tenant's own artifacts, which run on the tenant's version line, but these charts are not published at version %s in %s: %s; `erun push --version %s` (or `erun build --release`) publishes the tenant's runtime and component charts together, so publish the missing chart(s) then deploy", version, registry, strings.Join(missing, ", "), version)
 	}
 	return nil
 }
@@ -675,7 +675,7 @@ func (e *RuntimeChartConfirmationError) Error() string {
 			"check registry credentials/connectivity and retry."
 	}
 	return "no runtime chart is published at version " + version + " at any coordinate deploy probed — " +
-		strings.Join(e.Candidates, "; ") + ". `erun push --version " + version + "` (or `erun release`) publishes a " +
+		strings.Join(e.Candidates, "; ") + ". `erun push --version " + version + "` (or `erun build --release`) publishes a " +
 		"version's runtime chart, so deploy is refusing rather than installing a coordinate that cannot exist; " +
 		"publish the version, or name a chart explicitly with `runtimechart` in the env config (or `--runtime-chart <ref>` for one deploy)."
 }
@@ -712,14 +712,14 @@ func (e *PublishedChartNotFoundError) Error() string {
 	if len(e.Candidates) == 0 {
 		msg += ": that version has no published chart in the registry. " +
 			"`erun push` publishes a version's image and chart together, so a version is deployable only after it is pushed — " +
-			"run `erun push --version " + version + "` (or `erun release` for a release version), then deploy."
+			"run `erun push --version " + version + "` (or `erun build --release` for a release version), then deploy."
 		return msg + helmOutputSuffix(e.HelmOutput)
 	}
 	msg += ": no chart is published at " + version + " at any coordinate the deploy probed — " + strings.Join(e.Candidates, ", ") + ". " +
 		"The " + DevopsComponentName + " platform chart is published only beside the runtime image erun releases, so a registry holding just this project's own images has it at no version: " +
 		"point the environment at the registry that does, with `erun init <tenant> <env> --runtime-registry <registry>`, which persists it as the env's runtimeregistry and redeploys."
 	if tenantChart := strings.TrimSpace(e.TenantChart); tenantChart != "" {
-		msg += " If this project publishes its own " + tenantChart + " umbrella instead, publish it at this version from the project that owns that chart — `erun push --version " + version + "` (or `erun release`) — then deploy."
+		msg += " If this project publishes its own " + tenantChart + " umbrella instead, publish it at this version from the project that owns that chart — `erun push --version " + version + "` (or `erun build --release`) — then deploy."
 	}
 	msg += " If the environment rides a chart on another line entirely, state it outright: `runtimechart` in the env config (the desktop's Runtime tab, \"Runtime chart\") or `--runtime-chart <ref>` for one deploy, and the version keeps naming the image."
 	return msg + helmOutputSuffix(e.HelmOutput)

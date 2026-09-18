@@ -41,7 +41,7 @@ func (e *MissingGHCRCredentialError) Error() string {
 			"From a shell in this environment (erun open), authenticate with one of:\n"+
 			"  gh auth login -h github.com -s write:packages,read:packages\n"+
 			"  docker login %s\n"+
-			"then re-run erun release (or erun push).",
+			"then re-run erun build --release (or erun push).",
 		registry, host)
 }
 

@@ -297,7 +297,10 @@ func TestRelease(t *testing.T) {
 		fixture.SeedTerraformModuleImageReference(t, setup.Cwd, "erun-webhook")
 		fixture.RunGit(t, setup.Cwd, "add", "erun-devops")
 		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add terraform module image reference")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
+		// release marks source control only, so the publish and the preflights it
+		// owns now live in `build --release`: this asserts them where they moved to
+		// rather than dropping the coverage.
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -607,7 +610,10 @@ esac
 		})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "df")...)
 
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// release marks source control only, so the publish and the preflights it
+		// owns now live in `build --release`: this asserts them where they moved to
+		// rather than dropping the coverage.
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for low disk headroom, got 0: %s", result.Combined)
 		}
@@ -660,7 +666,10 @@ esac
 		})
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "df")...)
 
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// release marks source control only, so the publish and the preflights it
+		// owns now live in `build --release`: this asserts them where they moved to
+		// rather than dropping the coverage.
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for low disk headroom, got 0: %s", result.Combined)
 		}
@@ -765,7 +774,10 @@ esac
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		seedBareOrigin(t, setup)
 
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubPublishToolchain(t, setup)...)})
+		// release marks source control only, so the publish and the preflights it
+		// owns now live in `build --release`: this asserts them where they moved to
+		// rather than dropping the coverage.
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubPublishToolchain(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -795,7 +807,10 @@ esac
 		// so this scenario still reaches the simulated docker failure it is about.
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
 		envVars = append(envVars, "GH_TOKEN=integration-test-token")
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// release marks source control only, so the publish and the preflights it
+		// owns now live in `build --release`: this asserts them where they moved to
+		// rather than dropping the coverage.
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when the publish fails, got 0: %s", result.Combined)
 		}
@@ -834,7 +849,10 @@ exit 0
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "git")...)
 		envVars = append(envVars, stubPublishToolchain(t, setup)...)
 
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// release marks source control only, so the publish and the preflights it
+		// owns now live in `build --release`: this asserts them where they moved to
+		// rather than dropping the coverage.
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when the base branch moved before the build, got 0: %s", result.Combined)
 		}
@@ -900,7 +918,10 @@ exit 0
 			"GH_TOKEN=integration-test-token",
 		)
 
-		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// release marks source control only, so the publish and the preflights it
+		// owns now live in `build --release`: this asserts them where they moved to
+		// rather than dropping the coverage.
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1057,7 +1078,10 @@ exit 0
 		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add web component")
 
 		componentCwd := filepath.Join(setup.Cwd, "erun-devops", "docker", "api")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: componentCwd, Env: releaseEnv(t, setup)})
+		// release marks source control only, so the publish and the preflights it
+		// owns now live in `build --release`: this asserts them where they moved to
+		// rather than dropping the coverage.
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: componentCwd, Env: releaseEnv(t, setup)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for a release that cannot publish every image, got 0: %s", result.Combined)
 		}

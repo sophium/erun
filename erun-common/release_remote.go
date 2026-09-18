@@ -96,7 +96,7 @@ func movedReleaseBaseBranchError(spec ReleaseSpec, branch string, ahead int) err
 		"Building now would publish %s and push its tag, and only then fail at the final push with everything already public.\n"+
 		"Nothing is published yet, so absorb the move and re-run:\n"+
 		"  git -C %s pull --rebase origin %s\n"+
-		"  erun release --force\n"+
+		"  erun build --release --force\n"+
 		"(--force recreates the local v%s tag this run already made, which the rebase leaves behind.)",
 		branch, ahead, spec.Version, spec.ProjectRoot, branch, spec.Version)
 }
