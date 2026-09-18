@@ -46,6 +46,13 @@ var (
 	// environment is broken.
 	ErrMCPEndpointUnreachable = errors.New("MCP endpoint is not reachable")
 
+	// ErrMCPTargetNotAnswering narrows ErrMCPEndpointUnreachable to the shape
+	// where the local forward is up and the environment behind it did not take
+	// the call — a target still coming up, not a dead tunnel. The distinction
+	// is what keeps a caller from answering it with a re-open, which replaces
+	// nothing and leaves the same wait ahead.
+	ErrMCPTargetNotAnswering = errors.New("the local port-forward is up but the environment behind it did not answer")
+
 	// ErrMCPUnauthorized means the edge refused the bearer.
 	ErrMCPUnauthorized = errors.New("MCP endpoint rejected the bearer token")
 
@@ -434,7 +441,7 @@ func (s *mcpSession) report(message string) {
 func (s *mcpSession) postOnce(ctx context.Context, body []byte) ([]byte, error) {
 	s.awaitStartupOnce(ctx)
 	if s.localPort > 0 && !CanReachLocalMCPEndpoint(s.localPort) && LocalPortIsBound(s.localPort) {
-		return nil, s.staleTunnelError()
+		return nil, s.unreachableTunnelError()
 	}
 	token, err := s.mintToken()
 	if err != nil {
@@ -502,10 +509,17 @@ func (s *mcpSession) newRequest(ctx context.Context, body []byte, token string) 
 	return req, nil
 }
 
-// staleTunnelError names a local port that is bound but not answering — the
-// preflight failure postOnce refuses to spend a request on, and the shape a
+// unreachableTunnelError names a local port that is held but not answering —
+// the preflight failure postOnce refuses to spend a request on, and the shape a
 // caller sees when the tunnel was already dead before this request started.
-func (s *mcpSession) staleTunnelError() error {
+// Which of the two held-port faults it is decides what the caller is told to
+// do: a connection that was accepted and then closed without a reply is a
+// target that has not come up behind a working forward, and re-opening the
+// environment is no help for it.
+func (s *mcpSession) unreachableTunnelError() error {
+	if ClassifyLocalMCPUnreachable(s.localPort) == LocalMCPTargetNotAnswering {
+		return fmt.Errorf("%w: %w: %s (127.0.0.1:%d is held and took the connection, but the environment behind it closed it without answering — it is most likely still starting, so retry shortly)", ErrMCPEndpointUnreachable, ErrMCPTargetNotAnswering, s.endpoint, s.localPort)
+	}
 	return fmt.Errorf("%w: %s (127.0.0.1:%d is held but the edge never answers — a stale port-forward)", ErrMCPEndpointUnreachable, s.endpoint, s.localPort)
 }
 
