@@ -12,7 +12,7 @@ Initialize ERun configuration for a tenant and environment. On a local environme
 erun init [TENANT] [ENVIRONMENT] [flags]
 ```
 
-If `TENANT` and/or `ENVIRONMENT` are omitted, ERun resolves them from the current working directory and the default tenant/environment in `~/.config/erun/config.yaml`. When neither can be resolved, you are prompted (or the command exits with an error in non-interactive contexts).
+If `TENANT` and/or `ENVIRONMENT` are omitted, ERun resolves them from the current working directory and the default tenant/environment in `<config-root>/config.yaml`. When neither can be resolved, you are prompted (or the command exits with an error in non-interactive contexts).
 
 ## Flags
 
@@ -95,7 +95,7 @@ erun init my-tenant local --dry-run
 
 ## Side effects
 
-`init` writes per-user tenant + env config under `~/.config/erun/`, a project-level `<repo>/.erun/config.yaml`, and deploys the runtime pod into the `<tenant>-<environment>` namespace. The runtime pod comes from the published `erun-devops` chart and image — `init` writes nothing else into your project.
+`init` writes per-user tenant + env config under `<config-root>/`, a project-level `<repo>/.erun/config.yaml`, and deploys the runtime pod into the `<tenant>-<environment>` namespace. The runtime pod comes from the published `erun-devops` chart and image — `init` writes nothing else into your project.
 
 For a `remote-agent`/`runtime` environment configured to build to or deploy from ghcr.io, `init` also checks whether *you* — the machine running `init` — already have a working ghcr.io credential (`docker login`, a `gh` session, or `GH_TOKEN`/`GITHUB_TOKEN`), and if so, mints a Kubernetes Secret from it and mounts it into the pod. This means a freshly created environment usually authenticates itself, with nothing to hand-carry in.
 

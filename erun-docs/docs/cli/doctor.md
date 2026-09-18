@@ -104,8 +104,8 @@ A healthy local-side run against an env named `local` on Docker Desktop:
 ```
 erun doctor — my-tenant / local
   config:
-    tenant config         ok  ~/.config/erun/my-tenant/tenant.yaml
-    environment config    ok  ~/.config/erun/my-tenant/local/config.yaml
+    tenant config         ok  ~/Library/Application Support/erun/my-tenant/config.yaml
+    environment config    ok  ~/Library/Application Support/erun/my-tenant/local/config.yaml
     project config        ok  /Users/you/code/my-project/.erun/config.yaml
   cluster:
     kubernetes context    ok  docker-desktop
@@ -121,8 +121,8 @@ An unhealthy run after an interrupted init:
 ```
 erun doctor — my-tenant / rihards-dev
   config:
-    tenant config         ok  ~/.config/erun/my-tenant/tenant.yaml
-    environment config    ok  ~/.config/erun/my-tenant/rihards-dev/config.yaml
+    tenant config         ok  ~/Library/Application Support/erun/my-tenant/config.yaml
+    environment config    ok  ~/Library/Application Support/erun/my-tenant/rihards-dev/config.yaml
   cluster:
     kubernetes context    ok  erun-004-020362606330-eu-west-2
     runtime pod      missing  no pod found in namespace my-tenant-rihards-dev

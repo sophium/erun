@@ -30,7 +30,7 @@ This is reference material — for everyday use you don't need to think about it
 | Error code | Cause |
 |---|---|
 | `ENVIRONMENT_NOT_RESOLVED` | None of the resolution steps produced an env, and no TTY is available for a prompt. |
-| `TENANT_NOT_CONFIGURED` | The resolved tenant has no `~/.config/erun/<tenant>/tenant.yaml`. |
+| `TENANT_NOT_CONFIGURED` | The resolved tenant has no `<config-root>/<tenant>/config.yaml`. |
 
 ## 3. Build context directory
 

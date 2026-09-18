@@ -207,6 +207,10 @@ COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
 # checks erun-common's known infrastructure-failure signature list against
 # this page's spec of the gate-run/gate-build failure classifier.
 COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-reference/skills-spec.md
+# TestConfigLocationsDocMatchesResolver (erun-integration) derives the per-user
+# config paths from erun-common's own resolvers and asserts this page documents
+# them; only the one file is needed.
+COPY erun-docs/docs/reference/config-locations.md /src/erun-docs/docs/reference/config-locations.md
 
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the
