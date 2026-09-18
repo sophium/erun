@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,6 +110,9 @@ func injectedPortValue(value string) int {
 // so the result stays stable no matter how many other envs exist. A zero
 // result is deliberate: a missing range is an upstream bug, so callers that
 // need to bind fail loudly on port 0 rather than get a silent default.
+//
+// The chart-injected ports of the environment's own runtime pod outrank both
+// -- see overlayInjectedRuntimeLocalPorts.
 func LocalPortsForResult(result OpenResult) EnvironmentLocalPorts {
 	var ports EnvironmentLocalPorts
 	switch {
@@ -134,7 +138,7 @@ func LocalPortsForResult(result OpenResult) EnvironmentLocalPorts {
 	if result.EnvConfig.SSHD.LocalPort > 0 {
 		ports.SSH = result.EnvConfig.SSHD.LocalPort
 	}
-	return ports
+	return overlayInjectedRuntimeLocalPorts(ports, os.Getenv, result.Tenant, result.Environment)
 }
 
 func MCPPortForResult(result OpenResult) int {
