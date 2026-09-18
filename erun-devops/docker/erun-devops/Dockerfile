@@ -166,6 +166,19 @@ COPY erun-devops/dns01-webhook /src/erun-devops/dns01-webhook
 # member whose own gate `test-frontend` now runs here too (see root
 # AGENTS.md's Makefile comment).
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
+# test-atlas-validate runs erun-devops/docker/erun-backend-db/
+# atlas_validate_test.sh, which resolves the db module relative to its own
+# script_dir and copies `${db_module}/migrations/default` out of it. That is
+# the COPY-or-`cd`-fails rule the LINT_MODULES note above states, applied to a
+# directory rather than a module, and the target was added without it: the
+# script's `cd` into erun-backend/erun-backend-db failed here while the
+# identical command passed in a full checkout, so `make check` went red inside
+# every erun-devops image build and no release could be produced at all. Only
+# migrations/default is copied, including the atlas.sum it validates against --
+# that is the whole of what the script reads, and copying the wider module
+# would put unrelated schema/, retention/ and AGENTS.md edits into this image's
+# fingerprint.
+COPY erun-backend/erun-backend-db/migrations/default /src/erun-backend/erun-backend-db/migrations/default
 # TestDockerfileLdflagsActuallyStampsTheBinary reads this Dockerfile at test
 # time to lock its -ldflags target to the real release build, so the test
 # stage needs the file even though nothing here builds the eapi image itself.
