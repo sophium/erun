@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -75,22 +76,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 	if releaseSpec != nil {
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
-	return finalizeResolvedBuildExecution(ctx, execution, target.NoIncremental)
-}
-
-// finalizeResolvedBuildExecution applies incremental promotion and chart
-// resolution, then refuses an execution that plans no work at all: no release,
-// no script, no linux builds, no images, no pushes, no charts. Running it would
-// build nothing and test nothing, so its exit code must not read as a pass.
-func finalizeResolvedBuildExecution(ctx Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
-	execution, err := finalizeBuildExecution(ctx, execution, noIncremental)
-	if err != nil {
-		return BuildExecutionSpec{}, err
-	}
-	if !buildExecutionPlansWork(execution) {
-		return BuildExecutionSpec{}, newEmptyBuildPlanError("the image plan resolved to no images and no component charts")
-	}
-	return execution, nil
+	return finalizeBuildExecution(ctx, execution, target.NoIncremental)
 }
 
 // buildExecutionPlansWork reports whether an execution has anything to run. An
@@ -253,6 +239,18 @@ func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, targe
 	}
 	if script == nil {
 		return BuildExecutionSpec{}, ErrDockerBuildContextNotFound
+	}
+	// A nested build script only stands in for the image plan when the project
+	// has no docker build module to resolve. When it does, resolving zero images
+	// is a resolution failure, and running the script instead would exit zero
+	// having built no image and run no gate -- a pass a caller cannot tell from
+	// a real one.
+	if dockerDir, ok, err := resolveProjectDockerModuleDir(findProjectRoot, target); err != nil {
+		return BuildExecutionSpec{}, err
+	} else if ok {
+		return BuildExecutionSpec{}, newEmptyBuildPlanError(fmt.Sprintf(
+			"the project has a docker build module at %s, but this build resolved no images from it, and running %s instead would report success without building an image; re-run from the project root or select the component whose images you meant to build",
+			dockerDir, filepath.Join(filepath.Clean(script.Dir), script.Path)))
 	}
 	script.Env = buildScriptEnv(target.VersionOverride)
 	return BuildExecutionSpec{script: script}, nil
