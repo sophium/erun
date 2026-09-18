@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -38,13 +39,53 @@ func seedPortForwardStateFileForTest(t *testing.T, tenant, environment string, p
 // call, so the Setenv calls alone would not redirect it -- xdg.Reload is
 // what makes it honour this test's temp root (mirrors
 // erun-ui/environment_activity_observed_test.go's seedMCPForward).
+//
+// HOME is bound alongside XDG_CONFIG_HOME because darwin's os.UserConfigDir
+// consults only HOME and ignores XDG_CONFIG_HOME entirely: a test bound through
+// the XDG variable alone resolves to the operator's real ~/Library/Application
+// Support, which the moves below then rename files into. The directory that
+// actually resolves is asserted to sit inside the sandbox, so a change to either
+// rule fails loudly here instead of reaching the real home.
 func redirectConfigHomeForTest(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("HOME", root)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("os.UserConfigDir: %v", err)
+	}
+	if !strings.HasPrefix(configDir, root+string(filepath.Separator)) {
+		t.Fatalf("sandbox escape: os.UserConfigDir resolved to %q, outside the temp root %q; this test would read and move the real per-user state", configDir, root)
+	}
+
+	// Point the config store at the directory the state tree resolved to. On
+	// darwin adrg/xdg honours XDG_CONFIG_HOME while os.UserConfigDir ignores it,
+	// so leaving the two to derive their own answer would have the test seed one
+	// tree and the code under test read another.
+	t.Setenv("XDG_CONFIG_HOME", configDir)
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
+
+	if xdg.ConfigHome != configDir {
+		t.Fatalf("config store resolved to %q but the state tree to %q; the sandbox must cover both", xdg.ConfigHome, configDir)
+	}
+}
+
+// sandboxedConfigDirForTest is the config directory the code under test resolves
+// inside redirectConfigHomeForTest's sandbox. Expectations are built from it so
+// they describe the sandbox on every platform -- <root>/.config on linux,
+// <root>/Library/Application Support on darwin -- instead of encoding one
+// platform's layout.
+func sandboxedConfigDirForTest(t *testing.T) string {
+	t.Helper()
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("os.UserConfigDir: %v", err)
+	}
+	return configDir
 }
 
 // TestLoadPortForwardStateDeletedEnvironmentReadsAsNoForward is the existing,
@@ -114,7 +155,7 @@ func TestPortForwardStatePathUsesTheCanonicalERunSpelling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PortForwardStatePath: %v", err)
 	}
-	want := filepath.Join(xdg.ConfigHome, "ERun", "portforward", "mcp", "acme", "dev.json")
+	want := filepath.Join(sandboxedConfigDirForTest(t), "ERun", "portforward", "mcp", "acme", "dev.json")
 	if path != want {
 		t.Fatalf("port-forward state must live at the canonical spelling %q, got %q", want, path)
 	}
