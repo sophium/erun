@@ -47,7 +47,7 @@ func controlPlaneRegistryStub(t testing.TB, tags ...string) *httptest.Server {
 // version check finds its target here, the same call that reports the
 // plane's own version. Reports its own listener address as apiUrl, the same
 // as a real erun-backend-api reporting its own configured PlatformAPIURL --
-// this is what lets erun#2089's duplicate-alias collapsing key on it instead
+// this is what lets the duplicate-alias collapsing key on it instead
 // of falling back to DNS in the common single-alias case.
 func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httptest.Server {
 	t.Helper()
@@ -74,7 +74,7 @@ func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httpt
 // its own self-declared /v1/platform apiUrl instead of its own listener
 // address -- modeling a backend reachable through more than one
 // hostname/alias that always reports the same canonical apiUrl regardless of
-// which alias a client dialed (erun#2089). Passing another stub's own URL as
+// which alias a client dialed. Passing another stub's own URL as
 // identityAPIURL simulates two configured aliases resolving to one backend.
 func controlPlaneStubAt(t testing.TB, identityAPIURL, version string, consoleURL ...string) *httptest.Server {
 	t.Helper()
@@ -114,7 +114,7 @@ func consoleStub(t testing.TB, version string) *httptest.Server {
 // written together rather than via the single-purpose helpers list_test.go
 // and pin_test.go already use for each half alone. A plain map is fine here
 // because no scenario using it configures more than one alias; a scenario
-// that needs an ordered, multi-alias list (erun#2089's duplicate-alias
+// that needs an ordered, multi-alias list (the duplicate-alias
 // collapsing, where which alias is configured first decides which one
 // becomes the collapsed plane's primary entry) uses
 // seedControlPlaneConfigOrdered instead, since Go map iteration order is
@@ -453,7 +453,7 @@ func TestListControlPlanes(t *testing.T) {
 			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
 	})
 
-	// erun#2089: two configured aliases that resolve to the same backend must
+	// Two configured aliases that resolve to the same backend must
 	// be reported as one plane, not two -- pointing two aliases at one plane
 	// is legitimate configuration, but reporting it as two double-counts
 	// drift an operator would only ever act on once. Identity is keyed on
@@ -535,7 +535,7 @@ func TestListControlPlanes(t *testing.T) {
 		}
 	})
 
-	// erun#2089 follow-up: identity must never be guessed from DNS/host alone
+	// Follow-up: identity must never be guessed from DNS/host alone
 	// when neither alias's own GET /v1/platform self-reports an apiUrl -- an
 	// older platform that predates the field, modeled here via
 	// controlPlaneStubAt with an empty identityAPIURL. Both stubs listen on

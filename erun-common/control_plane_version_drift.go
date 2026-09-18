@@ -49,7 +49,7 @@ type ConsoleVersionStatus struct {
 // ControlPlaneAliasRef is one configured cloud-provider alias erun resolved
 // to the same backend as another configured alias's own -- see
 // ControlPlaneVersionStatus.AdditionalAliases. Pointing two aliases at one
-// plane is legitimate configuration (erun#2089); this is how the collapsed
+// plane is legitimate configuration; this is how the collapsed
 // report still names every alias that reaches it.
 type ControlPlaneAliasRef struct {
 	Alias  string `json:"alias"`
@@ -67,8 +67,7 @@ type ControlPlaneVersionStatus struct {
 	// e.g. two DNS names that both route to one physical control plane.
 	// Reporting each as its own plane would double-count drift an operator
 	// would only ever act on once, so every alias sharing a backend is
-	// collapsed into this one entry instead of appearing as a separate plane
-	// (erun#2089).
+	// collapsed into this one entry instead of appearing as a separate plane.
 	AdditionalAliases []ControlPlaneAliasRef `json:"additionalAliases,omitempty"`
 	// Reachable reports whether GET /v1/platform answered at all. A plane
 	// erun cannot reach is never reported current: Version/Behind/Ahead stay
@@ -248,7 +247,7 @@ func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersion
 // collapses. Reporting two rows for one backend is a cosmetic annoyance;
 // reporting one row for two backends hides a stale deployment. Deliberately
 // never keys on version either: two genuinely distinct planes can run the
-// same published release (erun#2089).
+// same published release.
 func controlPlaneBackendIdentity(configuredAPIURL, serverReportedAPIURL string) string {
 	if normalized := normalizeControlPlaneIdentityURL(serverReportedAPIURL); normalized != "" {
 		return "url:" + normalized

@@ -281,7 +281,7 @@ func writeControlPlaneVersionReport(ctx common.Context, drift common.ControlPlan
 // controlPlanesSectionHeader names both the number of distinct backends
 // found and the number of configured aliases that reach them -- when the two
 // differ, that gap is exactly the signal that two or more aliases were
-// collapsed into one plane (erun#2089), and a bare "Control planes:" header
+// collapsed into one plane, and a bare "Control planes:" header
 // would hide it.
 func controlPlanesSectionHeader(planes []common.ControlPlaneVersionStatus) string {
 	if len(planes) == 0 {
