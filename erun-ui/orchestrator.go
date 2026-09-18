@@ -2274,6 +2274,9 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 	// transient outage per call, so this is reported, never treated as a skip.
 	for _, env := range unreachable {
 		log.Printf("erun-app: orchestrator %s: wired %s but its edge is not answering", id, env.Label)
+		// Record the entry so the sweep can log the exit. Without this the log's
+		// last word on the wiring is the outage, forever.
+		a.recordOrchestratorEdgeOutage(id, env.Label)
 	}
 	if len(unreachable) > 0 {
 		notice := orchestratorMCPUnreachableNotice(name, unreachable)
