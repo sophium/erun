@@ -18,7 +18,7 @@ import (
 // held it: the kill returns, the port stops accepting, and the kernel still
 // refuses a bind on it for a short while. kubectl reports that refusal as
 // "Unable to listen on port N ... address already in use" and exits — measured
-// at 58% of reattachments on the environments this was written for (erun#2294).
+// at 58% of reattachments on the environments this was written for.
 // Each one costs a whole retry window during which the environment is
 // unreachable, which is the symptom the reattach path exists to remove.
 //

@@ -13,7 +13,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-// kubectlListenConflict is the failure erun#2294 measured at 58% of
+// kubectlListenConflict is the failure measured at 58% of
 // reattachments, copied from the reported log: the replacement forward's
 // kubectl cannot bind because the listener it replaced has not finished
 // closing. Both lines are kubectl's; the second is what marks the failure as a
@@ -47,7 +47,7 @@ func testForwardContext() (common.Context, *bytes.Buffer) {
 }
 
 // TestStartPortForwardWithBindRetryAbsorbsTheDyingListenersSocket is the
-// regression for erun#2294: a replacement forward whose first listen fails
+// regression test: a replacement forward whose first listen fails
 // because the predecessor's socket is still closing must be started again
 // rather than reported as a failed reattachment.
 func TestStartPortForwardWithBindRetryAbsorbsTheDyingListenersSocket(t *testing.T) {
