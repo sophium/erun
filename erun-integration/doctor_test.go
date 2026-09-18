@@ -1603,6 +1603,35 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_prune_images_and_build_cache_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_without_tty_skips_optional_prune_prompts", func(t *testing.T) {
+		// Regression coverage for erun#2231: doctor is the command reached for
+		// when a deploy has already failed, so its caller is often an
+		// orchestrator or CI step with no terminal. Reaching the optional prune
+		// prompts with stdin bound to /dev/null read EOF and exited 1 with
+		// "Doctor failed team/dev: ^D" -- a verdict on an environment nothing
+		// was wrong with. With no TTY each optional prune must be reported as
+		// skipped, named, and left unrun, and the run must exit 0 on the health
+		// of what it did examine.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectl(t, stubs, "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{
+			Cwd:              setup.Cwd,
+			Env:              envVars,
+			StdinFromDevNull: true,
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("no-TTY doctor exited %d; a skipped optional prompt is not a failed environment: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Doctor failed") {
+			t.Fatalf("no-TTY doctor reported the environment as failed: %s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_without_tty_skips_optional_prune_prompts", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_clear_pending_helm_via_prompt_then_prune_containers", func(t *testing.T) {
 		// The helm stub reports STATUS: pending-install, so the
 		// diagnosis recommends exactly one recovery and the interactive
