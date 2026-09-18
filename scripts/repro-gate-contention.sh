@@ -9,7 +9,7 @@
 # CPUs with two workers when it had the box to itself, both under
 # `taskset -c 0-3` and under `docker run --cpus=4`. What the gate adds is
 # company. `make check` runs `make -j${CHECK_GATE_PARALLELISM} check-gate`
-# (ten targets at the resolved width, which is the CPU budget itself), so for
+# (eleven targets at the resolved width, which is the CPU budget itself), so for
 # the whole length of the suite's two workers -- two Go backends and two
 # headless Chromiums -- the same CPU budget is also feeding golangci-lint,
 # the frontend gate, the chart tests and the integration suite. The suite's
