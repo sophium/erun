@@ -8,11 +8,16 @@
       name="description"
     />
     <link href="/favicon.svg" rel="icon" type="image/svg+xml" />
-    <!-- Overwritten at runtime from platform discovery (GET /v1/platform)
-         once the instance's brand resolves — see App.tsx's usePlatformInfo.
-         This is only the pre-JS bootstrap value, so the social preview tags
-         below carry the bundled product-level default rather than any
-         instance's own name. -->
+    <!-- The bundled product-level default: this file is one build serving any
+         instance, so it names no instance. The container's entrypoint rewrites
+         these brand-bearing tags from the deploy's platform.brand before nginx
+         serves the page (docker-entrypoint.d/05-platform-brand.sh), and injects
+         the same value as window.__ERUN_PLATFORM_BRAND__ for the bundle's own
+         pre-resolution paint (src/shell/brand.ts) — so what the page shows
+         before the bundle runs is what GET /v1/platform also supplies. An
+         instance that configures no brand keeps this default on both sides.
+         Keep this title agreeing with that script's fallback: src/shell/
+         brand.test.ts asserts the two directly. -->
     <title>ERun console</title>
     <meta content="ERun console" property="og:title" />
     <meta

@@ -424,12 +424,8 @@ type UpgradeOccupancyError struct {
 }
 
 func (e *UpgradeOccupancyError) Error() string {
-	names := make([]string, 0, len(e.Holders))
-	for _, lease := range e.Holders {
-		names = append(names, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
-	}
 	return fmt.Sprintf("%s/%s is held by %s -- an upgrade restarts the runtime pod and would interrupt that work; pass --override-lease to roll it anyway, or wait until it finishes",
-		e.Tenant, e.Environment, strings.Join(names, "; "))
+		e.Tenant, e.Environment, FormatLeaseHolders(e.Holders))
 }
 
 // LeaseGuardedUpgradeDeployer wraps deploy so a held environment refuses
@@ -455,7 +451,7 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 			if !override {
 				return &UpgradeOccupancyError{Tenant: item.Tenant, Environment: item.Environment, Holders: leases}
 			}
-			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), leaseHolderSummary(leases)))
+			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), FormatLeaseHolders(leases)))
 		}
 		// A dry run must show this refusal (or override) exactly as a real run
 		// would, but must not itself claim the exclusive lease -- that would be
@@ -478,14 +474,6 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 
 		return deploy(ctx, item)
 	}
-}
-
-func leaseHolderSummary(leases []EnvironmentActivityLease) string {
-	names := make([]string, 0, len(leases))
-	for _, lease := range leases {
-		names = append(names, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
-	}
-	return strings.Join(names, "; ")
 }
 
 // UpgradeItemFailure records a member whose deploy returned an error.
