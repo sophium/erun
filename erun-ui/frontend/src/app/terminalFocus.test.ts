@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, mock, test } from 'node:test';
+
+import { afterEach, beforeEach, test, vi } from 'vitest';
 
 import { scheduleTerminalFocus } from './terminalFocus';
 
@@ -32,11 +33,11 @@ function flushRaf(): void {
 beforeEach(() => {
   rafQueue = [];
   installWindow();
-  mock.timers.enable({ apis: ['setTimeout'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 });
 
 afterEach(() => {
-  mock.timers.reset();
+  vi.useRealTimers();
 });
 
 function harness(windowIsActive: () => boolean, focusIsFree: () => boolean = () => true) {
@@ -57,9 +58,9 @@ function harness(windowIsActive: () => boolean, focusIsFree: () => boolean = () 
 
 test('focus is restored when the window is already active', () => {
   const h = harness(() => true);
-  mock.timers.tick(0);
+  vi.advanceTimersByTime(0);
   flushRaf();
-  mock.timers.tick(80);
+  vi.advanceTimersByTime(80);
   assert.equal(h.count(), 3, 'all three attempts should focus an active window');
 });
 
@@ -70,9 +71,9 @@ test('focus is restored when the window is already active', () => {
 // against the unguarded `this.terminal?.focus()` it replaces.
 test('focus is never taken while another application is frontmost', () => {
   const h = harness(() => false);
-  mock.timers.tick(0);
+  vi.advanceTimersByTime(0);
   flushRaf();
-  mock.timers.tick(80);
+  vi.advanceTimersByTime(80);
   assert.equal(h.count(), 0, 'an inactive window must never pull focus');
 });
 
@@ -81,11 +82,11 @@ test('focus is never taken while another application is frontmost', () => {
 test('the guard is re-checked, so focus leaving the window mid-sequence stops it', () => {
   let active = true;
   const h = harness(() => active);
-  mock.timers.tick(0);
+  vi.advanceTimersByTime(0);
   assert.equal(h.count(), 1);
   active = false;
   flushRaf();
-  mock.timers.tick(80);
+  vi.advanceTimersByTime(80);
   assert.equal(h.count(), 1, 'attempts after focus left the window must stand down');
 });
 
@@ -99,9 +100,9 @@ test('focus is never taken off a control the user deliberately focused', () => {
     () => true,
     () => false,
   );
-  mock.timers.tick(0);
+  vi.advanceTimersByTime(0);
   flushRaf();
-  mock.timers.tick(80);
+  vi.advanceTimersByTime(80);
   assert.equal(h.count(), 0, 'a control holding focus must not be overruled');
 });
 
@@ -111,11 +112,11 @@ test('a restore still happens when nothing else holds focus', () => {
     () => true,
     () => free,
   );
-  mock.timers.tick(0);
+  vi.advanceTimersByTime(0);
   assert.equal(h.count(), 1, 'a dialog close leaves focus free, so the restore must run');
   // The user clicks into something before the trailing attempts land.
   free = false;
   flushRaf();
-  mock.timers.tick(80);
+  vi.advanceTimersByTime(80);
   assert.equal(h.count(), 1, 'later attempts must stand down once a control takes focus');
 });

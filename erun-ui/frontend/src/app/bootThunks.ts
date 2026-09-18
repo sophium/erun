@@ -105,7 +105,24 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
     seedEnvUsage(dispatch, tenants);
     seedEnvNodes(dispatch, tenants);
     dispatch(setCloudProviders(loaded.cloudProviders ?? []));
-    dispatch(setSelected(loaded.selected ?? null));
+    // getInitialState is a real backend round trip, so something can already
+    // own the terminal (most commonly an orchestrator session -- a restart
+    // handoff, or, in the headless test harness, a concurrent user/test
+    // action) by the time it resolves. Restoring the persisted "last selected
+    // environment" at that point is never useful and is actively harmful:
+    // setSelected's own selection-sync middleware reconciles terminal.sessionId
+    // onto whatever environment tab this selection names, clobbering
+    // whatever already claimed the terminal with a stale or empty session.
+    // terminal.sessionId is the right test rather than
+    // selectActiveSessionOrchestrator: on a fresh boot it is 0 until
+    // something sets it, and orchestrators.items is not populated until this
+    // same function's own loadOrchestrators() call further down -- an
+    // orchestrator that claimed the terminal concurrently is invisible to
+    // that selector until then, even though its session id is already
+    // sitting in terminal.sessionId.
+    if (getState().terminal.sessionId === 0) {
+      dispatch(setSelected(loaded.selected ?? null));
+    }
     dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions ?? [])));
     dispatch(
       setVersionSuggestionNotices(
@@ -131,7 +148,7 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
 
     const selected = getState().selection.selected;
     if (selected) {
-      await dispatch(openSelection(selected));
+      await dispatch(openSelection(selected, { isDefaultLandingOpen: true }));
       return;
     }
 

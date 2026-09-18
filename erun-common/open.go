@@ -201,6 +201,10 @@ type ShellLaunchParams struct {
 	Contribute bool
 	AITool     string
 	Claude     EnvironmentClaudeConfig
+	// Gateway is the erun-level OpenRouter catalog, when the operator has
+	// configured one. Set by the callers that launch an AI session; nil for
+	// every other use of these params, which leaves the launch unchanged.
+	Gateway *OpenRouterConfig
 	// RuntimeImage lets the AI session prelude advise on the erun-build-env
 	// skill only when the env still runs the default published runtime image.
 	RuntimeImage string
@@ -1018,7 +1022,7 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 		)
 	}
 	if req.AI {
-		body = append(body, AISessionLaunchLines(req.AITool, req.Claude, req.Tenant, req.Environment)...)
+		body = append(body, AISessionLaunchLines(req.AITool, req.Claude, req.Gateway, req.Tenant, req.Environment)...)
 	}
 	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
 }

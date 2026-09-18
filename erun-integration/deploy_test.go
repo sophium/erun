@@ -3354,6 +3354,57 @@ esac
 		golden.Equal(t, "deploy/dry_run_with_aws_claude_models_traces_set_strings", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_with_openrouter_gateway_traces_set_strings", func(t *testing.T) {
+		// Exercises eruncommon.helmClaudeSetArgs' gateway branch: the erun-level
+		// catalog in root config resolves into the runtime chart's
+		// claude.openRouter* helm --set-string args. Only the credential's Secret
+		// name travels — a token value never reaches helm argv. This env is also
+		// AWS, so it pins that the gateway's available-models and model variables
+		// are not emitted twice.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "managed")
+		envDir := filepath.Join(tenantDir, "prod")
+		for _, dir := range []string{tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("name: managed\nprojectroot: "+setup.Cwd+"\ndefaultenvironment: prod\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: prod\n" +
+			"repopath: " + setup.Cwd + "\n" +
+			"kubernetescontext: edge\n" +
+			"containerregistry: registry.example/test\n" +
+			"runtimeversion: 1.0.0\n" +
+			"managedcloud: true\n" +
+			"cloudprovideralias: dev\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		rootBody := "openrouter:\n" +
+			"  baseurl: https://openrouter.ai/api\n" +
+			"  authtokensecret: erun-claude-gateway\n" +
+			"  defaultmodel: deepseek/deepseek-v4-pro-0813\n" +
+			"  models:\n" +
+			"    - id: deepseek/deepseek-v4.1-flash\n" +
+			"      context: 1048576\n" +
+			"    - id: deepseek/deepseek-v4-pro-0813\n" +
+			"      context: 1024000\n"
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(rootBody), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_with_openrouter_gateway_traces_set_strings", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_helm_pending_recovery_via_auto_recover_env", func(t *testing.T) {
 		// Exercises wrapHelmDeployWithReleaseRecovery + the production
 		// helm-recovery path: a stubbed `helm` exits with the pending
@@ -4376,6 +4427,55 @@ esac
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/in_pod_remote_agent_runtime_deploy_allowed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_runtime_env_runtime_deploy_refused", func(t *testing.T) {
+		// Regression: a runtime env's pod carries only the config projection the
+		// chart injected, which has no deploy block — so `deploy.components` is
+		// empty in there even when the env has a saved selection, the
+		// runtime-chart-alone fallback is reached for lack of information rather
+		// than by choice, and the deploy exited 0 having rolled one chart of the
+		// nine the operator selected. The refusal names the runtime chart it would
+		// have rolled alone and both remedies.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a blind in-pod runtime deploy:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_runtime_deploy_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_runtime_env_explicit_runtime_component_allowed", func(t *testing.T) {
+		// The other remedy the refusal names: naming the runtime release rolls the
+		// runtime chart alone from inside the pod, deliberately rather than by
+		// inference. The runtime-only rollout this env's bootstrap/heal path needs
+		// stays reachable in-pod.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--components", "team-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_explicit_runtime_component_allowed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_runtime_env_saved_selection_still_resolves", func(t *testing.T) {
+		// The guard fires on the empty-selection fallback, not on being in a pod:
+		// a runtime env whose deploy.components resolved to something — the host
+		// case, where the operator's own config store is the one being read — is a
+		// real selection and deploys exactly as before, in-pod identity and all.
+		// Only the runtime-chart-alone inference is refused.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"team-devops"})
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_saved_selection_still_resolves", normalize.Apply(result.Combined))
 	})
 
 	t.Run("in_pod_local_agent_component_deploy_allowed", func(t *testing.T) {

@@ -97,10 +97,50 @@ type MCPToolListParams struct {
 	IdleProbe bool
 }
 
+// MCPTool is one tool descriptor as the edge returns it. It keeps the wire JSON
+// it was decoded from, so the structured surface (`erun mcp tools --output
+// json`) re-emits the protocol's own shape -- annotations, _meta, outputSchema,
+// title, and any field the protocol gains later -- instead of a narrowed copy.
+// The typed fields exist for the text renderer, which is free to summarize.
 type MCPTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+	Name        string
+	Description string
+	InputSchema json.RawMessage
+	// raw is the descriptor exactly as the edge sent it. Empty only for a tool
+	// this package constructed rather than decoded.
+	raw json.RawMessage
+}
+
+func (t *MCPTool) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		InputSchema json.RawMessage `json:"inputSchema"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	t.Name = fields.Name
+	t.Description = fields.Description
+	t.InputSchema = fields.InputSchema
+	t.raw = append(json.RawMessage(nil), data...)
+	return nil
+}
+
+// MarshalJSON re-emits the decoded descriptor verbatim. A tool the edge
+// annotated must reach a structured caller with those annotations intact, so
+// this must never rebuild the payload from the typed fields: any field this
+// build does not know about would be lost.
+func (t MCPTool) MarshalJSON() ([]byte, error) {
+	if len(t.raw) > 0 {
+		return t.raw, nil
+	}
+	type constructedTool struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+	}
+	return json.Marshal(constructedTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 }
 
 type MCPToolListResult struct {

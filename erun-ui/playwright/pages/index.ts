@@ -4,6 +4,7 @@ export { Titlebar } from './Titlebar';
 export { GlobalConfigDialog } from './GlobalConfigDialog';
 export { EnvironmentInitDialog } from './EnvironmentInitDialog';
 export { ManageDialog, type ManageTab } from './ManageDialog';
+export { BuildProfileDialog } from './BuildProfileDialog';
 export {
   type TabBox,
   type TabStripGeometry,

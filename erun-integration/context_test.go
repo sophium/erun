@@ -838,8 +838,9 @@ func TestContext(t *testing.T) {
 
 	t.Run("start_real_run_inside_working_hours_gate_clears", func(t *testing.T) {
 		// The permitting arm: an attached env inside its working window
-		// (00:00-23:59, all but one minute per day) lets a start without
-		// --force pass the gate and run the normal start flow.
+		// (00:00-23:59, the all-day span, unconditional including the day's
+		// last minute) lets a start without --force pass the gate and run the
+		// normal start flow.
 		setup := env.New(t)
 		seedCloudContextConfig(t, setup, "edge")
 		root := filepath.Join(setup.ConfigHome, "erun")

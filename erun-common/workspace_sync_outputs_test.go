@@ -112,6 +112,57 @@ func TestRemoteOutputsFilesReportsExitStatusPlainlyWhenSSHWroteNoStderr(t *testi
 	}
 }
 
+// TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass is erun#2387: the
+// outputs lane re-staged its whole set on every pass, byte for byte, even when
+// nothing had changed. workspaceSyncStubFetchMarkerEnv marks the moment the
+// pod's archive is actually streamed (the real ssh/tar transfer), so this test
+// proves the transfer itself is skipped for unchanged content -- not just that
+// the reported count looks right -- and that a genuine content change still
+// triggers a real transfer.
+func TestSyncOutputsArtifactsSkipsUnchangedContentOnSecondPass(t *testing.T) {
+	stubWorkspaceSyncSSHForOutputs(t)
+	t.Setenv(workspaceSyncStubOutputsEnv, "bin/tool")
+	marker := filepath.Join(t.TempDir(), "fetched")
+	t.Setenv(workspaceSyncStubFetchMarkerEnv, marker)
+
+	artifactsLocal := t.TempDir()
+	archive := writeWorkspaceSyncArchive(t, map[string][]byte{"bin/tool": []byte("build output v1")})
+	t.Setenv(workspaceSyncStubArchiveEnv, archive)
+
+	copied, _, err := syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
+	requireWorkspaceSyncNoError(t, err, "first sync pass")
+	if copied != 1 {
+		t.Fatalf("first pass: copied = %d, want 1 (nothing mirrored yet)", copied)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("first pass should have transferred the file: %v", statErr)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("clear transfer marker: %v", err)
+	}
+
+	copied, _, err = syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
+	requireWorkspaceSyncNoError(t, err, "second sync pass")
+	if copied != 0 {
+		t.Fatalf("second pass: copied = %d, want 0 for unchanged content", copied)
+	}
+	if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+		t.Fatalf("second pass re-transferred unchanged content instead of skipping it")
+	}
+
+	changedArchive := writeWorkspaceSyncArchive(t, map[string][]byte{"bin/tool": []byte("build output v2, genuinely different")})
+	t.Setenv(workspaceSyncStubArchiveEnv, changedArchive)
+
+	copied, _, err = syncOutputsArtifacts(context.Background(), "pod", "/home/agent/outputs", artifactsLocal)
+	requireWorkspaceSyncNoError(t, err, "third sync pass")
+	if copied != 1 {
+		t.Fatalf("third pass: copied = %d, want 1 for genuinely changed content", copied)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("third pass should have transferred the genuinely changed content: %v", statErr)
+	}
+}
+
 func TestSyncOutputsArtifactsTreatsNonConnectionFindFailureAsInconclusive(t *testing.T) {
 	stubWorkspaceSyncSSHForOutputs(t)
 	// Exit 1 simulates `find` itself failing once inside the outputs dir (e.g. a
