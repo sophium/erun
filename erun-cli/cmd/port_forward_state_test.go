@@ -3,10 +3,49 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
 )
+
+// portForwardSandboxForTest points every per-user directory the state-path
+// resolution consults at a fresh temp root, and returns the config and cache
+// directories the code under test resolves inside it.
+//
+// Binding only XDG_CONFIG_HOME/XDG_CACHE_HOME is not enough: os.UserConfigDir
+// and os.UserCacheDir read HOME on darwin and ignore both, so a test bound that
+// way resolves -- and, on the non-dry-run path, renames -- files under the
+// operator's real ~/Library/Application Support and ~/Library/Caches. HOME is
+// bound for that reason, and each directory that comes back is asserted to sit
+// inside the sandbox, so a change to either rule fails loudly here instead of
+// reaching the real home.
+func portForwardSandboxForTest(t *testing.T) (configDir, cacheDir string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_CACHE_HOME", "")
+
+	var err error
+	if configDir, err = os.UserConfigDir(); err != nil {
+		t.Fatalf("os.UserConfigDir: %v", err)
+	}
+	if cacheDir, err = os.UserCacheDir(); err != nil {
+		t.Fatalf("os.UserCacheDir: %v", err)
+	}
+	for _, dir := range []string{configDir, cacheDir} {
+		if !strings.HasPrefix(dir, root+string(filepath.Separator)) {
+			t.Fatalf("sandbox escape: resolved %q, outside the temp root %q; this test would read and move the operator's real per-user state", dir, root)
+		}
+	}
+
+	// Pin the XDG variables to the resolved directories so the whole sandbox is
+	// one tree on every platform, including the adrg/xdg-backed config store.
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	return configDir, cacheDir
+}
 
 func seedLegacyPortForwardState(t *testing.T, cacheHome, kind, tenant, environment string) string {
 	t.Helper()
@@ -26,10 +65,7 @@ func seedLegacyPortForwardState(t *testing.T, cacheHome, kind, tenant, environme
 // before its own dry-run check, so a dry run must not move the operator's
 // legacy-cache-dir state file to its new location.
 func TestPortForwardStatePathDryRunDoesNotMigrateLegacyState(t *testing.T) {
-	configHome := t.TempDir()
-	cacheHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
-	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	_, cacheHome := portForwardSandboxForTest(t)
 
 	legacyPath := seedLegacyPortForwardState(t, cacheHome, "api", "acme", "dev")
 
@@ -56,10 +92,7 @@ func TestPortForwardStatePathDryRunDoesNotMigrateLegacyState(t *testing.T) {
 // real (non-dry-run) resolution still performs the one-time migration the
 // dry-run case above must skip.
 func TestPortForwardStatePathMigratesLegacyStateWhenNotDryRun(t *testing.T) {
-	configHome := t.TempDir()
-	cacheHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
-	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	_, cacheHome := portForwardSandboxForTest(t)
 
 	legacyPath := seedLegacyPortForwardState(t, cacheHome, "api", "acme", "dev")
 
@@ -88,8 +121,7 @@ func TestPortForwardStatePathMigratesLegacyStateWhenNotDryRun(t *testing.T) {
 // same one, so a record under it has to be carried to the canonical spelling
 // instead of reported as a missing forward.
 func TestPortForwardStatePathCarriesTheLowercaseSpelledStateForward(t *testing.T) {
-	configHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
+	configHome, _ := portForwardSandboxForTest(t)
 	caseInsensitive := caseInsensitiveVolumeForTest(t, configHome)
 
 	legacyPath := seedLegacyLowercaseSpelledPortForwardState(t, configHome, "api", "acme", "dev")
@@ -120,8 +152,7 @@ func TestPortForwardStatePathCarriesTheLowercaseSpelledStateForward(t *testing.T
 // every ensure*PortForward call makes before its own dry-run check, so a dry run
 // must report where the record lives today without moving it.
 func TestPortForwardStatePathDryRunKeepsTheLowercaseSpelledStateInPlace(t *testing.T) {
-	configHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
+	configHome, _ := portForwardSandboxForTest(t)
 	caseInsensitive := caseInsensitiveVolumeForTest(t, configHome)
 
 	legacyPath := seedLegacyLowercaseSpelledPortForwardState(t, configHome, "api", "acme", "dev")
