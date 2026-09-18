@@ -8,6 +8,7 @@ import {
   relativeDashboardDate,
   tenantDashboardPanel,
 } from '@/app/tenantDashboardPanels';
+import { AccessDeniedBody } from '@/components/app/AccessRemedyNote';
 import { InlineAlert } from '@/components/app/InlineAlert';
 
 export type TenantDashboardData = AppState['tenantDashboard']['data'];
@@ -35,7 +36,11 @@ export function PanelBody({
       <div className="mt-4">
         <EmptyState
           heading="You do not have access to this panel"
-          body={`It needs ${panel.restricted}. Ask an administrator for access.`}
+          body={
+            <AccessDeniedBody remedies={data?.accessRemedies} restricted={panel.restricted}>
+              {`It needs ${panel.restricted}. Ask an administrator for access.`}
+            </AccessDeniedBody>
+          }
         />
       </div>
     );

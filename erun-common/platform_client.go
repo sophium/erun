@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -371,6 +372,69 @@ func (c *PlatformClient) CreateUser(ctx context.Context, params PlatformCreateUs
 	var user PlatformUser
 	err := c.do(ctx, http.MethodPost, "/v1/users", params, true, &user)
 	return user, err
+}
+
+// PlatformRolePermission is one permission a role grants: either an exact
+// apiMethod/apiPath pair or an apiMethodPattern/apiPathPattern regex pair,
+// never both and never neither — the same shape role_permissions stores.
+type PlatformRolePermission struct {
+	APIMethod        string `json:"apiMethod,omitempty"`
+	APIPath          string `json:"apiPath,omitempty"`
+	APIMethodPattern string `json:"apiMethodPattern,omitempty"`
+	APIPathPattern   string `json:"apiPathPattern,omitempty"`
+}
+
+// PlatformRole is a named, tenant-owned bundle of permissions. Name is what an
+// operator recognizes; RoleID is what a grant takes, which is why a client
+// that can only name the missing access has to resolve one to the other
+// before it can hand over a command that runs.
+type PlatformRole struct {
+	RoleID      string                   `json:"roleId"`
+	TenantID    string                   `json:"tenantId,omitempty"`
+	Name        string                   `json:"name"`
+	Permissions []PlatformRolePermission `json:"permissions"`
+}
+
+// Covers reports whether this role would let a caller through to method on to
+// apiPath. It mirrors the server's own resolution: an exact pair matches
+// literally, a pattern pair matches as compiled regexes, and a permission
+// missing either half of its pair never matches anything. An unparseable
+// pattern covers nothing rather than everything — a client rendering a remedy
+// must not promise access on the strength of a pattern it could not read.
+func (r PlatformRole) Covers(method string, apiPath string) bool {
+	for _, permission := range r.Permissions {
+		if permission.covers(method, apiPath) {
+			return true
+		}
+	}
+	return false
+}
+
+// covers reports whether this one permission lets the method through, under
+// whichever of the two shapes it carries. A permission missing either half of
+// its pair covers nothing, and a pattern that does not compile matches
+// nothing rather than everything.
+func (p PlatformRolePermission) covers(method string, apiPath string) bool {
+	if p.APIMethod != "" && p.APIPath != "" {
+		return p.APIMethod == method && p.APIPath == apiPath
+	}
+	if p.APIMethodPattern == "" || p.APIPathPattern == "" {
+		return false
+	}
+	return matchesPattern(p.APIMethodPattern, method) && matchesPattern(p.APIPathPattern, apiPath)
+}
+
+func matchesPattern(pattern string, value string) bool {
+	matched, err := regexp.MatchString(pattern, value)
+	return err == nil && matched
+}
+
+// ListRoles lists the caller's tenant's roles. There is no cross-tenant
+// override: RLS scopes it to the tenant the caller's token resolved.
+func (c *PlatformClient) ListRoles(ctx context.Context) ([]PlatformRole, error) {
+	var roles []PlatformRole
+	err := c.do(ctx, http.MethodGet, "/v1/roles", nil, true, &roles)
+	return roles, err
 }
 
 // PlatformGrantUserRoleParams grants one role to one already-enrolled user.
