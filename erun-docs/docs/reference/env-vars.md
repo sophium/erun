@@ -64,6 +64,11 @@ launch, and the shared orchestrator contract reads its scope from them.
 | `ERUN_UI_SESSION` | bool literal `1` | unset | Internal. Marks the process as one the desktop app started, so the app can tell its own session from a shell the Operator opened by hand. Do not depend on this. | Desktop app, for every session it launches (orchestrator and in-app shell alike). |
 | `ERUN_DEV_BIN_DIR` | absolute path | `erun-cli/bin` | Internal to the development wrapper `erun-cli/run.sh`, which reads it as the directory it builds `erun` and `erun-app` into. An Operator sets it to a directory outside the checkout so that invoking `erun` does not write into a worktree — which a host-side orchestrator treats as a read-only review directory. Do not depend on this; it is not part of the session contract. | `erun-cli/run.sh` (read from the environment, never set by erun). |
 
+One variable outside the `ERUN_*` namespace is set here too:
+`CLAUDE_CODE_SUBAGENT_MODEL` (string, `opus`), which pins the model the
+session's subagents run on. The in-pod Claude variables above are unrelated —
+those come from `EnvConfig.claude.*` and describe a pod, not a session.
+
 Read scope from `ERUN_ORCHESTRATOR_ID`, never from memory or disk: the id is the
 only thing that ties a session to its `orchestrators:` entry.
 
