@@ -97,8 +97,8 @@ function routeLoadTenantDashboard(
 // dismissAIOccupancyPromptIfShown is a defensive wait, not a feature this
 // spec is testing: opening an environment auto-spawns its AI tab
 // (ensureDefaultEnvTabs), which resolves either into an AI tab or -- if the
-// environment's activity lease is already held -- the occupancy prompt
-// (erun#1221). These tests care about the diff panel, not the AI tab, so race
+// environment's activity lease is already held -- the occupancy prompt.
+// These tests care about the diff panel, not the AI tab, so race
 // on whichever the spawn actually produces and clear the prompt out of the
 // way rather than letting it block a later click.
 async function dismissAIOccupancyPromptIfShown(
@@ -184,7 +184,7 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     // Unlike the other two blocked reasons (checked below), this one names a
     // destination on a different surface -- so the popover carries a real
     // action to get there in one click, rather than leaving the reader to
-    // find the tenant dashboard on their own (#1388).
+    // find the tenant dashboard on their own.
     const openReviewsTab = app.page.getByRole('button', { name: 'Open Reviews tab' });
     await expect(openReviewsTab).toBeVisible();
     await openReviewsTab.click();
@@ -225,7 +225,7 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       await page.getByRole('button', { name: 'Comment on line 1 of main.go' }).click();
       await expect(page.getByText('Commit this change before commenting on it.')).toBeVisible();
       // This blocked reason is actionable exactly where the operator already
-      // stands (commit the change), so it stays message-only (#1388).
+      // stands (commit the change), so it stays message-only.
       await expect(page.getByRole('button', { name: 'Open Reviews tab' })).toHaveCount(0);
       await expect(page.getByLabel('New comment')).toHaveCount(0);
     } finally {
@@ -266,7 +266,7 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
         page.getByText('You do not have access to comment on this review.'),
       ).toBeVisible();
       // Actionable exactly where the operator stands (ask for access), so no
-      // navigation button here either (#1388).
+      // navigation button here either.
       await expect(page.getByRole('button', { name: 'Open Reviews tab' })).toHaveCount(0);
       await expect(page.getByLabel('New comment')).toHaveCount(0);
     } finally {
