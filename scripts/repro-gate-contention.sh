@@ -340,9 +340,23 @@ exit \$suite_rc"
 	grep -E '^[[:space:]]+(Slow test file|Total:|[0-9]+ (passed|failed|flaky))' "$log" | tail -5 | sed 's/^/   /'
 	# A load that never ran reports the same spec list as one that saturated
 	# the box, so its evidence is part of the verdict rather than a footnote.
+	# The cgroup counters are the load's real evidence: they are numeric, they
+	# are read inside the container, and they survive a live load -- `make`
+	# replays a target's output when its batch finishes (parallel-gate.sh), so
+	# the load's own log is 0 bytes for the whole length of a contended run and
+	# reads identically to a load that never started.
 	if [ "$control" -eq 0 ]; then
+		cpu_stat=$(grep -m1 '^>> cgroup cpu\.stat' "$log" || true)
+		if [ -n "$cpu_stat" ]; then
+			printf '   %s\n' "$cpu_stat"
+		fi
 		printf '   load [%s]:\n' "$load"
-		sed -n '/^>> load \[/,$p' "$log" | tail -n 8 | sed 's/^/     /'
+		evidence=$(sed -n '/^>> load \[/,$p' "$log" | tail -n 8)
+		printf '%s\n' "$evidence" | sed 's/^/     /'
+		beyond_header=$(printf '%s\n' "$evidence" | grep -cv '^>> load \[' || true)
+		if [ "$beyond_header" -eq 0 ]; then
+			printf '     (no output yet: a target'"'"'s log is replayed when its batch ends)\n'
+		fi
 	fi
 	printf '   log: %s\n' "$log"
 	return "$rc"
