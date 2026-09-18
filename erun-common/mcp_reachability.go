@@ -154,13 +154,6 @@ const (
 	LocalMCPTargetNotAnswering LocalMCPUnreachableKind = "target-not-answering"
 )
 
-// HoldsPort reports whether this kind describes a local port that something is
-// holding. A held port is not a fallback to a local store: a pod may well be
-// running work behind a forward that is not answering it.
-func (k LocalMCPUnreachableKind) HoldsPort() bool {
-	return k == LocalMCPStaleForward || k == LocalMCPTargetNotAnswering
-}
-
 // ClassifyLocalMCPUnreachable reports which locally observable failure shape
 // applies for a port that CanReachLocalMCPEndpoint has already reported
 // unreachable.
@@ -185,7 +178,7 @@ func DescribeLocalMCPUnreachable(tenant, environment string, port int) string {
 	case LocalMCPStaleForward:
 		return fmt.Sprintf("the port-forward for %s/%s on 127.0.0.1:%d is not carrying traffic (the local port is held but the edge never answers) — re-establishing it", tenant, environment, port)
 	case LocalMCPTargetNotAnswering:
-		return fmt.Sprintf("the port-forward for %s/%s on 127.0.0.1:%d is up but the environment behind it did not answer (the local port took the connection and closed it without a reply) — the environment is most likely still starting, so retry shortly rather than re-opening it", tenant, environment, port)
+		return fmt.Sprintf("the port-forward for %s/%s on 127.0.0.1:%d is up but the environment behind it did not answer (the local port took the connection and closed it without a reply) — the environment is most likely still starting, so retry shortly, and re-establish the forward only if it stays unresponsive", tenant, environment, port)
 	}
 	return fmt.Sprintf("no port-forward is listening for %s/%s on 127.0.0.1:%d", tenant, environment, port)
 }

@@ -850,8 +850,13 @@ exit 3`)
 		if !strings.Contains(result.Combined, "still starting") {
 			t.Fatalf("expected the unready target to be named as such, got:\n%s", result.Combined)
 		}
-		if strings.Contains(result.Combined, "run `erun open team dev`") {
-			t.Fatalf("re-opening an environment whose forward is up replaces nothing, got:\n%s", result.Combined)
+		// Re-opening is what the stale shape prints, and it replaces nothing
+		// while the forward is up and working.
+		if strings.Contains(result.Combined, "so the local MCP port-forward is up") {
+			t.Fatalf("an environment whose forward is up must not be sent to a re-open, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "if it stays unresponsive") {
+			t.Fatalf("the unready target still needs a way out when it does not recover, got:\n%s", result.Combined)
 		}
 	})
 
