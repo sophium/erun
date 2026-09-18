@@ -32,7 +32,7 @@ func (r stubWhoamiTenantRepository) Current(context.Context) (model.Tenant, erro
 	return r.tenant, nil
 }
 
-// TestWhoamiTenantNameMatchesTenantRecordNotUsername locks erun#2083: an
+// TestWhoamiTenantNameMatchesTenantRecordNotUsername locks the agreement: an
 // operator read whoami's leading username field as if it were the tenant's
 // name, because whoami carried no tenant name field at all and its
 // plain-text rendering put the username exactly where a tenant name would

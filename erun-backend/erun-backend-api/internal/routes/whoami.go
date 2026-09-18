@@ -16,7 +16,7 @@ type WhoamiUserRepository interface {
 
 // WhoamiTenantRepository resolves the caller's own tenant record off the
 // exact same tenants.name column and TenantRepository.Current method that
-// GET /v1/tenants reads (erun#2083: whoami used to carry no tenant name at
+// GET /v1/tenants reads (whoami used to carry no tenant name at
 // all, and its plain-text line put the caller's own username where an
 // operator naturally reads a tenant name, which is what made an ordinary
 // username look like a tenant list disagreement). Reusing the identical read
