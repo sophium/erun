@@ -12,7 +12,6 @@ release: classified mode = stable
 release: develop branch "develop" exists = true
 <VERSION>
 audit: erun release
-==> Releasing <VERSION>
 release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
@@ -24,22 +23,7 @@ Current branch main is up to date.
 stage: release
 [main <SHORTSHA>] [skip ci] release <VERSION>
  2 files changed, 4 insertions(+), 4 deletions(-)
-release: origin/main has not moved since sync-remote
-release: docker root free disk space is not observable from this process; skipping the headroom check
-stage: publish
-fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
-fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
-promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
-fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
-fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
-promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
-==> Publishing api <VERSION> to oci://ghcr.io/sophium/charts
-==> Verified published chart api <VERSION>
-==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
-==> Verified published chart base <VERSION>
-stage: verify-publication
-==> Verified published image ghcr.io/sophium/api:<VERSION>
-==> Verified published image ghcr.io/sophium/base:<VERSION>
+release version: <VERSION> (source control only; no artifacts were built or published)
 stage: post-release-version-bump
 [main <SHORTSHA>] [skip ci] prepare <VERSION>
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -60,37 +44,6 @@ To <TMP>
  * [new tag]         <VERSION> -> <VERSION>
  ! [rejected]        develop -> develop (non-fast-forward)
 error: failed to push some refs to '<TMP>'
-==> Release failed after <ELAPSED>
-step timing (ordered by duration):
-  release (failed) [<ELAPSED>] — exit status 1
-release: the push was rejected for develop (non-fast-forward), which is not origin/main having moved during the release, so nothing is rebased or retried.
-Everything else this release publishes is already public: its images and charts verified on the registry and tag <VERSION> is on the remote. What did not land is develop (non-fast-forward).
-The GitHub Release object for <VERSION> is created after this push, so it does not exist yet either.
-Recover by hand — do not delete tag <VERSION> and do not reset main, both are already public:
-  git -C <TMP> fetch origin
-  reconcile develop with its remote, push it, then create the GitHub Release for the existing tag <VERSION>
-    post-release-version-bump [<ELAPSED>]
-    publish [<ELAPSED>]
-      api (cache hit) [<ELAPSED>]
-        linux/amd64 (cache hit) [<ELAPSED>]
-        linux/arm64 (cache hit) [<ELAPSED>]
-      base (cache hit) [<ELAPSED>]
-        linux/amd64 (cache hit) [<ELAPSED>]
-        linux/arm64 (cache hit) [<ELAPSED>]
-      chart api [<ELAPSED>]
-      chart base [<ELAPSED>]
-    push (failed) [<ELAPSED>] — exit status 1
-release: the push was rejected for develop (non-fast-forward), which is not origin/main having moved during the release, so nothing is rebased or retried.
-Everything else this release publishes is already public: its images and charts verified on the registry and tag <VERSION> is on the remote. What did not land is develop (non-fast-forward).
-The GitHub Release object for <VERSION> is created after this push, so it does not exist yet either.
-Recover by hand — do not delete tag <VERSION> and do not reset main, both are already public:
-  git -C <TMP> fetch origin
-  reconcile develop with its remote, push it, then create the GitHub Release for the existing tag <VERSION>
-    release [<ELAPSED>]
-    sync-develop [<ELAPSED>]
-    sync-remote [<ELAPSED>]
-    verify-publication [<ELAPSED>]
-timing record written to <TMP>
 exit status 1
 release: the push was rejected for develop (non-fast-forward), which is not origin/main having moved during the release, so nothing is rebased or retried.
 Everything else this release publishes is already public: its images and charts verified on the registry and tag <VERSION> is on the remote. What did not land is develop (non-fast-forward).
