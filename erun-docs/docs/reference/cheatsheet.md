@@ -42,7 +42,7 @@ erun deploy --version 1.0.77 --tenant t --environment prod \
 
 ```bash
 erun list                           # tenants · envs · effective target
-erun list cloud                     # managed cloud contexts only
+erun context list                   # managed cloud contexts only
 erun doctor                         # diagnose local config + runtime pod
 erun version                        # erun's build version (+ the project's, when in one)
 erun mcp tools                      # what the env's MCP edge can do

@@ -200,9 +200,36 @@ export const selectWhipDefaultTarget = (state: RootState): WhipDefaultTarget => 
 };
 
 export interface ReviewEnvTarget {
+  kind: 'env';
   envKey: string;
   tenant: string;
   environment: string;
+}
+
+// ReviewDirectoryTarget is a directory an orchestrator works in directly: a path
+// on this machine that belongs to no environment, so it has no tenant, no
+// environment and no MCP edge. It is a review target all the same -- the diff is
+// that directory's own working tree, read with host git rather than over an MCP
+// -- so the panel shows its changes beside the linked environments' instead of
+// reading "No environment selected" for a scope the orchestrator actually has.
+export interface ReviewDirectoryTarget {
+  kind: 'directory';
+  // envKey is the panel's opaque slot key, shared with diffByEnv, the
+  // selected-path map and the collapsed-directory map. A directory has no
+  // tenant/environment to spell "<tenant>/<environment>" from, so it carries a
+  // namespaced key instead; nothing splits these keys, so the only requirements
+  // are that they are stable and that they cannot collide with an environment's.
+  envKey: string;
+  directory: string;
+}
+
+export type ReviewTarget = ReviewEnvTarget | ReviewDirectoryTarget;
+
+// reviewDirectoryKey names one directory's slot. The prefix is what keeps it
+// distinct from an environment's "<tenant>/<environment>"; the path follows
+// verbatim, so a store dump reads as the path itself.
+export function reviewDirectoryKey(directory: string): string {
+  return 'directory:' + directory;
 }
 
 // DiagnosticsContext names which evidence the Diagnostics console shows: an
@@ -213,7 +240,7 @@ export type DiagnosticsContext =
   | { kind: 'environment'; tenant: string; environment: string }
   | { kind: 'app' };
 
-// selectDiagnosticsContext mirrors selectReviewEnvTargets' own precedence
+// selectDiagnosticsContext mirrors selectReviewTargets' own precedence
 // (orchestrator session over sidebar selection) rather than introducing a
 // second notion of "what's active" — an orchestrator session used to leave
 // the Diagnostics panel reading "environment: none selected" with no trace,
@@ -230,18 +257,35 @@ export const selectDiagnosticsContext = (state: RootState): DiagnosticsContext =
   return { kind: 'app' };
 };
 
-// selectReviewEnvTargets resolves which environments the diff panel shows: an
-// orchestrator session's linked environments in its configured order, else the
-// single selected environment. A single environment is the one-entry case, so
-// the panel has one code path rather than two (#1178).
-export const selectReviewEnvTargets = (state: RootState): ReviewEnvTarget[] => {
+// selectReviewTargets resolves what the diff panel shows: an orchestrator
+// session's linked environments and the directories it works in itself, in the
+// order its definition names them, else the single selected environment. One
+// target is the one-entry case, so the panel has one code path rather than two --
+// an environment and a directory differ in where their diff is read from, not in
+// how the panel treats them.
+export const selectReviewTargets = (state: RootState): ReviewTarget[] => {
   const orchestrator = selectActiveSessionOrchestrator(state);
   if (orchestrator) {
-    return orchestrator.environments.map((env) => ({
-      envKey: `${env.tenant}/${env.environment}`,
-      tenant: env.tenant,
-      environment: env.environment,
-    }));
+    // Environments first, then the orchestrator's own directories, so the panel
+    // reads in the order the definition names them and a single-environment
+    // session looks exactly as it did before directories existed.
+    return [
+      ...orchestrator.environments.map(
+        (env): ReviewTarget => ({
+          kind: 'env',
+          envKey: `${env.tenant}/${env.environment}`,
+          tenant: env.tenant,
+          environment: env.environment,
+        }),
+      ),
+      ...orchestrator.directories.map(
+        (directory): ReviewTarget => ({
+          kind: 'directory',
+          envKey: reviewDirectoryKey(directory),
+          directory,
+        }),
+      ),
+    ];
   }
   const selection = state.selection.selected;
   if (!selection) {
@@ -249,6 +293,7 @@ export const selectReviewEnvTargets = (state: RootState): ReviewEnvTarget[] => {
   }
   return [
     {
+      kind: 'env',
       envKey: `${selection.tenant}/${selection.environment}`,
       tenant: selection.tenant,
       environment: selection.environment,

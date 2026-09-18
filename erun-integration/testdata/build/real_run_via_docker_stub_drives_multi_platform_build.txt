@@ -1,5 +1,6 @@
 audit: erun build
 ==> Building
+build: docker root free disk space is not observable from this process; skipping the headroom check
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
