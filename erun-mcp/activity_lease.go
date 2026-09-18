@@ -39,7 +39,7 @@ type ActivityLeaseResult struct {
 	Lease       *eruncommon.EnvironmentActivityLease  `json:"lease,omitempty"`
 	Held        []eruncommon.EnvironmentActivityLease `json:"held"`
 	// Released and Note are set only by activity_lease_release. Released is
-	// true only when a matching lease was actually removed — before erun#2115
+	// true only when a matching lease was actually removed — before this fix
 	// a no-match and a real release both reported identical success. Note
 	// explains a no-match when the id is actually held under a different
 	// shape (plain vs exclusive, or a different scope) than the caller asked

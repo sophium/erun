@@ -406,7 +406,7 @@ func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) 
 }
 
 // ReleaseEnvironmentActivityLeaseResult reports whether a release call found
-// and removed a matching lease. Before erun#2115, a call that matched nothing
+// and removed a matching lease. Before this fix, a call that matched nothing
 // and a call that genuinely released something both printed the identical
 // "lease released" success, which hid a still-held exclusive claim from an
 // operator who released it with the wrong flags. Released distinguishes the
@@ -429,7 +429,7 @@ type ReleaseEnvironmentActivityLeaseResult struct {
 // errors, so a wrapper's exit trap never fails a job that already finished
 // cleanly. The returned result still reports honestly whether anything was
 // actually removed, and names it when the id is actually held as an exclusive
-// claim instead — the exact case erun#2115 reported.
+// claim instead.
 func ReleaseEnvironmentActivityLease(tenant, environment, id string) (ReleaseEnvironmentActivityLeaseResult, error) {
 	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
@@ -453,7 +453,7 @@ func ReleaseEnvironmentActivityLease(tenant, environment, id string) (ReleaseEnv
 // describeUnmatchedLeaseRelease explains why a release matched nothing by
 // checking whether id is actually held under a different shape (plain vs
 // exclusive, or a different scope) than the caller asked to release — the
-// exact case erun#2115 reported: an --exclusive claim taken on one scope,
+// exact case: an --exclusive claim taken on one scope,
 // released without --exclusive --scope <that scope>, used to report success
 // while the claim it meant to clear stayed held. wantExclusive/wantScope name
 // what the caller actually asked to release. Empty when nothing at all is

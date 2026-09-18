@@ -922,7 +922,7 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("lease_release_with_mismatched_flags_reports_no_match_and_does_not_clear_the_claim", func(t *testing.T) {
-		// erun#2115: an exclusive claim released with the wrong flags (a plain
+		// An exclusive claim released with the wrong flags (a plain
 		// release of an id actually held exclusively) used to print "lease
 		// released" and clear nothing, hiding a still-held exclusive claim from
 		// the operator. This must still exit 0 (a wrapper's cleanup trap must

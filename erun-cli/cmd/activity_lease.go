@@ -188,7 +188,7 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 }
 
 // writeActivityLeaseReleaseResult reports what the release actually did.
-// erun#2115: a no-match release used to print the identical "lease released"
+// A no-match release used to print the identical "lease released"
 // success text a real release does, hiding a still-held exclusive claim from
 // an operator who released it with the wrong flags. The exit code stays 0
 // either way — a wrapper's cleanup trap must never fail over this — but the
@@ -313,8 +313,7 @@ func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivity
 		}
 		// Naming the exclusive scope here is what lets an operator write the
 		// matching release (--exclusive --scope <scope>) from what list
-		// prints, instead of guessing after a release reports no match
-		// (erun#2115).
+		// prints, instead of guessing after a release reports no match.
 		if lease.Exclusive {
 			value += fmt.Sprintf(", exclusive scope %s", lease.Scope)
 		}

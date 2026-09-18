@@ -114,7 +114,7 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 
 func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
 	// A wrapper's exit trap must not fail a job that already finished, so
-	// releasing a lease that was never taken is success — but erun#2115 says
+	// releasing a lease that was never taken is success — but the contract is that
 	// the result must still say plainly that nothing was actually released.
 	isolateActivityCache(t)
 	result, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
@@ -129,7 +129,7 @@ func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
 	}
 }
 
-// erun#2115: releasing a plain lease that does not exist, because the id is
+// Releasing a plain lease that does not exist, because the id is
 // actually held as an exclusive claim, used to report identical success to a
 // real release — hiding a still-held exclusive claim from an operator who
 // used the wrong flags. The release must still succeed (never break a
