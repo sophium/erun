@@ -510,6 +510,12 @@ here happen to have files — read the config every time.
 - **On completion, present the assumptions you took.** End with a concise list of
   every recommended assumption you made in place of asking, so the operator can
   course-correct. This list is required, not optional.
+- **Land work through the target repository's review and merge queue.** A branch
+  that arrives as a pull request may be gated and landed as one; a branch you
+  caused to exist must reach MERGE, which the platform verifies against the
+  recorded gate build and the remote's own tip. A closed pull request asserts a
+  landing rather than proving one, so it is never the finish line. Do not finish
+  delegated work by opening a pull request.
 - Make irreversible, remote, and cross-environment actions explicit beforehand.
   A heads-up does not replace approval when the action is outside the authorized
   scope. General engineering and direct in-pod interaction rules remain in the
