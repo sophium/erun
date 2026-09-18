@@ -646,35 +646,57 @@ func validateWorkingHours(value string) error {
 	return nil
 }
 
+// lastMinuteOfDay is the highest minute-of-day parseClockMinute can produce
+// (23:59). HH:MM has no way to spell midnight/24:00, so a window declared
+// 00:00-23:59 is the only literal all-day span an operator can write.
+const lastMinuteOfDay = 23*60 + 59
+
+func applyWorkingHoursTimezone(now time.Time, timezone string) (time.Time, error) {
+	timezone = strings.TrimSpace(timezone)
+	if timezone == "" {
+		return now, nil
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return now, fmt.Errorf("invalid environment idle timezone %q: %w", timezone, err)
+	}
+	return now.In(loc), nil
+}
+
 func workingHoursStatus(value string, timezone string, now time.Time) (bool, int64, error) {
 	start, end, err := parseWorkingHours(value)
 	if err != nil {
 		return false, 0, err
 	}
-	if timezone = strings.TrimSpace(timezone); timezone != "" {
-		loc, locErr := time.LoadLocation(timezone)
-		if locErr != nil {
-			return false, 0, fmt.Errorf("invalid environment idle timezone %q: %w", timezone, locErr)
-		}
-		now = now.In(loc)
+	now, err = applyWorkingHoursTimezone(now, timezone)
+	if err != nil {
+		return false, 0, err
 	}
+	outside, remainingSeconds := evaluateWorkingHoursWindow(start, end, now)
+	return outside, remainingSeconds, nil
+}
+
+func evaluateWorkingHoursWindow(start, end int, now time.Time) (bool, int64) {
 	minute := now.Hour()*60 + now.Minute()
-	if start < end {
-		outside := minute < start || minute >= end
-		if outside {
-			return true, 0, nil
-		}
-		return false, int64((end-minute)*60 - now.Second()), nil
+	if start == 0 && end == lastMinuteOfDay {
+		// The all-day span is always inside rather than excluding the day's
+		// last minute under the ordinary end-exclusive rule below.
+		return false, int64((24*60-minute)*60 - now.Second())
 	}
-	outside := minute >= end && minute < start
-	if outside {
-		return true, 0, nil
+	if start < end {
+		if minute < start || minute >= end {
+			return true, 0
+		}
+		return false, int64((end-minute)*60 - now.Second())
+	}
+	if minute >= end && minute < start {
+		return true, 0
 	}
 	remainingMinutes := end - minute
 	if remainingMinutes <= 0 {
 		remainingMinutes += 24 * 60
 	}
-	return false, int64(remainingMinutes*60 - now.Second()), nil
+	return false, int64(remainingMinutes*60 - now.Second())
 }
 
 func parseWorkingHours(value string) (int, int, error) {

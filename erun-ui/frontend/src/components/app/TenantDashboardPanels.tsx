@@ -7,6 +7,7 @@ import type {
   UITenantDashboardUser,
 } from '@/types';
 
+import { BuildProfileDialog, BuildProfileViewButton } from './BuildProfileDialog';
 import { InlineAlert } from './InlineAlert';
 import {
   DataCell,
@@ -39,11 +40,11 @@ export function TenantDashboardPanels({ data }: { data: TenantDashboardData }): 
 }
 
 function UsersPanel({ data }: { data: TenantDashboardData }): React.ReactElement {
-  const user = data?.user;
+  const users = data?.users ?? [];
   return (
     <TabsContent value="users" className="min-h-0 overflow-auto">
       <PanelBody data={data} tab="users" empty={<EmptyState heading="No signed-in user" />}>
-        {user ? <UsersTable users={[user]} /> : null}
+        {users.length > 0 ? <UsersTable users={users} /> : null}
       </PanelBody>
     </TabsContent>
   );
@@ -51,6 +52,7 @@ function UsersPanel({ data }: { data: TenantDashboardData }): React.ReactElement
 
 function BuildsPanel({ data }: { data: TenantDashboardData }): React.ReactElement {
   const builds = data?.builds ?? [];
+  const [selectedBuild, setSelectedBuild] = React.useState<UITenantDashboardBuild | null>(null);
   return (
     <TabsContent value="builds" className="min-h-0 overflow-auto">
       <PanelBody
@@ -63,8 +65,14 @@ function BuildsPanel({ data }: { data: TenantDashboardData }): React.ReactElemen
           />
         }
       >
-        {builds.length > 0 ? <BuildsTable builds={builds} /> : null}
+        {builds.length > 0 ? <BuildsTable builds={builds} onSelect={setSelectedBuild} /> : null}
       </PanelBody>
+      <BuildProfileDialog
+        build={selectedBuild}
+        onClose={() => {
+          setSelectedBuild(null);
+        }}
+      />
     </TabsContent>
   );
 }
@@ -95,7 +103,7 @@ function UsersTable({ users }: { users: UITenantDashboardUser[] }): React.ReactE
       {users.map((user) => (
         <tr key={user.userId || (user.username ?? '') || (user.subject ?? '')}>
           <DataCell strong>{displayUsername(user)}</DataCell>
-          <DataCell>{formatRoles(user.roles)}</DataCell>
+          <DataCell>{formatRosterRoles(user.roles)}</DataCell>
         </tr>
       ))}
     </DataTable>
@@ -114,9 +122,18 @@ function buildSourceLabel(build: UITenantDashboardBuild): string {
   return '—';
 }
 
-function BuildsTable({ builds }: { builds: UITenantDashboardBuild[] }): React.ReactElement {
+function BuildsTable({
+  builds,
+  onSelect,
+}: {
+  builds: UITenantDashboardBuild[];
+  onSelect: (build: UITenantDashboardBuild) => void;
+}): React.ReactElement {
   return (
-    <DataTable headers={['Build', 'Source', 'Result', 'Commit', 'Version', 'Created']}>
+    <DataTable
+      headers={['Build', 'Source', 'Result', 'Commit', 'Version', 'Created', '']}
+      minWidthClassName="min-w-[820px]"
+    >
       {builds.map((build) => (
         <tr key={build.buildId}>
           <DataCell strong>{build.buildId}</DataCell>
@@ -131,6 +148,9 @@ function BuildsTable({ builds }: { builds: UITenantDashboardBuild[] }): React.Re
           <DataCell>{build.version}</DataCell>
           <DataCell>
             <RelativeTime value={build.createdAt} />
+          </DataCell>
+          <DataCell>
+            <BuildProfileViewButton build={build} onSelect={onSelect} />
           </DataCell>
         </tr>
       ))}
@@ -191,7 +211,12 @@ function displayUsername(user: UITenantDashboardUser): string {
   return 'Unknown user';
 }
 
-function formatRoles(roles: string[] | undefined): string {
+// formatRosterRoles renders a roster row's roles. GET /v1/users reports the
+// tenant's users without their roles, so an absent list here means the roles
+// were not reported -- not that the user has none. Claiming the latter would
+// state something false about a colleague; only the caller's own row carries
+// roles, which whoami answered with.
+function formatRosterRoles(roles: string[] | undefined): string {
   const names = roles?.map((role) => role.trim()).filter(Boolean) ?? [];
-  return names.length > 0 ? names.join(', ') : 'No roles assigned';
+  return names.length > 0 ? names.join(', ') : 'Not reported';
 }

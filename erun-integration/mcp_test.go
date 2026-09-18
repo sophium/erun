@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1210,5 +1211,50 @@ exit 3`)
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "mcp/tools_real_run_lists_tools_with_their_arguments", normalize.Apply(result.Combined))
+	})
+
+	t.Run("tools_structured_output_carries_the_descriptor_the_edge_sent", func(t *testing.T) {
+		// Structured output exists for callers that decide whether a tool is
+		// safe to call before calling it, so it must carry the annotations and
+		// protocol extensions the edge sent, not the subset the scannable text
+		// rendering narrows to.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{
+			"tools/list": `{"tools":[` +
+				`{"_meta":{"family":"cloud","mcpOnly":true},` +
+				`"annotations":{"destructiveHint":true,"idempotentHint":false,"openWorldHint":true,"readOnlyHint":false},` +
+				`"description":"Clear the AWS credentials delivered to this environment.",` +
+				`"inputSchema":{"type":"object","properties":{}},` +
+				`"name":"cloud_clear_aws_credentials",` +
+				`"outputSchema":{"type":"object","properties":{"cleared":{"type":"boolean"}}},` +
+				`"title":"Clear AWS credentials"}` +
+				`]}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "tools", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var listed, want struct {
+			Tools []map[string]any `json:"tools"`
+		}
+		if err := json.Unmarshal([]byte(result.Stdout), &listed); err != nil {
+			t.Fatalf("decode tools JSON output: %v\n%s", err, result.Stdout)
+		}
+		if err := json.Unmarshal([]byte(edge.Results["tools/list"]), &want); err != nil {
+			t.Fatalf("decode the edge's own tools/list payload: %v", err)
+		}
+		if len(listed.Tools) != len(want.Tools) {
+			t.Fatalf("structured output listed %d tools, want %d: %s", len(listed.Tools), len(want.Tools), result.Stdout)
+		}
+		// Whole descriptors, so a field the protocol gains later fails here
+		// rather than disappearing from the structured surface unnoticed.
+		if !reflect.DeepEqual(listed.Tools, want.Tools) {
+			t.Errorf("structured output does not carry the descriptor the edge sent\n got: %v\nwant: %v", listed.Tools, want.Tools)
+		}
 	})
 }
