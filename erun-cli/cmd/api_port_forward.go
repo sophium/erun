@@ -3,8 +3,6 @@ package cmd
 import (
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -120,10 +118,7 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 
 func startAPIPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return 0, err
-	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	logFile, err := openPortForwardLog(logPath)
 	if err != nil {
 		return 0, err
 	}

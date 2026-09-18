@@ -129,10 +129,7 @@ func reusableRecordedPortForward(ctx common.Context, kind string, state, expecte
 
 func startMCPPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return 0, err
-	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := openPortForwardLog(logPath)
 	if err != nil {
 		return 0, err
 	}
