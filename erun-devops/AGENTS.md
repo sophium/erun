@@ -201,6 +201,17 @@ composition and release invariants belong to root/shared logic, not chart policy
   is a different artifact even without source changes. Snapshot identity uses its
   stable base-snapshot value. Promotion requires every requested architecture;
   do not silently reuse an incomplete platform set.
+- **Incremental promotion never skips a Dockerfile matching the test-stage-gate
+  convention (`AS test` plus a later `COPY --from=test`), however unchanged its
+  inputs are.** A matching fp-tagged image proves the *inputs* are unchanged, not
+  that the gate ran: promoting one reports the same exit 0 as a build that actually
+  ran `make check`. Detect the convention by Dockerfile content
+  (`dockerfileHasGateTestStage`), always rebuild such a Dockerfile instead of
+  promoting it, and refuse outright if a build is ever marked both `GateTestStage`
+  and `Promote`. This is deliberately narrower than disabling the Docker build
+  cache generally: BuildKit's per-instruction layer cache inside a real
+  `docker build` is untouched. `build_gate_test_stage_test.go` locks the detection
+  and the refusal.
 - Previews show concrete commands for the operations selected, without adding
   build/push actions to a pure deploy.
 - **A test needing a real container runtime is reachable from a `RUN` step only
