@@ -277,7 +277,7 @@ func TestOrchestratorShellActivityStartHookCapturesTheSessionID(t *testing.T) {
 	}
 }
 
-// erun#2144: a transient orchestrator id (investigate-<nanos>, report-bug-
+// A transient orchestrator id (investigate-<nanos>, report-bug-
 // <nanos>) is minted once and never reused, so once its session ends nothing
 // will ever call readOrchestratorShellActivity for it again —
 // reconcileOrchestratorActivity only visits ids currently in a.orchestrators.

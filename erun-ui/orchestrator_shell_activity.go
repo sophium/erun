@@ -256,7 +256,7 @@ func orchestratorShellActivityResetHookCommand() string {
 // sweep, a "running: true" report a session never got to clear (because it
 // ended without ever checking TaskOutput/TaskStop on its own backgrounded
 // shell) sits on disk asserting that forever, since nothing else will ever
-// read, correct, or delete it (erun#2144). Sweeping the directory itself,
+// read, correct, or delete it. Sweeping the directory itself,
 // rather than only reading on request, is what actually reaps it: the bound
 // applied is exactly the one readOrchestratorShellActivity already uses for a
 // session it can no longer see, just run unconditionally instead of only for

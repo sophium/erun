@@ -66,7 +66,7 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			a.reconcileOrchestratorPacing()
 			// Reaps shell-activity reports reconcileOrchestratorActivity itself
 			// will never revisit — orphaned or transient orchestrator ids that
-			// are not, or are no longer, in a.orchestrators at all (erun#2144).
+			// are not, or are no longer, in a.orchestrators at all.
 			a.reconcileOrphanedOrchestratorShellActivity(time.Now())
 		}
 	}
