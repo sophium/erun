@@ -50,7 +50,9 @@ missing authority or external blockers with the evidence and required action.
 1. Resolve scope, role, environment type, and host/pod paths.
 2. Send implementation and focused iteration to a **code** environment.
 3. Send pushed-branch regression gates, gate fixes, and releases to a **build**
-   environment with warm caches; it is not the feature-authoring lane.
+   environment with warm caches; it is not the feature-authoring lane. A gate
+   *tests* a branch; it does not land one — see "Landing work" for the route that
+   ends in a verified `MERGED`.
 4. Operate **runtime** environments through erun/platform lifecycle operations.
    They have no worktree or in-pod Agent to delegate code work to.
 5. Review each environment's authoritative diff read-only; send corrections back
@@ -175,6 +177,25 @@ ID's `wip:<id>` label, not its display name.
   implement it only when in scope, otherwise report the required expansion.
 - Keep public/tenant addresses in their respective committed deployment/DNS owners;
   a manual live change is a diagnostic probe, not a reproducible delivered fix.
+
+## Landing work
+
+Finished work lands through the target repository's own review and merge queue.
+A pushed branch is a proposal; a closed pull request is not a merge.
+
+- **Invariant.** A branch this orchestrator caused to exist goes `erun-merge`
+  (branch → a review at `READY`), then `review record-build`, then the target's
+  merge queue, then `erun-merge-queue-drive` (gate the prospective merge, push on
+  green, report `MERGED`). `MERGED` is verified against the recorded GATE build and
+  the remote's own tip; a closed pull request asserts a landing rather than proving
+  one, so it is never the finish line.
+- **Exception.** A branch that *arrived* with no review — pushed by a peer or an
+  earlier session — may be composed into a batch `gate-merge` and landed on green.
+  That is handling a condition already in front of you, never licence to create more
+  of them. Do not finish delegated work by opening a pull request.
+- **Verification.** Report the queue's shape — OPEN / READY / MERGE, and reviews
+  advanced this session — before any branch count. Branches landed beside
+  "reviews advanced: 0" is a method error, not throughput.
 
 ## Fixing erun itself
 
