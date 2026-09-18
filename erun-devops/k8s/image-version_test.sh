@@ -78,6 +78,7 @@ sed -n 's/.*%s\/\(erun-[a-z0-9-]*\):\([A-Za-z0-9][^"[:space:]]*\)".*/\1 \2/p' "$
 # `default "<tag>" .Values.<image>ImageTag` -- the tag behind an indirection.
 sed -n 's/.*default "\([A-Za-z0-9][^"]*\)" \.Values\.\([a-z0-9-]*\)ImageTag.*/erun-\2 \1/p' "${sites}" >>"${pairs}"
 
+lines="$(wc -l <"${pairs}" | tr -d '[:space:]')"
 sort -u "${pairs}" -o "${pairs}"
 
 checked=0
@@ -93,4 +94,4 @@ done <"${pairs}"
 [ "${checked}" -gt 0 ] ||
     fail "no image-version literals found in the chart templates; they all moved behind a shared source, so rewrite this test to follow them rather than deleting it"
 
-echo "PASS: image versions agree with their VERSION pins (dind rendered, ${checked} template site(s) checked)"
+echo "PASS: image versions agree with their VERSION pins (dind rendered, ${checked} image(s) across ${lines} template line(s))"
