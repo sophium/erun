@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -342,12 +343,16 @@ func APIURLForListEnvironment(tenant TenantConfig, localPorts EnvironmentLocalPo
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
+// listEnvironmentLocalPorts resolves the ports this process should report for
+// one environment: the config-derived allocation, overridden by the chart's
+// injected ERUN_*_PORT values when this process is that environment's own
+// runtime pod -- see overlayInjectedRuntimeLocalPorts.
 func listEnvironmentLocalPorts(tenant string, env EnvConfig, portAllocations map[string]EnvironmentLocalPorts) EnvironmentLocalPorts {
 	localPorts := portAllocations[environmentPortKey(tenant, env.Name)]
 	if env.SSHD.LocalPort > 0 {
 		localPorts.SSH = env.SSHD.LocalPort
 	}
-	return localPorts
+	return overlayInjectedRuntimeLocalPorts(localPorts, os.Getenv, tenant, env.Name)
 }
 
 func listEnvironmentOpenResult(tenant TenantConfig, env EnvConfig, localPorts EnvironmentLocalPorts) OpenResult {
