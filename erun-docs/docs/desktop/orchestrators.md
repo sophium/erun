@@ -25,9 +25,9 @@ For the exact files behind these two layers and how they're injected into a sess
 
 ## The conversation an orchestrator comes back to {#orchestrator-conversations}
 
-An orchestrator keeps one long conversation, and starting it — after a quit, a reboot, a crash, or a rebuild-and-restart — resumes that conversation rather than beginning a new one. ERun follows the conversation the session itself reports being in, so a session that ends up in a conversation of its own is still the one you get back.
+An orchestrator keeps one long conversation, and starting it — after a quit, a reboot, a crash, or a rebuild-and-restart — resumes that conversation rather than beginning a new one. By default that is the conversation derived from the orchestrator's own name: the same one on every launch and on every machine, so nothing on disk can point it somewhere else. A session that ends up in a conversation of its own — after a `/clear`, after a compaction, or because the harness declined the id it was asked to resume — does not move that default on its own. Its conversation is kept and offered, and **Attach** in the manage dialog is how you make it the one that comes back.
 
-When it can't confirm which conversation that is, it says so instead of coming back looking healthy with hours of the work missing. The message names both conversations — the one it resumed and the one it couldn't vouch for — and the manage dialog is where you settle it.
+When a session's own conversation is still on this machine and differs from the one the launch resumes, ERun says so instead of coming back looking healthy with hours of the work missing. The message names both conversations — the one it resumed and the one the session was actually working in — and the manage dialog is where you settle it.
 
 The dialog's **Conversation** section lists every conversation this orchestrator could resume, newest first, each with when it was last written, how large it is, the folder it was started in, and how it opens, so you can recognise the one holding your work. Each row says what it is to this orchestrator:
 
