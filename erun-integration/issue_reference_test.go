@@ -413,7 +413,6 @@ var issueReferenceBaseline = map[string]int{
 	"erun-integration/push_test.go":                       8,
 	"erun-integration/release_test.go":                    6,
 	"erun-integration/review_test.go":                     1,
-	"erun-integration/usage_test.go":                      1,
 	"erun-integration/version_test.go":                    2,
 	"erun-integration/whip_test.go":                       2,
 	"erun-mcp/activity_lease.go":                          2,

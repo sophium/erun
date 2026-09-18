@@ -1,0 +1,10 @@
+CPU: 0.0% of a 1.00-core quota (sampled over 1.0s)
+Memory: 394.4MiB / 2.0GiB (19.3%), peak 979.7MiB, OOM kills 0
+erun-dind sidecar (where builds run):
+  CPU: 0.0% of a 1.00-core quota (sampled over 1.0s)
+  Memory: 394.4MiB / 2.0GiB (19.3%), peak 979.7MiB, OOM kills 0
+Disk (node, shared): <HOME> 170.1GiB / 189.1GiB (90.0%)
+  this environment's own usage: 9.5GiB
+Warnings (1):
+  node disk is at 90% (warns at 90%) -- shared with every environment on this node
+audit: erun usage
