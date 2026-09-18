@@ -108,7 +108,7 @@ func TestList(t *testing.T) {
 		// its own erun version cannot be read from config alone -- behind must
 		// read "unknown", never a silent "no" that would misreport an unknown
 		// gate as safely current. Its config-unresolved version now also
-		// triggers a live MCP-edge probe fallback (erun#2093); pin its local
+		// triggers a live MCP-edge probe fallback; pin its local
 		// port range off the default 17000 range so that real dial never risks
 		// colliding with a developer's own live erun session, same rule as the
 		// mcp_test.go fake-edge scenarios.
@@ -754,7 +754,7 @@ func TestList(t *testing.T) {
 	})
 }
 
-// TestListVersionDriftLiveProbe covers erun#2093: a tenant that ships its own
+// TestListVersionDriftLiveProbe covers the fallback: a tenant that ships its own
 // runtime image under its own tag scheme (e.g. frs-devops) has no version
 // erun can parse from config, so `erun list --tenant` used to report
 // "version=none" for every one of its environments and --fail-on-drift
@@ -874,7 +874,7 @@ func TestListVersionDriftLiveProbe(t *testing.T) {
 // tenant-owned runtime image under its own release line (e.g.
 // frs-devops:1.0.98), not erun's own erun-devops line -- exactly the shape
 // ResolveErunVersion can never resolve a version out of, since the image tag
-// carries the tenant's own line, not erun's (erun#2093). lineVersion is that
+// carries the tenant's own line, not erun's. lineVersion is that
 // tenant-owned number and is deliberately unrelated to whatever erun version
 // the environment's live MCP edge reports in a given scenario.
 func seedTenantEnvOnCustomRuntimeLine(t testing.TB, setup env.Setup, tenant, environment, lineVersion string, rangeStart int) {

@@ -71,7 +71,7 @@ type TenantVersionDrift struct {
 // back empty -- config has no way to parse a tenant's own runtime image tag
 // (e.g. frs-devops:1.0.98), but the running edge's own initialize handshake
 // always reports its own binary's version, regardless of which image shipped
-// it (erun#2093). reachable reports whether the edge answered the handshake
+// it. reachable reports whether the edge answered the handshake
 // at all, independent of err: false means there is nothing to ask (never
 // opened, or genuinely stopped) and is not itself a finding; true with a
 // non-nil err or an empty version means the edge is up but its version still
