@@ -189,11 +189,20 @@ function TenantDashboardReadyBody({
       className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] px-5 py-4"
     >
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
-        {/* h-auto + flex-wrap override the primitive's single-row, fixed-height
-            layout: a narrow <main> has less width than the full tab set
-            needs, so the strip wraps onto a second line instead of pushing
-            tabs (and the actions beside it) off-screen with no way back. */}
-        <TabsList className="h-auto w-full flex-wrap justify-start">
+        {/* Two overrides make a wrapped strip take vertical space; the
+            primitive sizes a strip for a single row.
+            - The list is fixed at h-9 by a variant rule, which a bare `h-auto`
+              cannot override: tailwind-merge keeps both classes (different
+              modifier chains) and the variant still wins, so the override has
+              to repeat the variant chain to replace it.
+            - Each trigger is `100% - 1px` of that height. Once the list wraps,
+              "100%" is the whole strip, so every row inherited the full strip
+              height as its own and the second row spilled out of the list's
+              box onto the toolbar below. Pinning triggers to the single-row
+              height (h-9 less the list's p-[3px] and the trigger border) keeps
+              each row that size, so the list's auto height is the sum of its
+              rows and everything under it is laid out below. */}
+        <TabsList className="group-data-[orientation=horizontal]/tabs:h-auto w-full flex-wrap justify-start [&>[data-slot=tabs-trigger]]:h-[29px]">
           {visibleTabs.map((descriptor) => (
             <TabsTrigger key={descriptor.tab} value={descriptor.tab}>
               {descriptor.tab === 'requests' ? requestsTabLabel(dashboard.data) : descriptor.label}

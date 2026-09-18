@@ -2,7 +2,7 @@ import type { Locator, Page, Route, Request } from '@playwright/test';
 
 import { boundingBoxOf } from '../../../fixtures/boundingBox.js';
 import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
-import type { AppShell } from '../../../pages/index.js';
+import type { AppShell, TenantDashboardTab } from '../../../pages/index.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -59,7 +59,37 @@ function seedDashboardEnvironment(title: string): string {
   return environment;
 }
 
-async function fulfillDashboard(route: Route, environment: string): Promise<void> {
+// A tenant whose dashboard reports only a couple of panels does not wrap its
+// tab strip at these widths, so the wrapping case has to stage the full set.
+const DEFAULT_DASHBOARD_PANELS = [{ tab: 'users' }, { tab: 'reviews' }];
+const ALL_DASHBOARD_PANELS = [
+  { tab: 'users' },
+  { tab: 'reviews' },
+  { tab: 'queue' },
+  { tab: 'gates' },
+  { tab: 'builds' },
+  { tab: 'audit' },
+  { tab: 'registration' },
+  { tab: 'requests' },
+  { tab: 'api-log' },
+];
+const ALL_TAB_LABELS: readonly TenantDashboardTab[] = [
+  'Users',
+  'Reviews',
+  'Merge queue',
+  'Gates',
+  'Builds',
+  'Audit log',
+  'Registration',
+  'Requests',
+  'API log',
+];
+
+async function fulfillDashboard(
+  route: Route,
+  environment: string,
+  panels: ReadonlyArray<{ tab: string }> = DEFAULT_DASHBOARD_PANELS,
+): Promise<void> {
   await route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({
@@ -82,7 +112,7 @@ async function fulfillDashboard(route: Route, environment: string): Promise<void
             updatedAt: '2026-01-01T00:00:00Z',
           },
         ],
-        panels: [{ tab: 'users' }, { tab: 'reviews' }],
+        panels,
       },
     }),
   });
@@ -98,11 +128,16 @@ async function sidebarCollapsed(app: AppShell): Promise<boolean> {
   return (await app.titlebar.toggleButton().getAttribute('aria-pressed')) === 'false';
 }
 
-async function openReviewsTab(app: AppShell, page: Page, environment: string): Promise<void> {
+async function openReviewsTab(
+  app: AppShell,
+  page: Page,
+  environment: string,
+  panels: ReadonlyArray<{ tab: string }> = DEFAULT_DASHBOARD_PANELS,
+): Promise<void> {
   await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
     if (body.method === 'LoadTenantDashboard') {
-      await fulfillDashboard(route, environment);
+      await fulfillDashboard(route, environment, panels);
       return;
     }
     await route.continue();
@@ -193,6 +228,95 @@ for (const width of [480, 640, 900, 1440]) {
     });
   });
 }
+
+// Regression coverage for the wrapped tab strip escaping its own container's
+// height (#2238). The primitive gives a horizontal strip a fixed 36px height
+// through a `group-data-[orientation=horizontal]/tabs:` rule, and the call
+// site's bare `h-auto` never overrode it — tailwind-merge keeps both classes
+// (different modifier chains) and the variant selector out-specifies a plain
+// utility. So the strip stayed 36px tall while its wrapped second row
+// overflowed that box, and the toolbar beneath it (`N reviews` / `Mine` /
+// `Waiting on me` / `+ New review`) was laid out as if the row were not there.
+// At 900px — the narrowest <main> of any width, and the width the report names
+// — `API log` landed in the `+ New review` button's footprint.
+//
+// Geometry is the assertion, not presence: both elements already existed, both
+// reported themselves visible, and that is exactly why the defect hid.
+test.describe('narrow-viewport tenant dashboard — wrapped tab strip (#2238)', () => {
+  test.use({ viewport: { width: 900, height: 900 } });
+
+  test('a wrapped tab row takes vertical space and never renders over the toolbar', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('wrapped-tabs');
+    try {
+      await openReviewsTab(app, page, environment, ALL_DASHBOARD_PANELS);
+
+      const firstTab = app.tenantDashboard.tab('Users');
+      const lastTab = app.tenantDashboard.tab('API log');
+      const newReview = app.tenantDashboard.newReviewButton();
+      await expect(lastTab).toBeVisible();
+      await expect(newReview).toBeVisible();
+
+      // The premise, asserted rather than assumed: at this width the strip
+      // really does wrap onto a second row. Without it the overlap assertions
+      // below would pass vacuously on a single-row strip.
+      const firstRow = await boundingBoxOf(firstTab, 'first tab (Users)');
+      const last = await boundingBoxOf(lastTab, 'last tab (API log)');
+      expect(
+        last.y,
+        `the tab strip did not wrap at 900px (Users y=${firstRow.y}, API log y=${last.y})`,
+      ).toBeGreaterThan(firstRow.y + firstRow.height / 2);
+
+      // The regression itself. The toolbar's top edge is the boundary the
+      // wrapped row used to cross; the button sits inside that row, so
+      // requiring the tab to finish above the button is the stricter form.
+      const toolbar = await boundingBoxOf(newReview, 'New review button');
+      expect(
+        last.y + last.height,
+        `API log (bottom ${(last.y + last.height).toFixed(1)}) overlaps the toolbar ` +
+          `(New review top ${toolbar.y.toFixed(1)}); the wrapped row must push it down`,
+      ).toBeLessThanOrEqual(toolbar.y + 1);
+
+      // The symptom the report describes: the wrapped row rendered *below* the
+      // strip's own rounded background, i.e. outside the list's box. Pushing
+      // the toolbar down could also be faked by giving the row a margin, which
+      // would leave that visible break in place.
+      const strip = await boundingBoxOf(app.tenantDashboard.tabsList(), 'tab strip');
+      expect(
+        last.y + last.height,
+        `API log (bottom ${(last.y + last.height).toFixed(1)}) renders outside the tab strip ` +
+          `(bottom ${(strip.y + strip.height).toFixed(1)})`,
+      ).toBeLessThanOrEqual(strip.y + strip.height + 1);
+
+      // Reachable and clickable, not merely painted: a trial click runs
+      // Playwright's actionability checks (including "receives pointer
+      // events") without performing the click, so a control the toolbar covers
+      // fails here even when its box is geometrically clear. Every tab, since
+      // a wrapped row is only usable if the whole strip is.
+      for (const label of ALL_TAB_LABELS) {
+        await app.tenantDashboard.tab(label).click({ trial: true });
+      }
+      await expect.poll(() => isFullyOnScreen(lastTab, 900)).toBe(true);
+
+      // Narrower than the reported width, where the sidebar has collapsed and
+      // the strip still wraps: the same invariant has to hold.
+      await page.setViewportSize({ width: 640, height: 900 });
+      await expect(lastTab).toBeVisible();
+      const narrowTab = await boundingBoxOf(lastTab, 'last tab (API log) at 640px');
+      const narrowToolbar = await boundingBoxOf(newReview, 'New review button at 640px');
+      expect(
+        narrowTab.y + narrowTab.height,
+        `API log (bottom ${(narrowTab.y + narrowTab.height).toFixed(1)}) overlaps the toolbar ` +
+          `at 640px (New review top ${narrowToolbar.y.toFixed(1)})`,
+      ).toBeLessThanOrEqual(narrowToolbar.y + 1);
+      await expect.poll(() => isFullyOnScreen(lastTab, 640)).toBe(true);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});
 
 test.describe('narrow-viewport shell — resize behavior (#1385)', () => {
   test('narrowing the window (not the splitter) reclamps the sidebar and keeps <main> reachable', async ({

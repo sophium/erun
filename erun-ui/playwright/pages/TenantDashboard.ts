@@ -39,6 +39,14 @@ export class TenantDashboard {
     return this.page.getByRole('tab');
   }
 
+  // The dashboard's tab list carries no accessible name of its own, so this
+  // anchors on a tab it holds rather than adding an aria-label to production
+  // markup for the test's benefit. Radix renders triggers as direct children
+  // of the list.
+  tabsList(): Locator {
+    return this.tab('Users').locator('..');
+  }
+
   restrictedAccessNote(): Locator {
     return this.page.getByText('Some panels are hidden because you do not have access to');
   }
