@@ -50,14 +50,19 @@ test.describe('tenant dashboard — users tab (#2050)', () => {
         tenant: SEED_TENANT,
         environment,
         apiUrl: 'http://127.0.0.1:1/unreachable',
-        user: {
-          tenantId: 't1',
-          userId: 'u1',
-          username: 'erun',
-          roles: ['ReadAll', 'WriteAll'],
-          issuer: 'https://auth.example.com',
-          subject: '386994597031248060',
-        },
+        // The Users tab renders the roster (GET /v1/users), not the caller's
+        // own identity: seeding only `user` leaves `data.users` empty and the
+        // tab renders no table at all.
+        users: [
+          {
+            tenantId: 't1',
+            userId: 'u1',
+            username: 'erun',
+            roles: ['ReadAll', 'WriteAll'],
+            issuer: 'https://auth.example.com',
+            subject: '386994597031248060',
+          },
+        ],
         panels: [{ tab: 'users' }],
       });
 
