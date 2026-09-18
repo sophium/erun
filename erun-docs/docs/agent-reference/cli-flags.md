@@ -1025,8 +1025,8 @@ The credential material never appears in an argument, a trace line, or a golden 
 
 ## `erun stop`
 
-`erun stop` scales an environment's runtime Deployment to zero, returning the runtime container's
-resource limits **and** its unlimited `dind` sidecar's real consumption to the node. It is the
+`erun stop` scales an environment's runtime Deployment to zero, returning the resource limits and
+requests of both the runtime container **and** its `dind` sidecar to the node. It is the
 counterpart to `erun open`, which is the only thing that starts an environment again. There is
 deliberately **no MCP `stop` tool**: the env's MCP edge runs inside the runtime container, so
 stopping over MCP would kill the caller mid-call. Lifecycle is host-side, as it always has been for
