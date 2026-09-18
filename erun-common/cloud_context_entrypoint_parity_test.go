@@ -26,8 +26,8 @@ var (
 // The runtime entrypoint re-derives in shell the cloud-context name and
 // kubernetes-context defaults that this package owns through
 // ResolveInjectedRuntimeConfig and NormalizeCloudContextConfig. Two
-// implementations of one default is the coupling that failed silently in
-// #1662: `doctor --sync-config` reported phantom drift on every run, never
+// implementations of one default is the coupling that failed silently once:
+// `doctor --sync-config` reported phantom drift on every run, never
 // reached InSync, and nothing went red -- the tool simply never converged.
 //
 // This test pins both sides to the shared expectations table in
@@ -86,7 +86,7 @@ func assertEntrypointExpressions(t *testing.T, row cloudContextDefaultRow, env m
 }
 
 // assertInjectedProjection checks the Go path the runtime config is synced
-// against, which is the side #1662 was fixed on.
+// against, which is the side the drift was fixed on.
 func assertInjectedProjection(t *testing.T, row cloudContextDefaultRow, env map[string]string) {
 	t.Helper()
 	injected, ok := ResolveInjectedRuntimeConfig(func(key string) string { return env[key] })
