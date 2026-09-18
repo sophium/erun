@@ -349,7 +349,7 @@ func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now ti
 // caller input: a claim must not be able to name someone else as its holder.
 func environmentJobExclusivityHolder(params StartEnvironmentJobParams) EnvironmentActivityLeaseHolder {
 	return EnvironmentActivityLeaseHolder{
-		Orchestrator: strings.TrimSpace(os.Getenv("ERUN_ORCHESTRATOR_ID")),
+		Orchestrator: strings.TrimSpace(os.Getenv(OrchestratorIDEnvVar)),
 		Tenant:       params.Tenant,
 	}
 }
@@ -358,7 +358,8 @@ func environmentJobExclusivityHolder(params StartEnvironmentJobParams) Environme
 // scoped to this job's own id, so it can never drop a claim that has since been
 // legitimately taken by someone else.
 func releaseEnvironmentJobExclusivityClaim(tenant, environment, id string) error {
-	return ReleaseExclusiveEnvironmentActivityLease(tenant, environment, EnvironmentActivityLeaseScopeEnvironment, environmentJobExclusiveLeaseID(id))
+	_, err := ReleaseExclusiveEnvironmentActivityLease(tenant, environment, EnvironmentActivityLeaseScopeEnvironment, environmentJobExclusiveLeaseID(id))
+	return err
 }
 
 // environmentJobExclusivityTakeError translates a lost create race into the

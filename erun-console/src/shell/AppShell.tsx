@@ -39,12 +39,14 @@ function OperationsSectionContent({
   docsUrl,
   tenant,
   callerErunUserId,
+  scopeTenantId,
 }: {
   active: 'tenants' | 'users' | 'org-settings' | 'smtp-settings';
   token: string;
   docsUrl: string | undefined;
   tenant: TenantConfigView['tenant'];
   callerErunUserId: string | undefined;
+  scopeTenantId: string | undefined;
 }): React.ReactElement {
   switch (active) {
     case 'tenants':
@@ -56,6 +58,7 @@ function OperationsSectionContent({
           ownTenantId={tenant.tenantId}
           tenantType={tenant.type}
           callerErunUserId={callerErunUserId}
+          scopeTenantId={scopeTenantId}
         />
       );
     case 'org-settings':
@@ -138,6 +141,7 @@ function SectionContent({
           docsUrl={docsUrl}
           tenant={config.tenant}
           callerErunUserId={callerErunUserId}
+          scopeTenantId={scopeTenantId}
         />
       );
   }

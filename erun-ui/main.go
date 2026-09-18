@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -22,7 +23,31 @@ import (
 // asset server, so the headless build and `wails dev` can run side-by-side.
 const defaultHeadlessPort = 34123
 
+// appUsage is what `erun-app --help` prints. The desktop is launched by the
+// `erun app` launcher and by the OS, never by a human typing flags, so this
+// file is the only place the binary explains itself — and it must do so
+// without starting a desktop. Launching on --help made an ordinary "what flags
+// does this take?" probe start a second instance with real side effects:
+// workspace syncs, orchestrator pacing, and a control record written over the
+// running desktop's.
+const appUsage = `ERun desktop app
+
+Usage:
+  erun-app [flags]
+
+Flags:
+  -h, --help     Print this usage and exit.
+      --headless Serve the app over HTTP+SSE instead of opening a window.
+      --port     Port for --headless (default 34123).
+`
+
 func main() {
+	// Ahead of every side effect, including the durable log this function
+	// defers: a help probe must start nothing and write nothing.
+	if wantsUsage(os.Args[1:]) {
+		printAppUsage(os.Stdout)
+		return
+	}
 	setAppIdentity("ERun")
 	defer initDurableAppLog()()
 
@@ -54,6 +79,23 @@ func main() {
 	}
 
 	runWails(app)
+}
+
+// wantsUsage reports whether args ask for usage rather than a launch. Any
+// position counts: the alternative is Wails' own argument parser rejecting a
+// flag this binary does accept.
+func wantsUsage(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "-h", "--help", "-help":
+			return true
+		}
+	}
+	return false
+}
+
+func printAppUsage(w io.Writer) {
+	_, _ = io.WriteString(w, appUsage)
 }
 
 func parseHeadlessFlags(args []string) (headless bool, port int, leftover []string) {

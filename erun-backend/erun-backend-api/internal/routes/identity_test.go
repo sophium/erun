@@ -16,11 +16,13 @@ import (
 )
 
 type stubEnrolledUserLister struct {
-	users []model.User
-	err   error
+	users     []model.User
+	err       error
+	gotFilter repository.UserFilter
 }
 
-func (s *stubEnrolledUserLister) List(context.Context, repository.UserFilter) ([]model.User, error) {
+func (s *stubEnrolledUserLister) List(_ context.Context, filter repository.UserFilter) ([]model.User, error) {
+	s.gotFilter = filter
 	return s.users, s.err
 }
 
@@ -166,6 +168,44 @@ func TestListUsersThreadsOrgIDQueryParam(t *testing.T) {
 	}
 	if admin.gotListOrgID != "org-tenant-x" {
 		t.Fatalf("gotListOrgID = %q, want org-tenant-x", admin.gotListOrgID)
+	}
+}
+
+// TestListUsersDefaultsMembershipJoinToCallersOwnTenant locks today's
+// unchanged behaviour: omitting ?tenantId= must keep cross-referencing
+// against the caller's own resolved tenant, so an existing caller sees no
+// change.
+func TestListUsersDefaultsMembershipJoinToCallersOwnTenant(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	erunUsers := &stubEnrolledUserLister{}
+	routes := IdentityRoutes{admin: admin, erunUsers: erunUsers}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if erunUsers.gotFilter.TenantID != "tenant-ops" {
+		t.Fatalf("gotFilter.TenantID = %q, want the caller's own tenant-ops", erunUsers.gotFilter.TenantID)
+	}
+}
+
+// TestListUsersThreadsTenantIDQueryParamForMembershipJoin is the fix itself:
+// the membership join must target the tenant being administered, not the
+// caller's own resolved tenant -- otherwise every row
+// from another org misses the join against its genuine members and renders
+// "IdP only, not enrolled" for people who really are enrolled, just in a
+// different tenant.
+func TestListUsersThreadsTenantIDQueryParamForMembershipJoin(t *testing.T) {
+	admin := &stubIdentityAdminClient{}
+	erunUsers := &stubEnrolledUserLister{}
+	routes := IdentityRoutes{admin: admin, erunUsers: erunUsers}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users?orgId=org-tenant-x&tenantId=tenant-x", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if erunUsers.gotFilter.TenantID != "tenant-x" {
+		t.Fatalf("gotFilter.TenantID = %q, want tenant-x", erunUsers.gotFilter.TenantID)
 	}
 }
 

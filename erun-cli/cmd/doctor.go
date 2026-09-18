@@ -52,6 +52,10 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 			"or --rollback (the two are alternatives — pass only one). Run inside a runtime pod, " +
 			"--sync-config reconciles the on-disk env config with the helm-injected ERUN_* env vars " +
 			"(injected env wins) and rewrites the projected keys, preserving everything else. " +
+			"Without a TTY on stdin (an MCP client, an orchestrator, a script) doctor skips the " +
+			"optional prune prompts instead of blocking on them, reports each one as skipped, and " +
+			"still exits on the health of what it examined; pass --prune-images, --prune-build-cache, " +
+			"or --prune-containers to run one explicitly. " +
 			"For a remote-agent env with workspace sync enabled it reports the host mirror's SSH " +
 			"provisioning, and --repair-workspace-sync repairs it without redeploying (resolve/persist " +
 			"the key, write the ssh config alias, install the pod authorized_keys, ensure the port-forward).",
@@ -144,10 +148,10 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if err := reportRuntimeImageLineMismatch(ctx, result); err != nil {
 		return err
 	}
-	if err := reportHostCredentials(ctx, configStore, result); err != nil {
+	if err := reportHostCredentials(ctx, configStore, result, diagnosis); err != nil {
 		return err
 	}
-	if err := reportGitPushAccess(ctx, result); err != nil {
+	if err := reportGitPushAccess(ctx, result, diagnosis); err != nil {
 		return err
 	}
 	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {
@@ -264,6 +268,9 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 	if err := runDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis); err != nil {
 		return err
 	}
+	if diagnosis.ClusterUnreachable {
+		return reportDoctorCleanupSkippedUnreachable(ctx, options)
+	}
 	inspection, err := common.RunDoctorInspection(ctx, nil, req)
 	if err != nil {
 		return reportDoctorInspectionUnreachable(ctx, options, err)
@@ -274,7 +281,7 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 		}
 	}
 
-	actions, err := selectedDoctorActions(promptRunner, result, options, ctx.DryRun)
+	actions, err := selectedDoctorActions(ctx, promptRunner, result, options, ctx.DryRun)
 	if err != nil {
 		return err
 	}
@@ -305,6 +312,22 @@ func reportDoctorInspectionUnreachable(ctx common.Context, options doctorOptions
 	return ferr
 }
 
+// reportDoctorCleanupSkippedUnreachable mirrors reportDoctorInspectionUnreachable
+// for the case where an earlier section already confirmed the cluster is
+// unreachable: it reports the same skip and the same "no prune action ran"
+// outcome without paying a second kubectl exec timeout to rediscover what the
+// helm release status section already proved.
+func reportDoctorCleanupSkippedUnreachable(ctx common.Context, options doctorOptions) error {
+	if repErr := reportPodSkippedUnreachable(ctx, "Docker storage"); repErr != nil {
+		return repErr
+	}
+	if !anyDoctorActionRequested(options.pruneImages, options.pruneBuildCache, options.pruneContainers) {
+		return nil
+	}
+	_, ferr := fmt.Fprintln(ctx.Stdout, "Skipping the requested prune action(s) for the same reason.")
+	return ferr
+}
+
 func writeNoDoctorActionsSelected(ctx common.Context) error {
 	_, err := fmt.Fprintln(ctx.Stdout, "No cleanup actions selected.")
 	return err
@@ -317,12 +340,10 @@ const deployDiagnosisGuidance = "If the release is stuck pending or an image fai
 
 // runDeployDiagnosis reports helm release status and pods, read-only, so the
 // reader sees why a deploy failed before deciding on the destructive recovery
-// actions.
+// actions. It runs under --dry-run too: the flag withholds mutations, not
+// reads, and this diagnosis is the whole reason an operator reaches for it.
 func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) (common.DeployDiagnosisResult, error) {
 	diagnosis := common.RunDeployDiagnosis(ctx, req)
-	if ctx.DryRun {
-		return diagnosis, nil
-	}
 	if err := writeDeployDiagnosis(ctx, diagnosis); err != nil {
 		return diagnosis, err
 	}
@@ -336,7 +357,7 @@ func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) (commo
 // mutate the live release, so prompts are gated on an unhealthy diagnosis —
 // `erun doctor` never offers rollback on a healthy env.
 func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult) error {
-	actions, err := selectedDeployRecoveryActions(promptRunner, req, options, diagnosis, ctx.DryRun)
+	actions, err := selectedDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis, ctx.DryRun)
 	if err != nil {
 		return err
 	}
@@ -364,7 +385,7 @@ func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req
 // win, else the interactive path offers a single confirm for the one recovery
 // that fits the diagnosis — clearing a pending lock and rolling back are
 // alternative fixes, and running both is wrong.
-func selectedDeployRecoveryActions(promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult, dryRun bool) ([]common.DeployRecoveryAction, error) {
+func selectedDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult, dryRun bool) ([]common.DeployRecoveryAction, error) {
 	if options.clearPendingHelm {
 		return []common.DeployRecoveryAction{common.DeployRecoveryClearPendingHelm}, nil
 	}
@@ -378,7 +399,7 @@ func selectedDeployRecoveryActions(promptRunner PromptRunner, req common.ShellLa
 	if !ok {
 		return nil, nil
 	}
-	confirmed, err := confirmPrompt(promptRunner, common.DeployRecoveryActionPromptLabel(action, req))
+	confirmed, err := doctorConfirm(ctx, promptRunner, common.DeployRecoveryActionPromptLabel(action, req), common.DeployRecoveryActionWithoutPromptHint(action))
 	if err != nil {
 		return nil, err
 	}
@@ -393,6 +414,9 @@ func writeDeployDiagnosis(ctx common.Context, diagnosis common.DeployDiagnosisRe
 		if _, err := fmt.Fprintf(ctx.Stdout, "== Helm release status ==\n%s\n\n", diagnosis.HelmStatus); err != nil {
 			return err
 		}
+	}
+	if diagnosis.ClusterUnreachable {
+		return reportPodSkippedUnreachable(ctx, "Pods")
 	}
 	if strings.TrimSpace(diagnosis.Pods) != "" {
 		if _, err := fmt.Fprintf(ctx.Stdout, "== Pods ==\n%s\n\n", diagnosis.Pods); err != nil {
@@ -446,7 +470,8 @@ func shouldRepairJetBrainsGateway(ctx common.Context, promptRunner PromptRunner,
 	if promptRunner == nil || ctx.DryRun {
 		return false, nil
 	}
-	return confirmPrompt(promptRunner, fmt.Sprintf("Clear cached JetBrains Gateway backend metadata for %s/%s?", result.Tenant, result.Environment))
+	return doctorConfirm(ctx, promptRunner, fmt.Sprintf("Clear cached JetBrains Gateway backend metadata for %s/%s?", result.Tenant, result.Environment),
+		"Re-run with --repair-jetbrains-gateway to run it without a prompt.")
 }
 
 func runJetBrainsGatewayRepair(ctx common.Context, repair jetBrainsGatewayDoctorRepair) (bool, error) {
@@ -500,7 +525,7 @@ func doctorOnlySelectedJetBrainsGatewayRepair(options doctorOptions) bool {
 	return options.repairJetBrainsGateway && !options.pruneImages && !options.pruneBuildCache && !options.pruneContainers
 }
 
-func selectedDoctorActions(promptRunner PromptRunner, result common.OpenResult, options doctorOptions, dryRun bool) ([]common.DoctorAction, error) {
+func selectedDoctorActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions, dryRun bool) ([]common.DoctorAction, error) {
 	selected := make([]common.DoctorAction, 0, 3)
 	if options.pruneImages {
 		selected = append(selected, common.DoctorActionPruneImages)
@@ -514,17 +539,89 @@ func selectedDoctorActions(promptRunner PromptRunner, result common.OpenResult, 
 	if len(selected) > 0 || dryRun || promptRunner == nil {
 		return selected, nil
 	}
+	// doctor is the command reached for when a deploy has already failed, which
+	// is exactly when the caller is an orchestrator, a CI job, or an agent — none
+	// of which have a terminal to answer a prompt on. These prunes are optional
+	// maintenance with explicit flags of their own, so with no terminal they are
+	// skipped and named as skipped, never turned into a failed check: a
+	// diagnostic that reports "environment broken" because nobody answered an
+	// optional prompt is worse than one that says what it did not do.
+	if !stdinIsTerminal() {
+		return selected, writeOptionalDoctorPromptsSkipped(ctx, result, doctorPromptsNoTerminal)
+	}
+	prompted, unasked, err := promptForDoctorActions(promptRunner, result)
+	if err != nil {
+		return nil, err
+	}
+	if unasked {
+		return selected, writeOptionalDoctorPromptsSkipped(ctx, result, doctorPromptsStdinClosed)
+	}
+	return append(selected, prompted...), nil
+}
 
+// The two reasons the optional prompts went unasked differ in cause and so in
+// what the reader should do about them, and the report says which one happened
+// rather than prescribing a fix for the wrong one.
+const (
+	doctorPromptsNoTerminal  = "stdin is not a terminal, so there was nobody to answer the prompt"
+	doctorPromptsStdinClosed = "stdin closed before the prompt could be answered"
+)
+
+// doctorConfirm answers a confirm doctor offers for a step it cannot simply
+// skip, such as a recovery that mutates the live release. A reader that went
+// away is a declined answer -- the default these prompts already document --
+// and not a diagnosis: letting EOF surface as an error turns it into "Doctor
+// failed <tenant>/<env>", which reads as a verdict on an environment nothing
+// was wrong with, to the caller that never got the report it asked for. The
+// line names the step that was not run and how to run it without a prompt, so
+// the caller still has a next action. A real prompt failure still propagates.
+func doctorConfirm(ctx common.Context, promptRunner PromptRunner, label, withoutPrompt string) (bool, error) {
+	confirmed, err := confirmPrompt(promptRunner, label)
+	if !errors.Is(err, promptui.ErrEOF) {
+		return confirmed, err
+	}
+	_, writeErr := fmt.Fprintf(ctx.Stdout, "Not run: stdin reached EOF before %q could be confirmed. %s\n",
+		strings.TrimRight(strings.TrimSpace(label), "?"), withoutPrompt)
+	return false, writeErr
+}
+
+// promptForDoctorActions asks about each optional prune action. unasked reports
+// that the reader hit EOF instead of answering: a terminal that closed mid-run
+// is still nobody declining optional maintenance, so the caller reports those
+// actions as skipped rather than failing the diagnosis over them.
+func promptForDoctorActions(promptRunner PromptRunner, result common.OpenResult) ([]common.DoctorAction, bool, error) {
+	selected := make([]common.DoctorAction, 0, len(common.DoctorActions()))
 	for _, action := range common.DoctorActions() {
 		ok, err := confirmPrompt(promptRunner, common.DoctorActionPromptLabel(action, result))
+		if errors.Is(err, promptui.ErrEOF) {
+			return nil, true, nil
+		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if ok {
 			selected = append(selected, action)
 		}
 	}
-	return selected, nil
+	return selected, false, nil
+}
+
+// writeOptionalDoctorPromptsSkipped names each optional prune action that went
+// unasked and says plainly that it was skipped rather than run or failed. It
+// returns only write errors: a caller that could not be asked anything is not a
+// failed check, and doctor's exit code must reflect the environment's health,
+// not the absence of somebody to answer a prompt.
+func writeOptionalDoctorPromptsSkipped(ctx common.Context, result common.OpenResult, reason string) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Optional cleanup steps in %s/%s not checked: %s. These are optional maintenance, not failed checks.\n", result.Tenant, result.Environment, reason); err != nil {
+		return err
+	}
+	for _, action := range common.DoctorActions() {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  skipped: %s (%s)\n", action, common.DoctorActionDescription(action)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, "Pass --prune-images, --prune-build-cache, or --prune-containers to run one explicitly.")
+	return err
 }
 
 func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options doctorOptions) error {
@@ -584,7 +681,8 @@ func confirmRemoteInitFinish(ctx common.Context, promptRunner PromptRunner, opti
 		_, err := fmt.Fprintln(ctx.Stdout, "Run `erun doctor --finish-remote-init` inside this pod to finish the missing steps.")
 		return false, err
 	}
-	return confirmPrompt(promptRunner, "Finish missing remote-init steps now")
+	return doctorConfirm(ctx, promptRunner, "Finish missing remote-init steps now",
+		"Re-run with --finish-remote-init to run it without a prompt.")
 }
 
 func remoteInitPromptFunc(promptRunner PromptRunner) common.RemoteInitFinishPrompt {

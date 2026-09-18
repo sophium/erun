@@ -17,6 +17,8 @@
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
+    "incremental": true,
+    "tsBuildInfoFile": "../../.cache/frontend-tsbuildinfo/erun-ui-frontend.tsbuildinfo",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],

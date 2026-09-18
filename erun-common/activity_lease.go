@@ -405,58 +405,81 @@ func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) 
 	return lease, nil
 }
 
+// EnvironmentActivityLeaseReleaseOutcome distinguishes what a release actually
+// did, so a caller — and the report it prints — can tell "a held claim was
+// removed" from "there was nothing there to remove" instead of both reading as
+// the same bare success. Both are still success from the release call's own
+// point of view: a wrapper's exit trap must never fail a job that already
+// finished cleanly just because it releases twice.
+type EnvironmentActivityLeaseReleaseOutcome int
+
+const (
+	// EnvironmentActivityLeaseReleased means a held claim existed under the
+	// given id (and, for an exclusive claim, scope) and this call removed it.
+	EnvironmentActivityLeaseReleased EnvironmentActivityLeaseReleaseOutcome = iota
+	// EnvironmentActivityLeaseNotHeld means nothing was held under the given
+	// id/scope: never taken, already released, or already expired and
+	// reclaimed.
+	EnvironmentActivityLeaseNotHeld
+)
+
 // ReleaseEnvironmentActivityLease drops a shared (non-exclusive) lease.
 // Idempotent: releasing a lease that already expired or was never taken is
 // success, so a wrapper's exit trap never fails a job that already finished
-// cleanly.
-func ReleaseEnvironmentActivityLease(tenant, environment, id string) error {
+// cleanly — but the returned outcome tells a caller whether anything was
+// actually there to remove, rather than reporting the same success either way.
+func ReleaseEnvironmentActivityLease(tenant, environment, id string) (EnvironmentActivityLeaseReleaseOutcome, error) {
 	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
 	dir, err := environmentActivityLeaseDir(tenant, environment)
 	if err != nil {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
-	if err := os.Remove(filepath.Join(dir, resolved+".json")); err != nil && !os.IsNotExist(err) {
-		return err
+	if err := os.Remove(filepath.Join(dir, resolved+".json")); err != nil {
+		if os.IsNotExist(err) {
+			return EnvironmentActivityLeaseNotHeld, nil
+		}
+		return EnvironmentActivityLeaseNotHeld, err
 	}
-	return nil
+	return EnvironmentActivityLeaseReleased, nil
 }
 
 // ReleaseExclusiveEnvironmentActivityLease drops an exclusive claim on a
 // scope. It only removes the file when the recorded holder is this same id —
 // releasing by scope name alone, without proving you are the holder, could
 // otherwise drop a different holder's exclusivity out from under them (a
-// stale release call racing a new legitimate claim). A mismatched or already
-// vacated scope is success, matching the shared release's idempotence.
-func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) error {
-	scope = strings.TrimSpace(scope)
-	if scope == "" {
-		scope = defaultEnvironmentActivityLeaseScope
-	}
+// stale release call racing a new legitimate claim). An already-vacated scope
+// is a success outcome, matching the shared release's idempotence, but a
+// scope held by a *different* id is refused outright and names the actual
+// holder (EnvironmentActivityLeaseConflictError) instead of quietly reporting
+// success for a claim it never touched — the same shape a conflicting take
+// already refuses with.
+func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) (EnvironmentActivityLeaseReleaseOutcome, error) {
+	scope = NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
 	resolvedID, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
 	path, err := exclusiveEnvironmentActivityLeasePath(tenant, environment, scope)
 	if err != nil {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
 	existing, err := loadEnvironmentActivityLease(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return EnvironmentActivityLeaseNotHeld, nil
 		}
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
 	if existing.ID != resolvedID {
-		return nil
+		return EnvironmentActivityLeaseNotHeld, &EnvironmentActivityLeaseConflictError{Scope: scope, Holder: existing}
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
-	return nil
+	return EnvironmentActivityLeaseReleased, nil
 }
 
 // LoadEnvironmentActivityLeases returns the leases still holding the

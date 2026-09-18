@@ -2,6 +2,7 @@ audit: erun build --dry-run --environment local
 cd <TMP> && git check-ignore -q -- .erun/config.yaml
 build: platforms configured as linux/amd64 (.erun/config.yaml environments.local.docker.platforms)
 build: platforms configured as linux/amd64 (.erun/config.yaml environments.local.docker.platforms)
+docker info -f '{{.DockerRootDir}}'
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platform linux/amd64

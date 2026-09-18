@@ -22,9 +22,15 @@ test('issueReferencePattern catches the shape, not one phrasing', () => {
     ['acme/widgets#8888', true],
     ['https://github.com/acme/widgets/issues/8888', true],
     ['https://github.com/acme/widgets/pull/8888', true],
+    // The repository's own short form: no slash, no "issue" prefix.
+    ['erun#8888', true],
+    ['(erun#8888: a note)', true],
     ['# Overview', false],
     ['C# is a language', false],
     ['no hash sign here at all', false],
+    // A known, accepted coincidental match -- see issueReferencePattern's
+    // own comment. Baselined in production code, not narrowed away here.
+    ['PKCS#12', true],
   ];
   for (const [value, want] of cases) {
     assert.equal(issueReferencePattern.test(value), want, `pattern.test(${JSON.stringify(value)})`);
