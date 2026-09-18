@@ -77,7 +77,7 @@ An env deployed with a trust anchor requires a **bearer on every request**, incl
 | Lifetime | 5 minutes. Mint per request; do not cache. |
 | Failure | `401` with the verification reason. |
 
-An env deployed before key injection (no anchor configured) stays unauthenticated — loopback-only, behind the namespace's default-deny `NetworkPolicy`.
+An env deployed before key injection (no anchor configured) answers any caller that can reach the port. The edge binds the pod IP rather than loopback — the in-pod Service that `erun expose` fronts has to reach it — and the runtime chart's `NetworkPolicy` re-permits `mcp` from any source, so an unanchored edge is reachable from every pod in the cluster, not just the env's own namespace. Inject a key by redeploying before treating an env as safe to leave running unanchored.
 
 **Don't hand-roll the token.** `erun mcp call` and `erun mcp tools` mint one internally per request; `erun mcp proxy` does the same for a client that speaks MCP itself, relaying its stdio to this endpoint; and `erun mcp token` prints one for a caller driving the protocol directly:
 

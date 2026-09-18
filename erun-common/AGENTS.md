@@ -139,6 +139,13 @@ demonstrated:
   ID), and a genuine failure. The orphan warning is not proof of completed work;
   callers must inspect the job's own record. A wrapper's bounded-wait timeout is
   also not the underlying gate verdict (`scripts/agent-gate.sh`).
+- The wrapper's own 124 does not survive `make`: GNU Make collapses any nonzero
+  recipe exit to its generic exit 2, so a caller reading only `make check`'s exit
+  status cannot tell a bounded-wait timeout from a real failure. Keep the default
+  foreground-safe (bail at the first timeout) and let a caller that is not
+  foreground-constrained opt in with `AGENT_GATE_AWAIT_VERDICT=1`, which re-awaits
+  the same job across bounded `job await` calls until it reaches a real verdict.
+  `ERUN_JOB_ID` being set does not distinguish the two callers.
 
 ## Release recovery
 
@@ -148,6 +155,15 @@ demonstrated:
   `release_disk_headroom.go`.
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
+- A push the registry rejects for a blob it does not hold is the concurrent-publisher
+  shape, not a local defect: two releases sharing layers can have the loser's manifest
+  rejected while the peer's upload is still committing. `DockerImagePusher` re-pushes
+  it, bounded, gated on `IsDockerUnknownBlobError` alone. Do not add a second retry
+  for it at a higher layer and do not widen the predicate — an auth, policy, or network
+  failure must still surface on its first occurrence. The promote path's
+  rebuild-from-source fallback remains the deeper recovery for the one blob rejection
+  a re-push cannot clear: a stale local "already pushed" record that skips the upload
+  again.
 - Refuse an existing release tag at a different HEAD. If it is an unpushed,
   unincorporated interrupted-run tag, name that diagnosis and the explicit remedy;
   never automatically delete it. Preserve retryable version state.
