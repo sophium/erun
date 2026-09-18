@@ -66,8 +66,8 @@ func portForwardLogPath(statePath string) string {
 
 // rotatePortForwardLogIfOversized bounds a forward's own kubectl log so a
 // forward that stays healthy and reused for weeks cannot grow it without
-// limit, and reclaims a log that already grew unbounded before this existed
-// (erun#2161). Called every time this env's forward is found alive --
+// limit, and reclaims a log that already grew unbounded before this existed.
+// Called every time this env's forward is found alive --
 // serving, adopted from a foreign process, or just started -- so a long-lived
 // forward gets checked on every touch rather than only at kubectl's own
 // startup.

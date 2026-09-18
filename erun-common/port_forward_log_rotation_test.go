@@ -8,7 +8,7 @@ import (
 )
 
 // TestRotateOversizedFileTruncatesInPlaceForStillOpenAppendWriter is the
-// regression test for erun#2161: a kubectl port-forward's log fd is opened
+// regression test: a kubectl port-forward's log fd is opened
 // O_APPEND and stays open for the forward's whole life, so rotation must bound
 // the file without that process ever reopening it. Before this fix, nothing
 // checked the file's size at all, so a long-lived forward's log grew without
@@ -82,7 +82,7 @@ func assertFileSize(t *testing.T, path string, want int) {
 }
 
 // TestRotateOversizedFileReclaimsAnAlreadyOversizedLogWithNoActiveWriter
-// covers the other half of erun#2161: existing 449MB-shaped logs need
+// covers the other half: existing 449MB-shaped logs need
 // reclaiming too, not just bounding future growth. No writer needs to be
 // open for this case -- a plain oversized file on disk from before this fix
 // existed.

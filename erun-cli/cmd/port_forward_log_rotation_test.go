@@ -33,7 +33,7 @@ func writeOversizedFile(t *testing.T, path string, size int) {
 }
 
 // TestReusableRecordedPortForwardRotatesOversizedLogWhenServing is the
-// regression test for erun#2161 on the mcp/api reuse path: a forward that
+// regression test on the mcp/api reuse path: a forward that
 // is found alive and serving on every touch (every `erun open` for that env)
 // must reclaim an already-oversized log rather than leaving it to grow
 // forever, since a serving forward is never restarted and its log's fd is
