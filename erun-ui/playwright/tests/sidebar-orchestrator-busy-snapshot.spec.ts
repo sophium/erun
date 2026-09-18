@@ -24,7 +24,7 @@ import { SEED_ORCHESTRATOR } from '../fixtures/seedRoot.js';
 // harness cannot wait out a real 15s poll deterministically. An environment's
 // own AI-tab badge does NOT go through this event any more — see
 // sidebar-ai-activity.spec.ts, which covers the structured per-env model
-// (erun#1105) instead.
+// instead.
 
 const RUNNING_SESSION_ID = 4242;
 

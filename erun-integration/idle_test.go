@@ -118,7 +118,7 @@ func TestIdle(t *testing.T) {
 	})
 
 	t.Run("ai_session_awaiting_input_is_not_reported_as_idle", func(t *testing.T) {
-		// erun#1105: the load-bearing case a PTY-output-volume heuristic can
+		// The load-bearing case a PTY-output-volume heuristic can
 		// never produce. A session silently waiting on the operator (Claude
 		// Code's Notification hook) must render distinctly from both busy and
 		// idle, never collapse into "idle" the way silence-based detection

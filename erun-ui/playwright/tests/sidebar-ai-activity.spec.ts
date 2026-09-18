@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures/erunApp.js';
 
-// Covers the structured AI-session status model (erun#1105): an env's AI-tab
+// Covers the structured AI-session status model: an env's AI-tab
 // badge is driven by the tool's own turn-boundary self-report (busy / idle /
 // awaiting-input / unknown), read through the same environment-activity
 // observation as the generic busy marker — not inferred from PTY output
