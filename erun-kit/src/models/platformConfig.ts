@@ -44,7 +44,7 @@ export interface Environment {
   environmentId: string;
   // The tenant this environment belongs to. Always present on the wire —
   // load-bearing once a caller can be scoped to see another tenant's rows
-  // (erun#1816), since that is the only thing that then says whose row this is.
+  // rows, since that is the only thing that then says whose row this is.
   tenantId: string;
   name: string;
   // "runtime" | "remote-agent" | "local-agent"; kept as a string for the

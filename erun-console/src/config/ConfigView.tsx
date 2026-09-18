@@ -81,7 +81,7 @@ function EnvironmentRow({
 // showTenant is true only for an OPERATIONS caller: a COMPANY tenant's own
 // environments are always its own, so the column would repeat what the
 // tenant header already names. An OPERATIONS caller can be scoped to see
-// another tenant's rows (erun#1816), where this is the only thing that says
+// another tenant's rows, where this is the only thing that says
 // whose row is whose.
 function EnvironmentsSection({
   environments,
