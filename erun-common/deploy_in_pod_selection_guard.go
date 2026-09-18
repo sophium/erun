@@ -33,7 +33,7 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 //
 // Rolling on that fallback upgrades one chart, leaves every component the
 // operator selected on its previous version, and exits 0 — a silent partial
-// upgrade of a production environment (erun#2248). Refusing and naming both
+// upgrade of a production environment. Refusing and naming both
 // remedies is the same fail-closed shape as the sibling in-pod guard
 // (guardInPodLocalAgentRuntimeDeploy) and the saved-selection shadow guard: the
 // deploy is not resolvable from here, so it is not attempted from here.
