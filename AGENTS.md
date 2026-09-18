@@ -108,8 +108,11 @@ operators may interact directly with in-pod agents without an orchestrator.
 - Convenience orchestration switches are for interactive operators only.
   Programmatic callers compose primitives and pass the version explicitly.
 - `push` publishes images and runtime charts; `deploy` only installs a
-  published version. `release` is the contracted build/publish/tag
-  orchestrator and must verify publication before exposing release metadata.
+  published version. `release` marks source control and nothing else: it stamps,
+  commits, tags and pushes the version, and never builds, publishes, or verifies
+  an artifact. `build --release` is the one that composes that stamp/tag work
+  with the build and the publish, and verifies what it published before it
+  reports a released version.
 
 ## Answering The Operator's Questions
 
@@ -356,14 +359,18 @@ It also cannot run inside `check-gate`: it reads git history, and `check-gate` r
 
 ## Release Rules
 
-- A successful release means every versioned artifact is deployable. Refuse
-  incomplete builds and verify images and charts from their published source
-  before pushing the release tag or other outward-facing metadata.
-- Keep recoverable local preparation before publication and outward-facing
-  changes after verification. Version bumps occur only after publication so a
+- A successful release marks source control; it says nothing about artifacts.
+  `build --release` is what refuses an incomplete build and verifies images and
+  charts from their published source, before it reports the version it released.
+  A tag whose artifacts never landed names a dead version rather than corrupting
+  anything: `deploy` never builds, so a dead version is not deployable by
+  accident, and the remedy is to fix the source and release again.
+- Keep recoverable local preparation before the outward-facing pushes.
+  `build --release` bumps the version only once its publish has succeeded, so a
   failed run can retry the same version.
-- Account for the base branch moving during a release: check before expensive
-  work and reconcile safely before the final push.
+- Account for the base branch moving during a `build --release`: check before
+  expensive work and reconcile safely before the final push. The guard belongs
+  to the build, which is the step that spends.
 - Release builds cover `linux/amd64` and `linux/arm64`; non-release builds may
   narrow platforms explicitly. Verify daemon support before multi-architecture
   work and publish local base images before dependent images.
