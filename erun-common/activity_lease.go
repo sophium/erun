@@ -645,7 +645,7 @@ func loadEnvironmentActivityLease(path string) (EnvironmentActivityLease, error)
 // once per lease it happens to hold. A job's own plain presence lease and, when
 // --exclusive, its environment-scope claim carry an identical Holder for
 // exactly this reason: one piece of work, reported once instead of twice under
-// two different-looking lease names (erun#2119).
+// two different-looking lease names.
 func FormatLeaseHolders(leases []EnvironmentActivityLease) string {
 	type leaseHolderGroup struct {
 		holder EnvironmentActivityLeaseHolder

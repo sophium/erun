@@ -83,7 +83,7 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 }
 
 // TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases is the regression test
-// for erun#2119's second complaint: a job's plain presence lease and its
+// for the second complaint: a job's plain presence lease and its
 // exclusive environment claim are one piece of work, but a refusal that lists
 // every lease separately reported them as two unrelated claimants. Once both
 // leases carry the same Holder, the refusal must say so once.

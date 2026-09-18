@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// TestJobPresenceLeaseRecordsInitiator is the regression test for erun#2119.
+// TestJobPresenceLeaseRecordsInitiator is the regression test for the defect.
 // A job's own plain activity lease — the one every started job holds for its
 // whole lifetime, not only the exclusive-scope claim an --exclusive job also
 // takes — recorded no holder at all, so a refusal fed by it could only ever
