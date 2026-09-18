@@ -115,13 +115,20 @@ func TestUsageDescriptionNamesASurfaceThatCarriesTheVerdict(t *testing.T) {
 }
 
 // TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment pins the MCP
-// half of the excludes-builds caveat: a build-capable environment's reading
-// cannot see the erun-dind sidecar an image build actually runs in, so the
-// result must carry ExcludesBuilds=true instead of letting the reading imply
-// the environment is idle. The Runtime fixture elsewhere in this file cannot
-// tell a working field from a missing one -- UsesDindSidecar() is false for
-// Runtime either way -- so this is the only case that exercises the disclosure
-// at all, on either transport.
+// half of the excludes-builds caveat at the boundary the defect lived on: a
+// build-capable environment's reading cannot see the erun-dind sidecar an
+// image build actually runs in, so the result must carry ExcludesBuilds=true
+// instead of letting the reading imply the environment is idle. The Runtime
+// fixture elsewhere in this file cannot tell a working field from a missing
+// one -- UsesDindSidecar() is false for Runtime either way -- so this is the
+// only case that exercises the disclosure at all.
+//
+// The unresolved-type case is the defect itself, not a hypothetical: inside a
+// runtime pod the on-disk env config is a projection `doctor --sync-config`
+// rewrites only when it runs, so an unsynced pod config carries no `type`.
+// ResolvedType() then reads empty and UsesDindSidecar() reads the unrecognised
+// type as "no sidecar", so the field that exists to disclose the gap went
+// missing -- silently, on exactly the environment that has the gap.
 func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	xdg.Reload()
@@ -135,9 +142,18 @@ func TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment(t *testing.T
 		{"remote-agent carries the dind sidecar", eruncommon.EnvironmentTypeRemoteAgent, true},
 		{"local-agent carries the dind sidecar", eruncommon.EnvironmentTypeLocalAgent, true},
 		{"runtime builds nowhere in this container", eruncommon.EnvironmentTypeRuntime, false},
+		// "" is not a fourth type: it is the pod-local projection state, where
+		// the type is only recoverable from the injected identity (set below).
+		{"unresolved type resolves from the pod's injected identity", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// A pod injects its own identity; the on-disk config may or may not
+			// have been synced to match it yet.
+			t.Setenv("ERUN_TENANT", "tenant-a")
+			t.Setenv("ERUN_ENVIRONMENT", "dev")
+			t.Setenv("ERUN_ENV_TYPE", string(eruncommon.EnvironmentTypeRemoteAgent))
+
 			runtime := RuntimeConfig{
 				Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 				Store:   usageTestStoreOfType("tenant-a", "dev", tc.envType, t.TempDir()),

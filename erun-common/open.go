@@ -518,7 +518,37 @@ func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, 
 	if resolver, ok := store.(effectiveKubernetesContextResolver); ok {
 		envConfig.KubernetesContext = resolver.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
 	}
+	envConfig = withInjectedRuntimeType(tenant, environment, envConfig)
 	return envConfig, nil
+}
+
+// withInjectedRuntimeType fills an unresolved environment type from the runtime
+// identity this process was injected with, when it is resolving the very
+// environment it runs in. Inside a runtime pod the on-disk env config is a
+// projection `doctor --sync-config` rewrites only when it runs, so it can lag
+// the chart's injected identity -- trusting the stale copy for an in-pod build
+// already produced the wrong registry and build script silently
+// (injectedDockerBuildEnvConfig, docker_build_scope.go). A stale type is the
+// same class of silent wrong answer, and a worse one: ResolvedType() reads
+// empty, and UsesDindSidecar() then reads the unrecognised type as "carries no
+// erun-dind sidecar" rather than "cannot tell", so a build-capable environment
+// under-reports its usage -- RuntimeUsage.ExcludesBuilds exists precisely to
+// disclose the sidecar a runtime-container reading cannot see, and it must not
+// fail open on the one surface that reports the number.
+//
+// Falls back only when the type is genuinely unresolved, and only for the
+// resolved target the injected identity actually names, so resolving any other
+// environment from inside a pod is untouched.
+func withInjectedRuntimeType(tenant, environment string, envConfig EnvConfig) EnvConfig {
+	if envConfig.Type.IsValid() {
+		return envConfig
+	}
+	injected, ok := ResolveInjectedRuntimeConfig(os.Getenv)
+	if !ok || injected.Tenant != tenant || injected.Environment != environment {
+		return envConfig
+	}
+	envConfig.Type = injected.Env.Type
+	return envConfig
 }
 
 func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
