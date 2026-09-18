@@ -101,7 +101,7 @@ func readDesktopAppBundleVersion(bundlePath string) (string, bool) {
 // has drifted from this CLI's own version, and a stale second copy sharing
 // the bundle id (com.sophium.erun) with a current one -- both invisible
 // today, since nothing about launching a stale bundle (Finder, Spotlight, the
-// Dock) ever consults the CLI it sits beside (erun#2139). Detection only, and
+// Dock) ever consults the CLI it sits beside. Detection only, and
 // unconditional: a stale or duplicated bundle is a fact about this host, not
 // about the tenant/environment doctor is scoped to, so this runs before any
 // tenant resolves and the same in --dry-run as for real -- there is no live

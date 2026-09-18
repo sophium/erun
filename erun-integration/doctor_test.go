@@ -1468,7 +1468,7 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("dry_run_reports_stale_desktop_app_bundle", func(t *testing.T) {
-		// erun#2139: the installed desktop app bundle can drift arbitrarily far
+		// The installed desktop app bundle can drift arbitrarily far
 		// behind the CLI with nothing to say so. A single ~/Applications/ERun.app
 		// bundle whose Info.plist version differs from this CLI's own build
 		// version must surface under "== Desktop app ==", identically in
@@ -1491,7 +1491,7 @@ func TestDoctor(t *testing.T) {
 	})
 
 	t.Run("dry_run_reports_shadowed_desktop_app_bundle", func(t *testing.T) {
-		// The operator-reported shape (erun#2139): a current bundle at
+		// The operator-reported shape: a current bundle at
 		// ~/Applications/ERun.app sits alongside a stale one at
 		// /Applications/ERun.app (both simulated here since a test must never
 		// touch a real /Applications -- ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE
