@@ -737,18 +737,17 @@ func TestWireOrchestratorMCPHostEnvIsNotCountedAsMissing(t *testing.T) {
 	}
 }
 
-func TestSingleOrchestratorMCPUnreachableEnv(t *testing.T) {
-	if _, _, ok := singleOrchestratorMCPUnreachableEnv(nil); ok {
-		t.Fatal("expected no match for zero unreachable envs")
-	}
-	if _, _, ok := singleOrchestratorMCPUnreachableEnv([]orchestratorMCPUnreachable{
-		{Label: "frs/dev"}, {Label: "frs/staging"},
-	}); ok {
-		t.Fatal("expected no match for more than one unreachable env")
-	}
-	tenant, environment, ok := singleOrchestratorMCPUnreachableEnv([]orchestratorMCPUnreachable{{Label: "frs/dev"}})
+func TestOrchestratorMCPUnreachableEnv(t *testing.T) {
+	tenant, environment, ok := orchestratorMCPUnreachableEnv("frs/dev")
 	if !ok || tenant != "frs" || environment != "dev" {
 		t.Fatalf("got tenant=%q environment=%q ok=%v, want frs/dev/true", tenant, environment, ok)
+	}
+	// orchestratorEnvLabel's degenerate shapes name no env a deploy action
+	// could target, so they must not produce one.
+	for _, label := range []string{"", "frs", "/dev", "frs/", "?/dev", "frs/?", "an unnamed linked entry"} {
+		if tenant, environment, ok := orchestratorMCPUnreachableEnv(label); ok {
+			t.Fatalf("label %q resolved to %q/%q, want no actionable env", label, tenant, environment)
+		}
 	}
 }
 
@@ -807,11 +806,14 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	}
 }
 
-// TestWireOrchestratorMCPMultipleUnreachableEnvsCarryNoAction locks the
-// ambiguous case: when more than one linked env's edge is unreachable, no
-// single env can own the notice's action, so it falls back to the plain
-// app-level notice with no action rather than guessing which env to deploy.
-func TestWireOrchestratorMCPMultipleUnreachableEnvsCarryNoAction(t *testing.T) {
+// TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable is the
+// regression for the case that used to get the least help: several edges down
+// at once collapsed into one combined notice carrying no action, so the
+// orchestrator with the most broken edges was told about them with nothing to
+// click. Every unreachable env now gets its own env-scoped notice carrying the
+// same deploy action the single-env case gets -- not one env picked for the
+// whole set, and not a notice that merely mentions the others.
+func TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable(t *testing.T) {
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 	app, _ := orchestratorTestAppWithReachability(t, func(int) bool { return false })
 	defer app.shutdown(context.Background())
@@ -824,16 +826,47 @@ func TestWireOrchestratorMCPMultipleUnreachableEnvsCarryNoAction(t *testing.T) {
 	})
 
 	events := emits.events(appNotificationEvent)
-	if len(events) != 1 {
-		t.Fatalf("expected exactly one notice about the unreachable edges, got %+v", events)
+	if len(events) != 2 {
+		t.Fatalf("expected one notice per unreachable env, got %+v", events)
 	}
-	payload, ok := events[0].(appNotificationPayload)
+	seen := make(map[string]bool, len(events))
+	for _, event := range events {
+		seen[assertActionableUnreachableNotice(t, event, "Petios")] = true
+	}
+	for _, want := range []string{"frs/dev", "frs/laptop"} {
+		if !seen[want] {
+			t.Fatalf("no actionable notice for %s; got %+v", want, seen)
+		}
+	}
+}
+
+// assertActionableUnreachableNotice checks one notice about an unreachable edge
+// and returns the environment it names: a warning about that env, tagged with
+// it and carrying the deploy action. A notice that merely mentions the edge is
+// not recovery, which is what this locks.
+func assertActionableUnreachableNotice(t *testing.T, event any, orchestrator string) string {
+	t.Helper()
+	payload, ok := event.(appNotificationPayload)
 	if !ok {
-		t.Fatalf("unexpected payload type: %T", events[0])
+		t.Fatalf("unexpected payload type: %T", event)
 	}
-	if payload.Tenant != "" || payload.Environment != "" || payload.Action != "" {
-		t.Fatalf("notice = %+v, want no tenant/environment/action tag when several envs are unreachable", payload)
+	if payload.Kind != "warning" {
+		t.Fatalf("kind = %q, want warning: %q", payload.Kind, payload.Message)
 	}
+	if payload.Action != notificationActionDeploy {
+		t.Fatalf("notice for %s/%s carries action %q, want %q -- every unreachable edge must be actionable",
+			payload.Tenant, payload.Environment, payload.Action, notificationActionDeploy)
+	}
+	if payload.Source != notificationSourceOrchestratorEdgeUnreachable {
+		t.Fatalf("notice source = %q, want %q", payload.Source, notificationSourceOrchestratorEdgeUnreachable)
+	}
+	label := payload.Tenant + "/" + payload.Environment
+	for _, want := range []string{label, orchestrator} {
+		if !strings.Contains(payload.Message, want) {
+			t.Fatalf("notice tagged %s does not mention %q: %q", label, want, payload.Message)
+		}
+	}
+	return label
 }
 
 // TestOrchestratorMCPPartialNoticeNamesWhatIsMissing: the notice is the only

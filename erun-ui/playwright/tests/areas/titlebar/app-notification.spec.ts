@@ -119,6 +119,55 @@ test.describe('app-notification message centre', () => {
     await expect(row.getByRole('button', { name: 'Copy', exact: true })).toBeVisible();
   });
 
+  // A launch that finds MORE than one linked environment's edge unreachable
+  // used to collapse into one combined notice emitted with no action, so the
+  // orchestrators with the most edges down were told about them with nothing
+  // to click. The backend now posts one env-scoped notice per unreachable edge
+  // (Go: TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable owns
+  // that emit -- launching an orchestrator needs a real AI harness and PTY
+  // this harness deliberately lacks). What is observable here is the half that
+  // made the missing action a defect: each notice renders its own Deploy
+  // control, and the actionless shape renders none -- the frontend's remedy
+  // comes from the payload's action, not from the message naming a fix.
+  test('each unreachable-edge warning carries its own Deploy control', async ({ app, page }) => {
+    const recovery =
+      'Calls will recover automatically once the edge comes back; if it stays down, deploy or reopen that environment.';
+    for (const [tenant, environment] of [
+      ['pw', 'alpha'],
+      ['pw', 'beta'],
+    ]) {
+      await emit(page, {
+        kind: 'warning',
+        message: `Petios wired tools for ${tenant}/${environment}, but its edge is not answering right now. ${recovery}`,
+        tenant,
+        environment,
+        source: 'orchestrator-edge-unreachable',
+        action: 'deploy',
+      });
+    }
+    await emit(page, {
+      kind: 'warning',
+      message: `Petios wired tools for pw/alpha, pw/beta, but its edge is not answering right now. ${recovery}`,
+    });
+
+    await app.titlebar.openMessageCenter('warning');
+
+    for (const [tenant, environment] of [
+      ['pw', 'alpha'],
+      ['pw', 'beta'],
+    ]) {
+      const row = app.titlebar.messageCenterRow(
+        `wired tools for ${tenant}/${environment}, but its edge`,
+      );
+      await expect(row).toBeVisible();
+      await expect(row.getByRole('button', { name: 'Deploy', exact: true })).toBeVisible();
+    }
+
+    const actionless = app.titlebar.messageCenterRow('wired tools for pw/alpha, pw/beta');
+    await expect(actionless).toBeVisible();
+    await expect(actionless.getByRole('button', { name: 'Deploy', exact: true })).toHaveCount(0);
+  });
+
   test('payload with empty message is ignored', async ({ app, page }) => {
     const sentinel = 'Sentinel error toast proving the empty payload was processed.';
     // Events are ordered, so once this error sentinel's icon renders the

@@ -348,17 +348,16 @@ func orchestratorMCPUnreachableNotice(name string, unreachable []orchestratorMCP
 		label, strings.Join(names, ", "))
 }
 
-// singleOrchestratorMCPUnreachableEnv reports the one environment a deploy
-// action can unambiguously target: exactly one unreachable env, whose Label
-// is guaranteed "<tenant>/<environment>" (orchestratorEnvLabel's well-formed
-// case — the only shape probeOrchestratorMCPEdges ever wires). More than one
-// unreachable env has no single env to attach the action to.
-func singleOrchestratorMCPUnreachableEnv(unreachable []orchestratorMCPUnreachable) (tenant, environment string, ok bool) {
-	if len(unreachable) != 1 {
-		return "", "", false
-	}
-	tenant, environment, found := strings.Cut(unreachable[0].Label, "/")
-	if !found || tenant == "" || environment == "" {
+// orchestratorMCPUnreachableEnv splits one unreachable edge's Label into the
+// environment a deploy action can target. The label is normally
+// orchestratorEnvLabel's well-formed "<tenant>/<environment>" — the shape
+// probeOrchestratorMCPEdges wires — so the degenerate shapes that helper also
+// produces report false and their notice carries no action: "?" is its
+// placeholder for the half of a malformed entry that did not resolve, and a
+// deploy aimed at it would be a control that cannot work.
+func orchestratorMCPUnreachableEnv(label string) (tenant, environment string, ok bool) {
+	tenant, environment, found := strings.Cut(label, "/")
+	if !found || tenant == "" || environment == "" || tenant == "?" || environment == "?" {
 		return "", "", false
 	}
 	return tenant, environment, true
