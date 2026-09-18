@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/adrg/xdg"
 )
 
 // TestParseRuntimeUsageReadings covers the fixture shapes #1233 measured
@@ -63,6 +65,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"memory_max=2147483648",
 				"memory_peak=1027301376",
 				"memory_oom_kill=0",
+				"memory_ceiling_hits=21292",
 				"cpu_max=100000 100000",
 				"cpu_usage_before=581511501",
 				"cpu_usage_after=581611501",
@@ -75,7 +78,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			wantMemory: RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
-				OOMKillsObserved: true,
+				OOMKillsObserved: true, CeilingHits: 21292, CeilingHitsObserved: true,
 			},
 			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112)},
 		},
@@ -188,6 +191,27 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 			},
 			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
 		},
+		{
+			// memory.events' "max" counter (cgroup ceiling hits) is exactly
+			// as unreadable as oom_kill from the same file; CeilingHitsObserved
+			// must stay false rather than reporting a confident "never hit it".
+			name: "memory.events max (ceiling hits) missing reports unobserved, not a fabricated zero",
+			output: strings.Join([]string{
+				"cgroup_type=cgroup2fs",
+				"memory_current=413589504",
+				"memory_max=2147483648",
+				"memory_peak=1027301376",
+				"memory_oom_kill=0",
+				"memory_ceiling_hits=",
+			}, "\n"),
+			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: RuntimeMemoryUsage{
+				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
+				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
+				OOMKillsObserved: true,
+			},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+		},
 	}
 }
 
@@ -249,6 +273,12 @@ func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want RuntimeMemoryUsage) {
 	}
 	if got.OOMKillsObserved != want.OOMKillsObserved {
 		t.Errorf("Memory.OOMKillsObserved = %t, want %t", got.OOMKillsObserved, want.OOMKillsObserved)
+	}
+	if got.CeilingHits != want.CeilingHits {
+		t.Errorf("Memory.CeilingHits = %d, want %d", got.CeilingHits, want.CeilingHits)
+	}
+	if got.CeilingHitsObserved != want.CeilingHitsObserved {
+		t.Errorf("Memory.CeilingHitsObserved = %t, want %t", got.CeilingHitsObserved, want.CeilingHitsObserved)
 	}
 }
 
@@ -434,5 +464,125 @@ func TestClampRuntimeUsageInterval(t *testing.T) {
 				t.Errorf("clampRuntimeUsageInterval(%v) = %v, want %v", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestRetainedMemoryWarningsSurviveAContainerRestart pins the defect: memory.peak
+// and memory.events' oom_kill are per-container counters, so a restart zeroes
+// both and an environment that was OOM-killed reads as memory-healthy. The
+// retained history is what outlives the container, so the warning has to come
+// from it -- without becoming a warning an idle environment also gets, or one
+// no operator action can clear.
+func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
+	const limit = int64(6442450944) // 6144Mi, the runtimepod in the observed report
+
+	// The reading taken after the restart: both counters reset, so neither the
+	// live peak nor the live kill count supports a warning by itself.
+	restarted := RuntimeMemoryUsage{
+		CurrentBytes: 1503238554, PeakBytes: 2254857830, PeakObserved: true,
+		LimitBytes: limit, PercentOfLimit: 100 * float64(1503238554) / float64(limit),
+		OOMKills: 0, OOMKillsObserved: true,
+	}
+	unrestarted := RuntimeMemoryUsage{
+		CurrentBytes: 6442450943, PeakBytes: 6443237376, PeakObserved: true,
+		LimitBytes: limit, PercentOfLimit: 100 * float64(6442450943) / float64(limit),
+		OOMKills: 1, OOMKillsObserved: true,
+	}
+
+	t.Run("a retained kill and near-limit peak keep warning after a restart", func(t *testing.T) {
+		history := RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+
+		warnings := retainedMemoryUsageWarnings(restarted, history)
+		if !hasWarningContaining(warnings, "retained history recorded 1 OOM kill") {
+			t.Errorf("a kill the retained history records must survive the restart, got %v", warnings)
+		}
+		if !hasWarningContaining(warnings, "retained memory peak reached") {
+			t.Errorf("a retained near-limit peak must survive the restart, got %v", warnings)
+		}
+	})
+
+	t.Run("a genuinely idle environment is still healthy", func(t *testing.T) {
+		idle := RuntimeMemoryUsage{
+			CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true,
+			LimitBytes: limit, PercentOfLimit: 100 * float64(52428800) / float64(limit),
+			OOMKillsObserved: true,
+		}
+		for _, history := range []RuntimeUsageHistory{
+			{},
+			{Restarts: 3, ObservedPeakMemoryBytes: 104857600},
+		} {
+			if warnings := retainedMemoryUsageWarnings(idle, history); len(warnings) != 0 {
+				t.Errorf("an environment that never approached its limit must not warn, got %v", warnings)
+			}
+		}
+	})
+
+	t.Run("raising the limit clears the retained peak warning", func(t *testing.T) {
+		// The same history, scored against the 9216Mi the pod's own verdict
+		// recommends: the signal is re-derived every read, so acting on it is
+		// what clears it -- there is no stored "already warned" flag to reset.
+		raised := restarted
+		raised.LimitBytes = 9663676416 // 9216Mi
+		history := RuntimeUsageHistory{Restarts: 25, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+
+		warnings := retainedMemoryUsageWarnings(raised, history)
+		if hasWarningContaining(warnings, "retained memory peak reached") {
+			t.Errorf("a raised limit must clear the peak warning, got %v", warnings)
+		}
+		if !hasWarningContaining(warnings, "retained history recorded 1 OOM kill") {
+			t.Errorf("a kill that already happened stays reported, got %v", warnings)
+		}
+	})
+
+	t.Run("an uninterrupted container is not warned twice", func(t *testing.T) {
+		history := RuntimeUsageHistory{Restarts: 0, ObservedPeakMemoryBytes: 6443237376, ObservedOOMKills: 1}
+
+		if warnings := retainedMemoryUsageWarnings(unrestarted, history); len(warnings) != 0 {
+			t.Errorf("live counters already cover this container, got %v", warnings)
+		}
+	})
+}
+
+// TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory proves the wiring
+// rather than just the judgement: a caller that only runs RunRuntimeUsage --
+// `erun usage`, the MCP usage tool, the desktop card -- gets the retained
+// warning without asking for it, and an environment with no retained history
+// gains nothing.
+func TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+
+	// The post-restart reading: both counters reset, so it warns about nothing.
+	reading := parseRuntimeUsage(ShellLaunchParams{Tenant: "erun", Environment: "code3"}, strings.Join([]string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=1503238554",
+		"memory_max=6442450944",
+		"memory_peak=2254857830",
+		"memory_oom_kill=0",
+	}, "\n"), time.Second)
+	if len(reading.Warnings) != 0 {
+		t.Fatalf("expected the live reading alone to be silent, got %v", reading.Warnings)
+	}
+	if warnings := applyRetainedUsageWarnings(reading).Warnings; len(warnings) != 0 {
+		t.Fatalf("no retained history must not manufacture a warning, got %v", warnings)
+	}
+
+	history := AppendRuntimeUsageSample(RuntimeUsageHistory{}, RuntimeUsage{
+		Memory: RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
+	}, time.Now())
+	if err := SaveRuntimeUsageHistory("erun", "code3", history); err != nil {
+		t.Fatalf("save history: %v", err)
+	}
+
+	warnings := applyRetainedUsageWarnings(reading).Warnings
+	if !hasWarningContaining(warnings, "retained memory peak reached") {
+		t.Errorf("the pre-restart peak must be picked up, got %v", warnings)
+	}
+	if !hasWarningContaining(warnings, "retained history recorded 1 OOM kill") {
+		t.Errorf("the pre-restart kill must be picked up, got %v", warnings)
+	}
+	if len(warnings) != 2 {
+		t.Errorf("expected exactly the two retained warnings, got %v", warnings)
 	}
 }

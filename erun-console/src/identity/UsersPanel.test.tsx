@@ -550,3 +550,91 @@ describe('UsersPanel', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
+
+// The scope selector was rendered on every section but read by only three
+// panels, and Users was not one of them -- an operator pointing
+// "Administering" at another tenant saw their own tenant's identities
+// unchanged, with no signal the control did not apply. These lock the fix:
+// a scoped read swaps in the target tenant's own org and membership join
+// (mirroring shell/AppShell.test.tsx's existing Environments scope test),
+// and a target tenant with no org mapping renders that fact plainly instead
+// of a false "no users enrolled" empty state.
+describe('UsersPanel scope selector', () => {
+  const TENANTS = [
+    { tenantId: 'own-tenant', name: 'Acme', type: 'OPERATIONS', createdAt: '', updatedAt: '' },
+    { tenantId: 'tenant-beta', name: 'Beta', type: 'COMPANY', createdAt: '', updatedAt: '' },
+  ];
+
+  it("swaps in the scoped tenant's own users and reports its own membership, never the caller's own tenant's rows", async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/tenants') {
+        return jsonResponse(TENANTS);
+      }
+      if (req.url === '/v1/tenant-issuers?tenantId=tenant-beta') {
+        return jsonResponse([
+          {
+            tenantId: 'tenant-beta',
+            issuer: 'https://idp.example.com',
+            name: 'Beta',
+            orgFieldKey: 'org_id',
+            orgFieldValue: 'org-beta',
+          },
+        ]);
+      }
+      if (req.url === '/v1/identity/users?orgId=org-beta&tenantId=tenant-beta') {
+        return jsonResponse([
+          {
+            id: 'idp-beta-1',
+            username: 'carol',
+            state: 'USER_STATE_ACTIVE',
+            enrolled: true,
+            erunUserId: 'erun-carol',
+          },
+        ]);
+      }
+      // The caller's own, unscoped read -- must never be hit while scoped.
+      if (req.url === '/v1/identity/users') {
+        return jsonResponse([{ id: 'idp-own-1', username: 'alice', state: 'USER_STATE_ACTIVE' }]);
+      }
+      return jsonResponse({}, 404);
+    });
+    renderWithStore(
+      <UsersPanel
+        token="dev-token"
+        ownTenantId="own-tenant"
+        tenantType="OPERATIONS"
+        scopeTenantId="tenant-beta"
+      />,
+    );
+
+    expect(await screen.findByText('carol')).toBeInTheDocument();
+    expect(screen.getByText('Tenant member')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Manage roles' })).toBeInTheDocument();
+    expect(screen.queryByText('alice')).not.toBeInTheDocument();
+    // The scoped badge in the card header names the tenant being viewed.
+    expect(screen.getAllByText('Beta').length).toBeGreaterThan(0);
+  });
+
+  it('states plainly that the scoped tenant has no organization mapping, instead of rendering a false empty table', async () => {
+    mockFetch((req) => {
+      if (req.url === '/v1/tenants') {
+        return jsonResponse(TENANTS);
+      }
+      if (req.url === '/v1/tenant-issuers?tenantId=tenant-beta') {
+        return jsonResponse([]);
+      }
+      return jsonResponse([]);
+    });
+    renderWithStore(
+      <UsersPanel
+        token="dev-token"
+        ownTenantId="own-tenant"
+        tenantType="OPERATIONS"
+        scopeTenantId="tenant-beta"
+      />,
+    );
+
+    expect(await screen.findByText(/has no organization mapping yet/)).toBeInTheDocument();
+    expect(screen.queryByText('No users enrolled yet.')).not.toBeInTheDocument();
+  });
+});

@@ -316,7 +316,7 @@ export function StartReviewFromDiffAction({
         variant="outline"
         size="sm"
         // Queried by the review surface's `S` keyboard shortcut
-        // (TerminalController.startReviewForFocusedDiffEnv) to activate this
+        // (reviewDiffKeyboardNav's startReviewForFocusedEnv) to activate this
         // exact section's action without duplicating its dialog-opening logic.
         data-review-action="start-review"
         onClick={() => {

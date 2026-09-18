@@ -270,7 +270,7 @@ func offerOrphanedCloudContextRecovery(ctx common.Context, configStore common.Co
 	}
 	if !ctx.DryRun {
 		label := fmt.Sprintf("Recover cloud context %s from AWS (account %s, region %s)?", orphan.KubernetesContext, orphan.AccountID, orphan.Region)
-		ok, err := confirmPrompt(promptRunner, label)
+		ok, err := doctorConfirm(ctx, promptRunner, label, "Re-run with --restore-config-from-backup <date> to restore the config non-interactively.")
 		if err != nil || !ok {
 			return false, err
 		}
@@ -330,7 +330,7 @@ func offerRootConfigBackupRestore(ctx common.Context, promptRunner PromptRunner,
 		return false, err
 	}
 	label := fmt.Sprintf("Restore root config from backup %s path=%s?", backup.Date.Format("2006-01-02"), backup.Path)
-	ok, err := confirmPrompt(promptRunner, label)
+	ok, err := doctorConfirm(ctx, promptRunner, label, "Re-run with --restore-config-from-backup "+backup.Date.Format("2006-01-02")+" to restore it without a prompt.")
 	if err != nil || !ok {
 		return false, err
 	}
@@ -389,7 +389,8 @@ func offerOrphanedAliasRepair(ctx common.Context, configStore common.ConfigStore
 		_, err := fmt.Fprintf(ctx.Stdout, "Cannot repair alias %q non-interactively; re-run with a TTY or run `erun cloud init aws` directly\n", orphan.Alias)
 		return false, err
 	}
-	ok, err := confirmPrompt(promptRunner, fmt.Sprintf("Re-initialize cloud provider alias %s (account %s, user %s)?", orphan.Alias, orphan.AccountID, orphan.Username))
+	ok, err := doctorConfirm(ctx, promptRunner, fmt.Sprintf("Re-initialize cloud provider alias %s (account %s, user %s)?", orphan.Alias, orphan.AccountID, orphan.Username),
+		"Run `erun cloud init aws` directly to re-initialize it without a prompt.")
 	if err != nil || !ok {
 		return false, err
 	}

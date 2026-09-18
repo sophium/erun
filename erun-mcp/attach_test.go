@@ -14,21 +14,6 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// attachTestIOTimeout bounds how long these tests wait for a PTY byte or an
-// outcome message. This suite forks a real shell under a real PTY (dtach,
-// pgrep, several /proc reads) for every scenario, and every one of those
-// forks queues behind whatever else the host scheduler is running -- an
-// agent pod is frequently sharing its node with other pods' CPU-heavy work
-// (release builds, other suites) that this suite has no way to see or wait
-// out. Measured on a contended pod (~2x CPU oversubscription from unrelated
-// load, several repeated runs), the slowest of these scenarios still
-// completed within 23s; a shorter deadline turns ordinary scheduler
-// contention into a spurious failure indistinguishable from a real hang,
-// which is what happened here before this constant existed. A genuine hang
-// (the bridge never closing, the shell never producing output) still fails
-// the test, just later.
-const attachTestIOTimeout = 45 * time.Second
-
 // newAttachTestRuntime scopes a test to a unique tenant/environment pair, so
 // RemoteAppSessionSocketPath resolves to a socket path no other test (or real
 // environment) can collide with. It also ensures the socket directory itself
@@ -110,12 +95,26 @@ func writeControl(t *testing.T, conn *websocket.Conn, msg attachControlMessage) 
 	}
 }
 
+// attachReadDeadline bounds each read from the attach WebSocket. Every one of
+// these reads waits for a real dtach + shell process to produce something, so
+// the bound has to tolerate a busy host rather than measure it: at 10s the
+// golden-path test failed inside the in-build gate, where six packages
+// including this one run their own shells side by side, while the same test
+// passes standalone in seconds. The same suite forks a real shell under a real
+// PTY (dtach, pgrep, several /proc reads) per scenario, and each fork queues
+// behind whatever else the node runs -- measured on a contended pod (~2x CPU
+// oversubscription), the slowest scenario still completed within 23s, so a
+// tighter bound turns ordinary scheduler contention into a spurious failure
+// indistinguishable from a real hang. It stays finite so a genuinely wedged
+// attach still fails its own test instead of hanging the suite.
+const attachReadDeadline = 60 * time.Second
+
 // waitForAnyBinary blocks until the first binary frame arrives, proving the
 // PTY has actually produced output (so the owner file -- written before dtach
 // ever runs -- is guaranteed to already be in place).
 func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(attachTestIOTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	for {
 		kind, _, err := conn.ReadMessage()
 		if err != nil {
@@ -131,7 +130,7 @@ func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 // want appears or the deadline lapses.
 func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(attachTestIOTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	var accumulated strings.Builder
 	for {
 		kind, data, err := conn.ReadMessage()
@@ -149,7 +148,7 @@ func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 
 func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(attachTestIOTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	for {
 		kind, data, err := conn.ReadMessage()
 		if err != nil {
@@ -179,8 +178,8 @@ func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage
 func TestAttachReadHelpersToleratePastThePriorDeadline(t *testing.T) {
 	const priorDeadline = 10 * time.Second
 	const delay = priorDeadline + 2*time.Second
-	if delay >= attachTestIOTimeout {
-		t.Fatalf("test setup: delay %s must stay below attachTestIOTimeout %s", delay, attachTestIOTimeout)
+	if delay >= attachReadDeadline {
+		t.Fatalf("test setup: delay %s must stay below attachReadDeadline %s", delay, attachReadDeadline)
 	}
 
 	mux := http.NewServeMux()
@@ -381,6 +380,18 @@ func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
 // disconnect indistinguishable from a network stall), and the session itself
 // survives for the new attach to keep driving.
 func TestAttachEvictionReportsTakenOverAndPreservesTheSession(t *testing.T) {
+	// Eviction is the /proc half of the attach script: it finds the session's
+	// master by grepping /proc/<pid>/cmdline, then kills the other viewer's
+	// dtach client so that viewer's own `dtach -A` returns and its wrapper reads
+	// the foreign owner id and exits 76 -- the taken-over outcome this test
+	// asserts. The runtime image is Linux and ships no ss/lsof, so /proc is the
+	// intended mechanism there; where /proc is absent (macOS) the scan
+	// deliberately finds nothing and, by design, kicks no one, so the first
+	// viewer is never evicted and its socket never sees an outcome. That is the
+	// platform behaving as documented, so this runs where the behaviour exists.
+	if _, err := os.Stat("/proc"); err != nil {
+		t.Skip("takeover resolves the session master through /proc, which this platform does not have")
+	}
 	runtime := newAttachTestRuntime(t)
 	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")
