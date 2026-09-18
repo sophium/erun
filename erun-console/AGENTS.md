@@ -46,6 +46,15 @@ Keep verification claims tied to actual test boundaries:
 
 - `src/shell/`: persistent sidebar/header and one derived active section;
   branded pre-auth screens. Keep navigation and app composition console-local.
+- The console carries no product identity of its own. The brand is the
+  deployment's `platform.brand`, which the API serves at `GET /v1/platform`; the
+  console image's entrypoint stamps that same value into the served page and the
+  bundle reads it before discovery resolves (`src/shell/brand.ts`). The bundled
+  default covers only an instance that configures no brand — the state where the
+  server serves none either. Never add a name literal at a shell call site, and
+  never hold the brand back behind a skeleton, a delay, or a resolved-only
+  render: a pre-resolution paint under a different name is a visible identity
+  change on every load.
 - Tenant switching re-authenticates with `prompt=select_account`; it is never
   client-side tenant re-scoping. Consume the one-shot switch intent after config
   resolves and show a mismatch if the API-selected tenant differs.

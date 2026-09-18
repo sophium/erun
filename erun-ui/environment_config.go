@@ -207,6 +207,14 @@ func (a *App) ChooseLocalRepoPath(current string) (string, error) {
 
 func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
 	updated := environmentConfigFromUI(config, existing)
+	// The repository path is the one field the desktop runs on the same machine
+	// as, so it is refused here — with the reason env-init gives for the same
+	// value — rather than written and left to surface at the next deploy as a
+	// failure of the mount. Both callers share ValidateEnvRepoPath, so the
+	// dialog accepts exactly the paths init accepts.
+	if err := eruncommon.ValidateEnvRepoPath(updated.ResolvedType(), updated.LocalRepoPath); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
 	if _, err := updated.Idle.Resolve(); err != nil {
 		return eruncommon.EnvConfig{}, err
 	}

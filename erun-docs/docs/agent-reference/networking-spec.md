@@ -160,6 +160,8 @@ The dry-run trace prints both `kubectl` commands verbatim (including the TTL) pl
 
 Either way, `expose` **references** the pre-issued Secret and sets **no** `cert-manager.io/issuer` annotation on the Ingress itself (the annotation model would trigger per-host issuance instead of the one wildcard cert covering every exposed service).
 
+**Transport policy belongs to the edge, not to an Ingress.** `terraform-erun-cluster-edge` redirects Traefik's plaintext entrypoint to the secure one with a permanent 301 and serves `Strict-Transport-Security` there, for every host the controller routes — `hsts_max_age_seconds` (default `86400`), `hsts_include_subdomains` and `hsts_preload` (both off by default, because they bind names beyond the hosts the module serves). No Ingress carries scheme policy of its own, and none needs to: the entrypoint is the only layer that can upgrade a request before an application sees it, which matters because a *relative* `Location` issued behind the edge inherits the scheme the browser started on — the hosted IdP's own relative login chain stays on http until the entrypoint redirects it, no matter how each host is configured. The docs host is the exception: it is published to Cloudflare Pages rather than routed through Traefik, so its HSTS comes from `erun-docs/static/_headers`, which Pages applies to the deployed site and its custom domain.
+
 **Idempotency / errors.** `replace-rrset` and `apply` are both idempotent; re-running converges. The wildcard record is written before the Ingress, so a failure applying the Ingress can leave the DNS record in place — re-run after resolving the cluster issue. Pre-flight validation (missing/malformed `platform:` block, missing `--ip`, non-DNS-1035 service name) fails before any write; see [`erun expose` · Error behaviour](/cli/expose#error-behaviour).
 
 ## Unexposing
@@ -181,7 +183,7 @@ Either way, `expose` **references** the pre-issued Secret and sets **no** `cert-
 
 ## Cross-namespace traffic semantics
 
-Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny `NetworkPolicy` as a **copy-paste pattern you apply per env** — the runtime chart does **not** auto-deploy one (no `NetworkPolicy` template ships in it). Apply this manifest to an env's namespace to block ingress from outside it. The shape:
+Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny `NetworkPolicy` as a **copy-paste pattern you apply per env**. The runtime chart ships one policy, but it is not this one: it selects only the runtime pod (`app: <release>`), and in exchange for isolating that pod it re-permits `ssh`, `mcp`, and the metrics port by number — see [Metrics spec · Endpoint](/agent-reference/metrics-spec) for the exact permitted set. Every other pod in the namespace, application services included, is ungoverned until you apply the manifest below. Apply it to an env's namespace to block ingress from outside it. The shape:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -223,7 +225,7 @@ Then label the consumer namespace:
 kubectl label namespace <tenant>-env-a allow-shared-<service>=true
 ```
 
-The runtime chart can apply this label via a `values.yaml` flag (`runtime.sharedDbConsumer: true`) so the policy is committed in the source rather than applied ad-hoc.
+The label is applied by hand, per consumer namespace: the runtime chart renders no value for it, so there is nothing to commit in the env's own source.
 
 ## Egress semantics
 

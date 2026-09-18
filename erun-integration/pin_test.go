@@ -73,6 +73,21 @@ func seedDns01WebhookImageDrift(t *testing.T, root, rootConfigDir string) {
 	}
 }
 
+// A registry's tag list is not a release list: scratch tags live beside real
+// versions, and every entry `pin --list` enumerates is offered to an operator as
+// a pinnable version. The desktop picker maps this same list straight into its
+// select with no filter of its own, so a stray offered here is offered there
+// too. Asserting only that real versions are present cannot catch one.
+func assertNoStrayTagOffered(t *testing.T, combined string) {
+	t.Helper()
+	for _, line := range strings.Split(combined, "\n") {
+		switch strings.TrimSpace(line) {
+		case "permcheck-tmp", "authprobe", "latest":
+			t.Fatalf("a scratch tag must not be offered as a pinnable version:\n%s", combined)
+		}
+	}
+}
+
 func TestPin(t *testing.T) {
 	t.Parallel()
 	t.Run("help", func(t *testing.T) {
@@ -419,7 +434,7 @@ func TestPin(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"latest"}]}`)
+			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"1.0.172-snapshot-20260821151853"},{"name":"permcheck-tmp"},{"name":"authprobe"},{"name":"latest"}]}`)
 		}))
 		defer server.Close()
 		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n  namespace: acme\n  repository: erun-devops\n  baseurl: "+server.URL+"\n")
@@ -428,11 +443,16 @@ func TestPin(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{"latest stable: 1.0.174", "1.0.173"} {
+		for _, want := range []string{
+			"latest stable: 1.0.174",
+			"1.0.173",
+			"1.0.172-snapshot-20260821151853",
+		} {
 			if !strings.Contains(result.Combined, want) {
 				t.Fatalf("expected %q in the listing:\n%s", want, result.Combined)
 			}
 		}
+		assertNoStrayTagOffered(t, result.Combined)
 	})
 
 	// The reported nit: `erun pin --list` is the literal example in this
@@ -443,7 +463,7 @@ func TestPin(t *testing.T) {
 		setup := env.New(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"latest"}]}`)
+			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"1.0.172-snapshot-20260821151853"},{"name":"permcheck-tmp"},{"name":"authprobe"},{"name":"latest"}]}`)
 		}))
 		defer server.Close()
 		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n  namespace: acme\n  repository: erun-devops\n  baseurl: "+server.URL+"\n")
@@ -455,11 +475,16 @@ func TestPin(t *testing.T) {
 		if strings.Contains(result.Combined, "default tenant is not configured") {
 			t.Fatalf("--list must not require a default tenant:\n%s", result.Combined)
 		}
-		for _, want := range []string{"latest stable: 1.0.174", "1.0.173"} {
+		for _, want := range []string{
+			"latest stable: 1.0.174",
+			"1.0.173",
+			"1.0.172-snapshot-20260821151853",
+		} {
 			if !strings.Contains(result.Combined, want) {
 				t.Fatalf("expected %q in the listing:\n%s", want, result.Combined)
 			}
 		}
+		assertNoStrayTagOffered(t, result.Combined)
 	})
 
 	// Pinning to a version the registry does not carry produces a tree that only

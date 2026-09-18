@@ -22,6 +22,8 @@ A version is **required**: pass `--version <v>` to install a specific published 
 
 A saved default wins over the plan permanently, so if the plan has grown since the selection was saved, a plain deploy (no `--components`) **refuses** rather than silently rolling out only the stale saved subset — it names what the plan asks for beyond the saved set and both ways to reconcile: adopt the addition (`erun init --components <a,b,…>` naming the full set), or clear the saved selection (`erun init --components ''`) and return the environment to the plan. Passing `--components` explicitly for that run bypasses this entirely, same as it bypasses the saved selection itself.
 
+A `runtime` environment's pod carries only the config projection the chart injected, so the saved default is not visible from inside it. An in-pod deploy that would fall back to the runtime chart alone **refuses** rather than rolling one chart and reporting success — see [Deploying a runtime environment from inside its own pod](#runtime-env-in-pod).
+
 The deployment plan also sets ordering: steps run in order, and a list within a step deploys in parallel; when the plan is absent, deploy falls back to chart-dependency-based ordering. For the full precedence rules and the plan's YAML schema, see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config) and [Agent reference · CLI flag spec · `erun deploy`](/agent-reference/cli-flags#erun-deploy).
 
 ## Where the runtime chart comes from
@@ -146,6 +148,24 @@ A `local-agent` environment is defined by state that lives on your machine: the 
 
 `erun deploy` refuses that combination: deploying the **runtime** chart of a `local-agent` environment from inside that environment's own pod errors and points at the host CLI. Component-only deploys still work in-pod (a component chart carries no environment shape), and a `remote-agent` environment — which owns its worktree inside the pod — keeps deploying itself normally.
 
+## Deploying a runtime environment from inside its own pod {#runtime-env-in-pod}
+
+A `runtime` environment's pod carries only the config projection the chart injected (`erun doctor --sync-config`), and that projection has no `deploy` block. `deploy.components` is therefore empty in there even when the environment has a saved selection, and the `.erun/config.yaml` plan an in-pod deploy sees is the pod's own checkout's, not yours.
+
+A plain `erun deploy` run in that pod cannot tell a selection that is genuinely empty from the one you saved on your machine, so the runtime-chart-alone fallback is reached for lack of information rather than by choice — and it used to roll that one chart and report success. `erun deploy` now refuses that combination: when the process is inside the target environment's own runtime pod and the selection resolved to nothing, it errors during resolution before any change, names the runtime chart it would have rolled alone, and points at both remedies.
+
+```sh
+# from the host — the saved selection resolves here
+erun deploy team prod --version 1.2.3
+
+# from inside the pod — name the set explicitly
+erun deploy team prod --version 1.2.3 --components team-devops
+```
+
+Only the empty-selection fallback is affected, and only for a `runtime` environment in its own pod. Every selection that resolves to something — `--components`, a saved default, a `k8s.deployments` plan — deploys exactly as before, an off-pod deploy is untouched, and an in-pod deploy of a *different* environment is untouched too. Naming the runtime release (`team-devops` above) still rolls the runtime chart alone from inside the pod; it is simply no longer inferred.
+
+The other two environment types are deliberately out of scope. A `local-agent` environment has its own in-pod refusal, with a different message — see [Deploying a local-agent environment from inside its own pod](#local-agent-in-pod). A `remote-agent` environment owns its worktree inside the pod, so it keeps deploying itself normally.
+
 ## Moving the worktree onto its own volume {#worktree-adoption}
 
 A `remote-agent` environment keeps its checkout on a volume of its own. Environments created before
@@ -232,7 +252,7 @@ erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops
 Require the environment's MCP edge to authenticate, recording the key for later deploys:
 
 ```bash
-erun deploy team dev --version 1.2.3 --mcp-auth-public-key ~/.config/erun/desktopid.pub
+erun deploy team dev --version 1.2.3 --mcp-auth-public-key ~/.config/ERun/desktopid.pub
 ```
 
 Turn that authentication back off on purpose:
@@ -274,6 +294,7 @@ erun deploy team prod --version 1.2.3
 | Cluster unreachable. | Errors before any change; exit code 1, message identifies the context. |
 | The live release has MCP authentication enabled but the deploy resolved none. | Errors during resolution, before `helm upgrade`: `MCP auth is enabled on the live <release> release, but this deploy resolved none …`, followed by what that release trusts — the desktop identity key's path on this host, the `<release>-mcp-auth` Secret and its key fingerprint, or (a legacy or hand-configured release) an OIDC issuer, which erun has no supported way to reconfigure. Re-supply the named key with `--mcp-auth-public-key <path>`, or pass `--no-mcp-auth` to turn it off on purpose. See [MCP edge authentication is sticky](#mcp-auth-sticky). Exit code 1. |
 | Deploying a `local-agent` environment's runtime chart from inside that environment's own runtime pod. | Errors during resolution, before any change, and names the host command to run instead. The in-pod config is not authoritative for a `local-agent` environment — see [Deploying a local-agent environment from inside its own pod](#local-agent-in-pod). Exit code 1. |
+| A plain in-pod deploy of a `runtime` environment, run inside that environment's own runtime pod, that would fall back to the runtime chart alone. | Errors during resolution, before any change, and names the runtime chart it would have rolled alone plus both remedies — the host-CLI command, or an explicit `--components`. The in-pod config is a projection that carries no `deploy.components` — see [Deploying a runtime environment from inside its own pod](#runtime-env-in-pod). Exit code 1. |
 | Linked cloud context is stopped. | Starts the context, waits for readiness, then proceeds. If start fails, errors. |
 | `--version <v>` names a version whose image was never published. | Errors during resolution, before `helm upgrade`: `image <ref> is not present locally or in the registry; deploy installs an existing version and does not build it — run erun build/push to create it first`. No build, no push, no partial deploy. |
 | `--current` but the environment has no recorded version yet. | Errors before any change — there is no current version to redeploy. Deploy a specific `--version` once to seed it. |

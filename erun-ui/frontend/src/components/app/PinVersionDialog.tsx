@@ -16,6 +16,7 @@ import { applyPin, closePinVersion, previewPin, revertPin } from '@/app/pinVersi
 import type { PinPlanView } from '@/app/slices/pinVersionSlice';
 import { PIN_LATEST_STABLE_TARGET, setPinTarget } from '@/app/slices/pinVersionSlice';
 import type { RootState } from '@/app/store';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import type { UISelection } from '@/types';
 
 import { PermissionNotice } from './InlineAlert';
@@ -103,11 +104,7 @@ export function PinVersionDialog(): React.ReactElement {
 
           {plan ? <PinPlanTable plan={plan} applied={applied} /> : null}
 
-          {error ? (
-            <p role="alert" className="text-sm break-words text-destructive">
-              {error}
-            </p>
-          ) : null}
+          {error ? <InlineAlert>{error}</InlineAlert> : null}
           {status ? (
             <p role="status" className="text-sm break-words text-muted-foreground">
               {status}

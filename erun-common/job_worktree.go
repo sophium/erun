@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // An agent job's working tree is the one thing its own exit status says
@@ -25,6 +26,18 @@ import (
 // operation's own state could corrupt it). Outside that envelope the
 // supervisor only reports what it saw; it never guesses its way into a
 // commit that could do more harm than the dirty tree it was trying to save.
+//
+// A dirty tree is also not necessarily this job's own: an environment's
+// worktree is shared by every job that runs in it, so `git status` at this
+// job's finish can be entirely another, still-running job's uncommitted work
+// — a job cancelled seconds after starting, having never touched git, can
+// still see a fully dirty tree that belongs to a concurrent sibling.
+// Checkpointing then would misattribute that work and, worse, snapshot it
+// mid-write with no coordination from the job actually producing it. So this
+// job checkpoints only when it is the only live job pointed at this
+// worktree; otherwise it leaves the tree alone and says why, on the theory
+// that whichever job is still running is the one actually entitled to decide
+// what happens to it.
 
 // agentJobWorktreeCommitMessage marks a checkpoint commit as machine-authored
 // so nobody mistakes it for the agent's own work.
@@ -63,18 +76,78 @@ func (o environmentJobWorktreeOutcome) apply(job *EnvironmentJob) {
 // supervisor has none of its own beyond a discarded stdout/stderr — this is
 // not a user-facing trace, it is the same kind of internal bookkeeping call
 // finishEnvironmentJob already makes.
-func captureAgentJobWorktreeOutcome(job EnvironmentJob) environmentJobWorktreeOutcome {
+//
+// jobsDir is the same job-records directory finishEnvironmentJob already
+// writes this job's own outcome into; it is what lets
+// agentJobWorktreeContender look at every sibling job sharing this
+// environment without needing tenant/environment threaded through separately.
+func captureAgentJobWorktreeOutcome(job EnvironmentJob, jobsDir string) environmentJobWorktreeOutcome {
 	ctx := Context{Logger: NewLogger(VerbosityInfo)}
 	dir, branch, dirty := agentJobDirtyWorktree(ctx, job)
 	if !dirty {
 		return environmentJobWorktreeOutcome{}
 	}
 	outcome := environmentJobWorktreeOutcome{dirty: true, branch: branch, detached: branch == "HEAD"}
+	if contenderID, contended := agentJobWorktreeContender(jobsDir, job, time.Now()); contended {
+		outcome.reason = fmt.Sprintf("the working tree had uncommitted changes when the job ended, but job %q is "+
+			"still running and shares this worktree; a checkpoint here could commit that job's in-flight work under "+
+			"this job's name, so none was made", contenderID)
+		return outcome
+	}
 	if reason, refused := refuseAgentJobWorktreeCheckpoint(ctx, dir, branch); refused {
 		outcome.reason = reason
 		return outcome
 	}
 	return checkpointAgentJobWorktree(ctx, dir, branch, outcome)
+}
+
+// agentJobWorktreeContender reports the id of another job in jobsDir that is
+// still live and points at the same working tree as job, if any. Read through
+// reconcileEnvironmentJob so a sibling whose supervisor already died reads as
+// finished here too, exactly like every other job read — a genuinely dead
+// contender has nothing left to lose from a checkpoint racing it.
+//
+// This is deliberately not scoped to agent jobs only: a plain command job
+// (e.g. a detached `git`/build invocation) sharing this worktree is just as
+// much a concurrent writer as another agent job would be.
+func agentJobWorktreeContender(jobsDir string, job EnvironmentJob, now time.Time) (string, bool) {
+	dir := strings.TrimSpace(job.Dir)
+	if jobsDir == "" || dir == "" {
+		return "", false
+	}
+	entries, err := os.ReadDir(jobsDir)
+	if err != nil {
+		return "", false
+	}
+	hostname := currentJobHostname()
+	for _, entry := range entries {
+		if other, live := agentJobWorktreeContenderCandidate(jobsDir, entry, job.ID, dir, now, hostname); live {
+			return other, true
+		}
+	}
+	return "", false
+}
+
+// agentJobWorktreeContenderCandidate resolves one directory entry into a
+// verdict for agentJobWorktreeContender's loop: whether it is a sibling job
+// still live on the same worktree, kept separate only to stay under the
+// cyclomatic complexity budget a single loop body would otherwise exceed.
+func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfID, dir string, now time.Time, hostname string) (string, bool) {
+	if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+		return "", false
+	}
+	if strings.TrimSuffix(entry.Name(), ".json") == selfID {
+		return "", false
+	}
+	other, err := readEnvironmentJob(filepath.Join(jobsDir, entry.Name()))
+	if err != nil || strings.TrimSpace(other.Dir) != dir {
+		return "", false
+	}
+	other = reconcileEnvironmentJob(jobsDir, other, now, processAlive, hostname)
+	if other.Finished() {
+		return "", false
+	}
+	return other.ID, true
 }
 
 // agentJobDirtyWorktree reports whether job is a finished agent job whose Dir

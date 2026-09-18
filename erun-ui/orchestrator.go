@@ -510,6 +510,12 @@ here happen to have files — read the config every time.
 - **On completion, present the assumptions you took.** End with a concise list of
   every recommended assumption you made in place of asking, so the operator can
   course-correct. This list is required, not optional.
+- **Land work through the target repository's review and merge queue.** A branch
+  that arrives as a pull request may be gated and landed as one; a branch you
+  caused to exist must reach MERGE, which the platform verifies against the
+  recorded gate build and the remote's own tip. A closed pull request asserts a
+  landing rather than proving one, so it is never the finish line. Do not finish
+  delegated work by opening a pull request.
 - Make irreversible, remote, and cross-environment actions explicit beforehand.
   A heads-up does not replace approval when the action is outside the authorized
   scope. General engineering and direct in-pod interaction rules remain in the
@@ -2350,7 +2356,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		// The orchestrator's own id, so an agent driving from its shell can
 		// record itself as the return target for a rebuild+restart (see the
 		// erun-orchestrate skill). Empty for transient/Investigate sessions.
-		"ERUN_ORCHESTRATOR_ID=" + id,
+		eruncommon.OrchestratorIDEnvVar + "=" + id,
 		// This launch's nonce, which the session's own hooks stamp onto the
 		// conversation id they report. It is what makes that record this launch's
 		// rather than any session that happens to carry the orchestrator id.

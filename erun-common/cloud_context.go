@@ -1045,6 +1045,42 @@ func refreshSingleCloudContextStatus(ctx Context, store CloudReadStore, deps Clo
 	return seed, nil
 }
 
+// inClusterKubernetesContext is the kubernetes context a runtime pod resolves to
+// when the chart injects none: every kubectl and helm call inside the pod talks
+// to the cluster the pod itself runs in.
+const inClusterKubernetesContext = "in-cluster"
+
+// isInClusterCloudContext reports whether a cloud context names the cluster this
+// process runs in. Such a context is already running by definition: it has no
+// instance to power on and no working-hours gate to clear, so no power
+// management path may treat it as startable.
+func isInClusterCloudContext(config CloudContextConfig) bool {
+	return strings.TrimSpace(config.Name) == inClusterKubernetesContext ||
+		strings.TrimSpace(config.KubernetesContext) == inClusterKubernetesContext
+}
+
+// ensureCloudContextRunningForPreflight powers on the matched cloud context when
+// the environment is down. An in-cluster context is the cluster the current
+// process runs in, so it is already running: there is no instance to power on
+// and no working-hours gate to clear.
+func ensureCloudContextRunningForPreflight(ctx Context, store CloudContextStore, deps CloudContextDependencies, status CloudContextStatus) error {
+	if isInClusterCloudContext(status.CloudContextConfig) {
+		return nil
+	}
+	// Reach AWS for the authoritative state before deciding to start. Preflight
+	// runs at most once per context per CLI run (the started cache), so the
+	// extra describe call is a fair cost-quality trade.
+	live, err := refreshSingleCloudContextStatus(ctx, store, deps, status)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(live.Status) == CloudContextStatusRunning {
+		return nil
+	}
+	_, err = StartCloudContext(ctx, store, CloudContextParams{Name: status.Name}, deps)
+	return err
+}
+
 func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencies) KubernetesContextPreflightFunc {
 	var mu sync.Mutex
 	started := make(map[string]struct{})
@@ -1065,18 +1101,7 @@ func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencie
 		if err != nil || !ok {
 			return err
 		}
-		// Reach AWS for the authoritative state before deciding to start.
-		// Preflight runs at most once per context per CLI run (the started
-		// cache), so the extra describe call is a fair cost-quality trade.
-		live, err := refreshSingleCloudContextStatus(ctx, store, deps, status)
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(live.Status) == CloudContextStatusRunning {
-			return nil
-		}
-
-		if _, err := StartCloudContext(ctx, store, CloudContextParams{Name: status.Name}, deps); err != nil {
+		if err := ensureCloudContextRunningForPreflight(ctx, store, deps, status); err != nil {
 			return err
 		}
 
