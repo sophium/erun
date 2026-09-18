@@ -520,9 +520,11 @@ HELM_CHART_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(words 
 # Helm-render assertions for the erun-devops/k8s charts (erun-devops,
 # erun-backend-postgres, erun-backend-db, erun-backend-api, erun-oci-registry,
 # erun-zitadel, erun-console, erun-docs): each *_test.sh renders its chart with
-# `helm template` and asserts on the output. No cluster, no docker -- pure
-# rendering -- so a pinned `helm` binary is all the image test stage needs to
-# run these (see the Dockerfile's test stage). Iterates the directory rather
+# `helm template` and asserts on the output. image-version_test.sh sits here
+# too, asserting chart image defaults against the docker/<image>/VERSION pins
+# they mirror. No cluster, no docker -- pure rendering -- so a pinned `helm`
+# binary is all the image test stage needs to run these (see the Dockerfile's
+# test stage). Iterates the directory rather
 # than naming each script so a new chart's *_test.sh is picked up with no
 # Makefile edit. Scripts run concurrently (bounded by
 # HELM_CHART_TEST_PARALLELISM) via scripts/parallel-gate.sh, which buffers

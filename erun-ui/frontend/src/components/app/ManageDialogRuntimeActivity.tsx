@@ -7,6 +7,7 @@ import {
   useReclaimRuntimeResourcesMutation,
 } from '@/app/api/environmentApi';
 import { readError } from '@/app/errors';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import { RuntimePanelNotice } from '@/components/app/RuntimePanelNotice';
 import type { UISelection } from '@/types';
 import type { UIRuntimeProcessGroup } from '@/uiRuntimeTypes';
@@ -101,11 +102,7 @@ function ReclaimOutcome({
   failure: string;
 }): React.ReactElement | null {
   if (failure) {
-    return (
-      <p className="text-xs leading-[1.35] text-destructive" role="alert">
-        {failure}
-      </p>
-    );
+    return <InlineAlert>{failure}</InlineAlert>;
   }
   if (!outcome) {
     return null;

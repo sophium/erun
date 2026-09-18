@@ -7,6 +7,7 @@ import {
   useResizeRuntimeToRecommendationMutation,
 } from '@/app/api/environmentApi';
 import { readError } from '@/app/errors';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import { RuntimePanelNotice } from '@/components/app/RuntimePanelNotice';
 import type { UISelection } from '@/types';
 import type { UIRuntimeSizingAction, UIRuntimeSizingRecommendation } from '@/uiRuntimeTypes';
@@ -135,11 +136,7 @@ function RuntimeSizingResizeOutcome({
     );
   }
   if (isError) {
-    return (
-      <p className="text-xs leading-[1.35] text-destructive" role="alert">
-        {readError(error)}
-      </p>
-    );
+    return <InlineAlert>{readError(error)}</InlineAlert>;
   }
   return null;
 }

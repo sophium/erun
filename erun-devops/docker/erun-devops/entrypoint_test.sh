@@ -279,6 +279,61 @@ case "${config}" in
 esac
 stop_run
 
+# --- 8a. The cloud-context defaults the entrypoint emits match the Go path ---
+# entrypoint.sh re-derives in shell the cloud-context name/kubernetes-context
+# fallback that erun-common owns (ResolveInjectedRuntimeConfig routing through
+# NormalizeCloudContextConfig). Nothing asserted the two agreed, which is how
+# #1662 stayed silent -- doctor --sync-config reported phantom drift on every
+# run, never reached InSync, and no test went red. Both sides read
+# cloud_context_defaults.tsv, so editing one fallback without the other turns
+# the other's test red (the Go twin is
+# erun-common/cloud_context_entrypoint_parity_test.go).
+defaults_fixture="${script_dir}/cloud_context_defaults.tsv"
+[ -f "${defaults_fixture}" ] || fail "the shared cloud-context fixture is missing: ${defaults_fixture}"
+defaults_cases=0
+while IFS="$(printf '\t')" read -r label want_name want_kube expected_name expected_kube; do
+    case "${label}" in '' | '#'*) continue ;; esac
+    defaults_cases=$((defaults_cases + 1))
+    prepare_run "cloudctx_${label}"
+    run_dir="${work_root}/cloudctx_${label}"
+
+    # "-" is the fixture's "unset", so the variable is omitted entirely rather
+    # than passed empty -- an empty value is not the same input state here.
+    cloud_context_env=""
+    [ "${want_name}" = "-" ] || cloud_context_env="ERUN_CLOUD_CONTEXT_NAME=${want_name}"
+    kubernetes_context_env=""
+    [ "${want_kube}" = "-" ] || kubernetes_context_env="ERUN_KUBERNETES_CONTEXT=${want_kube}"
+
+    # shellcheck disable=SC2086 # the two vars must word-split away when unset
+    env -i \
+        HOME="${run_dir}/home" \
+        PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+        ERUN_TENANT=team \
+        ERUN_ENVIRONMENT=dev \
+        ERUN_MCP_PORT=17000 \
+        ERUN_MCP_ENABLED=false \
+        ERUN_CLOUD_PROVIDER=aws \
+        ERUN_CLOUD_PROVIDER_ALIAS=operator@aws \
+        ERUN_CLOUD_REGION=us-east-1 \
+        ${cloud_context_env} ${kubernetes_context_env} \
+        setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+    run_pid=$!
+    wait_for booted || fail "the devops path should reach its idle foreground"
+
+    emitted=$(sed -n '/^cloudcontexts:/,/^[a-z]/p' "${run_dir}/home/.config/erun/config.yaml")
+    case "${emitted}" in
+        *"  - name: ${expected_name}"*) ;;
+        *) fail "${label}: the emitted cloud context name should be '${expected_name}', matching the Go normalizer: ${emitted}" ;;
+    esac
+    case "${emitted}" in
+        *"kubernetescontext: ${expected_kube}"*) ;;
+        *) fail "${label}: the emitted kubernetescontext should be '${expected_kube}', matching the Go normalizer: ${emitted}" ;;
+    esac
+    stop_run
+done <"${defaults_fixture}"
+[ "${defaults_cases}" -gt 0 ] || fail "the shared cloud-context fixture yielded no cases"
+stop_run
+
 # --- 9. A configured gateway relays Claude Code's routing settings ---
 # The gateway's address and credential reach the container as environment
 # variables, but two things have to land in Claude Code's settings file: the
@@ -345,4 +400,4 @@ for name in ANTHROPIC_BASE_URL ANTHROPIC_MODEL CLAUDE_CODE_MAX_CONTEXT_TOKENS; d
 done
 stop_run
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, and gateway settings relay"
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, and cloud-context default parity with the Go normalizer"

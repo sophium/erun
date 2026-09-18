@@ -146,7 +146,7 @@ func psProcessGroupHasLiveMember(pgid int) (bool, bool) {
 		if len(fields) < 3 || fields[1] != target {
 			continue
 		}
-		if !strings.Contains(fields[2], "Z") {
+		if !psStatIsZombie(fields[2]) {
 			return true, true
 		}
 	}
@@ -182,22 +182,42 @@ func environmentJobSessionSurvivors(sid int) bool {
 	}
 }
 
+// environmentJobSessionHasLiveMember asks this platform's own process table
+// first — /proc on Linux, ps's pid and stat columns paired with getsid(2) on
+// Darwin — and only falls back to ps's session column where the platform has
+// no table to offer (see psSessionHasLiveMember for why that column cannot be
+// the primary source).
 func environmentJobSessionHasLiveMember(sid int) bool {
-	alive, ok := psSessionHasLiveMember(sid)
-	return ok && alive
+	if procs, ok := environmentJobSessionProcessesFunc(); ok {
+		return sessionHasLiveMember(procs, sid)
+	}
+	return psSessionHasLiveMember(sid)
 }
 
 // psSessionHasLiveMember is psProcessGroupHasLiveMember's session-scoped
-// twin: same zombie handling via the STAT column, but keyed on the session
-// id rather than the process group. The session leader itself (pid == sid)
-// is excluded, matching the pgid check's exclusion of the group it is asked
-// to signal — it is the job's own tracked child, already reaped by the time
-// this runs.
-func psSessionHasLiveMember(sid int) (bool, bool) {
+// twin: same zombie handling via the STAT column and the same exclusion of
+// the session leader itself (pid == sid), which — like the group the pgid
+// check is asked about — is the job's own tracked child, already reaped by
+// the time this runs.
+//
+// It is the fallback for a platform with no session source of its own, not
+// the primary check: the sess column it keys on is populated on Linux and
+// empty on Darwin, where the kernel's user-visible kinfo_proc has nowhere to
+// carry a session id, so `ps -o sess` prints 0 for every process. On Darwin
+// this could only ever answer "no member" — the false success that
+// platformSessionProcesses exists to answer instead.
+func psSessionHasLiveMember(sid int) bool {
 	out, err := exec.Command("ps", "-axo", "pid=,sess=,stat=").Output()
 	if err != nil {
-		return false, false
+		return false
 	}
+	return parsePSSessionTable(out, sid)
+}
+
+// parsePSSessionTable finds a live, non-leader member of session sid in
+// `ps -axo pid=,sess=,stat=` output. A row whose pid will not parse is
+// skipped rather than compared, so it can never be mistaken for the leader.
+func parsePSSessionTable(out []byte, sid int) bool {
 	target := strconv.Itoa(sid)
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
@@ -209,11 +229,11 @@ func psSessionHasLiveMember(sid int) (bool, bool) {
 		if err != nil || pid == sid {
 			continue
 		}
-		if !strings.Contains(fields[2], "Z") {
-			return true, true
+		if !psStatIsZombie(fields[2]) {
+			return true
 		}
 	}
-	return false, true
+	return false
 }
 
 func environmentJobSignalNumber(signal string) (syscall.Signal, error) {

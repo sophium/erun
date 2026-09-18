@@ -50,6 +50,11 @@ export interface UITenantDashboard {
   platformIssuer?: string;
   platformSubject?: string;
   user?: UITenantDashboardUser;
+  // users is the Users tab's roster: the tenant's users, from GET /v1/users.
+  // Distinct from user above, which is the caller's own identity — the tab
+  // lists the tenant, and an unreadable roster is reported on the panel rather
+  // than collapsing back to the caller's single row.
+  users?: UITenantDashboardUser[];
   reviews?: UITenantDashboardReview[];
   mergeQueue?: UITenantDashboardReview[];
   builds?: UITenantDashboardBuild[];
