@@ -33,6 +33,13 @@ fail() {
 # the same "coverage meta-data emit failed" line a real race produces;
 # STUB_TOTAL_PCT (default 80.0) controls what `go tool cover -func` reports as
 # the total.
+#
+# The gate reads coverage per process: each instrumented subprocess writes into
+# its own private subdirectory of GOCOVERDIR, and the gate refuses to report a
+# total when that directory is missing or empty. The stub therefore has to
+# stand in for that shape too -- a clean run leaves one populated per-process
+# directory, and the emit-failure run leaves the directory it created empty,
+# exactly as a losing invocation that never landed its meta-data does.
 stub_go() {
 	bin_dir="$1"
 	mkdir -p "$bin_dir"
@@ -40,9 +47,14 @@ stub_go() {
 #!/bin/sh
 case "$1" in
 test)
+	if [ -n "${GOCOVERDIR:-}" ]; then
+		mkdir -p "${GOCOVERDIR}/proc.$$"
+	fi
 	if [ "${STUB_EMIT_FAILED:-0}" = "1" ]; then
 		echo "some_test_test.go output"
 		echo "coverage meta-data emit failed: rename /tmp/x/covmeta.abc /tmp/x/covmeta.abc.tmp2: no such file or directory"
+	else
+		printf 'mode: set\n' >"${GOCOVERDIR}/proc.$$/covcounters.stub"
 	fi
 	echo "ok  	github.com/sophium/erun/erun-integration	1.234s"
 	exit 0

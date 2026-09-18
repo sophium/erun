@@ -91,10 +91,9 @@ var buildCheckCoverage = map[string]coverageEntry{
 			"is deleted, not carried alongside it",
 	},
 	"erun-common": {
-		kind: deliberatelyExcluded,
-		reason: "erun-common/AGENTS.md's Validation section: erun-common behavior is gated end-to-end by this suite, " +
-			"not by this module's own unit tests -- a unit test overlapping an integration scenario is deleted, not " +
-			"carried alongside it",
+		kind:   gatedByMakeTarget,
+		target: "test-erun-common",
+		reason: "the Makefile's test-erun-common target runs `cd erun-common && go test -race ./...`",
 	},
 	"erun-kit": {
 		kind:   gatedByMakeTarget,
@@ -112,9 +111,9 @@ var buildCheckCoverage = map[string]coverageEntry{
 		reason: "the Makefile's test-frontend target runs `cd erun-ui/frontend && ... && yarn test`",
 	},
 	"erun-ui/playwright": {
-		kind: deliberatelyExcluded,
-		reason: "needs a built desktop app and a real k3d cluster; runs on its own schedule, never in the per-commit " +
-			"gate (root AGENTS.md's Makefile comment; erun-ui/playwright/AGENTS.md)",
+		kind:   gatedByMakeTarget,
+		target: "test-playwright",
+		reason: "the Makefile's test-playwright target runs erun-ui/playwright/run.sh against the built headless app",
 	},
 	"erun-console/playwright": {
 		kind: deliberatelyExcluded,

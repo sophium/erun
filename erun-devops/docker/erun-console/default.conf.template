@@ -8,8 +8,8 @@ server {
     index index.html;
 
     location /healthz {
+        default_type text/plain;
         return 200 "ok";
-        add_header Content-Type text/plain;
     }
 
     # The build actually serving this container — baked in at image build time
