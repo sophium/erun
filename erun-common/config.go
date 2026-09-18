@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
@@ -836,7 +837,53 @@ var (
 	ErrConfigCorrupted    = errors.New("config file cannot be unmarshaled")
 	ErrFailedToSaveConfig = errors.New("could not save struct to yaml file")
 	ErrNotInGitRepository = errors.New("cannot find git project")
+	// ErrUnusableStateName reports a tenant or environment that cannot name
+	// exactly one directory in the state tree. See validateStatePathSegment.
+	ErrUnusableStateName = errors.New("unusable tenant or environment name")
 )
+
+// validateStatePathSegment refuses a value the state tree cannot name a single
+// directory after. Every path under the config root is keyed by a tenant and an
+// environment, so each has to be one plain path segment: a value carrying
+// whitespace, a separator, a NUL, or no characters at all is not a name, and
+// joining a path with it does not fail -- it creates a directory beside the
+// real one. That is how display-shaped strings accumulate as stray state
+// directories nobody ever writes into: "<tenant> <environment>", or that pair
+// with a port appended, is how a label and a port-forward read, not how a path
+// is spelled. Refusing at the point the path is built tells the caller instead
+// of leaving the residue behind.
+func validateStatePathSegment(kind, value string) error {
+	switch {
+	case strings.TrimSpace(value) == "":
+		return fmt.Errorf("%w: %s is required", ErrUnusableStateName, kind)
+	case strings.TrimSpace(value) != value:
+		return fmt.Errorf("%w: %s %q has leading or trailing whitespace; pass the name itself", ErrUnusableStateName, kind, value)
+	case value == "." || value == "..":
+		return fmt.Errorf("%w: %s %q names no directory", ErrUnusableStateName, kind, value)
+	}
+	for _, r := range value {
+		switch {
+		case unicode.IsSpace(r):
+			return fmt.Errorf("%w: %s %q contains whitespace, so it names no single directory; a tenant and an environment are separate names, not one label", ErrUnusableStateName, kind, value)
+		case r == '/' || r == '\\':
+			return fmt.Errorf("%w: %s %q contains a path separator", ErrUnusableStateName, kind, value)
+		case r == 0:
+			return fmt.Errorf("%w: %s %q contains a NUL byte", ErrUnusableStateName, kind, value)
+		}
+	}
+	return nil
+}
+
+// validateReadableStatePathSegment is validateStatePathSegment for a read:
+// a name the state tree cannot hold is reported the way an environment that was
+// never configured is, so listing the tree skips a stray directory instead of
+// failing on it, and no read resolves outside the tree.
+func validateReadableStatePathSegment(kind, value string) error {
+	if err := validateStatePathSegment(kind, value); err != nil {
+		return fmt.Errorf("%w: %v", ErrNotInitialized, err)
+	}
+	return nil
+}
 
 func ERunConfigDir() (string, error) {
 	configHome := strings.TrimSpace(xdg.ConfigHome)
@@ -983,6 +1030,9 @@ func LoadERunConfig() (ERunConfig, string, error) {
 
 func SaveTenantConfig(config TenantConfig) error {
 	config = NormalizeTenantConfig(config)
+	if err := validateStatePathSegment("tenant", config.Name); err != nil {
+		return err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -1014,6 +1064,9 @@ func NormalizeTenantConfig(config TenantConfig) TenantConfig {
 }
 
 func DeleteTenantConfig(tenant string) error {
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -1027,6 +1080,9 @@ func DeleteTenantConfig(tenant string) error {
 
 func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 	config := TenantConfig{}
+	if err := validateReadableStatePathSegment("tenant", tenant); err != nil {
+		return config, "", err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
@@ -1080,6 +1136,12 @@ func ListTenantConfigs() ([]TenantConfig, error) {
 }
 
 func SaveEnvConfig(tenant string, config EnvConfig) error {
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return err
+	}
+	if err := validateStatePathSegment("environment", config.Name); err != nil {
+		return err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -1111,6 +1173,12 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 }
 
 func DeleteEnvConfig(tenant, envName string) error {
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return err
+	}
+	if err := validateStatePathSegment("environment", envName); err != nil {
+		return err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -1124,6 +1192,12 @@ func DeleteEnvConfig(tenant, envName string) error {
 
 func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	config := EnvConfig{}
+	if err := validateReadableStatePathSegment("tenant", tenant); err != nil {
+		return config, "", err
+	}
+	if err := validateReadableStatePathSegment("environment", envName); err != nil {
+		return config, "", err
+	}
 	configFilePath, err := resolveConfigFilePath(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return config, configFilePath, ErrNoUserDataFolder
