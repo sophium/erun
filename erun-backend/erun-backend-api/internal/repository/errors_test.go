@@ -10,8 +10,8 @@ import (
 )
 
 // TestNormalizeNoRowsMapsMalformedInputToErrInvalidInput is the regression
-// test for erun#2136: a syntactically malformed id (e.g. "not-a-uuid" against
-// a UUID column) produces PostgreSQL SQLSTATE 22P02
+// test for a syntactically malformed id: a value like "not-a-uuid" against
+// a UUID column produces PostgreSQL SQLSTATE 22P02
 // (invalid_text_representation), which every Get-by-id repository method
 // routes through normalizeNoRows. Before the fix this fell through
 // unclassified and writeRepositoryError's default case reported it as a 500;

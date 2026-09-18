@@ -6,7 +6,7 @@ import (
 )
 
 // TestGetReviewMalformedIDReturns400NotFoundForAbsentAndSuccessForValid is
-// the regression test for erun#2136: GET /v1/reviews/{id} reported 500 for a
+// the regression test for a malformed review id: GET /v1/reviews/{id} reported 500 for a
 // syntactically malformed id (the review_id column is UUID, and PostgreSQL
 // rejects "not-a-uuid" at parse time with SQLSTATE 22P02), reachable through
 // this package's real HTTP handler and routing exactly the way a live
