@@ -163,6 +163,13 @@ type App struct {
 	busyEnvs       map[string]int
 	workspaceSyncs map[string]*workspaceSyncWorker
 	orchestrators  map[string]*orchestratorSession
+	// unmanagedPacingReason is pacingLastReason's counterpart for a configured
+	// orchestrator this desktop holds no session for and therefore has no
+	// orchestratorSession to keep it on: the last pacing reason logged for it,
+	// so the reconciler's decision line covers the whole configured population
+	// without repeating itself every 15s tick. Guarded by a.mu, like the map it
+	// shadows. See orchestratorPacingUnmanagedRows.
+	unmanagedPacingReason map[string]orchestratorPacingReason
 	// investigations bounds how many failure reports become agents, for how
 	// long, and on what input. It holds its own lock; never call into it while
 	// holding a.mu, since it observes session liveness through this App.
@@ -184,7 +191,7 @@ type App struct {
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
 	envEnsureMu               sync.Mutex
-	envEnsureInflight         map[string]struct{}
+	envEnsureInflight         map[string]*envEnsureRun
 	envEnsureDone             map[string]time.Time
 	envEnsureFailNotified     map[string]struct{}
 	// initEmitted dedups the environment-initialized signal per env. `erun init`
@@ -273,18 +280,19 @@ func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
 	app := &App{
-		deps:                 deps,
-		sessions:             make(map[string]*managedTerminal),
-		idleStops:            make(map[string]struct{}),
-		intentionalStops:     make(map[string]struct{}),
-		runtimeStops:         make(map[string]struct{}),
-		sessionHeartbeats:    make(map[string]sessionHeartbeat),
-		busyEnvs:             make(map[string]int),
-		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
-		orchestrators:        make(map[string]*orchestratorSession),
-		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),
-		workingIssueCache:    make(map[string]workingIssueCacheEntry),
-		envUsage:             loadPersistedEnvironmentUsage(deps.environmentUsageHistoryPath),
+		deps:                  deps,
+		sessions:              make(map[string]*managedTerminal),
+		idleStops:             make(map[string]struct{}),
+		intentionalStops:      make(map[string]struct{}),
+		runtimeStops:          make(map[string]struct{}),
+		sessionHeartbeats:     make(map[string]sessionHeartbeat),
+		busyEnvs:              make(map[string]int),
+		workspaceSyncs:        make(map[string]*workspaceSyncWorker),
+		orchestrators:         make(map[string]*orchestratorSession),
+		unmanagedPacingReason: make(map[string]orchestratorPacingReason),
+		credentialRefreshers:  make(map[string]*cloudCredentialsRefresher),
+		workingIssueCache:     make(map[string]workingIssueCacheEntry),
+		envUsage:              loadPersistedEnvironmentUsage(deps.environmentUsageHistoryPath),
 	}
 	app.investigations = newInvestigationRegistry(defaultInvestigationReportDir())
 	app.investigations.live = func(id string) bool {

@@ -401,6 +401,15 @@ export function seedGitRemoteAgentForK3d(
 //   see signalSessionReadyOnLine in erun-ui/activity_queue_app.go) and then
 //   sleeps, so the tab behaves like a healthy opened session: alive, quiet,
 //   and killable on env close.
+//
+//   `--no-shell` is the non-interactive probe form (`erun open <t> <e>
+//   --no-shell --reconnect`, see buildOpenNoShellArgs in erun-ui/session.go):
+//   the real CLI sets the forwards up and EXITS, and every caller waits on
+//   that exit. Sleeping here instead hung whatever was waiting — which is
+//   why the Windows stub has always exited for it. Matching that here is not
+//   cosmetic: an orchestrator launch opens a linked env's edge before writing
+//   the MCP config naming it, so a probe that never returns delays the launch
+//   by its whole bound and the operator sees a stopped orchestrator.
 // - kubectl: answers the context listing with an empty set (the env-init
 //   dialog's deterministic empty state) and reports everything else as
 //   unreachable.
@@ -448,6 +457,9 @@ function writeStubBinary(name: string): void {
     body = [
       ...stubRegisterPreamble(name),
       '# erun playwright stub: keeps ERun/AI tabs alive and inert.',
+      'case "$*" in',
+      '  *--no-shell*) exit 0 ;;',
+      'esac',
       'case "$1" in',
       '  open)',
       '    register_stub',

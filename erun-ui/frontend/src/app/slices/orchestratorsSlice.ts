@@ -92,6 +92,15 @@ export interface OrchestratorInfo {
   // orchestratorNudgeSummary.ts, which renders this case distinctly instead
   // of asserting "Not nudged" for a history that was actually lost.
   nudgeHistoryUnreadable?: boolean;
+  // pacingUnreachable is true when this desktop holds no session for the
+  // orchestrator while its own hooks report one running elsewhere — a session
+  // started in a terminal, or by a previous desktop instance. The pacer decides
+  // only for sessions the desktop holds, so nothing here can nudge it, and its
+  // nudge count stays frozen at zero: exactly what a freshly checked,
+  // needing-nothing orchestrator looks like. See
+  // orchestratorPacingUnreachableNote, which is how the card tells those two
+  // states apart.
+  pacingUnreachable?: boolean;
   // restartRequired mirrors the Go side's own comparison of what this
   // orchestrator's live session was actually spawned with against what it is
   // linked to right now: true means an edit changed the scope while the

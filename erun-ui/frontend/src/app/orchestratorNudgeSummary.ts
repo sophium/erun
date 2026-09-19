@@ -13,6 +13,31 @@ type NudgeSummaryFields = Pick<
   | 'nudgeHistoryUnreadable'
 >;
 
+// orchestratorPacingUnreachableNote is the could-not half of the Nudges row,
+// and the reason this module is not only a summary: a session this desktop did
+// not launch -- one started in a terminal, or left behind by a previous desktop
+// instance -- is read and displayed like any other, but the pacer decides only
+// for sessions the desktop holds a PTY of, so its count simply never moves.
+// Nothing in the number itself separates that from an orchestrator erun has
+// just checked and found nothing to do about, which is the whole of the defect
+// this line answers.
+//
+// The scope wording is not decoration: this desktop can only speak for itself.
+// The session may be perfectly healthy and paced by something else, so the line
+// claims exactly one thing -- that no nudge can come from here.
+//
+// It returns '' whenever this desktop is the one that owns the session, which
+// is every ordinary case (including a stopped orchestrator nothing is reporting
+// for): "erun cannot pace this from here" is only worth saying when there is
+// something to pace.
+export function orchestratorPacingUnreachableNote(orchestrator: {
+  pacingUnreachable?: boolean;
+}): string {
+  return orchestrator.pacingUnreachable
+    ? 'Not paced from this desktop — erun has no session for it here.'
+    : '';
+}
+
 // orchestratorNudgeSummary names the pacing state orchestrator_pacing.go
 // tracks per session. nudgeCount/nudgeCapped are the cap's own live budget --
 // they reset every time the session answers, so reading them directly once
