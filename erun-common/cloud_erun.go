@@ -93,11 +93,30 @@ func InitERunCloudProvider(ctx Context, store CloudStore, params InitERunCloudPr
 			ClientID: platform.CLIClientID,
 		},
 	})
+	provider.ERun.RefreshTokenRef = existingERunRefreshTokenRef(store, alias)
 	saved, err := SaveCloudProviderConfig(store, provider)
 	if err != nil {
 		return CloudProviderConfig{}, err
 	}
 	return saved, nil
+}
+
+// existingERunRefreshTokenRef returns the stored-session reference the alias
+// already carries, or "" when it is not configured yet.
+//
+// Re-initializing an alias rediscovers its platform config and rewrites the
+// alias wholesale (upsertCloudProvider replaces a matching alias rather than
+// merging it), so a fresh provider carrying no refresh-token reference would
+// drop that reference from config.yaml — the token itself stays in the secret
+// store, orphaned, and the operator who re-ran init is silently signed out.
+// Only the session reference is carried over: the API URL, client id, and
+// issuer just discovered are the point of re-initializing.
+func existingERunRefreshTokenRef(store CloudStore, alias string) string {
+	existing, err := ResolveCloudProvider(store, alias)
+	if err != nil || existing.ERun == nil {
+		return ""
+	}
+	return existing.ERun.RefreshTokenRef
 }
 
 // erunAliasUsername is fixed rather than derived from a signed-in identity:
