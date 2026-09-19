@@ -2271,6 +2271,12 @@ type orchestratorSpawn struct {
 // environment that is not there, which an agent reads as "not linked" rather
 // than "failed to wire".
 func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.OrchestratorEnvConfig) string {
+	// The config written below is read once, by a client that connects through it
+	// as it launches, so an environment that is merely unopened is indistinguishable
+	// to that client from one that is broken. Open the edges that are not answering
+	// before the config naming them exists; anything still dead afterwards is
+	// reported as unreachable by the probe inside the write.
+	a.repairOrchestratorMCPEdges(envs)
 	path, skipped, unreachable, err := a.writeOrchestratorMCPConfig(id, envs)
 	hostEnvs, problems := splitOrchestratorMCPHostSkips(skipped)
 	for _, skip := range skipped {
