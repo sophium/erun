@@ -2317,9 +2317,10 @@ func (a *App) reportUnreachableOrchestratorEdges(name string, unreachable []orch
 // one (a restart hand-off, an operator attaching one deliberately) is taken as
 // given: it names the conversation that asked for this launch. Otherwise the
 // launch resolves what this orchestrator is on -- attached, or the derived
-// anchor -- and reports anything surprising about that answer: today, only an
-// attachment that could not be honoured, since a resume that lands somewhere
-// unexpected in silence is the whole defect.
+// anchor -- and reports anything surprising about that answer: an attachment
+// that could not be honoured, or an anchor that diverged from the conversation
+// this orchestrator's own session last reported. A resume that lands somewhere
+// unexpected in silence is the whole defect, and both are that.
 func (a *App) conversationToLaunch(id, named string) string {
 	if conversationID := strings.TrimSpace(named); conversationID != "" {
 		return conversationID

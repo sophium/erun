@@ -24,6 +24,29 @@ import { isolatedHomeDir, SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.j
 const STALE_CONVERSATION = '35f05bb8-34b6-5a9e-891e-8b6780550a60';
 const LIVE_CONVERSATION = '0c01340d-65bd-4ed9-bb9e-91bdff59a6ec';
 
+// stageLiveConversationRecord writes the record an orchestrator's own session
+// leaves behind through its hooks: the conversation it was actually working in.
+// Staged rather than produced by a real session, for the same reason the
+// transcripts are: the harness has no real Claude to run. The desktop reads this
+// file for the launch notice asserted below.
+function stageLiveConversationRecord(orchestratorId: string, conversationId: string): void {
+  const dir = path.join(isolatedHomeDir(), '.config', 'ERun', 'orchestrator-live');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `${orchestratorId}.json`),
+    `${JSON.stringify({ conversationId })}\n`,
+  );
+}
+
+function removeLiveConversationRecord(orchestratorId: string): void {
+  fs.rmSync(
+    path.join(isolatedHomeDir(), '.config', 'ERun', 'orchestrator-live', `${orchestratorId}.json`),
+    {
+      force: true,
+    },
+  );
+}
+
 function stageTranscript(conversationId: string, cwd: string, prompt: string, ageMs: number): void {
   const dir = path.join(isolatedHomeDir(), '.claude', 'projects', '-orchestrators');
   fs.mkdirSync(dir, { recursive: true });
@@ -64,6 +87,7 @@ test.describe('choosing which conversation an orchestrator resumes', () => {
 
   test.afterEach(() => {
     removeStagedTranscripts();
+    removeLiveConversationRecord(SEED_ORCHESTRATOR);
   });
 
   test('the manage dialog lists what the orchestrator can resume and says what it is on', async ({
@@ -96,6 +120,35 @@ test.describe('choosing which conversation an orchestrator resumes', () => {
     await expect(
       app.orchestratorDialog.conversationRows().filter({ hasText: 'Resumes now' }),
     ).toHaveCount(1);
+
+    await app.page.keyboard.press('Escape');
+  });
+
+  // The defect the notice closes: with nothing attached, a launch resumes the
+  // conversation derived from the orchestrator's id — fixed at its first-ever
+  // conversation, so it stops tracking the operator the moment their session
+  // moves on. A restart then lands on weeks-old history and, from inside the
+  // resumed session, looks exactly like a session that landed correctly. The
+  // record the session's own hooks write is staged here for real, and the
+  // surface has to name both conversations and the one place to put it right.
+  //
+  // That the launch still RESUMES the anchor and never adopts the tracked
+  // conversation is pinned by erun-ui/orchestrator_live_conversation_test.go,
+  // which can drive the actual resolve; this asserts the notice reaches the
+  // rendered dialog, which a Go test cannot.
+  test('a launch that falls back to the anchor says which conversation it diverged from', async ({
+    app,
+  }) => {
+    stageLiveConversationRecord(SEED_ORCHESTRATOR, LIVE_CONVERSATION);
+
+    await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
+    await app.orchestratorDialog.waitForOpen('Edit orchestrator');
+
+    const summary = app.orchestratorDialog.conversationSummary();
+    await expect(summary).toContainText(
+      `not the one its last session was working in (${LIVE_CONVERSATION})`,
+    );
+    await expect(summary).toContainText('manage the orchestrator to attach it');
 
     await app.page.keyboard.press('Escape');
   });
