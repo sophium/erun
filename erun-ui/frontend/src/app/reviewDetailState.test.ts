@@ -1,8 +1,8 @@
 // The Reviews tab's status filter: what it opens on, what it shows, and what an
-// empty selection means. These pin the two things the operator asked for — a
-// status filter at all, and OPEN+MERGE as its default — plus the empty-selection
-// rule, which is the one that could quietly read as "this tenant has no
-// reviews" if it were ever changed to "show nothing".
+// empty selection means. These pin what the operator asked for — a status filter
+// at all, opening on the statuses that still need someone — plus the
+// empty-selection rule, which is the one that could quietly read as "this tenant
+// has no reviews" if it were ever changed to "show nothing".
 import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
@@ -20,16 +20,29 @@ import {
 const review = (status: string) => ({ status });
 
 test('the Reviews tab opens on the statuses that still need someone', () => {
-  assert.deepEqual(defaultReviewStatuses(), ['OPEN', 'MERGE']);
-  assert.deepEqual(defaultReviewFilter().statuses, ['OPEN', 'MERGE']);
+  assert.deepEqual(defaultReviewStatuses(), ['OPEN', 'READY', 'MERGE', 'FAILED']);
+  assert.deepEqual(defaultReviewFilter().statuses, ['OPEN', 'READY', 'MERGE', 'FAILED']);
+});
+
+test('the default hides only the finished statuses, never a live one', () => {
+  const defaults = defaultReviewStatuses();
+  // READY is a review waiting on its reviewers; FAILED is a build that broke.
+  // Both are work, and hiding either would bury exactly what this filter exists
+  // to surface — a FAILED review is the most actionable row a tenant has.
+  assert.ok(defaults.includes('READY'));
+  assert.ok(defaults.includes('FAILED'));
+  // MERGED and CLOSED are the only statuses meaning "nobody's problem any
+  // more", and they are what made the unfiltered list unreadable.
+  assert.ok(!defaults.includes('MERGED'));
+  assert.ok(!defaults.includes('CLOSED'));
 });
 
 test('the untouched status set reads as default, and a narrowed one does not', () => {
-  assert.equal(reviewStatusFilterIsDefault(['OPEN', 'MERGE']), true);
+  assert.equal(reviewStatusFilterIsDefault(['OPEN', 'READY', 'MERGE', 'FAILED']), true);
   // Same members, different order: still the default set.
-  assert.equal(reviewStatusFilterIsDefault(['MERGE', 'OPEN']), true);
+  assert.equal(reviewStatusFilterIsDefault(['FAILED', 'MERGE', 'READY', 'OPEN']), true);
   assert.equal(reviewStatusFilterIsDefault(['OPEN']), false);
-  assert.equal(reviewStatusFilterIsDefault(['OPEN', 'MERGE', 'MERGED']), false);
+  assert.equal(reviewStatusFilterIsDefault(['OPEN', 'READY', 'MERGE', 'FAILED', 'MERGED']), false);
   assert.equal(reviewStatusFilterIsDefault([]), false);
 });
 

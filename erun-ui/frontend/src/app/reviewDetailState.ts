@@ -39,18 +39,26 @@ export interface ReviewFilterState {
 }
 
 // reviewStatuses is the platform's own review-status vocabulary, in the order
-// the filter presents it: the two that mean "this needs someone" first, then
-// the terminal ones.
-export const reviewStatuses = ['OPEN', 'MERGE', 'READY', 'FAILED', 'MERGED', 'CLOSED'] as const;
+// the filter presents it: every live status first, in lifecycle order, then the
+// two terminal ones.
+export const reviewStatuses = ['OPEN', 'READY', 'MERGE', 'FAILED', 'MERGED', 'CLOSED'] as const;
 
-// defaultReviewStatuses is what the list shows with no filter chosen.
+// defaultReviewStatuses is what the list shows with no filter chosen: every
+// status that is not finished.
 //
 // A tenant accumulates MERGED and CLOSED reviews forever — one large tenant was
 // at 155 reviews of which 68 were closed and 87 merged, so the unfiltered list
-// was entirely finished work and the handful that needed someone were buried in
-// it. Opening on the two statuses that mean "actionable" makes the default view
-// the one an operator actually wants, and the counted number honest about it.
-export const defaultReviewStatuses = (): string[] => ['OPEN', 'MERGE'];
+// was entirely finished work and the handful that still needed someone were
+// buried in it. Opening on the live statuses makes the default view the one an
+// operator actually wants, and the counted number honest about it.
+//
+// FAILED and READY belong in that set, not outside it. A failed build is the
+// most actionable state a review can be in, and READY is a review waiting on
+// its reviewers; excluding either would hide exactly the rows the filter exists
+// to surface, and would leave the operator needing a filter just to see a
+// broken build. MERGED and CLOSED are the only two that mean "nobody's
+// problem any more", and they are the only two this hides.
+export const defaultReviewStatuses = (): string[] => ['OPEN', 'READY', 'MERGE', 'FAILED'];
 
 // reviewStatusFilterIsDefault reports whether statuses is the untouched
 // default, so a panel can tell "narrowed by the operator" from "as it opens"
