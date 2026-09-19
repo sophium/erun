@@ -453,10 +453,17 @@ export interface UITenantDashboardBuild {
 }
 
 // UIConnectERunPlatformInput is the "Connect to erunpaas.com" action's input:
-// just the API base URL, discovered against the platform itself the same way
-// `erun cloud init erun` already does.
+// the API base URL — discovered against the platform itself the same way
+// `erun cloud init erun` already does — and the tenant the click came from.
+//
+// tenant is omitted only by the machine-wide settings dialog, which attaches
+// the alias globally and has no tenant to attach it to. A click on a tenant's
+// dashboard carries that tenant: an alias attached only machine-globally
+// cannot move a tenant whose own alias selection is already non-empty, so
+// without it the Connect card re-renders unchanged.
 export interface UIConnectERunPlatformInput {
   apiUrl: string;
+  tenant?: string;
 }
 
 // UIPlatformUserEnrollInput is the "not enrolled" state's enrollment attempt.
