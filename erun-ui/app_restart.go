@@ -72,12 +72,13 @@ type orchestratorRestoreState struct {
 
 // orchestratorNoticeKind classifies how loudly an operator-facing notice about
 // a reopened orchestrator should read. Only "warning" is minted today — an
-// unhonourable attachment, a refused hand-off, a changed scope, a hand-off left
-// mid-task — because every one of them means something the operator asked for,
-// or something a session recorded, could not be honoured. "info" is kept as a
-// distinct kind (see Sidebar.OrchestratorNotice.tsx's role="status" rendering)
-// for a future routine notice; ordinary resumption of the derived anchor has
-// nothing to report at all (erun#1696).
+// unhonourable attachment, a fall-through to the anchor that diverged from the
+// conversation the session last reported, a refused hand-off, a changed scope,
+// a hand-off left mid-task — because every one of them means something the
+// operator asked for, or something a session recorded, could not be honoured.
+// "info" is kept as a distinct kind (see Sidebar.OrchestratorNotice.tsx's
+// role="status" rendering) for a future routine notice; an ordinary resumption
+// of the derived anchor has nothing to report at all.
 type orchestratorNoticeKind string
 
 const (
@@ -343,8 +344,11 @@ func (a *App) ResolveOrchestratorToReopen() relaunchTarget {
 // resumes, and what has to be said about it: the conversation the operator
 // attached, else the anchor derived from its id — never the one this
 // orchestrator's own session last reported, which stays available only in the
-// Manage dialog (see orchestrator_live_conversation.go, erun#1696). A transient
-// orchestrator has no id to derive from and gets a fresh conversation.
+// Manage dialog (see orchestrator_live_conversation.go). A fall-through to the
+// anchor that diverged from that reported conversation is reported, and is
+// still not what gets resumed: see orchestratorAnchorDivergenceNotice. A
+// transient orchestrator has no id to derive from and gets a fresh
+// conversation.
 func (a *App) resolveReopenSessionID(entry orchestratorOpenEntry) (string, orchestratorNotice) {
 	if strings.TrimSpace(entry.OrchestratorID) == "" {
 		return uuid.NewString(), orchestratorNotice{}
