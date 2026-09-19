@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -107,13 +108,15 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 
 // promotePlatformImage re-tags one platform's cached fingerprint image and
 // pushes it under the real version tag. The fingerprint check that chose this
-// path only proves the image exists in the local daemon; it says nothing
-// about whether the registry still holds every blob that image references.
-// A push the registry rejects for a blob it doesn't have — surfacing as
-// "unknown blob" — means the cache hit cannot be trusted for this run, so
-// promotion is only ever an optimization over building from source: a
-// rejection here falls back to building and pushing this platform for real,
-// rather than failing the whole release over a check that was wrong.
+// path only proves the image exists in the local daemon; it says nothing about
+// whether the registry still holds every blob that image references, nor about
+// whether the local image is the single platform the tag claims to be
+// (see localImageIsSinglePlatform). Promotion is only ever an optimization over
+// building from source, so either a push the registry rejects for a blob it
+// doesn't have — surfacing as "unknown blob" — or a cache entry that cannot be
+// published as a per-arch manifest falls back to building and pushing this
+// platform for real, rather than failing the whole release over a check that
+// was wrong.
 //
 // Any other failure (a real auth or network error, for instance) is not
 // retried, since rebuilding could not change its outcome; it is returned with
@@ -126,17 +129,77 @@ func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, s
 	if err == nil {
 		err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
 	}
+	singlePlatform := true
 	if err == nil {
+		// A cached image that is a whole multi-platform index would be
+		// published as a manifest list under this platform's tag, and the
+		// assembly step rejects input that is a list ("<tag> is a manifest
+		// list"): the two halves of the release would disagree about what a
+		// per-arch tag is. The build path cannot produce that — dockerBuildArgs
+		// passes --provenance=false — but a promoted tag has no build behind it,
+		// so the shape of the image it was re-tagged from is checked here.
+		singlePlatform = localImageIsSinglePlatform(platformTag)
+	}
+	if err == nil && singlePlatform {
 		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
 	}
-	if err == nil {
+	if err == nil && singlePlatform {
 		return "", nil
 	}
-	if !IsDockerUnknownBlobError(err.Error()) {
+	if err != nil && !IsDockerUnknownBlobError(err.Error()) {
 		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, err)
 	}
-	_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
+	} else {
+		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s would publish a multi-platform image under a per-arch tag; rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, platform)
+	}
 	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
+}
+
+// localImageIsSinglePlatform reports whether a local tag names a single-platform
+// image rather than a whole multi-platform index.
+//
+// A daemon backed by the containerd image store keeps a multi-platform image as
+// the index itself and records that on the image's descriptor; the classic
+// store cannot hold one at all, and records no descriptor. Anything that cannot
+// be read — no descriptor, an older docker, an image that vanished between the
+// tag and this inspect — reports single-platform, so the classic path keeps
+// publishing exactly as it did before.
+func localImageIsSinglePlatform(tag string) bool {
+	cmd := Command("docker", "image", "inspect", tag)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return true
+	}
+	var images []struct {
+		Descriptor struct {
+			MediaType string `json:"mediaType"`
+		} `json:"Descriptor"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &images); err != nil {
+		return true
+	}
+	for _, image := range images {
+		if isImageIndexMediaType(image.Descriptor.MediaType) {
+			return false
+		}
+	}
+	return true
+}
+
+// isImageIndexMediaType reports whether a media type names a manifest list, in
+// either the docker or the OCI spelling.
+func isImageIndexMediaType(mediaType string) bool {
+	switch strings.TrimSpace(mediaType) {
+	case "application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.index.v1+json":
+		return true
+	default:
+		return false
+	}
 }
 
 // pushPlatformImage publishes one platform the moment it is built, instead of
