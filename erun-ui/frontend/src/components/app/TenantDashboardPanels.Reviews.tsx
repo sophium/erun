@@ -14,6 +14,14 @@ import {
   submitAdvanceMergeQueue,
 } from '@/app/mergeQueueThunks';
 import { resolveTenantPlatformAlias } from '@/app/platformSignIn';
+import {
+  defaultReviewStatuses,
+  reviewCountLabel,
+  reviewsMatchingStatuses,
+  reviewStatusCounts,
+  reviewStatusFilterIsDefault,
+  toggleReviewStatus,
+} from '@/app/reviewDetailState';
 import { openReviewDetail } from '@/app/reviewDetailThunks';
 import {
   reviewAuthorInitials,
@@ -22,7 +30,7 @@ import {
   unresolvedThreadsCountLabel,
   unresolvedThreadsTone,
 } from '@/app/tenantDashboardPanels';
-import { setReviewFilter } from '@/app/tenantDialogThunks';
+import { setReviewFilter, setReviewStatusFilter } from '@/app/tenantDialogThunks';
 import type { UITenantDashboardReview } from '@/types';
 
 import { PermissionNotice } from './InlineAlert';
@@ -36,7 +44,10 @@ import {
   type TenantDashboardData,
 } from './TenantDashboardMessage';
 import { MergeQueueBlockedAlert } from './TenantDashboardPanels.MergeQueueBlocked';
-import { ReviewFilterSegmentedControl } from './TenantDashboardPanels.ReviewFilter';
+import {
+  ReviewFilterSegmentedControl,
+  ReviewStatusFilterControl,
+} from './TenantDashboardPanels.ReviewFilter';
 
 // ReviewsPanel is the review object's own home: status, branches, and — via
 // each row — its builds, comment threads, and merge-queue position. The
@@ -45,26 +56,19 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   const dispatch = useAppDispatch();
   const reviewFilter = useAppSelector((state) => state.tenantDashboard.reviewFilter);
   const reviews = data?.reviews ?? [];
-  const filterActive = reviewFilter.mine || reviewFilter.waitingOnMe;
+  const visibleReviews = reviewsMatchingStatuses(reviews, reviewFilter.statuses);
+  const filterActive =
+    reviewFilter.mine ||
+    reviewFilter.waitingOnMe ||
+    !reviewStatusFilterIsDefault(reviewFilter.statuses);
   return (
     <TabsContent value="reviews" className="min-h-0 overflow-auto">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-[13px] text-muted-foreground">
-            {reviews.length} review{reviews.length === 1 ? '' : 's'}
+            {reviewCountLabel(visibleReviews.length, reviews.length)}
           </span>
-          <ReviewFilterSegmentedControl
-            mine={reviewFilter.mine}
-            waitingOnMe={reviewFilter.waitingOnMe}
-            mineCount={data?.mineReviewCount}
-            waitingOnMeCount={data?.waitingOnMeReviewCount}
-            onToggleMine={() => {
-              void dispatch(setReviewFilter({ mine: !reviewFilter.mine }));
-            }}
-            onToggleWaitingOnMe={() => {
-              void dispatch(setReviewFilter({ waitingOnMe: !reviewFilter.waitingOnMe }));
-            }}
-          />
+          <ReviewsFilterControls data={data} reviews={reviews} />
         </div>
         <NewReviewAction data={data} />
       </div>
@@ -73,9 +77,9 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
         tab="reviews"
         empty={<ReviewsEmptyState filterActive={filterActive} />}
       >
-        {reviews.length > 0 ? (
+        {visibleReviews.length > 0 ? (
           <ReviewsTable
-            reviews={reviews}
+            reviews={visibleReviews}
             currentUserId={data?.user?.userId}
             showThreads
             onSelect={(review) => {
@@ -88,6 +92,45 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   );
 }
 
+// ReviewsFilterControls is the Reviews tab's filter row: the authorship chips
+// (answered by the platform) and the status chips (narrowed locally, see
+// ReviewFilterState.statuses for why). Splitting them out keeps ReviewsPanel
+// itself inside eslint's complexity budget, and keeps every filter change in
+// one place.
+function ReviewsFilterControls({
+  data,
+  reviews,
+}: {
+  data: TenantDashboardData;
+  reviews: UITenantDashboardReview[];
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const reviewFilter = useAppSelector((state) => state.tenantDashboard.reviewFilter);
+  return (
+    <>
+      <ReviewFilterSegmentedControl
+        mine={reviewFilter.mine}
+        waitingOnMe={reviewFilter.waitingOnMe}
+        mineCount={data?.mineReviewCount}
+        waitingOnMeCount={data?.waitingOnMeReviewCount}
+        onToggleMine={() => {
+          void dispatch(setReviewFilter({ mine: !reviewFilter.mine }));
+        }}
+        onToggleWaitingOnMe={() => {
+          void dispatch(setReviewFilter({ waitingOnMe: !reviewFilter.waitingOnMe }));
+        }}
+      />
+      <ReviewStatusFilterControl
+        statuses={reviewFilter.statuses}
+        counts={reviewStatusCounts(reviews)}
+        onToggle={(status) => {
+          dispatch(setReviewStatusFilter(toggleReviewStatus(reviewFilter.statuses, status)));
+        }}
+      />
+    </>
+  );
+}
+
 // ReviewsEmptyState keeps "nothing exists yet" and "nothing matches this
 // filter" visually and textually distinct, per the repo's three-empty-states
 // rule — a filtered zero must not read as "this tenant has no reviews".
@@ -97,14 +140,20 @@ function ReviewsEmptyState({ filterActive }: { filterActive: boolean }): React.R
     return (
       <EmptyState
         heading="No reviews match this filter"
-        body="Nothing is both Mine and Waiting on me right now, whichever you've turned on."
+        body="Nothing matches the status and authorship filters you've turned on. Clear them to see every review this tenant has."
         action={
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => {
-              void dispatch(setReviewFilter({ mine: false, waitingOnMe: false }));
+              void dispatch(
+                setReviewFilter({
+                  mine: false,
+                  waitingOnMe: false,
+                  statuses: defaultReviewStatuses(),
+                }),
+              );
             }}
           >
             Clear filter

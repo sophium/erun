@@ -359,6 +359,77 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
       removeEnvironment(SEED_TENANT, environment);
     }
   });
+
+  // A tenant accumulates MERGED and CLOSED reviews forever, so an unfiltered
+  // list is mostly finished work with the actionable rows buried in it — one
+  // tenant was at 155 reviews of which 87 were merged and 68 closed. This pins
+  // the two halves of that: the status chips exist at all, and the list opens
+  // on OPEN+MERGE rather than on everything.
+  test('the status chips open on OPEN+MERGE and narrow the list to them', async ({ app, page }) => {
+    const environment = seedDashboardEnvironment('reviews-status-filter');
+    try {
+      const openReview = { ...REVIEW, reviewId: 'review-open', name: 'Add widget', status: 'OPEN' };
+      const mergedReview = {
+        ...REVIEW,
+        reviewId: 'review-merged',
+        name: 'Ship widget',
+        status: 'MERGED',
+      };
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [openReview, mergedReview],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+
+      // The group exists, and it opens on the two actionable statuses: the
+      // MERGED review is hidden without the operator asking for it.
+      await expect(app.tenantDashboard.reviewStatusFilterGroup()).toBeVisible();
+      await expect(app.tenantDashboard.reviewStatusFilterButton('OPEN')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await expect(app.tenantDashboard.reviewStatusFilterButton('MERGE')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await expect(app.tenantDashboard.reviewStatusFilterButton('MERGED')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
+      // The count names both numbers, so a filtered "1" cannot be misread as
+      // the tenant's whole history.
+      await expect(app.tenantDashboard.reviewCountText()).toHaveText('1 of 2 reviews');
+
+      // Turning MERGED on brings the hidden row back.
+      await app.tenantDashboard.reviewStatusFilterButton('MERGED').click();
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(2);
+      await expect(app.tenantDashboard.reviewCountText()).toHaveText('2 reviews');
+
+      // And turning OPEN off leaves only MERGED: the chips narrow the list
+      // rather than acting as a mutually-exclusive tab strip.
+      await app.tenantDashboard.reviewStatusFilterButton('OPEN').click();
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
+      await expect(app.tenantDashboard.reviewCountText()).toHaveText('1 of 2 reviews');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
 });
 
 // The list row and the dialog over it name the same quantity — how many of a

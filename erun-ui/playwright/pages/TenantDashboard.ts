@@ -211,6 +211,24 @@ export class TenantDashboard {
     return this.activePanel().getByRole('button', { name: 'Waiting on me' });
   }
 
+  // reviewStatusFilterButton matches one status chip by label prefix, because
+  // each chip's accessible name carries its count badge (e.g. "OPEN 3") — the
+  // same shape mineFilterButton handles.
+  reviewStatusFilterButton(status: string): Locator {
+    return this.activePanel().getByRole('button', { name: new RegExp(`^${status}\\b`) });
+  }
+
+  // reviewStatusFilterGroup scopes a status-chip query to the filter group, so
+  // a status word appearing elsewhere in the panel is never matched.
+  reviewStatusFilterGroup(): Locator {
+    return this.activePanel().getByRole('group', { name: 'Filter reviews by status' });
+  }
+
+  // reviewCountText is the "N reviews" / "N of M reviews" line above the table.
+  reviewCountText(): Locator {
+    return this.activePanel().getByText(/^\d+( of \d+)? reviews?$/);
+  }
+
   async openReview(name: string): Promise<void> {
     await this.page.getByRole('button', { name: `Open review ${name}` }).click();
   }
