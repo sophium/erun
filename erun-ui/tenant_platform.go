@@ -236,15 +236,24 @@ func (a *App) tenantPlatformClient(ctx context.Context, tenant string) (*eruncom
 }
 
 // uiConnectERunPlatformInput is the "Connect to erunpaas.com" action's input:
-// just the API base URL, discovered against the platform itself the same way
-// `erun cloud init erun` already does.
+// the API base URL — discovered against the platform itself the same way
+// `erun cloud init erun` already does — and the tenant the click came from.
+//
+// Tenant is empty only for the machine-wide settings dialog, which attaches
+// the alias globally and has no tenant to attach it to. A click on a tenant's
+// dashboard carries that tenant so the attach lands in the selection the
+// dashboard's own resolution reads (resolveTenantPlatform): an alias attached
+// only machine-globally cannot move a tenant whose own selection is already
+// non-empty, which left the Connect card byte-identical after a click.
 type uiConnectERunPlatformInput struct {
 	APIURL string `json:"apiUrl"`
+	Tenant string `json:"tenant,omitempty"`
 }
 
 // ConnectERunPlatform attaches a hosted erun platform as a cloud alias, so the
 // not-connected state has an in-app path with no terminal and no hand-typed
-// URL beyond the base address itself.
+// URL beyond the base address itself. It attaches the alias to the tenant the
+// click came from, which is the state the caller is asking to move.
 func (a *App) ConnectERunPlatform(input uiConnectERunPlatformInput) (uiCloudProviderStatus, error) {
 	provider, err := eruncommon.InitERunCloudProvider(eruncommon.Context{}, a.deps.store, eruncommon.InitERunCloudProviderParams{
 		APIURL: strings.TrimSpace(input.APIURL),
@@ -252,7 +261,32 @@ func (a *App) ConnectERunPlatform(input uiConnectERunPlatformInput) (uiCloudProv
 	if err != nil {
 		return uiCloudProviderStatus{}, err
 	}
+	if tenant := strings.TrimSpace(input.Tenant); tenant != "" {
+		if err := a.attachTenantCloudProviderAlias(tenant, provider.Alias); err != nil {
+			return uiCloudProviderStatus{}, err
+		}
+	}
 	return cloudProviderStatusToUI(eruncommon.CloudProviderTokenStatus(provider, a.deps.cloudDeps)), nil
+}
+
+// attachTenantCloudProviderAlias attaches alias to tenant's own cloud provider
+// selection. This is the write that makes Connect able to leave the
+// not-connected state: resolution consults the tenant's own selection whenever
+// that selection is non-empty, so the alias has to be in it, not merely in the
+// machine-global list.
+//
+// A tenant with no config of its own yet gets one naming just this alias —
+// refusing to write it would leave exactly the tenant this action is meant to
+// connect with no selection at all, and no way to grow one from the card.
+func (a *App) attachTenantCloudProviderAlias(tenant, alias string) error {
+	config, _, err := a.deps.store.LoadTenantConfig(tenant)
+	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
+		return err
+	}
+	config.Name = tenant
+	config.CloudProviderAliases, config.PrimaryCloudProviderAlias = eruncommon.AttachTenantCloudProviderAlias(
+		config.CloudProviderAliases, config.PrimaryCloudProviderAlias, alias)
+	return a.deps.store.SaveTenantConfig(config)
 }
 
 // uiPlatformUserEnrollInput is the "not enrolled" state's enrollment attempt:

@@ -8,7 +8,7 @@ import type { TenantDashboardState } from '@/app/state';
 
 import { tenantApi } from './api/tenantApi';
 import { replaceCloudProvider } from './cloudContextState';
-import { signInAndRecover } from './cloudProviderThunks';
+import { type CloudProviderUpdateOutcome, signInAndRecover } from './cloudProviderThunks';
 import { readError } from './errors';
 import { patchTenantDashboard } from './slices/tenantDashboardSlice';
 import { setCloudProviders } from './slices/tenantsSlice';
@@ -21,12 +21,18 @@ export const setConnectApiUrlDraft =
     dispatch(patchTenantDashboard({ connectApiUrlDraft: value }));
   };
 
-// connectTenantPlatform attaches apiUrl as this machine's erun-type cloud
-// alias, then immediately signs into it and reloads the dashboard —
-// InitERunCloudProvider performs no sign-in on its own, so chaining straight
-// into it is what makes this a single click from "not connected" to
-// "working" (Smooth: no dead ends between discrete steps the operator would
-// otherwise have to notice and trigger themselves).
+// connectTenantPlatform attaches apiUrl as the dashboard's own tenant's
+// erun-type cloud alias, then immediately signs into it and reloads the
+// dashboard — InitERunCloudProvider performs no sign-in on its own, so
+// chaining straight into it is what makes this a single click from "not
+// connected" to "working" (Smooth: no dead ends between discrete steps the
+// operator would otherwise have to notice and trigger themselves).
+//
+// The tenant is read from the dashboard state this thunk is dispatched from
+// and sent with the attach: the dashboard's platform resolution reads the
+// tenant's own alias selection whenever that selection is non-empty, so an
+// alias the attach left machine-global only cannot move the tenant whose
+// Connect card was clicked.
 export const connectTenantPlatform =
   (apiUrl: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -36,16 +42,28 @@ export const connectTenantPlatform =
     }
     dispatch(patchTenantDashboard({ connecting: true, connectError: '' }));
     try {
+      const tenant = getState().tenantDashboard.tenant.trim();
       const provider = await dispatch(
-        tenantApi.endpoints.connectERunPlatform.initiate({ apiUrl: trimmed }),
+        tenantApi.endpoints.connectERunPlatform.initiate(
+          tenant ? { apiUrl: trimmed, tenant } : { apiUrl: trimmed },
+        ),
       ).unwrap();
       dispatch(
         setCloudProviders(replaceCloudProvider(getState().tenants.cloudProviders, provider)),
       );
-      dispatch(patchTenantDashboard({ connecting: false, connectError: '' }));
-      await dispatch(
+      // connecting stays set across the sign-in: the click's outcome is not
+      // known until the grant settles, and clearing it here would show a
+      // re-enabled Connect button (and the same card) while the sign-in this
+      // click started is still the thing that has to finish.
+      const outcome = await dispatch(
         signInAndRecover(provider.alias, () => {
           void dispatch(loadTenantDashboard());
+        }),
+      );
+      dispatch(
+        patchTenantDashboard({
+          connecting: false,
+          connectError: signInOutcomeMessage(outcome, provider.alias),
         }),
       );
     } catch (error) {
@@ -57,6 +75,24 @@ export const connectTenantPlatform =
       );
     }
   };
+
+// signInOutcomeMessage is what the card says when the sign-in half of Connect
+// did not finish. Without it a failed or skipped grant set no error at all
+// and left the card byte-identical to the one before the click — the state
+// the operator reads as "the button does nothing" even though the alias
+// attach behind it succeeded. The two non-success outcomes are kept apart
+// because their remedies differ: nothing was attempted for a skipped grant,
+// while a failed one carries the grant's own reason.
+function signInOutcomeMessage(outcome: CloudProviderUpdateOutcome, alias: string): string {
+  switch (outcome.status) {
+    case 'success':
+      return '';
+    case 'skipped':
+      return `${alias} was already signing in from another action, so this sign-in did not start. Wait for that one to finish, then click Connect again.`;
+    case 'failed':
+      return `The alias ${alias} was attached, but signing in failed: ${outcome.message} Click Connect again to retry the sign-in.`;
+  }
+}
 
 // connectFailureMessage names the standard host beside a verification
 // failure — unless the operator already tried it — so a mistyped or
