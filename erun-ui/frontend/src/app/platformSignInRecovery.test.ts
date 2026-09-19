@@ -78,7 +78,7 @@ function seedNotSignedInDashboard(dispatch: AppDispatch): void {
         canApproveInviteRequests: false,
         canDeclineInviteRequests: false,
       },
-      reviewFilter: { mine: false, waitingOnMe: false },
+      reviewFilter: { mine: false, waitingOnMe: false, statuses: ['OPEN', 'MERGE'] },
       platformAliasOverride: '',
       connectApiUrlDraft: '',
       connecting: false,

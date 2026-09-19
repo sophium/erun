@@ -5,6 +5,8 @@
 import { cn } from 'erun-kit';
 import * as React from 'react';
 
+import { reviewStatuses } from '../../app/reviewDetailState';
+
 // ReviewFilterSegmentedControl is one grouped control, not two independent
 // buttons: Mine and Waiting-on-me visually merge into a single pill,
 // matching the DiffSourceButton segmented-toggle pattern the review panel's
@@ -37,6 +39,49 @@ export function ReviewFilterSegmentedControl({
         active={waitingOnMe}
         onClick={onToggleWaitingOnMe}
       />
+    </div>
+  );
+}
+
+// ReviewStatusFilterControl narrows the list by status, in the same grouped
+// pill idiom as the authorship chips so the two filters read as one surface.
+//
+// It exists because an unfiltered list is mostly finished work: a tenant
+// accumulates MERGED and CLOSED reviews forever, so the rows that need someone
+// are buried under rows that need nobody — one tenant was at 155 reviews of
+// which 87 were merged and 68 closed. OPEN+MERGE opens by default (see
+// defaultReviewStatuses) and each chip carries the count it would show, so the
+// distribution is legible before anything is clicked.
+//
+// Turning every chip off means "show everything" rather than "show nothing":
+// that is how the unfiltered list is reached, so the control needs no separate
+// reset affordance and can never strand the operator on an empty panel.
+export function ReviewStatusFilterControl({
+  statuses,
+  counts,
+  onToggle,
+}: {
+  statuses: string[];
+  counts: Record<string, number>;
+  onToggle: (status: string) => void;
+}): React.ReactElement {
+  return (
+    <div
+      role="group"
+      aria-label="Filter reviews by status"
+      className="flex flex-wrap items-center gap-1 rounded-[var(--radius)] border border-input bg-background p-1 text-[13px]"
+    >
+      {reviewStatuses.map((status) => (
+        <ReviewFilterToggle
+          key={status}
+          label={status}
+          count={counts[status] ?? 0}
+          active={statuses.includes(status)}
+          onClick={() => {
+            onToggle(status);
+          }}
+        />
+      ))}
     </div>
   );
 }

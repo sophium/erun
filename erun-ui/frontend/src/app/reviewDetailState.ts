@@ -21,12 +21,110 @@ export type TenantDashboardTab =
   | 'requests'
   | 'api-log';
 
-// ReviewFilterState backs the Reviews tab's one-click discovery filters.
-// Both can be on at once (author=me AND reviewer=me is a valid, if narrow,
-// combination the platform already supports).
+// ReviewFilterState backs the Reviews tab's filters.
+//
+// mine/waitingOnMe are the one-click discovery filters, and both can be on at
+// once (author=me AND reviewer=me is a valid, if narrow, combination the
+// platform already supports).
+//
+// statuses narrows the list by review status. It is applied locally rather than
+// server-side, because the platform's GET /v1/reviews accepts a single `status`
+// per query (PlatformReviewFilter.Status is one string) and cannot express
+// "OPEN or MERGE" at all — while the dashboard already holds the tenant's whole
+// review list, so narrowing it needs no round-trip.
 export interface ReviewFilterState {
   mine: boolean;
   waitingOnMe: boolean;
+  statuses: string[];
+}
+
+// reviewStatuses is the platform's own review-status vocabulary, in the order
+// the filter presents it: every live status first, in lifecycle order, then the
+// two terminal ones.
+export const reviewStatuses = ['OPEN', 'READY', 'MERGE', 'FAILED', 'MERGED', 'CLOSED'] as const;
+
+// defaultReviewStatuses is what the list shows with no filter chosen: every
+// status that is not finished.
+//
+// A tenant accumulates MERGED and CLOSED reviews forever — one large tenant was
+// at 155 reviews of which 68 were closed and 87 merged, so the unfiltered list
+// was entirely finished work and the handful that still needed someone were
+// buried in it. Opening on the live statuses makes the default view the one an
+// operator actually wants, and the counted number honest about it.
+//
+// FAILED and READY belong in that set, not outside it. A failed build is the
+// most actionable state a review can be in, and READY is a review waiting on
+// its reviewers; excluding either would hide exactly the rows the filter exists
+// to surface, and would leave the operator needing a filter just to see a
+// broken build. MERGED and CLOSED are the only two that mean "nobody's
+// problem any more", and they are the only two this hides.
+export const defaultReviewStatuses = (): string[] => ['OPEN', 'READY', 'MERGE', 'FAILED'];
+
+// reviewStatusFilterIsDefault reports whether statuses is the untouched
+// default, so a panel can tell "narrowed by the operator" from "as it opens"
+// without comparing literals at each call site.
+export function reviewStatusFilterIsDefault(statuses: string[]): boolean {
+  const fallback = defaultReviewStatuses();
+  if (statuses.length !== fallback.length) {
+    return false;
+  }
+  return fallback.every((status) => statuses.includes(status));
+}
+
+// reviewsMatchingStatuses narrows a loaded review list to the chosen statuses.
+//
+// An empty selection shows everything rather than nothing: turning every chip
+// off is how an operator asks for the unfiltered list, and rendering an empty
+// panel for it would read as "this tenant has no reviews" — the exact confusion
+// the three-empty-states rule exists to prevent.
+export function reviewsMatchingStatuses<T extends { status: string }>(
+  reviews: T[],
+  statuses: string[],
+): T[] {
+  if (statuses.length === 0) {
+    return reviews;
+  }
+  const wanted = new Set(statuses.map((status) => status.trim().toUpperCase()));
+  return reviews.filter((review) => wanted.has(review.status.trim().toUpperCase()));
+}
+
+// toggleReviewStatus adds or removes one status, preserving the canonical
+// order so the chip row never reshuffles under the operator's cursor.
+export function toggleReviewStatus(statuses: string[], status: string): string[] {
+  const target = status.trim().toUpperCase();
+  const next = statuses.includes(target)
+    ? statuses.filter((candidate) => candidate !== target)
+    : [...statuses, target];
+  return reviewStatuses.filter((candidate) => next.includes(candidate));
+}
+
+// reviewCountLabel renders the list's own count, naming both numbers whenever
+// a status filter is hiding rows. "3 of 155" is the honest reading; "3" alone
+// would claim the tenant has three reviews.
+export function reviewCountLabel(visible: number, total: number): string {
+  if (visible === total) {
+    return `${String(visible)} ${visible === 1 ? 'review' : 'reviews'}`;
+  }
+  // Both numbers shown: the noun belongs to the total. "1 of 155 reviews" is
+  // the true sentence — the tenant has 155, one of which is on screen — where
+  // agreeing with the visible count would read "1 of 155 review".
+  return `${String(visible)} of ${String(total)} ${total === 1 ? 'review' : 'reviews'}`;
+}
+
+// reviewStatusCounts counts the loaded reviews per status, so each chip can
+// carry the distribution it offers. A status with no reviews still reports 0
+// rather than being omitted: "MERGED 0" is information, and a chip that appears
+// and disappears as the tenant's history changes is harder to aim at.
+export function reviewStatusCounts(reviews: { status: string }[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const status of reviewStatuses) {
+    counts[status] = 0;
+  }
+  for (const review of reviews) {
+    const status = review.status.trim().toUpperCase();
+    counts[status] = (counts[status] ?? 0) + 1;
+  }
+  return counts;
 }
 
 export interface TenantDashboardState {
@@ -144,6 +242,7 @@ export interface ReviewDetailState {
 export const defaultReviewFilter = (): ReviewFilterState => ({
   mine: false,
   waitingOnMe: false,
+  statuses: defaultReviewStatuses(),
 });
 
 export const defaultTenantDashboard = (): TenantDashboardState => ({
