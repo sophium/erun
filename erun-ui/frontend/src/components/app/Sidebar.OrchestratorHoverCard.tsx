@@ -8,6 +8,7 @@ import { orchestratorEnvironmentLine } from '@/app/orchestratorEnvironmentActivi
 import {
   orchestratorHasNudgeHistory,
   orchestratorNudgeSummary,
+  orchestratorPacingUnreachableNote,
 } from '@/app/orchestratorNudgeSummary';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { useHoverCardOpenState } from '@/app/useHoverCardOpenState';
@@ -113,7 +114,9 @@ export function OrchestratorHoverCard({
           <HoverCardRow label="Environments" wide>
             <OrchestratorEnvironments environments={orchestrator.environments} />
           </HoverCardRow>
-          {(running || orchestratorHasNudgeHistory(orchestrator)) && (
+          {(running ||
+            orchestratorHasNudgeHistory(orchestrator) ||
+            Boolean(orchestrator.pacingUnreachable)) && (
             <HoverCardRow label="Nudges">
               <OrchestratorNudges orchestrator={orchestrator} />
             </HoverCardRow>
@@ -245,12 +248,20 @@ function OrchestratorEnvironments({
 // the cumulative history survives a stopped session (persisted per
 // orchestrator id) -- see orchestratorHasNudgeHistory, which is why this row
 // can still render while stopped.
+//
+// The history and the could-not line are one fact read together, so they stack
+// (spacing level 1, HOVER_CARD_VALUE_STACK_CLASS): what erun has done about
+// this session, and whether it can do anything about it from here. The second
+// is a caption rather than an alert -- nothing the operator did caused it and
+// nothing is failing; the session simply belongs to another desktop, which is
+// also why it is not the amber treatment restartRequired earns.
 function OrchestratorNudges({
   orchestrator,
 }: {
   orchestrator: OrchestratorInfo;
 }): React.ReactElement {
   const summary = orchestratorNudgeSummary(orchestrator, Date.now());
+  const unreachableNote = orchestratorPacingUnreachableNote(orchestrator);
   if (orchestrator.nudgeCapped) {
     return (
       <span className={`flex items-start gap-1.5 ${HOVER_CARD_ALERT_CLASS}`}>
@@ -259,10 +270,16 @@ function OrchestratorNudges({
       </span>
     );
   }
-  if (orchestrator.autoNudgeCount > 0 || orchestrator.whipCount > 0) {
-    return <span>{summary}</span>;
+  const hasHistory = orchestrator.autoNudgeCount > 0 || orchestrator.whipCount > 0;
+  if (!unreachableNote) {
+    return hasHistory ? <span>{summary}</span> : <Muted>{summary}</Muted>;
   }
-  return <Muted>{summary}</Muted>;
+  return (
+    <span className={HOVER_CARD_VALUE_STACK_CLASS}>
+      {hasHistory ? <span>{summary}</span> : <Muted>{summary}</Muted>}
+      <span className={HOVER_CARD_CAPTION_CLASS}>{unreachableNote}</span>
+    </span>
+  );
 }
 
 function Muted({ children }: { children: React.ReactNode }): React.ReactElement {

@@ -575,14 +575,54 @@ func (a *App) RestartApp(returnToOrchestratorID string) error {
 // the id it was spawned with. A restart is the operator taking a live session
 // away and promising it back, so naming anything other than the conversation
 // that is live is how a restart strands the work it was meant to preserve.
+//
+// "Running right now" is this desktop's session when it has one. When it does
+// not -- an orchestrator started in a terminal, or one whose session object is
+// gone -- the same answer is still on disk, and the durable open-set entry plus
+// the live-conversation record are what carry it (see
+// restartHandoffFromOpenState). Leaving that case empty is what used to send the
+// next launch to the derived anchor instead of the conversation that was really
+// live, silently.
 func (a *App) restartHandoff(orchestratorID string) orchestratorRestoreState {
 	state := orchestratorRestoreState{OrchestratorID: strings.TrimSpace(orchestratorID)}
 	conversationID, launchID, scope := a.runningOrchestratorConversation(state.OrchestratorID)
 	if conversationID == "" {
-		return state
+		return a.restartHandoffFromOpenState(state)
 	}
 	state.ConversationID = orchestratorLiveConversationForLaunch(state.OrchestratorID, launchID, conversationID)
 	state.Environments = scope
+	state.ResumePrompt = orchestratorRestartResumePrompt(state.OrchestratorID)
+	return state
+}
+
+// restartHandoffFromOpenState answers restartHandoff's question for an
+// orchestrator this desktop holds no session for, from what is durable instead
+// of from memory: the open-set entry records the nonce of the launch that last
+// started it and the scope that launch was wired to, and the live-conversation
+// record holds the conversation that session reported being on.
+//
+// The confirmation is the same one every other path uses and is the whole
+// safety of this: orchestratorLiveConversationForLaunch only trusts a record
+// whose echoed nonce matches the launch the entry names, so a record left by a
+// replaced run, or by a writer that no longer exists, cannot decide what this
+// restart hands a task to. An entry that names no launch, or a record that does
+// not confirm, leaves the hand-off empty exactly as before -- the next launch
+// then resumes the derived anchor idle, which is the honest outcome when
+// nothing here can vouch for what was running.
+func (a *App) restartHandoffFromOpenState(state orchestratorRestoreState) orchestratorRestoreState {
+	entry := orchestratorEntryOrEmpty(readOpenOrchestrators(a.deps.orchestratorOpenPath), state.OrchestratorID)
+	if strings.TrimSpace(entry.LaunchID) == "" {
+		return state
+	}
+	// The empty fallback is deliberate: with nothing confirmed there is no
+	// conversation this hand-off could name, and the next launch resumes the
+	// anchor idle rather than a task being handed to a guess.
+	conversationID := orchestratorLiveConversationForLaunch(state.OrchestratorID, entry.LaunchID, "")
+	if conversationID == "" {
+		return state
+	}
+	state.ConversationID = conversationID
+	state.Environments = entry.Environments
 	state.ResumePrompt = orchestratorRestartResumePrompt(state.OrchestratorID)
 	return state
 }
