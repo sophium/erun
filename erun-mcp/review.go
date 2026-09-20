@@ -227,7 +227,7 @@ type ReviewReportMergedInput struct {
 	platformAliasInput
 	ReviewID  string `json:"reviewId" jsonschema:"review id to report merged"`
 	BuildID   string `json:"buildId" jsonschema:"the successful GATE build's id"`
-	RemoteURL string `json:"remoteUrl" jsonschema:"the git remote the platform fetches to verify the merge"`
+	RemoteURL string `json:"remoteUrl" jsonschema:"the git remote the platform fetches to verify the merge, in any form git accepts; an SSH remote is read over its host's HTTPS without credentials"`
 }
 
 type ReviewReportMergedResult struct {
