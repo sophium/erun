@@ -691,6 +691,12 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 // observed. It returns only after the work has finished and its result is
 // durable, so the caller of this function is the process whose liveness the job
 // record is reconciled against.
+//
+// Registering the job is the point of no return: from there on, this process is
+// the only writer of that record's outcome, so every way its own body can end --
+// a returned setup error, or a panic in its finish path -- is turned into a
+// recorded outcome rather than into a record left reading "running". See
+// recordEnvironmentJobSupervisorFailure.
 func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	env, err := normalizeEnvironmentJobEnv(params.Env)
 	if err != nil {
@@ -701,6 +707,56 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	if err != nil {
 		return err
 	}
+	// Registered before runRegisteredEnvironmentJobSupervisor's own deferred
+	// stops, so those have already run by the time this writes: a reader that
+	// observes the terminal record never races this supervisor's own tail, the
+	// same ordering job_task.go's runTaskEnvironmentJob takes for the same
+	// reason.
+	var panicked any
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = r
+		}
+		recordEnvironmentJobSupervisorFailure(recorder, err, panicked)
+	}()
+	err = runRegisteredEnvironmentJobSupervisor(recorder, params)
+	return err
+}
+
+// recordEnvironmentJobSupervisorFailure settles a job whose supervising process
+// is ending without an outcome of its own. A registered record still reading
+// EnvironmentJobStateRunning is the worst shape this store can hold: once the
+// supervisor's process is gone, every later read can only reconcile the record
+// against that death and demote it to EnvironmentJobStateUnknown -- no exit
+// code, and nothing naming what happened to the work. The supervisor itself did
+// observe why it is ending, so recording that turns an unknowable fate into a
+// definite, actionable one.
+//
+// A no-op once an outcome is already durable, so it can never overwrite the one
+// finishEnvironmentJob wrote.
+func recordEnvironmentJobSupervisorFailure(recorder *jobRecorder, err error, panicked any) {
+	if recorder == nil || (err == nil && panicked == nil) {
+		return
+	}
+	if recorder.snapshot().State != EnvironmentJobStateRunning {
+		return
+	}
+	reason := fmt.Sprintf("job supervisor could not run this job: %v", err)
+	if panicked != nil {
+		reason = fmt.Sprintf("job supervisor panicked before it could record an outcome: %v", panicked)
+	}
+	code := 1
+	recorder.update(func(job *EnvironmentJob) {
+		job.State = EnvironmentJobStateExited
+		job.EndedAt = time.Now()
+		job.ExitCode = &code
+		job.Reason = reason
+	})
+}
+
+// runRegisteredEnvironmentJobSupervisor is RunEnvironmentJobSupervisor's body
+// for a job whose running record is already durable.
+func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params EnvironmentJobSupervisorParams) error {
 	job := recorder.snapshot()
 	log, err := os.OpenFile(job.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
