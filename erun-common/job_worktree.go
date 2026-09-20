@@ -207,6 +207,14 @@ func checkpointAgentJobWorktree(ctx Context, dir, branch string, outcome environ
 	commitResult, err := CommitWorkingTree(ctx, dir, CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: agentJobWorktreeCommitMessage,
+		// The checkpoint is this run's last act, and it is the only thing
+		// standing between a killed job's in-flight work and its loss. A
+		// repository hook that rejects it does not veto a commit, it discards
+		// work: observed live as a lint finding about an unused constant —
+		// mid-edit code being exactly what a linter objects to — turning into an
+		// unrecoverable working tree. Bypass hooks here and nowhere else; a
+		// human-authored commit still runs them.
+		SkipHooks: true,
 	}, CommitWorkingTreeDependencies{})
 	if err != nil {
 		outcome.reason = fmt.Sprintf("the working tree had uncommitted changes when the job ended and the "+
