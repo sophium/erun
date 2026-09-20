@@ -384,12 +384,12 @@ func TestAcceptMergedSucceedsWhenParentIsTheGatedTip(t *testing.T) {
 	}
 }
 
-// TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting
-// is the fix for erun#2250: commits that arrived directly on the target
-// branch between the gated tip and the reported commit — the release flow's
-// `[skip ci]` pushes, for instance — mean the reported commit's immediate
-// parent is no longer the gated tip, but the gated work is still really its
-// ancestor, so the merge is accepted rather than permanently refused.
+// TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting:
+// commits that arrived directly on the target branch between the gated tip
+// and the reported commit — the release flow's `[skip ci]` pushes, for
+// instance — mean the reported commit's immediate parent is no longer the
+// gated tip, but the gated work is still really its ancestor, so the merge is
+// accepted rather than permanently refused.
 func TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting(t *testing.T) {
 	reviews, builds := mergingReviewGatedAgainst("merge-commit")
 	release := &fakeReleaseTrigger{}

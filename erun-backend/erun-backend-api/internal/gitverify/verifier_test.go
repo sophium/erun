@@ -234,8 +234,8 @@ func squashLandedRepo(t *testing.T, unrelatedLanding bool) (remoteURL, squashCom
 	return "file://" + dir, squashCommit, branchTip
 }
 
-// TestRemoteVerifierContainsChangesFindsASquashLandedBranch is the case
-// erun#2575 is about, and it establishes both halves: the check that
+// TestRemoteVerifierContainsChangesFindsASquashLandedBranch is the case a
+// squash-landed review turns on, and it establishes both halves: the check
 // report-merged needs — the branch tip being an ancestor of the target —
 // really is false for a squash merge, and ContainsChanges still reports the
 // work as landed, naming the squash commit.
