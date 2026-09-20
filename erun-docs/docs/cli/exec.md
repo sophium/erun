@@ -77,7 +77,11 @@ This is the git half of gating a [merge queue](/collaboration/merge-queue) promo
 
 The working tree must already be clean: unlike `merge`, this checks out a **different** local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge or lost.
 
-A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict (with the conflicted files) recorded in the result's `skipped` list, and the rest of the batch still gates against the tree as it stood before that attempt. A batch where every source is skipped lands nothing and exits non-zero rather than reporting success against an unchanged target.
+A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict (with the conflicted files) recorded in the result's `skipped` list, and the rest of the batch still gates against the tree as it stood before that attempt.
+
+A source that contributes nothing is skipped the same way. When a source's content is already on the target — the branch is still at the target's tip, or its change has already landed there — its squash stages no changes and there is no commit to record, so it is reported in `skipped` with that reason instead of failing the batch. An already-landed branch is a no-op for a batch, not a dead gate.
+
+A batch where every source is skipped lands nothing and exits non-zero rather than reporting success against an unchanged target.
 
 `--dry-run` traces the fetch, checkout, and each squash merge and commit without running them. Reports the target branch, remote, the resulting tip commit, and the `landed`/`skipped` source lists; add `--output json` for a structured result.
 
