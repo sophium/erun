@@ -388,6 +388,35 @@ FRONTEND_GATE_JOB_MEMORY_MIB := 650
 FRONTEND_GATE_JOB_COUNT := 15
 FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND_GATE_JOB_COUNT) $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
+# vitest sizes its worker pool from os.availableParallelism(), which reads the
+# container's whole CPU quota -- so a single `vitest run` claims all of it, and
+# the vitest workspaces below are dispatched as separate *concurrent* jobs in
+# the fan-out above. Two of them side by side therefore demand twice the quota
+# before the other frontend jobs (build, lint, typecheck) or any concurrent
+# check-gate target takes a share, and that oversubscription is spent as cgroup
+# throttling. This is what the issue filed on the in-image gate describes: a
+# 2.8MB tarball fetches in 0.27s from an idle container on the same daemon, but
+# the throttled install spends minutes on it and then dies as ESOCKETTIMEDOUT,
+# reading as a network fault (erun#2390).
+#
+# Same bound, same reasoning, same shape as LINT_GOMAXPROCS above: divide the
+# environment's real quota by the number of these jobs that actually run
+# concurrently, rather than handing each the whole ceiling. It is derived from
+# parallel-gate.sh cpu-quota (not a constant and not `nproc`, both of which
+# misread a throttled cgroup -- see that script's comment) and floored at 1 so
+# a small environment still runs.
+#
+# FRONTEND_VITEST_JOB_COUNT counts only the workspaces whose `yarn test`
+# really runs vitest, since it is vitest's own pool that multiplies. A
+# workspace that switches runner has to be counted here too;
+# erun-integration/frontend_test_workers_bound_test.go reads this on every run
+# and fails if a vitest workspace's job stops naming the bound.
+FRONTEND_VITEST_JOB_COUNT := 2
+FRONTEND_VITEST_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(FRONTEND_VITEST_JOB_COUNT) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	echo $$n)
+
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
 # (erun-devops/docker/erun-devops/Dockerfile) covering all three workspaces.
@@ -438,12 +467,12 @@ test-frontend:
 		printf 'erun-ui-frontend-lint\terun-ui/frontend lint\tcd erun-ui/frontend && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/\n'; \
 		printf 'erun-ui-frontend-format\terun-ui/frontend format:check\tcd erun-ui/frontend && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json\n'; \
 		printf 'erun-ui-frontend-build\terun-ui/frontend build\tcd erun-ui/frontend && yarn build\n'; \
-		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test\n'; \
+		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n'; \
 		printf 'erun-console-typecheck\terun-console typecheck\tcd erun-console && yarn typecheck\n'; \
 		printf 'erun-console-lint\terun-console lint\tcd erun-console && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/\n'; \
 		printf 'erun-console-format\terun-console format:check\tcd erun-console && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json\n'; \
 		printf 'erun-console-build\terun-console build\tcd erun-console && yarn build\n'; \
-		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test\n' \
+		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n' \
 	) | ./scripts/parallel-gate.sh $(FRONTEND_GATE_PARALLELISM) test-frontend
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
