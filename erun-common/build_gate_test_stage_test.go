@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -163,6 +164,93 @@ func TestDockerImageBuilderRefusesToPromoteAGateDockerfile(t *testing.T) {
 	}
 	if !errors.Is(err, errGateTestStagePromoted) {
 		t.Fatalf("expected the gate-promotion sentinel error, got: %v", err)
+	}
+}
+
+// TestApplyIncrementalToDockerBuildsKeepsTheGateMarkedWithoutIncremental
+// reproduces the report that `--no-incremental` builds silently. It returned early from
+// ApplyIncrementalToDockerBuilds, before applyIncrementalPromotion ever ran, and
+// the *only* thing that sets GateTestStage is the gate branch inside that
+// function. So the flag skipped the marking, and with it both surfaces that tell
+// an operator whether this build runs make check: the rebuild-trigger trace line
+// and gateTestStageProvenanceLines' `test stage (...): LIVE` declaration. The
+// result was a build that exited 0 with no guard line and no stage declaration --
+// less auditable than the plain build it was meant to improve on, and
+// indistinguishable from a real pass.
+//
+// Before the fix this fails on the marking itself: with the flag set, a gate
+// Dockerfile came back with GateTestStage false. Ordinary Dockerfiles are
+// asserted alongside it so the fix cannot pass by marking everything.
+func TestApplyIncrementalToDockerBuildsKeepsTheGateMarkedWithoutIncremental(t *testing.T) {
+	dir := t.TempDir()
+	gate := DockerBuildSpec{
+		ContextDir:     dir,
+		DockerfilePath: writeTestDockerfile(t, filepath.Join(dir, "gate"), gateDockerfileContent),
+		Image:          DockerImageReference{ImageName: "erun-devops", Tag: "ghcr.io/sophium/erun-devops:1.0.248"},
+		Platforms:      []string{"linux/amd64"},
+	}
+	ordinary := DockerBuildSpec{
+		ContextDir:     filepath.Join(dir, "ordinary"),
+		DockerfilePath: writeTestDockerfile(t, filepath.Join(dir, "ordinary"), "FROM scratch\nCOPY . /app\n"),
+		Image:          DockerImageReference{ImageName: "erun-console", Tag: "ghcr.io/sophium/erun-console:1.0.248"},
+		Platforms:      []string{"linux/amd64"},
+	}
+
+	// No docker daemon on PATH: the noIncremental path must not inspect or
+	// promote anything, so nothing here may shell out.
+	out, err := ApplyIncrementalToDockerBuilds(Context{}, []DockerBuildSpec{gate, ordinary}, true)
+	if err != nil {
+		t.Fatalf("ApplyIncrementalToDockerBuilds: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected both builds to survive, got %d", len(out))
+	}
+	if !out[0].GateTestStage {
+		t.Error("--no-incremental dropped the GateTestStage marking: the build would have no guard line and no `test stage (...): LIVE` declaration")
+	}
+	if out[0].Promote {
+		t.Error("--no-incremental must not promote anything, least of all a gate Dockerfile")
+	}
+	if out[1].GateTestStage {
+		t.Error("an ordinary Dockerfile must not be marked as a gate")
+	}
+	if out[1].Promote {
+		t.Error("--no-incremental must not promote an ordinary Dockerfile either")
+	}
+}
+
+// TestNoIncrementalStillDeclaresTheGateLineAndTheLiveTestStage is the
+// reproduction at the surface the report actually observed: the operator-facing
+// lines. It drives the same trace functions the build drives, on builds that came
+// through the real --no-incremental entry point, and requires both the guard line
+// and the LIVE declaration to be present. Asserting the marking alone would not
+// prove the report's symptom is gone -- the lines are what the report quoted as
+// missing.
+func TestNoIncrementalStillDeclaresTheGateLineAndTheLiveTestStage(t *testing.T) {
+	dir := t.TempDir()
+	gate := DockerBuildSpec{
+		ContextDir:     dir,
+		DockerfilePath: writeTestDockerfile(t, filepath.Join(dir, "gate"), gateDockerfileContent),
+		Image:          DockerImageReference{ImageName: "erun-devops", Tag: "ghcr.io/sophium/erun-devops:1.0.248"},
+		Platforms:      []string{"linux/amd64"},
+	}
+
+	out, err := ApplyIncrementalToDockerBuilds(Context{}, []DockerBuildSpec{gate}, true)
+	if err != nil {
+		t.Fatalf("ApplyIncrementalToDockerBuilds: %v", err)
+	}
+
+	var buf bytes.Buffer
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &buf, &buf)}
+	traceDockerBuild(ctx, out[0])
+	lines := gateTestStageProvenanceLines(out)
+	rendered := buf.String() + strings.Join(lines, "\n")
+
+	if !strings.Contains(rendered, "because its Dockerfile's test stage runs the build's own gate") {
+		t.Errorf("--no-incremental must still print the gate guard line; got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "test stage (ghcr.io/sophium/erun-devops:1.0.248): LIVE") {
+		t.Errorf("--no-incremental must still declare the test stage as LIVE; got:\n%s", rendered)
 	}
 }
 

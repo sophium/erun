@@ -158,9 +158,20 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 		return DesktopRestartOutcome{Status: DesktopRestartRefused, Reason: reason}
 	}
 	if !deps.ProcessAlive(marker.PID) {
+		// The record names a process that is gone, so it identifies no desktop
+		// this call could ask to restart — and because a desktop that never
+		// took the record over publishes no endpoint, there is nothing else to
+		// resolve it by. Refusing is therefore the honest answer, but a bare
+		// "the record is stale" is a dead end: the record is not what the
+		// operator acts on. A record naming a dead pid is free, so reopening
+		// the desktop app claims it cleanly and the trigger works again, and
+		// the reason says so rather than leaving them with no path back to a
+		// rebuild.
 		return DesktopRestartOutcome{
-			Status:      DesktopRestartRefused,
-			Reason:      fmt.Sprintf("the desktop app recorded at pid %d is not running; the record is stale", marker.PID),
+			Status: DesktopRestartRefused,
+			Reason: fmt.Sprintf(
+				"the desktop app recorded at pid %d is not running; the record is stale — quit and reopen the desktop app so it records a fresh one",
+				marker.PID),
 			PID:         marker.PID,
 			ControlPort: marker.ControlPort,
 		}

@@ -393,6 +393,117 @@ func TestAdoptRestartControl_ReportsAHolderThatOutlivesTheWait(t *testing.T) {
 	}
 }
 
+// TestAdoptRestartControlSteadily_TakesOverAHolderThatOutlivesTheHandoffWindow
+// is the reported stranding at its cause. The hand-off window is bounded, so a
+// predecessor that outlives it leaves the successor refused — and the successor
+// used to stop there for good. The record then stayed pinned to a pid that had
+// since exited, and nothing revisited it: the desktop actually running owned no
+// endpoint, so `erun app restart` read the record as stale and refused, and the
+// operator had no supported path back to a rebuild at all. Re-checking past the
+// window, until the holder's exit finally frees the record, is what closes that.
+func TestAdoptRestartControlSteadily_TakesOverAHolderThatOutlivesTheHandoffWindow(t *testing.T) {
+	stage := stageStrandedRestartControl(t)
+
+	// The hand-off window ends with the predecessor still alive: this is the
+	// point the successor used to give up at, permanently.
+	remaining, err := adoptRestartControl(stage.claim, func(time.Duration) {})
+	if err != nil {
+		t.Fatalf("adoptRestartControl: %v", err)
+	}
+	if remaining != stage.predecessor.PID {
+		t.Fatalf("remaining holder = %d, want the predecessor %d outliving the window", remaining, stage.predecessor.PID)
+	}
+	if got := stage.recorded(t); got != stage.predecessor {
+		t.Fatalf("record is %+v after the window; want it still the predecessor's", got)
+	}
+
+	// Only now does the predecessor exit — long after the window closed.
+	if err := stage.predecessorExits(); err != nil {
+		t.Fatalf("predecessor shutdown: %v", err)
+	}
+
+	sleeps := 0
+	if err := adoptRestartControlSteadily(stage.claim, func(time.Duration) { sleeps++ }, restartControlRetryInterval); err != nil {
+		t.Fatalf("adoptRestartControlSteadily: %v", err)
+	}
+	if sleeps != 1 {
+		t.Fatalf("re-checked after %d waits, want the one wait before the record came free", sleeps)
+	}
+	if got := stage.recorded(t); got != stage.successor {
+		t.Fatalf("record is %+v; want the successor %+v to have taken it over", got, stage.successor)
+	}
+}
+
+// strandedRestartControl stages the reported stranding on disk: a predecessor's
+// record that a successor cannot take while the predecessor is alive, and the
+// switch that finally makes the predecessor exit. The holder is faked rather
+// than spawned because what is under test is the wait's shape — how long an
+// instance keeps trying — not process control.
+type strandedRestartControl struct {
+	path        string
+	predecessor eruncommon.DesktopControlMarker
+	successor   eruncommon.DesktopControlMarker
+	alive       map[int]bool
+}
+
+func stageStrandedRestartControl(t *testing.T) *strandedRestartControl {
+	t.Helper()
+	stage := &strandedRestartControl{
+		path:        filepath.Join(t.TempDir(), "desktop-control.json"),
+		predecessor: eruncommon.DesktopControlMarker{PID: 50193, ControlPort: 59775, StartedAtUnix: 100},
+		successor:   eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: 56614, StartedAtUnix: 200},
+	}
+	stage.alive = map[int]bool{stage.predecessor.PID: true, stage.successor.PID: true}
+	if _, err := claimDesktopControlMarker(stage.path, stage.predecessor, stage.processAlive); err != nil {
+		t.Fatalf("stage the predecessor's record: %v", err)
+	}
+	return stage
+}
+
+func (s *strandedRestartControl) processAlive(pid int) bool { return s.alive[pid] }
+
+func (s *strandedRestartControl) claim() (restartControlClaim, error) {
+	return claimDesktopControlMarker(s.path, s.successor, s.processAlive)
+}
+
+// predecessorExits is the predecessor leaving long after the hand-off window
+// closed: it stops being alive and its clean shutdown drops the record it owns.
+func (s *strandedRestartControl) predecessorExits() error {
+	delete(s.alive, s.predecessor.PID)
+	return removeDesktopControlMarker(s.path, s.predecessor.PID)
+}
+
+// recorded reports which process the record on disk names right now.
+func (s *strandedRestartControl) recorded(t *testing.T) eruncommon.DesktopControlMarker {
+	t.Helper()
+	got, err := eruncommon.ReadDesktopControlMarker(s.path)
+	if err != nil {
+		t.Fatalf("read the control record: %v", err)
+	}
+	return got
+}
+
+// TestAdoptRestartControlSteadily_EndsWhenThisProcessShutsDown pins the one
+// thing that must end the re-check. A claim that kept publishing after shutdown
+// removed the record would advertise the endpoint of a process that has already
+// gone — exactly the stale record the claim exists to keep out of the way.
+func TestAdoptRestartControlSteadily_EndsWhenThisProcessShutsDown(t *testing.T) {
+	attempts := 0
+	err := adoptRestartControlSteadily(func() (restartControlClaim, error) {
+		attempts++
+		if attempts < 3 {
+			return restartControlClaim{HolderPID: 50193}, nil
+		}
+		return restartControlClaim{}, errRestartControlReleased
+	}, func(time.Duration) {}, restartControlRetryInterval)
+	if !errors.Is(err, errRestartControlReleased) {
+		t.Fatalf("err = %v, want errRestartControlReleased", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("claimed %d times, want the re-check to end on the claim that found this process released", attempts)
+	}
+}
+
 // TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord is the
 // transient-second-instance case: an instance that cannot own the endpoint
 // must leave the running desktop's record exactly as it found it, because a

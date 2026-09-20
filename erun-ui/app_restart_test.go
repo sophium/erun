@@ -32,9 +32,87 @@ func restartTestApp(t *testing.T) (*App, string) {
 		orchestratorOpenPath:   filepath.Join(home, orchestratorOpenFileName),
 		relaunchApp:            func() error { return nil },
 		quitApp:                func() {},
+		// beforeClose reads the window's maximised state on its way out, and
+		// the real probe needs a Wails context a test does not have.
+		windowMaximised: func(context.Context) bool { return false },
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app, restoreDir
+}
+
+// TestRestartAppIsNotCancelledByTheCloseGate is the reported failure at its
+// cause. RestartApp spawns the successor and then asks Wails to quit, and
+// Wails abandons that quit outright when OnBeforeClose returns true --
+// beforeClose does, for as long as any activity is running, which is exactly
+// when an operator restarts to pick up a rebuild. The predecessor then never
+// exits: it keeps the control record and the control port, the successor waits
+// on a process that is not going away, and the operator is left with two
+// desktops, the one in front of them still the old binary.
+//
+// The quit is driven the way Wails drives it, through beforeClose, so what is
+// asserted is the real decision rather than a stub's.
+func TestRestartAppIsNotCancelledByTheCloseGate(t *testing.T) {
+	app, _ := restartTestApp(t)
+	app.activityQueue.start(activityQueueEntry{
+		ID:      "deploy-1",
+		Command: "deploy",
+		Status:  activityQueueStatusRunning,
+	})
+
+	quitLanded := false
+	app.deps.quitApp = func() {
+		if app.beforeClose(context.Background()) {
+			return
+		}
+		quitLanded = true
+	}
+
+	if err := app.RestartApp("agent-1"); err != nil {
+		t.Fatalf("RestartApp failed: %v", err)
+	}
+	if !quitLanded {
+		t.Fatal("the restart's own quit was cancelled by the close gate: the predecessor keeps running while the successor waits on it, which is the two-desktop state a restart must not reach")
+	}
+}
+
+// TestRestartQuitStallWatch_EndsAQuitThatNeverLanded pins the escalation the
+// two-desktop state depends on being bounded and legible. A restart has already
+// relaunched its successor and written its hand-off before it asks to quit, so a
+// predecessor still running its whole grace later is a real second desktop
+// holding the control record — and one that only logs is the reported state,
+// where the operator's window is still the old binary. The wait is handed to the
+// watch rather than slept through, and the exit is substituted rather than
+// taken, so the escalation is witnessed without ending the test process.
+func TestRestartQuitStallWatch_EndsAQuitThatNeverLanded(t *testing.T) {
+	var waited time.Duration
+	exits := 0
+	var reason string
+	restartQuitStallWatch(restartQuitStallGrace, func(d time.Duration) { waited += d }, func(r string) {
+		exits++
+		reason = r
+	}, "test reason")
+
+	if waited != restartQuitStallGrace {
+		t.Fatalf("waited %s, want the quit given exactly the bounded grace %s", waited, restartQuitStallGrace)
+	}
+	if exits != 1 {
+		t.Fatalf("exited %d times, want the stalled quit to end the process exactly once", exits)
+	}
+	if reason != "test reason" {
+		t.Fatalf("exit reason = %q, want the reason it was handed, so the escalation is recorded rather than a desktop that vanished", reason)
+	}
+}
+
+// TestQuitDesktopApp_ReportsWhenThereWasNoWindowToAsk pins the gate the stall
+// watch is armed behind. A headless or not-yet-started app has no Wails context
+// to quit, so no quit was ever asked of it and "still running" means nothing:
+// arming the escalation there would end a healthy process that was never asked
+// to go anywhere.
+func TestQuitDesktopApp_ReportsWhenThereWasNoWindowToAsk(t *testing.T) {
+	app := &App{}
+	if app.quitDesktopApp() {
+		t.Fatal("quitDesktopApp reported a quit for an app with no Wails context to ask")
+	}
 }
 
 // stageOrchestratorConversation writes the transcript the AI harness leaves for a

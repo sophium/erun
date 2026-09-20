@@ -90,24 +90,36 @@ const (
 // EnvConfig.RuntimeDindPod) overrides them the same way RuntimePod already
 // overrides DefaultRuntimePodCPU/Memory.
 //
-// Note this default does not by itself guarantee the limit is enforced on
-// every cluster: erun-dind's inner `dockerd` runs with no `--cgroup-parent`,
-// and on a cgroupfs-driver cgroup v2 host with an unnamespaced (privileged)
-// view of the real cgroup tree, that means BuildKit's own build containers
-// land as siblings of the pod's own Kubernetes-limited cgroup
-// (/sys/fs/cgroup/docker/buildkit/*, memory.max: max) rather than as its
-// descendants — verified live. Nesting them properly (so this limit is the
-// real ceiling rather than node memory) was investigated and shelved:
+// Note the two axes are not in the same state. CPU *is* now a real ceiling on
+// build work: dind-entrypoint.sh mirrors the sidecar's own kubelet-enforced
+// cpu.max into a dedicated /docker/erun-build-cpu-cap-<pod> cgroup, and
+// buildContainerCPUCapCgroupParent has every `docker build` nest its
+// RUN-instruction containers there via `--cgroup-parent`, so the
+// sidecar's configured CPU limit throttles a build rather than only sizing the
+// concurrency the Dockerfile asks for. That is what makes
+// `erun resize --dind-cpu` an effective lever on build CPU, and the cap
+// announces itself on stderr when the cgroup plumbing fails (report_uncapped).
+//
+// Memory has no equivalent, and this default does not by itself guarantee its
+// limit is enforced on every cluster: erun-dind's inner `dockerd` runs with no
+// `--cgroup-parent` for memory, and on a cgroupfs-driver cgroup v2 host with an
+// unnamespaced (privileged) view of the real cgroup tree, that means BuildKit's
+// own build containers land as siblings of the pod's own Kubernetes-limited
+// cgroup (/sys/fs/cgroup/docker/buildkit/*, memory.max: max) rather than as its
+// descendants — verified live. Nesting them properly was investigated and
+// shelved:
 // it requires moving the sidecar's own process out of its assigned cgroup so
 // that cgroup's cgroup.subtree_control can delegate the memory controller to
 // a child, and cgroup v2 then refuses to attach any *new* process directly
 // to that cgroup afterward (confirmed live) — which is exactly how
 // `kubectl exec`/`erun open`, the postStart hook, and the readiness probe
-// all reach this container. Raising this default is real capacity-planning
-// value (it sizes `erun init`/`erun resize`'s own suggestion and the backend
-// tenant-quota floor derived from MinimumRuntimeNamespaceQuota) even though
-// it is a bigger ceiling for the node to have room for, not a hard cgroup
-// enforcement of it.
+// all reach this container. (The CPU cap above sidesteps that constraint by
+// mirroring the value into a sibling cgroup rather than reparenting the
+// sidecar, which is why CPU could be enforced where memory could not.)
+// Raising this default is real capacity-planning value for memory (it sizes
+// `erun init`/`erun resize`'s own suggestion and the backend tenant-quota
+// floor derived from MinimumRuntimeNamespaceQuota) even though it is a bigger
+// ceiling for the node to have room for, not a hard cgroup enforcement of it.
 const (
 	DefaultRuntimeDindCPU           = "4"
 	DefaultRuntimeDindMemory        = "20Gi"

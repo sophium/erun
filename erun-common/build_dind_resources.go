@@ -15,12 +15,25 @@ var (
 // DindCPULimitEnvVar / DindMemoryLimitMiBEnvVar name the env vars the runtime
 // chart's downward API populates on the main container from the erun-dind
 // sidecar's own resource limits (erun-devops/k8s/erun-devops/templates/service.yaml),
-// so an in-pod build can read the sidecar's real limit directly instead of
-// through the config store, which has no environment entry inside the pod.
-// `erun resize --dind-cpu` moves the sidecar's real limit and the cgroup it
-// lives in, but a gate build kept sizing off the config-store fallback
-// default ("4") because the in-pod config store resolves no environment and
-// envConfig was always nil in that context.
+// so an in-pod build can read the budget the operator provisioned for it
+// instead of through the config store, which has no environment entry inside
+// the pod. `erun resize --dind-cpu` moves the sidecar's configured limit, but
+// a gate build kept sizing off the config-store fallback default ("4")
+// because the in-pod config store resolves no environment and envConfig was
+// always nil in that context.
+//
+// These values are a sizing budget, not the cap itself: the Dockerfile only
+// feeds them to its own gate-concurrency arithmetic, because a RUN step in the
+// test stage runs as a sibling of the sidecar's limited cgroup and so cannot
+// read the sidecar's real limit off the filesystem itself. The
+// limit they are resolved from is nonetheless enforced on that same build work
+// by a separate mechanism: buildContainerCPUCapCgroupParent nests every
+// RUN-instruction container under /docker/erun-build-cpu-cap-<pod>, whose
+// cpu.max dind-entrypoint.sh mirrors from the sidecar's own kubelet-enforced
+// quota. So `erun resize --dind-cpu` moves both the concurrency this value
+// sizes and the ceiling the build actually runs under; it is only this ARG
+// read on its own that is not that ceiling. Memory is the one left uncapped
+// (see DefaultRuntimeDindCPU's note in runtime_resources.go).
 const (
 	DindCPULimitEnvVar       = "ERUN_DIND_CPU_LIMIT"
 	DindMemoryLimitMiBEnvVar = "ERUN_DIND_MEMORY_LIMIT_MIB"
@@ -77,9 +90,9 @@ func applyDindResourceBuildArgs(store DockerStore, projectRoot, environment stri
 // resolveDockerBuildDindPodResources resolves the building environment's
 // configured erun-dind sidecar resources. It prefers the downward-API env
 // vars (DindCPULimitEnvVar/DindMemoryLimitMiBEnvVar) field-by-field when they
-// parse as valid Kubernetes quantities, since those reflect the sidecar's
-// real, live limit and are the only source available to an in-pod build,
-// whose config store has no environment entry to read. Any field an env var
+// parse as valid Kubernetes quantities, since those are projected from the
+// sidecar's configured limits and are the only source available to an in-pod
+// build, whose config store has no environment entry to read. Any field an env var
 // does not resolve (absent, or malformed) falls back to the config-store
 // lookup a host-driven build already relies on, and a field neither resolves
 // falls back further to NormalizeRuntimeDindPodResources' own conservative
