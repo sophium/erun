@@ -1,12 +1,15 @@
 package eruncommon
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // A multi-arch, many-image release is the single build most likely to fill a
@@ -51,6 +54,41 @@ const releaseMinDiskHeadroomBytes uint64 = 20 << 30 // 20 GiB
 // rather than reacting after pods are already being killed.
 const minDiskHeadroomPercent uint64 = 10
 
+// Every subprocess this preflight runs against the docker daemon is bounded.
+// The daemon it talks to can stop answering — observed on a real node as a
+// readiness probe's two-second `docker info` timing out while buildkit held a
+// live Solve — and an unbounded call there is worse than a failed one: the
+// preflight never returns, so the build it fronts neither proceeds nor fails
+// and writes no terminal record at all. A bound turns that into a state the
+// caller can report and act on.
+//
+// The three bounds differ because what they wait on differs. The plain CLI
+// reads return in milliseconds on a healthy daemon; the probe is a container
+// run that may first pull a small image; the prune is a real reclaim of a
+// build cache measured in tens of gigabytes, which has taken tens of seconds
+// on the node this floor exists for.
+const (
+	diskHeadroomReadTimeout  = 15 * time.Second
+	diskHeadroomProbeTimeout = 60 * time.Second
+	diskHeadroomPruneTimeout = 5 * time.Minute
+)
+
+// diskHeadroomTimeouts are those bounds as one value, carried on the policy so
+// each caller binds them explicitly and a test can shorten them without
+// mutating anything shared.
+type diskHeadroomTimeouts struct {
+	read  time.Duration
+	probe time.Duration
+	prune time.Duration
+}
+
+// diskHeadroomDefaultTimeouts is what both production callers bind.
+var diskHeadroomDefaultTimeouts = diskHeadroomTimeouts{
+	read:  diskHeadroomReadTimeout,
+	probe: diskHeadroomProbeTimeout,
+	prune: diskHeadroomPruneTimeout,
+}
+
 // diskHeadroomMeasurement is one capacity's free/total read together with what
 // the read established about the filesystem it came from. The path travels
 // with the numbers — and with the environment-owned paths measured to share
@@ -70,11 +108,14 @@ type diskHeadroomMeasurement struct {
 }
 
 // diskHeadroomFreeSpaceFunc reads the docker root's current free and total
-// space, returning ok=false when the read is inconclusive. Total is what makes
+// space, returning an error when the read is inconclusive. Total is what makes
 // the floor proportional; it is 0 when the read could not determine it, which
 // falls back to the absolute floor. Injectable so the decision logic in
-// ensureDiskHeadroomWith can be unit-tested without a real docker daemon.
-type diskHeadroomFreeSpaceFunc func() (diskHeadroomMeasurement, bool)
+// ensureDiskHeadroomWith can be unit-tested without a real docker daemon. The
+// error names why the read failed — a daemon that did not answer within its
+// bound is a different state from one that is simply absent, and only the read
+// that knows which can say so.
+type diskHeadroomFreeSpaceFunc func(limits diskHeadroomTimeouts) (diskHeadroomMeasurement, error)
 
 // dockerReclaimable is what docker's own stores could still free, from a
 // single `docker system df` reading. Two figures, two questions, one reading,
@@ -91,14 +132,13 @@ type dockerReclaimable struct {
 // so the caller can decline a prune that would be a pure no-op. The reported
 // figures are lower bounds, not size estimates — see dockerReclaimableBytes —
 // so they are only trusted to say "nothing at all", never to say "not enough".
-// ok is false when the figure is unreadable, which is treated as "prune
-// anyway" rather than "never prune": an unknown is not a reason to skip the
-// remedy.
-type diskHeadroomReclaimableFunc func() (dockerReclaimable, bool)
+// An error is treated as "prune anyway" rather than "never prune": an unknown
+// is not a reason to skip the remedy.
+type diskHeadroomReclaimableFunc func(limit time.Duration) (dockerReclaimable, error)
 
 // diskHeadroomPruneFunc bounds a build-cache prune to leave at least floor
 // bytes free. Injectable for the same reason as diskHeadroomFreeSpaceFunc.
-type diskHeadroomPruneFunc func(floor uint64) error
+type diskHeadroomPruneFunc func(floor uint64, limit time.Duration) error
 
 // diskHeadroomPolicy is what differs between the two callers: the word used in
 // traces, and whether a disk still below the floor after the prune stops the
@@ -110,11 +150,16 @@ type diskHeadroomPruneFunc func(floor uint64) error
 type diskHeadroomPolicy struct {
 	label  string
 	refuse bool
+	// limits bound every subprocess this policy's check runs. Carried here
+	// rather than fixed in the implementations so the decision logic and the
+	// real commands can be exercised together against a daemon that stops
+	// answering, without waiting out a production bound to do it.
+	limits diskHeadroomTimeouts
 }
 
 var (
-	releaseDiskHeadroomPolicy = diskHeadroomPolicy{label: "release", refuse: true}
-	buildDiskHeadroomPolicy   = diskHeadroomPolicy{label: "build", refuse: false}
+	releaseDiskHeadroomPolicy = diskHeadroomPolicy{label: "release", refuse: true, limits: diskHeadroomDefaultTimeouts}
+	buildDiskHeadroomPolicy   = diskHeadroomPolicy{label: "build", refuse: false, limits: diskHeadroomDefaultTimeouts}
 )
 
 // ensureReleaseDiskHeadroom reads the docker root's free space before a
@@ -147,9 +192,9 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 		return nil
 	}
 
-	measured, ok := readFree()
-	if !ok {
-		ctx.Trace(policy.label + ": docker root free disk space is not observable from this process; skipping the headroom check")
+	measured, readErr := readFree(policy.limits)
+	if readErr != nil {
+		ctx.Trace(fmt.Sprintf("%s: docker root free disk space is not observable from this process (%s); skipping the headroom check", policy.label, readErr))
 		return nil
 	}
 	floor := resolveMinDiskHeadroomBytes(measured.total)
@@ -169,7 +214,8 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 	// only reaches this environment's own cache) ends in the same refusal it
 	// would have ended in anyway, just after spending the cache. So skip the
 	// prune only when it is confidently a no-op.
-	reclaimable, known := readReclaimable()
+	reclaimable, reclaimErr := readReclaimable(policy.limits.read)
+	known := reclaimErr == nil
 	if known && reclaimable.buildCache == 0 {
 		ctx.Trace(fmt.Sprintf(
 			"%s: a build-cache prune has nothing reclaimable; skipping it rather than running a no-op",
@@ -179,12 +225,18 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 
 	ctx.Trace(fmt.Sprintf("%s: docker root free disk is below the %s floor; pruning reclaimable build cache down to it", policy.label, formatGiB(floor)))
 	ctx.TraceCommand("", "docker", "builder", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10))
-	if err := prune(floor); err != nil {
-		ctx.Trace(policy.label + ": docker builder prune failed, continuing: " + err.Error())
+	if err := prune(floor, policy.limits.prune); err != nil {
+		// The prune is not what the run depends on, so a failure here is not
+		// fatal — but it must not read as an act that happened. A prune that
+		// never ran (an unrecognized flag, a daemon that did not answer in
+		// time) leaves the shortfall exactly where it was, and the verdict
+		// below is measured against a disk this line did not move.
+		ctx.Trace(fmt.Sprintf("%s: the build-cache prune did not complete (%s), so the cache it would have reclaimed is still on disk; measuring the shortfall against what is actually free now", policy.label, err))
 	}
 
-	measured, ok = readFree()
-	if !ok {
+	measured, readErr = readFree(policy.limits)
+	if readErr != nil {
+		ctx.Trace(fmt.Sprintf("%s: the docker root's free space could not be re-read after the prune (%s); the shortfall is unmeasured and the run continues unrefused", policy.label, readErr))
 		return nil
 	}
 	return diskHeadroomVerdict(ctx, policy, newDiskHeadroomShortfall(measured, floor, reclaimable, known))
@@ -270,10 +322,10 @@ func diskHeadroomVerdict(ctx Context, policy diskHeadroomPolicy, shortfall diskH
 // by 4.4x (22.57GB reported, 98.27GB freed). The exact accounting gap behind
 // that understatement is not confirmed, so callers must not assume a
 // particular cause — only that the number can be short.
-func dockerReclaimableBytes() (dockerReclaimable, bool) {
-	out, err := Command("docker", "system", "df", "--format", "{{.Type}}|{{.Reclaimable}}").Output()
+func dockerReclaimableBytes(limit time.Duration) (dockerReclaimable, error) {
+	out, err := diskHeadroomOutput(limit, "docker", "system", "df", "--format", "{{.Type}}|{{.Reclaimable}}")
 	if err != nil {
-		return dockerReclaimable{}, false
+		return dockerReclaimable{}, diskHeadroomReadFailure(limit, "docker system df", err)
 	}
 	var reclaimable dockerReclaimable
 	recognized := false
@@ -297,9 +349,9 @@ func dockerReclaimableBytes() (dockerReclaimable, bool) {
 		}
 	}
 	if !recognized {
-		return dockerReclaimable{}, false
+		return dockerReclaimable{}, errors.New("docker system df reported no recognisable size")
 	}
-	return reclaimable, true
+	return reclaimable, nil
 }
 
 // dockerSizeUnits are the suffixes docker renders sizes with, longest first so
@@ -335,8 +387,63 @@ func parseDockerSize(value string) (uint64, bool) {
 // --min-free-space makes the prune a no-op once free space reaches floor,
 // rather than reclaiming everything reclaimable the way an unqualified
 // `docker builder prune -f` does.
-func runDiskHeadroomPrune(floor uint64) error {
-	return Command("docker", "builder", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10)).Run()
+//
+// It is bounded because the daemon it drives is the thing this check exists
+// for: the disk-floor case is precisely the one where a daemon can be too busy
+// — or too wedged — to answer at all, and an unbounded prune there is a build
+// that never returns instead of a build that proceeds on a full disk.
+func runDiskHeadroomPrune(floor uint64, limit time.Duration) error {
+	err := diskHeadroomRun(limit, "docker", "builder", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10))
+	return diskHeadroomReadFailure(limit, "docker builder prune", err)
+}
+
+// diskHeadroomOutput runs one headroom read under limit and returns its
+// stdout, and diskHeadroomRun does the same for a command whose output is not
+// read. Both go through CommandContext with a deadline rather than Command,
+// whose WaitDelay bounds only the post-exit pipe drain and would leave a
+// daemon that never answers holding the process open forever.
+func diskHeadroomOutput(limit time.Duration, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	out, err := Command(name, args...).Output()
+	return out, diskHeadroomDeadlineErr(ctx, err)
+}
+
+func diskHeadroomRun(limit time.Duration, name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	return diskHeadroomDeadlineErr(ctx, Command(name, args...).Run())
+}
+
+// diskHeadroomDeadlineErr reports a command killed by its own deadline as that
+// deadline, rather than as the bare "signal: killed" the kill produces. The
+// distinction is the whole diagnosis: a daemon that stopped answering within
+// its bound reads very differently from one that exited with an error, and a
+// caller cannot recover it from the signal alone once the context is gone.
+func diskHeadroomDeadlineErr(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	return err
+}
+
+// diskHeadroomReadFailure turns a subprocess failure into the state it
+// actually represents. A deadline that elapsed is not the same failure as a
+// command that ran and exited nonzero — the first says the daemon stopped
+// answering, the second says it answered with an error — and only a message
+// that tells them apart lets an operator diagnose a node whose daemon is
+// wedged from one where docker is simply missing.
+func diskHeadroomReadFailure(limit time.Duration, what string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%s did not answer within %s", what, limit)
+	}
+	return fmt.Errorf("%s failed: %w", what, err)
 }
 
 // resolveMinDiskHeadroomBytes takes the larger of the absolute floor and the
@@ -376,35 +483,35 @@ const diskHeadroomProbeImage = "busybox:1.36.1"
 // running a throwaway container with that root bind-mounted turns "not visible
 // from here" into a real read instead of a reason to give up. Only when both
 // routes fail is ok false.
-func dockerRootDiskBytes() (diskHeadroomMeasurement, bool) {
+func dockerRootDiskBytes(limits diskHeadroomTimeouts) (diskHeadroomMeasurement, error) {
 	if runtime.GOOS == "windows" {
-		return diskHeadroomMeasurement{}, false
+		return diskHeadroomMeasurement{}, errors.New("windows has no df")
 	}
-	rootOut, err := Command("docker", "info", "-f", "{{.DockerRootDir}}").Output()
+	rootOut, err := diskHeadroomOutput(limits.read, "docker", "info", "-f", "{{.DockerRootDir}}")
 	if err != nil {
-		return diskHeadroomMeasurement{}, false
+		return diskHeadroomMeasurement{}, diskHeadroomReadFailure(limits.read, "docker info", err)
 	}
 	root := strings.TrimSpace(string(rootOut))
 	if root == "" {
-		return diskHeadroomMeasurement{}, false
+		return diskHeadroomMeasurement{}, errors.New("docker reported no root directory")
 	}
 	if _, statErr := os.Stat(root); statErr == nil {
-		dfOut, err := Command("df", "-Pk", root).Output()
+		dfOut, err := diskHeadroomOutput(limits.read, "df", "-Pk", root)
 		if err != nil {
-			return diskHeadroomMeasurement{}, false
+			return diskHeadroomMeasurement{}, diskHeadroomReadFailure(limits.read, "df", err)
 		}
 		free, total, ok := parseDFDiskBytes(string(dfOut))
 		if !ok {
-			return diskHeadroomMeasurement{}, false
+			return diskHeadroomMeasurement{}, errors.New("df output at the docker root was not parseable")
 		}
 		return diskHeadroomMeasurement{
 			free:        free,
 			total:       total,
 			path:        root,
-			sharedPaths: environmentPathsSharingFilesystem(root),
-		}, true
+			sharedPaths: environmentPathsSharingFilesystem(limits, root),
+		}, nil
 	}
-	return dockerRootDiskBytesViaProbe(root)
+	return dockerRootDiskBytesViaProbe(limits, root)
 }
 
 // dockerRootDiskBytesViaProbe reads free space at root as the docker
@@ -417,16 +524,19 @@ func dockerRootDiskBytes() (diskHeadroomMeasurement, bool) {
 // No co-located space is reported on this route, and that is deliberate: it
 // exists precisely because root is not a path this process can read, so it
 // cannot measure what else shares that filesystem either.
-func dockerRootDiskBytesViaProbe(root string) (diskHeadroomMeasurement, bool) {
-	out, err := Command("docker", "run", "--rm", "-v", root+":/host:ro", diskHeadroomProbeImage, "df", "-Pk", "/host").Output()
+func dockerRootDiskBytesViaProbe(limits diskHeadroomTimeouts, root string) (diskHeadroomMeasurement, error) {
+	// The probe gets its own, longer bound: unlike the reads above it may have
+	// to pull its pinned image first, and a slow pull is not a daemon that
+	// stopped answering.
+	out, err := diskHeadroomOutput(limits.probe, "docker", "run", "--rm", "-v", root+":/host:ro", diskHeadroomProbeImage, "df", "-Pk", "/host")
 	if err != nil {
-		return diskHeadroomMeasurement{}, false
+		return diskHeadroomMeasurement{}, diskHeadroomReadFailure(limits.probe, "the disk headroom probe container", err)
 	}
 	free, total, ok := parseDFDiskBytes(string(out))
 	if !ok {
-		return diskHeadroomMeasurement{}, false
+		return diskHeadroomMeasurement{}, errors.New("the disk headroom probe container returned unparseable df output")
 	}
-	return diskHeadroomMeasurement{free: free, total: total, path: root}, true
+	return diskHeadroomMeasurement{free: free, total: total, path: root}, nil
 }
 
 // environmentPathsSharingFilesystem reports which of the environment's own
@@ -437,8 +547,8 @@ func dockerRootDiskBytesViaProbe(root string) (diskHeadroomMeasurement, bool) {
 // routinely do not, so naming them there would be the reported defect in the
 // other direction. A path that does not exist, or whose filesystem cannot be
 // determined, is left out rather than guessed at.
-func environmentPathsSharingFilesystem(measured string) []string {
-	mount, ok := dfMountPoint(measured)
+func environmentPathsSharingFilesystem(limits diskHeadroomTimeouts, measured string) []string {
+	mount, ok := dfMountPoint(limits.read, measured)
 	if !ok {
 		return nil
 	}
@@ -456,7 +566,7 @@ func environmentPathsSharingFilesystem(measured string) []string {
 		if _, err := os.Stat(candidate); err != nil {
 			continue
 		}
-		if candidateMount, ok := dfMountPoint(candidate); ok && candidateMount == mount {
+		if candidateMount, ok := dfMountPoint(limits.read, candidate); ok && candidateMount == mount {
 			shared = append(shared, candidate)
 		}
 	}
@@ -467,8 +577,8 @@ func environmentPathsSharingFilesystem(measured string) []string {
 // names it. The mount point is compared rather than the filesystem name: it is
 // the last column and stays last even when a long identifier wraps the data
 // row onto its own line, the shape parseDFDiskBytes already has to tolerate.
-func dfMountPoint(path string) (string, bool) {
-	out, err := Command("df", "-Pk", path).Output()
+func dfMountPoint(limit time.Duration, path string) (string, bool) {
+	out, err := diskHeadroomOutput(limit, "df", "-Pk", path)
 	if err != nil {
 		return "", false
 	}
