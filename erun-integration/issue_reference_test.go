@@ -322,7 +322,6 @@ var issueReferenceBaseline = map[string]int{
 	"erun-common/ai_launch_test.go":                       1,
 	"erun-common/build_cpu_cap.go":                        1,
 	"erun-common/build_dind_resources.go":                 1,
-	"erun-common/build_docker_promote_fallback_test.go":   1,
 	"erun-common/build_report.go":                         1,
 	"erun-common/build_run.go":                            2,
 	"erun-common/build_run_test.go":                       1,
