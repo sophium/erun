@@ -178,7 +178,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// environment a review's merge queue promoted to MERGE ever calls this,
 	// after it has fetched, gate-built, and pushed the prospective merge
 	// itself — no desktop surface authors this report either.
-	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED, verified as a queue-driven merge or as work that landed elsewhere", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// Requeue recovers a merge-queue wedge: a review stuck at
 	// MERGE with no desktop button to move it, only ever hit by whichever
 	// tooling drove gate-merge/the merge queue in the first place — the same
