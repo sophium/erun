@@ -416,16 +416,25 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 	)
 	cmd := &cobra.Command{
 		Use:   "report-merged REVIEW_ID",
-		Short: "Report a review MERGED after gate-building and pushing its prospective merge",
-		Long: "Report a review MERGED. This is for the environment a review's merge queue promoted to MERGE, " +
+		Short: "Report a review MERGED, for a queue-driven merge or work that landed elsewhere",
+		Long: "Report a review MERGED. Which verification the platform applies depends on where the review is " +
+			"sitting, not on what this command claims.\n\n" +
+			"A review at MERGE is the merge queue's: this is for the environment the queue promoted to MERGE, " +
 			"once it has fetched the review's target and source, gate-built the prospective squash merge with " +
-			"`erun review record-build --gate`, and pushed the result — never before the push actually landed.\n\n" +
-			"The platform does not take this report on trust: it checks buildId names an already-recorded, " +
-			"successful GATE build for this review, then fetches remoteUrl to confirm that build's commit is " +
-			"really reachable from the target branch's tip with the parent this review was gated against. Any " +
-			"of those checks failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at MERGE.\n\n" +
+			"`erun review record-build --gate`, and pushed the result — never before the push actually landed. " +
+			"--build-id must name that GATE build, and the platform fetches --remote-url to confirm the build's " +
+			"commit is really reachable from the target branch's tip with the parent this review was gated " +
+			"against. Any of those checks failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at " +
+			"MERGE.\n\n" +
+			"Any other review is one whose work landed without the queue — in practice a GitHub squash merge, " +
+			"where the branch's own commits are not ancestors of the target and no GATE build exists to name. " +
+			"Omit --build-id: the platform confirms against the same remote that everything the review's source " +
+			"branch adds is already present in the target branch's history, and moves the review only if it is. " +
+			"A branch that did not land is refused just as firmly, with the same MERGE_NOT_VERIFIED. This is " +
+			"what keeps a squash-landed review from sitting OPEN forever and inflating the open count.\n\n" +
 			"A real, immediate write. --dry-run traces the call without making it.",
-		Example:      "  erun review report-merged 018f... --build-id 018e... --remote-url https://github.com/org/repo.git",
+		Example: "  erun review report-merged 018f... --build-id 018e... --remote-url https://github.com/org/repo.git\n" +
+			"  erun review report-merged 018f... --remote-url https://github.com/org/repo.git",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -446,7 +455,7 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 			return ctx.WriteResult(review)
 		},
 	}
-	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful GATE build's id")
+	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful GATE build's id (omit for work that landed without the queue)")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge")
 	addDryRunFlag(cmd)
 	return cmd
