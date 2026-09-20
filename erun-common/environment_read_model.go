@@ -243,7 +243,18 @@ func ResolveEnvironmentReadModel(ctx Context, store ListStore, tenant, environme
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}
-		diagnosis := RunDeployDiagnosis(ctx, ShellLaunchParamsFromResult(openResult))
+		// The gateway catalog is erun-level, so it is read here rather than
+		// off the environment's own config; an unreadable root config is
+		// already reported by the root-config inspection above, and leaving the
+		// catalog unset keeps the diagnosis on its pre-existing answer instead
+		// of failing the whole read model.
+		gateway, err := ResolveOpenRouterConfig(store)
+		if err != nil {
+			gateway = nil
+		}
+		request := ShellLaunchParamsFromResult(openResult)
+		request.Gateway = gateway
+		diagnosis := RunDeployDiagnosis(ctx, request)
 		resolved := ResolveEnvironmentHealth(rootConfig, diagnosis)
 		health = &resolved
 	}

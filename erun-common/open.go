@@ -212,8 +212,12 @@ type ShellLaunchParams struct {
 	AITool     string
 	Claude     EnvironmentClaudeConfig
 	// Gateway is the erun-level OpenRouter catalog, when the operator has
-	// configured one. Set by the callers that launch an AI session; nil for
-	// every other use of these params, which leaves the launch unchanged.
+	// configured one. Set by the callers that launch an AI session, and by the
+	// callers that diagnose an environment: the deploy diagnosis resolves this
+	// environment's effective gateway through it to tell a gateway-routed
+	// environment whose pod template never consumed the gateway from a healthy
+	// one (runtime_agent_credentials.go). Nil for every other use of these
+	// params, which leaves both the launch and the diagnosis unchanged.
 	Gateway *OpenRouterConfig
 	// RuntimeImage lets the AI session prelude advise on the erun-build-env
 	// skill only when the env still runs the default published runtime image.

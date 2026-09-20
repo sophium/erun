@@ -29,6 +29,15 @@ type DeployDiagnosisResult struct {
 	// paying its own multi-minute kubectl timeout to rediscover the exact
 	// fact this diagnosis already established.
 	ClusterUnreachable bool
+	// AgentCredentials answers whether the deployed pod template carries the
+	// model-provider wiring erun configured for this environment -- the one
+	// deployment fact helm status and pod readiness cannot show, because an
+	// environment whose chart predates that wiring deploys cleanly and reports
+	// healthy while being unable to start an agent at all. It is
+	// NotApplicable for an environment no gateway routes, which asserts nothing
+	// about such an environment's capability; see
+	// runtime_agent_credentials.go.
+	AgentCredentials RuntimeAgentCredentialStatus
 }
 
 func helmStatusArgs(req ShellLaunchParams) []string {
@@ -65,7 +74,14 @@ func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResul
 	podArgs := deployDiagnosisPodArgs(req)
 	ctx.TraceCommand("", "kubectl", podArgs...)
 	helmStatus, helmErr := runDoctorDiagnosisCommand("helm", helmArgs)
-	result := DeployDiagnosisResult{HelmStatus: helmStatus}
+	// Applicability is resolved up front, from the request alone, so every way
+	// out of this function -- including the early return for an unreachable
+	// cluster -- still distinguishes "this check does not apply here" from "it
+	// could not run". The read below only ever refines it.
+	result := DeployDiagnosisResult{
+		HelmStatus:       helmStatus,
+		AgentCredentials: runtimeAgentCredentialApplicability(req),
+	}
 	if helmErr != nil && !isHelmReleaseNotFound(helmStatus) {
 		result.HelmReadError = observeHelmReadErrorMessage(RuntimeReleaseName(req.Tenant), req.Namespace, helmStatus, helmErr)
 		result.ClusterUnreachable = kubernetesAPIServerUnreachableSignal(helmStatus)
@@ -78,6 +94,14 @@ func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResul
 	if podsErr != nil {
 		result.ClusterUnreachable = kubernetesAPIServerUnreachableSignal(pods)
 	}
+	if result.ClusterUnreachable {
+		// Same reasoning as the skipped pods probe above: the agent-credential
+		// read is one more kubectl call against the cluster this diagnosis has
+		// just established is unreachable, and it would report a read failure
+		// where the honest answer is "not observed".
+		return result
+	}
+	result.AgentCredentials = inspectRuntimeAgentCredentials(ctx, req)
 	return result
 }
 
