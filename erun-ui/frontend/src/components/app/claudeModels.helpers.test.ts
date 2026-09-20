@@ -111,4 +111,25 @@ describe('selectableClaudeModelIds', () => {
     expect(selectableClaudeModelIds([])).toEqual([]);
     expect(selectableClaudeModelIds([{ id: '' }])).toEqual([]);
   });
+
+  it('drops a row declared to require reasoning echo', () => {
+    // The declared listing is the one model a default must not name: it is what
+    // the environment renders as ANTHROPIC_MODEL and what an exec agent job
+    // starts on, and no erun lane can drive it.
+    expect(
+      selectableClaudeModelIds([
+        { id: 'deepseek/deepseek-v4.1-flash', requiresReasoningEcho: true },
+        { id: 'openai/gpt-6-astra' },
+        { id: 'anthropic/claude-fable-5.1', requiresReasoningEcho: false },
+      ]),
+    ).toEqual(['openai/gpt-6-astra', 'anthropic/claude-fable-5.1']);
+  });
+
+  it('returns nothing when every usable row is declared', () => {
+    expect(
+      selectableClaudeModelIds([
+        { id: 'deepseek/deepseek-v4.1-flash', requiresReasoningEcho: true },
+      ]),
+    ).toEqual([]);
+  });
 });
