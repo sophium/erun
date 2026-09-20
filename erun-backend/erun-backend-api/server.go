@@ -159,13 +159,14 @@ func registerProtectedRoutes(mux *http.ServeMux, auth *AuthMiddleware, options H
 	catalog := &routeCatalog{}
 	register := protectedRouteRegistrar(mux, auth, catalog)
 	var users routes.WhoamiUserRepository
+	var tenants routes.WhoamiTenantRepository
 	if txManager != nil {
 		users = repository.NewUserRepository(txManager)
-		registerDatabaseRoutes(register, options, txManager, authorizer)
+		tenants = registerDatabaseRoutes(register, options, txManager, authorizer)
 	}
 	// Whoami registers last, and reads the catalog per request, so its own route
 	// and every route above it are in the capability answer.
-	routes.RegisterWhoamiRoute(register, users, resolveCapabilities(options, authorizer), catalog.sorted)
+	routes.RegisterWhoamiRoute(register, users, tenants, resolveCapabilities(options, authorizer), catalog.sorted)
 	return catalog
 }
 
@@ -313,8 +314,9 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 // threaded through only for the routes that need a per-caller entitlement
 // check beyond the route-level TenantUser/TenantAdmin gate already enforced
 // by the outer middleware -- today just the MCP token mint route's erun:admin
-// check (erun#1891).
-func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) {
+// check (erun#1891). It returns the tenant repository so whoami can read the
+// caller's own tenant name off the identical repository tenant list uses.
+func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) *repository.TenantRepository {
 	repos := newDatabaseRepositories(txManager)
 	// contextCredentials resolves a placed environment's live admin token
 	// (#1112). nil without a cipher (the same precondition context
@@ -402,6 +404,7 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	inviteRequestService := service.NewInviteRequestService(inviteRequests, repos.tenants, repository.NewUserRepository(txManager), repository.NewInviteRepository(txManager))
 	routes.RegisterInviteRequestRoutes(register, inviteRequests, repos.tenants, inviteRequestService)
 	registerIdentityAdminRoutes(register, options, txManager)
+	return repos.tenants
 }
 
 // registerIdentityAdminRoutes wires /v1/identity/* (issue #1209) when a
