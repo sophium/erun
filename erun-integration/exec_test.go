@@ -1665,6 +1665,68 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("gate_merge_real_run_skips_a_source_that_contributes_nothing", func(t *testing.T) {
+		// erun#2578's second half. A source whose content is already on the
+		// target — here a branch still at main's own tip, so `git merge
+		// --squash` reports "Already up to date" and stages nothing — used to
+		// abort the whole batch: the code asked git to commit the empty squash
+		// anyway, that commit exited non-zero, and the failure came back as a
+		// bare exit status that named no cause (git explains it on stdout,
+		// which the commit call discarded). A no-op source contributes nothing
+		// and must be skipped like a conflicting one, with the rest of the
+		// batch still gating — an already-landed branch is a no-op, not a dead
+		// gate.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		// `already` never diverges from main, so squashing it stages nothing.
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "already")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "already")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "already", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Already\x00Add feature"})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 — a source that contributes nothing must not fail the batch:\n%s", result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 1 || parsed.Landed[0].SourceBranch != "feature" {
+			t.Fatalf("expected feature to land, got: %+v", parsed.Landed)
+		}
+		if len(parsed.Skipped) != 1 || parsed.Skipped[0].SourceBranch != "already" {
+			t.Fatalf("expected already to be skipped, got: %+v", parsed.Skipped)
+		}
+		// The skip must say it staged nothing — not be misreported as a
+		// conflict, the other thing that produces a skip.
+		if !strings.Contains(parsed.Skipped[0].Reason, "staged no changes") {
+			t.Fatalf("expected the skip to name the no-op cause, got: %q", parsed.Skipped[0].Reason)
+		}
+		if len(parsed.Skipped[0].ConflictedFiles) != 0 {
+			t.Fatalf("expected no conflicted files for a no-op source, got: %+v", parsed.Skipped[0].ConflictedFiles)
+		}
+		if !strings.Contains(result.Combined, "Skipped") {
+			t.Fatalf("expected the CLI to report the skip, got:\n%s", result.Combined)
+		}
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "feature.txt")); err != nil {
+			t.Fatalf("expected feature.txt to be squash-merged onto main: %v", err)
+		}
+		subjects := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "--format=%s", "main~1..main"))
+		if subjects != "Add feature" {
+			t.Fatalf("expected exactly one squash commit, for the contributing source only, got: %q", subjects)
+		}
+	})
+
 	t.Run("gate_merge_real_run_batch_skips_a_conflicting_source_and_lands_the_rest", func(t *testing.T) {
 		// The conflict-skip path this generalization exists for: a batch of
 		// three, where the middle source conflicts with what the first source
