@@ -82,7 +82,7 @@ Records a build against a review — the only way an erun client transitions a r
 |---|---|
 | `--commit` | Full 40-character commit hash the build ran against. |
 | `--gate` | Record the merge queue's own `GATE` build kind instead of an ordinary build — set by the environment a review's merge queue promoted to `MERGE`, reporting its own build of the prospective merge. Omit `--version` when this is set: the gate publishes nothing. |
-| `--version` | Version the build minted (from `erun build --release --output json`), required even for a failed build — release resolves the version before the build step runs. Omit with `--gate`. |
+| `--version` | Version the build minted — from the run's own `erun build --output json`, or from `erun build --dry-run --output json` when it failed before printing one. Required even for a failed build. A `RECORDED` build publishes nothing, so the version is metadata no platform path resolves: a version `erun build --release` produced is accepted but not required (see [Builds § Triggering builds](/collaboration/builds#triggering-builds)). Omit with `--gate`. |
 | `--failed` | Record the build as failed instead of successful. |
 | `--failure-detail` | Why the build failed. Only meaningful with `--failed`. |
 

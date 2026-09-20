@@ -357,8 +357,14 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			"head, on to MERGE); recording a failed one moves it to FAILED. There is no separate command to set " +
 			"a review's status directly to READY or FAILED — only a recorded build result does that.\n\n" +
 			"commit must be the full 40-character commit hash the build ran against (e.g. from `git rev-parse " +
-			"HEAD` after pushing), and version the version it minted (from `erun build --release --output " +
-			"json`), even for a failed build — release resolves the version before the build step runs.\n\n" +
+			"HEAD` after pushing), and version the version it minted — from the run's own `erun build --output " +
+			"json`, or from `erun build --dry-run --output json` when it failed before printing one — even for a " +
+			"failed build.\n\n" +
+			"A RECORDED build asserts the commit builds; it publishes nothing, so the version is metadata no " +
+			"platform path resolves. A `--release` produced version is accepted but not required: building the " +
+			"pushed branch with `erun build` and recording what it mints is the ordinary path, and the artifact " +
+			"that ships is cut after merge by the release the accepted review enqueues. A release here publishes " +
+			"a two-architecture `-pr.<sha>` image set per pull request that nothing consumes.\n\n" +
 			"--gate records the merge queue's own GATE build kind instead of an ordinary build: the environment " +
 			"a review's merge queue promotes to MERGE runs `erun build` (never --release) against the " +
 			"prospective merge and reports the result this way. A GATE build carries no version, since the gate " +
@@ -402,7 +408,7 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 	}
 	cmd.Flags().StringVar(&commitID, "commit", "", "Full commit hash the build ran against")
 	cmd.Flags().BoolVar(&gate, "gate", false, "Record the merge queue's own GATE build kind instead of an ordinary build")
-	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --release); omit with --gate")
+	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --output json, or --dry-run --output json when it failed); omit with --gate")
 	cmd.Flags().BoolVar(&failed, "failed", false, "Record the build as failed instead of successful")
 	cmd.Flags().StringVar(&failureDetail, "failure-detail", "", "Why the build failed (only meaningful with --failed)")
 	addDryRunFlag(cmd)
