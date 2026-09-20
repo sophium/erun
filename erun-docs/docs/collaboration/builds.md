@@ -84,7 +84,9 @@ Recording builds on the server (instead of treating them as ephemeral CI artifac
 
 ## Triggering builds
 
-Recording a build is decoupled from running one. Any Agent or pipeline that produced a build (often `erun build --release`, or build infrastructure you already have) can call `POST /builds` once it completes, and the outcome funnels into the same review/merge-queue model.
+Recording a build is decoupled from running one. Any Agent or pipeline that produced a build (an ordinary `erun build`, `erun build --release`, or build infrastructure you already have) can call `POST /builds` once it completes, and the outcome funnels into the same review/merge-queue model.
+
+**A pre-merge build asserts that the commit builds; it is not a release.** The ordinary path from `OPEN` to `READY` runs a plain `erun build` against the pushed commit and records the version it mints. That build publishes nothing, so the version is metadata: no platform path resolves it, and the artifact that ships is cut *after* merge, by the [release queue](#release-queue)'s release, which mints its own. Recording a version an `erun build --release` produced is accepted — the platform cannot tell the two apart, and both are `RECORDED` — but a release at that step publishes a two-architecture `-pr.<sha>` image and chart set per pull request that nothing consumes, and it never consults the environment's `docker.platforms` pin. A build narrowed with `--platform` (or by that pin) is the cheap path; the merge queue's own gate is a plain `erun build` for the same reason.
 
 Two cases ERun's own clients drive end to end this same way: gating a review's merge (the [merge queue](#merge-queue), directly below) and, once a review is `MERGED`, releasing what it merged (the [release queue](#release-queue), below). Neither runs inside this API — the environment that was promoted to `MERGE`, or that earned the release, runs the real work itself (its own workspace, its own daemon) and reports the outcome through the same `POST /builds` route everything else uses.
 

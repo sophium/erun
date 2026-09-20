@@ -13,7 +13,7 @@ One review moves between two environments as it goes from a proposed change to a
 | Review state | Who owns it | What happens |
 |---|---|---|
 | — | **builder** | Implements the feature in its own environment. |
-| `OPEN` → `READY` | **builder** | Takes the change from "done" to a review sitting at `READY` — see [Reviews](/collaboration/reviews). |
+| `OPEN` → `READY` | **builder** | Takes the change from "done" to a review sitting at `READY` — see [Reviews](/collaboration/reviews). The build it records is a plain `erun build`, which asserts only that the commit builds; see [Builds § Triggering builds](/collaboration/builds#triggering-builds). |
 | `READY` | **reviewer** | Picks up reviews it is a reviewer on, reads the diff, posts line-anchored comment threads, and — where it has a concrete fix — pushes a proposal branch. |
 | `READY`, threads open | **builder** | Reads the threads, judges each proposal on merit, merges the ones it accepts, pushes, rebuilds. It is not obliged to take a proposal, and says why when it declines, in that thread. |
 | `READY`, threads open | **reviewer** | Returns to its own threads, reads the builder's replies, and resolves the ones the builder addressed. |
