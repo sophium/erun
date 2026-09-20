@@ -97,7 +97,7 @@ The override applies to the runtime release only; component charts keep resolvin
 
 The desktop resolves this before you commit: picking a version reports which chart it would install, disables Deploy when the registry says there is none, and offers the chart that fixes it — see [Desktop app · Deploying a version](/desktop/deploying-a-version).
 
-For an environment that rides a separately-versioned chart *permanently* -- rather than for one run -- state it once on the environment instead, with [`runtimechart`](/reference/configuration#envconfig). Every later deploy then installs that chart, including one driven from the desktop, which passes only a version. The flag beats the field for a single run and leaves it unchanged, the same way `--runtime-image` relates to `runtimeimage`.
+For an environment that rides a separately-versioned chart *permanently* -- rather than for one run -- state it once on the environment instead, with [`runtimechart`](/reference/configuration#envconfig). Every later deploy then installs that chart, including one driven from the desktop, which passes only a version. A stated version is honored as stated, with one exception: a stated version of ERun's own stock `erun-devops` chart on an environment whose runtime coordinates ride ERun's release line is a pin an earlier deploy left behind, so a deploy to a newer version *moves* it to `--version` and records the chart it installed instead of installing the older one. An environment whose runtime image is versioned on the project's own line — the case `runtimechart` exists for — keeps its stated version. The flag beats the field for a single run and leaves it unchanged, the same way `--runtime-image` relates to `runtimeimage`.
 
 ## Flags
 
