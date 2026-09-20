@@ -501,8 +501,10 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"prospective merge.\n\n" +
 			"A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean " +
 			"state and the conflict recorded in the result, and the rest of the batch still gates against the " +
-			"tree as it stood before that attempt. A batch where every source is skipped lands nothing and " +
-			"exits non-zero.\n\n" +
+			"tree as it stood before that attempt. A source that contributes nothing is skipped the same way: " +
+			"when its squash stages no changes because its content is already on the target, it is recorded as " +
+			"skipped with that reason rather than failing the batch, so an already-landed branch is a no-op " +
+			"instead of a dead gate. A batch where every source is skipped lands nothing and exits non-zero.\n\n" +
 			"Refused outright while something else holds this environment exclusively: this rewrites the one " +
 			"shared worktree, so two gate-merges in flight at once do not merely slow each other down, they " +
 			"corrupt each other's accounting — a drive has already reported pushing a commit that belonged to " +

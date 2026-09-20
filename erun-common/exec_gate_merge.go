@@ -59,8 +59,9 @@ type GateMergeLandedSource struct {
 }
 
 // GateMergeSkippedSource is one source branch that did not land — a
-// conflicting squash, or a branch this could not even resolve after
-// fetching (e.g. deleted since the caller decided to batch it). The rest of
+// conflicting squash, a branch this could not even resolve after fetching
+// (e.g. deleted since the caller decided to batch it), or one whose squash
+// staged nothing because its content is already on the target. The rest of
 // the batch still gates; a skip here is reported, not fatal.
 type GateMergeSkippedSource struct {
 	SourceBranch    string   `json:"sourceBranch"`
@@ -87,6 +88,10 @@ type GateMergeWorkingTreeDependencies struct {
 	ResolveRef       func(ctx Context, root, ref string) (string, error)
 	RunGit           GitCommandRunnerFunc
 	ConflictedFiles  func(root string, runGit GitCommandRunnerFunc) ([]string, error)
+	// StagedPaths reads back what a squash actually staged. A source that
+	// stages nothing contributes nothing to the prospective merge, so it is
+	// skipped rather than committed — see gateMergeOneSource.
+	StagedPaths func(ctx Context, root string) ([]string, error)
 	// RunAtlasHash regenerates a conflicted atlas.sum instead of leaving it
 	// for a human to resolve. See resolveAtlasSumConflicts.
 	RunAtlasHash AtlasMigrateHashRunnerFunc
@@ -105,6 +110,9 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 	if deps.ConflictedFiles == nil {
 		deps.ConflictedFiles = gitMergeConflictedFiles
 	}
+	if deps.StagedPaths == nil {
+		deps.StagedPaths = gitStagedFiles
+	}
 	if deps.RunAtlasHash == nil {
 		deps.RunAtlasHash = runAtlasMigrateHash
 	}
@@ -118,7 +126,10 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 // aborted, the conflict recorded in the result's Skipped list, and the next
 // source is tried against the working tree as it stood before that attempt
 // — rather than failing the whole batch, so one bad branch cannot turn an
-// otherwise-clean batch dead. Sources is required to be non-empty.
+// otherwise-clean batch dead. A source whose squash stages nothing is
+// skipped the same way: it contributes no change, which is a no-op rather
+// than an error, and it is recorded so the caller can tell "already landed"
+// from "broken". Sources is required to be non-empty.
 //
 // The working tree must be clean before this runs: unlike the ordinary
 // exec merge/commit/push primitives, this checks out a different local
@@ -212,14 +223,12 @@ func traceGateMergePlan(ctx Context, root string, sources []GateMergeSource, tar
 // isolated so the validation and dry-run branching above it don't inflate
 // that function's complexity.
 func fetchAndGateMergeWorkingTree(ctx Context, root string, sources []GateMergeSource, target, remote string, fetchArgs []string, targetRef string, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
-	var fetchStderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &fetchStderr, fetchArgs...); err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(fetchStderr.String()))
+	if output, err := runGitCapturingOutput(root, deps, fetchArgs...); err != nil {
+		return GateMergeWorkingTreeResult{}, fmt.Errorf("git fetch: %w: %s", err, output)
 	}
 
-	var checkoutStderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &checkoutStderr, "checkout", "-B", target, targetRef); err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("git checkout: %w: %s", err, strings.TrimSpace(checkoutStderr.String()))
+	if output, err := runGitCapturingOutput(root, deps, "checkout", "-B", target, targetRef); err != nil {
+		return GateMergeWorkingTreeResult{}, fmt.Errorf("git checkout: %w: %s", err, output)
 	}
 
 	result := GateMergeWorkingTreeResult{TargetBranch: target, Remote: remote}
@@ -245,14 +254,30 @@ func fetchAndGateMergeWorkingTree(ctx Context, root string, sources []GateMergeS
 	return result, nil
 }
 
+// runGitCapturingOutput runs one git command with both of its streams
+// collected into a single buffer, returning that buffer trimmed. A caller
+// wrapping an error to explain a failure must not read only one stream: git
+// reports some failures on stdout, and "nothing to commit, working tree
+// clean" — the one that says a squash staged nothing — is exactly one, so a
+// stderr-only buffer reduces a named cause to a bare exit status. One
+// *bytes.Buffer is safe for both streams because os/exec detects identical
+// writers and drains them through a single pipe.
+func runGitCapturingOutput(root string, deps GateMergeWorkingTreeDependencies, args ...string) (string, error) {
+	var output bytes.Buffer
+	err := deps.RunGit(root, &output, &output, args...)
+	return strings.TrimSpace(output.String()), err
+}
+
 // gateMergeOneSource squash-merges and commits one source branch onto
 // whatever the working tree currently holds. A conflicted squash is backed
 // out with `git reset --hard HEAD` and reported as a skip rather than
 // returned as an error, so the caller can keep trying the rest of the batch
 // against a clean tree — `git merge --abort` is not available here, since
-// `--squash` deliberately never records a MERGE_HEAD to abort. Any other
-// git failure (a bad ref, a real I/O error) is fatal for the whole batch,
-// since it says something is wrong beyond this one branch.
+// `--squash` deliberately never records a MERGE_HEAD to abort. A squash that
+// stages nothing is likewise a skip: the source contributes no change, so
+// there is nothing to commit and no reason to fail the batch. Any other git
+// failure (a bad ref, a real I/O error) is fatal for the whole batch, since
+// it says something is wrong beyond this one branch.
 func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
 	sourceRef := remote + "/" + source.Branch
 	sourceCommit, err := deps.ResolveRef(ctx, root, sourceRef)
@@ -263,36 +288,38 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 		}, nil
 	}
 
-	var mergeStderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &mergeStderr, "merge", "--squash", sourceRef); err != nil {
-		conflicted, conflictErr := deps.ConflictedFiles(root, deps.RunGit)
-		if conflictErr == nil && len(conflicted) > 0 {
-			remaining, resolveErr := resolveAtlasSumConflicts(root, deps.RunGit, deps.RunAtlasHash, conflicted)
-			if resolveErr != nil {
-				return nil, nil, fmt.Errorf("regenerate conflicted atlas.sum for %s: %w", source.Branch, resolveErr)
-			}
-			if len(remaining) > 0 {
-				var resetStderr bytes.Buffer
-				if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
-					return nil, nil, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
-				}
-				return nil, &GateMergeSkippedSource{
-					SourceBranch:    source.Branch,
-					SourceCommit:    sourceCommit,
-					Reason:          fmt.Sprintf("squashing %s onto %s left %d file(s) conflicted", source.Branch, remote, len(remaining)),
-					ConflictedFiles: remaining,
-				}, nil
-			}
-			// Every conflict was an atlas.sum this regenerated and staged —
-			// fall through and land this source like a clean squash.
-		} else {
-			return nil, nil, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, err, strings.TrimSpace(mergeStderr.String()))
+	if mergeOutput, err := runGitCapturingOutput(root, deps, "merge", "--squash", sourceRef); err != nil {
+		skipped, skipErr := skipConflictedGateMergeSource(root, source, remote, sourceCommit, sourceRef, mergeOutput, err, deps)
+		if skipped != nil || skipErr != nil {
+			return nil, skipped, skipErr
 		}
+		// Every conflict was an atlas.sum this regenerated and staged — fall
+		// through and land this source like a clean squash.
 	}
 
-	var commitStderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &commitStderr, "commit", "-m", source.Message); err != nil {
-		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, strings.TrimSpace(commitStderr.String()))
+	// A squash that staged nothing contributes nothing to the prospective
+	// merge: the source's content is already on the target, whether because
+	// it merged to no tree change at all or because it is already contained
+	// there. There is no commit to record, and asking git for one anyway
+	// aborted the whole batch — the one channel that explained why, git's own
+	// "nothing to commit, working tree clean", is on *stdout*, which the
+	// commit call discarded, so the caller saw a bare exit status. A no-op
+	// source is the same class of thing as a conflicting one: skipped and
+	// recorded, with the rest of the batch still gating.
+	staged, err := deps.StagedPaths(ctx, root)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read what squashing %s staged: %w", source.Branch, err)
+	}
+	if len(staged) == 0 {
+		return nil, &GateMergeSkippedSource{
+			SourceBranch: source.Branch,
+			SourceCommit: sourceCommit,
+			Reason:       fmt.Sprintf("squashing %s onto %s staged no changes: the source is already contained in the target", source.Branch, remote),
+		}, nil
+	}
+
+	if output, err := runGitCapturingOutput(root, deps, "commit", "-m", source.Message); err != nil {
+		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, output)
 	}
 
 	commit, err := deps.ResolveRef(ctx, root, "HEAD")
@@ -301,6 +328,37 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 	}
 
 	return &GateMergeLandedSource{SourceBranch: source.Branch, SourceCommit: sourceCommit, Commit: commit}, nil, nil
+}
+
+// skipConflictedGateMergeSource classifies a failed `git merge --squash` for
+// one source. A nil skip with a nil error means the source is not skipped
+// after all: every conflict was an atlas.sum that resolveAtlasSumConflicts
+// regenerated and staged, so the caller lands it like a clean squash. A non-nil
+// skip is a recorded non-fatal skip; a non-nil error is fatal for the whole
+// batch. Isolated so gateMergeOneSource's own branching stays under the
+// cyclomatic-complexity gate.
+func skipConflictedGateMergeSource(root string, source GateMergeSource, remote, sourceCommit, sourceRef, mergeOutput string, mergeErr error, deps GateMergeWorkingTreeDependencies) (*GateMergeSkippedSource, error) {
+	conflicted, conflictErr := deps.ConflictedFiles(root, deps.RunGit)
+	if conflictErr != nil || len(conflicted) == 0 {
+		return nil, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, mergeErr, mergeOutput)
+	}
+	remaining, resolveErr := resolveAtlasSumConflicts(root, deps.RunGit, deps.RunAtlasHash, conflicted)
+	if resolveErr != nil {
+		return nil, fmt.Errorf("regenerate conflicted atlas.sum for %s: %w", source.Branch, resolveErr)
+	}
+	if len(remaining) == 0 {
+		return nil, nil
+	}
+	var resetStderr bytes.Buffer
+	if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
+		return nil, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+	}
+	return &GateMergeSkippedSource{
+		SourceBranch:    source.Branch,
+		SourceCommit:    sourceCommit,
+		Reason:          fmt.Sprintf("squashing %s onto %s left %d file(s) conflicted", source.Branch, remote, len(remaining)),
+		ConflictedFiles: remaining,
+	}, nil
 }
 
 // gitResolveRef resolves ref to its full commit hash.
