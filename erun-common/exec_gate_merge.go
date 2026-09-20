@@ -59,9 +59,10 @@ type GateMergeLandedSource struct {
 }
 
 // GateMergeSkippedSource is one source branch that did not land — a
-// conflicting squash, or a branch this could not even resolve after
-// fetching (e.g. deleted since the caller decided to batch it). The rest of
-// the batch still gates; a skip here is reported, not fatal.
+// conflicting squash, a squash that produced no changes (already on the
+// target), or a branch this could not even resolve after fetching (e.g.
+// deleted since the caller decided to batch it). The rest of the batch still
+// gates; a skip here is reported, not fatal.
 type GateMergeSkippedSource struct {
 	SourceBranch    string   `json:"sourceBranch"`
 	SourceCommit    string   `json:"sourceCommit,omitempty"`
@@ -114,10 +115,11 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 // GateMergeWorkingTree fetches Remote/TargetBranch and every Remote/source in
 // Params.Sources, checks out a local branch named TargetBranch at its own
 // fresh remote tip, then squash-merges each source onto it in order, each as
-// its own commit. A source whose squash conflicts is skipped — the merge is
-// aborted, the conflict recorded in the result's Skipped list, and the next
-// source is tried against the working tree as it stood before that attempt
-// — rather than failing the whole batch, so one bad branch cannot turn an
+// its own commit. A source whose squash conflicts, or whose squash produces
+// no changes because the branch is already on the target, is skipped — the
+// tree is left as it stood before that attempt, the skip recorded in the
+// result's Skipped list, and the next source is tried — rather than failing
+// the whole batch, so one no-op or conflicting branch cannot turn an
 // otherwise-clean batch dead. Sources is required to be non-empty.
 //
 // The working tree must be clean before this runs: unlike the ordinary
@@ -250,9 +252,11 @@ func fetchAndGateMergeWorkingTree(ctx Context, root string, sources []GateMergeS
 // out with `git reset --hard HEAD` and reported as a skip rather than
 // returned as an error, so the caller can keep trying the rest of the batch
 // against a clean tree — `git merge --abort` is not available here, since
-// `--squash` deliberately never records a MERGE_HEAD to abort. Any other
-// git failure (a bad ref, a real I/O error) is fatal for the whole batch,
-// since it says something is wrong beyond this one branch.
+// `--squash` deliberately never records a MERGE_HEAD to abort. A squash that
+// stages nothing is the same class of skip (already on the target), not a
+// batch-fatal error. Any other git failure (a bad ref, a real I/O error) is
+// fatal for the whole batch, since it says something is wrong beyond this
+// one branch.
 func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
 	sourceRef := remote + "/" + source.Branch
 	sourceCommit, err := deps.ResolveRef(ctx, root, sourceRef)
@@ -290,9 +294,17 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 		}
 	}
 
-	var commitStderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &commitStderr, "commit", "-m", source.Message); err != nil {
-		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, strings.TrimSpace(commitStderr.String()))
+	var commitStdout, commitStderr bytes.Buffer
+	if err := deps.RunGit(root, &commitStdout, &commitStderr, "commit", "-m", source.Message); err != nil {
+		detail := joinGitStreams(commitStdout.String(), commitStderr.String())
+		if gitCommitNothingToCommit(detail) {
+			return nil, &GateMergeSkippedSource{
+				SourceBranch: source.Branch,
+				SourceCommit: sourceCommit,
+				Reason:       fmt.Sprintf("squashing %s onto the target produced no changes", source.Branch),
+			}, nil
+		}
+		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, detail)
 	}
 
 	commit, err := deps.ResolveRef(ctx, root, "HEAD")
@@ -314,4 +326,24 @@ func gitResolveRef(ctx Context, root, ref string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+// joinGitStreams concatenates git stdout and stderr for an error report.
+// git commit prints "nothing to commit, working tree clean" on stdout;
+// hooks and fatals usually go to stderr. Either stream may be empty.
+func joinGitStreams(stdout, stderr string) string {
+	out := strings.TrimSpace(stdout)
+	err := strings.TrimSpace(stderr)
+	switch {
+	case out == "":
+		return err
+	case err == "":
+		return out
+	default:
+		return out + "\n" + err
+	}
+}
+
+func gitCommitNothingToCommit(output string) bool {
+	return strings.Contains(strings.ToLower(output), "nothing to commit")
 }
