@@ -725,7 +725,7 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 		}
 		recordEnvironmentJobSupervisorFailure(recorder, err, panicked)
 	}()
-	err = runRegisteredEnvironmentJobSupervisor(recorder, params)
+	err = runRegisteredEnvironmentJobSupervisor(recorder, params, adoptedBaseline)
 	return err
 }
 
@@ -762,7 +762,7 @@ func recordEnvironmentJobSupervisorFailure(recorder *jobRecorder, err error, pan
 
 // runRegisteredEnvironmentJobSupervisor is RunEnvironmentJobSupervisor's body
 // for a job whose running record is already durable.
-func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params EnvironmentJobSupervisorParams) error {
+func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params EnvironmentJobSupervisorParams, adoptedBaseline map[int]struct{}) error {
 	job := recorder.snapshot()
 	log, err := os.OpenFile(job.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
