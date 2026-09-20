@@ -109,7 +109,8 @@ func TestListGateRunsNormalizesLowercaseStatusFilter(t *testing.T) {
 // TestListGateRunsRejectsUnknownStatusFilter: an unknown `?status=` must be
 // refused with the write route's own named-field error, not answered with the
 // zero rows a legitimately empty result returns -- the two are indistinguishable
-// to an operator, which is the harm #2015's case fix named one layer over.
+// to an operator, the same ambiguity the outcome route already refuses one
+// layer over.
 func TestListGateRunsRejectsUnknownStatusFilter(t *testing.T) {
 	repo := &stubGateRunRepository{}
 	routes := GateRunRoutes{gateRuns: repo}
