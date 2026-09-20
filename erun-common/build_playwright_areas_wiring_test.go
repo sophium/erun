@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// The three tests below pin the wiring the erun#2580 report found unverified:
-// the resolver computes a selection, the gate runs a selection, and nothing
-// checked that the value which crosses between them is the resolver's own.
+// The three tests below pin wiring a report found unverified: the resolver
+// computes a selection, the gate runs a selection, and nothing checked that
+// the value which crosses between them is the resolver's own.
 // They read the real code path -- the real Dockerfile, the real resolver, the
 // real docker argv -- rather than recomputing an expected value, because a
 // recomputed expectation agrees with a broken wiring exactly as well as with a
