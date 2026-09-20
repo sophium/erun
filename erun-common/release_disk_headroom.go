@@ -405,14 +405,14 @@ func runDiskHeadroomPrune(floor uint64, limit time.Duration) error {
 func diskHeadroomOutput(limit time.Duration, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	out, err := Command(name, args...).Output()
+	out, err := CommandContext(ctx, name, args...).Output()
 	return out, diskHeadroomDeadlineErr(ctx, err)
 }
 
 func diskHeadroomRun(limit time.Duration, name string, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	return diskHeadroomDeadlineErr(ctx, Command(name, args...).Run())
+	return diskHeadroomDeadlineErr(ctx, CommandContext(ctx, name, args...).Run())
 }
 
 // diskHeadroomDeadlineErr reports a command killed by its own deadline as that
