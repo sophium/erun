@@ -54,6 +54,29 @@ func TestDockerfileHasGateTestStageRequiresBothTheStageAndTheDependency(t *testi
 	}
 }
 
+// TestRealDevopsDockerfileStillMatchesTheGateConvention pins the artefact every
+// case above only models. Detection is what exempts erun-devops from
+// fingerprint promotion, so if the real Dockerfile stops matching the
+// convention the exemption stops firing silently: a wholly cached build then
+// reports the same exit 0 in seconds as one that ran make check, while every
+// synthetic case above stays green. The real Dockerfile is the one input those
+// cases cannot cover, which is why editing it -- renaming the stage, dropping
+// the dependency on it -- has to fail here rather than only making the gate
+// fast again.
+//
+// Reads a sibling module, so it must run uncached: a cached pass cannot
+// establish that this file was re-read. test-erun-common already passes
+// -count=1. Same shape as the cloud-context entrypoint parity test.
+func TestRealDevopsDockerfileStillMatchesTheGateConvention(t *testing.T) {
+	const path = "../erun-devops/docker/erun-devops/Dockerfile"
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the gate Dockerfile this exemption exists for is not readable at %s: %v", path, err)
+	}
+	if !dockerfileHasGateTestStage(path) {
+		t.Fatalf("%s no longer matches the gate convention (a stage declared `AS test` plus a later `COPY --from=test`), so applyIncrementalPromotion would promote it from a cached fingerprint image and skip make check, reporting a wholly unverified build as a pass", path)
+	}
+}
+
 // TestApplyIncrementalPromotionNeverPromotesAGateDockerfile reproduces
 // The defect: a `docker build` promotion decision is a pure function of
 // whether the fp-tagged image already exists locally, with no way to prove
