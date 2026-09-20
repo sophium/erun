@@ -374,7 +374,7 @@ var issueReferenceBaseline = map[string]int{
 	"erun-common/platform_client_reviews.go":              2,
 	"erun-common/platform_client_test.go":                 1,
 	"erun-common/platform_commands.go":                    2,
-	"erun-common/published_devops_chart.go":               4,
+	"erun-common/published_devops_chart.go":               3,
 	"erun-common/published_devops_chart_test.go":          5,
 	"erun-common/registry_versions_oci_test.go":           2,
 	"erun-common/release_anonymous_pullability_test.go":   1,

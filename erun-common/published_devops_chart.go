@@ -153,7 +153,7 @@ func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chart
 // erun-devops chart on the deploy's own line at a version the deploy has moved
 // past: see stockRuntimePinMovesWithDeployVersion. Honoring that one installs the
 // older chart while the deploy records the newer version, so the operator reads
-// a version roll that did not happen (erun#2569).
+// a version roll that did not happen.
 func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
 		reference, chartVersion := splitChartReferenceVersion(named)
@@ -806,7 +806,7 @@ func effectiveRuntimeChartCoordinateForImage(chart resolvedRuntimeChart, runtime
 // (explicit or not stale), nothing changed, so persistImage names the same
 // image the config already records -- a no-op write. When it falls through to
 // the deploy's own default, persistImage is the name that default resolved
-// to, healing exactly the field erun#1754 found silently left behind. Empty
+// to, healing exactly the field a prior report found silently left behind. Empty
 // only for the erun product's own environments, which have no line of their
 // own to persist a name for.
 func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, version, chartName, chartVersion, runtimeChartOverride string, runtimeImageExplicit bool) (image, persistImage string) {
@@ -878,7 +878,7 @@ func staleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 // coordinate with the recorded runtime version. A deploy version that has moved
 // on then makes the stated one a pin left behind by an earlier deploy, and
 // honoring it installs the older chart and image while the deploy still records
-// the newer version — a version the pods are not running (erun#2569).
+// the newer version — a version the pods are not running.
 //
 // Two things must hold, and neither is inferred from the tenant name alone:
 //

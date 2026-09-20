@@ -2,7 +2,7 @@ package eruncommon
 
 import "testing"
 
-// stockPinTarget is the state erun#2569 was reproduced in: an environment whose
+// stockPinTarget is the state the reported failure was reproduced in: an environment whose
 // runtime coordinates are all on erun's own release line and all at 1.0.282,
 // with a deploy asking for 1.0.283. Every field names one coordinate, so a
 // deploy that installs the older artifacts while recording the newer version
@@ -22,9 +22,9 @@ func stockPinTarget() OpenResult {
 	}
 }
 
-// TestDeployMovesStockRuntimePinWithTheDeployVersion is the reproduction of
-// erun#2569: a deploy of 1.0.283 onto an environment pinned at 1.0.282 on erun's
-// own line must install 1.0.283, not honor the older chart and image while
+// TestDeployMovesStockRuntimePinWithTheDeployVersion is the reproduction of the
+// reported failure: a deploy of 1.0.283 onto an environment pinned at 1.0.282 on
+// erun's own line must install 1.0.283, not honor the older chart and image while
 // recording the newer version.
 func TestDeployMovesStockRuntimePinWithTheDeployVersion(t *testing.T) {
 	const version = "1.0.283"
