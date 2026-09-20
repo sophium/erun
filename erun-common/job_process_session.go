@@ -5,13 +5,16 @@ package eruncommon
 import "strings"
 
 // sessionProcess is one process as a session scan sees it: the pid, whether it
-// is a zombie (already exited, only waiting to be reaped), and the session it
-// belongs to. A zero session means the platform could not report one for that
-// process, which is not the same as session zero -- no process is in it.
+// is a zombie (already exited, only waiting to be reaped), the session it
+// belongs to, and the parent it currently reports. A zero session means the
+// platform could not report one for that process, which is not the same as
+// session zero -- no process is in it. A zero parent likewise means the
+// platform could not report one, which is not the same as a parent of pid 0.
 type sessionProcess struct {
 	pid     int
 	zombie  bool
 	session int
+	parent  int
 }
 
 // environmentJobSessionProcessesFunc builds the table
@@ -31,6 +34,34 @@ var environmentJobSessionProcessesFunc = platformSessionProcesses
 func sessionHasLiveMember(procs []sessionProcess, sid int) bool {
 	for _, proc := range procs {
 		if proc.pid == sid || proc.zombie || proc.session != sid {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// descendantHasLiveMember reports whether the table holds a live, non-zombie
+// process whose parent is parentPID. It is what catches work that escaped both
+// the process group and the session: a descendant that called setsid itself
+// gets a fresh group *and* a fresh session, so neither of the scans above can
+// name it, but it cannot escape being reparented -- when the process that
+// spawned it exits, the kernel hands it to the nearest ancestor marked as a
+// child subreaper, which is this supervisor (see
+// enableEnvironmentJobSubreaper). Its parent is then the supervisor itself,
+// whatever it did to its own group and session.
+//
+// A zombie is excluded for the same reason the scans above exclude it:
+// completed work nobody has reaped yet is not abandoned background work. A
+// zero parent marks a row the platform could not answer for, and a negative
+// parentPID means there is no supervisor pid to compare against, so neither
+// can match.
+func descendantHasLiveMember(procs []sessionProcess, parentPID int) bool {
+	if parentPID <= 0 {
+		return false
+	}
+	for _, proc := range procs {
+		if proc.zombie || proc.parent != parentPID {
 			continue
 		}
 		return true

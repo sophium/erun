@@ -698,6 +698,11 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 // recorded outcome rather than into a record left reading "running". See
 // recordEnvironmentJobSupervisorFailure.
 func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
+	// Claim orphaned descendants before any is created. This has to happen
+	// before the work starts, not at the finish check that reads it: the
+	// reparenting it arranges is decided by the kernel at the moment the
+	// spawning process exits, and cannot be retrofitted afterwards.
+	enableEnvironmentJobSubreaper()
 	env, err := normalizeEnvironmentJobEnv(params.Env)
 	if err != nil {
 		return err
@@ -1053,9 +1058,11 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 		reason = "failed to start: " + waitErr.Error()
 	}
 	jobState = EnvironmentJobStateExited
-	if state != nil && (environmentJobProcessGroupSurvivors(childPID) || environmentJobSessionSurvivors(childPID)) {
+	if state != nil && (environmentJobProcessGroupSurvivors(childPID) ||
+		environmentJobSessionSurvivors(childPID) ||
+		environmentJobDescendantSurvivors(os.Getpid())) {
 		jobState = EnvironmentJobStateAbandoned
-		reason = "the job's own process exited, but it left other processes still running in its process group or session — background work it started and never waited for; nothing further will be reported for that work"
+		reason = "the job's own process exited, but it left other processes still running in its process group, session, or reparented onto this supervisor — background work it started and never waited for; nothing further will be reported for that work"
 	}
 	self := recorder.snapshot()
 	if running := awaitEnvironmentJobRunningChildren(recorder.dir, self.ID, resolveEnvironmentJobGateIncompleteWaitCap()); len(running) > 0 {

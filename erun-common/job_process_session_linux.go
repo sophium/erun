@@ -43,11 +43,11 @@ func platformSessionProcesses() ([]sessionProcess, bool) {
 	return procs, true
 }
 
-// parseProcStat reads the pid, state and session out of one /proc/<pid>/stat.
-// The command name is the only field that may itself contain spaces and
-// parentheses, so the pid is everything before the first '(' and the fields
-// that follow are everything after the last ')': state first, then ppid,
-// process group, and session.
+// parseProcStat reads the pid, state, parent and session out of one
+// /proc/<pid>/stat. The command name is the only field that may itself contain
+// spaces and parentheses, so the pid is everything before the first '(' and
+// the fields that follow are everything after the last ')': state first, then
+// ppid, process group, and session.
 func parseProcStat(stat []byte) (sessionProcess, bool) {
 	open := bytes.IndexByte(stat, '(')
 	closing := bytes.LastIndexByte(stat, ')')
@@ -62,9 +62,13 @@ func parseProcStat(stat []byte) (sessionProcess, bool) {
 	if len(fields) < 4 {
 		return sessionProcess{}, false
 	}
+	parent, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return sessionProcess{}, false
+	}
 	session, err := strconv.Atoi(fields[3])
 	if err != nil {
 		return sessionProcess{}, false
 	}
-	return sessionProcess{pid: pid, zombie: fields[0] == "Z", session: session}, true
+	return sessionProcess{pid: pid, zombie: fields[0] == "Z", session: session, parent: parent}, true
 }
