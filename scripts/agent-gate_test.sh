@@ -1073,5 +1073,102 @@ stub_erun "${case_dir}/bin"
 	grep -q -- 'spec two' "$STUB_ARGV_FILE" || fail "playwright stable id: second invocation's arguments were lost"
 )
 
+# --- the gate's Playwright area selection survives the detach boundary.
+#
+# The reported failure: `erun exec resolve-playwright-areas` on a clean tree
+# printed `smoke` while `make check` -- the gate that actually runs in an agent
+# pod -- ran the full suite, with nothing in either output saying which of the
+# two it had used. The selection travels in PLAYWRIGHT_TEST_AREAS, and `check`
+# depends on test-playwright rather than being one of its prerequisites, so the
+# target-specific variable test-playwright declares is out of scope in the
+# recipe that hands the environment to agent-gate.sh and on to the job. What
+# crossed instead was the bare `export`'s empty-but-*defined* value: inside the
+# job, test-playwright's own `?=` read that as "the caller already supplied
+# this" and skipped the resolution, and run.sh read it as "no selection".
+#
+# This case drives the shipped Makefile: its `check` target and the
+# target-specific declarations and bare `export` that decide its environment,
+# the real agent-gate.sh, and a job boundary whose command runs under the
+# environment it inherited (what `erun exec job start` was measured doing).
+# Only the recipes that would actually run the suite are replaced, so the
+# environment under test is the shipped one; the observer is the real
+# test-playwright target, still carrying its own `?=`, reporting the value it
+# would hand to run.sh.
+case_dir="${work_root}/playwright-area-selection"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+cat >"${case_dir}/inner-observe.mk" <<'EOF'
+test-erun-ui-windows-build test-frontend:
+	@:
+test-playwright:
+	@printf 'gate-consumer PLAYWRIGHT_TEST_AREAS=[%s]\n' "$${PLAYWRIGHT_TEST_AREAS-}"
+EOF
+cat >"${case_dir}/boundary.mk" <<'EOF'
+check:
+	@./scripts/agent-gate.sh check "make check" -- $(MAKE) -f Makefile -f "$$INNER_OBSERVE_MK" test-playwright
+EOF
+(
+	cd "${script_dir}/.."
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=remote-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export INNER_OBSERVE_MK="${case_dir}/inner-observe.mk"
+	unset PLAYWRIGHT_TEST_AREAS AGENT_GATE_DETACHED RUN_SH_AGENT_GATED
+
+	# What the tree resolves to, computed the same way the Makefile does.
+	expected=$(cd erun-cli && go run . exec resolve-playwright-areas)
+	[ -n "$expected" ] || fail "area selection: the resolver produced no selection to compare against"
+
+	set +e
+	OUT=$(make -f Makefile -f "${case_dir}/boundary.mk" check 2>&1)
+	STATUS=$?
+	set -e
+	[ "$STATUS" -eq 0 ] || fail "area selection: the gate was expected to reach its observer cleanly, got $STATUS ($OUT)"
+
+	got=$(printf '%s\n' "$OUT" | sed -n 's/^gate-consumer PLAYWRIGHT_TEST_AREAS=\[\(.*\)\]$/\1/p' | head -1)
+	[ -n "$got" ] || fail "area selection: the gate never reported a selection to its consumer, output was: $OUT"
+	[ "$got" = "$expected" ] || fail "area selection: the gate ran with PLAYWRIGHT_TEST_AREAS=[$got] but the tree resolved [$expected] -- the gate must run the selection it resolved, not an empty one it inherited"
+)
+
+# --- the gate-scoping environment is part of what a job id identifies: a
+# cached pass recorded for one selection must never be replayed for a
+# differently-scoped request under the same job id and tree. Without this, a
+# narrowed run's green stands in for a full-suite request -- a gate reporting a
+# verdict for a selection it did not run.
+#
+# The two requests below are identical in argv and differ only in
+# PLAYWRIGHT_TEST_AREAS, and execution is observed through a side effect
+# rather than through the command's own output. Argv is already part of the
+# job id, so a case whose two runs differed there -- a "narrow selection"
+# label against a "full selection" one, say -- separates them whether or not
+# the selection is ever consulted, and passes against a key that ignores it.
+# Same argv, one channel of difference: only the selection can tell them
+# apart.
+case_dir="${work_root}/gate-scope-replay"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+runs_file="${case_dir}/runs"
+: >"$runs_file"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	PLAYWRIGHT_TEST_AREAS=smoke run_gate ui-playwright scoped-run -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "gate scope replay: narrowed run expected exit 0, got $STATUS ($OUT)"
+
+	PLAYWRIGHT_TEST_AREAS=all run_gate ui-playwright scoped-run -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "gate scope replay: full run expected exit 0, got $STATUS ($OUT)"
+
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "gate scope replay: a request under a different selection must actually run rather than replaying the other selection's recorded pass, ran $runs of 2"
+)
+
 echo "ok: agent-gate.sh"
 echo "ok: erun-ui/playwright/run.sh detachment wiring"

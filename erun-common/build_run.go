@@ -162,6 +162,45 @@ func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build Do
 	return RunDockerBuilds(ctx, builds, build)
 }
 
+// ensureGateBuildActuallyBuilt refuses a gate build that would execute nothing.
+//
+// `erun build --gate` is the merge queue's verdict on a tree, and the only thing
+// `review record-build --gate` reads from it is the exit code. A run whose every
+// image promotes from the fingerprint cache -- and which plans no script or
+// linux package build -- produces that same exit code having compiled, tested
+// and executed nothing. That is not a weaker verification; it is a different
+// claim wearing the same green checkmark, and the caller cannot tell the two
+// apart. Refusing here is what keeps them distinguishable.
+//
+// The per-Dockerfile guard (dockerfileHasGateTestStage, applyIncrementalPromotion)
+// is the other half and stays the first line of defence: it keeps the build's own
+// test stage live in any CLI that carries it. This check does not depend on that
+// detection being right, on the Dockerfile keeping its marker, or on the deploy
+// being shaped the way the guard expects; it is judged from the resolved plan,
+// which is what the run will actually do.
+func ensureGateBuildActuallyBuilt(execution BuildExecutionSpec) error {
+	if !execution.gate {
+		return nil
+	}
+	// A script or linux package build runs unconditionally, so either one is a
+	// real execution however the images resolve.
+	if execution.script != nil || len(execution.linuxBuilds) > 0 {
+		return nil
+	}
+	promoted := make([]string, 0, len(execution.dockerBuilds))
+	for _, buildInput := range execution.dockerBuilds {
+		if !buildInput.Promote {
+			return nil
+		}
+		promoted = append(promoted, strings.TrimSpace(buildInput.Image.Tag))
+	}
+	if len(promoted) == 0 {
+		// Nothing planned at all is the empty-plan guard's case, not this one.
+		return nil
+	}
+	return newGateBuildNotRunError(promoted)
+}
+
 // gateTestStageProvenanceLines names, for each build whose Dockerfile runs
 // the project's own gate (make check, see dockerfileHasGateTestStage), whether
 // this run's docker build actually invokes that test stage or — the state
@@ -316,6 +355,9 @@ func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCo
 func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if !buildExecutionPlansWork(execution) {
 		return newEmptyBuildPlanError("the resolved plan has nothing to build or test")
+	}
+	if err := ensureGateBuildActuallyBuilt(execution); err != nil {
+		return err
 	}
 	return runResolvedBuildExecution(ctx, execution, deploySpecs, runGit, runScript, build, push, deploy)
 }

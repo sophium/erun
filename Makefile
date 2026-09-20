@@ -127,6 +127,34 @@ LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
 
+# GO_TEST_GOMAXPROCS is the same bound as LINT_GOMAXPROCS above, for the other
+# internally-parallel Go fan-out in the gate: `go test ./...`, which builds and
+# runs package test binaries up to GOMAXPROCS at a time and otherwise takes
+# that number straight from the cgroup.
+#
+# The four module test targets plus the dns01-webhook one are siblings in
+# check-gate's own -j fan-out, so each unbounded one claims the whole quota and
+# five of them running side by side demand five times it. Measured on the 6-CPU
+# in-pod gate arrangement (lint plus all four module test targets, warm build
+# cache, -j5): unbounded, 13.4% of CPU periods throttled and 127s of throttled
+# CPU-time; with each target held to a fifth of the quota, 3.6% and 6.1s -- a
+# 95% cut in the CPU-time spent queued behind the cgroup ceiling, at the same
+# wall clock (183s vs 179s, and the gate's tests all still run: same packages,
+# same -race, same -count=1). Throttling this deep is what turns into the
+# syscall-timeout-shaped failures -- a timed-out package fetch, a timed-out
+# linter run -- that read as network faults and are not (see the yarn
+# --network-timeout note under test-frontend below).
+#
+# Divide the quota by the count of these targets rather than by a fan-out width
+# the way lint does: make, not this recipe, is what runs them concurrently.
+# Floored at 1 so a small environment still runs; on a larger one each target
+# gets proportionally more.
+GO_TEST_TARGET_COUNT := 5
+GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(GO_TEST_TARGET_COUNT) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	echo $$n)
+
 # Run golangci-lint across the gated modules concurrently (bounded by
 # LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
 # none, so it uses the default linters). Every module's combined stdout/stderr
@@ -184,7 +212,7 @@ lint:
 # of bug go dark again.
 test-erun-ui:
 	@echo ">> go test erun-ui"
-	@(cd erun-ui && go test -race -count=1 ./...)
+	@(cd erun-ui && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -race -count=1 ./...)
 
 # erun-backend-api's own Go tests. LINT_MODULES above already gives this
 # module golangci-lint, but nothing ran `go test ./...` for it: its Dockerfile
@@ -215,7 +243,7 @@ test-erun-ui:
 # describes.
 test-erun-backend-api:
 	@echo ">> go test erun-backend-api"
-	@(cd erun-backend/erun-backend-api && go test -count=1 ./...)
+	@(cd erun-backend/erun-backend-api && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -count=1 ./...)
 
 # erun-mcp's own Go tests. LINT_MODULES above already gives this module
 # golangci-lint, but nothing ran `go test ./...` for it: erun-mcp is unioned
@@ -236,7 +264,7 @@ test-erun-backend-api:
 # drifted tool index.
 test-erun-mcp:
 	@echo ">> go test erun-mcp"
-	@(cd erun-mcp && go test -count=1 ./...)
+	@(cd erun-mcp && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -count=1 ./...)
 
 # erun-common's own Go tests. LINT_MODULES above already gives this module
 # golangci-lint, but nothing ran `go test ./...` for it: erun-common is its
@@ -269,7 +297,7 @@ test-erun-mcp:
 # keep this class of bug from going undetected again.
 test-erun-common:
 	@echo ">> go test erun-common"
-	@(cd erun-common && go test -race -count=1 ./...)
+	@(cd erun-common && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -race -count=1 ./...)
 
 # erun-devops/dns01-webhook's own Go tests. This module has no entry in
 # LINT_MODULES and no test stage of its own -- its Dockerfile only builds the
@@ -278,7 +306,7 @@ test-erun-common:
 # reachable only by a contributor running `go test` from the module by hand.
 test-erun-dns01-webhook:
 	@echo ">> go test erun-devops/dns01-webhook"
-	@(cd erun-devops/dns01-webhook && go test ./...)
+	@(cd erun-devops/dns01-webhook && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test ./...)
 
 # All three Yarn-workspace members: the shared frontend kit (erun-kit), the
 # desktop frontend (erun-ui/frontend), and the hosted console (erun-console).
@@ -477,16 +505,38 @@ test-playwright: test-erun-ui-windows-build test-frontend
 # resolve-playwright-areas` (a thin CLI wrapper around the same
 # erun-common.ResolvePlaywrightTestAreaSelection function `erun build` calls
 # above), so a developer or agent iterating locally pays the same cost the
-# gate does. This is a target-specific variable (scoped to test-playwright
-# and whatever depends on it) using `?=`, so it is only evaluated when the
-# caller has not already supplied PLAYWRIGHT_TEST_AREAS -- the Dockerfile
-# test stage's own build-arg thread, including its empty-string "run
-# everything" default, is left untouched. `export` (no value) marks the
-# variable for export to the recipe's environment whenever it does get a
-# value, from either source. Declared after the recipe, not beside it: the
-# coverage gate in erun-integration reads a target's recipe from its first
-# definition line, so that line has to stay adjacent to the recipe.
+# gate does. This is a target-specific variable using `?=`, so it is only
+# evaluated when the caller has not already supplied PLAYWRIGHT_TEST_AREAS --
+# the Dockerfile test stage's own build-arg thread, including its
+# empty-string "run everything" default, is left untouched. `export` (no
+# value) marks the variable for export to a recipe's environment whenever it
+# does get a value, from either source. Declared after the recipe, not beside
+# it: the coverage gate in erun-integration reads a target's recipe from its
+# first definition line, so that line has to stay adjacent to the recipe.
 test-playwright: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
+
+# The same resolution on `check`, which needs its own copy rather than
+# inheriting test-playwright's: Make gives a target-specific variable to the
+# target that declares it and to the chain of prerequisites *below* it, and
+# `check` sits above test-playwright rather than below it. What reached
+# `check` instead was the bare `export` on the next line -- an empty but
+# *defined* PLAYWRIGHT_TEST_AREAS, and "defined" is the operative word.
+# `check`'s recipe is the boundary where the job's environment is captured
+# (scripts/agent-gate.sh hands it to `erun exec job start`), so inside that job
+# test-playwright's own `?=` read the empty value as "the caller already
+# supplied this" and never resolved, and run.sh read it as "no selection":
+# `make check` in an agent pod ran the full suite while `erun exec
+# resolve-playwright-areas` on the same clean tree printed `smoke`, with
+# nothing in the gate's output saying which of the two it had used. Resolving
+# at the boundary makes the selection that crosses it the one the tree
+# resolved. `?=` still preserves a value the caller supplied (the Dockerfile
+# build-arg thread), and an unresolvable tree still resolves to "all" through
+# the CLI's own fail-safe. Both declarations sit above the `export` because
+# the bare `export` defines the variable, and a target-specific `?=` parsed
+# after that definition is skipped -- the ordering is load-bearing, not
+# stylistic. Declared after their recipes, not beside them: the coverage gate
+# in erun-integration reads a target's recipe from its first definition line.
+check: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
 export PLAYWRIGHT_TEST_AREAS
 
 # Cross-compiles erun-app for Windows to prove the one other platform erun-ui

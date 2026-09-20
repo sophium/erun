@@ -150,8 +150,10 @@ func (c *PlatformClient) GetReview(ctx context.Context, reviewID string) (Platfo
 
 // PlatformUpdateReviewStatusParams is the review status-transition input.
 // RemoteURL is required only for a MERGED report: the git remote the platform
-// fetches to verify buildId's commit is really reachable from the target
-// branch's tip with the parent this review was gated against.
+// fetches to verify the merge against. Which check it runs depends on where
+// the review is — a review at MERGE is checked through BuildID's GATE build,
+// and any other review through whether its source branch's changes are
+// already in the target branch's history, which is why BuildID is optional.
 type PlatformUpdateReviewStatusParams struct {
 	Status    string `json:"status"`
 	BuildID   string `json:"buildId,omitempty"`

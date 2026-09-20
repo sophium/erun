@@ -40,6 +40,15 @@ export function addClaudeModelId({
 
 // selectableClaudeModelIds returns the catalog's usable ids, so a default
 // model can never be chosen from a blank or malformed row.
+//
+// A row declared to require reasoning echo is not one of them: it is exactly
+// the model a default must not name, since the default is what an environment
+// renders as ANTHROPIC_MODEL and what an exec agent job starts on. Offering it
+// here would let the operator pick, as the default, the one listing the catalog
+// has already recorded cannot be driven.
 export function selectableClaudeModelIds(rows: UIOpenRouterModel[]): string[] {
-  return rows.map((row) => row.id.trim()).filter((id) => isClaudeModelToken(id));
+  return rows
+    .filter((row) => !row.requiresReasoningEcho)
+    .map((row) => row.id.trim())
+    .filter((id) => isClaudeModelToken(id));
 }

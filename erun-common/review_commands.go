@@ -333,23 +333,40 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 	})
 }
 
-// RunReviewReportMerged reports a review MERGED after its promoted
-// environment has fetched, gate-built, and pushed the prospective merge
-// itself. buildId must name the GATE build the push actually produced;
-// remoteURL is the git remote the platform fetches to verify that build's
-// commit is really reachable from the target branch's tip. Any of the
-// platform's three verification conditions failing refuses with
-// MERGE_NOT_VERIFIED and leaves the review at MERGE — see AGENTS.md "Merge
-// Queue".
+// RunReviewReportMerged reports a review MERGED. Which verification the
+// platform applies is decided by where the review is sitting, not by what the
+// caller claims.
+//
+// A review holding MERGE is the merge queue's: it has been fetched,
+// gate-built and pushed by the environment the queue promoted, and buildId
+// must name the GATE build that push produced. remoteURL is the git remote
+// the platform fetches to verify that build's commit is really reachable from
+// the target branch's tip. Any of the platform's three verification
+// conditions failing refuses with MERGE_NOT_VERIFIED and leaves the review at
+// MERGE — see AGENTS.md "Merge Queue".
+//
+// Any other review is one whose work landed without the queue — in practice a
+// GitHub squash merge, where the branch's own commits are not ancestors of
+// the target and no GATE build exists to name. Omit buildID: the platform
+// then confirms against the same remote that everything the review's source
+// branch adds is already present in the target branch's history, and moves
+// the review only if it is. A branch that did not land is refused just as
+// firmly, with the same MERGE_NOT_VERIFIED — either way the answer is a fact
+// about the repository rather than the caller's word.
 func RunReviewReportMerged(ctx Context, store CloudReadStore, alias, reviewID, buildID, remoteURL string, deps CloudDependencies) (PlatformReview, error) {
-	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(buildID) == "" || strings.TrimSpace(remoteURL) == "" {
-		return PlatformReview{}, fmt.Errorf("review id, build id, and remote url are required")
+	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(remoteURL) == "" {
+		return PlatformReview{}, fmt.Errorf("review id and remote url are required")
 	}
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformReview{}, err
 	}
-	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", "status=MERGED", "buildId="+buildID, "remoteUrl="+remoteURL)
+	details := []string{"status=MERGED"}
+	if strings.TrimSpace(buildID) != "" {
+		details = append(details, "buildId="+buildID)
+	}
+	details = append(details, "remoteUrl="+remoteURL)
+	tracePlatformCall(ctx, provider, "PATCH", "/v1/reviews/"+reviewID+"/status", details...)
 	if ctx.DryRun {
 		return PlatformReview{}, nil
 	}

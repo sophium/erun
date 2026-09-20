@@ -210,6 +210,12 @@ export class GlobalConfigDialog {
     );
   }
 
+  openRouterReasoningEchoCheckbox(index: number): Locator {
+    return this.openRouterModelRow(index).getByLabel(
+      `Requires reasoning echo for model ${String(index + 1)}`,
+    );
+  }
+
   openRouterRemoveModelButton(index: number): Locator {
     return this.openRouterModelRow(index).getByRole('button', {
       name: `Remove model ${String(index + 1)}`,

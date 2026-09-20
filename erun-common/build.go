@@ -39,6 +39,21 @@ func newEmptyBuildPlanError(reason string) error {
 	return fmt.Errorf("%w: %s", ErrBuildPlanEmpty, reason)
 }
 
+// ErrGateBuildNotRun reports a gate build whose plan would execute nothing: no
+// script, no linux package build, and every docker image promoted from the
+// fingerprint cache. The fingerprint proves the inputs are unchanged; it does
+// not prove anything ran against them, so such a run has the same exit code as
+// a real gate and none of its evidence. `review record-build --gate` reads only
+// that exit code, so the refusal has to happen here, in the build itself.
+var ErrGateBuildNotRun = errors.New("gate build resolved nothing to run")
+
+func newGateBuildNotRunError(promotedTags []string) error {
+	return fmt.Errorf(
+		"%w: every image would be promoted from the fingerprint cache (%s) and no script or linux package build is planned, "+
+			"so this run would build and test nothing; re-run with --no-incremental to gate a real build, or drop --gate if this is an ordinary incremental build",
+		ErrGateBuildNotRun, strings.Join(promotedTags, ", "))
+}
+
 func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
@@ -55,7 +70,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 	}
 	if script != nil {
 		script.Env = buildScriptEnv(target.VersionOverride)
-		return BuildExecutionSpec{release: releaseSpec, script: script}, nil
+		return BuildExecutionSpec{release: releaseSpec, script: script, gate: target.Gate}, nil
 	}
 
 	linuxBuilds, hadLinuxBuilds, err := resolveLinuxBuildsForExecution(findProjectRoot, resolveBuildContext, target, releaseSpec)
@@ -72,7 +87,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 		return resolveBuildExecutionWithoutBuilds(findProjectRoot, target, hadLinuxBuilds)
 	}
 
-	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0}
+	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0, gate: target.Gate}
 	if releaseSpec != nil {
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}

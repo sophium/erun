@@ -142,20 +142,19 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 		return err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
+	// The gateway catalog is erun-level rather than part of this environment's
+	// own config, so it is resolved from the root config here. A root config
+	// that cannot be read leaves the catalog unset, which keeps the diagnosis
+	// on its pre-existing answer; the root-config section above already reports
+	// the unreadable config itself.
+	if gateway, err := common.ResolveOpenRouterConfig(configStore); err == nil {
+		req.Gateway = gateway
+	}
 	diagnosis, err := runDeployDiagnosis(ctx, req)
 	if err != nil {
 		return err
 	}
-	if err := reportRuntimeImageRegistryMismatch(ctx, result); err != nil {
-		return err
-	}
-	if err := reportRuntimeImageLineMismatch(ctx, result); err != nil {
-		return err
-	}
-	if err := reportHostCredentials(ctx, configStore, result, diagnosis); err != nil {
-		return err
-	}
-	if err := reportGitPushAccess(ctx, result, diagnosis); err != nil {
+	if err := reportDeployDiagnosisSections(ctx, configStore, result, diagnosis); err != nil {
 		return err
 	}
 	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {
@@ -165,6 +164,29 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 		return nil
 	}
 	return runDoctorPostSyncActions(ctx, promptRunner, result, req, diagnosis, options)
+}
+
+// reportDeployDiagnosisSections writes the read-only sections that report what
+// the deploy diagnosis found: the environment's image and registry
+// configuration, the credentials injected into its runtime pod, and whether
+// that pod carries the model-provider wiring it was deployed with. They read as
+// one sequence because they share a shape -- each states one fact about the
+// environment as deployed, and none of them mutates anything -- and they are
+// grouped here rather than inlined so the section list stays a list.
+func reportDeployDiagnosisSections(ctx common.Context, configStore common.ConfigStore, result common.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+	sections := []func() error{
+		func() error { return reportRuntimeImageRegistryMismatch(ctx, result) },
+		func() error { return reportRuntimeImageLineMismatch(ctx, result) },
+		func() error { return reportHostCredentials(ctx, configStore, result, diagnosis) },
+		func() error { return reportGitPushAccess(ctx, result, diagnosis) },
+		func() error { return reportAgentCredentials(ctx, result, diagnosis) },
+	}
+	for _, section := range sections {
+		if err := section(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // reportProjectConfigAndExecutionModes runs the two checks that need neither

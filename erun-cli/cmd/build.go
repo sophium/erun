@@ -53,6 +53,9 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateGateBuildTarget(target); err != nil {
+				return err
+			}
 			ctx := commandContext(cmd)
 			ctx.BuildJobs = jobs
 			return runBuildCommand(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart, cloudStore, cloudDeps)
@@ -64,8 +67,21 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 	// their builds stay sequential, so offering the knob there would advertise a
 	// control that does nothing.
 	cmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "Build this many images at once (0 resolves from the machine, 1 is sequential). Independent images build concurrently; a FROM dependency still waits for its base.")
+	cmd.Flags().BoolVar(&target.Gate, "gate", false, "Declare this the merge queue's gate build: refuse to report success if the resolved plan would execute nothing (every image promoted from the fingerprint cache), instead of certifying a tree nothing was built against")
 	cmd.AddCommand(newBuildProfileCmd())
 	return cmd
+}
+
+// validateGateBuildTarget refuses the combinations that contradict what --gate
+// declares. A gate build is a verdict on a tree and publishes nothing; a
+// --release would mint and publish a version from it, and --deploy/--e2e would
+// roll one out. Accepting either would let a run that is simultaneously the
+// merge queue's gate and a release publish under a green gate record.
+func validateGateBuildTarget(target common.DockerCommandTarget) error {
+	if !target.Gate || (!target.Release && !target.Deploy && !target.E2E) {
+		return nil
+	}
+	return errors.New("--gate cannot be combined with --release, --deploy, or --e2e: a gate build runs the merge queue's verification and publishes and deploys nothing")
 }
 
 func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, cloudStore common.CloudReadStore, cloudDeps common.CloudDependencies) error {

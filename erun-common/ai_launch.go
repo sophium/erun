@@ -74,8 +74,17 @@ func claudeConfiguredModel(config EnvironmentClaudeConfig) string {
 // wins even when the catalog does not list it, because typing an uncurated id is
 // a supported act and silently substituting another model would launch
 // something other than what the tab shows.
+//
+// One choice is refused rather than substituted: an id the catalog itself lists
+// as requiring reasoning echo. That listing is the operator stating this model
+// cannot be driven, and nothing about the environment's own record makes it
+// driveable again, so launching it would substitute a mid-run provider refusal
+// for a launch that never happens. It is not a silent substitution of the kind
+// the rule above guards against — the id cannot be launched at all, and
+// ModelIDs no longer offers it, so the resolved default is the only model the
+// tab can present as selectable.
 func resolveGatewayLaunchModel(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) string {
-	if model := claudeConfiguredModel(config); model != "" {
+	if model := claudeConfiguredModel(config); model != "" && !gateway.RequiresReasoningEcho(model) {
 		return model
 	}
 	return gateway.ResolveDefaultModel()

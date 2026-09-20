@@ -289,6 +289,13 @@ type uiERunConfig struct {
 type uiOpenRouterModel struct {
 	ID      string `json:"id"`
 	Context int    `json:"context,omitempty"`
+	// RequiresReasoningEcho mirrors the catalog's own declaration (see
+	// OpenRouterModel in erun-common/openrouter.go). It travels through this
+	// type rather than being dropped because the desktop catalog editor writes
+	// the whole catalog back on save: a field the conversion did not carry would
+	// be removed by the first edit, silently returning the model to the
+	// selectable set the declaration exists to keep it out of.
+	RequiresReasoningEcho bool `json:"requiresReasoningEcho,omitempty"`
 }
 
 // uiOpenRouterConfig is the gateway an environment's Claude Code is routed
