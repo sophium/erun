@@ -164,6 +164,10 @@ type BuildExecutionSpec struct {
 	// (validate); a build that pushes publishes them.
 	componentCharts []HelmChartPublishSpec
 	skippedLinux    bool
+	// gate marks the merge queue's gate build (`erun build --gate`): a run whose
+	// exit code is read as the verdict on a tree by `review record-build --gate`.
+	// Such a run must execute something -- see ensureGateBuildActuallyBuilt.
+	gate bool
 }
 
 type DockerPushExecutionSpec struct {
@@ -194,6 +198,14 @@ type DockerCommandTarget struct {
 	E2E bool
 	// NoIncremental disables the default fingerprint-based incremental build cache.
 	NoIncremental bool
+	// Gate declares this build the merge queue's gate: the run whose exit code
+	// `review record-build --gate` turns into the verdict on a tree. A gate build
+	// never *forces* a rebuild -- the per-Dockerfile guard that already keeps its
+	// test stage live (dockerfileHasGateTestStage) still decides that -- but it
+	// refuses to report success for a run that would execute nothing at all,
+	// which is the one outcome a cache hit cannot be distinguished from by the
+	// caller reading the exit code. See ensureGateBuildActuallyBuilt.
+	Gate bool
 	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
 	// resolve docker/release contexts directly.
 	DisableBuildScriptDiscovery bool
