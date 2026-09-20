@@ -2,4 +2,4 @@ audit: erun app restart --dry-run
 app restart: orchestrator=""
 app restart: resolving the running desktop app from <TMP>
 app restart: status=refused pid=<PID> controlPort=4242
-restart refused: the desktop app recorded at pid <PID> is not running; the record is stale
+restart refused: the desktop app recorded at pid <PID> is not running; the record is stale — quit and reopen the desktop app so it records a fresh one
