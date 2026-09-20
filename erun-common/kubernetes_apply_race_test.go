@@ -2,11 +2,13 @@ package eruncommon
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Deploy runs the components of one step in parallel, and a Secret the
@@ -42,15 +44,30 @@ stringData:
 // timing-dependent: every invocation announces itself, then waits for the
 // others, so no invocation can win the create before its sibling has also read
 // "absent". The wait is bounded so a broken test cannot hang.
+//
+// The create is one exclusive operation, and the manifest it publishes is the
+// invocation's own file. Both are what keep the state this stub leaves behind
+// from depending on scheduling, because a stub that can reach a state the API
+// server cannot turns the assertions reading that state into coin flips:
+//
+//   - `set -C` (noclobber) is the shell's O_EXCL create, so the object is
+//     visible at the instant exactly one invocation's create succeeds. A
+//     refused create is therefore only ever refused for an object that is
+//     already there -- the API server's own guarantee, and the thing the
+//     loser's retry relies on when it re-reads and takes the update path.
+//   - Two invocations writing one shared manifest file can truncate it under
+//     each other, and a reader then publishes a manifest neither meant to
+//     apply.
 func kubectlStubScript(dir string, participants int) string {
 	return `#!/bin/sh
 set -u
 dir="` + dir + `"
 participants=` + strconv.Itoa(participants) + `
-cat > "$dir/manifest"
+manifest="$dir/manifest.$$"
+cat > "$manifest"
 echo x >> "$dir/attempts"
 if [ -f "$dir/object" ]; then
-  cp "$dir/manifest" "$dir/object"
+  cp "$manifest" "$dir/object"
   exit 0
 fi
 : > "$dir/entered-$$"
@@ -65,8 +82,7 @@ while :; do
   [ "$i" -gt 3000 ] && break
   sleep 0.01
 done
-if mkdir "$dir/claimed" 2>/dev/null; then
-  cp "$dir/manifest" "$dir/object"
+if (set -C; cat "$manifest" > "$dir/object") 2>/dev/null; then
   exit 0
 fi
 echo x >> "$dir/refusals"
@@ -125,14 +141,12 @@ func kubectlStubAttempts(t *testing.T, dir string) int {
 	return len(strings.Fields(string(raw)))
 }
 
-// TestConcurrentAppliesOfOneSharedSecretBothSucceed is the reported failure:
-// two components of one parallel deploy step apply the same shared secret, the
-// loser of the create race is refused with AlreadyExists, and the component --
-// and with it the environment's upgrade -- fails while its sibling succeeds.
-//
-// The overlap is forced by the stub's rendezvous, so the loser is guaranteed
-// to lose before the fix and to be retried into the update path after it.
-func TestConcurrentAppliesOfOneSharedSecretBothSucceed(t *testing.T) {
+// applySharedSecretFromTwoComponents runs the reported scenario: two
+// components of one parallel deploy step apply the same shared secret at the
+// same time, against the rendezvousing stub. It returns the stub's state
+// directory so the caller can assert on what the overlap produced.
+func applySharedSecretFromTwoComponents(t *testing.T) string {
+	t.Helper()
 	isolateKubectlSecretApplyMode(t)
 	dir := writeStatefulKubectlStub(t, func(dir string) string { return kubectlStubScript(dir, 2) })
 	args := kubectlApplyStdinArgs("team-dev", "orbstack")
@@ -153,6 +167,16 @@ func TestConcurrentAppliesOfOneSharedSecretBothSucceed(t *testing.T) {
 			t.Fatalf("component %d failed on a shared secret its sibling also applied: %v", i+1, err)
 		}
 	}
+	return dir
+}
+
+// assertSharedSecretApplied checks what the two applies were there to produce:
+// the secret holds the manifest, and exactly one create lost the race. Exactly
+// one is the property itself, not a tolerance widened to fit: a create the stub
+// refused has already been told the object is there, so the loser's retry reads
+// it and takes the update path instead of being refused again.
+func assertSharedSecretApplied(t *testing.T, dir string) {
+	t.Helper()
 	// Without this the test could pass by never racing at all, which is the
 	// one way a test for a race can quietly stop testing anything.
 	if got := kubectlStubRefusals(t, dir); got != 1 {
@@ -165,6 +189,54 @@ func TestConcurrentAppliesOfOneSharedSecretBothSucceed(t *testing.T) {
 	if string(applied) != sharedSecretManifest {
 		t.Fatalf("the shared secret does not hold the applied manifest:\n got: %s\nwant: %s", applied, sharedSecretManifest)
 	}
+}
+
+// TestConcurrentAppliesOfOneSharedSecretBothSucceed is the reported failure:
+// two components of one parallel deploy step apply the same shared secret, the
+// loser of the create race is refused with AlreadyExists, and the component --
+// and with it the environment's upgrade -- fails while its sibling succeeds.
+//
+// The overlap is forced by the stub's rendezvous, so the loser is guaranteed
+// to lose before the fix and to be retried into the update path after it.
+func TestConcurrentAppliesOfOneSharedSecretBothSucceed(t *testing.T) {
+	assertSharedSecretApplied(t, applySharedSecretFromTwoComponents(t))
+}
+
+// TestSharedSecretApplyIsNotRefusedWhileTheWinnersCreateIsStillPublishing
+// drives the interleaving the reported flake depended on instead of waiting
+// for it: the winner's create has taken the object but has not published it
+// yet when the loser's retry arrives, so the retry that only a rare schedule
+// produced is produced on every run. slowStubPublish is what widens the window
+// the losing create is refused in, from the microseconds between the stub's
+// two steps to a hold the test controls.
+//
+// The window does not exist against a real API server -- the refusal is the
+// server saying the object is already there -- so a retry that lands in it
+// must find the object rather than be refused a second time. Before the stub
+// published the object with the same exclusive operation that claimed it, the
+// loser's retries were refused until its attempts ran out and its component
+// failed, which is the failure the gate hit.
+func TestSharedSecretApplyIsNotRefusedWhileTheWinnersCreateIsStillPublishing(t *testing.T) {
+	slowStubPublish(t, 200*time.Millisecond)
+	assertSharedSecretApplied(t, applySharedSecretFromTwoComponents(t))
+}
+
+// slowStubPublish puts a `cp` on PATH that sleeps before doing its work, which
+// holds a stub invocation between taking the create and publishing the object.
+// The stub resolves `cp` through PATH like any other process, so the shim
+// reaches it without the stub knowing. PATH is restored when the test ends.
+func slowStubPublish(t *testing.T, hold time.Duration) {
+	t.Helper()
+	realCP, err := exec.LookPath("cp")
+	if err != nil {
+		t.Fatalf("locate cp: %v", err)
+	}
+	dir := t.TempDir()
+	shim := "#!/bin/sh\nsleep " + strconv.FormatFloat(hold.Seconds(), 'f', 3, 64) + "\nexec " + shellSingleQuote(realCP) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "cp"), []byte(shim), 0o755); err != nil {
+		t.Fatalf("write cp shim: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 // A refusal that never stops being a refusal is still an error, reported after
