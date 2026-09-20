@@ -22,6 +22,7 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 // builds themselves are scheduled.
 func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 	buildInput.Verbosity = ctx.Verbosity
+	traceGateTestStageDecision(ctx, buildInput)
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
 		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
@@ -53,6 +54,22 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 	return err
 }
 
+// traceGateTestStageDecision names the builds whose Dockerfile runs the
+// project's own gate. It deliberately does not sit inside
+// traceIncrementalDecision: that trace is gated on a computed fingerprint, which
+// --no-incremental does not produce, and a build that skips promotion needs this
+// line *more* than one that does not. Suppressing it there is what made the flag
+// less truthful than the default (see ApplyIncrementalToDockerBuilds). Guarded on
+// dry-run for the same reason as traceIncrementalDecision: the only incrementally
+// promoted path is the real build, and the goldens must stay stable.
+func traceGateTestStageDecision(ctx Context, buildInput DockerBuildSpec) {
+	if ctx.DryRun || !buildInput.GateTestStage {
+		return
+	}
+	tag := strings.TrimSpace(buildInput.Image.Tag)
+	ctx.Trace("rebuilding " + tag + " because its Dockerfile's test stage runs the build's own gate (never promoted from a cached fingerprint)")
+}
+
 // traceIncrementalDecision re-emits the fingerprint inspect already run during
 // resolution so dry-run output stays complete, then names the concrete rebuild
 // trigger. The per-platform detail is deliberate: a single vague "missing or
@@ -76,8 +93,6 @@ func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
 	switch {
 	case buildInput.Promote:
 		ctx.Trace("promoting from cached fingerprint image: " + tag)
-	case buildInput.GateTestStage:
-		ctx.Trace("rebuilding " + tag + " because its Dockerfile's test stage runs the build's own gate (never promoted from a cached fingerprint)")
 	case strings.TrimSpace(buildInput.CascadeRebuildFromTag) != "":
 		ctx.Trace("rebuilding " + tag + " because dependency " + strings.TrimSpace(buildInput.CascadeRebuildFromTag) + " is rebuilding")
 	case len(buildInput.MissingFingerprintPlatforms) > 0:
