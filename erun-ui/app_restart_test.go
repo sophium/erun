@@ -75,6 +75,46 @@ func TestRestartAppIsNotCancelledByTheCloseGate(t *testing.T) {
 	}
 }
 
+// TestRestartQuitStallWatch_EndsAQuitThatNeverLanded pins the escalation the
+// two-desktop state depends on being bounded and legible. A restart has already
+// relaunched its successor and written its hand-off before it asks to quit, so a
+// predecessor still running its whole grace later is a real second desktop
+// holding the control record — and one that only logs is the reported state,
+// where the operator's window is still the old binary. The wait is handed to the
+// watch rather than slept through, and the exit is substituted rather than
+// taken, so the escalation is witnessed without ending the test process.
+func TestRestartQuitStallWatch_EndsAQuitThatNeverLanded(t *testing.T) {
+	var waited time.Duration
+	exits := 0
+	var reason string
+	restartQuitStallWatch(restartQuitStallGrace, func(d time.Duration) { waited += d }, func(r string) {
+		exits++
+		reason = r
+	}, "test reason")
+
+	if waited != restartQuitStallGrace {
+		t.Fatalf("waited %s, want the quit given exactly the bounded grace %s", waited, restartQuitStallGrace)
+	}
+	if exits != 1 {
+		t.Fatalf("exited %d times, want the stalled quit to end the process exactly once", exits)
+	}
+	if reason != "test reason" {
+		t.Fatalf("exit reason = %q, want the reason it was handed, so the escalation is recorded rather than a desktop that vanished", reason)
+	}
+}
+
+// TestQuitDesktopApp_ReportsWhenThereWasNoWindowToAsk pins the gate the stall
+// watch is armed behind. A headless or not-yet-started app has no Wails context
+// to quit, so no quit was ever asked of it and "still running" means nothing:
+// arming the escalation there would end a healthy process that was never asked
+// to go anywhere.
+func TestQuitDesktopApp_ReportsWhenThereWasNoWindowToAsk(t *testing.T) {
+	app := &App{}
+	if app.quitDesktopApp() {
+		t.Fatal("quitDesktopApp reported a quit for an app with no Wails context to ask")
+	}
+}
+
 // stageOrchestratorConversation writes the transcript the AI harness leaves for a
 // conversation, which is how the resume path tells a conversation it can still
 // continue from one that is gone.
