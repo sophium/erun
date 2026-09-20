@@ -10,11 +10,11 @@ import (
 )
 
 // platformSessionProcesses builds this host's process table from /proc, where
-// both halves of what the session scan needs are always available: field 3 of
-// /proc/<pid>/stat is the state and field 6 is the session. Reading them is
-// also what makes the scan independent of ps here -- the session column ps
-// populates on Linux is empty on Darwin, and this is the source that answers
-// on both.
+// everything the session, process-group and descendant scans need is always
+// available: field 3 of /proc/<pid>/stat is the state, field 5 is the process
+// group and field 6 is the session. Reading them is also what makes those
+// scans independent of ps here -- the session column ps populates on Linux is
+// empty on Darwin, and this is the source that answers on both.
 func platformSessionProcesses() ([]sessionProcess, bool) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
@@ -43,11 +43,11 @@ func platformSessionProcesses() ([]sessionProcess, bool) {
 	return procs, true
 }
 
-// parseProcStat reads the pid, state and session out of one /proc/<pid>/stat.
-// The command name is the only field that may itself contain spaces and
-// parentheses, so the pid is everything before the first '(' and the fields
-// that follow are everything after the last ')': state first, then ppid,
-// process group, and session.
+// parseProcStat reads the pid, state, parent, process group and session out of
+// one /proc/<pid>/stat. The command name is the only field that may itself
+// contain spaces and parentheses, so the pid is everything before the first
+// '(' and the fields that follow are everything after the last ')': state
+// first, then ppid, process group, and session.
 func parseProcStat(stat []byte) (sessionProcess, bool) {
 	open := bytes.IndexByte(stat, '(')
 	closing := bytes.LastIndexByte(stat, ')')
@@ -62,9 +62,17 @@ func parseProcStat(stat []byte) (sessionProcess, bool) {
 	if len(fields) < 4 {
 		return sessionProcess{}, false
 	}
+	parent, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return sessionProcess{}, false
+	}
+	group, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return sessionProcess{}, false
+	}
 	session, err := strconv.Atoi(fields[3])
 	if err != nil {
 		return sessionProcess{}, false
 	}
-	return sessionProcess{pid: pid, zombie: fields[0] == "Z", session: session}, true
+	return sessionProcess{pid: pid, zombie: fields[0] == "Z", session: session, group: group, parent: parent}, true
 }
