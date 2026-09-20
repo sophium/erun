@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// TestGateMergeOneSourceNamesACommitFailureReportedOnStdout reproduces
-// erun#2578's discarded stream. The commit error path was built to explain the
+// TestGateMergeOneSourceNamesACommitFailureReportedOnStdout reproduces a
+// reported discarded stream. The commit error path was built to explain the
 // failure — it captures a buffer and interpolates it into the message — but it
 // captured only *stderr*, and git explains the failure that motivated the
 // report ("nothing to commit, working tree clean") on *stdout*. The caller got

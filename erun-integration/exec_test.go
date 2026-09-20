@@ -1666,8 +1666,8 @@ func TestExec(t *testing.T) {
 	})
 
 	t.Run("gate_merge_real_run_skips_a_source_that_contributes_nothing", func(t *testing.T) {
-		// erun#2578's second half. A source whose content is already on the
-		// target — here a branch still at main's own tip, so `git merge
+		// The no-op half of the same report. A source whose content is already
+		// on the target — here a branch still at main's own tip, so `git merge
 		// --squash` reports "Already up to date" and stages nothing — used to
 		// abort the whole batch: the code asked git to commit the empty squash
 		// anyway, that commit exited non-zero, and the failure came back as a
