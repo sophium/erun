@@ -305,15 +305,32 @@ func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivity
 		return err
 	}
 	for _, lease := range leases {
-		value := fmt.Sprintf("%s, expires in %s", lease.Name, formatLeaseRemaining(lease, now))
-		if lease.PID > 0 {
-			value += fmt.Sprintf(", pid %d", lease.PID)
-		}
-		if err := writeLabeledValue(ctx, lease.ID, value); err != nil {
+		if err := writeLabeledValue(ctx, lease.ID, activityLeaseSummary(lease, now)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// activityLeaseSummary renders one held claim, and renders an exclusive one as
+// exclusive. A presence lease's "name, expires in ..." line is indistinguishable
+// from an exclusive claim's, so a caller reading the list could not tell a claim
+// that refuses everyone else in its scope from one that refuses nobody — the
+// same invisibility that let an inert concurrency guard go unnoticed, because
+// nothing on this surface said the claim was there or what it covered.
+func activityLeaseSummary(lease common.EnvironmentActivityLease, now time.Time) string {
+	value := fmt.Sprintf("%s, expires in %s", lease.Name, formatLeaseRemaining(lease, now))
+	if lease.Exclusive {
+		value = fmt.Sprintf("%s, exclusive on %s, held by %s, expires in %s",
+			lease.Name,
+			common.NormalizeExclusiveEnvironmentActivityLeaseScope(lease.Scope),
+			lease.Holder.String(),
+			formatLeaseRemaining(lease, now))
+	}
+	if lease.PID > 0 {
+		value += fmt.Sprintf(", pid %d", lease.PID)
+	}
+	return value
 }
 
 func formatLeaseRemaining(lease common.EnvironmentActivityLease, now time.Time) string {
