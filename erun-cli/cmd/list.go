@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
-	sshconfig "github.com/sophium/erun/internal/sshconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -789,7 +788,7 @@ func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 	if alias == "" {
 		return valueOrNone(alias)
 	}
-	configured, err := sshconfig.DefaultConfigHasAlias(alias)
+	configured, err := common.DefaultSSHConfigHasAlias(alias)
 	if err != nil || configured {
 		return alias
 	}

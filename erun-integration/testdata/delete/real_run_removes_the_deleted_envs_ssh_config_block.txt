@@ -1,0 +1,4 @@
+deleted environment: team/dev
+removed ssh config block: Host erun-team-dev (that alias no longer resolves)
+audit: erun delete --yes team dev
+delete: removing Host erun-team-dev block from <TMP>
