@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseDFDiskBytes(t *testing.T) {
@@ -371,17 +372,23 @@ func runDiskHeadroomCase(t *testing.T, tc diskHeadroomCase) {
 	}
 
 	readCalls := 0
-	readFree := func() (diskHeadroomMeasurement, bool) {
+	readFree := func(diskHeadroomTimeouts) (diskHeadroomMeasurement, error) {
 		read := tc.reads[readCalls]
 		readCalls++
-		return read.measurement(), read.ok
+		if !read.ok {
+			return read.measurement(), errors.New("free disk space is unreadable")
+		}
+		return read.measurement(), nil
 	}
-	readReclaimable := func() (dockerReclaimable, bool) {
-		return tc.reclaimable, tc.reclaimableOK
+	readReclaimable := func(time.Duration) (dockerReclaimable, error) {
+		if !tc.reclaimableOK {
+			return dockerReclaimable{}, errors.New("docker system df is unreadable")
+		}
+		return tc.reclaimable, nil
 	}
 	pruneCalls := 0
 	var prunedTo uint64
-	prune := func(target uint64) error {
+	prune := func(target uint64, _ time.Duration) error {
 		pruneCalls++
 		prunedTo = target
 		return tc.pruneErr
@@ -458,6 +465,151 @@ func TestDiskHeadroomRemedyFollowsTheMeasurement(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected the remedy to contain %q, got %q", want, got)
 		}
+	}
+}
+
+// diskHeadroomShortLimits is the production check's wall-clock bounds shrunk
+// to what a test can wait out. The scenario is unchanged — a docker that stops
+// answering — so the only thing the shorter bound changes is how long the
+// regression takes to prove itself, not what it proves.
+func diskHeadroomShortLimits() diskHeadroomTimeouts {
+	const short = 500 * time.Millisecond
+	return diskHeadroomTimeouts{read: short, probe: short, prune: short}
+}
+
+// headroomTestBound is how long a test waits for the preflight before calling
+// it non-terminating. It is deliberately far above the short limits, so a
+// loaded machine cannot turn a bounded return into a reported hang.
+const headroomTestBound = 30 * time.Second
+
+// awaitHeadroomPreflight runs one check and fails the test if it is still
+// running at headroomTestBound, which is the reported failure: a preflight
+// that neither lets the build proceed nor fails it, and so writes no terminal
+// record for a gate to report.
+func awaitHeadroomPreflight(t *testing.T, ctx Context, policy diskHeadroomPolicy) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		done <- ensureDiskHeadroomWith(ctx, policy, dockerRootDiskBytes, dockerReclaimableBytes, runDiskHeadroomPrune)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(headroomTestBound):
+		t.Fatalf("the disk headroom preflight had not returned after %s: the build neither proceeds nor fails, and nothing records a terminal outcome", headroomTestBound)
+		return nil
+	}
+}
+
+// TestDiskHeadroomPreflightEndsWhenTheDaemonStopsAnswering reproduces the
+// reported hang through the real commands this check runs: a docker daemon
+// that stops answering — the state the incident's own readiness probe caught,
+// with a two-second `docker info` timing out — used to leave the preflight
+// blocked in an unbounded subprocess forever. Nothing in erun's build is
+// bounded, so the build it fronts never returned either.
+func TestDiskHeadroomPreflightEndsWhenTheDaemonStopsAnswering(t *testing.T) {
+	// Neither binary ever answers, matching a daemon wedged across its whole
+	// API rather than one slow call. Both are bounded sleeps rather than
+	// infinite ones so a failure to kill them cannot outlive the test.
+	// `exec` so the stub is the sleeping process itself rather than a shell
+	// holding it as a child: a real docker is killed on its own, and an
+	// orphaned grandchild would otherwise hold the read's pipe past the kill.
+	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, "exec sleep 3600"))
+	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, "exec sleep 3600"))
+	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+
+	logs := &strings.Builder{}
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	policy := buildDiskHeadroomPolicy
+	policy.limits = diskHeadroomShortLimits()
+
+	err := awaitHeadroomPreflight(t, ctx, policy)
+	if err != nil {
+		t.Fatalf("a build must still proceed on a disk it could not measure, got %v", err)
+	}
+	// Proceeding silently would be the other half of the defect: the operator
+	// has to be able to tell an unmeasured disk from a healthy one, and a
+	// daemon that did not answer from one that is simply absent.
+	message := logs.String()
+	if !strings.Contains(message, "not observable") {
+		t.Fatalf("expected the skipped check to say so, got %q", message)
+	}
+	if !strings.Contains(message, "did not answer within") {
+		t.Fatalf("expected the skipped check to name the daemon that stopped answering, got %q", message)
+	}
+}
+
+// TestDiskHeadroomPruneBoundStillReportsAVerdict covers the other half of the
+// prune path: the daemon answers every read and goes silent on the prune
+// itself. The prune is not what the build depends on, so the build must still
+// proceed — but it must proceed having said the prune did not complete, and
+// still render the shortfall against the disk it actually has. A prune that
+// was announced and never ran, followed by a build that reports nothing, is
+// the shape where the mechanism goes inert without anyone able to tell.
+func TestDiskHeadroomPruneBoundStillReportsAVerdict(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, `case "$1" in
+  info) echo "`+root+`" ;;
+  system) echo "Build Cache|40GB" ;;
+  builder) sleep 3600 ;;
+esac`))
+	// 1 GiB free of ~435 GiB: below the floor, so the prune is reached.
+	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
+echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
+	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+
+	logs := &strings.Builder{}
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	policy := buildDiskHeadroomPolicy
+	policy.limits = diskHeadroomShortLimits()
+
+	err := awaitHeadroomPreflight(t, ctx, policy)
+	if err != nil {
+		t.Fatalf("a build must still proceed when its prune does not finish, got %v", err)
+	}
+	message := logs.String()
+	if !strings.Contains(message, "the build-cache prune did not complete") {
+		t.Fatalf("expected the prune's failure to be reported rather than assumed, got %q", message)
+	}
+	if !strings.Contains(message, "did not answer within") {
+		t.Fatalf("expected the prune bound to be named as the cause, got %q", message)
+	}
+	if !strings.Contains(message, "below the") {
+		t.Fatalf("expected the shortfall to still be reported against the disk that is actually free, got %q", message)
+	}
+}
+
+// TestDiskHeadroomAbsentExecutableIsNamedNotSpliced covers the third state the
+// read has to tell apart, alongside a daemon that answers and one that stops
+// answering: no docker at all on PATH. The read must still report why — but in
+// its own words, never by splicing the runtime's own "exec: ...: executable
+// file not found in $PATH". That string is what any run reaching for an
+// undeclared binary produces, so a trace carrying it is indistinguishable from
+// a build silently depending on whatever the host happens to have installed,
+// which is a different fault from a daemon that is present but unhealthy.
+func TestDiskHeadroomAbsentExecutableIsNamedNotSpliced(t *testing.T) {
+	// A name that resolves nowhere, so the read reaches a missing binary rather
+	// than any real docker the host has installed.
+	t.Setenv("ERUN_DOCKER_BIN", "erun-no-such-docker-binary-for-headroom-test")
+	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+
+	logs := &strings.Builder{}
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	policy := buildDiskHeadroomPolicy
+	policy.limits = diskHeadroomShortLimits()
+
+	if err := awaitHeadroomPreflight(t, ctx, policy); err != nil {
+		t.Fatalf("a build must still proceed on a disk it could not measure, got %v", err)
+	}
+	message := logs.String()
+	if !strings.Contains(message, "not observable") {
+		t.Fatalf("expected the skipped check to say so, got %q", message)
+	}
+	if !strings.Contains(message, "the executable is not on PATH") {
+		t.Fatalf("expected an absent docker to be named as absent, got %q", message)
+	}
+	if strings.Contains(message, "executable file not found in") {
+		t.Fatalf("expected the missing binary's cause to be reported in the check's own words rather than spliced from the runtime, got %q", message)
 	}
 }
 
