@@ -374,6 +374,20 @@ It also cannot run inside `check-gate`: it reads git history, and `check-gate` r
 - Release builds cover `linux/amd64` and `linux/arm64`; non-release builds may
   narrow platforms explicitly. Verify daemon support before multi-architecture
   work and publish local base images before dependent images.
+- **A pre-merge `READY` build is not a release.** The drive builds the pushed
+  branch with a plain `erun build` and records the version it mints
+  (`erun-merge`, rung 5); that build asserts only that the commit builds. The
+  version is metadata no platform path resolves — the artifact that ships is
+  cut after merge, by the release the accepted review enqueues, which mints its
+  own. A `--release` at that step instead publishes a two-architecture
+  `-pr.<sha>` image and chart set per pull request that nothing consumes, and
+  it discards the environment's `docker.platforms` pin, which a release never
+  consults. The merge queue's own gate build stays plain `erun build` too.
+- That pre-merge build reads `docker.platforms` from the **checked-out
+  branch's** `.erun/config.yaml`, so a branch cut before the pin landed still
+  builds both architectures and emulates the foreign one. Read the build's own
+  `build: platforms configured as ...` trace line and pass `--platform` with
+  the architecture the machine actually runs when it names more than one.
 - Treat release changes as repository-wide. Validate `erun-common`, `erun-cli`,
   and `erun-mcp`, plus desktop packaging and runtime chart contracts when
   affected. Add regression coverage for every fixed release failure mode.

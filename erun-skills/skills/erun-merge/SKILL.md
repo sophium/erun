@@ -177,19 +177,47 @@ branch carries several unrelated commits and no single subject captures it.
 
 ```sh
 commit=$(git rev-parse HEAD)
-if erun build --release --output json > /tmp/erun-merge-build.json; then
+if erun build --output json > /tmp/erun-merge-build.json; then
   version=$(jq -r .version /tmp/erun-merge-build.json)
   erun review record-build "${review_id}" --commit "${commit}" --version "${version}"
 else
-  # release resolves the version before the per-arch builds run, so it is
-  # still knowable even though the failed run's own JSON was never written
-  # (the command errors before printing a result). --dry-run recomputes the
-  # identical version from the same repo state without touching anything.
-  version=$(erun build --release --dry-run --output json | jq -r .version)
+  # A plain build mints its version from a snapshot timestamp, so the failed
+  # run's own JSON was never written (the command errors before printing a
+  # result) and cannot be re-read. --dry-run mints a valid, same-form version
+  # from the same repo state without building anything — enough for a field
+  # nothing downstream resolves.
+  version=$(erun build --dry-run --output json | jq -r .version)
   erun review record-build "${review_id}" --commit "${commit}" --version "${version}" \
-    --failed --failure-detail "erun build --release failed; see the build log"
+    --failed --failure-detail "erun build failed; see the build log"
 fi
 ```
+
+**`READY` asserts "this commit builds", not "a publishable artifact exists
+at version X".** The plain build above mints the version `record-build`
+records and builds it; it publishes nothing. The artifact that ships is cut
+*after* merge, by the release the accepted review enqueues, which mints its
+own version — so nothing consumes a pre-merge `-pr.<sha>` image set, and no
+platform path resolves the version string this records. Reaching for
+`--release` here instead pays for a two-architecture publish on every pull
+request for an artifact with no consumer, and it discards the environment's
+`docker.platforms` pin.
+
+**Narrow the platform when the branch predates the environment's pin.** The
+build's platform set comes from the *checked-out branch's* `.erun/config.yaml`
+(`docker.platforms`, project-wide or per environment), not from the
+environment you are running in — so a branch cut before that pin landed still
+resolves both architectures and emulates the foreign one, invisibly, at two to
+three times the wall clock. A non-release build may narrow it explicitly,
+which root `AGENTS.md` § "Release Rules" permits and only `--release` refuses:
+
+```sh
+erun build --platform linux/amd64 --output json   # on a machine that only runs amd64
+```
+
+Check what the build resolved from its own trace line — `build: platforms
+configured as <platforms> (.erun/config.yaml <origin>)` — and pass `--platform`
+with the architecture the machine actually runs (`uname -m`) whenever that line
+names more than one.
 
 **Recording the build is the whole transition — there is no separate step
 that sets the review's status.** `erun review record-build` is the only way
