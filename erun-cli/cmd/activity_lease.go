@@ -51,10 +51,14 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 			"read, so a crashed job cannot keep an environment awake.\n\n" +
 			"Pass --exclusive before any mutating work in a target environment (erun#1245):\n" +
 			"at most one exclusive holder is allowed per --scope (default \"worktree\"), so a\n" +
-			"second agent job or orchestrator already working the same worktree is refused\n" +
-			"and named in the error, while a job in a different scope - a separate clone in\n" +
-			"the same pod - is unaffected. An exclusive take is also refused while an\n" +
-			"operator's own SSH session is active in the environment.",
+			"second exclusive take in that scope is refused and named in the error, while a\n" +
+			"holder in a different scope - a separate clone in the same pod - is\n" +
+			"unaffected. An exclusive take is also refused while an operator's own SSH\n" +
+			"session is active in the environment.\n\n" +
+			"Which work a claim refuses once it is held depends on its scope: only an\n" +
+			"\"environment\" claim refuses other job starts here, while a \"worktree\" claim\n" +
+			"- the default - is refused by erun exec gate-merge, which rewrites that one\n" +
+			"shared worktree. A claim at another scope refuses neither.",
 		Example: "  # From inside the environment, wrap a long build so it stays busy for the build.\n" +
 			"  erun activity lease take --tenant team --environment dev --name gradle-build --pid $$\n" +
 			"  trap 'erun activity lease release --tenant team --environment dev --id gradle-build' EXIT\n\n" +
