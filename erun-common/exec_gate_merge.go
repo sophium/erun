@@ -119,9 +119,10 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 	return deps
 }
 
-// GateMergeWorkingTree fetches Remote/TargetBranch and every Remote/source in
-// Params.Sources, checks out a local branch named TargetBranch at its own
-// fresh remote tip, then squash-merges each source onto it in order, each as
+// GateMergeWorkingTree fetches TargetBranch and every source in Params.Sources
+// from Remote into the local refs/erun/gate-merge/ staging namespace, checks
+// out a local branch named TargetBranch at its own fresh remote tip, then
+// squash-merges each source onto it in order, each as
 // its own commit. A source whose squash conflicts is skipped — the merge is
 // aborted, the conflict recorded in the result's Skipped list, and the next
 // source is tried against the working tree as it stood before that attempt
@@ -174,7 +175,7 @@ func GateMergeWorkingTree(ctx Context, root string, params GateMergeWorkingTreeP
 		return GateMergeWorkingTreeResult{}, fmt.Errorf("refusing to gate-merge: the working tree has uncommitted changes")
 	}
 
-	targetRef := remote + "/" + target
+	targetRef := gateMergeFetchRef(target)
 	fetchArgs := traceGateMergePlan(ctx, root, params.Sources, target, remote, targetRef)
 	if ctx.DryRun {
 		return GateMergeWorkingTreeResult{TargetBranch: target, Remote: remote}, nil
@@ -201,19 +202,39 @@ func validateGateMergeSources(sources []GateMergeSource) error {
 	return nil
 }
 
+// gateMergeFetchRef is the local ref a gate-merge stages each fetched branch
+// under. A gate-merge cannot consume the remote-tracking name it used to
+// (origin/main): ref names may contain neither ":" nor "//", so no such name
+// exists when --remote is a URL rather than a configured remote, and both the
+// checkout and every squash-merge failed against a ref git could not resolve.
+// Staging by branch name gives one shape that works for either kind of remote,
+// and --dry-run now traces exactly the refs the real run resolves.
+func gateMergeFetchRef(branch string) string {
+	return "refs/erun/gate-merge/" + branch
+}
+
+// gateMergeFetchSpec maps a remote branch onto its staging ref. The leading
+// "+" forces the update so a reused environment never gates against a tip left
+// behind by an earlier drive. The source is left unqualified so git keeps
+// resolving it as it did before (refs/heads, then refs/tags), rather than
+// narrowing a gate-merge to branches only.
+func gateMergeFetchSpec(branch string) string {
+	return "+" + branch + ":" + gateMergeFetchRef(branch)
+}
+
 // traceGateMergePlan emits the trace lines for the fetch, the checkout, and
 // each source's squash-merge + commit pair, and returns the fetch argv so
 // the real run doesn't have to rebuild it. Traced unconditionally (not only
 // under --dry-run), matching every other exec primitive's audit contract.
 func traceGateMergePlan(ctx Context, root string, sources []GateMergeSource, target, remote, targetRef string) []string {
-	fetchArgs := []string{"fetch", remote, target}
+	fetchArgs := []string{"fetch", remote, gateMergeFetchSpec(target)}
 	for _, source := range sources {
-		fetchArgs = append(fetchArgs, source.Branch)
+		fetchArgs = append(fetchArgs, gateMergeFetchSpec(source.Branch))
 	}
 	ctx.TraceCommand(root, "git", fetchArgs...)
 	ctx.TraceCommand(root, "git", "checkout", "-B", target, targetRef)
 	for _, source := range sources {
-		ctx.TraceCommand(root, "git", "merge", "--squash", remote+"/"+source.Branch)
+		ctx.TraceCommand(root, "git", "merge", "--squash", gateMergeFetchRef(source.Branch))
 		ctx.TraceCommand(root, "git", "commit", "-m", "<message>")
 	}
 	return fetchArgs
@@ -279,7 +300,7 @@ func runGitCapturingOutput(root string, deps GateMergeWorkingTreeDependencies, a
 // failure (a bad ref, a real I/O error) is fatal for the whole batch, since
 // it says something is wrong beyond this one branch.
 func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
-	sourceRef := remote + "/" + source.Branch
+	sourceRef := gateMergeFetchRef(source.Branch)
 	sourceCommit, err := deps.ResolveRef(ctx, root, sourceRef)
 	if err != nil {
 		return nil, &GateMergeSkippedSource{
