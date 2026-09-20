@@ -46,9 +46,10 @@ func runJobSupervisorSetupFailureHelper() int {
 }
 
 // TestEnvironmentJobSupervisorRecordsWhyItsOwnProcessEnded is the reproduction
-// of #2590's operator-visible state: after a supervisor's process is gone, the
-// job must name an outcome rather than reading as unknown. Pre-fix the record
-// the helper's process left behind still says "running", and the load below --
+// of the operator-visible state this guards: after a supervisor's process is
+// gone, the job must name an outcome rather than reading as unknown. Pre-fix
+// the record the helper's process left behind still says "running", and the
+// load below --
 // the same one `erun job status` and `erun job await` go through -- answers with
 // `unknown: job supervisor N is gone without recording an exit status`, no exit
 // code and no reason.
