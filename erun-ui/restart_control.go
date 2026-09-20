@@ -247,14 +247,34 @@ func (a *App) startRestartControl() {
 }
 
 // adoptRestartControlRecord records marker once the desktop holding the record
-// exits. Giving up is reported: an instance that could not own the endpoint is
-// running without a discoverable control endpoint, which is exactly what an
-// external restart trigger reads as "no desktop is running".
+// exits, waiting out the hand-off window first and then re-checking for as long
+// as this process lives. It never gives up for good: a holder that outlives the
+// window may still exit at any later time, and an adoption that stops at that
+// point strands the record on a pid that has since exited — leaving it naming a
+// process that is gone while the desktop actually running owns no endpoint, so
+// every reader (`erun app restart`, above all) concludes no desktop is running
+// and the operator has no path back to a rebuild. Re-checking costs one file
+// read and one liveness probe per interval, and those are worth paying to keep
+// the record pointing at the desktop that outlives the hand-off.
+//
+// The wait ends only on shutdown, which is the one thing that makes this
+// process's endpoint unserviceable and so makes publishing it wrong.
 func (a *App) adoptRestartControlRecord(marker eruncommon.DesktopControlMarker, holder int) {
 	log.Printf("erun-app: restart control record is held by pid %d; waiting for it to exit", holder)
-	remaining, err := adoptRestartControl(func() (restartControlClaim, error) {
+	claim := func() (restartControlClaim, error) {
 		return a.claimRestartControlMarker(marker)
-	}, time.Sleep)
+	}
+	remaining, err := adoptRestartControl(claim, time.Sleep)
+	if err == nil && remaining > 0 {
+		// The tight window is over and a live process still holds the record,
+		// which is the reported give-up point: from here the wait slows to a
+		// steady re-check rather than ending, because the holder may exit at
+		// any later time and nothing else revisits the record.
+		log.Printf(
+			"erun-app: restart control record still names pid %d, which is running; this desktop is not the recorded one, and keeps re-checking every %s until it can take it over",
+			remaining, restartControlRetryInterval)
+		err = adoptRestartControlSteadily(claim, time.Sleep, restartControlRetryInterval)
+	}
 	if errors.Is(err, errRestartControlReleased) {
 		// This process shut down before the record was free. It never owned
 		// the endpoint, so there is no takeover to report and nothing to
@@ -264,10 +284,6 @@ func (a *App) adoptRestartControlRecord(marker eruncommon.DesktopControlMarker, 
 	}
 	if err != nil {
 		log.Printf("erun-app: adopt restart control record: %v", err)
-		return
-	}
-	if remaining > 0 {
-		log.Printf("erun-app: restart control record still names pid %d, which is running; this desktop is not the recorded one", remaining)
 		return
 	}
 	log.Printf("erun-app: took over the restart control record from pid %d", holder)
@@ -319,6 +335,15 @@ const (
 	restartControlClaimInterval = 50 * time.Millisecond
 )
 
+// restartControlRetryInterval is how often a desktop that has already waited
+// out the hand-off window re-checks a control record another live process still
+// holds. It is deliberately slower than the hand-off's own interval: that one
+// is short because a restart's predecessor is normally gone within it, while
+// this one covers the case where the holder outlives the window and exits at
+// some unknown later time — so its job is to be cheap enough to run for the
+// rest of the process's life, not to be quick.
+const restartControlRetryInterval = 15 * time.Second
+
 // adoptRestartControl keeps trying to record this process's control endpoint
 // while a different live process holds the record, and returns the pid of a
 // holder that outlived the wait — or 0 once the record is this process's. A
@@ -344,4 +369,30 @@ func adoptRestartControl(claim func() (restartControlClaim, error), sleep func(t
 		}
 	}
 	return result.HolderPID, nil
+}
+
+// adoptRestartControlSteadily keeps re-checking a record another live process
+// holds, at a fixed interval, until this process records itself or the claim
+// fails — which is how a holdout that exits long after the hand-off window is
+// still taken over rather than stranding the record on a pid that has since
+// exited. It returns nil only once the record is this process's, and the claim's
+// own error otherwise (errRestartControlReleased on shutdown), so its caller
+// reports a takeover it really made and never one it only waited for.
+//
+// The loop is bounded by the process's life, not by an attempt count: there is
+// no later reconcile that would revisit a record this gave up on, so stopping
+// short of adoption is the permanent stranding this exists to prevent. sleep
+// and the claim are supplied by the caller so the wait can be driven without a
+// real second process or a real clock.
+func adoptRestartControlSteadily(claim func() (restartControlClaim, error), sleep func(time.Duration), interval time.Duration) error {
+	for {
+		sleep(interval)
+		result, err := claim()
+		if err != nil {
+			return err
+		}
+		if result.Recorded {
+			return nil
+		}
+	}
 }
