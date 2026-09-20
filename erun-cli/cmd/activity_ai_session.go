@@ -93,7 +93,7 @@ func newActivityAISessionStatusCmd() *cobra.Command {
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&sessionID, "session", "", "AI session id to resolve; omit to list every recorded session")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output (alias for --output json)")
 	return cmd
 }
 
@@ -119,12 +119,12 @@ func runActivityAISessionStatus(cmd *cobra.Command, tenant, environment, session
 }
 
 func writeAISessionStatuses(cmd *cobra.Command, statuses []common.AISessionStatus, jsonOutput bool) error {
-	if jsonOutput {
-		encoder := json.NewEncoder(commandContext(cmd).Stdout)
+	ctx := commandContext(cmd)
+	if commandWantsJSON(ctx, jsonOutput) {
+		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(statuses)
 	}
-	ctx := commandContext(cmd)
 	if len(statuses) == 0 {
 		return writeLabeledValue(ctx, "ai sessions", "none recorded")
 	}

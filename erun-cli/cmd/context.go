@@ -42,6 +42,16 @@ func runContextListCommand(ctx common.Context, store common.CloudContextStore, d
 	if err != nil {
 		return err
 	}
+	return writeCloudContextList(ctx, contexts)
+}
+
+func writeCloudContextList(ctx common.Context, contexts []common.CloudContextStatus) error {
+	if err := ctx.WriteResult(common.CloudContextListResult{CloudContexts: contexts}); err != nil {
+		return err
+	}
+	if ctx.Output == common.OutputJSON {
+		return nil
+	}
 	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Contexts:"); err != nil {
 		return err
 	}

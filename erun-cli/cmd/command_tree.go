@@ -91,6 +91,33 @@ func IsAgentFacingCLIOnlyCommand(path string) bool {
 	return cliOnlyAgentFacingCommands[path]
 }
 
+// outputJSONAliasCommands declares every command carrying its own --json flag.
+// The documented global --output json is the contract an orchestrator follows;
+// a command's own --json is an alias of it, never a second, rival spelling that
+// the global flag cannot reach. Keyed by the command's path below "erun".
+//
+// Declaring a command here is the reviewable statement that --output json
+// reaches its structured result too -- flipping its own flag must not be the
+// only way to get it. A command whose --json is a machine-only wire contract
+// that --output json also satisfies still belongs here.
+var outputJSONAliasCommands = map[string]bool{
+	"activity ai-session status": true,
+	"activity lease list":        true,
+	"activity lease take":        true,
+	"activity sample":            true,
+	"activity status":            true,
+	"activity stop-ready":        true,
+	"exec diff":                  true,
+	"idle":                       true,
+	"whip":                       true,
+}
+
+// IsOutputJSONAliasCommand reports whether a command's own --json flag is a
+// declared alias of the global --output json.
+func IsOutputJSONAliasCommand(path string) bool {
+	return outputJSONAliasCommands[path]
+}
+
 // cliOnlyAgentFacingFlags is the flag-granularity twin of
 // cliOnlyAgentFacingCommands: a flag that adds a dimension to an
 // already-surfaced command yet is structurally about the CLI's own

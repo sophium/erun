@@ -439,6 +439,12 @@ func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVer
 }
 
 func writeListResult(ctx common.Context, result common.ListResult) error {
+	if err := ctx.WriteResult(result); err != nil {
+		return err
+	}
+	if ctx.Output == common.OutputJSON {
+		return nil
+	}
 	if err := writeListHeaderSections(ctx, result); err != nil {
 		return err
 	}
