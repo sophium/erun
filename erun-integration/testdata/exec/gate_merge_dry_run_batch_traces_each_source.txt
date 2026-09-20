@@ -1,8 +1,8 @@
 audit: erun exec gate-merge --dry-run --source [feature/a,feature/b] --target main
 git -C <TMP> status --porcelain --untracked-files=no
-cd <TMP> && git fetch origin main feature/a feature/b
-cd <TMP> && git checkout -B main origin/main
-cd <TMP> && git merge --squash origin/feature/a
+cd <TMP> && git fetch origin +main:refs/erun/gate-merge/main +feature/a:refs/erun/gate-merge/feature/a +feature/b:refs/erun/gate-merge/feature/b
+cd <TMP> && git checkout -B main refs/erun/gate-merge/main
+cd <TMP> && git merge --squash refs/erun/gate-merge/feature/a
 cd <TMP> && git commit -m '<message>'
-cd <TMP> && git merge --squash origin/feature/b
+cd <TMP> && git merge --squash refs/erun/gate-merge/feature/b
 cd <TMP> && git commit -m '<message>'
