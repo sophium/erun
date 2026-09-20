@@ -294,6 +294,16 @@ func IsDockerCreatePackageDenied(message string) bool {
 	return strings.Contains(strings.ToLower(message), "create_package")
 }
 
+// IsDockerMissingLocalImageError reports the daemon refusing to act on an image
+// its local store does not hold — the "No such image: <ref>" it answers a tag
+// or an inspect with. It is the shape a stale cache decision takes when the
+// image that decision was made from has since been evicted: a daemon reclaiming
+// space under disk pressure, a prune, or a release whose other images grew the
+// store between the decision and the work.
+func IsDockerMissingLocalImageError(message string) bool {
+	return strings.Contains(strings.ToLower(message), "no such image")
+}
+
 // IsDockerUnknownBlobError reports a registry refusing to link a manifest to a
 // blob it does not actually hold — "unknown blob" from the daemon's push
 // output, or the registry's own BLOB_UNKNOWN error code. This is the shape a

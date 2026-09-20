@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -182,9 +183,9 @@ func TestStepTimingCacheDecisionAppearsOnStepAndPlatformChildren(t *testing.T) {
 	clock := newFakeClock()
 	root := newStepTiming("build", clock.now)
 	image := root.child("erun-console")
-	image.setCache(false, "fingerprint image is missing for platform linux/amd64")
 
 	cache := &cacheDecision{hit: false, missReason: "fingerprint image is missing for platform linux/amd64"}
+	image.setCache(cache)
 	clock.advance(2 * time.Second)
 	image.addFinishedChild("linux/amd64", 2*time.Second, nil, cache, nil)
 	clock.advance(1 * time.Second)
@@ -212,6 +213,45 @@ func TestStepTimingCacheDecisionAppearsOnStepAndPlatformChildren(t *testing.T) {
 	for _, platform := range imageJSON.Steps {
 		if platform.CacheHit == nil || *platform.CacheHit {
 			t.Fatalf("expected platform %s to carry the same cache-miss tag, got %+v", platform.Name, platform.CacheHit)
+		}
+	}
+}
+
+// An image whose promote turns out unable to trust its fingerprint image is
+// rebuilt, so the "cache hit" it announced before the build ran has to be
+// demoted — otherwise the one artifact an operator reads to diagnose a slow
+// release reports the opposite of what happened: a full rebuild labelled a
+// cache hit (the same lie as a gate build promoted from a cached fingerprint).
+func TestPromoteFallbackDemotesTheAnnouncedCacheHit(t *testing.T) {
+	fpTag := fingerprintTag(testPromoteBuildInput().Image, "abc123", "linux/amd64")
+	newRecordingFakeDocker(t, fakeDockerShapes{missingTags: []string{fpTag}})
+
+	var stdout, stderr bytes.Buffer
+	ctx := Context{Stdout: &stdout, Stderr: &stderr}
+	root := newStepTiming("build", nil)
+	ctx.timing = root
+	if err := executeDockerBuild(ctx, testPromoteBuildInput(), nil, &stdout, &stderr); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	joined := strings.Join(renderStepTimingRows(root, 0), "\n")
+	if strings.Contains(joined, "cache hit") {
+		t.Fatalf("a rebuilt image must not be reported as a cache hit, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "cache miss: fingerprint image is missing for platform linux/amd64") {
+		t.Fatalf("expected the demoted decision to name the missing fingerprint image, got:\n%s", joined)
+	}
+
+	imageJSON := root.toRecord("build").Steps[0]
+	if imageJSON.CacheHit == nil || *imageJSON.CacheHit {
+		t.Fatalf("expected the image step to record a cache miss, got %+v", imageJSON.CacheHit)
+	}
+	if imageJSON.CacheMissReason != "fingerprint image is missing for platform linux/amd64" {
+		t.Fatalf("expected the JSON record to carry the demoted reason, got %q", imageJSON.CacheMissReason)
+	}
+	for _, platform := range imageJSON.Steps {
+		if platform.CacheHit == nil || *platform.CacheHit {
+			t.Fatalf("expected platform %s to carry the demoted tag too, got %+v", platform.Name, platform.CacheHit)
 		}
 	}
 }

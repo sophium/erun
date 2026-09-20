@@ -36,9 +36,38 @@ type stepTiming struct {
 // cacheDecision records whether an image build promoted from the fingerprint
 // cache or rebuilt, and why, so the timing report can answer "how long" and
 // "why" from the same row instead of sending a reader back to the trace.
+//
+// One decision is shared by the image's own step and every per-platform child
+// under it, so a decision that turns out wrong — a promote whose fingerprint
+// image was gone by the time it ran — is corrected for all of them at once.
+// It is written from the build and read from the report, hence the mutex.
 type cacheDecision struct {
+	mu         sync.Mutex
 	hit        bool
 	missReason string
+}
+
+// markMiss demotes a decision announced before the build ran: the promote it
+// described could not be trusted and the image was rebuilt for real. Without
+// this the report would call a full rebuild a cache hit — the same
+// cache-hit-standing-in-for-work-that-never-ran lie the trace avoids.
+func (d *cacheDecision) markMiss(reason string) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.hit = false
+	d.missReason = reason
+	d.mu.Unlock()
+}
+
+func (d *cacheDecision) snapshot() (hit bool, missReason string) {
+	if d == nil {
+		return false, ""
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.hit, d.missReason
 }
 
 func newStepTiming(name string, now func() time.Time) *stepTiming {
@@ -94,9 +123,12 @@ func (s *stepTiming) finish(err error) {
 	s.cgroupMetrics = buildCgroupMetricsFromSnapshots(s.cgroupBefore, captureBuildCgroupSnapshot(), s.end.Sub(s.start))
 }
 
-func (s *stepTiming) setCache(hit bool, missReason string) {
+// setCache attaches a decision by pointer, not by value: the same decision is
+// handed to every per-platform child, so a later markMiss reaches the image's
+// own row and its children together.
+func (s *stepTiming) setCache(decision *cacheDecision) {
 	s.mu.Lock()
-	s.cache = &cacheDecision{hit: hit, missReason: missReason}
+	s.cache = decision
 	s.mu.Unlock()
 }
 
@@ -174,13 +206,13 @@ func (c Context) startTimingStep(name string) (Context, func(error)) {
 	return next, func(err error) { child.finish(err) }
 }
 
-// recordTimingCache attaches a fingerprint cache hit/miss decision to the
-// context's current step (a no-op outside an active timing root).
-func (c Context) recordTimingCache(hit bool, missReason string) {
+// recordTimingCache attaches a fingerprint cache decision to the context's
+// current step (a no-op outside an active timing root).
+func (c Context) recordTimingCache(decision *cacheDecision) {
 	if c.timing == nil {
 		return
 	}
-	c.timing.setCache(hit, missReason)
+	c.timing.setCache(decision)
 }
 
 // timingPlatformObserver returns a callback that records one finished
@@ -311,10 +343,10 @@ func renderStepTimingRows(step *stepTiming, depth int) []string {
 		label += " (failed)"
 	}
 	if snap.cache != nil {
-		if snap.cache.hit {
+		if hit, missReason := snap.cache.snapshot(); hit {
 			label += " (cache hit)"
 		} else {
-			label += " (cache miss: " + snap.cache.missReason + ")"
+			label += " (cache miss: " + missReason + ")"
 		}
 	}
 	row := strings.Repeat("  ", depth) + label + " [" + snap.dur.String() + "]" + buildCgroupSummary(snap.cgroup)
@@ -376,9 +408,9 @@ func (s *stepTiming) toStepJSON() TimingStepJSON {
 		Cgroup:          snap.cgroup,
 	}
 	if snap.cache != nil {
-		hit := snap.cache.hit
+		hit, missReason := snap.cache.snapshot()
 		out.CacheHit = &hit
-		out.CacheMissReason = snap.cache.missReason
+		out.CacheMissReason = missReason
 	}
 	if len(snap.children) > 0 {
 		out.Steps = make([]TimingStepJSON, 0, len(snap.children))

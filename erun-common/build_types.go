@@ -139,6 +139,12 @@ type DockerBuildSpec struct {
 	// the same buildInput value it hands to the builder — exactly how it already
 	// threads Verbosity through. Never marshaled: a func value has no JSON form.
 	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) `json:"-"`
+	// PromoteFallbackObserver, when set, is called once with every platform a
+	// promote could not trust its fingerprint image for and rebuilt from source
+	// instead. It exists so a caller can correct the cache decision announced
+	// before the build ran: an image that had to be rebuilt must not be reported
+	// as a cache hit. Never marshaled, like PlatformObserver.
+	PromoteFallbackObserver func(platforms []string) `json:"-"`
 }
 
 type DockerPushSpec struct {

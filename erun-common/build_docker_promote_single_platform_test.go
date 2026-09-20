@@ -42,6 +42,9 @@ type fakeDockerShapes struct {
 	inspectFails bool
 	// unreadableTags answer `docker image inspect` with output that is not JSON.
 	unreadableTags []string
+	// missingTags are tags the local store does not hold. `docker tag` from one
+	// fails with the daemon's own answer for an absent source, verbatim.
+	missingTags []string
 }
 
 // newRecordingFakeDocker installs a stub `docker` (via the ERUN_DOCKER_BIN
@@ -57,15 +60,28 @@ func newRecordingFakeDocker(t *testing.T, shapes fakeDockerShapes) {
 		"      " + shellCasePattern(shapes.undescribedTags) + ") echo '" + dockerImageUndescribedJSON + "' ;;\n" +
 		"      " + shellCasePattern(shapes.unreadableTags) + ") echo 'not json' ;;\n" +
 		"      *) echo '" + dockerImagePlainJSON + "' ;;\n" +
-		"    esac ;;\n"
+		"    esac\n"
 	if shapes.inspectFails {
 		inspectAnswer = "    exit 1\n"
 	}
+	// `docker tag <source> <target>` re-tags a source the store no longer holds
+	// the way the daemon does, so a promote built on a stale decision reaches the
+	// same failure a real release hits.
+	tagAnswer := "    case \"$2\" in\n" +
+		"      " + shellCasePattern(shapes.missingTags) + ")\n" +
+		"        echo \"Error response from daemon: No such image: $2\" >&2\n" +
+		"        exit 1\n" +
+		"        ;;\n" +
+		"    esac\n"
 	script := "#!/bin/bash\n" +
 		"echo \"$*\" >> " + logPath + "\n" +
 		"case \"$1\" in\n" +
 		"  image)\n" +
 		inspectAnswer +
+		"    ;;\n" +
+		"  tag)\n" +
+		tagAnswer +
+		"    ;;\n" +
 		"esac\n" +
 		"exit 0\n"
 	path := filepath.Join(dir, "docker")
@@ -241,6 +257,47 @@ func TestPromotePublishesWhenTheImageShapeCannotBeRead(t *testing.T) {
 				t.Fatalf("an unreadable image shape must not force a rebuild, got %v", builds)
 			}
 		})
+	}
+}
+
+// The other way a cache entry cannot be promoted: the local store no longer has
+// it. A release decides up front and then spends minutes building the rest of
+// its images, and a daemon reclaiming space evicts the very content the decision
+// was based on, so the promote's re-tag fails with "No such image: <fp tag>" —
+// after every other image in the release has been built. That is a cache miss,
+// not a failure: the platform is built and pushed for real, and the rebuild also
+// re-points the fingerprint entry, so the next run's decision is honest again.
+func TestPromoteRebuildsWhenTheLocalStoreLosesTheFingerprintImage(t *testing.T) {
+	perArchTag := "ghcr.io/sophium/erun-console:1.0.246-amd64"
+	fpTag := fingerprintTag(testPromoteBuildInput().Image, "abc123", "linux/amd64")
+	newRecordingFakeDocker(t, fakeDockerShapes{missingTags: []string{fpTag}})
+
+	var stdout, stderr bytes.Buffer
+	if err := DockerImageBuilder(testPromoteBuildInput(), &stdout, &stderr); err != nil {
+		t.Fatalf("a fingerprint image the local store lost is a cache miss, not a failure, got: %v", err)
+	}
+
+	recorded := dockerCallsFrom(t)
+	build := indexOfArgv(recorded, "build", "--platform linux/amd64")
+	if build < 0 {
+		t.Fatalf("expected the platform to be rebuilt from source, got %v", recorded)
+	}
+	// The promoted tag must only ever be published from the rebuild: a promote
+	// that could not re-tag anything has nothing of its own to push.
+	if pushes := dockerCallsMatching(recorded, "push", perArchTag); len(pushes) != 1 {
+		t.Fatalf("expected exactly one push of %s, got %v", perArchTag, pushes)
+	}
+	if indexOfArgv(recorded, "push", perArchTag) < build {
+		t.Fatalf("the absent cache entry was pushed before anything rebuilt it: %v", recorded)
+	}
+	if !strings.Contains(stderr.String(), "the local store no longer has the fingerprint image it was decided from") ||
+		!strings.Contains(stderr.String(), perArchTag) {
+		t.Fatalf("expected the rebuild to name the tag and the reason, got: %s", stderr.String())
+	}
+	// The rebuild is what repairs the cache the next run reads.
+	repaired := indexOfExactCall(recorded, "tag "+perArchTag+" "+fpTag)
+	if repaired < build {
+		t.Fatalf("the fingerprint entry was not re-pointed after the rebuild that produces it: %v", recorded)
 	}
 }
 

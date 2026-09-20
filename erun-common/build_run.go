@@ -36,6 +36,11 @@ func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 // is active — see startTimingStep) and wires PlatformObserver so the builder
 // reports each architecture's duration into it, tagged with the same cache
 // decision the trace already names.
+//
+// The decision is one object shared by the image's row and its per-platform
+// children, and PromoteFallbackObserver demotes it if a promote turns out
+// unable to trust its fingerprint image: the image is rebuilt for real, so
+// leaving the hit it announced would report a full build as a cache hit.
 func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
 	if build == nil {
 		build = DockerImageBuilder
@@ -45,7 +50,10 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 	var cache *cacheDecision
 	if hit, applicable, reason := incrementalCacheDecision(buildInput); applicable {
 		cache = &cacheDecision{hit: hit, missReason: reason}
-		stepCtx.recordTimingCache(hit, reason)
+		stepCtx.recordTimingCache(cache)
+		buildInput.PromoteFallbackObserver = func(platforms []string) {
+			cache.markMiss("fingerprint image is missing for " + describeMissingPlatforms(platforms))
+		}
 	}
 	buildInput.PlatformObserver = stepCtx.timingPlatformObserver(cache)
 	err := build(buildInput, stdout, stderr)

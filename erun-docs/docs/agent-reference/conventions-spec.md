@@ -288,7 +288,7 @@ Each successful build writes the fingerprint to `<projectRoot>/.erun/config.yaml
 
 1. Compute the local fingerprint per the rule above.
 2. Read the configured fingerprint from `<projectRoot>/.erun/config.yaml`.
-3. If local == configured: pull `<registry>/<image>:fp-<configured>-<arch>` from the registry. On hit, re-tag locally as the current build's intended tag. **Skip the `docker build` invocation.** Emit `result: cached`.
+3. If local == configured: pull `<registry>/<image>:fp-<configured>-<arch>` from the registry. On hit, re-tag locally as the current build's intended tag. **Skip the `docker build` invocation.** Emit `result: cached`. A cached copy that cannot be trusted is a miss rather than a failure: the local store no longer holding the image when the promote runs (a release decides the whole set up front and can outlive its own cache under disk pressure), the registry no longer holding a blob the image references, and a cache entry that is a multi-platform index where the per-arch tag claims a single platform all rebuild that platform from source, which also re-points the fingerprint entry at the rebuilt image.
 4. If local != configured (or the pull misses): run `docker buildx build` per the [multi-architecture contract](#multi-architecture-build-contract). Update `<projectRoot>/.erun/config.yaml` with the new fingerprint. Emit `result: built`.
 
 `--no-incremental` on `erun build` skips steps 1–3 and rebuilds every image unconditionally.
