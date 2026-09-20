@@ -579,6 +579,40 @@ echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
 	}
 }
 
+// TestDiskHeadroomAbsentExecutableIsNamedNotSpliced covers the third state the
+// read has to tell apart, alongside a daemon that answers and one that stops
+// answering: no docker at all on PATH. The read must still report why — but in
+// its own words, never by splicing the runtime's own "exec: ...: executable
+// file not found in $PATH". That string is what any run reaching for an
+// undeclared binary produces, so a trace carrying it is indistinguishable from
+// a build silently depending on whatever the host happens to have installed,
+// which is a different fault from a daemon that is present but unhealthy.
+func TestDiskHeadroomAbsentExecutableIsNamedNotSpliced(t *testing.T) {
+	// A name that resolves nowhere, so the read reaches a missing binary rather
+	// than any real docker the host has installed.
+	t.Setenv("ERUN_DOCKER_BIN", "erun-no-such-docker-binary-for-headroom-test")
+	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+
+	logs := &strings.Builder{}
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	policy := buildDiskHeadroomPolicy
+	policy.limits = diskHeadroomShortLimits()
+
+	if err := awaitHeadroomPreflight(t, ctx, policy); err != nil {
+		t.Fatalf("a build must still proceed on a disk it could not measure, got %v", err)
+	}
+	message := logs.String()
+	if !strings.Contains(message, "not observable") {
+		t.Fatalf("expected the skipped check to say so, got %q", message)
+	}
+	if !strings.Contains(message, "the executable is not on PATH") {
+		t.Fatalf("expected an absent docker to be named as absent, got %q", message)
+	}
+	if strings.Contains(message, "executable file not found in") {
+		t.Fatalf("expected the missing binary's cause to be reported in the check's own words rather than spliced from the runtime, got %q", message)
+	}
+}
+
 func TestParseDockerSize(t *testing.T) {
 	// Shapes taken from real `docker system df --format` output on a build box.
 	cases := []struct {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -442,6 +443,15 @@ func diskHeadroomReadFailure(limit time.Duration, what string, err error) error 
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("%s did not answer within %s", what, limit)
+	}
+	// An executable that is not on PATH is reported as that, not by splicing
+	// the runtime's own "exec: ...: executable file not found" string. The
+	// callers' traces are read as evidence of what a run reached for, and that
+	// string is indistinguishable there from a run silently depending on a
+	// binary it never declared — a different fault from a daemon that is
+	// present but unhealthy.
+	if errors.Is(err, exec.ErrNotFound) {
+		return fmt.Errorf("%s could not run: the executable is not on PATH", what)
 	}
 	return fmt.Errorf("%s failed: %w", what, err)
 }
