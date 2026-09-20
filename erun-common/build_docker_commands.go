@@ -107,21 +107,13 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 }
 
 // promotePlatformImage re-tags one platform's cached fingerprint image and
-// pushes it under the real version tag. The fingerprint check that chose this
-// path only proves the image exists in the local daemon; it says nothing about
-// whether the registry still holds every blob that image references, nor about
-// whether the local image is the single platform the tag claims to be
-// (see localImageIsSinglePlatform). Promotion is only ever an optimization over
-// building from source, so either a push the registry rejects for a blob it
-// doesn't have — surfacing as "unknown blob" — or a cache entry that cannot be
-// published as a per-arch manifest falls back to building and pushing this
-// platform for real, rather than failing the whole release over a check that
-// was wrong.
-//
-// Any other failure (a real auth or network error, for instance) is not
-// retried, since rebuilding could not change its outcome; it is returned with
-// the promoted tag and its cached source named, so the failure says which
-// image and which operation it belongs to instead of a bare daemon message.
+// pushes it under the real version tag. Promotion is only ever an optimization
+// over building from source, so a promote that cannot be trusted falls back to
+// building and pushing this platform for real rather than failing the whole
+// release over a cache check that was wrong; settlePromoteFailure decides which
+// failures those are. Every other failure is returned with the promoted tag and
+// its cached source named, so it says which image and which operation it
+// belongs to instead of a bare daemon message.
 func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
@@ -146,13 +138,42 @@ func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, s
 	if err == nil && singlePlatform {
 		return "", nil
 	}
-	if err != nil && !IsDockerUnknownBlobError(err.Error()) {
-		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, err)
-	}
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
-	} else {
+	return settlePromoteFailure(buildInput, platform, platformTag, fpTag, err, stdout, stderr)
+}
+
+// promoteSourceMissing reports an affirmative "no image" from the local store
+// for the fingerprint tag a promote would re-tag. An inspect that could not run
+// at all is not that: it is not evidence the image is gone, so it is left to
+// fail on the daemon's own reason — the same fail-safe direction
+// localImageIsSinglePlatform takes for a shape it cannot read.
+func promoteSourceMissing(fpTag string) bool {
+	present, err := DockerImageExists(fpTag)
+	return err == nil && !present
+}
+
+// settlePromoteFailure decides what a promote that did not publish does. The
+// fingerprint check that chose the promote path proves only that the cached
+// image existed when that check ran, which is before any image in the run
+// builds; this promote runs minutes later, so a disk-floor prune mid-release is
+// enough to take the image out from under a decision already made. That case,
+// a push the registry rejects for a blob it does not hold (surfacing as
+// "unknown blob"), and a cache entry that cannot be published as a per-arch
+// manifest all mean the same thing — this cache entry cannot be trusted this
+// run — so all three rebuild and push this platform from source, instead of
+// aborting a release whose other images have all built.
+//
+// Any other failure (a real auth or network error, for instance) is not
+// retried, since rebuilding could not change its outcome.
+func settlePromoteFailure(buildInput DockerBuildSpec, platform, platformTag, fpTag string, promoteErr error, stdout, stderr io.Writer) (string, error) {
+	switch {
+	case promoteErr == nil:
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s would publish a multi-platform image under a per-arch tag; rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, platform)
+	case promoteSourceMissing(fpTag):
+		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); that cached image is no longer in the local image store, so rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, promoteErr, platform)
+	case IsDockerUnknownBlobError(promoteErr.Error()):
+		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, promoteErr)
+	default:
+		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, promoteErr)
 	}
 	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 }

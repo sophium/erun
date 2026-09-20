@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -55,6 +56,120 @@ func newFakeDockerOnPath(t *testing.T, pushFailureMessage string) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+// newFakeDockerImageStore puts a fake `docker` executable ahead of PATH that
+// models a local image store holding exactly the tags in present: `docker image
+// inspect` succeeds only for those, `docker tag` fails with the daemon's own
+// "No such image" for any other source, and every other subcommand (build,
+// push, manifest) succeeds. Every invocation is appended to invocations.log in
+// the returned state dir, so a test can tell a promote from a rebuild.
+func newFakeDockerImageStore(t *testing.T, present ...string) (invocations func() string) {
+	t.Helper()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	var seed strings.Builder
+	for _, tag := range present {
+		fmt.Fprintf(&seed, "touch \"$store/%s\"\n", fakeDockerStoreKey(tag))
+	}
+	script := "#!/bin/bash\n" +
+		"store=\"" + stateDir + "\"\n" +
+		"key() { echo \"$1\" | tr '/:.' '_'; }\n" +
+		"has() { [ -f \"$store/$(key \"$1\")\" ]; }\n" +
+		"mark() { touch \"$store/$(key \"$1\")\"; }\n" +
+		seed.String() +
+		"printf '%s\\n' \"$*\" >> \"$store/invocations.log\"\n" +
+		"case \"$1\" in\n" +
+		"  image)\n" +
+		"    tag=\"${@: -1}\"\n" +
+		"    if [ \"$2\" = \"inspect\" ] && ! has \"$tag\"; then\n" +
+		"      echo \"Error: No such image: $tag\" >&2\n" +
+		"      exit 1\n" +
+		"    fi\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"  tag)\n" +
+		"    src=\"$2\"\n" +
+		"    if ! has \"$src\"; then\n" +
+		"      echo \"Error response from daemon: No such image: $src\" >&2\n" +
+		"      exit 1\n" +
+		"    fi\n" +
+		"    mark \"$3\"\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"  build)\n" +
+		"    prev=\"\"\n" +
+		"    for arg in \"$@\"; do\n" +
+		"      if [ \"$prev\" = \"-t\" ]; then mark \"$arg\"; fi\n" +
+		"      prev=\"$arg\"\n" +
+		"    done\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"  *)\n" +
+		"    exit 0\n" +
+		"    ;;\n" +
+		"esac\n"
+	path := filepath.Join(binDir, "docker")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() string {
+		data, err := os.ReadFile(filepath.Join(stateDir, "invocations.log"))
+		if err != nil {
+			return ""
+		}
+		return string(data)
+	}
+}
+
+// fakeDockerStoreKey mirrors the shell fake's key() so both sides agree on which
+// file stands for which tag.
+func fakeDockerStoreKey(tag string) string {
+	return strings.NewReplacer("/", "_", ":", "_", ".", "_").Replace(tag)
+}
+
+// TestPromoteDockerImageRebuildsWhenTheCachedFingerprintImageIsGone reproduces
+// the reported symptom: the fingerprint check that chose promotion ran before
+// every other image in the run built, and by the time the promote runs the
+// cached image is no longer in the local store (a disk-floor prune mid-release
+// is enough). The fix treats that absence as a cache miss and rebuilds the
+// platform from source instead of aborting a release whose other images have
+// all built.
+func TestPromoteDockerImageRebuildsWhenTheCachedFingerprintImageIsGone(t *testing.T) {
+	invocations := newFakeDockerImageStore(t)
+
+	var stdout, stderr bytes.Buffer
+	if err := DockerImageBuilder(testPromoteBuildInput(), &stdout, &stderr); err != nil {
+		t.Fatalf("expected the missing cached image to rebuild instead of failing, got: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "is no longer in the local image store") {
+		t.Errorf("expected a note naming the missing cached image, got: %s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "fp-abc123-amd64") {
+		t.Errorf("expected the note to name the fingerprint source that was gone, got: %s", stderr.String())
+	}
+	if !strings.Contains(invocations(), "build --platform linux/amd64") {
+		t.Errorf("expected a real build to replace the promote, got invocations:\n%s", invocations())
+	}
+}
+
+// TestPromoteDockerImageStillPromotesWhenTheCachedFingerprintImageIsPresent
+// guards the other half: a cached image that is really there is still promoted,
+// with no rebuild behind it.
+func TestPromoteDockerImageStillPromotesWhenTheCachedFingerprintImageIsPresent(t *testing.T) {
+	invocations := newFakeDockerImageStore(t, "ghcr.io/sophium/erun-console:fp-abc123-amd64")
+
+	var stdout, stderr bytes.Buffer
+	if err := DockerImageBuilder(testPromoteBuildInput(), &stdout, &stderr); err != nil {
+		t.Fatalf("expected the present cached image to promote, got: %v", err)
+	}
+	if strings.Contains(stderr.String(), "rebuilding") {
+		t.Errorf("a present cached image must not rebuild, got: %s", stderr.String())
+	}
+	if strings.Contains(invocations(), "build ") {
+		t.Errorf("a present cached image must not run docker build, got invocations:\n%s", invocations())
+	}
+}
+
 func testPromoteBuildInput() DockerBuildSpec {
 	return DockerBuildSpec{
 		ContextDir:     "/tmp",
@@ -72,7 +187,7 @@ func testPromoteBuildInput() DockerBuildSpec {
 }
 
 // TestPromoteDockerImageFallsBackToARealBuildOnUnknownBlob reproduces the
-// erun#1921 symptom: a promote's push is rejected because the registry
+// reported symptom: a promote's push is rejected because the registry
 // doesn't hold a blob docker's cache believed was already there. The fix
 // treats that as proof the cache hit cannot be trusted this run and rebuilds
 // the platform from source instead of failing the release.
