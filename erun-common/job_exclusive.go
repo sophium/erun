@@ -80,8 +80,10 @@ type EnvironmentExclusivityConflictError struct {
 	// Operation names what was refused, so the refusal reads as a sentence
 	// about the caller's own action rather than about the mechanism.
 	Operation string
-	// Scope is always EnvironmentActivityLeaseScopeEnvironment today; it is
-	// carried so a reader never has to assume which scope was contended.
+	// Scope is the scope the holder actually took its claim on, carried so a
+	// reader never has to assume which scope was contended — and so the
+	// release remedy below names the store the claim is really in, rather than
+	// the environment scope an exclusive take only uses when asked for it.
 	Scope  string
 	Holder EnvironmentActivityLease
 	// HolderJobID is the job behind the claim, empty when the holder is not a
@@ -132,16 +134,65 @@ func formatEnvironmentExclusivityRemaining(remaining time.Duration) string {
 // deliberate: that read is also what reclaims an expired or orphaned claim, so
 // the answer here can never be a claim nobody holds any more.
 func heldEnvironmentExclusivityClaim(tenant, environment string, now time.Time) (EnvironmentActivityLease, bool) {
-	held, err := LoadEnvironmentActivityLeases(tenant, environment, now)
-	if err != nil {
+	claims := heldEnvironmentExclusivityClaims(tenant, environment, now, environmentExclusivityHoldsWholeEnvironment)
+	if len(claims) == 0 {
 		return EnvironmentActivityLease{}, false
 	}
+	return claims[0], true
+}
+
+// environmentExclusivityHoldsWholeEnvironment is the one scope that means "no
+// other work here at all", rather than "not this resource".
+func environmentExclusivityHoldsWholeEnvironment(scope string) bool {
+	return strings.TrimSpace(scope) == EnvironmentActivityLeaseScopeEnvironment
+}
+
+// environmentExclusivityCoversWorktree reports whether a claim in scope covers
+// the environment's one shared worktree, which is what `exec gate-merge`
+// rewrites. The default scope claims exactly that resource, and the
+// environment scope claims everything here, so it covers the worktree too. Any
+// other scope names a resource of the caller's own choosing — a second clone's
+// checkout, the case scopes exist for -- and a claim on it must not refuse work
+// in a different one.
+func environmentExclusivityCoversWorktree(scope string) bool {
+	switch strings.TrimSpace(scope) {
+	case defaultEnvironmentActivityLeaseScope, EnvironmentActivityLeaseScopeEnvironment:
+		return true
+	default:
+		return false
+	}
+}
+
+// heldEnvironmentExclusivityClaims returns every held exclusive claim whose
+// scope satisfies covers, in the store's own deterministic order. A slice
+// rather than the one claim, because two scopes can be held at once, one claim
+// per scope, and a caller entitled to work under one of them is not thereby
+// entitled to work under the other.
+func heldEnvironmentExclusivityClaims(tenant, environment string, now time.Time, covers func(string) bool) []EnvironmentActivityLease {
+	held, err := LoadEnvironmentActivityLeases(tenant, environment, now)
+	if err != nil {
+		return nil
+	}
+	var claims []EnvironmentActivityLease
 	for _, lease := range held {
-		if lease.Exclusive && lease.Scope == EnvironmentActivityLeaseScopeEnvironment {
-			return lease, true
+		if lease.Exclusive && covers(lease.Scope) {
+			claims = append(claims, lease)
 		}
 	}
-	return EnvironmentActivityLease{}, false
+	return claims
+}
+
+// environmentExclusivityExemption names why this caller may run under a held
+// claim, or returns "" when it may not: either it took the claim itself and
+// named it, or the claim belongs to a job it is running inside.
+func environmentExclusivityExemption(tenant, environment string, holder EnvironmentActivityLease, underLeaseID string) string {
+	if environmentExclusivityClaimedByCaller(holder, underLeaseID) {
+		return fmt.Sprintf("running under the caller's own exclusive claim %s", holder.ID)
+	}
+	if environmentExclusivityHeldByOwnLineage(tenant, environment, holder) {
+		return fmt.Sprintf("running under this caller's own job's exclusive claim %s", holder.ID)
+	}
+	return ""
 }
 
 // environmentExclusivityConflict builds the refusal for a claim this caller is
@@ -150,7 +201,7 @@ func environmentExclusivityConflict(operation, tenant, environment string, holde
 	holderJobID, _ := environmentJobIDFromExclusiveLeaseID(holder.ID)
 	return &EnvironmentExclusivityConflictError{
 		Operation:   operation,
-		Scope:       EnvironmentActivityLeaseScopeEnvironment,
+		Scope:       NormalizeExclusiveEnvironmentActivityLeaseScope(holder.Scope),
 		Holder:      holder,
 		HolderJobID: holderJobID,
 		Requested:   requested,
@@ -181,23 +232,34 @@ func EnsureEnvironmentNotExclusivelyHeld(ctx Context, what, underLeaseID string)
 		return nil
 	}
 	now := time.Now()
-	holder, held := heldEnvironmentExclusivityClaim(tenant, environment, now)
-	if !held {
+	// Every exclusive claim covering the worktree this rewrites, not only the
+	// one claiming the whole environment. An exclusive take defaults to the
+	// worktree scope, so reading the environment scope alone found nothing to
+	// refuse and let the drive rewrite the tree under a claim that was held —
+	// failing open for exactly the caller, an orchestrator holding the worktree
+	// for its whole window, this guard was written for.
+	claims := heldEnvironmentExclusivityClaims(tenant, environment, now, environmentExclusivityCoversWorktree)
+	if len(claims) == 0 {
 		ctx.Trace(fmt.Sprintf("%s: no exclusive claim on %s/%s, proceeding", what, tenant, environment))
 		return nil
 	}
-	if environmentExclusivityClaimedByCaller(holder, underLeaseID) {
-		ctx.Trace(fmt.Sprintf("%s: running under the caller's own exclusive claim %s, proceeding", what, holder.ID))
-		return nil
+	// A caller entitled to work under one claim is not thereby entitled to work
+	// under another, so every covering claim is accounted for before this
+	// proceeds: the first one the caller is not exempt from refuses the whole
+	// operation, and nothing is traced as proceeding until none is left.
+	exemptions := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		exemption := environmentExclusivityExemption(tenant, environment, claim, underLeaseID)
+		if exemption == "" {
+			ctx.Trace(fmt.Sprintf("%s: refused, %s holds %s/%s exclusively", what, claim.ID, tenant, environment))
+			return environmentExclusivityConflict(what, tenant, environment, claim, false, now)
+		}
+		exemptions = append(exemptions, fmt.Sprintf("%s: %s, proceeding", what, exemption))
 	}
-	// A job's own nested work is entitled to run under the claim its own
-	// ancestor took, exactly as a nested job start is.
-	if environmentExclusivityHeldByOwnLineage(tenant, environment, holder) {
-		ctx.Trace(fmt.Sprintf("%s: running under this caller's own job's exclusive claim %s, proceeding", what, holder.ID))
-		return nil
+	for _, exemption := range exemptions {
+		ctx.Trace(exemption)
 	}
-	ctx.Trace(fmt.Sprintf("%s: refused, %s holds %s/%s exclusively", what, holder.ID, tenant, environment))
-	return environmentExclusivityConflict(what, tenant, environment, holder, false, now)
+	return nil
 }
 
 // environmentExclusivityClaimedByCaller compares a caller's declared claim id

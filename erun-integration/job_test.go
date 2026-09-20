@@ -587,6 +587,64 @@ func TestJob(t *testing.T) {
 		}
 	})
 
+	t.Run("agent_progress_reports_a_gateway_reasoning_refusal_as_the_reason", func(t *testing.T) {
+		// A gateway serving a reasoning model refuses the conversation when it
+		// wants the model's own reasoning handed back, and a client can only echo
+		// reasoning the gateway returned — so the refusal lands mid-run however
+		// far the job already got, and the work it did up to that point is all it
+		// has to show. The two events below are captured verbatim from `claude -p
+		// --output-format stream-json` on that refusal (the second is the closing
+		// envelope erun folds the error from), and the failed job's reason must
+		// say what was refused and that the work itself did not fail, rather than
+		// reporting a bare exit code under a checkpoint that names nothing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		refusal := "API Error: 400 The `reasoning_content` in the thinking mode must be passed back to the API."
+		events := []string{
+			`{"type":"assistant","message":{"model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"` + refusal + `"}]}}`,
+			`{"type":"result","subtype":"success","is_error":true,"result":"` + refusal + `"}`,
+		}
+		quoted := make([]string, 0, len(events))
+		for _, event := range events {
+			quoted = append(quoted, "'"+event+"'")
+		}
+		fixture.StubBinaryWithScript(t, stubs, "claude",
+			"printf '%s\\n' "+strings.Join(quoted, " ")+"\nexit 1")
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
+
+		start := startJob(t, setup, envVars, "sweep", "--agent", "claude", "--", "fix the failing tests")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--timeout", "30s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
+		}
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if status.ExitCode != 0 {
+			t.Fatalf("status: exit %d: %s", status.ExitCode, status.Combined)
+		}
+		var payload struct {
+			Reason   string `json:"reason"`
+			Progress struct {
+				Error string `json:"error"`
+			} `json:"progress"`
+		}
+		if err := json.Unmarshal([]byte(status.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, status.Stdout)
+		}
+		if !strings.Contains(payload.Progress.Error, "reasoning_content") {
+			t.Fatalf("expected the gateway's raw refusal preserved in progress.error, got %q", payload.Progress.Error)
+		}
+		if !strings.Contains(payload.Reason, "reasoning cannot be echoed back through this gateway") {
+			t.Fatalf("expected the reason to name the gateway's reasoning round-trip as the cause, got %q", payload.Reason)
+		}
+		if !strings.Contains(payload.Reason, "rather than the work failing") {
+			t.Fatalf("expected the reason to distinguish the refusal from a failed task, got %q", payload.Reason)
+		}
+	})
+
 	t.Run("agent_start_refuses_an_unsupported_tool_or_a_command", func(t *testing.T) {
 		// A caller that meant a command and a caller that meant an agent must not be
 		// silently given the other, and an unsupported tool must name the ones erun

@@ -1494,6 +1494,51 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/gate_merge_refuses_while_the_environment_is_held_exclusively", normalize.Apply(result.Combined))
 	})
 
+	t.Run("gate_merge_refuses_a_claim_taken_at_the_default_scope", func(t *testing.T) {
+		// A drive that names no --scope gets the documented default, "worktree",
+		// which is the environment's one shared worktree and exactly the resource
+		// gate-merge rewrites. That is the shape both transports record from an
+		// ordinary exclusive take, so it has to refuse here; reading only the
+		// "environment" scope left the guard inert for it and let the drive
+		// rewrite the tree under a claim that was held -- failing open.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := inEnvironment(append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev"))
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "merge-queue drive 2442", "--id", "merge-queue", "--exclusive", "--orchestrator", "erun",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		list := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		refused := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main", "--dry-run"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add widget\n"})
+		if refused.ExitCode == 0 {
+			t.Fatalf("expected a refusal while a default-scoped exclusive claim is held, got 0:\n%s", refused.Combined)
+		}
+		// --under-lease exempts that claim and only that claim, so the drive that
+		// took it proceeds where an unrelated id still does not.
+		own := erun.Run(t, []string{
+			"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main",
+			"--under-lease", "merge-queue", "--remote", "nonexistent", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add widget\n"})
+		if own.ExitCode != 0 {
+			t.Fatalf("the claim's own holder must not be refused: exit %d: %s", own.ExitCode, own.Combined)
+		}
+		other := erun.Run(t, []string{
+			"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main",
+			"--under-lease", "some-other-drive", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add widget\n"})
+		if other.ExitCode == 0 {
+			t.Fatalf("--under-lease must exempt only the caller's own claim, got 0:\n%s", other.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_refuses_a_claim_taken_at_the_default_scope", normalize.Apply(
+			take.Combined+list.Combined+refused.Combined+own.Combined+other.Combined))
+	})
+
 	t.Run("gate_merge_under_lease_is_not_refused_by_the_callers_own_claim", func(t *testing.T) {
 		// A merge-queue drive holds the environment for its whole window, which
 		// spans several separate processes and so cannot be expressed as a job.
