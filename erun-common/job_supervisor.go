@@ -297,11 +297,20 @@ var agentAuthFailureSignatures = []string{
 	"not logged in",
 }
 
-// agentAuthFailureReason returns a clarified failure reason when a failed
-// agent job's own folded error looks like an authentication problem, and ""
-// otherwise — never guessing on a message that does not match one of the
-// tools' own known phrasings.
-func agentAuthFailureReason(tool, message string) string {
+// agentGatewayRoundTripFailureSignatures are phrases a gateway serving a
+// reasoning model uses when it refuses a conversation because it must be handed
+// the model's own reasoning back. The refusal is the provider's, and it lands
+// mid-run however long the conversation has already run: the client can only
+// echo reasoning the gateway returned, so a turn whose reasoning the gateway
+// withheld cannot be replayed by any client, including this one.
+var agentGatewayRoundTripFailureSignatures = []string{
+	"`reasoning_content` in the thinking mode",
+}
+
+// agentFailureReason returns a clarified failure reason when a failed agent
+// job's own folded error names a known cause, and "" otherwise — never guessing
+// on a message that does not match one of the tools' own known phrasings.
+func agentFailureReason(tool, message string) string {
 	trimmed := strings.TrimSpace(message)
 	if trimmed == "" {
 		return ""
@@ -310,6 +319,11 @@ func agentAuthFailureReason(tool, message string) string {
 	for _, signature := range agentAuthFailureSignatures {
 		if strings.Contains(lower, signature) {
 			return fmt.Sprintf("%s reported an authentication failure (%s); this environment's %s credentials are missing or stale, not a problem with the work itself", tool, trimmed, tool)
+		}
+	}
+	for _, signature := range agentGatewayRoundTripFailureSignatures {
+		if strings.Contains(lower, signature) {
+			return fmt.Sprintf("%s was refused mid-run by the gateway model's provider (%s): the model's reasoning cannot be echoed back through this gateway, so the conversation was rejected mid-run rather than the work failing; the working tree it left is preserved, and dispatching the work again starts a fresh conversation", tool, trimmed)
 		}
 	}
 	return ""
@@ -933,7 +947,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		job.OutputTruncated = writer.truncated()
 		job.Signal = signal
 		if reason == "" && code != 0 && job.Kind == EnvironmentJobKindAgent && job.Progress != nil {
-			reason = agentAuthFailureReason(job.AgentTool, job.Progress.Error)
+			reason = agentFailureReason(job.AgentTool, job.Progress.Error)
 		}
 		job.Reason = reason
 		job.ExitCode = &code
