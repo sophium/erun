@@ -12,6 +12,14 @@ export interface UIOpenRouterModel {
   // declaring the larger headline lets a conversation grow past what the
   // serving provider accepts.
   context?: number;
+  // Set when the model's provider demands the model's own reasoning back on the
+  // next request. No erun AI lane can drive such a model: every lane drives
+  // Claude Code, which builds the requests erun never builds and models no
+  // reasoning_content at all, so a conversation on it is refused mid-run rather
+  // than failing the work. Declaring one keeps it out of the selectable set and
+  // out of the model an environment renders as ANTHROPIC_MODEL, so the failure
+  // lands where the model is chosen instead of tens of turns in.
+  requiresReasoningEcho?: boolean;
 }
 
 export interface UIOpenRouterConfig {

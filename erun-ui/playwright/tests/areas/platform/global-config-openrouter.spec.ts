@@ -382,4 +382,47 @@ test.describe('erun-level gateway catalog', () => {
 
     await restoreCatalog(app.globalConfigDialog);
   });
+
+  test('keeps a declared reasoning-echo model out of the default choices', async ({ app }) => {
+    // Declaring the listing is how an operator records that the provider
+    // demands the model's own reasoning back, which no erun AI lane can supply.
+    // Two things must survive: the declaration itself, and the listing then not
+    // being offered as the default an environment renders as ANTHROPIC_MODEL
+    // and an exec agent job starts on.
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+    await clearCatalog(app.globalConfigDialog);
+    await expect(app.globalConfigDialog.openRouterModelRows()).toHaveCount(0);
+
+    await app.globalConfigDialog.setOpenRouterBaseURL('https://openrouter.ai/api');
+    await app.globalConfigDialog.addOpenRouterModel({
+      id: 'deepseek/deepseek-v4.1-flash',
+      context: 1048576,
+    });
+    // Undeclared by default, so the control is reporting state rather than
+    // always reading as on.
+    await expect(app.globalConfigDialog.openRouterReasoningEchoCheckbox(0)).not.toBeChecked();
+    await app.globalConfigDialog.openRouterReasoningEchoCheckbox(0).check();
+    await expect(app.globalConfigDialog.openRouterReasoningEchoCheckbox(0)).toBeChecked();
+
+    // The default list is the model an environment starts on, so a declared
+    // listing must not appear in it however the row is otherwise filled in.
+    await app.globalConfigDialog.openRouterDefaultModelTrigger().click();
+    await expect(
+      app.page.getByRole('option', { name: 'deepseek/deepseek-v4.1-flash' }),
+    ).toBeHidden();
+    await app.page.keyboard.press('Escape');
+
+    await app.globalConfigDialog.save();
+    await app.globalConfigDialog.waitForClosed();
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+    // The declaration survives the save. The editor writes the whole catalog
+    // back, so a conversion that dropped this field would delete it here and
+    // quietly return the row to the selectable set on the operator's first edit.
+    await expect(app.globalConfigDialog.openRouterReasoningEchoCheckbox(0)).toBeChecked();
+
+    await restoreCatalog(app.globalConfigDialog);
+  });
 });

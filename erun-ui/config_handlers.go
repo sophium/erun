@@ -341,7 +341,7 @@ func openRouterConfigToUI(config *eruncommon.OpenRouterConfig) *uiOpenRouterConf
 		DefaultModel: strings.TrimSpace(config.DefaultModel),
 	}
 	for _, m := range config.Models {
-		out.Models = append(out.Models, uiOpenRouterModel{ID: strings.TrimSpace(m.ID), Context: m.Context})
+		out.Models = append(out.Models, uiOpenRouterModel{ID: strings.TrimSpace(m.ID), Context: m.Context, RequiresReasoningEcho: m.RequiresReasoningEcho})
 	}
 	return out
 }
@@ -360,7 +360,7 @@ func openRouterConfigFromUI(config *uiOpenRouterConfig) *eruncommon.OpenRouterCo
 		if id == "" {
 			continue
 		}
-		out.Models = append(out.Models, eruncommon.OpenRouterModel{ID: id, Context: m.Context})
+		out.Models = append(out.Models, eruncommon.OpenRouterModel{ID: id, Context: m.Context, RequiresReasoningEcho: m.RequiresReasoningEcho})
 	}
 	return out
 }

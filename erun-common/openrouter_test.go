@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestOpenRouterConfigNilSafety(t *testing.T) {
@@ -356,5 +358,151 @@ func TestResolveClaudeLaunchModelWithGateway(t *testing.T) {
 				t.Fatalf("resolveClaudeLaunchModel(%+v, gateway) = %q, want %q", tc.config, got, tc.want)
 			}
 		})
+	}
+}
+
+// reasoningEchoGateway is a catalog whose first entry is declared undriveable:
+// the default an environment would otherwise render as ANTHROPIC_MODEL, and the
+// model an exec agent job would start on.
+func reasoningEchoGateway() *OpenRouterConfig {
+	return &OpenRouterConfig{
+		BaseURL: "https://openrouter.ai/api",
+		Models: []OpenRouterModel{
+			{ID: "deepseek/deepseek-v4.1-flash", Context: 262144, RequiresReasoningEcho: true},
+			{ID: "anthropic/claude-fable-5.1", Context: 200000},
+		},
+	}
+}
+
+// TestOpenRouterCatalogStopsAdvertisingAModelThatRequiresReasoningEcho pins the
+// first half of the contract: a listing the provider refuses to continue a
+// conversation on is not offered to anyone. ModelIDs is what reaches
+// ERUN_CLAUDE_AVAILABLE_MODELS and the desktop's model choices, so an entry
+// surviving here is an entry an operator can select and then lose a
+// conversation to.
+func TestOpenRouterCatalogStopsAdvertisingAModelThatRequiresReasoningEcho(t *testing.T) {
+	gateway := reasoningEchoGateway()
+
+	if got := gateway.ModelIDs(); len(got) != 1 || got[0] != "anthropic/claude-fable-5.1" {
+		t.Fatalf("ModelIDs = %v, want only the driveable listing", got)
+	}
+	if !gateway.RequiresReasoningEcho("deepseek/deepseek-v4.1-flash") {
+		t.Fatal("the declared listing must report as requiring reasoning echo")
+	}
+	if gateway.RequiresReasoningEcho("anthropic/claude-fable-5.1") {
+		t.Fatal("a driveable listing must not report as requiring reasoning echo")
+	}
+	// An id the catalog does not list is a supported by-hand choice, not a
+	// declared one, so it is never refused.
+	if gateway.RequiresReasoningEcho("typed/by-hand") {
+		t.Fatal("an uncurated id must not be reported as requiring reasoning echo")
+	}
+}
+
+// TestOpenRouterDefaultResolutionSkipsAModelThatRequiresReasoningEcho pins the
+// second half: the resolved default is what an environment renders as
+// ANTHROPIC_MODEL, which is the model every exec agent job in it starts on, so
+// resolving an undriveable listing here puts the whole environment's agent lane
+// on a model that dies mid-run.
+func TestOpenRouterDefaultResolutionSkipsAModelThatRequiresReasoningEcho(t *testing.T) {
+	gateway := reasoningEchoGateway()
+	if got := gateway.ResolveDefaultModel(); got != "anthropic/claude-fable-5.1" {
+		t.Fatalf("ResolveDefaultModel = %q, want the first driveable listing", got)
+	}
+
+	// A default naming the undriveable listing is skipped for the same reason a
+	// stale one naming an unlisted model is: it must not reach ANTHROPIC_MODEL.
+	named := reasoningEchoGateway()
+	named.DefaultModel = "deepseek/deepseek-v4.1-flash"
+	if got := named.ResolveDefaultModel(); got != "anthropic/claude-fable-5.1" {
+		t.Fatalf("ResolveDefaultModel with an undriveable default = %q, want a driveable listing", got)
+	}
+
+	// Nothing driveable is left, so there is no default to resolve rather than a
+	// listing launched on the strength of being the only one present.
+	only := reasoningEchoGateway()
+	only.Models = []OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash", RequiresReasoningEcho: true}}
+	if got := only.ResolveDefaultModel(); got != "" {
+		t.Fatalf("ResolveDefaultModel of an undriveable-only catalog = %q, want empty", got)
+	}
+}
+
+// TestAISessionLaunchRefusesAnEnvironmentChoiceThatRequiresReasoningEcho covers
+// the path an already-saved environment takes, which the catalog alone cannot
+// fix: resolveGatewayLaunchModel deliberately honours an environment's own model
+// choice even when the catalog does not list it, so a choice naming a declared
+// listing has to be refused on its own rather than by omission. The launch must
+// carry the driveable default and must not carry the refused id anywhere — not
+// as --model, and not in the subagent/context env prefix built beside it.
+func TestAISessionLaunchRefusesAnEnvironmentChoiceThatRequiresReasoningEcho(t *testing.T) {
+	model := func(v string) *string { return &v }
+	gateway := reasoningEchoGateway()
+
+	chosen := AISessionLaunchCommand("", EnvironmentClaudeConfig{DefaultModel: model("deepseek/deepseek-v4.1-flash")}, gateway, "team", "dev")
+	if strings.Contains(chosen, "deepseek/deepseek-v4.1-flash") {
+		t.Fatalf("the refused listing reached the launch command: %q", chosen)
+	}
+	if !strings.Contains(chosen, "--model anthropic/claude-fable-5.1") {
+		t.Fatalf("expected the launch to fall back to the driveable default, got %q", chosen)
+	}
+
+	// The environment's own driveable choice still wins, so the refusal is
+	// scoped to the declared listing rather than to environment choices at all.
+	kept := AISessionLaunchCommand("", EnvironmentClaudeConfig{DefaultModel: model("anthropic/claude-fable-5.1")}, gateway, "team", "dev")
+	if !strings.Contains(kept, "--model anthropic/claude-fable-5.1") {
+		t.Fatalf("expected a driveable environment choice to be honoured, got %q", kept)
+	}
+
+	// An uncurated id stays a supported act: the catalog never declared it, so
+	// nothing here refuses it.
+	uncurated := AISessionLaunchCommand("", EnvironmentClaudeConfig{DefaultModel: model("typed/by-hand")}, gateway, "team", "dev")
+	if !strings.Contains(uncurated, "--model typed/by-hand") {
+		t.Fatalf("expected an uncurated choice to be honoured, got %q", uncurated)
+	}
+}
+
+// TestACatalogDeclaringReasoningEchoStopsAdvertisingAndSelectingIt drives the
+// declaration through the operator's own config, which is the path that actually
+// sets it, and states the defect in the terms the report gives: erun's catalog
+// offered a model its agent lane cannot drive, and the failure surfaced as a
+// conversation refused mid-run rather than as a launch that never happened.
+//
+// This is the reproduction. Before the declaration existed the key parsed as an
+// unknown field and was ignored, so the listing stayed advertised, stayed the
+// resolved default that an environment renders as ANTHROPIC_MODEL, and stayed
+// the model an environment's own saved choice launched — the exact three ways
+// the reported job reached it.
+func TestACatalogDeclaringReasoningEchoStopsAdvertisingAndSelectingIt(t *testing.T) {
+	var config ERunConfig
+	if err := yaml.Unmarshal([]byte(`
+openrouter:
+    baseurl: https://openrouter.ai/api
+    defaultmodel: deepseek/deepseek-v4.1-flash
+    models:
+        - id: deepseek/deepseek-v4.1-flash
+          context: 262144
+          requiresreasoningecho: true
+        - id: anthropic/claude-fable-5.1
+          context: 200000
+`), &config); err != nil {
+		t.Fatalf("parse config: %v", err)
+	}
+	gateway := config.OpenRouter
+	if gateway == nil {
+		t.Fatal("expected a configured catalog")
+	}
+	if ids := gateway.ModelIDs(); len(ids) != 1 || ids[0] != "anthropic/claude-fable-5.1" {
+		t.Fatalf("ModelIDs = %v, want the declared listing omitted so it is not offered", ids)
+	}
+	if got := gateway.ResolveDefaultModel(); got != "anthropic/claude-fable-5.1" {
+		t.Fatalf("ResolveDefaultModel = %q, want a driveable listing rather than ANTHROPIC_MODEL landing on the declared one", got)
+	}
+	model := func(v string) *string { return &v }
+	launch := AISessionLaunchCommand("", EnvironmentClaudeConfig{DefaultModel: model("deepseek/deepseek-v4.1-flash")}, gateway, "team", "dev")
+	if strings.Contains(launch, "deepseek/deepseek-v4.1-flash") {
+		t.Fatalf("an environment that already saved the declared listing still launched on it: %q", launch)
+	}
+	if !strings.Contains(launch, "--model anthropic/claude-fable-5.1") {
+		t.Fatalf("expected the launch to fall back to the driveable default, got %q", launch)
 	}
 }
