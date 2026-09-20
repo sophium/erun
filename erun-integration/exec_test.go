@@ -1613,6 +1613,48 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("gate_merge_real_run_accepts_a_url_remote", func(t *testing.T) {
+		// The reported failure: --remote takes a URL, not only a configured
+		// remote name. A URL creates no remote-tracking refs, so the ref the
+		// checkout and every squash-merge used to name ("<remote>/<branch>")
+		// does not exist for one, and the run died with "is not a commit and a
+		// branch 'main' cannot be created from it" while --dry-run exited 0
+		// having traced that same impossible ref. A file:// URL carries the ":"
+		// and "//" that made it unnameable as a ref, so it reproduces the
+		// report without reaching the network.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		remoteRoot := seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		remoteURL := "file://" + remoteRoot
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--remote", remoteURL, "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if parsed.Remote != remoteURL {
+			t.Fatalf("expected the URL remote to be reported back, got %q", parsed.Remote)
+		}
+		// A source that could not be resolved is skipped, not fatal, so a
+		// regression here would otherwise read as a clean empty run.
+		if len(parsed.Landed) != 1 || parsed.Landed[0].SourceBranch != "feature" {
+			t.Fatalf("expected feature to land against the URL remote, got landed=%+v skipped=%+v", parsed.Landed, parsed.Skipped)
+		}
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "feature.txt")); err != nil {
+			t.Fatalf("expected feature.txt to be squash-merged onto main: %v", err)
+		}
+	})
+
 	t.Run("gate_merge_real_run_batch_lands_multiple_sources", func(t *testing.T) {
 		// Two independent branches, both squashed onto one working tree by one
 		// gate-merge call — the batching this generalization exists for: a
