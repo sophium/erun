@@ -486,3 +486,45 @@ func TestEnvironmentJobSupervisorPropagatesItsOwnIDToTheWorksProcess(t *testing.
 		t.Fatalf("the work's process observed ERUN_JOB_ID=%q, want %q", observed, id)
 	}
 }
+
+// A handed-off job is work its parent deliberately does not wait for, so the
+// parent's finish check must not count it however it is found. The record-based
+// reads already honor that (environmentJobRunningChildren), but the descendant
+// scan reads a process table and cannot: a handed-off job's supervisor detaches
+// into its own session, so once the work that started it exits the kernel
+// reparents it onto the parent -- exactly the shape the widest scan reports as
+// abandoned work. The exclusion set is what carries the handoff relationship
+// across to that scan, and this locks its two sides: a child this job handed
+// off is excluded, and a job it did not start is not.
+func TestAHandedOffJobIsExcludedFromItsParentsLeftoverScan(t *testing.T) {
+	isolateActivityCache(t)
+
+	const tenant = "handoff-leftover-contract"
+	const environment = "handoff-test"
+	const parent = "parent-job"
+	dir, err := environmentJobDir(tenant, environment)
+	if err != nil {
+		t.Fatalf("environmentJobDir: %v", err)
+	}
+	seeded := []EnvironmentJob{
+		{ID: "held", Name: "held", State: EnvironmentJobStateRunning, PID: 4242, StartedByJobID: parent},
+		{ID: "released", Name: "released", State: EnvironmentJobStateRunning, PID: 4243, StartedByJobID: parent, Handoff: true},
+		{ID: "elsewhere", Name: "elsewhere", State: EnvironmentJobStateRunning, PID: 4244, StartedByJobID: "someone-else", Handoff: true},
+	}
+	for _, job := range seeded {
+		if err := writeEnvironmentJob(dir, job); err != nil {
+			t.Fatalf("seed job %s: %v", job.ID, err)
+		}
+	}
+
+	excluded := environmentJobLeftoverExclusions(dir, parent, nil)
+	if _, ok := excluded[4243]; !ok {
+		t.Fatalf("the handed-off job's supervisor must be excluded from its parent's leftover scan, got %v", excluded)
+	}
+	if _, ok := excluded[4242]; ok {
+		t.Fatalf("a job this parent did not hand off must stay reportable, got %v", excluded)
+	}
+	if _, ok := excluded[4244]; ok {
+		t.Fatalf("a handoff job this parent did not start is not its to exclude, got %v", excluded)
+	}
+}

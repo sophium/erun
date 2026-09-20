@@ -1041,7 +1041,10 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 // three are widest-last: the group misses work backgrounded into a fresh group
 // of its own, the session misses work that called setsid as well, and the
 // supervisor's own adopted descendants miss nothing -- see
-// environmentJobDescendantSurvivors. A sibling job record naming this job as its
+// environmentJobDescendantSurvivors. Work is only reported as abandoned when
+// it is this job's to report at all, which is why the widest scan runs against
+// an exclusion set rather than the bare process table (see
+// environmentJobLeftoverExclusions). A sibling job record naming this job as its
 // StartedByJobID is different: rather than declaring the outcome incomplete
 // on the spot, this waits for it (see awaitEnvironmentJobRunningChildren) —
 // the whole motivation being that a caller reading this job's own record
@@ -1062,14 +1065,14 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 	case waitErr != nil:
 		reason = "failed to start: " + waitErr.Error()
 	}
+	self := recorder.snapshot()
 	jobState = EnvironmentJobStateExited
 	if state != nil && (environmentJobProcessGroupSurvivors(childPID) ||
 		environmentJobSessionSurvivors(childPID) ||
-		environmentJobDescendantSurvivors(os.Getpid(), adoptedBaseline)) {
+		environmentJobDescendantSurvivors(os.Getpid(), environmentJobLeftoverExclusions(recorder.dir, self.ID, adoptedBaseline))) {
 		jobState = EnvironmentJobStateAbandoned
 		reason = "the job's own process exited, but it left other processes still running in its process group, session, or reparented onto this supervisor — background work it started and never waited for; nothing further will be reported for that work"
 	}
-	self := recorder.snapshot()
 	if running := awaitEnvironmentJobRunningChildren(recorder.dir, self.ID, resolveEnvironmentJobGateIncompleteWaitCap()); len(running) > 0 {
 		jobState = EnvironmentJobStateGateIncomplete
 		reason = environmentJobGateIncompleteReason(running)
@@ -1079,6 +1082,45 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 		startedJobFailed = environmentJobFailedChildReason(failed)
 	}
 	return code, signal, reason, jobState, startedJobFailed
+}
+
+// environmentJobLeftoverExclusions names the pids a job's own finish check must
+// not count as leftover work it is answerable for: the baseline already
+// captured (see environmentJobDescendantBaseline), plus the supervisor of every
+// job this one deliberately handed off.
+//
+// The second half is what keeps handoff meaning what it says. A handed-off job
+// is by definition work the parent does not wait for, and it is stored that way
+// by the record relationship alone — the child's Handoff field, which
+// environmentJobRunningChildren and the failed-child scan both already honor.
+// The descendant scan cannot see that: it reads a process table, and the
+// handed-off job's supervisor is reparented onto this one as soon as the work
+// that started it exits (that supervisor deliberately detached, so it is
+// exactly the shape the scan was added to catch). Without this, a job that
+// handed work off would report itself abandoned over the very job it said it
+// was not waiting for.
+//
+// Scoped to this job's own children, the same scope every other read of the
+// handoff relationship uses: a supervisor reparented onto this process is
+// always a descendant of this job's work, and a handed-off job this job did
+// not start is not its to reason about.
+func environmentJobLeftoverExclusions(dir, parentID string, adoptedBaseline map[int]struct{}) map[int]struct{} {
+	excluded := adoptedBaseline
+	for _, child := range environmentJobChildren(dir, parentID, time.Now()) {
+		if !child.Handoff || child.PID <= 0 {
+			continue
+		}
+		if _, known := excluded[child.PID]; known {
+			continue
+		}
+		merged := make(map[int]struct{}, len(excluded)+1)
+		for pid := range excluded {
+			merged[pid] = struct{}{}
+		}
+		merged[child.PID] = struct{}{}
+		excluded = merged
+	}
+	return excluded
 }
 
 // awaitEnvironmentJobRunningChildren blocks until no non-handoff job started

@@ -75,6 +75,47 @@ func TestEnvironmentJobSessionScanSkipsProcessesWithNoReportedSession(t *testing
 	}
 }
 
+// The process-group scan has the same zombie problem as the session scan, and
+// needs the same answer: `kill(-pgid, 0)` answers true for a process that has
+// already exited and is only waiting to be reaped, so a cancelled job whose
+// group member died from the cancel's own signal read as abandoned background
+// work. That member is completed work, not a survivor -- and a live member
+// beside it still is one.
+func TestEnvironmentJobProcessGroupScanIgnoresAZombie(t *testing.T) {
+	if groupHasLiveMember([]sessionProcess{{pid: 4243, group: 4242, zombie: true}}, 4242) {
+		t.Fatalf("a group holding only a zombie must not read as having a survivor")
+	}
+
+	procs := []sessionProcess{
+		{pid: 4243, group: 4242, zombie: true},
+		{pid: 4244, group: 4242},
+	}
+	if !groupHasLiveMember(procs, 4242) {
+		t.Fatalf("a live member alongside a zombie must read as a survivor")
+	}
+}
+
+// The platform's own table is what the group check consults first, and it is
+// consulted exactly where the process group is the question: a table that
+// cannot say which group a process is in must not answer instead of the
+// fallback.
+func TestEnvironmentJobProcessGroupScanIsAskedForTheGroupsOwnMembers(t *testing.T) {
+	table := []sessionProcess{
+		{pid: 4243, group: 9999},
+		{pid: 4244, group: 4242, zombie: true},
+	}
+	restore := environmentJobSessionProcessesFunc
+	environmentJobSessionProcessesFunc = func() ([]sessionProcess, bool) { return table, true }
+	t.Cleanup(func() { environmentJobSessionProcessesFunc = restore })
+
+	if alive, ok := platformProcessGroupHasLiveMember(4242); !ok || alive {
+		t.Fatalf("a group whose only member is a zombie must answer from the table, as no survivor")
+	}
+	if alive, ok := platformProcessGroupHasLiveMember(9999); !ok || !alive {
+		t.Fatalf("a group with a live member must answer from the table, as a survivor")
+	}
+}
+
 // The descendant scan is the one that catches a leftover which called setsid
 // for itself: it is in a session and a process group of its own, so neither
 // scan above can name it, and its parent is the supervisor it was handed to.

@@ -5,15 +5,17 @@ package eruncommon
 import "strings"
 
 // sessionProcess is one process as a session scan sees it: the pid, whether it
-// is a zombie (already exited, only waiting to be reaped), the session it
-// belongs to, and the parent it currently reports. A zero session means the
-// platform could not report one for that process, which is not the same as
-// session zero -- no process is in it. A zero parent likewise means the
-// platform could not report one, which is not the same as a parent of pid 0.
+// is a zombie (already exited, only waiting to be reaped), the session and
+// process group it belongs to, and the parent it currently reports. A zero
+// session means the platform could not report one for that process, which is
+// not the same as session zero -- no process is in it. A zero parent likewise
+// means the platform could not report one, which is not the same as a parent
+// of pid 0.
 type sessionProcess struct {
 	pid     int
 	zombie  bool
 	session int
+	group   int
 	parent  int
 }
 
@@ -34,6 +36,28 @@ var environmentJobSessionProcessesFunc = platformSessionProcesses
 func sessionHasLiveMember(procs []sessionProcess, sid int) bool {
 	for _, proc := range procs {
 		if proc.pid == sid || proc.zombie || proc.session != sid {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// groupHasLiveMember is sessionHasLiveMember's process-group twin, and shares
+// its reason for existing: a raw `kill(-pgid, 0)` probe cannot tell a process
+// that is still running from a zombie that already exited and is only waiting
+// to be reaped, so where the platform has a table to consult, the survivor
+// question is answered from it instead.
+//
+// Unlike the session scan it does not also exclude the group leader by pid.
+// The group it is asked about is the job's own tracked child, which is reaped
+// before this is ever asked (see environmentJobProcessGroupSurvivors), so
+// excluding the leader would only ever matter for a caller that asks early --
+// and there, naming a live leader as a survivor is the answer that matches
+// what the ps-based check this stands in for has always given.
+func groupHasLiveMember(procs []sessionProcess, pgid int) bool {
+	for _, proc := range procs {
+		if proc.zombie || proc.group != pgid {
 			continue
 		}
 		return true
