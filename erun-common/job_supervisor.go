@@ -1034,9 +1034,13 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 // resolveEnvironmentJobOutcome decides the exit code, signal, reason,
 // terminal state, and started-job failure finishEnvironmentJob records. State
 // and reason can be overridden by work the job left behind that it never
-// waited for: a process still alive in its own process group (abandoned) is
-// decided immediately, since nothing about an orphaned process group member
-// is worth waiting on. A sibling job record naming this job as its
+// waited for: a process still alive in the job's own process group, in its
+// session, or reparented onto this supervisor (abandoned) is decided
+// immediately, since nothing about a leftover process is worth waiting on. The
+// three are widest-last: the group misses work backgrounded into a fresh group
+// of its own, the session misses work that called setsid as well, and the
+// supervisor's own adopted descendants miss nothing -- see
+// environmentJobDescendantSurvivors. A sibling job record naming this job as its
 // StartedByJobID is different: rather than declaring the outcome incomplete
 // on the spot, this waits for it (see awaitEnvironmentJobRunningChildren) —
 // the whole motivation being that a caller reading this job's own record

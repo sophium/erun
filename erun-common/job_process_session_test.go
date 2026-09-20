@@ -74,3 +74,36 @@ func TestEnvironmentJobSessionScanSkipsProcessesWithNoReportedSession(t *testing
 		t.Fatalf("a process whose session is unknown must not match any session")
 	}
 }
+
+// The descendant scan is the one that catches a leftover which called setsid
+// for itself: it is in a session and a process group of its own, so neither
+// scan above can name it, and its parent is the supervisor it was handed to.
+// A zombie is still completed work rather than a survivor, and a row the
+// platform could not report a parent for must not be attributed to pid zero.
+func TestEnvironmentJobDescendantScanFindsTheReparentedLeftover(t *testing.T) {
+	leftover := []sessionProcess{
+		{pid: 4242, parent: 1},
+		{pid: 4243, parent: 4244, session: 4243},
+	}
+	if !descendantHasLiveMember(leftover, 4244) {
+		t.Fatalf("a live process reparented onto the supervisor must read as a survivor")
+	}
+	if descendantHasLiveMember(leftover, 4242) {
+		t.Fatalf("a process still parented to something else must not read as the supervisor's descendant")
+	}
+
+	// The reparented leftover already exited and is only waiting to be reaped.
+	completed := []sessionProcess{{pid: 4243, parent: 4244, zombie: true}}
+	if descendantHasLiveMember(completed, 4244) {
+		t.Fatalf("a reparented zombie must not read as a survivor")
+	}
+
+	// A platform that reports no parent must not have its processes attributed
+	// to the supervisor, and a supervisor with no pid has nothing to match.
+	if descendantHasLiveMember([]sessionProcess{{pid: 4243}}, 4244) {
+		t.Fatalf("a process whose parent is unknown must not match any supervisor")
+	}
+	if descendantHasLiveMember(leftover, 0) {
+		t.Fatalf("an unset supervisor pid must not match a process reporting parent zero")
+	}
+}
