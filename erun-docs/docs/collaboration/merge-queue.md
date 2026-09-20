@@ -38,6 +38,25 @@ A queued merge lands a squash commit whose SHA is never the source branch's head
 
 A repository merged through a plain GitHub pull request instead of an erun review — never calling `MERGE`/`MERGED` at all — can still require this same gate build via GitHub's own branch protection: [`erun exec report-commit-status`](/cli/exec#exec-report-commit-status) turns the gate build's outcome into a GitHub commit status on the pull request's head commit, which a required-status-checks rule can then require before GitHub allows the merge. This is a separate mechanism from the `MERGE`/`MERGED` verification above — it never touches an erun review at all — but reuses the same gate build a `gate-merge` + real build already produced.
 
+## Reconciling a review that landed elsewhere {#landed-elsewhere}
+
+Not every change lands through this queue. When a branch is merged on GitHub by **squash merge**, the platform's review row for it could never reach `MERGED`: a squash merge makes none of the branch's own commits ancestors of the target — that is what squashing means — and no `GATE` build was ever recorded for it, because it landed through GitHub rather than the queue. Both of `report-merged`'s queue conditions are therefore unsatisfiable, no matter how long the review sits there.
+
+The only remaining exit used to be [`review close`](/cli/review#review-close), which renders landed work as `CLOSED` — indistinguishable from abandoned, and so a worse signal than leaving it `OPEN`. The result was that such reviews stayed `OPEN` forever: one tenant measured 63 open reviews of which 44 were already on `main`, and the count grew by one for every change that landed this way.
+
+`report-merged` now reconciles these too, and it still verifies rather than believes. Omit `--build-id`, and the platform fetches `--remote-url` to check that everything the review's source branch adds — relative to where it diverged from the target — is already present in the target branch's history. The comparison is of the **change set**, not of the commit graph, so it holds even when the target advanced under the squash (the ordinary case). A branch that adds nothing, or whose history is unrelated to the target's, names no landing and is refused.
+
+```bash
+erun review report-merged 018f... --remote-url https://github.com/org/repo.git
+```
+
+- **CLI:** [`erun review report-merged`](/cli/review#review-report-merged) with `--build-id` omitted.
+- **MCP:** `review_report-merged` with `buildId` omitted.
+
+A reconciled merge records no `lastMergedBuildId` and triggers no release: there was no build, and the landing it reports already happened elsewhere and published whatever it published. It also does not disturb the queue — the next promotion's own gate still anchors on the last *queue-driven* merge on that branch, so reconciling any number of squash-landed reviews leaves subsequent merges verifying exactly as before.
+
+`CLOSED` reviews are never reconciled: closing is a decision already made and this does not reopen it. A review sitting at `MERGE` is the queue's and still goes through the `GATE`-build path above.
+
 ## Watching the gate {#watching-the-gate}
 
 Everything above happens somewhere with no name of its own by default: a gate build is just a job in whichever environment ran it, and a repository merged through a plain pull request (the previous paragraph) has no review at all to look at. [`erun gate list`](/cli/gate#gate-list) is the queue view that answers "what is being gated right now, what is waiting, and what did the last gates decide" without knowing any job id, whether or not an erun review exists for the change: each entry names the branch, the prospective merge commit actually tested, the target, and the verdict — `RUNNING`, `PASSED`, `FAILED`, or `INCONCLUSIVE`.

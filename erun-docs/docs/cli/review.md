@@ -88,14 +88,16 @@ Records a build against a review — the only way an erun client transitions a r
 
 ### `review report-merged` {#review-report-merged}
 
-Reports a review `MERGED`. This is for the environment a review's merge queue promoted to `MERGE`, once it has fetched the review's target and source (see [`exec gate-merge`](/cli/exec#exec-gate-merge)), gate-built the prospective squash merge, recorded that as a successful `GATE` build (`review record-build --gate`), and pushed the result — never before the push actually landed.
+Reports a review `MERGED`. The platform does not take this on trust, but *which* check it applies depends on where the review is sitting — not on what this command claims. Both refusals are `409 Conflict` (`MERGE_NOT_VERIFIED`), so either way the answer is a fact about the repository rather than the caller's word.
 
-The platform does not take this on trust: it checks `--build-id` names an already-recorded, successful `GATE` build for this review, then fetches `--remote-url` to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with `409 Conflict` (`MERGE_NOT_VERIFIED`) and leaves the review at `MERGE`. See [Merge queue](/collaboration/merge-queue) for the full mechanics.
+**A review at `MERGE` is the merge queue's.** This is for the environment the queue promoted, once it has fetched the review's target and source (see [`exec gate-merge`](/cli/exec#exec-gate-merge)), gate-built the prospective squash merge, recorded that as a successful `GATE` build (`review record-build --gate`), and pushed the result — never before the push actually landed. It checks `--build-id` names an already-recorded, successful `GATE` build for this review, then fetches `--remote-url` to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing leaves the review at `MERGE`.
+
+**Any other review is one whose work landed without the queue** — in practice a GitHub squash merge, where the branch's own commits are deliberately not ancestors of the target and no `GATE` build exists to name. Omit `--build-id`: the platform confirms against the same remote that everything the review's source branch adds, relative to where it diverged from the target, is already present in the target branch's history, and moves the review only if it is. A branch that did not land is refused just as firmly. This is what keeps a squash-landed review from sitting `OPEN` forever — see [Merge queue § Reconciling a review that landed elsewhere](/collaboration/merge-queue#landed-elsewhere).
 
 | Flag | Description |
 |---|---|
-| `--build-id` | The successful `GATE` build's id. |
-| `--remote-url` | The git remote the platform fetches to verify the merge. |
+| `--build-id` | The successful `GATE` build's id. Required for a review at `MERGE`; omit it for work that landed without the queue. |
+| `--remote-url` | The git remote the platform fetches to verify the merge. Required either way. |
 
 ### `review requeue` {#review-requeue}
 
@@ -166,8 +168,10 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `record-build` with a `--version` that fails the version grammar. | `400 Bad Request` (`INVALID_VERSION`). |
 | `record-build` on an unknown review id. | `404 Not Found`. |
 | `record-build --gate --failed` whose `--failure-detail` matches a known erun infrastructure-failure signature (a registry or network giving up, not a verdict about the change). | Aborts before any network call, naming the matched signature and the remedy: report the gate run `inconclusive` via [`exec gate-run report`](/cli/exec#exec-gate-run-report) instead of recording a `FAILED` `GATE` build. |
-| `report-merged` whose `--build-id` does not name a recorded, successful `GATE` build for this review. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
-| `report-merged` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
+| `report-merged` on a review at `MERGE` whose `--build-id` does not name a recorded, successful `GATE` build for it. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
+| `report-merged` on a review at `MERGE` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
+| `report-merged` on any other review whose source branch's changes are not already in the target branch's history. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review's status is unchanged. |
+| `report-merged` on a `CLOSED` review. | `400 Bad Request` (`INVALID_TRANSITION`); `CLOSED` is terminal. |
 | `requeue` on a review that is not currently at `MERGE`. | Aborts before the status change, naming the review's actual status. |
 | `reviewers add --user-id` not enrolled in your own tenant. | Aborts before any network call, naming `erun platform user list`/`erun platform user enroll`. |
 | `reviewers add --user-id` already assigned to the review. | `409 Conflict`. |
