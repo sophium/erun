@@ -97,7 +97,7 @@ Reports a review `MERGED`. The platform does not take this on trust, but *which*
 | Flag | Description |
 |---|---|
 | `--build-id` | The successful `GATE` build's id. Required for a review at `MERGE`; omit it for work that landed without the queue. |
-| `--remote-url` | The git remote the platform fetches to verify the merge. Required either way. |
+| `--remote-url` | The git remote the platform fetches to verify the merge. Required either way. Any form git accepts: an SSH remote — what `git remote get-url origin` returns on an SSH checkout — is read over the same host's HTTPS without credentials, so a public repository verifies either way, and a remote the platform cannot read that way is refused naming the form it needs. |
 
 ### `review requeue` {#review-requeue}
 

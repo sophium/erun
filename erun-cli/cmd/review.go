@@ -456,7 +456,7 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 		},
 	}
 	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful GATE build's id (omit for work that landed without the queue)")
-	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge")
+	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge; any form git accepts, an SSH remote being read over its host's HTTPS without credentials")
 	addDryRunFlag(cmd)
 	return cmd
 }

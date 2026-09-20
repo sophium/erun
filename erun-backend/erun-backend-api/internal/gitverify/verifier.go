@@ -55,6 +55,11 @@ type Verifier interface {
 // `git` binary of its own. It needs no stored credential or configuration
 // per tenant either: remoteURL is supplied by the caller reporting the
 // merge, the same "origin" its own checkout already pushed to.
+//
+// It never authenticates, so a remote URL in a form that needs an identity to
+// read is rewritten by fetchableRemoteURL below into one this process can
+// read anonymously before the fetch — the caller naming its own repository's
+// remote must not depend on this runtime holding a key to it.
 type RemoteVerifier struct{}
 
 func NewRemoteVerifier() *RemoteVerifier { return &RemoteVerifier{} }
@@ -324,11 +329,15 @@ func fetchBranch(ctx context.Context, remoteURL, branch string) (*git.Repository
 // repository, so two branches' histories can be compared without a second
 // fetch of the same remote.
 func fetchBranches(ctx context.Context, remoteURL string, branches ...string) (*git.Repository, error) {
+	fetchURL, err := fetchableRemoteURL(remoteURL)
+	if err != nil {
+		return nil, err
+	}
 	repo, err := git.Init(memory.NewStorage(), nil)
 	if err != nil {
 		return nil, err
 	}
-	remote, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
+	remote, err := repo.CreateRemote(&config.RemoteConfig{Name: "origin", URLs: []string{fetchURL}})
 	if err != nil {
 		return nil, err
 	}
@@ -337,9 +346,92 @@ func fetchBranches(ctx context.Context, remoteURL string, branches ...string) (*
 		refSpecs = append(refSpecs, config.RefSpec(fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", branch, branch)))
 	}
 	if err := remote.FetchContext(ctx, &git.FetchOptions{RefSpecs: refSpecs}); err != nil {
-		return nil, fmt.Errorf("fetching %s from the target remote: %w", strings.Join(branches, ", "), err)
+		return nil, fmt.Errorf("fetching %s from %s: %w. %s", strings.Join(branches, ", "), fetchURL, err,
+			unreadableRemoteNote(remoteURL, fetchURL))
 	}
 	return repo, nil
+}
+
+// fetchableRemoteURL rewrites a caller's remote URL into the form this process
+// can fetch on its own, and is what keeps `git remote get-url origin` — an
+// SSH remote on most checkouts — a usable --remote-url. The verifier only ever
+// reads the target remote and holds no key or agent, so an SSH remote is
+// answered over its host's credential-less HTTPS instead; a public repository
+// is readable that way without anyone's credentials. A URL that is already
+// readable anonymously (https, http, git, file, a local path) is returned
+// untouched, so a caller who named a private remote keeps the form they chose
+// and the fetch failure stays about their URL rather than one we substituted.
+//
+// An SSH remote on a port of its own has no HTTPS equivalent to carry it to,
+// so it is refused here, naming the form the platform needs, instead of being
+// sent to a fetch that would fail with an SSH-agent error this runtime cannot
+// act on.
+func fetchableRemoteURL(remoteURL string) (string, error) {
+	given := strings.TrimSpace(remoteURL)
+	if given == "" {
+		return "", fmt.Errorf("remoteURL is required")
+	}
+	if rest, ok := strings.CutPrefix(given, "ssh://"); ok {
+		return sshRemoteAsHTTPS(remoteURL, rest)
+	}
+	// Any other scheme is either already credential-less (https, http, git,
+	// file) or not one of git's, and is left for the fetch to judge.
+	if strings.Contains(given, "://") {
+		return given, nil
+	}
+	return scpLikeRemoteAsHTTPS(given), nil
+}
+
+// sshRemoteAsHTTPS answers an ssh:// remote with the same host's HTTPS form,
+// refusing the one shape that has none to be carried to: a remote on a port of
+// its own.
+func sshRemoteAsHTTPS(remoteURL, rest string) (string, error) {
+	host, path, found := strings.Cut(trimUser(rest), "/")
+	if !found || host == "" || path == "" {
+		return "", fmt.Errorf("remote-url %q names neither an ssh host nor a repository path", remoteURL)
+	}
+	if strings.ContainsRune(host, ':') {
+		return "", fmt.Errorf("remote-url %q is an ssh remote on a port of its own, which has no HTTPS equivalent: pass the repository's HTTPS URL, because the platform fetches the target remote without credentials", remoteURL)
+	}
+	return "https://" + host + "/" + path, nil
+}
+
+// scpLikeRemoteAsHTTPS answers git@host:owner/repo.git with the same host's
+// HTTPS form. A local path with a colon in it (or a Windows drive) is not
+// scp-like — its host part carries a separator — and is returned unchanged.
+func scpLikeRemoteAsHTTPS(given string) string {
+	hostPart, path, found := strings.Cut(given, ":")
+	if !found || path == "" || strings.HasPrefix(path, `\`) {
+		return given
+	}
+	host := trimUser(hostPart)
+	if host == "" || strings.ContainsAny(host, `/\`) {
+		return given
+	}
+	return "https://" + host + "/" + strings.TrimPrefix(path, "/")
+}
+
+// trimUser drops the `user@` an SSH remote may carry; the platform reads
+// anonymously, so the identity it names is not one to fetch as.
+func trimUser(hostPart string) string {
+	if at := strings.LastIndex(hostPart, "@"); at >= 0 {
+		return hostPart[at+1:]
+	}
+	return hostPart
+}
+
+// unreadableRemoteNote is appended to a verification fetch that failed. By the
+// time this fetch runs the caller's push has already landed, so the refusal
+// has to say what it is about — the platform's own read of the target remote —
+// rather than read as a verdict that the merge did not happen. Where the URL
+// was one we rewrote, it names both forms, because the caller is holding a
+// remote this platform could not read as given.
+func unreadableRemoteNote(remoteURL, fetchURL string) string {
+	if strings.TrimSpace(remoteURL) != fetchURL {
+		return fmt.Sprintf("the platform reads the target remote over HTTPS without credentials, so remote-url %q was fetched as %s; whether the merge landed was not judged by this failure",
+			strings.TrimSpace(remoteURL), fetchURL)
+	}
+	return "the platform fetches the target remote without credentials; whether the merge landed was not judged by this failure"
 }
 
 // branchTip reads the commit at branch's just-fetched tip.
