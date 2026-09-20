@@ -477,16 +477,38 @@ test-playwright: test-erun-ui-windows-build test-frontend
 # resolve-playwright-areas` (a thin CLI wrapper around the same
 # erun-common.ResolvePlaywrightTestAreaSelection function `erun build` calls
 # above), so a developer or agent iterating locally pays the same cost the
-# gate does. This is a target-specific variable (scoped to test-playwright
-# and whatever depends on it) using `?=`, so it is only evaluated when the
-# caller has not already supplied PLAYWRIGHT_TEST_AREAS -- the Dockerfile
-# test stage's own build-arg thread, including its empty-string "run
-# everything" default, is left untouched. `export` (no value) marks the
-# variable for export to the recipe's environment whenever it does get a
-# value, from either source. Declared after the recipe, not beside it: the
-# coverage gate in erun-integration reads a target's recipe from its first
-# definition line, so that line has to stay adjacent to the recipe.
+# gate does. This is a target-specific variable using `?=`, so it is only
+# evaluated when the caller has not already supplied PLAYWRIGHT_TEST_AREAS --
+# the Dockerfile test stage's own build-arg thread, including its
+# empty-string "run everything" default, is left untouched. `export` (no
+# value) marks the variable for export to a recipe's environment whenever it
+# does get a value, from either source. Declared after the recipe, not beside
+# it: the coverage gate in erun-integration reads a target's recipe from its
+# first definition line, so that line has to stay adjacent to the recipe.
 test-playwright: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
+
+# The same resolution on `check`, which needs its own copy rather than
+# inheriting test-playwright's: Make gives a target-specific variable to the
+# target that declares it and to the chain of prerequisites *below* it, and
+# `check` sits above test-playwright rather than below it. What reached
+# `check` instead was the bare `export` on the next line -- an empty but
+# *defined* PLAYWRIGHT_TEST_AREAS, and "defined" is the operative word.
+# `check`'s recipe is the boundary where the job's environment is captured
+# (scripts/agent-gate.sh hands it to `erun exec job start`), so inside that job
+# test-playwright's own `?=` read the empty value as "the caller already
+# supplied this" and never resolved, and run.sh read it as "no selection":
+# `make check` in an agent pod ran the full suite while `erun exec
+# resolve-playwright-areas` on the same clean tree printed `smoke`, with
+# nothing in the gate's output saying which of the two it had used. Resolving
+# at the boundary makes the selection that crosses it the one the tree
+# resolved. `?=` still preserves a value the caller supplied (the Dockerfile
+# build-arg thread), and an unresolvable tree still resolves to "all" through
+# the CLI's own fail-safe. Both declarations sit above the `export` because
+# the bare `export` defines the variable, and a target-specific `?=` parsed
+# after that definition is skipped -- the ordering is load-bearing, not
+# stylistic. Declared after their recipes, not beside them: the coverage gate
+# in erun-integration reads a target's recipe from its first definition line.
+check: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
 export PLAYWRIGHT_TEST_AREAS
 
 # Cross-compiles erun-app for Windows to prove the one other platform erun-ui

@@ -162,12 +162,31 @@ tree_state_key() {
 	} 2>/dev/null | hash_stdin | cut -c1-16
 }
 
+# gate_scope_env names the environment variables a gate's *selection* travels
+# in -- for the Playwright suite, which areas of it run. They are as much a
+# part of what a run means as its argv: `run.sh --skip-app-gates` under
+# PLAYWRIGHT_TEST_AREAS=all is a different run from the same command under
+# "smoke", and keying them the same would replay one's pass over the other's
+# request. That is the same failure the command hash above exists to prevent,
+# in the one channel the command hash cannot see.
+gate_scope_env="PLAYWRIGHT_TEST_AREAS"
+
 # cmd_state_key prints a key that changes whenever the command being gated
 # does, so a job id built from it can never satisfy a request for a
 # differently-scoped run (e.g. a full `make check-gate` reusing a narrower
 # run's cached result under the same job id).
 cmd_state_key() {
-	printf '%s\0' "$@" | hash_stdin | cut -c1-16
+	{
+		printf '%s\0' "$@"
+		for name in $gate_scope_env; do
+			# printenv, not an indirect expansion of the shell variable, so the
+			# key reflects the environment the gate will actually run under:
+			# a value that never reached this process cannot scope a run it is
+			# not in.
+			value=$(printenv "$name" 2>/dev/null) || value=""
+			printf '%s\0%s\0' "$name" "$value"
+		done
+	} | hash_stdin | cut -c1-16
 }
 
 resolved_job_id="${job_id}-$(tree_state_key)-$(cmd_state_key "$@")"

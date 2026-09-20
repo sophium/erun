@@ -543,20 +543,33 @@ fi
 # those directories under tests/. An explicit caller target -- a bare CLI
 # arg, or the e2e-k3d default above -- always wins; this only supplies a
 # default when nothing else already set one.
-if [ -z "$PLAYWRIGHT_ARGS" ] && [ "$E2E_K3D" -eq 0 ] && [ -n "${PLAYWRIGHT_TEST_AREAS:-}" ] && [ "$PLAYWRIGHT_TEST_AREAS" != "all" ]; then
-	dirs="tests/smoke"
-	old_ifs="$IFS"
-	IFS=,
-	for token in $PLAYWRIGHT_TEST_AREAS; do
-		if [ "$token" != "smoke" ] && [ -n "$token" ]; then
-			dirs="$dirs tests/areas/$token"
-		fi
-	done
-	IFS="$old_ifs"
-	for d in $dirs; do
-		PLAYWRIGHT_ARGS="$PLAYWRIGHT_ARGS \"$d\""
-	done
-	printf '>> playwright: PLAYWRIGHT_TEST_AREAS=%s -> running %s\n' "$PLAYWRIGHT_TEST_AREAS" "$dirs" >&2
+#
+# Which selection the gate used is reported on both branches, not only on the
+# narrowing one. A run that covers everything has to be as legible as a
+# narrowed one: unset, empty, and literally "all" all mean the full suite, and
+# a resolver that failed upstream looks exactly like a tree that genuinely
+# resolved to "all" from here. Staying quiet on the full-suite branch is what
+# let `make check` inside an agent pod run the full suite on a clean tree
+# while a local `erun exec resolve-playwright-areas` on that same tree printed
+# `smoke` -- the difference existed only in a value nobody printed.
+if [ -z "$PLAYWRIGHT_ARGS" ] && [ "$E2E_K3D" -eq 0 ]; then
+	if [ -n "${PLAYWRIGHT_TEST_AREAS:-}" ] && [ "$PLAYWRIGHT_TEST_AREAS" != "all" ]; then
+		dirs="tests/smoke"
+		old_ifs="$IFS"
+		IFS=,
+		for token in $PLAYWRIGHT_TEST_AREAS; do
+			if [ "$token" != "smoke" ] && [ -n "$token" ]; then
+				dirs="$dirs tests/areas/$token"
+			fi
+		done
+		IFS="$old_ifs"
+		for d in $dirs; do
+			PLAYWRIGHT_ARGS="$PLAYWRIGHT_ARGS \"$d\""
+		done
+		printf '>> playwright: area selection %s -> running %s\n' "$PLAYWRIGHT_TEST_AREAS" "$dirs" >&2
+	else
+		printf '>> playwright: area selection %s -> running the full suite\n' "${PLAYWRIGHT_TEST_AREAS:-unset}" >&2
+	fi
 fi
 
 PLAYWRIGHT_FLAGS=""
