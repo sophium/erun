@@ -29,6 +29,15 @@ type CommitWorkingTreeParams struct {
 	// and silently falling back to "commit everything" is exactly the
 	// failure this scoping exists to prevent.
 	Paths []string
+	// SkipHooks commits with `git commit --no-verify`, so the repository's own
+	// pre-commit and commit-msg hooks cannot veto it. Reserve it for a
+	// machine-authored commit whose whole purpose is to preserve work that no
+	// other mechanism would save — a job supervisor's checkpoint. A hook is
+	// authored to police a human's commit; when it rejects a checkpoint it does
+	// not merely refuse one commit, it destroys the in-flight work of a run that
+	// has already ended. A human-authored commit leaves this false, so hook
+	// enforcement is unchanged for every caller that represents a person.
+	SkipHooks bool
 }
 
 // CommitWorkingTreeResult is what actually landed.
@@ -104,13 +113,23 @@ func CommitWorkingTree(ctx Context, root string, params CommitWorkingTreeParams,
 
 	addArgs := commitAddArgs(scopedPaths)
 	ctx.TraceCommand(root, "git", append([]string{"add"}, addArgs...)...)
-	ctx.TraceCommand(root, "git", "commit", "-m", "<message>")
+	ctx.TraceCommand(root, "git", commitVerbArgs(params.SkipHooks, "<message>")...)
 	if ctx.DryRun {
 		traceCommitPreview(ctx, preview)
 		return CommitWorkingTreeResult{Branch: branch, Files: preview}, nil
 	}
 
-	return stageAndCommitWorkingTree(ctx, root, params.Message, addArgs, deps)
+	return stageAndCommitWorkingTree(ctx, root, params.Message, addArgs, params.SkipHooks, deps)
+}
+
+// commitVerbArgs builds the `git commit` argv, so the dry-run trace and the
+// real invocation cannot drift apart on whether hooks are bypassed.
+func commitVerbArgs(skipHooks bool, message string) []string {
+	args := []string{"commit"}
+	if skipHooks {
+		args = append(args, "--no-verify")
+	}
+	return append(args, "-m", message)
 }
 
 // resolveCommitPreview reports the files a commit would include, and — when
@@ -169,7 +188,7 @@ func traceCommitPreview(ctx Context, preview []string) {
 // stageAndCommitWorkingTree runs the mutating half of CommitWorkingTree,
 // isolated so the branch-verification and dry-run branching above it don't
 // inflate that function's complexity.
-func stageAndCommitWorkingTree(ctx Context, root, message string, addArgs []string, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
+func stageAndCommitWorkingTree(ctx Context, root, message string, addArgs []string, skipHooks bool, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
 	var addStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &addStderr, append([]string{"add"}, addArgs...)...); err != nil {
 		return CommitWorkingTreeResult{}, fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(addStderr.String()))
@@ -184,7 +203,7 @@ func stageAndCommitWorkingTree(ctx Context, root, message string, addArgs []stri
 	}
 
 	var commitStderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &commitStderr, "commit", "-m", message); err != nil {
+	if err := deps.RunGit(root, io.Discard, &commitStderr, commitVerbArgs(skipHooks, message)...); err != nil {
 		return CommitWorkingTreeResult{}, fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(commitStderr.String()))
 	}
 
