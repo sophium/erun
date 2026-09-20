@@ -79,24 +79,71 @@ func kubectlApplyStdinArgs(namespace, kubernetesContext string) []string {
 	return append(args, "-n", strings.TrimSpace(namespace), "apply", "-f", "-")
 }
 
+// secretApplyCreateRaceAttempts bounds how many times an apply that lost a
+// create race is re-run before its error is reported. One re-run is enough:
+// the loser's second attempt reads the object its sibling created and takes
+// the update path, and no later attempt faces a different cluster state. The
+// bound exists so a create that keeps being refused cannot spin.
+const secretApplyCreateRaceAttempts = 3
+
 // applySecretManifest dispatches to the subprocess or library path per the
 // kubectl-secret-apply execution mode (see execution_mode.go). description
 // names the Secret in the error the caller would otherwise have written
 // itself, so both paths fail with the same prefix. args is the exact apply
 // command already traced by the caller, used by the subprocess path only.
+//
+// An `AlreadyExists` refusal of the create is retried, because it is not a
+// failure of this apply: it means another writer created the very same object
+// between this apply's read and its write. That is routine here -- deploy runs
+// the components of one step in parallel, and a Secret shared by them (the
+// gateway credential, the Cloudflare token, the image-pull credential) is
+// applied by each component -- so on first apply two components both read
+// "absent" and both take the create path, and whoever loses is rejected. The
+// loser's next attempt sees the object and takes the ordinary update path, so
+// the shared Secret still ends up with this manifest's content; treating the
+// refusal as success instead would leave a stale object in place whenever the
+// credential had actually changed. Nothing else is retried: an auth, policy,
+// or connectivity failure still surfaces on its first occurrence.
 func applySecretManifest(contextName, namespace, description, manifest string, args []string) error {
+	var err error
+	for attempt := 0; attempt < secretApplyCreateRaceAttempts; attempt++ {
+		var lostCreateRace bool
+		lostCreateRace, err = applySecretOnce(contextName, namespace, description, manifest, args)
+		if err == nil || !lostCreateRace {
+			return err
+		}
+	}
+	return err
+}
+
+// applySecretOnce runs one apply and reports whether its failure was another
+// writer winning the create race, in which case err is the refusal to report
+// only if every subsequent attempt fails the same way.
+func applySecretOnce(contextName, namespace, description, manifest string, args []string) (lostCreateRace bool, err error) {
 	if currentExecutionMode(kubectlSecretApplyExecutionOperation) == ExecutionModeLibrary {
 		if err := applySecretViaClientGo(contextName, namespace, manifest); err != nil {
-			return fmt.Errorf("kubectl apply %s: %s", description, err)
+			return apierrors.IsAlreadyExists(err), fmt.Errorf("kubectl apply %s: %w", description, err)
 		}
-		return nil
+		return false, nil
 	}
 	cmd := Command("kubectl", args...)
 	cmd.Stdin = strings.NewReader(manifest)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("kubectl apply %s: %w: %s", description, err, strings.TrimSpace(string(out)))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(out))
+		return kubectlReportsAlreadyExists(text), fmt.Errorf("kubectl apply %s: %w: %s", description, err, text)
 	}
-	return nil
+	return false, nil
+}
+
+// kubectlReportsAlreadyExists reads the refusal out of kubectl's own error
+// output. The reason is only in the text: the subprocess path has no Status
+// object to ask, which is what apierrors.IsAlreadyExists does for the library
+// path. Matching the parenthesized reason rather than "already exists" keeps
+// this to the create refusal -- the message the API server sends when a create
+// loses, not any phrase a later part of kubectl's output might carry.
+func kubectlReportsAlreadyExists(output string) bool {
+	return strings.Contains(output, "(AlreadyExists)")
 }
 
 // applySecretViaClientGo is the library-backed alternative to shelling out to
