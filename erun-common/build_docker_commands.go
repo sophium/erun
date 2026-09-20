@@ -378,7 +378,7 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 			Err:      err,
 		}
 	}
-	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message); ok {
+	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message, err); ok {
 		return message, DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
 	}
 	// Keep the step's own last words whatever else is known: they are all the
