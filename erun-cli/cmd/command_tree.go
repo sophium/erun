@@ -122,6 +122,12 @@ var cliOnlyAgentFacingFlags = map[string]bool{
 	// Contract"). The drift it reports is already surfaced; only the exit code
 	// is CLI-shaped.
 	"list --fail-on-drift": true,
+	// Declares a build the merge queue's gate, so a run that would build nothing
+	// fails rather than certifying a tree. It exists for the orchestrator that
+	// promotes and reports a review, and for the merge queue's own exit-code
+	// contract; the desktop's build action has no queue behind it and no record
+	// to protect.
+	"build --gate": true,
 	// Scripted-composition switches, in their own usage strings' words: they
 	// let a caller chain expose/unexpose after another command without first
 	// checking whether the project declares a platform block, and let one run
