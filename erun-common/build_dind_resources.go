@@ -22,15 +22,18 @@ var (
 // because the in-pod config store resolves no environment and envConfig was
 // always nil in that context.
 //
-// Read these as a provisioning budget threaded in for sizing, not as a cgroup
-// ceiling the build is confined to. The sidecar's Kubernetes limit is not a
-// descendant cgroup of the build work — a RUN step in the test stage runs as
-// its sibling — which is the same blind-cgroup reason the value cannot simply
-// be read off the filesystem there, and the reason resizing the sidecar does
-// not by itself bound what a build may consume (see DefaultRuntimeDindCPU's
-// own note on enforcement in runtime_resources.go). Raising or lowering the
-// number therefore moves the concurrency the gate sizes for itself; it is not
-// a lever that caps a build's real CPU use.
+// These values are a sizing budget, not the cap itself: the Dockerfile only
+// feeds them to its own gate-concurrency arithmetic, because a RUN step in the
+// test stage runs as a sibling of the sidecar's limited cgroup and so cannot
+// read the sidecar's real limit off the filesystem itself. The
+// limit they are resolved from is nonetheless enforced on that same build work
+// by a separate mechanism: buildContainerCPUCapCgroupParent nests every
+// RUN-instruction container under /docker/erun-build-cpu-cap-<pod>, whose
+// cpu.max dind-entrypoint.sh mirrors from the sidecar's own kubelet-enforced
+// quota. So `erun resize --dind-cpu` moves both the concurrency this value
+// sizes and the ceiling the build actually runs under; it is only this ARG
+// read on its own that is not that ceiling. Memory is the one left uncapped
+// (see DefaultRuntimeDindCPU's note in runtime_resources.go).
 const (
 	DindCPULimitEnvVar       = "ERUN_DIND_CPU_LIMIT"
 	DindMemoryLimitMiBEnvVar = "ERUN_DIND_MEMORY_LIMIT_MIB"
