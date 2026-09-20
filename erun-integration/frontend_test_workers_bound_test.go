@@ -21,8 +21,8 @@ var frontendWorkspaces = []string{"erun-kit", "erun-ui/frontend", "erun-console"
 // side by side therefore demand twice the quota before any of the other
 // frontend jobs (build, lint, typecheck) or any sibling check-gate target
 // takes a share, and the oversubscription is spent as cgroup throttling --
-// the mechanism erun#2390 describes, where a starved process fails on a
-// socket timeout that reads as a network fault.
+// the mechanism the in-image gate is starved by, where a starved process
+// fails on a socket timeout that reads as a network fault.
 //
 // This is the same defect class GO_TEST_GOMAXPROCS bounds for the Go test
 // targets and LINT_GOMAXPROCS bounds for golangci-lint, and it is the

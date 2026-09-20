@@ -394,10 +394,10 @@ FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND
 # the fan-out above. Two of them side by side therefore demand twice the quota
 # before the other frontend jobs (build, lint, typecheck) or any concurrent
 # check-gate target takes a share, and that oversubscription is spent as cgroup
-# throttling. This is what the issue filed on the in-image gate describes: a
-# 2.8MB tarball fetches in 0.27s from an idle container on the same daemon, but
-# the throttled install spends minutes on it and then dies as ESOCKETTIMEDOUT,
-# reading as a network fault (erun#2390).
+# throttling. This is the in-image gate's starvation mechanism: a 2.8MB tarball
+# fetches in 0.27s from an idle container on the same daemon, but the throttled
+# install spends minutes on it and then dies as ESOCKETTIMEDOUT, reading as a
+# network fault.
 #
 # Same bound, same reasoning, same shape as LINT_GOMAXPROCS above: divide the
 # environment's real quota by the number of these jobs that actually run
