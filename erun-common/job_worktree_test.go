@@ -350,6 +350,21 @@ func rejectCommitsWithAHook(t *testing.T, repo string) string {
 	return marker
 }
 
+// fileOnRemoteBranch reads a file out of a branch as it exists on the real
+// remote, so a test can require the run's actual bytes rather than merely that
+// a ref landed there. A ref can exist and still not carry the work.
+func fileOnRemoteBranch(t *testing.T, remote, branch, path string) string {
+	t.Helper()
+	cmd := exec.Command("git", "show", branch+":"+path)
+	cmd.Dir = remote
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("the rescued checkpoint commit did not reach the real remote carrying the run's "+
+			"in-flight work (%s): %v", path, err)
+	}
+	return string(out)
+}
+
 // The reproduction of the reported failure: a killed job's in-flight work was
 // lost because the automatic checkpoint commit ran the repository's own
 // pre-commit hook, and a lint finding about an unused constant refused it. The
@@ -398,10 +413,13 @@ func TestAgentJobCheckpointCommitSurvivesARepositoryPreCommitHookThatRejectsIt(t
 			"working tree (reason: %s): %+v", job.WorktreeReason, job)
 	}
 
-	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/feature/lane")
-	cmd.Dir = remote
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("the rescued checkpoint commit did not reach the real remote: %v", err)
+	// The reported failure is the loss of specific bytes — a staged file that
+	// existed only in the killed pod's working tree. A ref landing on the remote
+	// would not by itself prove they survived, so read the run's work back out of
+	// the remote and require the work itself.
+	if got := fileOnRemoteBranch(t, remote, "feature/lane", "uncommitted.txt"); got != "lane work\n" {
+		t.Fatalf("the remote's rescued checkpoint commit carries %q, want the run's in-flight work %q",
+			got, "lane work\n")
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Fatalf("the repository's pre-commit hook ran for the checkpoint commit; hooks must not "+
