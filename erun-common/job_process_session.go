@@ -42,26 +42,35 @@ func sessionHasLiveMember(procs []sessionProcess, sid int) bool {
 }
 
 // descendantHasLiveMember reports whether the table holds a live, non-zombie
-// process whose parent is parentPID. It is what catches work that escaped both
-// the process group and the session: a descendant that called setsid itself
-// gets a fresh group *and* a fresh session, so neither of the scans above can
-// name it, but it cannot escape being reparented -- when the process that
-// spawned it exits, the kernel hands it to the nearest ancestor marked as a
-// child subreaper, which is this supervisor (see
-// enableEnvironmentJobSubreaper). Its parent is then the supervisor itself,
-// whatever it did to its own group and session.
+// process whose parent is parentPID and which was not already there when the
+// job started. It is what catches work that escaped both the process group and
+// the session: a descendant that called setsid itself gets a fresh group *and*
+// a fresh session, so neither of the scans above can name it, but it cannot
+// escape being reparented -- when the process that spawned it exits, the
+// kernel hands it to the nearest ancestor marked as a child subreaper, which
+// is this supervisor (see enableEnvironmentJobSubreaper). Its parent is then
+// the supervisor itself, whatever it did to its own group and session.
+//
+// baseline is the set of pids already parented to the supervisor when it began
+// the work. On a supervisor's own process that set is empty, since nothing
+// else runs there; it is non-empty where the supervisor shares a process with
+// something else that keeps children of its own, and those are not this job's
+// to report.
 //
 // A zombie is excluded for the same reason the scans above exclude it:
 // completed work nobody has reaped yet is not abandoned background work. A
 // zero parent marks a row the platform could not answer for, and a negative
 // parentPID means there is no supervisor pid to compare against, so neither
 // can match.
-func descendantHasLiveMember(procs []sessionProcess, parentPID int) bool {
+func descendantHasLiveMember(procs []sessionProcess, parentPID int, baseline map[int]struct{}) bool {
 	if parentPID <= 0 {
 		return false
 	}
 	for _, proc := range procs {
 		if proc.zombie || proc.parent != parentPID {
+			continue
+		}
+		if _, existed := baseline[proc.pid]; existed {
 			continue
 		}
 		return true

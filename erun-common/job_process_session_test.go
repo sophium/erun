@@ -85,25 +85,39 @@ func TestEnvironmentJobDescendantScanFindsTheReparentedLeftover(t *testing.T) {
 		{pid: 4242, parent: 1},
 		{pid: 4243, parent: 4244, session: 4243},
 	}
-	if !descendantHasLiveMember(leftover, 4244) {
+	if !descendantHasLiveMember(leftover, 4244, nil) {
 		t.Fatalf("a live process reparented onto the supervisor must read as a survivor")
 	}
-	if descendantHasLiveMember(leftover, 4242) {
+	if descendantHasLiveMember(leftover, 4242, nil) {
 		t.Fatalf("a process still parented to something else must not read as the supervisor's descendant")
 	}
 
 	// The reparented leftover already exited and is only waiting to be reaped.
 	completed := []sessionProcess{{pid: 4243, parent: 4244, zombie: true}}
-	if descendantHasLiveMember(completed, 4244) {
+	if descendantHasLiveMember(completed, 4244, nil) {
 		t.Fatalf("a reparented zombie must not read as a survivor")
 	}
 
 	// A platform that reports no parent must not have its processes attributed
 	// to the supervisor, and a supervisor with no pid has nothing to match.
-	if descendantHasLiveMember([]sessionProcess{{pid: 4243}}, 4244) {
+	if descendantHasLiveMember([]sessionProcess{{pid: 4243}}, 4244, nil) {
 		t.Fatalf("a process whose parent is unknown must not match any supervisor")
 	}
-	if descendantHasLiveMember(leftover, 0) {
+	if descendantHasLiveMember(leftover, 0, nil) {
 		t.Fatalf("an unset supervisor pid must not match a process reporting parent zero")
+	}
+
+	// A child the supervisor already had before the job started belongs to
+	// whatever put it there, not to this job, and must not be reported as this
+	// job's leftover -- the case where the supervisor shares a process with a
+	// harness that keeps children of its own.
+	baseline := map[int]struct{}{4243: {}}
+	if descendantHasLiveMember(leftover, 4244, baseline) {
+		t.Fatalf("a child that predates the job must not read as a survivor this job left behind")
+	}
+	// One that arrived after it still must, even with a baseline in hand.
+	withNewcomer := append([]sessionProcess{{pid: 4245, parent: 4244}}, leftover...)
+	if !descendantHasLiveMember(withNewcomer, 4244, baseline) {
+		t.Fatalf("a descendant adopted after the job started must read as a survivor despite the baseline")
 	}
 }

@@ -15,4 +15,9 @@ func enableEnvironmentJobSubreaper() {}
 // nothing naming this supervisor to compare against. The process-group and
 // session scans remain the checks those platforms have; this one cannot report
 // a survivor it cannot see, and must not report one that is not there.
-func environmentJobDescendantSurvivors(parentPID int) bool { return false }
+func environmentJobDescendantSurvivors(parentPID int, baseline map[int]struct{}) bool { return false }
+
+// environmentJobDescendantBaseline has nothing to record: without a subreaper
+// to claim orphans there is no descendant for the check above to see, so there
+// is no baseline to exclude them by.
+func environmentJobDescendantBaseline(parentPID int) map[int]struct{} { return nil }

@@ -39,13 +39,13 @@ func enableEnvironmentJobSubreaper() {
 // spawning process exits, which can land a few milliseconds after the tracked
 // child is reaped, so a single reading taken the instant Wait returns can miss
 // a descendant that is about to arrive.
-func environmentJobDescendantSurvivors(parentPID int) bool {
+func environmentJobDescendantSurvivors(parentPID int, baseline map[int]struct{}) bool {
 	if parentPID <= 0 {
 		return false
 	}
 	deadline := time.Now().Add(environmentJobProcessGroupSurvivorSettleWindow)
 	for {
-		alive := environmentJobDescendantHasLiveMember(parentPID)
+		alive := environmentJobDescendantHasLiveMember(parentPID, baseline)
 		if !alive || !time.Now().Before(deadline) {
 			return alive
 		}
@@ -53,30 +53,56 @@ func environmentJobDescendantSurvivors(parentPID int) bool {
 	}
 }
 
+// environmentJobDescendantBaseline records the pids already parented to this
+// process, for the finish check above to exclude. A supervisor captures it
+// before it starts the work: on its own process it is empty, and where the
+// supervisor shares a process with a harness that keeps children of its own,
+// those children are not this job's to report.
+func environmentJobDescendantBaseline(parentPID int) map[int]struct{} {
+	baseline := map[int]struct{}{}
+	procs, ok := environmentJobSessionProcessesFunc()
+	if !ok {
+		return baseline
+	}
+	for _, proc := range procs {
+		if proc.parent == parentPID {
+			baseline[proc.pid] = struct{}{}
+		}
+	}
+	return baseline
+}
+
 // environmentJobDescendantHasLiveMember asks this platform's own process table
 // first -- /proc on Linux -- and only falls back to ps where the platform has
 // no table to offer.
-func environmentJobDescendantHasLiveMember(parentPID int) bool {
+func environmentJobDescendantHasLiveMember(parentPID int, baseline map[int]struct{}) bool {
 	if procs, ok := environmentJobSessionProcessesFunc(); ok {
-		return descendantHasLiveMember(procs, parentPID)
+		return descendantHasLiveMember(procs, parentPID, baseline)
 	}
 	out, err := exec.Command("ps", "-axo", "pid=,ppid=,stat=").Output()
 	if err != nil {
 		return false
 	}
-	return parsePSDescendantTable(out, parentPID)
+	return parsePSDescendantTable(out, parentPID, baseline)
 }
 
 // parsePSDescendantTable finds a live, non-zombie process whose parent is
 // parentPID in `ps -axo pid=,ppid=,stat=` output. Compared against ps's own
 // ppid column rather than getsid(2) only because there is no table to prefer
 // here; ppid is populated on every platform, unlike the session column.
-func parsePSDescendantTable(out []byte, parentPID int) bool {
+func parsePSDescendantTable(out []byte, parentPID int, baseline map[int]struct{}) bool {
 	target := strconv.Itoa(parentPID)
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) < 3 || fields[1] != target {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		if _, existed := baseline[pid]; existed {
 			continue
 		}
 		if !psStatIsZombie(fields[2]) {

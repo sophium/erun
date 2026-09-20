@@ -703,6 +703,7 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	// reparenting it arranges is decided by the kernel at the moment the
 	// spawning process exits, and cannot be retrofitted afterwards.
 	enableEnvironmentJobSubreaper()
+	adoptedBaseline := environmentJobDescendantBaseline(os.Getpid())
 	env, err := normalizeEnvironmentJobEnv(params.Env)
 	if err != nil {
 		return err
@@ -828,9 +829,9 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 			procState = cmd.ProcessState
 		}
 
-		resumeCommand, reinvoke := considerEnvironmentJobReinvocation(recorder, beat, childPID, procState, waitErr, reinvocationDeadline)
+		resumeCommand, reinvoke := considerEnvironmentJobReinvocation(recorder, beat, childPID, procState, waitErr, reinvocationDeadline, adoptedBaseline)
 		if !reinvoke {
-			return finishEnvironmentJob(recorder, beat, writer, childPID, procState, waitErr)
+			return finishEnvironmentJob(recorder, beat, writer, childPID, procState, waitErr, adoptedBaseline)
 		}
 		command = resumeCommand
 	}
@@ -853,11 +854,11 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 // already resolved one way or another — keeping one function as the single
 // source of "what happened this turn" is simpler than threading the tuple
 // through two call sites.
-func considerEnvironmentJobReinvocation(recorder *jobRecorder, beat *jobHeartbeat, childPID int, state *os.ProcessState, waitErr error, deadline time.Time) ([]string, bool) {
+func considerEnvironmentJobReinvocation(recorder *jobRecorder, beat *jobHeartbeat, childPID int, state *os.ProcessState, waitErr error, deadline time.Time, adoptedBaseline map[int]struct{}) ([]string, bool) {
 	// Folds the stream's tail before SessionID is read below, so a session id
 	// the tool only reported in its very last bytes is not missed.
 	beat.refresh(false)
-	_, _, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
+	_, _, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr, adoptedBaseline)
 	job := recorder.snapshot()
 	prompt, ok := decideEnvironmentJobReinvocation(job, jobState, startedJobFailed, reason, deadline)
 	if !ok {
@@ -972,14 +973,14 @@ func buildEnvironmentJobReinvocationPrompt(job EnvironmentJob, outcome string) s
 // not just a stale field. settle is applied to an in-memory copy first (no
 // disk write), reclaim is decided and acted on against that settled copy, and
 // only then does the single recorder.update below make any of it durable.
-func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error) error {
+func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error, adoptedBaseline map[int]struct{}) error {
 	// Fold the stream's tail before the outcome lands, so the finished record
 	// carries what the run last did rather than the poll's stale view of it.
 	beat.refresh(false)
 
 	cancelledBy, wasCancelled := consumeEnvironmentJobCancelRequest(recorder.dir, recorder.snapshot().ID)
 
-	code, signal, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
+	code, signal, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr, adoptedBaseline)
 	// A job that already spent its bounded reinvocations (see
 	// considerEnvironmentJobReinvocation) and still ends up here gate-incomplete
 	// or naming a StartedJobFailed exhausted its automatic "later" -- say so,
@@ -1050,7 +1051,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 // finished, its failure (if any) is folded into startedJobFailed instead, so
 // a clean exit code from this job's own process never overshadows a real
 // failure in work it waited for.
-func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os.ProcessState, waitErr error) (code int, signal, reason, jobState, startedJobFailed string) {
+func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os.ProcessState, waitErr error, adoptedBaseline map[int]struct{}) (code int, signal, reason, jobState, startedJobFailed string) {
 	code = -1
 	switch {
 	case state != nil:
@@ -1064,7 +1065,7 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 	jobState = EnvironmentJobStateExited
 	if state != nil && (environmentJobProcessGroupSurvivors(childPID) ||
 		environmentJobSessionSurvivors(childPID) ||
-		environmentJobDescendantSurvivors(os.Getpid())) {
+		environmentJobDescendantSurvivors(os.Getpid(), adoptedBaseline)) {
 		jobState = EnvironmentJobStateAbandoned
 		reason = "the job's own process exited, but it left other processes still running in its process group, session, or reparented onto this supervisor — background work it started and never waited for; nothing further will be reported for that work"
 	}
