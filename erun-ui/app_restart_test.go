@@ -32,9 +32,47 @@ func restartTestApp(t *testing.T) (*App, string) {
 		orchestratorOpenPath:   filepath.Join(home, orchestratorOpenFileName),
 		relaunchApp:            func() error { return nil },
 		quitApp:                func() {},
+		// beforeClose reads the window's maximised state on its way out, and
+		// the real probe needs a Wails context a test does not have.
+		windowMaximised: func(context.Context) bool { return false },
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app, restoreDir
+}
+
+// TestRestartAppIsNotCancelledByTheCloseGate is the reported failure at its
+// cause. RestartApp spawns the successor and then asks Wails to quit, and
+// Wails abandons that quit outright when OnBeforeClose returns true --
+// beforeClose does, for as long as any activity is running, which is exactly
+// when an operator restarts to pick up a rebuild. The predecessor then never
+// exits: it keeps the control record and the control port, the successor waits
+// on a process that is not going away, and the operator is left with two
+// desktops, the one in front of them still the old binary.
+//
+// The quit is driven the way Wails drives it, through beforeClose, so what is
+// asserted is the real decision rather than a stub's.
+func TestRestartAppIsNotCancelledByTheCloseGate(t *testing.T) {
+	app, _ := restartTestApp(t)
+	app.activityQueue.start(activityQueueEntry{
+		ID:      "deploy-1",
+		Command: "deploy",
+		Status:  activityQueueStatusRunning,
+	})
+
+	quitLanded := false
+	app.deps.quitApp = func() {
+		if app.beforeClose(context.Background()) {
+			return
+		}
+		quitLanded = true
+	}
+
+	if err := app.RestartApp("agent-1"); err != nil {
+		t.Fatalf("RestartApp failed: %v", err)
+	}
+	if !quitLanded {
+		t.Fatal("the restart's own quit was cancelled by the close gate: the predecessor keeps running while the successor waits on it, which is the two-desktop state a restart must not reach")
+	}
 }
 
 // stageOrchestratorConversation writes the transcript the AI harness leaves for a

@@ -54,15 +54,24 @@ func (a *App) PrepareWindowClose() uiCloseGate {
 func (a *App) ConfirmWindowClose() error {
 	running := a.runningActivityEntries()
 	writeErr := writeInterruptedActivityRecord(a.deps.interruptedActivityPath, running)
-	a.mu.Lock()
-	a.closeConfirmed = true
-	a.mu.Unlock()
+	a.markCloseConfirmed()
 	if a.deps.quitApp != nil {
 		a.deps.quitApp()
 	} else {
 		a.quitDesktopApp()
 	}
 	return writeErr
+}
+
+// markCloseConfirmed latches the "close despite the running work" decision
+// that lets the Quit-triggered beforeClose pass through instead of being
+// cancelled by the running-work gate. Two callers make that decision: the
+// operator's own confirmation, and a restart, which has already relaunched its
+// successor and so must not be cancelled on its way out (see RestartApp).
+func (a *App) markCloseConfirmed() {
+	a.mu.Lock()
+	a.closeConfirmed = true
+	a.mu.Unlock()
 }
 
 // consumeCloseConfirmed reports and clears the operator's prior "close

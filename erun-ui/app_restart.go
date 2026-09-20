@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -545,6 +546,18 @@ func equalOrchestratorScope(left, right []string) bool {
 // cannot spawn after asking Wails to quit; the two instances briefly coexist,
 // which is safe (no SingleInstanceLock). A headless/no-ctx build has no Wails
 // window to quit, so that step no-ops there.
+//
+// The quit is asked for with the close already confirmed. Wails runs
+// OnBeforeClose on its way out and abandons the quit outright when that returns
+// true (beforeClose does, for as long as any activity is running — which is
+// exactly when an operator restarts to pick up a rebuild). Left to the gate,
+// the predecessor never exits: it keeps the control record and the control
+// port, the successor waits on a process that is not going away, and the
+// operator is left with two desktops while the one in front of them is still
+// the old binary. A restart has already written its hand-off and launched its
+// successor, so it is the operator's explicit decision rather than the
+// accidental window close the gate exists to catch, and it confirms the close
+// exactly as ConfirmWindowClose does.
 func (a *App) RestartApp(returnToOrchestratorID string) error {
 	if err := writeOrchestratorRestoreTarget(a.deps.orchestratorRestoreDir, a.restartHandoff(returnToOrchestratorID), time.Now()); err != nil {
 		return fmt.Errorf("persist restart target: %w", err)
@@ -556,12 +569,52 @@ func (a *App) RestartApp(returnToOrchestratorID string) error {
 	if err := relaunch(); err != nil {
 		return fmt.Errorf("relaunch desktop app: %w", err)
 	}
+	a.markCloseConfirmed()
 	if a.deps.quitApp != nil {
 		a.deps.quitApp()
 		return nil
 	}
-	a.quitDesktopApp()
+	if a.quitDesktopApp() {
+		a.armRestartQuitStallWatch()
+	}
 	return nil
+}
+
+// restartQuitStallGrace bounds how long a restart that has already asked this
+// process to quit waits for that quit to land before it ends the process
+// itself. A restart is a hand-off this process has already completed — the
+// successor is launched and the resume hand-off is written before the quit is
+// asked for — so the only thing left for it to do is disappear, and a
+// predecessor that stays is a real second desktop still holding the control
+// record. The grace is generous because it is a backstop, not a schedule: a
+// quit that lands takes milliseconds.
+const restartQuitStallGrace = 15 * time.Second
+
+// armRestartQuitStallWatch starts the restart's last resort. It is armed only
+// when this process actually asked the platform to quit it, because that is
+// the only case where "still running" means the quit did not land.
+func (a *App) armRestartQuitStallWatch() {
+	reason := fmt.Sprintf(
+		"erun-app: restart asked this process to quit and it is still running %s later; exiting so the relaunched desktop is the only one left",
+		restartQuitStallGrace)
+	go restartQuitStallWatch(restartQuitStallGrace, time.Sleep, exitForStalledRestartQuit, reason)
+}
+
+// restartQuitStallWatch ends this process when the quit a restart asked for
+// never landed. Reaching the end of the wait is itself the evidence: a process
+// whose quit worked is not here to observe it. sleep and exit are supplied so
+// the escalation can be witnessed without ending the process running the test.
+func restartQuitStallWatch(stallGrace time.Duration, sleep func(time.Duration), exit func(string), reason string) {
+	sleep(stallGrace)
+	exit(reason)
+}
+
+// exitForStalledRestartQuit ends a process whose own quit could not complete.
+// It records why before it goes, so the escalation is legible rather than a
+// desktop that vanished.
+func exitForStalledRestartQuit(reason string) {
+	log.Print(reason)
+	os.Exit(0)
 }
 
 // restartHandoff describes what the next launch comes back to. The resume prompt
@@ -655,9 +708,14 @@ func resolveDesktopSelfPath(executable string) string {
 	return executable
 }
 
-func (a *App) quitDesktopApp() {
+// quitDesktopApp asks Wails to end this process, reporting whether it had a
+// window to ask at all. A headless or not-yet-started app has none, and a
+// caller that escalates on a stalled quit must not arm that escalation for a
+// quit nobody was ever asked for.
+func (a *App) quitDesktopApp() bool {
 	if a.ctx == nil {
-		return
+		return false
 	}
 	wailsruntime.Quit(a.ctx)
+	return true
 }
