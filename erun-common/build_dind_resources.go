@@ -15,12 +15,22 @@ var (
 // DindCPULimitEnvVar / DindMemoryLimitMiBEnvVar name the env vars the runtime
 // chart's downward API populates on the main container from the erun-dind
 // sidecar's own resource limits (erun-devops/k8s/erun-devops/templates/service.yaml),
-// so an in-pod build can read the sidecar's real limit directly instead of
-// through the config store, which has no environment entry inside the pod.
-// `erun resize --dind-cpu` moves the sidecar's real limit and the cgroup it
-// lives in, but a gate build kept sizing off the config-store fallback
-// default ("4") because the in-pod config store resolves no environment and
-// envConfig was always nil in that context.
+// so an in-pod build can read the budget the operator provisioned for it
+// instead of through the config store, which has no environment entry inside
+// the pod. `erun resize --dind-cpu` moves the sidecar's configured limit, but
+// a gate build kept sizing off the config-store fallback default ("4")
+// because the in-pod config store resolves no environment and envConfig was
+// always nil in that context.
+//
+// Read these as a provisioning budget threaded in for sizing, not as a cgroup
+// ceiling the build is confined to. The sidecar's Kubernetes limit is not a
+// descendant cgroup of the build work — a RUN step in the test stage runs as
+// its sibling — which is the same blind-cgroup reason the value cannot simply
+// be read off the filesystem there, and the reason resizing the sidecar does
+// not by itself bound what a build may consume (see DefaultRuntimeDindCPU's
+// own note on enforcement in runtime_resources.go). Raising or lowering the
+// number therefore moves the concurrency the gate sizes for itself; it is not
+// a lever that caps a build's real CPU use.
 const (
 	DindCPULimitEnvVar       = "ERUN_DIND_CPU_LIMIT"
 	DindMemoryLimitMiBEnvVar = "ERUN_DIND_MEMORY_LIMIT_MIB"
@@ -77,9 +87,9 @@ func applyDindResourceBuildArgs(store DockerStore, projectRoot, environment stri
 // resolveDockerBuildDindPodResources resolves the building environment's
 // configured erun-dind sidecar resources. It prefers the downward-API env
 // vars (DindCPULimitEnvVar/DindMemoryLimitMiBEnvVar) field-by-field when they
-// parse as valid Kubernetes quantities, since those reflect the sidecar's
-// real, live limit and are the only source available to an in-pod build,
-// whose config store has no environment entry to read. Any field an env var
+// parse as valid Kubernetes quantities, since those are projected from the
+// sidecar's configured limits and are the only source available to an in-pod
+// build, whose config store has no environment entry to read. Any field an env var
 // does not resolve (absent, or malformed) falls back to the config-store
 // lookup a host-driven build already relies on, and a field neither resolves
 // falls back further to NormalizeRuntimeDindPodResources' own conservative
