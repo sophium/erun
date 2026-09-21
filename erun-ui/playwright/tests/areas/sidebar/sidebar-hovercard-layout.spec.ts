@@ -188,13 +188,20 @@ test.describe('sidebar env hover card layout (#1901)', () => {
           timeout: 1_000,
         });
 
-      // Live-state rows -- Activity, Usage, Cloud node -- live in the second
-      // zone; identity rows -- Version, Working on -- live in the first.
+      // Live-state rows live in the second zone; identity rows -- Version,
+      // Working on -- live in the first. The live-state zone's exact rows are
+      // deliberately not asserted here: both of its conditional rows depend on
+      // live state this test does not drive. The usage rows are `CPU`/`Memory`
+      // once a reading is cached but the single degraded `Usage` row before
+      // that (SEED_ENV_ALPHA is shared and another spec can leave a reading on
+      // it), and the Cloud node row is omitted outright when there is no node.
+      // Their own specs own those shapes -- sidebar-environment-usage.spec.ts
+      // and sidebar-env-hover.spec.ts -- so this test stays on the two-zone
+      // boundary it is named for.
       await expect(zones.nth(0)).toContainText('Version', { timeout: 1_000 });
       await expect(zones.nth(0)).toContainText('Working on', { timeout: 1_000 });
       await expect(zones.nth(1)).toContainText('Activity', { timeout: 1_000 });
-      await expect(zones.nth(1)).toContainText('Usage', { timeout: 1_000 });
-      await expect(zones.nth(1)).toContainText('Cloud node', { timeout: 1_000 });
+      await expect(zones.nth(1)).not.toContainText('Working on', { timeout: 1_000 });
     });
 
     expect(Number.parseFloat(secondZoneBorder)).toBeGreaterThan(0);
@@ -260,7 +267,9 @@ test.describe('sidebar env hover card layout (#1901)', () => {
   // build-capable environment).
   test('a stale usage reading renders degraded, not as an amber warning', async ({ app, page }) => {
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
-    const usageValue = card.locator('dt:text-is("Usage") + dd');
+    // The CPU row, not the single `Usage` row: a cached reading renders CPU and
+    // Memory as separate rows, and a stale reading is still a reading.
+    const usageValue = card.locator('dt:text-is("CPU") + dd');
     let color = '';
     // Every read -- including the two that used to run after this block --
     // lives inside the one retryable attempt: the ongoing usage sweep can
