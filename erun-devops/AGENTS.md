@@ -164,7 +164,13 @@ composition and release invariants belong to root/shared logic, not chart policy
   missing static asset: carve out any request whose final path segment carries a
   file extension, not just the `/assets/` prefix, so a root-level file
   (`favicon.svg`) or a probed `/favicon.ico` 404s instead of serving the shell.
-  The `/v1/` proxy location takes `^~` so it stays ahead of that regex location.
+  The same fallback must not answer a conventional probe path the console does
+  not implement — a monitor's predicate is "2xx", so a shell served at `/health`
+  reports healthy unconditionally, the fail-open shape this carve-out exists to
+  remove; such paths 404 and name the endpoints that do answer (`/healthz`,
+  `/version.json`). Keep that set named rather than "any dotless path that is
+  not an app route": an unknown app route must keep serving the shell. The
+  `/v1/` proxy location takes `^~` so it stays ahead of both regex locations.
 
 ## Wrapping And Pinning Third-Party Service Images
 
