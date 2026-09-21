@@ -3,13 +3,17 @@ import { TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { type EnvironmentNodeIndicator, environmentNodeLabel } from '@/app/environmentNodeState';
-import { summarizeEnvironmentUsage } from '@/app/environmentUsageSummary';
+import {
+  summarizeEnvironmentUsageMetrics,
+  type UsageMetricSummary,
+} from '@/app/environmentUsageSummary';
 import {
   type ErunVersionSummary,
   summarizeErunVersion,
   summarizeRuntimeVersionLine,
 } from '@/app/environmentVersionLines';
 import { useHoverCardOpenState } from '@/app/useHoverCardOpenState';
+import { DecileStrip } from '@/components/app/Sidebar.DecileStrip';
 import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
 import {
   HOVER_CARD_ALERT_CLASS,
@@ -208,12 +212,15 @@ function EnvHoverCardFields({
         <HoverCardRow label="Activity">
           <ActivityState activityLabel={activityLabel} indicator={indicator} />
         </HoverCardRow>
-        <HoverCardRow label="Usage">
-          <UsageState usage={usage} excludesBuilds={usageExcludesBuilds} />
-        </HoverCardRow>
-        <HoverCardRow label="Cloud node">
-          <NodeState node={node} nodeIndicator={nodeIndicator} />
-        </HoverCardRow>
+        <UsageRows usage={usage} excludesBuilds={usageExcludesBuilds} />
+        {/* The Cloud node row is omitted entirely when there is no node: "this
+            cluster is not power-managed by erun" explains an absence the
+            operator cannot act on, and it was the longest row on the card. */}
+        {node && (
+          <HoverCardRow label="Cloud node">
+            <NodeState node={node} nodeIndicator={nodeIndicator} />
+          </HoverCardRow>
+        )}
       </dl>
     </div>
   );
@@ -308,22 +315,20 @@ function ActivityState({
 }
 
 // NodeState names the machine the environment's cluster runs on and the power
-// state it was last observed in. It renders on EVERY hover, including for a
-// running node the row itself stays silent about: "the node is fine, it is the
-// environment that could not be determined" is the answer a blank row cannot
-// give, and this is where it is available without new row vocabulary.
+// state it was last observed in. It renders whenever there IS a node, including
+// for a running node the row itself stays silent about: "the node is fine, it
+// is the environment that could not be determined" is the answer a blank row
+// cannot give, and this is where it is available without new row vocabulary.
+// The no-node case is not handled here -- the caller omits the row outright,
+// because "nothing power-manages this cluster" is not a fact an operator acts
+// on and was the longest line on the card.
 function NodeState({
   node,
   nodeIndicator,
 }: {
-  node: UIEnvironmentNodeSnapshot | undefined;
+  node: UIEnvironmentNodeSnapshot;
   nodeIndicator: EnvironmentNodeIndicator;
 }): React.ReactElement {
-  if (!node) {
-    // A definite answer, not an unread one: nothing erun power-manages backs
-    // this environment, so there is no node to be up or down.
-    return <Muted>No cloud node — this cluster is not power-managed by erun</Muted>;
-  }
   const label = environmentNodeLabel(node);
   if (nodeIndicator.state === 'stopped') {
     return (
@@ -361,16 +366,32 @@ function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
   }
 }
 
-// UsageState renders the environment-usage sweep's cached reading
-// (environment_usage.go): a comparable CPU/memory figure with its age, a
-// stated reason when there is nothing measurable (never a bare 0%, which
-// would read as idle-and-healthy rather than "unmeasured"), and a visible
-// staleness flag when the reading has outlived the sweep interval that
-// produced it — an unlabelled stale number is worse than none.
+// UsageRows renders the environment-usage sweep's cached reading
+// (environment_usage.go) as separate CPU and memory rows, each with a decile
+// strip, so idle and loaded stop looking identical: one joined string
+// ("CPU 12% · Mem 68% of 2048Mi") gave the two metrics the same shape, weight
+// and wrap whatever they read, leaving state legible only by parsing digits.
+//
+// Three states, and they must not collapse into each other:
+//
+//   - A reading renders two rows. Each metric may carry a `percent`, and only
+//     then does it get a strip: a measured zero renders an EMPTY (outlined)
+//     strip, while a metric that could not be measured at all renders a dash
+//     and no strip, so "idle" and "unmeasured" stay distinguishable.
+//   - An unread environment (never sampled, unavailable, or neither figure
+//     readable) renders ONE row naming the reason. There are no metrics to
+//     give separate rows to, and the reason is the actionable part -- in
+//     particular a never-sampled environment must say `no reading yet` rather
+//     than borrow the empty strip that means "measured zero".
+//   - A stale reading keeps its figures and strips and says so on the caption
+//     row; the strip is a real measurement, just an old one.
+//
 // A stale or unmeasurable reading is rendered as degraded, never as an amber
 // warning: nothing the operator did caused either state and no action follows
 // from it, so it should recede rather than alarm (see the TYPE note in
-// Sidebar.HoverCardRow.tsx).
+// Sidebar.HoverCardRow.tsx). Amber on this card is reserved for the strip's own
+// near-ceiling threshold, which is a different claim: the reading is fine, the
+// resource is nearly out.
 //
 // The reading itself is scoped to the runtime container's own cgroup, which
 // is never where a build runs -- every image build executes in the erun-dind
@@ -383,35 +404,66 @@ function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
 // is the only honest option left, so `excludesBuilds` (environmentUsesDindSidecar
 // in Sidebar.helpers.ts) makes the caption say so on every build-capable
 // environment, not just the ones currently building.
-function UsageState({
+function UsageRows({
   usage,
   excludesBuilds,
 }: {
   usage: UIEnvironmentUsageSnapshot | undefined;
   excludesBuilds: boolean;
 }): React.ReactElement {
-  const summary = summarizeEnvironmentUsage(usage, Date.now());
-  if (!summary.hasReading || !summary.headline) {
-    return <Muted>{summary.detail}</Muted>;
-  }
-  const scopeCaveat = excludesBuilds ? ' — excludes builds' : '';
-  if (summary.stale) {
+  const metrics = summarizeEnvironmentUsageMetrics(usage, Date.now());
+  if (metrics.kind === 'unread') {
     return (
-      <span className={HOVER_CARD_VALUE_STACK_CLASS}>
-        <Muted>{summary.headline}</Muted>
-        <Muted>
-          Stale — as of {summary.ageLabel} ago{scopeCaveat}
-        </Muted>
-      </span>
+      <HoverCardRow label="Usage">
+        <Muted>{metrics.detail}</Muted>
+      </HoverCardRow>
     );
   }
+  const scopeCaveat = excludesBuilds ? ' — excludes builds' : '';
   return (
-    <span className={HOVER_CARD_VALUE_STACK_CLASS}>
-      <span>{summary.headline}</span>
-      <span className={HOVER_CARD_CAPTION_CLASS}>
-        As of {summary.ageLabel} ago{scopeCaveat}
-      </span>
-    </span>
+    <>
+      <HoverCardRow label="CPU">
+        <UsageMetric metric={metrics.cpu} stale={metrics.stale} />
+      </HoverCardRow>
+      <HoverCardRow label="Memory">
+        <UsageMetric metric={metrics.memory} stale={metrics.stale} />
+      </HoverCardRow>
+      {/* The reading's age is its own row, under the metrics it qualifies --
+          a caption spanning both metrics must not sit under only one of them. */}
+      <HoverCardRow label="">
+        <Muted>
+          {metrics.stale ? 'Stale — as of' : 'As of'} {metrics.ageLabel} ago{scopeCaveat}
+        </Muted>
+      </HoverCardRow>
+    </>
+  );
+}
+
+// UsageMetric is one metric's value, its muted trailing suffix, and its decile
+// strip. The suffix is pushed to the right edge of the value column so the
+// figures themselves stack down one left edge and stay comparable.
+function UsageMetric({
+  metric,
+  stale,
+}: {
+  metric: UsageMetricSummary;
+  stale: boolean;
+}): React.ReactElement {
+  const figure = (
+    <span className={stale ? 'text-muted-foreground/70' : undefined}>{metric.value}</span>
+  );
+  return (
+    <div className={HOVER_CARD_VALUE_STACK_CLASS}>
+      {metric.suffix ? (
+        <span className="flex items-baseline justify-between gap-2">
+          {figure}
+          <span className={HOVER_CARD_CAPTION_CLASS}>{metric.suffix}</span>
+        </span>
+      ) : (
+        figure
+      )}
+      {metric.percent !== undefined && <DecileStrip percent={metric.percent} />}
+    </div>
   );
 }
 

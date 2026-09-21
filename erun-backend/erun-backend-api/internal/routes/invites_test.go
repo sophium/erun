@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -189,6 +191,31 @@ func TestInviteAcceptReportsEachTokenStatePlainly(t *testing.T) {
 				t.Fatalf("status = %d, want %d for %s; body=%s", rec.Code, tc.want, tc.name, rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestInviteAcceptReportsATakenLoginNameAsUsernameTaken locks the second
+// entry point that claims USERNAME_TAKEN: acceptance creates the IdP identity
+// itself, so an invitee who chose a name their organization already holds
+// must be told which name to change rather than handed Zitadel's own
+// account-naming text. It is the case the token-state switch above must not
+// swallow, since it arrives on that switch's default branch.
+func TestInviteAcceptReportsATakenLoginNameAsUsernameTaken(t *testing.T) {
+	accepter := &stubInviteAccepter{err: fmt.Errorf("create identity provider user: %w",
+		&zitadel.UsernameTakenError{Username: "newbie"})}
+	mux := http.NewServeMux()
+	RegisterInviteAcceptRoute(mux, accepter)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, acceptRequest(`{"token":"tok","username":"newbie","password":"S3cret!Pass"}`))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"USERNAME_TAKEN"`) {
+		t.Fatalf("body = %q, want the USERNAME_TAKEN machine code", body)
+	}
+	if !strings.Contains(body, "newbie") {
+		t.Fatalf("body = %q, want the offending login name named in the message", body)
 	}
 }
 

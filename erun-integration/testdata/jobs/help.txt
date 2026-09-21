@@ -1,0 +1,21 @@
+See what agents and orchestrators are working on, and what recently finished
+
+Usage:
+  erun jobs [command]
+
+Available Commands:
+  finish      Report a job's progress or its outcome
+  list        List jobs: what is being worked on now, and what recently finished
+  show        Show one job in full
+  start       Record that this actor is starting a piece of work
+
+Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+  -h, --help                help for jobs
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun jobs [command] --help" for more information about a command.

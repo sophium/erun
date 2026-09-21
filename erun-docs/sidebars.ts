@@ -50,6 +50,7 @@ const sidebars: SidebarsConfig = {
         'cli/platform',
         'cli/review',
         'cli/gate',
+        'cli/jobs',
         'cli/sshd',
         'cli/list',
         'cli/outputs',

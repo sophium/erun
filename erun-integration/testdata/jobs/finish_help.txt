@@ -1,0 +1,21 @@
+Report how a job ended (or refresh what it is doing). A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read.
+
+Usage:
+  erun jobs finish <job-id> [flags]
+
+Examples:
+  erun jobs finish job_01H... --status SUCCEEDED
+  erun jobs finish job_01H... --summary "waiting on the gate build"
+
+Flags:
+      --dry-run               Resolve and trace mutating actions without executing them.
+  -h, --help                  help for finish
+      --local-job-id string   Record the in-pod job id this mirrors
+      --status string         Close the job as SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED
+      --summary string        Refresh what the job is doing, in prose
+
+Global Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+      --output string       Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time                Print the elapsed runtime after the command finishes.
+  -v, --verbose count       Increase verbosity: -v streams external tool output, -vv adds erun command traces.

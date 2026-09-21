@@ -175,6 +175,23 @@ test.describe('sidebar env hover card', () => {
     await emitEnvStatusEvent(page, tenant, environment, '');
     await app.sidebar.closeEnvironment(tenant, environment);
   });
+
+  // "No cloud node — this cluster is not power-managed by erun" explained an
+  // absence the operator cannot act on, and it was the longest row on the card.
+  // A newly-seeded env has no power-managed node behind it, so the row is
+  // omitted outright rather than rendering that sentence.
+  test('an environment with no cloud node omits the row entirely', async ({ app, seededEnv }) => {
+    const { tenant, environment } = seededEnv;
+
+    await app.sidebar.readEnvHoverCard(tenant, environment, async (card) => {
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      await expect(card.getByText('Activity', { exact: true })).toBeVisible({ timeout: 1_000 });
+      await expect(card.getByText('Cloud node', { exact: true })).toHaveCount(0, {
+        timeout: 1_000,
+      });
+      await expect(card).not.toContainText('not power-managed by erun', { timeout: 1_000 });
+    });
+  });
 });
 
 interface EnvActivityEvent {

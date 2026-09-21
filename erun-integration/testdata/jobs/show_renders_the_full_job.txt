@@ -1,0 +1,13 @@
+job job_01HQ
+  status:      RUNNING
+  type:        fix
+  summary:     fixing the jobs claim race
+  actor:       erun/code2 (agent)
+  issue:       -
+  scope:       sophium/erun#1
+  environment: -
+  local job:   -
+  started:     <TS>
+  ended:       -
+audit: erun jobs show job_01HQ
+platform: GET <PLATFORM_API>/v1/jobs/job_01HQ

@@ -19,7 +19,7 @@ Both arguments are required. `erun delete` is destructive — there is no `delet
 1. The Kubernetes namespace `<tenant>-<env>` and everything inside it (the runtime pod, dind daemon, MCP container, PVCs for `/home/erun` and `/var/lib/docker`, helm releases, etc.).
 2. The local environment config (`<config-root>/<tenant>/<env>/`).
 3. The tenant's `default_environment` pointer if it referenced the deleted env — a sibling env (if any) is promoted to default.
-4. Cached port-forward state for the env (`<UserConfigDir>/erun/portforward/...`).
+4. The env's port-forward record under `<UserConfigDir>/erun/portforward/...`: the state file, the log, and the log's rotated generation. A log a forward that is still running holds open is kept.
 5. The `Host erun-<tenant>-<env>` block from your `~/.ssh/config`, when no other configured environment resolves to that alias — only that block is removed, and the rest of the file is untouched.
 
 Items 4 and 5 name state that would otherwise outlive the environment and point at local ports the environment no longer holds. Deleting an environment frees its port range for whichever environment is created next, so a surviving record does not fail — it silently resolves to a different, live environment. `ssh erun-<tenant>-<env>` after a delete reports the alias as unknown instead of connecting somewhere you did not name. Run `erun sshd init` again to recreate the alias if you kept a copy of the environment elsewhere.

@@ -711,6 +711,10 @@ func (r *resolvedOpenRunner) refreshHostCredentials() {
 // exactly the "action that succeeds and changes nothing" dead end. run()
 // decides whether that error matters for the branch it is in.
 func (r *resolvedOpenRunner) activateForwarders() error {
+	// Reclaim before starting anything: this is the moment the forward store
+	// is read and appended to, and the records being removed are the ones no
+	// environment left can reopen.
+	reclaimOrphanedPortForwardRecords(r.ctx)
 	var failures []string
 	if r.activateSSHD != nil && r.result.EnvConfig.SSHD.Enabled {
 		if err := r.activateSSHD(r.ctx, r.result); err != nil {

@@ -1164,7 +1164,7 @@ a pod start rather than a cold rebuild. In-pod processes are not: a stop ends wh
 2. The per-user env config directory `<config-root>/<tenant>/<env>/`.
 3. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
 
-The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` are **not** removed; a later env with the same name overwrites them (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
+4. The local port-forward record for the env — the state file, the log, and the log's rotated generation, under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.{json,log,log.1}`. A log a forward that is still running holds open is kept (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
 
 ### Error codes
 
@@ -1273,7 +1273,7 @@ An activity lease is **presence** — many holders coexist, and taking one says 
 |---|---|---|
 | `lastAliveAt` | RFC3339 timestamp | The supervisor's own clock timestamp at its last beat, stamped every ~1 second (`EnvironmentJobAliveHeartbeatInterval`) for as long as the supervisor runs — an image pull or a silent test suite beats exactly as often as a chatty one. |
 | `aliveSeq` | integer | A monotonic counter bumped on every beat, so a caller can distinguish "still beating" from "the same timestamp read twice" at second resolution. |
-| `aliveAgeMs` | integer or `null` | Computed fresh on every read as `now − lastAliveAt`, **in the reader's own process, using the same clock `lastAliveAt` was stamped with** — never a caller subtracting its own wall clock from a pod timestamp, which a few seconds of skew would turn into a false failure against a 5-second bound. `null` only when the job has never beaten: an attached job (no supervisor loop exists for it) or one whose supervisor has not registered its first beat yet. |
+| `aliveAgeMs` | integer or `null` | Computed fresh on every read as `now − lastAliveAt`, **in the reader's own process, using the same clock `lastAliveAt` was stamped with** — never a caller subtracting its own wall clock from a pod timestamp, which a few seconds of skew would turn into a false failure against a 5-second bound. `null` only when the job has never beaten: an attached job, which has no supervisor loop to beat for it. A started job's record carries a beat from the instant it is published as `running` — writing it is the supervisor proving it is alive — so a running job never reports `null` here. |
 
 **The caller rule:** once `aliveAgeMs` exceeds `5000`, stop waiting and treat the job as failed — report it as an `unknown` outcome, never as a success and never as the tool itself having errored — even if `state` still reads `running`. 1 second of beat cadence against a 5 second bound is 5× headroom for poll jitter and scheduling delay, not slack for the beat itself to run late by design. A silent-but-healthy command never trips this: the beat has nothing to do with `outputBytes`.
 
@@ -1449,9 +1449,11 @@ stdout and stderr are **merged** into one log in write order, and served as the 
 | `--signal <name>` | `TERM` \| `INT` \| `HUP` \| `KILL` | `TERM` | Signal to send. |
 | `--dry-run` | bool | `false` | Trace the target without signalling. |
 
-The signal goes to the **process group of the pid the record holds**, so a cancel can only reach the work it names — not a process that merely looks like it, and not the shell issuing the cancel. Two guards make the latter impossible: signalling erun's own pid is refused, and so is signalling erun's own process group.
+The signal goes to the **process group of the job's work** — the child pid its record holds — so a cancel can only reach the work it names, not a process that merely looks like it, and not the shell issuing the cancel. Two guards make the latter impossible: signalling erun's own pid is refused, and so is signalling erun's own process group.
 
 The job's supervisor is deliberately **not** signalled, so it survives to record the outcome; the cancelled job then reads back as a normal `exited` job carrying `signal`. Cancelling a job that already finished is not an error — it reports `signalled: false`.
+
+A cancel therefore refuses outright rather than fall back to the record's supervisor pid when the work's own pid is not in the record yet. A started job's record only exists once `job start` has returned a handle that names the work, so this is reachable only for records written before that guarantee; the error says so and names retrying as the next action. An attached job is the one case where the record's pid *is* the process to signal, because erun did not start it and there is no child to name.
 
 On Windows there are no signals: every name maps to a `taskkill /F /T` of the recorded pid, and `signal` is never populated on the resulting record.
 
