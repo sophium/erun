@@ -1,13 +1,20 @@
 #!/bin/sh
 
-# Tests integration-test.sh's own detection of a lost coverage emit: when a
-# coverage meta-data emit fails (concurrent invocations racing a
-# write-then-rename into a shared GOCOVERDIR), the losing invocation prints
-# the failure to its own output without failing the scenario that was
-# running at the time -- so the merged total downstream would otherwise
-# silently under-report coverage instead of the gate ever seeing why. This
-# exercises that detection against a stubbed `go`, without running the real
-# suite or building the real binary.
+# Tests integration-test.sh's own control flow against a stubbed `go`, without
+# running the real suite or building the real binary:
+#
+#   - its detection of a lost coverage emit: when a coverage meta-data emit
+#     fails (concurrent invocations racing a write-then-rename into a shared
+#     GOCOVERDIR), the losing invocation prints the failure to its own output
+#     without failing the scenario that was running at the time -- so the
+#     merged total downstream would otherwise silently under-report coverage
+#     instead of the gate ever seeing why.
+#   - its threshold comparison and the message that reports it, including the
+#     default the script derives from `coverage_measured` minus
+#     `coverage_margin`. The margin is there so cross-host variance does not
+#     fail the gate, so the cases below pin both that it exists at the default
+#     and that a total below the threshold is reported with the measured
+#     value, the threshold, and the shortfall between them.
 #
 # Run directly (not wired into `make check`, same reasoning as
 # scripts/agent-gate_test.sh): a stub `go` on PATH stands in for the real
@@ -113,5 +120,63 @@ set -e
 [ "$status" -eq 0 ] || fail "case2: expected zero exit for a clean run, got $status: $(cat "${case2_dir}/out.txt")"
 grep -q "ok  coverage 80.0% (>= 75.1%)" "${case2_dir}/out.txt" ||
 	fail "case2: expected the normal coverage report; got: $(cat "${case2_dir}/out.txt")"
+
+# Case 3: a total below the threshold must fail with a message naming the
+# measured value, the threshold, and the gap between them. These are the
+# numbers a real branch produced -- measured 74.7 against the then-pinned
+# 75.1 -- and the reader of a failed gate should not have to re-derive
+# whether the run was close.
+case3_dir="${work_root}/case3"
+mkdir -p "${case3_dir}/bin"
+stub_go "${case3_dir}/bin"
+set +e
+(cd "${case3_dir}" && PATH="${case3_dir}/bin:$PATH" STUB_TOTAL_PCT=74.7 COVERAGE_THRESHOLD=75.1 "$gate") >"${case3_dir}/out.txt" 2>&1
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "case3: expected a non-zero exit below the threshold, got 0: $(cat "${case3_dir}/out.txt")"
+grep -qF "!! coverage 74.7% is below threshold 75.1% (short by 0.4)" "${case3_dir}/out.txt" ||
+	fail "case3: expected the failure to name the measured total, the threshold, and the shortfall; got: $(cat "${case3_dir}/out.txt")"
+if grep -q "ok  coverage" "${case3_dir}/out.txt"; then
+	fail "case3: must not also report a passing coverage line: $(cat "${case3_dir}/out.txt")"
+fi
+
+# Case 4: the comparison is inclusive -- a total exactly on the threshold
+# passes. It is the boundary a miss is measured from, so an off-by-one turn
+# there would move every verdict without changing anything else.
+case4_dir="${work_root}/case4"
+mkdir -p "${case4_dir}/bin"
+stub_go "${case4_dir}/bin"
+set +e
+(cd "${case4_dir}" && PATH="${case4_dir}/bin:$PATH" STUB_TOTAL_PCT=74.8 COVERAGE_THRESHOLD=74.8 "$gate") >"${case4_dir}/out.txt" 2>&1
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "case4: expected a zero exit exactly on the threshold, got $status: $(cat "${case4_dir}/out.txt")"
+grep -q "ok  coverage 74.8% (>= 74.8%)" "${case4_dir}/out.txt" ||
+	fail "case4: expected the boundary to report a pass; got: $(cat "${case4_dir}/out.txt")"
+
+# Case 5: with no COVERAGE_THRESHOLD override, the default really is
+# `coverage_measured` minus `coverage_margin` -- and really is below the
+# measured total. The two are read back out of the gate script rather than
+# repeated here, so a re-base that moved the default onto the measured value
+# fails this case instead of quietly leaving the gate with no headroom.
+measured="$(sed -n 's/^coverage_measured=\([0-9.]*\)$/\1/p' "$gate")"
+margin="$(sed -n 's/^coverage_margin=\([0-9.]*\)$/\1/p' "$gate")"
+[ -n "$measured" ] && [ -n "$margin" ] ||
+	fail "the gate no longer names coverage_measured and coverage_margin"
+default="$(awk -v m="$measured" -v k="$margin" 'BEGIN { printf "%.1f", m - k }')"
+awk -v k="$margin" 'BEGIN { exit !(k > 0) }' ||
+	fail "the gate's coverage_margin is not positive: ${margin}"
+awk -v m="$measured" -v d="$default" 'BEGIN { exit !(d < m) }' ||
+	fail "the gate's default threshold ${default} is not below the measured ${measured}"
+case5_dir="${work_root}/case5"
+mkdir -p "${case5_dir}/bin"
+stub_go "${case5_dir}/bin"
+set +e
+(cd "${case5_dir}" && PATH="${case5_dir}/bin:$PATH" STUB_TOTAL_PCT="$default" "$gate") >"${case5_dir}/out.txt" 2>&1
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "case5: expected the derived default to pass at ${default}%, got $status: $(cat "${case5_dir}/out.txt")"
+grep -q "ok  coverage ${default}% (>= ${default}%)" "${case5_dir}/out.txt" ||
+	fail "case5: expected the default threshold to print as ${default}%; got: $(cat "${case5_dir}/out.txt")"
 
 echo "PASS"

@@ -1,0 +1,3 @@
+Dry run: erun jobs start planned.
+audit: erun jobs start --actor erun/code2 --dry-run --issue sophium/erun#1 --local-job-id job-local-1 --scope sophium/erun#1 --summary fixing the jobs claim race --type fix
+platform: POST https://api.example.test/v1/jobs (jobType=fix, actorId=erun/code2, issueRef=sophium/erun#1, scope=sophium/erun#1)
