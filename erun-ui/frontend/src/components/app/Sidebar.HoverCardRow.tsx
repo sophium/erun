@@ -89,6 +89,23 @@ export const HOVER_CARD_VALUE_CLASS = 'text-[10px] text-foreground';
 // turns a "truncate to one line" identifier back into a two-line wrap.
 // `break-normal` resets that inheritance for this element specifically.
 export const HOVER_CARD_TRUNCATE_CLASS = 'block truncate break-normal';
+// HOVER_CARD_CLAMP_2_CLASS is the held-length form of the same disclosure
+// rule, for a value whose useful part is its opening and whose length is
+// unbounded rather than merely long: it keeps two lines and puts the full
+// text in `title`, where `truncate` keeps one. Two lines is the budget a
+// machine-authored string gets -- it holds enough of the string to recognise
+// it, while bounding a value that would otherwise set the whole card's
+// height. Same rule as HOVER_CARD_TRUNCATE_CLASS: clip the rendering, never
+// the stored or passed value, and never drop the remainder without a way back
+// to it.
+//
+// Deliberately carries no `block`, unlike HOVER_CARD_TRUNCATE_CLASS: a clamp
+// works by `display: -webkit-box`, and Tailwind emits `.block` after
+// `.line-clamp-*` in the compiled stylesheet, so pairing the two silently
+// reinstates `display: block` and the value renders at full length with the
+// class still visibly present. `line-clamp-*`'s own display is block-level,
+// so nothing is needed here -- but do not add one back.
+export const HOVER_CARD_CLAMP_2_CLASS = 'line-clamp-2 break-normal';
 export const HOVER_CARD_CAPTION_SIZE_CLASS = 'text-[10px]';
 export const HOVER_CARD_CAPTION_CLASS = `${HOVER_CARD_CAPTION_SIZE_CLASS} text-muted-foreground`;
 // HOVER_CARD_CAPTION_DEGRADED_CLASS is the caption-sized form of the degraded
