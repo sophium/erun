@@ -42,6 +42,32 @@ A queued merge lands a squash commit whose SHA is never the source branch's head
 
 A repository merged through a plain GitHub pull request instead of an erun review — never calling `MERGE`/`MERGED` at all — can still require this same gate build via GitHub's own branch protection: [`erun exec report-commit-status`](/cli/exec#exec-report-commit-status) turns the gate build's outcome into a GitHub commit status on the pull request's head commit, which a required-status-checks rule can then require before GitHub allows the merge. This is a separate mechanism from the `MERGE`/`MERGED` verification above — it never touches an erun review at all — but reuses the same gate build a `gate-merge` + real build already produced.
 
+## What runs where: the build/platform split {#capability-split}
+
+The gate's steps do not all need the same credentials, and that difference decides which machine can run a drive.
+
+**A build needs no platform credentials.** `erun build` mints its version, builds, and publishes without resolving an erun platform alias at all. With none configured it skips *reporting* its outcome to the platform and carries on — the skip is deliberate, and nothing about the build's own result depends on it.
+
+**Every `erun review` call does.** `erun review list`, `create`, `record-build`, `report-merged`, and the [`erun exec gate-run`](/cli/exec#exec-gate-run-start) family all resolve a configured erun platform cloud alias first, and abort **before any network call** when there is none. They exit with code **127**, not `1` — a distinct code precisely so a script reading only the exit status can tell "this machine cannot reach the platform" apart from "it tried and failed". See [`erun review` § Error behaviour](/cli/review#error-behaviour).
+
+That distinction matters because an **agent environment has no erun platform cloud alias, and cannot get one**:
+
+- `erun cloud init erun --api-url <url>` succeeds unattended — it reads the platform's public `GET /v1/platform` and writes the alias.
+- `erun cloud login` does not. It completes through an OIDC **Device Authorization Grant** or **Authorization Code + PKCE**, and both need a human at a browser: the device grant requires someone to open the verification URL and approve it, and the PKCE flow's loopback redirect reuses an already-authenticated browser session. No retry, timeout, or piped answer substitutes for that person, so an unattended environment cannot provision itself one no matter how long it tries.
+
+So a gate drive is a **credentialed-host operation**, run by an orchestrator or operator machine that has `erun cloud login` done and can reach the environment's worktree. The environment contributes the workspace, the daemon, and the warm caches the build runs in — not the record of what it built. Concretely:
+
+| Step | Runs on |
+|---|---|
+| `erun-merge`: resolve the target, `erun exec merge`, commit, push | The environment |
+| `erun-merge`: the already-merged review check, `erun review create`, `erun review record-build` | A credentialed host |
+| `erun-merge`: the build whose version that `record-build` carries | Either — the environment has the warm caches, and the build itself needs no alias |
+| `erun-merge-queue-drive`: every rung, including resolving each review and reporting `MERGED` | A credentialed host |
+
+Both skills on this side now say so instead of discovering it mid-run. `erun-merge` and `erun-merge-queue-drive` probe for a usable alias before they touch git or take the environment claim, and stop there with this split named rather than proceeding into a call that cannot succeed. `erun-merge-queue-drive` stops **before** its exclusive environment claim in particular, so a drive that could never record anything does not reserve the environment and refuse the gate job a credentialed host could actually run.
+
+One exception on the build side: a project whose configured container registry is the platform-hosted `registry.erunpaas.com` authenticates that push with the operator's own platform bearer token, so the image *push* needs the alias. A registry the tenant runs itself does not.
+
 ## Reconciling a review that landed elsewhere {#landed-elsewhere}
 
 Not every change lands through this queue. When a branch is merged on GitHub by **squash merge**, the platform's review row for it could never reach `MERGED`: a squash merge makes none of the branch's own commits ancestors of the target — that is what squashing means — and no `GATE` build was ever recorded for it, because it landed through GitHub rather than the queue. Both of `report-merged`'s queue conditions are therefore unsatisfiable, no matter how long the review sits there.

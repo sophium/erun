@@ -179,3 +179,5 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `queue advance` on an empty queue, or whose head is not `READY`. | `404 Not Found`. |
 | `queue advance` whose head still has unresolved comment threads. | `409 Conflict`, naming the count and the review. Resolve them or use `queue override-advance`. |
 | `queue override-advance` with `--reason` omitted or blank. | Aborts before any network call. |
+
+**One exit code spans every "this machine has no usable platform access" case.** No alias configured, several configured with `--erun-alias` omitted, an alias of the wrong provider type, and an alias whose erun configuration is incomplete all abort before any network call and exit **`127`**. That code is reserved for this condition — an ordinary failure exits `1` — so a caller reading only the exit status can tell "this machine cannot reach the platform at all" apart from "it reached the platform and the call failed", and route the work to a credentialed host instead of retrying. [`erun-merge` and `erun-merge-queue-drive`](/collaboration/merge-queue#capability-split) use it exactly that way.

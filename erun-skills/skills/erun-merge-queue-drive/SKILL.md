@@ -33,9 +33,10 @@ for exact flags, and read the target repository's applicable AGENTS.md.
 
 ### Stop before the claim if this machine has no platform access
 
-Every rung of this drive is a platform call: rung 1 resolves each review with
-`erun review show`, rung 2 reports the gate run, rung 3 records the GATE build,
-and rung 4 calls `erun review report-merged`. An agent environment has no erun
+Every rung of this drive needs the platform: rung 1 resolves each review's
+status, source, target, and remote source SHA, rung 2 starts and reports the
+gate run, rung 3 records the GATE build, and rung 4 calls
+`erun review report-merged`. An agent environment has no erun
 platform cloud alias and **cannot obtain one** — `erun cloud init` succeeds
 unattended, but `erun cloud login` needs a human at a browser for either of its
 flows (Device Authorization Grant, Authorization Code + PKCE). So the drive is
