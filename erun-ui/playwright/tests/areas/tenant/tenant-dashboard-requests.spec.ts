@@ -1,5 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
 import {
   removeEnvironment,
@@ -119,13 +120,13 @@ test.describe('tenant dashboard — Requests tab', () => {
       await expect(app.tenantDashboard.requestsTable()).toHaveCount(0);
 
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-requests-empty-light.png',
+        path: artifactPath('test-results/tenant-dashboard-requests-empty-light.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
       await expect(app.tenantDashboard.requestsEmptyState()).toBeVisible();
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-requests-empty-dark.png',
+        path: artifactPath('test-results/tenant-dashboard-requests-empty-dark.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
@@ -159,13 +160,13 @@ test.describe('tenant dashboard — Requests tab', () => {
       await expect(app.tenantDashboard.declineButtonFor('newcomer-1')).toBeVisible();
 
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-requests-populated-light.png',
+        path: artifactPath('test-results/tenant-dashboard-requests-populated-light.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
       await expect(row).toBeVisible();
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-requests-populated-dark.png',
+        path: artifactPath('test-results/tenant-dashboard-requests-populated-dark.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
@@ -208,13 +209,13 @@ test.describe('tenant dashboard — Requests tab', () => {
       await expect(app.tenantDashboard.requestsEmptyState()).toBeVisible();
 
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-requests-issued-light.png',
+        path: artifactPath('test-results/tenant-dashboard-requests-issued-light.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
       await expect(notice).toBeVisible();
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-requests-issued-dark.png',
+        path: artifactPath('test-results/tenant-dashboard-requests-issued-dark.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
@@ -259,13 +260,13 @@ test.describe('tenant dashboard — Requests tab', () => {
       await expect(confirm).toBeDisabled();
 
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-requests-decline-dialog-light.png',
+        path: artifactPath('test-results/tenant-dashboard-requests-decline-dialog-light.png'),
         animations: 'disabled',
       });
       await forceDarkTheme(page);
       await expect(dialog).toBeVisible();
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-requests-decline-dialog-dark.png',
+        path: artifactPath('test-results/tenant-dashboard-requests-decline-dialog-dark.png'),
         animations: 'disabled',
       });
 

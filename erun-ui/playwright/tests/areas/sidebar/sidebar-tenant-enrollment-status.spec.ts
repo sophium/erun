@@ -1,5 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import {
   addERunCloudProviderAlias,
@@ -207,7 +208,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
     const icon = app.sidebar.tenantEnrollmentStatus(SEED_TENANT);
     await expect(icon).toBeVisible();
     await page.screenshot({
-      path: 'test-results/sidebar-tenant-enrollment-status-local-only-light.png',
+      path: artifactPath('test-results/sidebar-tenant-enrollment-status-local-only-light.png'),
       animations: 'disabled',
     });
     await page.evaluate(() => {
@@ -215,7 +216,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
     });
     await expect(icon).toBeVisible();
     await page.screenshot({
-      path: 'test-results/sidebar-tenant-enrollment-status-local-only-dark.png',
+      path: artifactPath('test-results/sidebar-tenant-enrollment-status-local-only-dark.png'),
       animations: 'disabled',
     });
   });
@@ -274,7 +275,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       ).toBeVisible();
 
       await page.screenshot({
-        path: 'test-results/sidebar-tenant-enrollment-status-unknown-light.png',
+        path: artifactPath('test-results/sidebar-tenant-enrollment-status-unknown-light.png'),
         animations: 'disabled',
       });
       await page.evaluate(() => {
@@ -282,7 +283,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       });
       await expect(icon).toBeVisible();
       await page.screenshot({
-        path: 'test-results/sidebar-tenant-enrollment-status-unknown-dark.png',
+        path: artifactPath('test-results/sidebar-tenant-enrollment-status-unknown-dark.png'),
         animations: 'disabled',
       });
     } finally {

@@ -2,6 +2,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 
 import { defineConfig, devices } from '@playwright/test';
+import {
+  PLAYWRIGHT_REPORT_DIRNAME,
+  TEST_RESULTS_DIRNAME,
+  artifactPath,
+  assertArtifactDirectoriesUsable,
+} from './fixtures/artifacts.js';
 import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js';
 
 // run.sh and this config share ERUN_PLAYWRIGHT_PORT so an overridden port
@@ -11,6 +17,11 @@ import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js'
 const HEADLESS_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 
 const E2E_K3D = e2eK3dEnabled();
+
+// Refuse an unusable artifact directory here, before any worker starts, so the
+// run reports the directory rather than failing inside a spec two minutes in
+// (fixtures/artifacts.ts owns the check and the message).
+assertArtifactDirectoriesUsable();
 
 // Resolve (and, without run.sh, create) the isolated root at config-load
 // time, before workers fork, so every process in the run agrees on the same
@@ -87,7 +98,15 @@ export default defineConfig({
   // No retries: a spec that only passes on a retry is flaky, and flakiness is a
   // determinism defect to fix, never to mask (see AGENTS.md "No flaky tests").
   retries: 0,
-  reporter: [['list'], ['html', { open: 'never' }]],
+  // Both of the reporter's destinations resolve through the artifact root, the
+  // same one the specs' own captures use (fixtures/artifacts.ts): a run that
+  // redirects its artifacts through ERUN_PLAYWRIGHT_ARTIFACTS_DIR must not
+  // leave the HTML report behind in the tree it was told to stay out of.
+  outputDir: artifactPath(TEST_RESULTS_DIRNAME),
+  reporter: [
+    ['list'],
+    ['html', { open: 'never', outputFolder: artifactPath(PLAYWRIGHT_REPORT_DIRNAME) }],
+  ],
   // Windows runs the heavier full Chromium build (see the chromium project) and
   // its ConPTY-backed sessions are slower than a unix pty, so under the full
   // suite's shared-backend load a borderline spec can exceed the POSIX-tuned

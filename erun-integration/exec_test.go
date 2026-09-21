@@ -17,6 +17,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
@@ -41,7 +42,7 @@ func mustReadFile(t testing.TB, path string) string {
 
 func captureGit(t testing.TB, dir string, args ...string) string {
 	t.Helper()
-	cmd := osexec.Command("git", args...)
+	cmd := harnessexec.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -69,7 +70,7 @@ func atlasBin(t testing.TB) string {
 // real Atlas checksum rather than a hand-authored placeholder.
 func runAtlasHash(t testing.TB, dir string) {
 	t.Helper()
-	cmd := osexec.Command(atlasBin(t), "migrate", "hash", "--dir", "file://migrations")
+	cmd := harnessexec.Command(atlasBin(t), "migrate", "hash", "--dir", "file://migrations")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("atlas migrate hash: %v: %s", err, out)
@@ -81,7 +82,7 @@ func runAtlasHash(t testing.TB, dir string) {
 // contract end to end rather than trusting that regeneration preserved it.
 func captureAtlasValidate(t testing.TB, dir string) (string, bool) {
 	t.Helper()
-	cmd := osexec.Command(atlasBin(t), "migrate", "validate", "--dir", "file://migrations")
+	cmd := harnessexec.Command(atlasBin(t), "migrate", "validate", "--dir", "file://migrations")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err == nil
