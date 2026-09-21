@@ -112,6 +112,13 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
     await expect(saveDefault).toBeDisabled();
+
+    // This save stored an empty selection (the runtime was the only box checked),
+    // which leaves the banner's own deploy with nothing to roll out. It reads the
+    // same checklist as the Runtime tab's Deploy, so it refuses on the same
+    // grounds rather than falling through to the runtime chart alone.
+    await expect(app.manageDialog.redeployNowButton()).toBeDisabled();
+    await expect(app.manageDialog.redeployBanner()).toContainText('no charts are checked');
   });
 
   test('a sourceless (runtime) env offers the publishable platform components by reference', async ({

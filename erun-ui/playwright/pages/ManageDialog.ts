@@ -49,6 +49,12 @@ export class ManageDialog {
     return this.locator().getByRole('alert').filter({ hasText: 'Pending redeploy' });
   }
 
+  // The banner's own deploy action. It reads the same checklist selection as the
+  // Runtime tab's Deploy, so an emptied checklist refuses it too.
+  redeployNowButton(): Locator {
+    return this.redeployBanner().getByRole('button', { name: 'Redeploy now' });
+  }
+
   // Converge on the banner actually having rendered before asserting on it.
   // The save click and the banner's appearance are two separate steps (a save
   // round-trip, then a re-render), so a bare `expect(...).toBeVisible()`
