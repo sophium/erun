@@ -201,7 +201,21 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 // the count and the review to route the operator to, rather than the bare
 // status text writeRepositoryError gives every other conflict, and gives the
 // merge-queue-specific machine codes documented in collaboration/reviews.md.
+// An occupied MERGE slot is the same shape of refusal for the same reason:
+// naming the review already holding the branch is what makes the advance worth
+// retrying, so it gets its own code rather than the generic not-found it would
+// otherwise fall through to.
 func writeAdvanceMergeQueueError(w http.ResponseWriter, req *http.Request, err error) {
+	var occupied *service.MergeQueueOccupiedError
+	if errors.As(err, &occupied) {
+		writeErrorDetails(w, http.StatusConflict, "MERGE_QUEUE_OCCUPIED", occupied.Error(), map[string]any{
+			"targetBranch": occupied.TargetBranch,
+			"reviewId":     occupied.ReviewID,
+			"name":         occupied.Name,
+			"sourceBranch": occupied.SourceBranch,
+		})
+		return
+	}
 	var blocked *service.UnresolvedThreadsError
 	if errors.As(err, &blocked) {
 		writeJSON(w, http.StatusConflict, unresolvedThreadsResponse{
@@ -269,6 +283,14 @@ func writeUpdateStatusError(w http.ResponseWriter, req *http.Request, err error)
 	var notVerified *service.MergeNotVerifiedError
 	if errors.As(err, &notVerified) {
 		writeErrorCode(w, http.StatusConflict, "MERGE_NOT_VERIFIED", notVerified.Error())
+		return
+	}
+	var notMerging *service.ReviewNotMergingError
+	if errors.As(err, &notMerging) {
+		writeErrorDetails(w, http.StatusConflict, "REVIEW_NOT_MERGING", notMerging.Error(), map[string]any{
+			"reviewId": notMerging.ReviewID,
+			"status":   notMerging.Status,
+		})
 		return
 	}
 	writeRepositoryError(w, req, err)
