@@ -4,6 +4,7 @@ import * as React from 'react';
 
 import {
   DEPLOY_COMPONENTS_EMPTY_NOTICE_ID,
+  DEPLOY_COMPONENTS_EMPTY_PANEL_NOTICE_ID,
   deployComponentLabel,
   deployComponentSelectionChanged,
   deployComponentsEmptySelection,
@@ -116,8 +117,13 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
           )}
           {/* Under the list, where the last uncheck happened: the checklist has
               promised exactly the checked charts, so it must say what an empty
-              one means before Deploy is pressed rather than after it rolls. */}
-          <DeployComponentsEmptyNotice dialog={dialog} />
+              one means before Deploy is pressed rather than after it rolls.
+              Panel id, so it never collides with the row's twin below the
+              popover during the panel's close animation. */}
+          <DeployComponentsEmptyNotice
+            dialog={dialog}
+            id={DEPLOY_COMPONENTS_EMPTY_PANEL_NOTICE_ID}
+          />
         </>
       )}
     </div>

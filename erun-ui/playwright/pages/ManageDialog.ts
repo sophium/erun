@@ -257,6 +257,19 @@ export class ManageDialog {
     return this.page.locator('#environment-config-save-deploy-components');
   }
 
+  // The notice under the version row stating that every chart in the checklist is
+  // unchecked, so a disabled Deploy names its reason rather than stopping
+  // silently.
+  deployComponentsEmptyNotice(): Locator {
+    return this.page.locator('#environment-config-deploy-components-empty-notice');
+  }
+
+  // The same statement rendered inside the open version panel, which covers the
+  // row above it while the operator is unchecking the last chart.
+  deployComponentsEmptyPanelNotice(): Locator {
+    return this.page.locator('#environment-config-deploy-components-empty-notice-panel');
+  }
+
   // The "Runtime chart" field states the chart coordinate -- which chart the
   // runtime is installed from -- separately from the version, which names the
   // image. Empty means "the chart published with the deployed version".
