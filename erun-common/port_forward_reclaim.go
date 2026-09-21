@@ -139,16 +139,24 @@ func portForwardRecordNames(tenantDir string) ([]string, error) {
 
 // configuredEnvironmentNames is the set of tenant -> environment names the
 // config store knows. known=false means the store could not be read well
-// enough to answer at all — a machine that has never been configured, a config
-// directory that is not there — and the caller must leave the tree as it is:
-// "I could not read the config" must never read as "no environment is
+// enough to answer at all, and the caller must leave the tree as it is: "I
+// could not read the config" must never read as "no environment is
 // configured", because that answer removes every forward log on the host.
 //
-// A store that reads cleanly and lists no tenants is a different answer, and a
-// real one: nothing is configured, so nothing under the tree is a live
-// environment's record.
+// What separates the two is whether the store was ever initialized. A store
+// that reads cleanly and lists no tenants is a real answer — nothing is
+// configured, so nothing under the tree is a live environment's record — but a
+// store that was never initialized here is not that answer: it is the shape of
+// two halves of erun resolving different config homes, where the tree in front
+// of the sweep belongs to a root this process cannot see. Listing a missing
+// directory yields no tenants without reporting anything, so the two cases are
+// only distinguishable by asking the question the store answers differently —
+// whether the machine-level config it is initialized around is there.
 func configuredEnvironmentNames() (map[string]map[string]bool, bool, error) {
 	store := ConfigStore{}
+	if _, _, err := store.LoadERunConfig(); err != nil {
+		return nil, false, nil
+	}
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
 		if errors.Is(err, ErrNotInitialized) {
