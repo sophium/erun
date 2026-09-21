@@ -1,6 +1,6 @@
 ---
 name: erun-merge-queue-drive
-description: Drive one or more reviews already promoted to MERGE through the merge-queue gate — batch their sources into one prospective merge with `erun exec gate-merge` (skipping, per branch, any that conflict), gate the landed stack with one real `erun build`, and push and report MERGED only for branches that actually landed and passed. Reports each actual outcome, including reviews left at MERGE after an inconclusive gate, and never advances, overrides, or promotes the queue itself. Use when the user says "drive the merge queue", "batch these reviews through the gate", "run the merge gate", "gate this promoted review", "build and push the merge queue head", or any similar request to execute the gate for one or more reviews that are already at MERGE.
+description: Drive one or more reviews already promoted to MERGE through the merge-queue gate — batch their sources into one prospective merge with `erun exec gate-merge` (skipping, per branch, any that conflict), gate the landed stack with one real `erun build`, and push and report MERGED only for branches that actually landed and passed. Reports each actual outcome, including reviews left at MERGE after an inconclusive gate, and never advances, overrides, or promotes the queue itself. Requires a machine with a configured erun platform cloud alias, since every rung is a platform call; an agent environment has none and cannot obtain one, so it stops before claiming the environment and hands the drive to a credentialed host. Use when the user says "drive the merge queue", "batch these reviews through the gate", "run the merge gate", "gate this promoted review", "build and push the merge queue head", or any similar request to execute the gate for one or more reviews that are already at MERGE.
 ---
 
 # Drive already-promoted reviews through the gate
@@ -17,7 +17,9 @@ for exact flags, and read the target repository's applicable AGENTS.md.
 ## Preconditions and batch boundary
 
 - Require erun, platform authentication, git access, and the build toolchain.
-  Report missing setup from the actual command's refusal; do not invent credentials.
+  Platform authentication is checked first and as a real check — see below —
+  because this drive is built entirely out of platform calls. Report any other
+  missing setup from the actual command's refusal; do not invent credentials.
 - Resolve each review fresh: status, source, target, name, and remote source SHA.
   Drop non-MERGE reviews without changing their state. Refuse mixed target branches
   and missing source refs.
@@ -28,6 +30,50 @@ for exact flags, and read the target repository's applicable AGENTS.md.
 - Batch membership, landing order, selective retry/bisection, and failure ownership
   are caller policy. Git composition and known infrastructure classification are
   shared erun mechanisms, not shell implementations to duplicate.
+
+### Stop before the claim if this machine has no platform access
+
+Every rung of this drive is a platform call: rung 1 resolves each review with
+`erun review show`, rung 2 reports the gate run, rung 3 records the GATE build,
+and rung 4 calls `erun review report-merged`. An agent environment has no erun
+platform cloud alias and **cannot obtain one** — `erun cloud init` succeeds
+unattended, but `erun cloud login` needs a human at a browser for either of its
+flows (Device Authorization Grant, Authorization Code + PKCE). So the drive is
+a **credentialed-host operation**, not a pod operation, and it must stop here
+rather than spending a run discovering that.
+
+```sh
+probe=0
+erun review list --dry-run >/dev/null 2>&1 || probe=$?
+if [ "${probe}" -eq 127 ]; then
+  cat >&2 <<'EOF'
+This machine cannot make erun platform calls, so this drive cannot start: no
+usable erun platform cloud provider alias is configured.
+
+Stop before taking the environment claim below. A claim taken here would
+reserve this environment for a drive that can never record anything, and would
+refuse the gate job that a credentialed host could actually run.
+
+Do not try to acquire a platform alias here. `erun cloud init` succeeds
+unattended, but `erun cloud login` does not — both of its flows need a human at
+a browser, so no retry, timeout, or piped answer completes one.
+
+The split: an environment builds (`erun build` needs no platform alias — with
+none configured it skips reporting its outcome), and a credentialed host makes
+every `erun review` call. Hand this drive to an orchestrator or operator
+machine that has `erun cloud login` done and can reach this environment's
+worktree, and let it claim and run the gate.
+EOF
+  exit 127
+fi
+```
+
+The probe resolves the alias without reaching the network (`--dry-run` stops
+before any HTTP call), and 127 is erun's own documented exit code for "this
+machine cannot resolve a usable platform alias" — see
+`erun-docs/docs/cli/review.md` § Error behaviour. It is a check, not advice:
+an agent cannot satisfy it by trying harder. Any other nonzero probe result is
+deliberately left to the real call that reports it.
 
 ## 0. Claim the environment
 
