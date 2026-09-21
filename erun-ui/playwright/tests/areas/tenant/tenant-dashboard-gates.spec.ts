@@ -132,6 +132,66 @@ test.describe('tenant dashboard — gates tab (erun#1932)', () => {
     }
   });
 
+  // The state /v1/gate-runs is actually in on both live planes today: the read
+  // 404s, so the operator's Gates tab is a failed read, not an empty queue.
+  // PanelBody already renders that through InlineAlert, but nothing held it
+  // there -- the empty-state case above asserts the opposite outcome for the
+  // same tab, and a regression that let a failed read fall through to "No gate
+  // runs yet" would read as "nothing is being gated" while the tab was simply
+  // unreadable. The neighbouring panel is staged with content in the same
+  // response, because a panel that failed must also not blank one that did not.
+  test('reports a failed gate-run read as a failure, not as an empty queue', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('gates-read-failure');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      await stubLoadTenantDashboard(page, {
+        tenant: SEED_TENANT,
+        environment,
+        apiUrl: 'http://127.0.0.1:1/unreachable',
+        user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+        gateRuns: [],
+        panels: [
+          {
+            tab: 'gates',
+            error: 'load tenant dashboard GET /v1/gate-runs: http 404: 404 page not found',
+          },
+          { tab: 'audit' },
+        ],
+        auditEvents: [
+          {
+            type: 'CLI',
+            actor: 'subject-2',
+            action: 'erun build',
+            createdAt: '2026-01-02T00:00:00Z',
+          },
+        ],
+      });
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Gates');
+
+      await expect(app.tenantDashboard.activePanel().getByRole('alert')).toContainText(
+        'GET /v1/gate-runs: http 404',
+      );
+      // The whole point: a read that failed is not a queue that is empty.
+      await expect(app.tenantDashboard.gatesEmptyState()).toHaveCount(0);
+      await expect(app.tenantDashboard.gatesTable()).toHaveCount(0);
+
+      // The failure is the Gates panel's own; the audit panel answered, so it
+      // still shows what it answered.
+      await app.tenantDashboard.selectTab('Audit log');
+      await expect(app.tenantDashboard.auditRows()).toHaveCount(1);
+      await expect(app.tenantDashboard.auditTable()).toContainText('erun build');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
   test('shows a purpose-built empty state, not an input-styled box, when there are no gate runs', async ({
     app,
     page,
