@@ -97,6 +97,12 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 // review shape rather than a bare error string — Blocked/UnresolvedThreads
 // let the caller route the operator to the threads, or to
 // OverrideAdvanceMergeQueue, instead of hitting a dead end.
+//
+// An occupied MERGE slot is the other refusal this cannot leave to the generic
+// conflict sentence: nothing changed under the caller and retrying will not
+// help, so "refresh and try again" would loop them forever. The platform's own
+// message names the review holding the branch and says to requeue it, so that
+// sentence is what surfaces.
 func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboardReview, error) {
 	tenant, err := requireTenant("advancing the merge queue", input.Tenant)
 	if err != nil {
@@ -123,6 +129,10 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 		if errors.As(err, &blocked) {
 			unresolved := blocked.UnresolvedThreads
 			return uiTenantDashboardReview{ReviewID: blocked.ReviewID, Blocked: true, UnresolvedThreads: &unresolved}, nil
+		}
+		var occupied *eruncommon.PlatformMergeQueueOccupiedError
+		if errors.As(err, &occupied) {
+			return uiTenantDashboardReview{}, errors.New(occupied.Error())
 		}
 		return uiTenantDashboardReview{}, operatorPlatformError(actionAdvanceQueue, err)
 	}
