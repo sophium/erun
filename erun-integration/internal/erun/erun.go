@@ -6,6 +6,7 @@ package erun
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,6 +34,16 @@ const CoverPkgs = "github.com/sophium/erun," +
 	"github.com/sophium/erun/cmd," +
 	"github.com/sophium/erun/internal/...," +
 	"github.com/sophium/erun/erun-common"
+
+// waitDelay bounds how long Run waits on a finished child's output pipes after
+// the child itself has exited (exec.Cmd.WaitDelay). The child's exit is the
+// event a scenario is about; the pipes closing is only how os/exec usually
+// learns of it, and a process the child spawned can hold them open long after
+// the child is gone. Keeping this far below the harness's own per-run timeout
+// is the point: a run that reaches it has already concluded, and a scenario
+// that leaves a descendant behind must fail as a timeout rather than wait out
+// the test binary's own deadline and panic the package.
+const waitDelay = 10 * time.Second
 
 var (
 	buildOnce   sync.Once
@@ -218,6 +229,15 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 		// the cap well above that environmental variance so it fails only a
 		// genuine deadlock, not a slow-but-correct run. If it ever fires, the
 		// goroutine dump below names the blocked call.
+		//
+		// Firing is not proof of a deadlock, though, and this harness has to
+		// stay usable when it is wrong: under contention -- this suite runs
+		// beside a browser suite against one CPU budget -- a command can be
+		// simply slow past this cap, and the run that follows a timeout must
+		// still conclude within it. That is what waitDelay guarantees: the
+		// timeout path's own wait is bounded, so the worst case for one
+		// scenario is this cap plus waitDelay, never the test binary's whole
+		// deadline.
 		timeout = 120 * time.Second
 	}
 
@@ -254,25 +274,79 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	done := make(chan error, 1)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start erun: %v", err)
 	}
+
+	err := supervise(cmd, timeout, waitDelay)
+	if errors.Is(err, errTimeout) {
+		t.Fatalf("erun timed out after %s; args=%v\n--- subprocess goroutine dump (stderr) ---\n%s", timeout, args, stderr.String())
+	}
+	// supervise reports a run it could observe as nil or the child's own exit
+	// error, having ruled out a timeout above; anything else is a command that
+	// could not be run at all. The status lives on ProcessState either way --
+	// a run whose wait was rescued by the delay reads its exit code there
+	// rather than from an error that no longer describes the child.
+	if _, ok := err.(*exec.ExitError); err != nil && !ok {
+		t.Fatalf("erun exec error: %v", err)
+	}
+	result := Result{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		Combined: stdout.String() + stderr.String(),
+		ExitCode: cmd.ProcessState.ExitCode(),
+	}
+	reportUndeclaredBinaries(t, result.Combined)
+	return result
+}
+
+// errTimeout reports a child that did not finish within its own timeout and
+// was killed. It is a sentinel rather than an *exec.ExitError because the
+// caller's message is about the harness's cap, not the signal the child died
+// of.
+var errTimeout = errors.New("erun: child exceeded its timeout")
+
+// supervise waits for an already-started child, killing it if it outlives
+// timeout. It returns the child's own Wait error -- nil, an *exec.ExitError,
+// or ErrWaitDelay, all of which describe an observed exit -- or errTimeout if
+// the cap was what ended the run.
+//
+// It arms delay on the child itself, rather than leaving that to its caller,
+// because that is the bound this whole function exists around: a child that
+// exits leaves its stdout/stderr pipes open for as long as any process it
+// started still holds them, and os/exec's own documentation names exactly
+// that case as the reason WaitDelay exists. Without it, Wait -- and therefore
+// this harness -- waits for the *pipe* rather than the child, and no timeout
+// can rescue it: a SIGKILL to a process that has already exited is a no-op,
+// and the copier goroutines blocked on those pipes never look at signals at
+// all. Owning the assignment here also keeps it reachable from a test that
+// drives the same wait with a short delay and a child chosen to hold its own
+// pipes open, which is the case that used to block forever.
+//
+// timeout and delay are arguments rather than the fixed caps their callers
+// pass so that wait can be driven directly at test speed.
+func supervise(cmd *exec.Cmd, timeout, delay time.Duration) error {
+	cmd.WaitDelay = delay
+	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
-	exitCode := 0
 	select {
 	case err := <-done:
-		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			} else {
-				t.Fatalf("erun exec error: %v", err)
-			}
+		// A WaitDelay expiry is not a failure to observe the child: its status
+		// was recorded on ProcessState before Wait began waiting on the pipes
+		// a descendant of the child was still holding open. The caller reads
+		// that status, so an expiry is reported as the completed run it is.
+		if errors.Is(err, exec.ErrWaitDelay) {
+			return nil
 		}
+		return err
 	case <-time.After(timeout):
 		// Give the signal a moment to flush the goroutine dump so the failure
 		// names the blocked call; fall back to Kill if the process ignores it.
+		// Both waits are bounded above by waitDelay, so a child that has
+		// already exited -- but whose pipes are still held open by something
+		// it started -- is reported as the timeout it is instead of wedging
+		// the whole package past the test binary's own deadline.
 		_ = cmd.Process.Signal(syscall.SIGQUIT)
 		select {
 		case <-done:
@@ -280,17 +354,8 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 			_ = cmd.Process.Kill()
 			<-done
 		}
-		t.Fatalf("erun timed out after %s; args=%v\n--- subprocess goroutine dump (stderr) ---\n%s", timeout, args, stderr.String())
+		return errTimeout
 	}
-
-	result := Result{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		Combined: stdout.String() + stderr.String(),
-		ExitCode: exitCode,
-	}
-	reportUndeclaredBinaries(t, result.Combined)
-	return result
 }
 
 // missingBinary matches the exec error Go reports when a command resolves no
