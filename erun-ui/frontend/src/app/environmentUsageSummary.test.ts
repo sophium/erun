@@ -335,3 +335,30 @@ test('a reading older than the sweep interval carries its staleness', () => {
   );
   assert.equal(fresh.stale, false);
 });
+
+test('a measured zero whose percentage the wire dropped still carries a percent', () => {
+  // The Go side marks these percentage fields `omitempty` and sets
+  // `utilization` unconditionally on every available CPU reading, so a genuine
+  // 0% arrives as `utilization: '0.0%'` with NO `utilizationPercent` key, and a
+  // 0-of-limit memory reading with no `percentOfLimit`. Reading a missing
+  // percentage as "unmeasured" would give the two states the same treatment --
+  // no strip for either -- which is the idle/unmeasured confusion the strip
+  // exists to remove. An available metric with no percentage is a measured zero.
+  const metrics = readingOf(
+    summarizeEnvironmentUsageMetrics(
+      snapshotWith({
+        tenant: 't',
+        environment: 'e',
+        available: true,
+        cpu: { available: true, utilization: '0.0%' },
+        memory: { available: true, current: '0Mi', limit: '23.0 GiB', oomKills: 0 },
+      }),
+      Date.now(),
+    ),
+  );
+  assert.equal(metrics.cpu.percent, 0);
+  assert.equal(metrics.memory.percent, 0);
+  // And the figure itself is a zero, not the dash reserved for unmeasured.
+  assert.equal(metrics.cpu.value, '0.0%');
+  assert.equal(metrics.memory.value, '0%');
+});

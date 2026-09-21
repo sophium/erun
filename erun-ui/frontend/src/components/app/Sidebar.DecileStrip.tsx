@@ -31,7 +31,15 @@ export function DecileStrip({ percent }: { percent: number }): React.ReactElemen
   const filled = decileFillCount(percent);
   const alert = decileIsAlert(percent);
   return (
-    <span aria-hidden="true" className="flex items-center gap-0.5">
+    <span
+      aria-hidden="true"
+      // The encoding is asserted from the DOM (Playwright reads these) rather
+      // than from ten per-segment classes, so the spec states the fill and the
+      // alert condition directly instead of counting divs.
+      data-decile-fill={filled}
+      data-decile-alert={alert ? 'true' : 'false'}
+      className="flex items-center gap-0.5"
+    >
       {Array.from({ length: DECILE_COUNT }, (_, index) => (
         <span
           key={index}

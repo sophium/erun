@@ -119,16 +119,34 @@ function memoryMetric(usage: UIEnvironmentUsageSnapshot['usage']['memory']): Usa
   if (usage.unlimited) {
     return { label: 'Memory', value: usage.current ?? '—', suffix: 'no limit' };
   }
+  const percent = measuredPercent(usage.percentOfLimit);
   return {
     label: 'Memory',
-    value: percentLabel(usage.percentOfLimit),
+    value: percentLabel(percent),
     suffix: usage.limit ? `of ${usage.limit}` : '',
-    percent: measuredPercent(usage.percentOfLimit),
+    percent,
   };
 }
 
+// measuredPercent resolves a metric's share of its ceiling to a number whenever
+// the metric was measured at all.
+//
+// A missing percentage on an AVAILABLE metric means the reading was zero, not
+// that nothing was measured: the Go side carries these fields with
+// `omitempty` (ui_model.go), and it sets `utilization` unconditionally on every
+// available CPU reading (`fmt.Sprintf("%.1f%%", ...)`, runtime_usage.go), so a
+// zero arrives as `"0.0%"` with the number simply dropped from the JSON. The
+// `?? 0` is what keeps a measured zero rendering its empty strip instead of no
+// strip at all -- the exact confusion between "idle" and "unmeasured" this
+// whole encoding exists to remove.
+//
+// The `available` guard above is what still separates a genuinely unread metric
+// from a zero one.
 function measuredPercent(value: number | undefined): number | undefined {
-  return value === undefined || !Number.isFinite(value) ? undefined : value;
+  if (value === undefined) {
+    return 0;
+  }
+  return Number.isFinite(value) ? value : undefined;
 }
 
 export function summarizeEnvironmentUsage(
