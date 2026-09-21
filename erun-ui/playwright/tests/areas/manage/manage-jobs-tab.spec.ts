@@ -51,6 +51,33 @@ const UNKNOWN_JOB = {
   endedAtUnix: 1700003600,
 };
 
+// Two terminal states that are not verdicts, and whose recorded exit code
+// cannot speak for them. An abandoned job left processes running in its own
+// process group; a gate-incomplete one ended while a job it started had not
+// reached a verdict. Both exit cleanly by definition, so both carry the zero
+// that used to render them as green successes.
+const ABANDONED_JOB = {
+  id: 'gate-4',
+  name: 'repo gate',
+  state: 'abandoned',
+  kind: 'command',
+  command: ['scripts/gate.sh', 'main'],
+  exitCode: 0,
+  startedAtUnix: 1700000000,
+  endedAtUnix: 1700000900,
+};
+
+const GATE_INCOMPLETE_JOB = {
+  id: 'agent-7',
+  name: 'automated fix',
+  state: 'gate-incomplete',
+  kind: 'agent',
+  agentTool: 'claude',
+  exitCode: 0,
+  startedAtUnix: 1700000000,
+  endedAtUnix: 1700001200,
+};
+
 // Every orchestrator-driven job is an agent job, and an agent job's argv
 // always carries the whole prompt as one argument -- this is the shape a real
 // `claude -p '<prompt>' --output-format stream-json --verbose` job takes.
@@ -120,6 +147,38 @@ test.describe('manage dialog jobs tab', () => {
     // spec fail whenever the render lands a second later than the fixture.
     await expect(app.manageDialog.locator().getByText('Took 1m15s')).toBeVisible();
     await expect(app.manageDialog.locator().getByText(/^Running for \d+m\d*s?$/)).toBeVisible();
+
+    await app.manageDialog.cancel();
+  });
+
+  // Abandoned and gate-incomplete are terminal without being verdicts, and the
+  // process that exited cleanly is not the work. Both carry a zero exit code,
+  // which is exactly what the badge used to read as "Succeeded" -- for
+  // abandoned, the state that most needs an operator to clean up after it.
+  test('an abandoned or incomplete job is never rendered as a success', async ({ app, page }) => {
+    await stubJobs(page, [ABANDONED_JOB, GATE_INCOMPLETE_JOB]);
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.jobsTabTrigger().click();
+
+    await expect(app.manageDialog.jobRows()).toHaveCount(2);
+
+    await expect(app.manageDialog.jobOutcome(0)).toContainText('Abandoned (work still running)');
+    await expect(app.manageDialog.jobOutcome(0)).not.toContainText('Succeeded');
+    await expect(app.manageDialog.jobOutcome(0)).not.toContainText('Failed (exit 0)');
+    // Abandoned is the one outcome that needs acting on, so it wears the
+    // destructive styling rather than the amber "unresolved" one.
+    await expect(app.manageDialog.jobOutcome(0)).toHaveClass(/\btext-destructive\b/);
+
+    await expect(app.manageDialog.jobOutcome(1)).toContainText('Gate incomplete (no verdict)');
+    await expect(app.manageDialog.jobOutcome(1)).not.toContainText('Succeeded');
+    await expect(app.manageDialog.jobOutcome(1)).not.toContainText('Failed (exit 0)');
+    await expect(app.manageDialog.jobOutcome(1)).toHaveClass(/\btext-amber-700\b/);
+
+    // Colour never carries the outcome on its own: each badge's own glyph is
+    // what tells the two apart, and both apart from the failed row's XCircle.
+    await expect(app.manageDialog.locator().locator('.lucide-circle-slash')).toHaveCount(1);
+    await expect(app.manageDialog.locator().locator('.lucide-hourglass')).toHaveCount(1);
 
     await app.manageDialog.cancel();
   });
