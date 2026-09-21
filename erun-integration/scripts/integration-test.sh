@@ -91,6 +91,11 @@
 #     would change at all. The gate still passed, but a branch adding
 #     uncovered production code arrived with no room to miss by, and main
 #     itself was one printed tenth from failing every gate on every branch.
+#     The measurement is not steady even run to run on one host: two
+#     back-to-back runs of the unmodified suite on the same pod differed by
+#     three statements (75.107933% and 75.099838%, both printing 75.1%), and
+#     the second was already under the old pin in raw terms -- it passed only
+#     because the printed one-decimal total is what gets compared.
 #     A margin therefore has to be at least one printed tenth (0.1 points, 37
 #     statements) to exist in the comparison at all, and 0.1 was already
 #     measured too thin here: this pin once held a 0.1-point margin (75.8
