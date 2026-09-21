@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 )
 
@@ -72,12 +73,40 @@ func (c Context) WriteResult(v any) error {
 	if out == nil {
 		return nil
 	}
-	encoded, err := json.MarshalIndent(v, "", "  ")
+	encoded, err := json.MarshalIndent(normalizeResultSlices(v), "", "  ")
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(out, string(encoded))
 	return err
+}
+
+// normalizeResultSlices replaces a top-level nil slice with an empty one, so a
+// result that resolved to no rows marshals as [] rather than null. The two are
+// not interchangeable for the orchestrators --output json exists for: null
+// conflates "we queried and nothing matched" with "this was not determined",
+// while [] can only mean the former. A consumer that iterates the result or
+// reads .length otherwise has to null-guard every command whose cardinality it
+// cannot predict from the surface.
+//
+// Only the top level is rewritten. A nil field inside a struct is left alone:
+// there, absence is part of the declared shape (omitempty marks a value that is
+// genuinely not part of this result), and filling it in would turn a reported
+// absence into a claim -- "refreshFailures": [] asserts the refresh ran and
+// nothing failed, which is false when it was never attempted.
+//
+// Maps are deliberately out of scope: the defect this normalises is a list
+// shape, and widening the rewrite to every container kind is a larger change
+// than the reported evidence supports.
+func normalizeResultSlices(v any) any {
+	if v == nil {
+		return v
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice || !rv.IsNil() {
+		return v
+	}
+	return reflect.MakeSlice(rv.Type(), 0, 0).Interface()
 }
 
 type KubernetesContextPreflightFunc func(Context, string) error

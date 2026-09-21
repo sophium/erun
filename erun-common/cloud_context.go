@@ -89,11 +89,21 @@ type CloudContextRefreshFailure struct {
 
 // CloudContextListResult is the structured result of listing managed cloud
 // contexts. It is shared so the CLI's --output json and the context_list MCP
-// tool emit one shape rather than two that drift apart. RefreshFailures is
-// empty when every batch succeeded, so a consumer that only wants rows is
-// unaffected.
+// tool emit one shape rather than two that drift apart.
+//
+// CloudContexts is always present, and always an array: it carries no
+// omitempty because that tag drops a slice of length zero as well, so an empty
+// set of contexts serialised as a bare {} -- a caller could not tell "none are
+// managed" from "this result does not report contexts". ListCloudContextStatuses
+// returns a non-nil slice for the same reason.
+//
+// RefreshFailures keeps its omitempty, which here is load-bearing rather than
+// the same bug: it is an annotation on the rows above, not the collection the
+// result exists to report. When there are no contexts the refresh is never
+// attempted, and writing an empty array there would assert that it ran and
+// nothing failed.
 type CloudContextListResult struct {
-	CloudContexts   []CloudContextStatus         `json:"cloudContexts,omitempty"`
+	CloudContexts   []CloudContextStatus         `json:"cloudContexts"`
 	RefreshFailures []CloudContextRefreshFailure `json:"refreshFailures,omitempty"`
 }
 
