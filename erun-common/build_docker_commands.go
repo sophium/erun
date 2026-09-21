@@ -557,6 +557,7 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	// produced. runDockerBuildOnce is what keeps a successful build quiet below
 	// debug verbosity; this flag only has to make the output exist to capture.
 	args = append(args, "--progress=plain")
+	args = append(args, dockerBuildEntitlementArgs(buildInput)...)
 	args = append(args, "-t", tag)
 	buildArgVersion := dockerBuildArgVersion(buildInput)
 	// A base this run keeps local — a snapshot base, or a pinned-version base built
@@ -587,6 +588,32 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	args = append(args, dockerSecretArgs(buildInput.DockerSecrets)...)
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
+}
+
+// dockerBuildEntitlementArgs returns the BuildKit entitlements this build is
+// granted, empty when it is granted none.
+//
+// BuildKit default-denies a step that asks for `RUN --network=host`, failing
+// the build at LLB load ("network.host is not allowed") before any step runs.
+// Without the grant a Dockerfile test stage that starts a container fixture
+// cannot build at all, which would leave the documented "a component's tests
+// belong in that component's build/test stages" contract unsatisfiable rather
+// than merely unfollowed.
+//
+// Scoped to a Dockerfile that declares a `test` stage, because that is the only
+// place the grant is needed and it is a real capability rather than a harmless
+// flag: it lets a build step join the *builder's* network namespace, which is
+// this environment pod's — its loopback (where the unauthenticated dind
+// listener sits), its address on the cluster network, and whatever else the pod
+// routes to. Every other build erun issues is a production image with no tests
+// in it, and a broad grant on those is a decision nobody made. A Dockerfile
+// with no `test` stage therefore keeps the default deny, and fails loudly at
+// LLB load if it asks anyway, rather than silently reaching the pod's network.
+func dockerBuildEntitlementArgs(buildInput DockerBuildSpec) []string {
+	if !dockerfileDeclaresTestStage(buildInput.DockerfilePath) {
+		return nil
+	}
+	return []string{"--allow", "network.host"}
 }
 
 // dockerBuildArgVersion is the value the ERUN_VERSION build arg carries before

@@ -60,11 +60,15 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 // traceIncrementalDecision: that trace is gated on a computed fingerprint, which
 // --no-incremental does not produce, and a build that skips promotion needs this
 // line *more* than one that does not. Suppressing it there is what made the flag
-// less truthful than the default (see ApplyIncrementalToDockerBuilds). Guarded on
-// dry-run for the same reason as traceIncrementalDecision: the only incrementally
-// promoted path is the real build, and the goldens must stay stable.
+// less truthful than the default (see ApplyIncrementalToDockerBuilds).
+//
+// It is the only emitter of the gate rebuild reason, in dry-run as well as in a
+// real run: traceIncrementalDecision returns before its own verdict for a gate
+// build, because resolution never inspected a fingerprint tag for one and it
+// would otherwise report the tag as "present locally" having looked at nothing.
+// A gate build's rebuild reason is the gate, not a cache state.
 func traceGateTestStageDecision(ctx Context, buildInput DockerBuildSpec) {
-	if ctx.DryRun || !buildInput.GateTestStage {
+	if !buildInput.GateTestStage {
 		return
 	}
 	tag := strings.TrimSpace(buildInput.Image.Tag)
@@ -112,6 +116,14 @@ func tracePlaywrightGateSelection(ctx Context, buildInput DockerBuildSpec) {
 // rebuild.
 func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
 	if buildInput.Fingerprint == "" {
+		return
+	}
+	// A gate build is never eligible for promotion, so resolution computed its
+	// fingerprint and stopped: it inspected no fingerprint tag and has no
+	// missing-platform set. Both lines below would then describe a check that did
+	// not happen and a cache state that does not exist. traceGateTestStageDecision
+	// already named the real reason.
+	if buildInput.GateTestStage {
 		return
 	}
 	missing := missingFingerprintPlatformSet(buildInput)

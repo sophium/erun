@@ -105,6 +105,23 @@ func dockerfileHasGateTestStage(dockerfilePath string) bool {
 	return dockerfileTestStagePattern.Match(data) && dockerfileCopyFromTestPattern.Match(data)
 }
 
+// dockerfileDeclaresTestStage reports whether a Dockerfile declares a `test`
+// stage at all, whether or not a later stage consumes it through the
+// `COPY --from=test` marker dockerfileHasGateTestStage additionally requires.
+//
+// It answers a different question from dockerfileHasGateTestStage and must not
+// be collapsed into it: that one asks whether this build is the project's own
+// merge gate (a promotion-eligibility question), this one asks whether the
+// build has a place for tests to run. Sharing the stage-name pattern keeps the
+// two from drifting on what counts as a `test` stage.
+func dockerfileDeclaresTestStage(dockerfilePath string) bool {
+	data, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return false
+	}
+	return dockerfileTestStagePattern.Match(data)
+}
+
 func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]DockerBuildSpec) []string {
 	deps := dockerfileLocalBaseImageDeps(dockerfilePath, buildsByTag)
 	tags := make([]string, 0, len(deps))
