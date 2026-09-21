@@ -423,6 +423,38 @@ FRONTEND_VITEST_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota);
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
 
+# ERUN_PLAYWRIGHT_WORKERS is the desktop suite's worker count, and it is
+# resolved here -- beside every other quota-derived gate width -- rather than
+# in the erun-devops Dockerfile, which used to compute it as DIND_CPU_LIMIT/2
+# inline in a RUN line. That made a test-parallelism decision an incidental
+# function of a resource limit: raising the sidecar's CPU cap silently raised
+# the suite's worker count, and a cap of 4 could only ever yield 2 workers no
+# matter what the gate could actually afford. The number is decided on its own
+# terms now, and the CPU cap only reaches it as the environment's CPU quota,
+# the same input every other width here divides.
+#
+# Two cores per worker, which is playwright.config.ts's own measured rule (a
+# worker is a Go backend *and* a headless Chromium, and they compete: 3 workers
+# on 4 cores timed out two specs, 2 passed clean; the 12-core environment runs
+# 6 without a contention failure). One environment's worth of that rule is
+# deliberately not the ceiling here: `make check` runs this suite concurrently
+# with the five Go test targets, golangci-lint, the integration suite and the
+# chart tests, all dividing the same quota, so the suite takes a bounded share
+# of it rather than the whole of it -- 4 workers needs 8 of the environment's
+# cores and leaves the rest of the fan-out its budget. Raise it by hand
+# (`make test-playwright ERUN_PLAYWRIGHT_WORKERS=6`) on an environment that is
+# not running the rest of the gate. Floored at 1 so a small environment still
+# runs, and the same `?=` shape as the widths above so a caller (the
+# contention repro script, or a one-off measurement) can override it.
+PLAYWRIGHT_CPU_PER_WORKER := 2
+PLAYWRIGHT_WORKER_CEILING := 4
+ERUN_PLAYWRIGHT_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(PLAYWRIGHT_CPU_PER_WORKER) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	[ "$$n" -le $(PLAYWRIGHT_WORKER_CEILING) ] || n=$(PLAYWRIGHT_WORKER_CEILING); \
+	echo $$n)
+export ERUN_PLAYWRIGHT_WORKERS
+
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
 # (erun-devops/docker/erun-devops/Dockerfile) covering all three workspaces.

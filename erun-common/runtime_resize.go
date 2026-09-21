@@ -259,7 +259,7 @@ func validateRuntimeResizeAgainstQuota(target, dindTarget RuntimePodResources, c
 			if available < 0 {
 				available = 0
 			}
-			return fmt.Errorf("resize: %s CPU plus the erun-dind sidecar's %s would exceed the namespace quota of %s CPU (%s available for the runtime container) — lower --cpu/--dind-cpu or raise the namespace quota with `erun deploy --max-cpu`", target.CPU, dindTarget.CPU, ceiling.CPU, FormatKubernetesCPUFromMilli(available))
+			return fmt.Errorf("resize: %s CPU plus the erun-dind sidecar's %s would exceed the namespace quota of %s CPU (%s available for the runtime container) — lower --cpu/--dind-cpu or raise the namespace quota with `erun deploy --max-cpu`", target.CPU, dindTarget.CPU, ceiling.CPU, formatAvailableCPUMilli(available))
 		}
 	}
 	if quotaMemMi, err := ParseKubernetesMemoryToMi(ceiling.Memory); err == nil {
@@ -273,6 +273,20 @@ func validateRuntimeResizeAgainstQuota(target, dindTarget RuntimePodResources, c
 		}
 	}
 	return nil
+}
+
+// formatAvailableCPUMilli renders how much CPU a refused resize leaves the
+// runtime container. FormatKubernetesCPUFromMilli returns an empty string for
+// a zero, which is right when there is no value to state and wrong here:
+// "would exceed the quota of 10 CPU ( available for the runtime container)"
+// drops the figure the sentence exists to report, and a reader cannot tell a
+// zero from a message that lost its number. A sidecar sized at or above the
+// whole quota is the ordinary way to reach it, not a corner.
+func formatAvailableCPUMilli(milli int64) string {
+	if milli <= 0 {
+		return "0"
+	}
+	return FormatKubernetesCPUFromMilli(milli)
 }
 
 // RuntimeResizeOccupancyError is returned when a resize is refused because the

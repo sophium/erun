@@ -4,5 +4,5 @@ resize: team/dev this moves the runtime container's throttle/OOM ceiling (and th
 mcp: team/dev edge resolved to http://<LOOPBACK>:26600/mcp
 mcp tools/call http://<LOOPBACK>:26600/mcp activity_lease_list '{"environment":"dev","tenant":"team"}'
 resize: team/dev overriding 1 held lease(s): orchestrator eng-42 (lease "exec_job_attach")
-resize team dev cpu=6 memory=16384Mi dind-cpu=4 dind-memory=20Gi
+resize team dev cpu=6 memory=16384Mi dind-cpu=12 dind-memory=20Gi
 resize: team/dev will roll the runtime pod once to apply the new limits

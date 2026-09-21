@@ -126,7 +126,7 @@ emitted; type is the single source of truth.
 {{- $dindResources := default dict $dind.resources -}}
 {{- $dindLimits := default dict $dindResources.limits -}}
 {{- $dindRequests := default dict $dindResources.requests -}}
-{{- $dindCPU := default "4" $dindLimits.cpu -}}
+{{- $dindCPU := default "12" $dindLimits.cpu -}}
 {{- $dindMemory := default "20480Mi" $dindLimits.memory -}}
 {{- $dindRequestCPU := default "0.25" $dindRequests.cpu -}}
 {{- $dindRequestMemory := default "1024Mi" $dindRequests.memory -}}
