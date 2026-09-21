@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -108,6 +109,48 @@ func (e *APIError) Error() string {
 // addressed by the request.
 func (e *APIError) NotFound() bool {
 	return e.StatusCode == http.StatusNotFound
+}
+
+// ErrUsernameTaken is the sentinel a caller matches with errors.Is when a
+// user could not be created because the login name asked for was already in
+// use. The concrete error is a *UsernameTakenError, which names the name.
+var ErrUsernameTaken = errors.New("username is already taken")
+
+// UsernameTakenError reports a login name the instance already holds.
+//
+// Detection is the status, and deliberately not Zitadel's wording: an
+// instance enforces login-name uniqueness with a unique constraint whose
+// message key is "Errors.User.AlreadyExists" ("User already exists"), not a
+// username-specific one, and it reaches the caller as Zitadel's AlreadyExists
+// conflict. On a human-user create that status means the login name collided,
+// and the caller needs the name they chose -- not the IdP's own text, which
+// names nothing they can act on.
+type UsernameTakenError struct {
+	// Username is the login name that was already in use, exactly as the
+	// caller supplied it. Under an instance whose Domain Policy requires
+	// login names to be domain-qualified, the name the instance actually
+	// holds is this one suffixed with the organization's own domain.
+	Username string
+}
+
+func (e *UsernameTakenError) Error() string {
+	return fmt.Sprintf("username %q is already taken; choose a different login name", e.Username)
+}
+
+// Unwrap exposes the sentinel, so errors.Is(err, ErrUsernameTaken) is the
+// check that does not depend on the concrete type.
+func (e *UsernameTakenError) Unwrap() error { return ErrUsernameTaken }
+
+// usernameConflict relabels Zitadel's AlreadyExists conflict on a user
+// create as the named, actionable error above. Every other failure is
+// returned unchanged, so a transport fault or a validation error still
+// reports as itself.
+func usernameConflict(username string, err error) error {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict {
+		return err
+	}
+	return &UsernameTakenError{Username: username}
 }
 
 const errorBodyTruncateLimit = 500
@@ -328,7 +371,7 @@ func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserPara
 		UserID string `json:"userId"`
 	}
 	if err := c.callInOrg(ctx, params.OrgID, http.MethodPost, "/management/v1/users/human", body, &resp); err != nil {
-		return User{}, err
+		return User{}, usernameConflict(username, err)
 	}
 	state := "USER_STATE_INITIAL"
 	if hasInitialPassword {
