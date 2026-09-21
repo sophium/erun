@@ -88,6 +88,15 @@ func openPortForwardLog(logPath string) (*os.File, error) {
 //
 // Best-effort and silent on failure: rotation is diagnostics housekeeping and
 // must never stop a healthy forward from being reused.
+func rotatePortForwardLogIfOversized(ctx common.Context, kind, logPath string) {
+	if strings.TrimSpace(logPath) == "" {
+		return
+	}
+	if common.RotateOversizedLog(logPath, portForwardLogMaxBytes) {
+		ctx.Trace(fmt.Sprintf("%s: rotated oversized port-forward log %s (kept a %s.1 backup)", kind, logPath, logPath))
+	}
+}
+
 // reclaimOrphanedPortForwardRecords removes forward records whose environment
 // no longer exists, so the tree tracks the environments it describes instead
 // of growing forever. It runs where the forward store is already touched --
@@ -101,14 +110,5 @@ func openPortForwardLog(logPath string) (*os.File, error) {
 func reclaimOrphanedPortForwardRecords(ctx common.Context) {
 	if err := common.ReclaimOrphanedPortForwardRecords(ctx); err != nil {
 		ctx.Trace(fmt.Sprintf("portforward: orphan reclaim skipped: %v", err))
-	}
-}
-
-func rotatePortForwardLogIfOversized(ctx common.Context, kind, logPath string) {
-	if strings.TrimSpace(logPath) == "" {
-		return
-	}
-	if common.RotateOversizedLog(logPath, portForwardLogMaxBytes) {
-		ctx.Trace(fmt.Sprintf("%s: rotated oversized port-forward log %s (kept a %s.1 backup)", kind, logPath, logPath))
 	}
 }
