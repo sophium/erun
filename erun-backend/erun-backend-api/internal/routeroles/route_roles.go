@@ -163,6 +163,16 @@ var Routes = map[string]Class{
 	"POST /v1/environments/{environment_id}/ai-sessions": TenantUserClass,
 	"GET /v1/environments/{environment_id}/ai-sessions":  TenantUserClass,
 
+	// jobs.go — recording and updating what this caller is working on is the
+	// same class as reporting a build result: an actor's own account of its
+	// work, not administration of the tenant. Reading the queue back is the
+	// same class as reading the tenant's builds.
+	"GET /v1/jobs":                               TenantUserClass,
+	"POST /v1/jobs":                              TenantUserClass,
+	"GET /v1/jobs/{job_id}":                      TenantUserClass,
+	"PATCH /v1/jobs/{job_id}":                    TenantUserClass,
+	"GET /v1/environments/{environment_id}/jobs": TenantUserClass,
+
 	// contexts.go — reading registered contexts is TenantUser; registering a
 	// new one is tenant administration (explicitly named in the issue this
 	// classification implements).

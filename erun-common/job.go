@@ -403,8 +403,10 @@ type EnvironmentJob struct {
 	// tell "still beating" from "the same timestamp read twice".
 	AliveSeq int64 `json:"aliveSeq,omitempty"`
 	// AliveAgeMs is computed fresh on every read as now-LastAliveAt, in the
-	// pod's own clock, and is nil only when the job has never beaten (an
-	// attached job, or one whose supervisor has not registered yet). A caller
+	// pod's own clock, and is nil only when the job has never beaten — an
+	// attached job that has not renewed, which has no supervisor to beat for
+	// it. Every record a supervisor wrote for itself carries a beat from the
+	// instant it was published as running. A caller
 	// that sees this exceed EnvironmentJobAliveStaleMs treats the job as
 	// failed — reported as an unknown outcome, never as success and never as
 	// a tool error — rather than waiting on a beat a dead supervisor can no

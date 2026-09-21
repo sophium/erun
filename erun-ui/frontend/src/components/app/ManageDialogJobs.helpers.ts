@@ -18,7 +18,14 @@ export interface JobView {
 // How a job's outcome reads to an operator. A job that is gone without an
 // outcome is its own case: reporting it as success would be a lie, and
 // reporting it as failure would blame work that may well have finished.
-export type JobOutcome = 'running' | 'succeeded' | 'failed' | 'signalled' | 'unknown';
+export type JobOutcome =
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'signalled'
+  | 'abandoned'
+  | 'gate-incomplete'
+  | 'unknown';
 
 export function jobOutcome(job: JobView): JobOutcome {
   if (job.state === 'running') {
@@ -26,6 +33,18 @@ export function jobOutcome(job: JobView): JobOutcome {
   }
   if (job.state === 'unknown') {
     return 'unknown';
+  }
+  // These two are terminal without being verdicts, and the recorded exit code
+  // cannot speak for them: the process that exited cleanly is not the work. An
+  // abandoned job left processes running in its own group, and a gate-incomplete
+  // one ended while a job it started had not reached a verdict. Both are tested
+  // before the exit code arms below, which is what used to render an abandoned
+  // job's clean exit as Succeeded.
+  if (job.state === 'abandoned') {
+    return 'abandoned';
+  }
+  if (job.state === 'gate-incomplete') {
+    return 'gate-incomplete';
   }
   if (job.exitCode === null) {
     return 'unknown';
@@ -46,6 +65,13 @@ export function jobOutcomeLabel(job: JobView): string {
       return 'Succeeded';
     case 'signalled':
       return 'Cancelled';
+    case 'abandoned':
+      // The parenthetical carries the state's whole meaning: work this job
+      // started is still running in the pod and nothing will report on it
+      // again. Without it the row reads as a closed-out outcome.
+      return 'Abandoned (work still running)';
+    case 'gate-incomplete':
+      return 'Gate incomplete (no verdict)';
     case 'failed':
       return `Failed (exit ${String(job.exitCode)})`;
     default:

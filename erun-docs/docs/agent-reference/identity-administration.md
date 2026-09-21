@@ -158,7 +158,35 @@ The IdP half is created first, since the erun mapping needs the subject the IdP 
 |---|---|---|
 | `400` | `username`/`email` empty, or the body is not valid JSON. | Send both fields. |
 | `403` | Caller's tenant is not `OPERATIONS`. | Call from an operations-tenant token. |
-| Forwarded from Zitadel | The IdP call itself failed (e.g. a username already taken in the IdP). | The response body carries Zitadel's own message; act on it directly. |
+| `409` | `USERNAME_TAKEN` — the login name is already held by another user in the addressed organization. | Choose a different login name. See [A taken login name](#username-taken). |
+| Forwarded from Zitadel | The IdP call itself failed for another reason (e.g. a colliding email, or a password the org's policy rejects). | The response body carries Zitadel's own message; act on it directly. |
+
+### A taken login name {#username-taken}
+
+A login name another user in the addressed organization already holds is the one identity failure **not** forwarded from Zitadel as-is. The instance signals it as a bare `AlreadyExists` conflict whose message names the account rather than the name — so the caller was told the one thing they cannot change, while the name they chose, the one thing they can, went unsaid. It is reported as its own code carrying that name:
+
+```json
+// 409 response — from POST /v1/identity/users, and from invite acceptance
+{
+  "code": "USERNAME_TAKEN",
+  "message": "username \"bob\" is already taken; choose a different login name"
+}
+```
+
+`message` is what the console and CLI render, so an Operator sees the name to change instead of the IdP's own text.
+
+**Effect and recovery.** The IdP rejected the create, so no identity and no erun user exist afterwards — there is nothing half-landed to clean up. What the failure costs the caller differs by entry point, and only the first is retryable as-is:
+
+| Entry point | Effect | Recovery |
+|---|---|---|
+| `POST /v1/identity/users` | Nothing created; a plain failed call. | Retry with a different `username`. |
+| Invite acceptance | Nothing created, **but the invite token is already spent** — it is consumed before the identity is created, and a failed create does not return it. | The invitee cannot reuse the link; issue a new invite. |
+
+**This code is not unique to this endpoint.** [`POST /v1/users`](/agent-reference/api-protocol#post-v1users-and-get-v1users) reports `USERNAME_TAKEN` too, when the *erun* username is taken in the target tenant. The two carry different messages because they concern different fields — an IdP login name here, the erun username there — so a client that branches on the code alone should present `message` rather than a message of its own.
+
+The detection is keyed on Zitadel's `Errors.User.AlreadyExists` **message key**, not on the `409` status alone: a conflict on this endpoint can also mean a colliding email or another uniqueness rule, and relabelling those would send the caller to change a name that was never the problem. Those keep arriving forwarded, as the table above says.
+
+The name in `message` is the one the caller supplied. On a platform whose Domain Policy requires domain-qualified login names, the name the instance actually holds is that one suffixed with the organization's own primary domain — see [login names under an org-scoped issuer](/agent-reference/api-protocol#org-scoped-login-names).
 
 ## `POST /v1/identity/users/{external_id}/deactivate` and `.../reactivate`
 

@@ -1,0 +1,2 @@
+audit: erun jobs start --actor erun/code2 --environment not-registered --summary running the integration gate --type gate
+environment "not-registered" is not registered on the erun platform; register it first (see `erun platform environment register`)
