@@ -118,13 +118,11 @@ var ErrUsernameTaken = errors.New("username is already taken")
 
 // UsernameTakenError reports a login name the instance already holds.
 //
-// Detection is the status, and deliberately not Zitadel's wording: an
-// instance enforces login-name uniqueness with a unique constraint whose
-// message key is "Errors.User.AlreadyExists" ("User already exists"), not a
-// username-specific one, and it reaches the caller as Zitadel's AlreadyExists
-// conflict. On a human-user create that status means the login name collided,
-// and the caller needs the name they chose -- not the IdP's own text, which
-// names nothing they can act on.
+// The instance signals this with the message key
+// "Errors.User.AlreadyExists" ("User already exists") rather than a
+// username-specific one, reaching the caller as Zitadel's AlreadyExists
+// conflict. The caller needs the name they chose back -- the IdP's own text
+// names the account, not the one thing they can change.
 type UsernameTakenError struct {
 	// Username is the login name that was already in use, exactly as the
 	// caller supplied it. Under an instance whose Domain Policy requires
@@ -141,13 +139,25 @@ func (e *UsernameTakenError) Error() string {
 // check that does not depend on the concrete type.
 func (e *UsernameTakenError) Unwrap() error { return ErrUsernameTaken }
 
-// usernameConflict relabels Zitadel's AlreadyExists conflict on a user
-// create as the named, actionable error above. Every other failure is
-// returned unchanged, so a transport fault or a validation error still
-// reports as itself.
+// zitadelUserAlreadyExistsKey is the message key the instance returns when a
+// human-user create collides with a uniqueness constraint on the identity.
+const zitadelUserAlreadyExistsKey = "Errors.User.AlreadyExists"
+
+// usernameConflict relabels Zitadel's user-already-exists conflict on a user
+// create as the named, actionable error above.
+//
+// The discriminator is that message key and not the status alone: a conflict
+// on this endpoint can also mean a colliding email or another uniqueness
+// rule, and relabelling every one of them as a username collision would send
+// the caller to change a name that was never the problem. Every other
+// failure is returned unchanged, so a transport fault or a validation error
+// still reports as itself.
 func usernameConflict(username string, err error) error {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict {
+		return err
+	}
+	if !strings.Contains(apiErr.Body, zitadelUserAlreadyExistsKey) {
 		return err
 	}
 	return &UsernameTakenError{Username: username}
