@@ -557,6 +557,18 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	// produced. runDockerBuildOnce is what keeps a successful build quiet below
 	// debug verbosity; this flag only has to make the output exist to capture.
 	args = append(args, "--progress=plain")
+	// BuildKit default-denies a step that asks for `RUN --network=host`, failing
+	// the build at LLB load ("network.host is not allowed") before any step runs.
+	// That denial is what keeps a build step from reaching the daemon building
+	// it, so lifting it is a deliberate grant, not a missing default: erun owns
+	// the builder, and the daemon a component's test stage needs is the same
+	// environment's own dind, already sharing this pod's network namespace.
+	// Without the grant a Dockerfile test stage that starts a container fixture
+	// cannot build at all, which would leave the documented "a component's tests
+	// belong in that component's build/test stages" contract unsatisfiable
+	// rather than merely unfollowed. The grant only lifts the default; a
+	// Dockerfile that never asks for the host network is unaffected.
+	args = append(args, "--allow", "network.host")
 	args = append(args, "-t", tag)
 	buildArgVersion := dockerBuildArgVersion(buildInput)
 	// A base this run keeps local — a snapshot base, or a pinned-version base built
