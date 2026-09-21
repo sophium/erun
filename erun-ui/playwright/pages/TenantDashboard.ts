@@ -302,6 +302,13 @@ export class TenantDashboard {
     return this.page.getByText('Connect this tenant to erunpaas.com', { exact: true });
   }
 
+  // The card replaces the dashboard before its tab strip renders, so its body
+  // must not name a subset of the tabs — a list of some of them reads as an
+  // account of what is unavailable and leaves the rest looking usable.
+  notConnectedBody(): Locator {
+    return this.page.getByText(/This tenant isn't connected to a hosted erun platform yet/);
+  }
+
   connectApiUrlInput(): Locator {
     return this.page.getByLabel('Platform API URL');
   }
