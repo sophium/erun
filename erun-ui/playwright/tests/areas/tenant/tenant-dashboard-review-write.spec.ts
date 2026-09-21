@@ -385,6 +385,16 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       await openDashboardReviewsTab(app, environment);
       await expect(app.tenantDashboard.newReviewButton()).toHaveCount(0);
       await expect(app.tenantDashboard.reviewsRestrictedNote()).toBeVisible();
+      // The empty state's body names two ways to open a review, and this
+      // caller has neither: the button's slot holds the notice asserted above,
+      // and the CLI posts the same route this flag is read from. It may only
+      // point at the notice, so it must not name either route.
+      await expect(app.tenantDashboard.reviewsEmptyState()).toBeVisible();
+      await expect(app.tenantDashboard.activePanel()).not.toContainText('New review button above');
+      await expect(app.tenantDashboard.activePanel()).not.toContainText('erun review create');
+      await expect(app.tenantDashboard.activePanel()).toContainText(
+        'Creating a review needs additional access',
+      );
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
