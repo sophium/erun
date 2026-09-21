@@ -97,6 +97,33 @@ func TestRemovePortForwardRecordKeepsTheLogOfAForwardThatIsStillRunning(t *testi
 	requireMissing(t, statePath)
 }
 
+// TestRemovePortForwardRecordKeepsALogSomeProcessStillHolds covers the case no
+// record can answer: a forward whose environment was deleted keeps its log
+// while it is still running, and the state file it would have been found
+// through goes with the environment, so a later reclaim looking at the tree
+// has nothing left to ask. Without the open-file check the delete path would
+// keep a log the sweep then removed -- taking away what an operator is reading
+// while the writer kept consuming disk through the unlinked file.
+func TestRemovePortForwardRecordKeepsALogSomeProcessStillHolds(t *testing.T) {
+	redirectConfigHomeForTest(t)
+	tenant, environment := "team", "dev"
+	// No processId: the record cannot answer the question on its own, which is
+	// the whole point.
+	seedPortForwardStateFileForTest(t, tenant, environment, 26100)
+	logPath := seedPortForwardLogForTest(t, "mcp", tenant, environment)
+
+	restore := portForwardLogHeldByProcess
+	portForwardLogHeldByProcess = func(string) bool { return true }
+	t.Cleanup(func() { portForwardLogHeldByProcess = restore })
+
+	if err := RemovePortForwardRecord(Context{}, "mcp", tenant, environment); err != nil {
+		t.Fatalf("remove record: %v", err)
+	}
+
+	requirePresent(t, logPath)
+	requirePresent(t, logPath+".1")
+}
+
 // writePortForwardStateProcessID rewrites a seeded record with the process id
 // a live forward would have recorded.
 func writePortForwardStateProcessID(t *testing.T, statePath string, processID int) {

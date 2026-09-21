@@ -115,8 +115,22 @@ func RemovePortForwardRecord(ctx Context, kind, tenant, environment string) erro
 	// a hand-edited or half-written record must not be able to point the
 	// removal at a file outside the forward tree.
 	logPath := PortForwardLogPathForState(statePath)
+	// Two ways a log can still have a writer, and both have to be checked.
+	// The record's own process answers it whenever there is a record; the
+	// open-file check answers the case where there is not — deleting an
+	// environment whose forward was still running keeps the log and takes the
+	// state file with it, so by the next sweep the record that would have
+	// answered is gone. Without the second check the delete path would keep a
+	// log the sweep then removed, and the guard would be decorative.
+	//
+	// The ".1" generation is checked with the live log because rotation
+	// renames rather than copies: after a rotation the writer holds the file
+	// that is now named ".1", so checking only the live path would unlink the
+	// file the forward is actually writing to.
 	if record, ok := readPortForwardStateFile(statePath); ok && isProcessAlive(record.ProcessID) {
 		ctx.Trace(fmt.Sprintf("%s: keeping port-forward log %s: the forward that recorded it (PID %d) is still running", kind, logPath, record.ProcessID))
+	} else if portForwardLogHeldByProcess(logPath) {
+		ctx.Trace(fmt.Sprintf("%s: keeping port-forward log %s: a process still holds it open", kind, logPath))
 	} else {
 		if err := removeFileIfPresent(ctx, logPath); err != nil {
 			return err
@@ -126,6 +140,37 @@ func RemovePortForwardRecord(ctx Context, kind, tenant, environment string) erro
 		}
 	}
 	return removeFileIfPresent(ctx, statePath)
+}
+
+// portForwardLogHeldByProcess is the seam a test overrides to decide, without
+// depending on lsof being installed, whether the log or the generation beside
+// it is still open somewhere.
+var portForwardLogHeldByProcess = logHeldByLiveProcess
+
+// logHeldByLiveProcess reports whether any process holds the log, or the
+// rotated generation the cap leaves beside it, open. Nothing is reported as
+// held when the question cannot be asked — no lsof on the host, a Windows
+// host, a probe that failed — which leaves the reclaim behaving as it did
+// before this check rather than refusing to run.
+func logHeldByLiveProcess(logPath string) bool {
+	if DetectHost().OS == HostOSWindows {
+		return false
+	}
+	for _, path := range []string{logPath, logPath + ".1"} {
+		out, err := Command("lsof", "-nP", "--", path).Output()
+		if err != nil {
+			continue
+		}
+		// lsof exits non-zero when nothing holds the file, so reaching here
+		// already means a holder; the header it prints either way is skipped
+		// so a version that reports no holder on stdout says so the same way.
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line = strings.TrimSpace(line); line != "" && !strings.HasPrefix(line, "COMMAND") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // readPortForwardStateFile reads the raw record at path, bypassing
