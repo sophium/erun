@@ -40,7 +40,7 @@ func newIdleCmd(store common.OpenStore, resolveOpen OpenResolver) *cobra.Command
 	}
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Tenant")
 	cmd.Flags().StringVar(&environment, "environment", "", "Environment")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output (alias for --output json)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -53,7 +53,13 @@ func runIdleCommand(ctx context.Context, commandCtx common.Context, store common
 	if !resolved {
 		return nil
 	}
-	if jsonOutput {
+	return writeIdleResult(commandCtx, status, jsonOutput)
+}
+
+// writeIdleResult picks the wire form once, so the documented global
+// --output json and the command's own --json alias cannot diverge.
+func writeIdleResult(commandCtx common.Context, status common.EnvironmentIdleStatus, jsonOutput bool) error {
+	if commandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(status)

@@ -165,15 +165,16 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecDiffCommand(commandContext(cmd), findProjectRoot, runGit, execDiffOptions{
-				JSON:           jsonOutput,
+			commandCtx := commandContext(cmd)
+			return runExecDiffCommand(commandCtx, findProjectRoot, runGit, execDiffOptions{
+				JSON:           commandWantsJSON(commandCtx, jsonOutput),
 				Scope:          scope,
 				SelectedCommit: selectedCommit,
 			})
 		},
 	}
 	addDryRunFlag(cmd)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text (alias for --output json)")
 	cmd.Flags().StringVar(&scope, "scope", "", "Diff scope: current (default), all, or commit")
 	cmd.Flags().StringVar(&selectedCommit, "selected-commit", "", "Oldest commit hash to include when --scope=commit")
 	return cmd

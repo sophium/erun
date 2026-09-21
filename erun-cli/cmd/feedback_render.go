@@ -45,6 +45,14 @@ func commandOutputMode(cmd *cobra.Command) common.OutputMode {
 	return mode
 }
 
+// commandWantsJSON unifies the global --output json with the per-command --json
+// some commands grew first. Both spellings mean the same thing, so a caller that
+// follows only the documented global flag gets the structured result rather than
+// prose; --json stays a supported alias rather than a second, rival contract.
+func commandWantsJSON(commandCtx common.Context, jsonFlag bool) bool {
+	return jsonFlag || commandCtx.Output == common.OutputJSON
+}
+
 func isDryRunCommand(cmd *cobra.Command) bool {
 	dryRun, err := cmd.Flags().GetBool("dry-run")
 	return err == nil && dryRun

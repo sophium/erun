@@ -74,6 +74,13 @@ type CloudContextStatus struct {
 	StopProtectionKnown bool   `json:"stopProtectionKnown,omitempty" yaml:"stopprotectionknown,omitempty"`
 }
 
+// CloudContextListResult is the structured result of listing managed cloud
+// contexts. It is shared so the CLI's --output json and the context_list MCP
+// tool emit one shape rather than two that drift apart.
+type CloudContextListResult struct {
+	CloudContexts []CloudContextStatus `json:"cloudContexts,omitempty"`
+}
+
 type InitCloudContextParams struct {
 	Name               string
 	CloudProviderAlias string

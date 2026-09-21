@@ -60,7 +60,7 @@ func newWhipCmd(store common.ListStore, resolveOpen OpenResolver) *cobra.Command
 	}
 	cmd.Flags().StringVar(&tenant, "tenant", "", "Whip only this tenant's environment (requires --environment)")
 	cmd.Flags().StringVar(&environment, "environment", "", "Whip only this environment (requires --tenant)")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output (alias for --output json)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -80,7 +80,7 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 	// JSON stays a single document on stdout, so it is written at the end.
 	emit := func(result common.WhipResult) error {
 		report.Results = append(report.Results, result)
-		if jsonOutput {
+		if commandWantsJSON(commandCtx, jsonOutput) {
 			return nil
 		}
 		return writeWhipResult(commandCtx, result, commandCtx.DryRun)
@@ -106,7 +106,13 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 		}
 	}
 
-	if jsonOutput {
+	return writeWhipReport(commandCtx, report, jsonOutput)
+}
+
+// writeWhipReport picks the wire form once, so the documented global
+// --output json and the command's own --json alias cannot diverge.
+func writeWhipReport(commandCtx common.Context, report common.WhipReport, jsonOutput bool) error {
+	if commandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(report)
