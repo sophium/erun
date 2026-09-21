@@ -31,9 +31,10 @@ or, to avoid gh's browser flow entirely: gh auth login -h <host> --with-token < 
 Run this only interactively over that shell -- never from an unattended agent run, which cannot complete gh's device-code/browser flow (there is nobody to open the URL).
 The credential persists on this environment's home volume across restarts, same as an operator's AWS identity.
 
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
 Filesystem  Size  Used  Avail  Mounted on
 overlay     100G  20G   80G    /var/lib/docker
-Running: Remove unused Docker images
+Running: Remove unused Docker images (the erun-dind sidecar)
 Total reclaimed space: 2GB
 audit: erun doctor --prune-images team dev
 trace-log: appending the full trace to <TMP>

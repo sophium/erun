@@ -1,0 +1,32 @@
+Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+
+== Helm release status ==
+NAME: team-devops
+STATUS: deployed
+
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+== Docker storage ==
+no build daemon — this environment resolves to type "runtime", which installs published versions by reference and never builds: its pod carries no erun-dind sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead
+
+audit: erun doctor --prune-images team dev
+trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor failed team/dev: this environment resolves to type "runtime", which installs published versions by reference and never builds: its pod carries no erun-dind sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead
+this environment resolves to type "runtime", which installs published versions by reference and never builds: its pod carries no erun-dind sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead

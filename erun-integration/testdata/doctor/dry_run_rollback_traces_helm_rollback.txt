@@ -15,6 +15,7 @@ kubectl-context-configure: subprocess
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 Running: Roll back to the last successful revision
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
 No cleanup actions selected.
 audit: erun doctor --dry-run --rollback team dev
 trace-log: would append the full trace to <TMP>
@@ -26,10 +27,12 @@ kubectl --context test-context --namespace team-dev wait --for=condition=Availab
 kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
 doctor-inspect:
   set -eu
-  printf '== Disk usage (/var/lib/docker) ==\n'
+  printf '%s\n' '== Disk usage (/var/lib/docker) =='
   df -h /var/lib/docker
-  printf '\n== Inode usage (/var/lib/docker) ==\n'
+  printf '\n'
+  printf '%s\n' '== Inode usage (/var/lib/docker) =='
   df -i /var/lib/docker
-  printf '\n== Docker system df ==\n'
+  printf '\n'
+  printf '%s\n' '== Docker system df =='
   docker system df
 ==> Doctor done team/dev
