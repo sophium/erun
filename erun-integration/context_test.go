@@ -625,6 +625,41 @@ func TestContext(t *testing.T) {
 		golden.Equal(t, "context/list_real_run_refresh_failures_mark_unknown", normalize.Apply(result.Combined))
 	})
 
+	t.Run("list_real_run_reports_a_batched_refresh_failure_once", func(t *testing.T) {
+		// One describe-instances call covers every context sharing its
+		// (alias, region), and its failure is one fact about that batch. The
+		// operator must read it once, at the batch level -- not once per
+		// context, where each row would also re-quote the several-hundred-
+		// character command naming every sibling context's instance ID.
+		setup := env.New(t)
+		seedCloudConfigWithContexts(t, setup,
+			contextYAMLItem("ctx-a", "dev", "us-east-1", "i-0aaaa11111aaaa1111")+
+				contextYAMLItem("ctx-b", "dev", "us-east-1", "i-0bbbb22222bbbb2222")+
+				contextYAMLItem("ctx-c", "dev", "us-east-1", "i-0cccc33333cccc3333")+
+				contextYAMLItem("ctx-d", "dev", "us-east-1", "i-0dddd44444dddd4444"))
+		stubs := setup.Cwd + "/stubs"
+		envVars := append(setup.Env(), fixture.StubAWSCloudContext(t, stubs, fixture.AWSCloudContextStubSpec{
+			DescribeInstanceStatesError: &fixture.AWSStubError{
+				Stderr: "An error occurred (ExpiredToken) when calling the DescribeInstances operation: The security token included in the request is expired",
+			},
+		})...)
+		result := erun.Run(t, []string{"context", "list", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The state classification stays honest -- the refresh could not
+		// determine the state, so it reports unknown rather than guessing.
+		if got := strings.Count(result.Combined, "status refresh failed"); got != 1 {
+			t.Fatalf("status refresh failure appears %d times, want exactly once:\n%s", got, result.Combined)
+		}
+		for _, row := range contextListRows(result.Combined) {
+			if strings.Contains(row, "message=") {
+				t.Fatalf("row repeats the shared cause instead of leaving it to the batch line:\n%s", row)
+			}
+		}
+		golden.Equal(t, "context/list_real_run_reports_a_batched_refresh_failure_once", normalize.Apply(result.Combined))
+	})
+
 	t.Run("start_real_run_retries_after_transitional_state", func(t *testing.T) {
 		// Locks the start-instances retry: the first call is rejected because
 		// the instance is still stopping, so production waits for stopped and
@@ -944,6 +979,19 @@ func TestContext(t *testing.T) {
 // contextYAMLItem renders one cloudcontexts YAML item; an empty instanceID
 // omits the instanceid key so refresh scenarios can stage a context the AWS
 // refresh must skip.
+// contextListRows returns only the per-context rows of a context listing, so a
+// batch-level line that legitimately names the whole batch's instance IDs is
+// not mistaken for a row disclosing its siblings.
+func contextListRows(out string) []string {
+	var rows []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "  - ") {
+			rows = append(rows, line)
+		}
+	}
+	return rows
+}
+
 func contextYAMLItem(name, alias, region, instanceID string) string {
 	item := "  - name: " + name + "\n" +
 		"    provider: aws\n" +
