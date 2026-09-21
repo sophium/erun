@@ -61,7 +61,7 @@ func migrateLegacyPortForwardState(legacyPath, newPath string) {
 }
 
 func portForwardLogPath(statePath string) string {
-	return strings.TrimSuffix(statePath, filepath.Ext(statePath)) + ".log"
+	return common.PortForwardLogPathForState(statePath)
 }
 
 // portForwardLogMaxBytes bounds each kubectl port-forward log. A log that
@@ -94,5 +94,21 @@ func rotatePortForwardLogIfOversized(ctx common.Context, kind, logPath string) {
 	}
 	if common.RotateOversizedLog(logPath, portForwardLogMaxBytes) {
 		ctx.Trace(fmt.Sprintf("%s: rotated oversized port-forward log %s (kept a %s.1 backup)", kind, logPath, logPath))
+	}
+}
+
+// reclaimOrphanedPortForwardRecords removes forward records whose environment
+// no longer exists, so the tree tracks the environments it describes instead
+// of growing forever. It runs where the forward store is already touched --
+// the same forward setup that applies the log cap -- because a reclaim left to
+// some unrelated command is a reclaim that stops happening the moment that
+// command changes.
+//
+// Best-effort and silent on failure: reclaiming disk is diagnostics
+// housekeeping and must never stop an operator opening the environment they
+// asked for.
+func reclaimOrphanedPortForwardRecords(ctx common.Context) {
+	if err := common.ReclaimOrphanedPortForwardRecords(ctx); err != nil {
+		ctx.Trace(fmt.Sprintf("portforward: orphan reclaim skipped: %v", err))
 	}
 }

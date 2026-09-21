@@ -1,0 +1,3 @@
+Dry run: erun jobs list planned.
+audit: erun jobs list --actor erun/code2 --dry-run --environment-id env_01HQ --issue sophium/erun#1 --scope sophium/erun#1 --status running
+platform: GET https://api.example.test/v1/jobs (status=RUNNING, environmentId=env_01HQ, issueRef=sophium/erun#1, scope=sophium/erun#1, actorId=erun/code2)

@@ -25,7 +25,7 @@ import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 const RUNNING_SESSION_ID = 4242;
 
 // The command observed on the erun-prod orchestrator card, verbatim. Its
-// length is the point -- at the card's fixed w-72 it wraps well past two
+// length is the point -- at the card's fixed w-90 it wraps well past two
 // lines, so the clamp has something real to hold back.
 const LONG_SHELL_COMMAND =
   'export GODEBUG=tlsmlkem=0; erun exec job start --tenant erun --environment code1 ' +

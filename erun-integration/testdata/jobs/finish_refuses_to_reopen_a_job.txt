@@ -1,0 +1,2 @@
+audit: erun jobs finish --status RUNNING job_01HQ
+RUNNING is the status a claim assigns; report SUCCEEDED, FAILED, ABANDONED or SUPERSEDED to close a job
