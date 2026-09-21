@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   Ban,
   CheckCircle2,
+  CircleSlash,
+  Hourglass,
   ListChecks,
   LoaderCircle,
   PlugZap,
@@ -265,7 +267,7 @@ function JobsEmptyState({ message }: { message: string }): React.ReactElement {
 // Colour never carries the outcome on its own: each state has its own icon and
 // its own words, so the row reads the same to someone who cannot separate the
 // green from the red.
-function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
+export function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
   const outcome = jobOutcome(job);
   const label = jobOutcomeLabel(job);
   const shared = 'inline-flex items-center gap-1.5 text-[12px] font-medium';
@@ -303,6 +305,28 @@ function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
         data-testid="manage-jobs-row-outcome"
       >
         <AlertTriangle className="size-3.5" aria-hidden="true" />
+        {label}
+      </span>
+    );
+  }
+  // Abandoned wears the destructive styling rather than the amber "unresolved"
+  // one: something is still running in the pod and nothing will report on it
+  // again, so it is the one outcome that needs an operator to act.
+  if (outcome === 'abandoned') {
+    return (
+      <span className={`${shared} text-destructive`} data-testid="manage-jobs-row-outcome">
+        <CircleSlash className="size-3.5" aria-hidden="true" />
+        {label}
+      </span>
+    );
+  }
+  if (outcome === 'gate-incomplete') {
+    return (
+      <span
+        className={`${shared} text-amber-700 dark:text-amber-400`}
+        data-testid="manage-jobs-row-outcome"
+      >
+        <Hourglass className="size-3.5" aria-hidden="true" />
         {label}
       </span>
     );
