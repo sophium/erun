@@ -33,6 +33,14 @@ type PortForwardState struct {
 // the config dir, not the cache dir: an evicted cache entry would orphan the
 // still-running kubectl port-forward and leave the next `erun open` unable to
 // recognise its own forward.
+//
+// The config tree is named through configRoot rather than spelled out again
+// here, because a second spelling is a second thing to keep in step: state
+// that resolved to a different root than the tenant config it is validated
+// against would stop being found, taking the recorded local port and the log
+// beside it out of reach. This tree is the lowercase one; the desktop's own
+// per-installation state is a separate capitalized tree, and the two are only
+// indistinguishable on a case-insensitive volume.
 func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 	kind = strings.TrimSpace(kind)
 	tenant = strings.TrimSpace(tenant)
@@ -53,7 +61,7 @@ func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(configDir, "erun", "portforward", kind, tenant, environment+".json"), nil
+	return filepath.Join(configDir, configRoot, "portforward", kind, tenant, environment+".json"), nil
 }
 
 // LoadPortForwardState reads a forward's state. A missing file is reported as
