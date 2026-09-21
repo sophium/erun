@@ -1,0 +1,3 @@
+Dry run: erun jobs finish planned.
+audit: erun jobs finish --dry-run --local-job-id job-local-1 --status succeeded --summary gate passed job_01HQ
+platform: PATCH https://api.example.test/v1/jobs/job_01HQ (status=succeeded, summary=gate passed)

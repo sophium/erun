@@ -1,0 +1,3 @@
+Started job job_01HQ (fix, RUNNING).
+audit: erun jobs start --actor erun/code2 --environment code2 --summary running the integration gate --type gate
+platform: POST <PLATFORM_API>/v1/jobs (jobType=gate, actorId=erun/code2, environment=code2)
