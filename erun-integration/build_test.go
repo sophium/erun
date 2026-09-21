@@ -178,6 +178,36 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_component_auto_selects_lone_entry", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_dockerfile_test_stage_grants_host_network_entitlement", func(t *testing.T) {
+		// BuildKit default-denies `RUN --network=host`, so a component test stage
+		// that starts a container fixture cannot build at all unless erun grants
+		// the network.host entitlement. The grant is scoped to a Dockerfile that
+		// declares a `test` stage: `--allow network.host` hands a build step the
+		// *builder's* network namespace — this environment pod's — which a
+		// production image with no tests has no use for. This scenario is the
+		// granted arm. The ungranted arm is every other build golden in this
+		// suite, none of whose Dockerfiles declare a test stage: make the grant
+		// unconditional again and all of them fail on the stray token, which is
+		// the only reason this boundary is visible at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "", "build/VERSION")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "docker", "api", "Dockerfile"),
+			"FROM --platform=$BUILDPLATFORM alpine:3.22 AS test\n"+
+				"RUN --network=host true && touch /test-ok\n"+
+				"\n"+
+				"FROM alpine:3.22 AS builder\n"+
+				"COPY --from=test /test-ok /tmp/erun-test-ok\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_test_stage_grants_host_network_entitlement", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_component_flag_selects_entry", func(t *testing.T) {
 		// Two components: entries declared (two independent harnesses in one
 		// monorepo); --component selects one by name, without editing the

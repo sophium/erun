@@ -229,13 +229,19 @@ composition and release invariants belong to root/shared logic, not chart policy
   builder instance needed. Verified live in this repo's own `remote-agent` pod: with
   the flag, a `RUN --network=host` step reached the pod's own dind sidecar at
   `DOCKER_HOST=tcp://127.0.0.1:2375` and ran a real container end to end.
-  `dockerBuildArgs` passes the flag on every build, so a component test stage can
-  depend on it; `build_network_entitlement_test.go` locks that it is passed and that
-  it is paired with its value. The grant is a consequence of erun owning the builder,
-  not a safe default, and it must be documented as such: a `RUN --network=host` step
-  can reach the daemon that is building it, and start, stop, prune or inspect the
-  containers and images of its own build. A component's test stage is trusted code
-  running against its own environment's runtime, not a sandbox.
+  `dockerBuildEntitlementArgs` passes the flag on a build whose Dockerfile declares a
+  `test` stage — the only build that has anywhere to run tests — so a component test
+  stage can depend on it. It is deliberately not passed to a Dockerfile with no
+  `test` stage: the entitlement hands a build step the *builder's* network namespace,
+  which is this environment pod's, and a production image has no use for it. Such a
+  build keeps BuildKit's default deny and fails loudly at LLB load if it asks anyway.
+  `build_network_entitlement_test.go` locks both arms and that the flag is paired with
+  its value; `build/dry_run_dockerfile_test_stage_grants_host_network_entitlement`
+  locks the granted arm end to end. The grant is a consequence of erun owning the
+  builder, not a safe default, and it must be documented as such: a `RUN
+  --network=host` step can reach the daemon that is building it, and start, stop,
+  prune or inspect the containers and images of its own build. A component's test
+  stage is trusted code running against its own environment's runtime, not a sandbox.
 - **The TCP endpoint that makes the above reachable is not deliberately wired up.**
   It exists because the dind sidecar always runs with `DOCKER_TLS_CERTDIR=""`, and
   the vendored `docker:*-dind` image then adds an insecure
