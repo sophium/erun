@@ -64,6 +64,28 @@ type DockerImageReference struct {
 	Insecure bool
 }
 
+// DockerBuildSecret is one BuildKit build secret a project declares under
+// `docker.secrets` in .erun/config.yaml, resolved for the build's environment.
+//
+// It carries a *reference* to the credential — the name of an environment
+// variable, or a host path — and never the credential itself. That is the
+// property that keeps a secret out of every surface erun writes: the value is
+// never in this struct, so it cannot reach the docker build argv as a literal,
+// a trace line, a log, or a timing record. docker resolves it from its own
+// (inherited) environment, or reads it from the file it is handed.
+type DockerBuildSecret struct {
+	// ID is the secret id the Dockerfile mounts, as in
+	// `RUN --mount=type=secret,id=<ID>`.
+	ID string `yaml:"id"`
+	// Env names the environment variable holding the credential, rendered as
+	// `--secret id=<ID>,env=<Env>`. docker reads the value from its own
+	// environment, so it never enters this process.
+	Env string `yaml:"env,omitempty"`
+	// Src names a host file or directory holding the credential, rendered as
+	// `--secret id=<ID>,src=<Src>`.
+	Src string `yaml:"src,omitempty"`
+}
+
 type DockerBuildSpec struct {
 	ContextDir     string
 	DockerfilePath string
@@ -128,6 +150,13 @@ type DockerBuildSpec struct {
 	// a sibling cgroup (erun#2255). Left empty outside an injected runtime pod.
 	// See buildContainerCPUCapCgroupParent.
 	CgroupParent string
+	// DockerSecrets carries the build secrets declared under `docker.secrets`
+	// (resolved for this build's environment) into the docker build argv as
+	// `--secret id=<id>,env=<VAR>` / `,src=<path>` references. Each entry holds
+	// a reference, never a credential value, which is what keeps a secret out of
+	// every trace, log, and timing record this build writes — see
+	// DockerBuildSecret.
+	DockerSecrets []DockerBuildSecret
 	// PlatformObserver, when set, is called after each platform's build (or
 	// promote+push) finishes, reporting that platform's elapsed time, error,
 	// build-cgroup cost (nil for a promote, which runs no docker build), and
