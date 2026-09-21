@@ -83,7 +83,7 @@ func TestIntegrationCoverageGateKeepsItsMargin(t *testing.T) {
 	// The default has to be derived from the pair rather than written out
 	// again: a second literal is free to disagree with the stated margin,
 	// which is how the pin came to sit on the measured value unnoticed.
-	assignment := strings.TrimSpace(thresholdAssignment(script))
+	assignment := thresholdAssignment(script)
 	for _, want := range []string{"COVERAGE_THRESHOLD", "coverage_measured", "coverage_margin"} {
 		if !strings.Contains(assignment, want) {
 			t.Errorf("the default threshold is no longer derived from %s: the assignment is %q. "+
@@ -102,9 +102,9 @@ func TestIntegrationCoverageGateKeepsItsMargin(t *testing.T) {
 	}
 }
 
-// thresholdAssignment returns the line that sets the gate's `threshold`, which
-// is the one assignment (the `-threshold=` and `--threshold=` argument forms
-// that also mention the name are matched and skipped).
+// thresholdAssignment returns the line that sets the gate's `threshold`. The
+// `-threshold=` and `--threshold=` argument forms also name it but are parsed
+// by their own case arms, so the assignment is the one line starting with it.
 func thresholdAssignment(script string) string {
 	for _, line := range strings.Split(script, "\n") {
 		if strings.HasPrefix(line, "threshold=") {
