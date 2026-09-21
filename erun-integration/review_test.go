@@ -424,6 +424,31 @@ func TestReview(t *testing.T) {
 		golden.Equal(t, "review/list_unknown_status_is_refused_as_a_bad_argument", normalize.Apply(result.Combined))
 	})
 
+	t.Run("list_lowercase_status_returns_the_matching_review", func(t *testing.T) {
+		// The reported failure: a lowercase --status was forwarded to the
+		// platform verbatim, matched nothing, and read as "no reviews" -- on a
+		// tenant that had matching reviews. The filter must resolve to the
+		// spelling the platform stores, so `open` finds the OPEN review.
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		create := erun.Run(t, []string{
+			"review", "create", "--name", "Add widget", "--source-branch", "feature/widget", "--target-branch", "main",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if create.ExitCode != 0 {
+			t.Fatalf("create exit %d: %s", create.ExitCode, create.Combined)
+		}
+
+		list := erun.Run(t, []string{"review", "list", "--status", "open"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if list.ExitCode != 0 {
+			t.Fatalf("list exit %d: %s", list.ExitCode, list.Combined)
+		}
+		if !strings.Contains(list.Combined, "Add widget") {
+			t.Fatalf("expected the OPEN review for a lowercase --status open, got:\n%s", list.Combined)
+		}
+	})
+
 	t.Run("list_with_a_valid_status_and_no_matches_is_an_empty_result", func(t *testing.T) {
 		// The other direction: a valid --status that matches nothing is a real
 		// empty result -- exit 0 and "no reviews" -- and the normalized filter
