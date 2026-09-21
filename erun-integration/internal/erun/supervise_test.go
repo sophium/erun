@@ -5,11 +5,12 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
 // writePipeHolderFixture writes a shell child that starts a descendant
@@ -59,7 +60,7 @@ func driveSupervise(t *testing.T, script string, timeout, delay time.Duration) (
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", script)
+	cmd := harnessexec.CommandContext(ctx, "/bin/sh", script)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stdout
