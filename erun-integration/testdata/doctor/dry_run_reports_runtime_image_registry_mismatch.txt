@@ -18,6 +18,7 @@ If the release is stuck pending or an image failed to pull, re-run `erun deploy 
 runtimeimage resolves to registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com, but runtimeregistry is ghcr.io/sophium.
 The deploy that installs this env sets imageOverrides.erun-devops from 123456789012.dkr.ecr.eu-west-2.amazonaws.com while runtimeRegistry stays ghcr.io/sophium; the runtime pod can only pull if a credential for 123456789012.dkr.ecr.eu-west-2.amazonaws.com also resolves where `erun deploy`/`erun open --deploy` runs (the same AWS/docker session that can push to it). If the pod is failing to pull, confirm that credential is available there, or realign the two with `erun init team dev --runtime-registry 123456789012.dkr.ecr.eu-west-2.amazonaws.com` to match the image.
 
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
 No cleanup actions selected.
 audit: erun doctor --dry-run team dev
 trace-log: would append the full trace to <TMP>
@@ -28,10 +29,12 @@ kubectl --context test-context --namespace team-dev wait --for=condition=Availab
 kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
 doctor-inspect:
   set -eu
-  printf '== Disk usage (/var/lib/docker) ==\n'
+  printf '%s\n' '== Disk usage (/var/lib/docker) =='
   df -h /var/lib/docker
-  printf '\n== Inode usage (/var/lib/docker) ==\n'
+  printf '\n'
+  printf '%s\n' '== Inode usage (/var/lib/docker) =='
   df -i /var/lib/docker
-  printf '\n== Docker system df ==\n'
+  printf '\n'
+  printf '%s\n' '== Docker system df =='
   docker system df
 ==> Doctor done team/dev

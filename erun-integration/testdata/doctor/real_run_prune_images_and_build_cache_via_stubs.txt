@@ -22,11 +22,12 @@ NAME                READY   STATUS    RESTARTS
 team-devops-pod-1   2/2     Running   0
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
 Filesystem  Size  Used  Avail  Mounted on
 overlay     100G  20G   80G    /var/lib/docker
-Running: Remove unused Docker images
+Running: Remove unused Docker images (the erun-dind sidecar)
 Total reclaimed space: 2GB
-Running: Remove unused BuildKit cache
+Running: Remove unused BuildKit cache (the erun-dind sidecar)
 Total: 3GB
 audit: erun doctor --prune-build-cache --prune-images team dev
 trace-log: appending the full trace to <TMP>
