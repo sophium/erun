@@ -134,3 +134,8 @@ CREATE TRIGGER gate_runs_set_timestamps
   BEFORE INSERT OR UPDATE ON gate_runs
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER jobs_set_timestamps
+  BEFORE INSERT OR UPDATE ON jobs
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
