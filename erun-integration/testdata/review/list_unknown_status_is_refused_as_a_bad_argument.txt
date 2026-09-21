@@ -1,0 +1,2 @@
+audit: erun review list --status bogus
+unsupported review status "bogus": expected "OPEN", "CLOSED", "FAILED", "READY", "MERGE" or "MERGED"

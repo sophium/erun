@@ -26,9 +26,48 @@ type ReviewListParams struct {
 	WaitingOnMe    bool
 }
 
+// The statuses a review can be filtered by: a review is OPEN while it is being
+// worked, READY once it is approved for the merge queue, MERGE while the queue
+// is advancing it, and settles on MERGED or CLOSED. FAILED marks one whose
+// recorded build did not pass.
+const (
+	ReviewStatusOpen   = "OPEN"
+	ReviewStatusClosed = "CLOSED"
+	ReviewStatusFailed = "FAILED"
+	ReviewStatusReady  = "READY"
+	ReviewStatusMerge  = "MERGE"
+	ReviewStatusMerged = "MERGED"
+)
+
+// NormalizeReviewStatus validates a review status filter and resolves it to the
+// spelling the platform stores, accepting any casing. The empty value means
+// "no status filter". The error names the accepted values, since this is
+// operator input from a flag or a tool argument: a mistyped filter that reached
+// the platform would come back as an empty listing, indistinguishable from a
+// real "no reviews".
+func NormalizeReviewStatus(status string) (string, error) {
+	trimmed := strings.TrimSpace(status)
+	switch normalized := strings.ToUpper(trimmed); normalized {
+	case "":
+		return "", nil
+	case ReviewStatusOpen, ReviewStatusClosed, ReviewStatusFailed,
+		ReviewStatusReady, ReviewStatusMerge, ReviewStatusMerged:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("unsupported review status %q: expected %q, %q, %q, %q, %q or %q",
+			trimmed, ReviewStatusOpen, ReviewStatusClosed, ReviewStatusFailed,
+			ReviewStatusReady, ReviewStatusMerge, ReviewStatusMerged)
+	}
+}
+
 // RunReviewList lists reviews visible to the caller's tenant, narrowed by the
 // given filters.
 func RunReviewList(ctx Context, store CloudReadStore, alias string, params ReviewListParams, deps CloudDependencies) ([]PlatformReview, error) {
+	status, err := NormalizeReviewStatus(params.Status)
+	if err != nil {
+		return nil, err
+	}
+	params.Status = status
 	if err := validateReviewListParams(params); err != nil {
 		return nil, err
 	}

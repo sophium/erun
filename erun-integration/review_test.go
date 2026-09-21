@@ -410,6 +410,35 @@ func TestReview(t *testing.T) {
 		golden.Equal(t, "review/list_rejects_mine_combined_with_author_user_id", normalize.Apply(result.Combined))
 	})
 
+	t.Run("list_unknown_status_is_refused_as_a_bad_argument", func(t *testing.T) {
+		// A mistyped --status must fail as a bad argument naming the accepted
+		// values. Passing it through to the platform filter would come back as
+		// an empty listing -- "no reviews" and exit 0 -- which is
+		// indistinguishable from a real empty result.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{"review", "list", "--status", "bogus"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("exit 0 for an unrecognised --status, want a non-zero exit:\n%s", result.Combined)
+		}
+		golden.Equal(t, "review/list_unknown_status_is_refused_as_a_bad_argument", normalize.Apply(result.Combined))
+	})
+
+	t.Run("list_with_a_valid_status_and_no_matches_is_an_empty_result", func(t *testing.T) {
+		// The other direction: a valid --status that matches nothing is a real
+		// empty result -- exit 0 and "no reviews" -- and the normalized filter
+		// is what reached the platform.
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		result := erun.Run(t, []string{"review", "list", "--status", "merged"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d for a valid --status with no matches, want 0:\n%s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/list_with_a_valid_status_and_no_matches_is_an_empty_result",
+			normalize.Apply(result.Combined, stubServerRule(server, "<PLATFORM_API>")))
+	})
+
 	t.Run("create_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
