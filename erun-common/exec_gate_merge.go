@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -11,7 +12,10 @@ import (
 // order it should land. Message becomes that branch's own squash commit
 // message — normally the branch's review name (AGENTS.md: "Review name is
 // the squash merge message") — since a landed branch becomes a real commit
-// on TargetBranch if the gate passes.
+// on TargetBranch if the gate passes. The branch's own load-bearing trailers
+// (see gateMergeCarriedTokens) are appended beneath it, so what the branch
+// declared about its own commit survives a squash that would otherwise
+// replace the branch's history with this one message.
 type GateMergeSource struct {
 	Branch  string
 	Message string
@@ -202,6 +206,157 @@ func validateGateMergeSources(sources []GateMergeSource) error {
 	return nil
 }
 
+// gateMergeCarriedTrailerLines is the closed set of trailers a squash carries
+// up into the commit that lands on the target, one pattern per line so the
+// shape each token's value must have sits beside the token. These are the
+// lines this repository's own guidance makes load-bearing for a landed commit
+// — "Closes #N" from the contribution rules, and the regression-reproduction
+// trailers from "A Defect Fix Names Its Reproduction" — because they are
+// declarations about the change that a later reader looks for on the target,
+// not commentary the branch author happened to leave behind. Copying every
+// trailing line a branch's commits might contain onto an unattended commit on
+// the target is a larger surface than this defect needs; a token not listed
+// here stays with the branch's own history.
+//
+// The issue-closing line is spelled without a colon, unlike the others, and
+// its value is required to be an issue reference: a sentence that merely
+// begins with the word cannot be read as a trailer.
+var gateMergeCarriedTrailerLines = []*regexp.Regexp{
+	regexp.MustCompile(`^Closes[ \t]+#[0-9]+(?:[ \t]*,[ \t]*#[0-9]+)*$`),
+	regexp.MustCompile(`^Reproduces:[ \t]+\S.*$`),
+	regexp.MustCompile(`^Regression-Test:[ \t]+\S.*$`),
+	regexp.MustCompile(`^Regression-Test-Existing:[ \t]+\S.*$`),
+	regexp.MustCompile(`^Regression-Test-Exemption:[ \t]+\S.*$`),
+}
+
+// gateMergeCarriesTrailer reports whether one line is a trailer this squash
+// preserves.
+func gateMergeCarriesTrailer(line string) bool {
+	for _, pattern := range gateMergeCarriedTrailerLines {
+		if pattern.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// gateMergeStartsTrailerBlock reports whether one line begins a new trailer
+// entry. Any token-shaped line does, carried or not, so an unrecognised
+// trailer between two carried ones does not fold the second into the first as
+// an indented continuation.
+var gateMergeStartsTrailerBlock = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*(?::|[ \t])`)
+
+// gateMergeTrailerLogArgs is the git invocation that reads back a source
+// branch's own commit bodies. The base is the ref the source is being squashed
+// onto, so the range is the commits this branch contributes to the prospective
+// merge rather than everything it has ever contained — a source that was cut
+// from an already-landed branch does not re-declare that branch's trailers.
+// Bodies are NUL-separated so a body containing blank lines still parses.
+func gateMergeTrailerLogArgs(base, sourceRef string) []string {
+	return []string{"log", "--format=%B%x00", base + ".." + sourceRef}
+}
+
+// gateMergeCarriedTrailers reads the trailers a source branch's own commits
+// declare, in the order they appear. Empty means the branch declares none,
+// which is not an error. A git failure here is fatal for the batch rather than
+// silently absent: the whole point of reading these is that their absence is
+// invisible on the target, so a read that failed must not be swallowed into
+// the same empty result as a branch that declared nothing.
+func gateMergeCarriedTrailers(ctx Context, root, base, sourceRef string, deps GateMergeWorkingTreeDependencies) ([]string, error) {
+	args := gateMergeTrailerLogArgs(base, sourceRef)
+	ctx.TraceCommand(root, "git", args...)
+	output, err := runGitCapturingOutput(root, deps, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read the trailers on %s: %w", sourceRef, err)
+	}
+	var trailers []string
+	for _, body := range strings.Split(output, "\x00") {
+		trailers = append(trailers, gateMergeTrailersFromBody(body)...)
+	}
+	return trailers, nil
+}
+
+// gateMergeTrailersFromBody extracts the carried trailer entries from one
+// commit body. Only the trailer block — the run of non-empty lines closing the
+// body — is considered, and an entry extends over the indented continuation
+// lines git folds into it, so a wrapped "Reproduces:" arrives whole rather
+// than truncated at its first line break.
+func gateMergeTrailersFromBody(body string) []string {
+	return gateMergeTrailerEntries(gateMergeTrailerBlock(body))
+}
+
+// gateMergeTrailerBlock is the trailer block of one commit body: the run of
+// non-empty lines that closes it, or nothing when the body has none.
+func gateMergeTrailerBlock(body string) []string {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	end := len(lines)
+	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	start := end
+	for start > 0 && strings.TrimSpace(lines[start-1]) != "" {
+		start--
+	}
+	return lines[start:end]
+}
+
+// gateMergeTrailerEntries picks the carried entries out of a trailer block,
+// folding each one's indented continuation lines into it so a wrapped
+// "Reproduces:" arrives whole rather than truncated at its first line break.
+func gateMergeTrailerEntries(lines []string) []string {
+	var carried []string
+	var entry []string
+	flush := func() {
+		if len(entry) > 0 {
+			carried = append(carried, strings.Join(entry, "\n"))
+			entry = nil
+		}
+	}
+	for _, line := range lines {
+		if gateMergeStartsTrailerBlock.MatchString(line) {
+			flush()
+			if gateMergeCarriesTrailer(line) {
+				entry = []string{line}
+			}
+			continue
+		}
+		if len(entry) > 0 && gateMergeContinuesTrailer(line) {
+			entry = append(entry, line)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return carried
+}
+
+// gateMergeContinuesTrailer reports whether a line is an indented continuation
+// of the trailer above it, which is the shape git folds into one entry.
+func gateMergeContinuesTrailer(line string) bool {
+	return strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
+}
+
+// gateMergeCommitMessage is the message one source lands under: the caller's
+// message — the review name — with the branch's own declared trailers beneath
+// it. The caller's message stays the subject line and the whole of the body it
+// already carries; a trailer the caller already passed through, or one two
+// commits on the branch both declare, is written once.
+func gateMergeCommitMessage(message string, trailers []string) string {
+	var carried []string
+	seen := make(map[string]bool, len(trailers))
+	for _, trailer := range trailers {
+		if seen[trailer] || strings.Contains(message, trailer) {
+			continue
+		}
+		seen[trailer] = true
+		carried = append(carried, trailer)
+	}
+	if len(carried) == 0 {
+		return message
+	}
+	return strings.TrimRight(message, "\n") + "\n\n" + strings.Join(carried, "\n")
+}
+
 // gateMergeFetchRef is the local ref a gate-merge stages each fetched branch
 // under. A gate-merge cannot consume the remote-tracking name it used to
 // (origin/main): ref names may contain neither ":" nor "//", so no such name
@@ -235,7 +390,8 @@ func traceGateMergePlan(ctx Context, root string, sources []GateMergeSource, tar
 	ctx.TraceCommand(root, "git", "checkout", "-B", target, targetRef)
 	for _, source := range sources {
 		ctx.TraceCommand(root, "git", "merge", "--squash", gateMergeFetchRef(source.Branch))
-		ctx.TraceCommand(root, "git", "commit", "-m", "<message>")
+		ctx.TraceCommand(root, "git", gateMergeTrailerLogArgs(targetRef, gateMergeFetchRef(source.Branch))...)
+		ctx.TraceCommand(root, "git", "commit", "-m", "<message + the branch trailers>")
 	}
 	return fetchArgs
 }
@@ -260,7 +416,7 @@ func fetchAndGateMergeWorkingTree(ctx Context, root string, sources []GateMergeS
 	result.Commit = tip
 
 	for _, source := range sources {
-		landed, skipped, err := gateMergeOneSource(ctx, root, source, remote, deps)
+		landed, skipped, err := gateMergeOneSource(ctx, root, source, remote, targetRef, deps)
 		if err != nil {
 			return GateMergeWorkingTreeResult{}, err
 		}
@@ -299,7 +455,7 @@ func runGitCapturingOutput(root string, deps GateMergeWorkingTreeDependencies, a
 // there is nothing to commit and no reason to fail the batch. Any other git
 // failure (a bad ref, a real I/O error) is fatal for the whole batch, since
 // it says something is wrong beyond this one branch.
-func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
+func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote, targetRef string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
 	sourceRef := gateMergeFetchRef(source.Branch)
 	sourceCommit, err := deps.ResolveRef(ctx, root, sourceRef)
 	if err != nil {
@@ -339,7 +495,11 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 		}, nil
 	}
 
-	if output, err := runGitCapturingOutput(root, deps, "commit", "-m", source.Message); err != nil {
+	trailers, err := gateMergeCarriedTrailers(ctx, root, targetRef, sourceRef, deps)
+	if err != nil {
+		return nil, nil, err
+	}
+	if output, err := runGitCapturingOutput(root, deps, "commit", "-m", gateMergeCommitMessage(source.Message, trailers)); err != nil {
 		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, output)
 	}
 
