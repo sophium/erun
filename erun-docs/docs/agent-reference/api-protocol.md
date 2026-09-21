@@ -43,6 +43,19 @@ ERun resolves the tenant from the token itself, not from the request path. Two d
 
 A single issuer can therefore map to **many** tenants (org-scoped), and multiple distinct issuers can map to the **same** tenant. The resolution key `(iss, org)` is kept unambiguous by a `UNIQUE NULLS NOT DISTINCT (issuer, org_field_value)` constraint. See the [database schema guidance](https://github.com/sophium/erun/blob/main/erun-backend/erun-backend-db/AGENTS.md) for the full table contract.
 
+### Login names under an org-scoped issuer {#org-scoped-login-names}
+
+An org-scoped issuer partitions tenants by `(iss, org)`; the login names inside it are partitioned the same way. The erun-shipped Zitadel enables its Domain Policy's `user_login_must_be_domain` and `validate_org_domains`, so a login name is unique **per organization** rather than per instance: Zitadel suffixes each login name with its own organization's primary domain, and an organization cannot claim a domain it does not control.
+
+| organization | login name supplied | whom the instance holds it as |
+|---|---|---|
+| `frs` | `login-client` | `login-client@frs.auth.erunpaas.com` |
+| `globex` | `login-client` | `login-client@globex.auth.erunpaas.com` |
+
+Two organizations can therefore hold the same bare login name without colliding — a cross-organization collision is structurally impossible, not avoided by naming discipline. The name stays unique **within** one organization: suffixing does not stop two users in the *same* organization wanting the same name, and that collision is reported as `409 USERNAME_TAKEN` rather than as the IdP's own conflict text (see [A taken login name](/agent-reference/identity-administration#username-taken)).
+
+Zitadel reads both settings when core first initialises the instance, so they describe a freshly provisioned platform. An instance that already exists does not have them re-applied, and enabling them there is deliberate operator work rather than a deploy step — it changes the login name every existing account signs in with, which is the intended outcome rather than a regression to roll back.
+
 ### Token verification algorithm
 
 For every authenticated request:
@@ -1143,7 +1156,7 @@ This endpoint requires the caller to already know the enrollee's `issuer`/`subje
 | `400` | `username` is empty, or the body is not valid JSON. | Send a non-empty `username`. |
 | `403` | `tenantId` (or `?tenantId=`) names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to act on your own tenant, or call from an operations-tenant token. |
 | `404` | `POST /v1/users`: a `roleIds` entry does not name a role in the target tenant. | Fix the role id, or create the role first via [`POST /v1/roles`](#roles-endpoints). |
-| `409` `USERNAME_TAKEN` | `POST /v1/users`: a *different* identity already holds that `username` in the target tenant (`users_tenant_username_key`). Re-enrolling the *same* `issuer`/`subject` that already holds a username is never this — see the `200`/`alreadyEnrolled` response above. | Use a different username, or omit `tenantId` if you meant your own tenant. |
+| `409` `USERNAME_TAKEN` | `POST /v1/users`: a *different* identity already holds that `username` in the target tenant (`users_tenant_username_key`). Re-enrolling the *same* `issuer`/`subject` that already holds a username is never this — see the `200`/`alreadyEnrolled` response above. **The code is shared with identity enrollment**, which reports it for a taken *IdP login name* and carries its own message; the two concern different fields, so tell them apart by `message`, not by the code (see [A taken login name](/agent-reference/identity-administration#username-taken)). | Use a different username, or omit `tenantId` if you meant your own tenant. |
 | `409` `UNRESOLVABLE_ISSUER_MAPPING` | `POST /v1/users` with `issuer`/`subject`: the target tenant's mapping for that issuer is one **no token can resolve through** — its org value contradicts the issuer's org-scoping mode, or the tenant has no mapping for that issuer at all. The enrollment would produce a user who can never sign in. The whole transaction rolls back, so no `users` row is left behind. | Repair the tenant's mapping first ([`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers), or check it with [`GET /v1/tenant-issuers`](#get-v1tenant-issuers)); a tenant in this state also reports `resolvable: false` on [`GET /v1/tenants`](#get-v1tenants). |
 | `409` `CONFLICT` | `POST /v1/users`: a uniqueness violation this endpoint does not recognize as either of the above. | Retry is unlikely to help without changing the request; treat as a server-side gap and report it. |
 
@@ -1305,7 +1318,8 @@ The half-landed-failure shape mirrors `POST /v1/identity/users` exactly: a failu
 | `400` | `token`/`username`/`password` empty, the body is not valid JSON, or `email` was supplied and does not match the invite's pinned email (case-insensitive). | Send all three required fields; match the pinned email exactly or omit it. |
 | `404` | `token` does not name any invite that ever existed (or it was revoked — revocation deletes the row). | Ask whoever invited you for a new link. |
 | `410` | The invite exists but has expired, or has already been consumed (single-use). | Ask whoever invited you for a new link. |
-| Forwarded from Zitadel | The IdP identity creation itself failed (e.g. the password does not meet the org's complexity policy). | The response body carries Zitadel's own message; act on it directly. |
+| `409` `USERNAME_TAKEN` | The chosen login name is already held by another user **in the invite's organization** — see [A taken login name](/agent-reference/identity-administration#username-taken). | Pick a different login name. This token is spent by the time the identity is created, so the same link cannot be reused — ask whoever invited you for a new one. |
+| Forwarded from Zitadel | The IdP identity creation itself failed for another reason (e.g. the password does not meet the org's complexity policy). | The response body carries Zitadel's own message; act on it directly. |
 
 **Not audited.** Unlike `POST`/`GET`/`DELETE /v1/invites` above (which run through the authenticated middleware that writes `audit_events` for every protected request), this endpoint is registered outside that middleware — the same as [`GET /v1/platform`](#platform-endpoint) — because there is no authenticated caller identity to attribute the row to. The invite's own `created_by_user_id` plus its `consumed_at` timestamp is today's record of who accepted it and when; a dedicated audit event for acceptance is a reasonable follow-up, not yet implemented.
 

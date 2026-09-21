@@ -200,7 +200,19 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// console/desktop surface; remove AgentFacing once it exists.
 	"gate_list": {Family: "gate", CLIPath: []string{"gate", "list"}, Title: "List gate runs: what is gating now, and what recent gates decided", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	"gate_show": {Family: "gate", CLIPath: []string{"gate", "show"}, Title: "Show one gate run in full", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
-	"idle":      {Family: "idle", CLIPath: []string{"idle"}, Title: "Report an environment's idle and auto-stop state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	// The jobs_* tools are the platform-backed queue: what agents and
+	// orchestrators are working on right now, and what recently finished.
+	// jobs_list/jobs_show are human-facing reads with a real operator surface
+	// (erun-console's Jobs section), so they are not AgentFacing.
+	// jobs_start/jobs_finish are the self-report writes an actor makes about
+	// its own work -- an operator watches the queue, never edits someone
+	// else's row -- which is the same AgentFacing exemption the
+	// exec_gate-run_start/exec_gate-run_report pair carries.
+	"jobs_list":   {Family: "jobs", CLIPath: []string{"jobs", "list"}, Title: "List jobs: what is being worked on now, and what recently finished", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"jobs_show":   {Family: "jobs", CLIPath: []string{"jobs", "show"}, Title: "Show one job in full", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"jobs_start":  {Family: "jobs", CLIPath: []string{"jobs", "start"}, Title: "Record that this actor is starting a piece of work", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"jobs_finish": {Family: "jobs", CLIPath: []string{"jobs", "finish"}, Title: "Report a job's progress or its outcome", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
+	"idle":        {Family: "idle", CLIPath: []string{"idle"}, Title: "Report an environment's idle and auto-stop state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	// The idle_stop_* primitives record and query the auto-stop supervisor's
 	// own decisions; a human reads that history through the already-covered
 	// `idle` report, never by calling these directly.

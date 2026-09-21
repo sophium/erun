@@ -1,0 +1,2 @@
+audit: erun jobs start --actor erun/code2 --summary work --type bogus
+unsupported job type "bogus": expected one of fix, review, gate, release, deploy, investigate, plan, triage, maintenance

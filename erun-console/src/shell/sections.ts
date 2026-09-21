@@ -1,5 +1,6 @@
 import type { TenantConfigView } from 'erun-kit';
 import {
+  Activity,
   Building2,
   Cloud,
   Inbox,
@@ -26,6 +27,7 @@ export type ConsoleSectionId =
   | 'invites'
   | 'requests'
   | 'gate-runs'
+  | 'jobs'
   | 'tenants'
   | 'users'
   | 'org-settings'
@@ -58,6 +60,12 @@ const BASE_SECTIONS: ConsoleSection[] = [
   // what is being gated right now, and what recent gates decided (GET
   // /v1/gate-runs is TenantUserClass -- no tenant type restricts it).
   { id: 'gate-runs', label: 'Gate runs', icon: ListChecks },
+  // Jobs is every tenant's own view of what is being worked on right now
+  // (GET /v1/jobs is TenantUserClass -- no tenant type restricts it). It
+  // reads only the caller's own tenant, which is why it is deliberately not
+  // in SCOPE_AWARE_SECTIONS below: the scope selector would otherwise claim
+  // a reach this panel does not have.
+  { id: 'jobs', label: 'Jobs', icon: Activity },
 ];
 
 const OPERATIONS_SECTIONS: ConsoleSection[] = [

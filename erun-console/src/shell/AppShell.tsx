@@ -14,6 +14,7 @@ import { InvitesPanel } from '../identity/InvitesPanel';
 import { OrgSettingsPanel } from '../identity/OrgSettingsPanel';
 import { SmtpSettingsPanel } from '../identity/SmtpSettingsPanel';
 import { UsersPanel } from '../identity/UsersPanel';
+import { JobsPanel } from '../jobs/JobsPanel';
 import { MCPAccessPanel } from '../mcp/MCPAccessPanel';
 import { ProvisionPanel } from '../provision/ProvisionPanel';
 import { QuotaPanel } from '../quota/QuotaPanel';
@@ -133,6 +134,8 @@ function SectionContent({
       );
     case 'gate-runs':
       return <GateRunsPanel token={token} />;
+    case 'jobs':
+      return <JobsPanel token={token} />;
     default:
       return (
         <OperationsSectionContent

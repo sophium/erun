@@ -637,6 +637,22 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Show one gate run in full on the erun platform. Supports preview.",
 	}, gateShowTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "jobs_list",
+		Description: "List jobs on the erun platform, the live queue first — what agents and orchestrators are working on right now, and what recently finished. Each entry names what is being done, by whom, and how long it has been going. A RUNNING job is work in flight; ABANDONED means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. Supports preview.",
+	}, jobsListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "jobs_show",
+		Description: "Show one job in full on the erun platform. Supports preview.",
+	}, jobsShowTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "jobs_start",
+		Description: "Record that this actor is starting a piece of work, so the queue shows what is in flight before it finishes and a second actor can see it. With scope set this is a claim: a 409 means another open job already holds that scope, and the refusal names who holds it, what they are doing in prose, and since when — pick up something else rather than duplicating the work. The summary is prose describing the work, never the command that performs it. A real, immediate write, not a preview, unless preview is set.",
+	}, jobsStartTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "jobs_finish",
+		Description: "Report how a job ended, or refresh what it is doing, on the erun platform. A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read. A real, immediate write, not a preview, unless preview is set.",
+	}, jobsFinishTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "review_queue_advance",
 		Description: "Advance a target branch's merge queue head to MERGE on the erun platform, which starts that review's merge-gate build. Refuses with the unresolved comment thread count when the queue head still has open threads — resolve them (review_resolve) or use review_queue_override_advance. A real, immediate mutation of shared control-plane state, not a preview, unless preview is set.",
 	}, reviewMergeQueueAdvanceTool(runtime))
