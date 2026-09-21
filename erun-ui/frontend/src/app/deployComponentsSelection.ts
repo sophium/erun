@@ -1,5 +1,17 @@
 import type { UIDeployableComponent } from '@/types';
 
+import type { AppState } from './state';
+
+type ManageDialog = AppState['manageDialog'];
+
+// The empty-selection notice, rendered under the version row when the picker is
+// closed, and again inside the picker panel -- the panel is a modal popover that
+// covers the row beneath it, so the operator unchecking the last box would
+// otherwise see the reason only after closing it.
+export const DEPLOY_COMPONENTS_EMPTY_NOTICE_ID = 'environment-config-deploy-components-empty-notice';
+export const DEPLOY_COMPONENTS_EMPTY_PANEL_NOTICE_ID =
+  'environment-config-deploy-components-empty-notice-panel';
+
 // normalizeDeployComponents defends against the Wails binding handing back null
 // for an empty slice.
 export function normalizeDeployComponents(
@@ -49,6 +61,31 @@ export function deployComponentSelectionChanged(
   }
   const selected = new Set(selection);
   return baseline.some((name) => !selected.has(name));
+}
+
+// deployComponentsEmptySelection reports that the checklist is on screen with
+// every box unchecked -- an explicit statement the operator made, not silence.
+//
+// It blocks Deploy, because the resolution cannot tell the two apart: the desktop
+// threads the selection to the CLI as `--components` only when it is non-empty,
+// so an empty one reaches `erun deploy` looking exactly like an omitted flag and
+// falls through the precedence tiers to the runtime chart alone (bootstrap/heal).
+// Left enabled, Deploy would roll out the one chart the operator just declined,
+// under a checklist promising exactly the checked charts.
+//
+// Scoped to a loaded, non-empty, version-scoped checklist deliberately. Before the
+// probe answers, or when the registry offers nothing to check, an empty selection
+// is emptiness of information rather than a choice: blocking on it would disable
+// Deploy for a reason the operator never made, and would strand the health check's
+// "runtime not deployed" recovery, which deploys the runtime on purpose.
+export function deployComponentsEmptySelection(dialog: ManageDialog): boolean {
+  if (dialog.deployComponentsLoading || dialog.version.trim() === '') {
+    return false;
+  }
+  if (dialog.deployComponents.length === 0) {
+    return false;
+  }
+  return dialog.deployComponentSelection.length === 0;
 }
 
 // The one runtime chart every published-chart env installs, regardless of
