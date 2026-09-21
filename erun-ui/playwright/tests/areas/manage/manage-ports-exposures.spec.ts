@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import { expectFramesAllDistinct, holdResponse } from '../../../fixtures/visualFrames.js';
@@ -106,7 +107,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(docsLink).toBeVisible();
 
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-not-applicable.png',
+      path: artifactPath('test-results/1351-visual/ports-not-applicable.png'),
     });
 
     const [popup] = await Promise.all([app.page.waitForEvent('popup'), docsLink.click()]);
@@ -157,7 +158,9 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(dialog.getByText('You may not have access to see this')).toBeVisible();
     await expect(dialog.getByText('Nothing exposed yet')).toHaveCount(0);
 
-    await dialog.screenshot({ path: 'test-results/1351-visual/ports-restricted.png' });
+    await dialog.screenshot({
+      path: artifactPath('test-results/1351-visual/ports-restricted.png'),
+    });
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -184,7 +187,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     const retry = dialog.getByRole('button', { name: 'Try again' });
     await expect(retry).toBeVisible();
 
-    await dialog.screenshot({ path: 'test-results/1351-visual/ports-failed.png' });
+    await dialog.screenshot({ path: artifactPath('test-results/1351-visual/ports-failed.png') });
 
     await retry.click();
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
@@ -264,7 +267,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     ).toBeVisible();
 
     await dialog.screenshot({
-      path: 'test-results/1918-visual/ports-cert-pending.png',
+      path: artifactPath('test-results/1918-visual/ports-cert-pending.png'),
     });
 
     const refresh = dialog.getByRole('button', { name: 'Refresh public addresses' });
@@ -310,7 +313,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-empty-configured.png',
+      path: artifactPath('test-results/1351-visual/ports-empty-configured.png'),
     });
 
     await dialog.locator('#expose-service-name').fill('api');
@@ -320,7 +323,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await expect(dialog.getByRole('button', { name: 'Exposing...' })).toBeVisible();
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-create-inflight.png',
+      path: artifactPath('test-results/1351-visual/ports-create-inflight.png'),
     });
     // Only now let the stubbed call settle: the frame above is the evidence
     // that the pending state renders, so it must be on disk before the
@@ -331,14 +334,14 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     expect(exposeCalls).toBe(1);
     expect(listCalls).toBe(2);
 
-    await dialog.screenshot({ path: 'test-results/1351-visual/ports-populated.png' });
+    await dialog.screenshot({ path: artifactPath('test-results/1351-visual/ports-populated.png') });
     // Every frame this test wrote must be a distinct file: a capture that
     // settles early collapses into its settled sibling, and the bundle then
     // documents a state the run never saw.
     await expectFramesAllDistinct([
-      'test-results/1351-visual/ports-empty-configured.png',
-      'test-results/1351-visual/ports-create-inflight.png',
-      'test-results/1351-visual/ports-populated.png',
+      artifactPath('test-results/1351-visual/ports-empty-configured.png'),
+      artifactPath('test-results/1351-visual/ports-create-inflight.png'),
+      artifactPath('test-results/1351-visual/ports-populated.png'),
     ]);
 
     const clipboardWrite = page.waitForRequest(
@@ -482,7 +485,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await confirm.scrollIntoViewIfNeeded();
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-remove-confirm.png',
+      path: artifactPath('test-results/1351-visual/ports-remove-confirm.png'),
     });
 
     // The negative names its effect rather than reusing the generic word: the
@@ -510,12 +513,12 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await confirm.click();
     await expect(dialog.getByRole('button', { name: 'Removing...' })).toBeVisible();
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-remove-inflight.png',
+      path: artifactPath('test-results/1351-visual/ports-remove-inflight.png'),
     });
     unexposeGate.release();
     await expectFramesAllDistinct([
-      'test-results/1351-visual/ports-remove-confirm.png',
-      'test-results/1351-visual/ports-remove-inflight.png',
+      artifactPath('test-results/1351-visual/ports-remove-confirm.png'),
+      artifactPath('test-results/1351-visual/ports-remove-inflight.png'),
     ]);
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();

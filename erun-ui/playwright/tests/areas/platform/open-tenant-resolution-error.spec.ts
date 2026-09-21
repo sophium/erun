@@ -1,3 +1,4 @@
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 
 // erun-common's resolveOpenTenant used to fail with a bare "tenant is
@@ -41,7 +42,7 @@ test.describe('open tenant-resolution error — actionable, no fake Copy action'
     await expect(page.getByRole('button', { name: 'Copy output' })).toBeHidden();
 
     await page.screenshot({
-      path: 'test-results/open-tenant-resolution-error-titlebar.png',
+      path: artifactPath('test-results/open-tenant-resolution-error-titlebar.png'),
     });
   });
 });
