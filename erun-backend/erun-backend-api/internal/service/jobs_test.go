@@ -146,7 +146,7 @@ func TestJobServiceClaimDefaultsToRunningAndStampsStartTime(t *testing.T) {
 // TestJobServiceClaimRefusesASecondHolderOfTheSameScope is the coordination
 // primitive. The refusal must name the holder, its prose summary, and when it
 // started -- that payload is the entire reason this is better than the local
-// activity lease's anonymous refusal (#2119).
+// activity lease's anonymous refusal.
 func TestJobServiceClaimRefusesASecondHolderOfTheSameScope(t *testing.T) {
 	svc := NewJobService(newFakeJobRepo())
 	ctx := context.Background()
@@ -185,7 +185,7 @@ func TestJobServiceClaimRefusesASecondHolderOfTheSameScope(t *testing.T) {
 // TestJobServiceClaimAllowsASecondClaimOnceTheHolderFinishes: the scope is
 // released by finishing the job, not by waiting. Without this, the first
 // abandoned-looking job would wedge an issue forever -- the permanently
-// orphaned running record #2144 describes.
+// orphaned running record nothing ever clears.
 func TestJobServiceClaimAllowsASecondClaimOnceTheHolderFinishes(t *testing.T) {
 	svc := NewJobService(newFakeJobRepo())
 	ctx := context.Background()
@@ -502,7 +502,7 @@ func TestJobServiceUpdateOfRunningToRunningIsANoOp(t *testing.T) {
 }
 
 // TestJobServiceSweepAbandonsAStaleRunningJob: an actor that disappears
-// without closing its job is the orphaned running record #2144 describes.
+// without closing its job is the orphaned running record nothing clears.
 // The sweep is what clears it -- and it records the transition rather than
 // deleting the row, so the queue still shows what was claimed and dropped.
 func TestJobServiceSweepAbandonsAStaleRunningJob(t *testing.T) {

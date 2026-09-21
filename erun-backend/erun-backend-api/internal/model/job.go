@@ -63,7 +63,7 @@ type Job struct {
 	// host-side orchestrator work that never enters an environment.
 	EnvironmentID string  `json:"environmentId,omitempty" bun:"environment_id,nullzero"`
 	JobType       JobType `json:"jobType" bun:"job_type"`
-	// IssueRef is the issue this work belongs to ("sophium/erun#2109");
+	// IssueRef is the issue this work belongs to, in owner/repo#number form;
 	// empty when the work is not issue-driven.
 	IssueRef string `json:"issueRef,omitempty" bun:"issue_ref,nullzero"`
 	// Summary is prose describing what is being done, never a command line —

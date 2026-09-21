@@ -70,9 +70,10 @@ func (stubJobEnvironments) Get(_ context.Context, environmentID string) (model.E
 	return model.Environment{EnvironmentID: environmentID}, nil
 }
 
-// TestListJobsReturnsAnEmptyArrayNotNull pins the client contract #2128
-// records: a tenant with no jobs ranges over an empty list, and a null body
-// would force every caller to null-check a collection the platform always has.
+// TestListJobsReturnsAnEmptyArrayNotNull pins the client contract an empty
+// queue has to hold: a tenant with no jobs ranges over an empty list, and a
+// null body would force every caller to null-check a collection the platform
+// always has.
 func TestListJobsReturnsAnEmptyArrayNotNull(t *testing.T) {
 	routes := JobRoutes{jobs: &stubJobRepository{jobs: []model.Job{}}}
 	rec := httptest.NewRecorder()
@@ -116,8 +117,8 @@ func TestListJobsPassesEveryDocumentedFilter(t *testing.T) {
 // TestClaimJobNamesTheHolderOnAConflict is the coordination primitive's whole
 // payload: a second actor asking for a held scope must be told *who* holds it,
 // what they are doing in prose, and since when. A bare 409 teaches a caller
-// nothing it can act on, and #2119 records exactly that defect on the local
-// activity lease -- an anonymous refusal.
+// nothing it can act on -- the defect the local activity lease has, where a
+// refusal is anonymous.
 func TestClaimJobNamesTheHolderOnAConflict(t *testing.T) {
 	started := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	svc := &stubJobService{err: &service.JobScopeHeldError{

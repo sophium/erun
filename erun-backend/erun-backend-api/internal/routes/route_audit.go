@@ -48,6 +48,16 @@ var InternalAPIRoutes = map[string]bool{
 	// matching GET has a real operator surface (erun-console's environments
 	// panel), so it is not listed here.
 	"POST /v1/environments/{environment_id}/ai-sessions": true,
+	// The environment-scoped jobs read is what a caller that knows only its
+	// own environment id asks -- an in-pod agent or orchestrator checking
+	// what else is running alongside it before claiming more work. It is not
+	// a second operator view of the queue: the tenant-wide GET /v1/jobs
+	// returns exactly these rows and narrows to one environment with its own
+	// environmentId filter, which is what the console's Jobs section renders.
+	// The nested route earns its place by being reachable from the side that
+	// has no tenant-scoped job ids to filter by, not by giving an operator a
+	// capability the flat route does not already have.
+	"GET /v1/environments/{environment_id}/jobs": true,
 	// A one-time, operations-only repair action for a platform whose own
 	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
 	// its ERUN_TENANT was read at bootstrap (see erun-backend-api/AGENTS.md's
