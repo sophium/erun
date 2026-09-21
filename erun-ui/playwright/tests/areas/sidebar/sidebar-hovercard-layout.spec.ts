@@ -239,11 +239,7 @@ test.describe('sidebar env hover card layout (#1901)', () => {
       let plainZone2Rows: string[] = [];
       await app.sidebar.readEnvHoverCard(SEED_TENANT, plainEnvironment, async (card) => {
         await expect(card).toBeVisible({ timeout: 1_000 });
-        plainZone2Rows = await card
-          .locator('dl')
-          .nth(1)
-          .locator('dt')
-          .allTextContents();
+        plainZone2Rows = await card.locator('dl').nth(1).locator('dt').allTextContents();
       });
 
       await waitForSeededRow(app, SEED_TENANT, environment);
@@ -259,11 +255,7 @@ test.describe('sidebar env hover card layout (#1901)', () => {
         await expect(card.locator('dl').nth(0)).toContainText('Line mismatch', {
           timeout: 1_000,
         });
-        mismatchZone2Rows = await card
-          .locator('dl')
-          .nth(1)
-          .locator('dt')
-          .allTextContents();
+        mismatchZone2Rows = await card.locator('dl').nth(1).locator('dt').allTextContents();
       });
 
       expect(mismatchZone2Rows).toEqual(plainZone2Rows);
