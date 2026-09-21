@@ -30,10 +30,17 @@ func TestInPodRuntimeOnlySelectionRefusesRatherThanRollingOneChartSilently(t *te
 		t.Fatal("in-pod runtime-only fallback was not refused; it would roll one chart and exit 0")
 	}
 	message := err.Error()
-	for _, want := range []string{"frs/prod", "frs-devops", "deploy.components", "--components", "from the host CLI", "1.0.104"} {
+	for _, want := range []string{"frs/prod", "frs-devops", "deploy.components", "from the host CLI", "1.0.104"} {
 		if !strings.Contains(message, want) {
 			t.Errorf("refusal does not name %q:\n%s", want, message)
 		}
+	}
+	// The runtime chart cannot be rolled from this pod by any route: naming it
+	// with --components reaches the in-pod runtime-chart guard one layer on
+	// (guardInPodRuntimeDeploy), so offering that here would name a command this
+	// same deploy refuses.
+	if strings.Contains(message, "--components") {
+		t.Errorf("refusal offers an in-pod --components route that the runtime-chart guard refuses:\n%s", message)
 	}
 }
 
@@ -106,11 +113,11 @@ func TestResolveGuardedDeploySelectionRefusesTheBlindRuntimeOnlyFallbackInPod(t 
 	}
 }
 
-// The guard is scoped to runtime environments, whose pod projects an
-// environment the host owns. A local-agent env has its own in-pod guard
-// (environment shape, not selection), and a remote-agent env owns its worktree
-// inside the pod and keeps deploying itself — asserting both stay allowed is
-// the "the set that is rolled is unchanged" direction for the env-type axis.
+// The guard is scoped to runtime environments, so the empty-selection fallback
+// gets this diagnosis only where the runtime chart is the whole environment.
+// The other types reach the same fallback and are refused for it by the in-pod
+// runtime-chart guard one layer on, not here — this narrowing decides which
+// refusal speaks, not what is permitted.
 func TestInPodRuntimeOnlySelectionIsScopedToRuntimeEnvironments(t *testing.T) {
 	for _, tc := range []struct {
 		envType EnvironmentType
