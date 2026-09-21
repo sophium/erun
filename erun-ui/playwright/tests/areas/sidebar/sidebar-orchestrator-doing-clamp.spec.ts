@@ -5,14 +5,17 @@ import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
 // The orchestrator card's "Doing" row rendered the background shell's raw
 // command verbatim, with no clamp of any kind. The command is machine-authored
-// and unbounded -- the real one is ~170 characters -- so it wrapped over
-// roughly ten lines and pushed the Environments list, the card's most valuable
-// content, out of sight. The card's own environment rows had already been
-// given truncation for exactly this reason; this field was missed.
+// and unbounded -- the reported one is about 170 characters -- so it wrapped
+// that row over roughly ten lines and pushed the Environments list, the card's
+// actual subject, out of sight. The card's own environment rows had already
+// been given truncation for exactly this reason; this field was missed, so the
+// two cards also disagreed on what a long value does.
 //
-// Against origin/main the assertions below fail: the command element carries
-// no `title` at all, and its rendered height is set by however many lines the
-// command happens to wrap to.
+// The first test is the reproduction: it locates the element rendering the
+// command in a way that resolves on both the fixed and the unfixed card, and
+// measures how many lines it actually occupies. Against the unfixed card it
+// occupies however many lines the command wraps to -- the defect -- and the
+// assertion fails on that number rather than on a missing locator.
 //
 // What the fix must NOT do is truncate the value itself: the string stays in
 // the DOM in full and is recoverable from `title`, because clipping is a
@@ -30,7 +33,10 @@ const LONG_SHELL_COMMAND =
 
 // 10m45s before the card renders, matching the reported reading.
 const SHELL_STARTED_AT_UNIX = Math.floor(Date.now() / 1000) - 645;
-const SHELL_PREFIX = 'Shell running for 10m45s:';
+// A pattern, not the literal "10m45s" the issue quotes: the elapsed reading is
+// taken when the card renders, which is seconds after this module evaluates,
+// so the literal is already stale by the time it is asserted against.
+const SHELL_PREFIX_PATTERN = /^Shell running for \d+m\d+s:$/;
 
 function snapshot(overrides: Record<string, unknown>) {
   return {
@@ -66,8 +72,8 @@ async function stubOrchestratorList(page: Page, body: unknown): Promise<void> {
 }
 
 // Radix's PopoverContent runs an entrance transform on every open, so a
-// bounding-box or height read taken right after `toBeVisible` can land
-// mid-transition. Mirrors sidebar-hovercard-layout.spec.ts.
+// height read taken right after `toBeVisible` can land mid-transition.
+// Mirrors sidebar-hovercard-layout.spec.ts.
 async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
   await page.addStyleTag({
     content:
@@ -75,31 +81,42 @@ async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
   });
 }
 
+function doingRow(card: Locator): Locator {
+  return card.locator('dd').filter({ hasText: 'Shell running' });
+}
+
+// The element that renders the command itself, resolved without assuming the
+// fix: on both the fixed and the unfixed card it is the innermost span whose
+// text contains the command.
+function commandElement(card: Locator): Locator {
+  return doingRow(card)
+    .locator('span')
+    .filter({ hasText: LONG_SHELL_COMMAND })
+    .last();
+}
+
 interface DoingGeometry {
-  // Lines the command element actually occupies, measured against the
-  // one-line prefix beside it rather than a parsed line-height -- the two
-  // share a font treatment, so the prefix is the honest unit for this read.
+  // Lines the command element actually occupies. Measured against the row's
+  // own one-line label rather than a parsed line-height: the label is present
+  // on both cards, and every element here inherits the same line-height, so
+  // it is the honest unit for this read.
   commandLines: number;
   // Height the command's content wants minus the height it is given. Positive
-  // means the clamp genuinely engaged rather than the string simply fitting.
+  // means a clamp genuinely engaged, rather than a command that happened to fit.
   commandOverflow: number;
-  // The whole Doing row, which is what the defect stretched.
+  // The Doing row as a whole, which is what the defect stretched.
   rowLines: number;
   title: string | null;
   text: string;
 }
 
-// Everything read in one evaluate so no re-render can interleave the
-// measurements (the card's open state belongs to the hovered row's own React
-// state -- see erun-ui/playwright/AGENTS.md's hover-card bullet).
-async function doingGeometry(
-  row: Locator,
-  prefix: Locator,
-  command: Locator,
-): Promise<DoingGeometry> {
-  const [prefixBox, rowBox, report] = await Promise.all([
-    prefix.evaluate((el) => ({ height: el.clientHeight })),
-    row.evaluate((el) => ({ height: el.clientHeight })),
+// One evaluate per element, so no re-render can interleave measurements (the
+// card's open state belongs to the hovered row's own React state -- see
+// erun-ui/playwright/AGENTS.md's hover-card bullet).
+async function doingGeometry(card: Locator, command: Locator): Promise<DoingGeometry> {
+  const [unit, rowHeight, report] = await Promise.all([
+    card.getByText('Doing', { exact: true }).evaluate((el) => el.clientHeight),
+    doingRow(card).evaluate((el) => el.clientHeight),
     command.evaluate((el) => ({
       clientHeight: el.clientHeight,
       scrollHeight: el.scrollHeight,
@@ -108,16 +125,12 @@ async function doingGeometry(
     })),
   ]);
   return {
-    commandLines: Math.round(report.clientHeight / prefixBox.height),
+    commandLines: report.clientHeight / unit,
     commandOverflow: report.scrollHeight - report.clientHeight,
-    rowLines: Math.round(rowBox.height / prefixBox.height),
+    rowLines: rowHeight / unit,
     title: report.title,
     text: report.text,
   };
-}
-
-function doingRow(card: Locator): Locator {
-  return card.locator('dd').filter({ hasText: 'Shell running' });
 }
 
 test.describe('orchestrator hover card held-length Doing field', () => {
@@ -131,52 +144,72 @@ test.describe('orchestrator hover card held-length Doing field', () => {
 
     await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
       await expect(card).toBeVisible();
-      const row = doingRow(card);
-      // The readable half leads, in the value treatment, on its own line.
-      const prefix = row.getByText(SHELL_PREFIX, { exact: true });
-      await expect(prefix).toBeVisible();
-
-      // The element carrying the full command in `title` is the clamped one.
-      // On origin/main nothing carries a title, so this fails there.
-      const command = row.getByTitle(LONG_SHELL_COMMAND);
+      const command = commandElement(card);
       await expect(command).toBeVisible();
 
-      const geometry = await doingGeometry(row, prefix, command);
-      // Nothing dropped: the whole command is still rendered...
+      const geometry = await doingGeometry(card, command);
+      // The reproduction: the command is held to the two-line budget. On the
+      // unfixed card this reads ~5, the number of lines it actually wraps to.
+      expect(geometry.commandLines).toBeLessThanOrEqual(2);
+      // And the clamp genuinely engaged: the content is longer than the box,
+      // so this is a real hold-back and not a command that happened to fit.
+      expect(geometry.commandOverflow).toBeGreaterThan(0);
+      // Nothing dropped: the command is still rendered in full...
       expect(geometry.text).toBe(LONG_SHELL_COMMAND);
       // ...and still recoverable in full, which is what makes clipping honest.
       expect(geometry.title).toBe(LONG_SHELL_COMMAND);
-      // ...held to the two-line budget...
-      expect(geometry.commandLines).toBeLessThanOrEqual(2);
-      // ...with the clamp genuinely engaged: the content is longer than the
-      // box, so this is a real hold-back, not a command that happened to fit.
-      expect(geometry.commandOverflow).toBeGreaterThan(0);
-      // And the row as a whole is bounded -- unclamped this row alone ran to
-      // about ten lines, so four (prefix, gap, two command lines) is a
-      // ceiling the defect clears by an order of magnitude.
+      // The row as a whole is bounded too -- unclamped it ran to about ten
+      // lines, so four (prefix, gap, two command lines) is a ceiling the
+      // defect clears by an order of magnitude.
       expect(geometry.rowLines).toBeLessThanOrEqual(4);
     });
   });
 
-  test('a short command is not padded out to the clamp budget', async ({ app, page }) => {
-    // The clamp is an upper bound, not a fixed height: the common case of a
-    // one-line command must still render on one line, and it is still
-    // recoverable from `title` for consistency with the long case.
-    await stubOrchestratorList(page, snapshot({ shellCommand: 'yarn build' }));
+  test('the readable half leads in the value treatment, with the command as a muted caption', async ({
+    app,
+    page,
+  }) => {
+    await stubOrchestratorList(page, snapshot({}));
     await app.reboot();
     await disablePopoverEntranceAnimation(page);
 
     await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
       await expect(card).toBeVisible();
       const row = doingRow(card);
-      const prefix = row.getByText(SHELL_PREFIX, { exact: true });
+      // The duration is the useful part and stands on its own, so it must not
+      // be carried inside the clamped command element.
+      const prefix = row.getByText(SHELL_PREFIX_PATTERN);
       await expect(prefix).toBeVisible();
-      const command = row.getByTitle('yarn build');
+      const command = commandElement(card);
+      await expect(command).toBeVisible();
+      await expect(command).toHaveText(LONG_SHELL_COMMAND);
+      await expect(prefix).not.toHaveText(LONG_SHELL_COMMAND);
+      // The command recedes rather than leading: the two elements resolve to
+      // different rendered colours, so the readable half keeps the card's
+      // value treatment while the command drops to the muted one.
+      const [prefixColor, commandColor] = await Promise.all([
+        prefix.evaluate((el) => getComputedStyle(el).color),
+        command.evaluate((el) => getComputedStyle(el).color),
+      ]);
+      expect(commandColor).not.toBe(prefixColor);
+    });
+  });
+
+  test('a short command is not padded out to the clamp budget', async ({ app, page }) => {
+    // The clamp is an upper bound, not a fixed height: the common case of a
+    // one-line command must still render on one line.
+    await stubOrchestratorList(page, snapshot({ shellCommand: 'yarn build' }));
+    await app.reboot();
+    await disablePopoverEntranceAnimation(page);
+
+    await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+      await expect(card).toBeVisible();
+      const command = doingRow(card).getByTitle('yarn build');
       await expect(command).toBeVisible();
 
-      const geometry = await doingGeometry(row, prefix, command);
+      const geometry = await doingGeometry(card, command);
       expect(geometry.text).toBe('yarn build');
-      expect(geometry.commandLines).toBe(1);
+      expect(geometry.commandLines).toBeLessThanOrEqual(1.05);
       expect(geometry.commandOverflow).toBeLessThanOrEqual(1);
     });
   });

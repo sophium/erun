@@ -98,7 +98,14 @@ export const HOVER_CARD_TRUNCATE_CLASS = 'block truncate break-normal';
 // height. Same rule as HOVER_CARD_TRUNCATE_CLASS: clip the rendering, never
 // the stored or passed value, and never drop the remainder without a way back
 // to it.
-export const HOVER_CARD_CLAMP_2_CLASS = 'block line-clamp-2 break-normal';
+//
+// Deliberately carries no `block`, unlike HOVER_CARD_TRUNCATE_CLASS: a clamp
+// works by `display: -webkit-box`, and Tailwind emits `.block` after
+// `.line-clamp-*` in the compiled stylesheet, so pairing the two silently
+// reinstates `display: block` and the value renders at full length with the
+// class still visibly present. `line-clamp-*`'s own display is block-level,
+// so nothing is needed here -- but do not add one back.
+export const HOVER_CARD_CLAMP_2_CLASS = 'line-clamp-2 break-normal';
 export const HOVER_CARD_CAPTION_SIZE_CLASS = 'text-[10px]';
 export const HOVER_CARD_CAPTION_CLASS = `${HOVER_CARD_CAPTION_SIZE_CLASS} text-muted-foreground`;
 // HOVER_CARD_CAPTION_DEGRADED_CLASS is the caption-sized form of the degraded
