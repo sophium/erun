@@ -1,5 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
 import {
   SEED_TENANT,
@@ -89,7 +90,7 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
       );
       await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-not-connected-default.png',
+        path: artifactPath('test-results/tenant-dashboard-not-connected-default.png'),
       });
     } finally {
       removeEnvironment(SEED_TENANT, environment);

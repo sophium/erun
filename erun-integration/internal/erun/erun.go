@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
 // CoverDirEnv names where instrumented binaries write coverage counters; the
@@ -123,7 +125,7 @@ func buildBinary() (string, error) {
 		"-o", exe,
 		".",
 	}
-	cmd := exec.Command("go", args...)
+	cmd := harnessexec.Command("go", args...)
 	cmd.Dir = filepath.Join(repoRoot, "erun-cli")
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	var buf bytes.Buffer
@@ -242,22 +244,18 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 		timeout = 120 * time.Second
 	}
 
-	// The context exists so that WaitDelay can be armed at all. WaitDelay is
-	// documented to bound a wait "after the command has exited or (if the
-	// command does not exit) after the context is cancelled", and the second
-	// clause is the only one this harness can rely on: os/exec starts the
-	// goroutine that enforces WaitDelay solely when the Cmd has a non-nil
-	// context whose Done channel is non-nil, so a Cmd built without one accepts
-	// a WaitDelay value and never acts on it. A child that does not exit -- a
-	// command wedged past the timeout under the gate's CPU contention -- is
-	// never reaped, so Process.Wait never returns, the post-exit path that also
+	// The context is what covers the one state the harness's drain bound
+	// cannot. harnessexec arms Cmd.WaitDelay on every child it builds, which
+	// bounds a wait on a child that has *exited*; a child that does not exit --
+	// a command wedged past the timeout under the gate's CPU contention -- is
+	// never reaped, so Process.Wait never returns, the post-exit path that
 	// consults WaitDelay is never reached, and Wait blocks forever however
-	// large the delay is. Cancelling this context is what turns a timeout into
-	// a bounded run.
+	// large the delay is. Cancelling this context is what turns that timeout
+	// into a bounded run, and supervise does it below.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := harnessexec.CommandContext(ctx, bin, args...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

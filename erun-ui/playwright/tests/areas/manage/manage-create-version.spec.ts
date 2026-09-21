@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 
 // The picker offers deterministic versions so the screenshot can show the
@@ -47,13 +48,13 @@ test.describe('manage dialog — deploy vs create new version (#739)', () => {
     // env types), then after picking a version so the version + component
     // one-panel is populated. Freeze animations so the popover is fully faded-in.
     await page.screenshot({
-      path: 'test-results/runtime-tab-local-agent.png',
+      path: artifactPath('test-results/runtime-tab-local-agent.png'),
       animations: 'disabled',
     });
     await app.manageDialog.openVersionPicker();
     await expect(app.manageDialog.deployComponentsHint()).toBeVisible();
     await page.screenshot({
-      path: 'test-results/runtime-tab-version-picker-gated.png',
+      path: artifactPath('test-results/runtime-tab-version-picker-gated.png'),
       animations: 'disabled',
     });
     await app.manageDialog.pickVersion('1.0.0');
@@ -62,7 +63,7 @@ test.describe('manage dialog — deploy vs create new version (#739)', () => {
       app.manageDialog.deployComponentCheckbox(`${seededEnv.tenant}-devops`),
     ).toBeVisible();
     await page.screenshot({
-      path: 'test-results/runtime-tab-version-picker.png',
+      path: artifactPath('test-results/runtime-tab-version-picker.png'),
       animations: 'disabled',
     });
 

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -21,13 +20,8 @@ import (
 
 	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-integration/internal/env"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
-
-func osExecCommand(name string, args []string, dir string) *osexec.Cmd {
-	cmd := osexec.Command(name, args...)
-	cmd.Dir = dir
-	return cmd
-}
 
 // SeedTenantEnv writes the minimum erun config tree so commands resolve a
 // tenant/environment without prompting.
@@ -1417,7 +1411,7 @@ func stubRunnerExe(t testing.TB) string {
 			return
 		}
 		out := filepath.Join(outDir, "erun-stub-runner.exe")
-		cmd := osexec.Command("go", "build", "-o", out, "./internal/fixture/stubrunner")
+		cmd := harnessexec.Command("go", "build", "-o", out, "./internal/fixture/stubrunner")
 		cmd.Dir = moduleRoot
 		if output, err := cmd.CombinedOutput(); err != nil {
 			stubRunnerErr = fmt.Errorf("build stub runner: %v\n%s", err, output)
@@ -1775,7 +1769,7 @@ func PodExecBinary(t testing.TB) string {
 			podExecBuildErr = fmt.Errorf("resolve fixture package path")
 			return
 		}
-		cmd := osexec.Command("go", "build", "-o", out, ".")
+		cmd := harnessexec.Command("go", "build", "-o", out, ".")
 		cmd.Dir = filepath.Join(filepath.Dir(thisFile), "podexec")
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if combined, err := cmd.CombinedOutput(); err != nil {
@@ -1828,7 +1822,8 @@ func SeedGitRepo(t testing.TB, dir string) {
 }
 
 func exec(name string, args []string, dir string) error {
-	cmd := osExecCommand(name, args, dir)
+	cmd := harnessexec.Command(name, args...)
+	cmd.Dir = dir
 	return cmd.Run()
 }
 
@@ -1864,7 +1859,7 @@ func PortSimBinary(t testing.TB) string {
 			return
 		}
 		pkgDir := filepath.Join(filepath.Dir(thisFile), "portsim")
-		cmd := osexec.Command("go", "build", "-o", out, ".")
+		cmd := harnessexec.Command("go", "build", "-o", out, ".")
 		cmd.Dir = pkgDir
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if combined, err := cmd.CombinedOutput(); err != nil {
@@ -1902,7 +1897,7 @@ func StartServingPortHolder(t testing.TB, port int) int {
 
 func startPortHolder(t testing.TB, port int, extra ...string) int {
 	t.Helper()
-	cmd := osexec.Command(PortSimBinary(t), append([]string{"--port", strconv.Itoa(port)}, extra...)...)
+	cmd := harnessexec.Command(PortSimBinary(t), append([]string{"--port", strconv.Itoa(port)}, extra...)...)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start port holder on %d: %v", port, err)
 	}
@@ -1947,7 +1942,7 @@ func StalePortHolderStopped(port int, timeout time.Duration) bool {
 // bound-but-dead shape.
 func StartUnboundPortForwardProcess(t testing.TB) int {
 	t.Helper()
-	cmd := osexec.Command(PortSimBinary(t), "--no-listen")
+	cmd := harnessexec.Command(PortSimBinary(t), "--no-listen")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start unbound port-forward process: %v", err)
 	}

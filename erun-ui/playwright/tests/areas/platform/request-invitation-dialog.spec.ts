@@ -1,5 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import {
   removeEnvironment,
@@ -97,13 +98,13 @@ test.describe('request an invitation dialog', () => {
       await expect(app.tenantDashboard.requestSubmitButton()).toBeEnabled();
 
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-open-light.png',
+        path: artifactPath('test-results/request-invitation-dialog-open-light.png'),
         animations: 'disabled',
       });
       await forceDarkTheme(page);
       await expect(dialog).toBeVisible();
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-open-dark.png',
+        path: artifactPath('test-results/request-invitation-dialog-open-dark.png'),
         animations: 'disabled',
       });
     } finally {
@@ -140,13 +141,13 @@ test.describe('request an invitation dialog', () => {
       await expect(app.tenantDashboard.requestInvitationDialog()).toBeVisible();
 
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-rate-limited-light.png',
+        path: artifactPath('test-results/request-invitation-dialog-rate-limited-light.png'),
         animations: 'disabled',
       });
       await forceDarkTheme(page);
       await expect(reason).toBeVisible();
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-rate-limited-dark.png',
+        path: artifactPath('test-results/request-invitation-dialog-rate-limited-dark.png'),
         animations: 'disabled',
       });
     } finally {
@@ -197,13 +198,13 @@ test.describe('request an invitation dialog', () => {
       await expect(app.tenantDashboard.requestPendingStatus()).toBeVisible();
 
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-submitted-pending-light.png',
+        path: artifactPath('test-results/request-invitation-dialog-submitted-pending-light.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
       await expect(app.tenantDashboard.requestPendingStatus()).toBeVisible();
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-submitted-pending-dark.png',
+        path: artifactPath('test-results/request-invitation-dialog-submitted-pending-dark.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
@@ -240,13 +241,13 @@ test.describe('request an invitation dialog', () => {
       await expect(app.tenantDashboard.requestSubmitButton()).toBeEnabled();
 
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-failed-light.png',
+        path: artifactPath('test-results/request-invitation-dialog-failed-light.png'),
         animations: 'disabled',
       });
       await forceDarkTheme(page);
       await expect(alert).toBeVisible();
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-failed-dark.png',
+        path: artifactPath('test-results/request-invitation-dialog-failed-dark.png'),
         animations: 'disabled',
       });
 
@@ -287,13 +288,13 @@ test.describe('request an invitation dialog', () => {
       await expect(app.tenantDashboard.requestStatusCheckRetryButton()).toBeVisible();
 
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-status-check-failed-light.png',
+        path: artifactPath('test-results/request-invitation-dialog-status-check-failed-light.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
       await expect(alert).toBeVisible();
       await page.screenshot({
-        path: 'test-results/request-invitation-dialog-status-check-failed-dark.png',
+        path: artifactPath('test-results/request-invitation-dialog-status-check-failed-dark.png'),
         animations: 'disabled',
       });
       await app.titlebar.toggleTheme();
