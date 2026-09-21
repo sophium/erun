@@ -20,12 +20,12 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 	if selectionSource != deploySelectionSourceDefault || len(selected) > 0 {
 		return false
 	}
-	// Narrow by type, because the other types reach this same fallback and are
-	// already refused for it one layer on: the fallback resolves a runtime-chart
-	// spec, and the in-pod runtime-chart guard refuses that spec for any
-	// environment's own pod (guardInPodRuntimeDeploy). This guard therefore only
-	// adds the earlier, selection-specific refusal for the type whose deploy the
-	// fallback genuinely owns.
+	// Narrow by type: for this type the runtime chart is the whole environment,
+	// so reaching the fallback is a real rollout decision rather than one chart
+	// among others, and it earns the diagnosis below. The other types reach the
+	// same fallback and are refused for it one layer on by the in-pod
+	// runtime-chart guard (guardInPodRuntimeDeploy), so narrowing here leaves no
+	// state unguarded.
 	if resolvedTarget.EnvConfig.ResolvedType() != EnvironmentTypeRuntime {
 		return false
 	}
@@ -48,10 +48,12 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 // deploy is not resolvable from here, so it is not attempted from here.
 //
 // Deliberately narrow: only a runtime environment, only its own pod, and only
-// the empty-selection default. An explicit --components selection is one-shot
-// and deliberate, a saved or plan-derived selection is a real selection, and an
-// off-pod resolve reads the operator's own config store — none of them are
-// touched.
+// the empty-selection default. This refusal exists for the fallback that cannot
+// be told apart from a genuinely empty selection; a selection that resolved to
+// something still reaches the runtime chart, and is refused for reading the
+// projection rather than the host store by the sibling guard one layer on
+// (guardInPodRuntimeDeploy). An off-pod resolve reads the operator's own config
+// store and is untouched by either.
 func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget OpenResult, target DeployTarget, selected []string, selectionSource string) error {
 	if !inPodBlindRuntimeOnlySelection(env, resolvedTarget, selected, selectionSource) {
 		return nil
@@ -59,6 +61,6 @@ func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget
 	tenant := strings.TrimSpace(resolvedTarget.Tenant)
 	environment := strings.TrimSpace(resolvedTarget.Environment)
 	runtimeName := RuntimeReleaseName(tenant)
-	return fmt.Errorf("deploy %s/%s: refusing to roll the runtime chart alone (%s) from inside this environment's own runtime pod — the in-pod config store is only the projection the chart injects (see `erun doctor --sync-config`), and it carries no deploy.components, so this process cannot tell a genuinely empty selection from the one saved on the host. Rolling on that fallback would upgrade the runtime chart, leave every component the operator selected on its previous version, and still report success. Run `erun deploy --tenant %s --environment %s --version %s` from the host CLI so the saved selection resolves there, or pass --components %s here to roll the runtime chart alone deliberately",
-		tenant, environment, runtimeName, tenant, environment, inPodGuardVersionHint(target.VersionOverride), runtimeName)
+	return fmt.Errorf("deploy %s/%s: refusing to roll the runtime chart alone (%s) from inside this environment's own runtime pod — the in-pod config store is only the projection the chart injects (see `erun doctor --sync-config`), and it carries no deploy.components, so this process cannot tell a genuinely empty selection from the one saved on the host. Rolling on that fallback would upgrade the runtime chart, leave every component the operator selected on its previous version, and still report success. Run `erun deploy --tenant %s --environment %s --version %s` from the host CLI, where the saved selection resolves and the rollout is resolved from the host config store rather than from this pod",
+		tenant, environment, runtimeName, tenant, environment, inPodGuardVersionHint(target.VersionOverride))
 }
