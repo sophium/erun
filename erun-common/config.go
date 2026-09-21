@@ -676,10 +676,27 @@ type ProjectDockerConfig struct {
 	// contributor's machine of any architecture. Absent or empty everywhere keeps
 	// the default multi-arch build.
 	Platforms []string `yaml:"platforms,omitempty"`
+	// Secrets declares the BuildKit build secrets every build of this project
+	// receives, as `--secret id=<id>,env=<VAR>` / `,src=<path>` references. It
+	// exists so a Dockerfile step that must fetch something private — a chart
+	// from a registry that is not anonymously pullable, for instance — can run
+	// to full coverage under a real build instead of degrading to skipping that
+	// work, which is a gate reporting success having verified less than it was
+	// asked to.
+	//
+	// Each entry carries a reference (an environment variable name or a host
+	// path), never a credential value, so no secret's contents are ever held in
+	// a Go struct and cannot reach a command line, a trace, or a log.
+	//
+	// Inheritance follows docker.platforms exactly: at the top level this is the
+	// project default every environment inherits, an environment's own list wins
+	// outright, and a declared-but-empty list (`secrets: []`) opts that
+	// environment out of the default.
+	Secrets []DockerBuildSecret `yaml:"secrets,omitempty"`
 }
 
 func (c ProjectDockerConfig) IsZero() bool {
-	return len(c.Fingerprints) == 0 && len(c.Platforms) == 0
+	return len(c.Fingerprints) == 0 && len(c.Platforms) == 0 && len(c.Secrets) == 0
 }
 
 type ReleaseConfig struct {
@@ -843,6 +860,36 @@ func (c ProjectConfig) DockerPlatformsOrigin(environment string) string {
 		}
 	}
 	return "docker.platforms (project default)"
+}
+
+// DockerSecretsForEnvironment returns the BuildKit build secrets a build
+// declares for the given environment, or nil when it declares none.
+//
+// It mirrors DockerPlatformsForEnvironment deliberately, so the two sibling
+// keys under `docker:` obey one inheritance rule: an environment's own
+// environments.<env>.docker.secrets wins outright, an environment that declares
+// none inherits the project-wide docker.secrets default, and a
+// declared-but-empty list (`secrets: []`) is the explicit opt-out.
+func (c ProjectConfig) DockerSecretsForEnvironment(environment string) []DockerBuildSecret {
+	environment = strings.TrimSpace(environment)
+	if environment != "" && c.Environments != nil {
+		if envConfig, ok := c.Environments[environment]; ok && envConfig.Docker.Secrets != nil {
+			return envConfig.Docker.Secrets
+		}
+	}
+	return c.Docker.Secrets
+}
+
+// DockerSecretsOrigin names where DockerSecretsForEnvironment's value came
+// from, so a build trace says which config key decided the secret list.
+func (c ProjectConfig) DockerSecretsOrigin(environment string) string {
+	environment = strings.TrimSpace(environment)
+	if environment != "" && c.Environments != nil {
+		if envConfig, ok := c.Environments[environment]; ok && envConfig.Docker.Secrets != nil {
+			return "environments." + environment + ".docker.secrets"
+		}
+	}
+	return "docker.secrets (project default)"
 }
 
 // normalizedDockerPlatforms trims a configured platform list and reports an
