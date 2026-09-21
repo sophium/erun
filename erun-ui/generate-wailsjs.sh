@@ -12,15 +12,15 @@
 # ERUN_WAILSJS_CACHE_DIR opts into skip-when-unchanged: unset (the default
 # for a local `./generate-wailsjs.sh` run), generation is unconditional, same
 # as always. When set -- the erun-devops Dockerfile points it at a
-# BuildKit cache mount -- this script hashes the Go source that actually
-# defines the bound API and skips the (expensive) `wails generate module`
-# call when that hash matches the last run, restoring the previously
-# generated output instead. Content-hashed rather than mtime-checked because
-# every Dockerfile COPY stamps a fresh mtime on every file on every build.
-# This is what makes the same build's second call (test-frontend's own
-# generation, then build.sh's inside test-playwright) a no-op, and what
-# survives a COPY-layer cache invalidation that has nothing to do with the
-# bound Go API (e.g. an unrelated frontend source edit).
+# BuildKit cache mount -- this script keys the generated output on the Go
+# source that actually defines the bound API and skips the (expensive)
+# `wails generate module` call when that key matches the last run, restoring
+# the previously generated output instead. Content-hashed rather than
+# mtime-checked because every Dockerfile COPY stamps a fresh mtime on every
+# file on every build. This is what makes the same build's second call
+# (test-frontend's own generation, then build.sh's inside test-playwright) a
+# no-op, and what survives a COPY-layer cache invalidation that has nothing
+# to do with the bound Go API (e.g. an unrelated frontend source edit).
 
 set -eu
 
@@ -36,42 +36,101 @@ cd "$SCRIPT_DIR"
 # (any of it can cross into a generated TS shape), and generation itself
 # depends on the pinned wails module version (go.mod/go.sum) and wails.json.
 #
+# Paths are relative to the module either way, so a key is a function of what
+# the repository contains rather than of where the checkout happens to sit.
+hash_bound_module_inputs() {
+	{
+		find . -maxdepth 1 -name '*.go' -print
+		find ./headlessserver -name '*.go' -print 2>/dev/null
+		printf '%s\n' ./wails.json ./go.mod ./go.sum
+	} | sort | xargs sha256sum | sha256sum | awk '{print $1}'
+}
+
+# Everything `go doc` reads out of erun-common, hashed by content. This half
+# costs no toolchain and no network: it is what gates the declaration digest
+# below, because recomputing that digest unconditionally is what made a cache
+# *hit* as expensive as a miss.
+hash_common_sources() {
+	(
+		cd "$SCRIPT_DIR/../erun-common"
+		{
+			find . -name '*.go' -print
+			for file in ./go.mod ./go.sum; do
+				if [ -e "$file" ]; then printf '%s\n' "$file"; fi
+			done
+		} | sort | xargs sha256sum
+	) | sha256sum | awk '{print $1}'
+}
+
 # erun-common contributes its *declarations* rather than its file contents.
 # `wails generate module` emits TS from the bound methods' signatures and the
 # types those reach, so a change confined to a function body cannot alter the
 # output -- yet hashing whole files made every such edit a cache miss, and
-# erun-common is the shared module nearly every change touches. Measured: a
-# hit is ~0.07s and a miss ~16s.
+# erun-common is the shared module nearly every change touches.
 #
 # `go doc -all -u` is a superset of what can reach the generated TS, not a
 # heuristic: -u includes unexported declarations, so an exported field whose
 # type is an unexported struct still has that struct's shape in the hash.
-# Verified against this module -- a true body-only edit leaves the output
-# byte-identical, while adding or changing any declaration, exported or not,
-# changes it. A `go doc` failure falls back to hashing the files, so an
-# unbuildable tree degrades to the previous conservative behaviour rather
-# than to a stale cache.
-hash_wails_inputs() {
-	{
-		find "$SCRIPT_DIR" -maxdepth 1 -name '*.go' -print
-		find "$SCRIPT_DIR/headlessserver" -name '*.go' -print 2>/dev/null
-		printf '%s\n' "$SCRIPT_DIR/wails.json" "$SCRIPT_DIR/go.mod" "$SCRIPT_DIR/go.sum"
-	} | sort | xargs sha256sum
-	if ! (cd "$SCRIPT_DIR/../erun-common" && go doc -all -u . 2>/dev/null) | sha256sum; then
-		find "$SCRIPT_DIR/../erun-common" -name '*.go' -print | sort | xargs sha256sum
+#
+# It is also the expensive half. It type-checks the package and everything it
+# imports, which is seconds against a warm build cache and far longer against
+# a cold one, and it cannot answer at all without a module cache it can
+# resolve. So it is never paid when erun-common is byte-identical to the run
+# that already paid it (see the caller). Prints nothing and returns non-zero
+# when the declarations cannot be read.
+hash_common_declarations() {
+	DECLARATIONS=$(cd "$SCRIPT_DIR/../erun-common" && go doc -all -u . 2>/dev/null) || return 1
+	if [ -z "$DECLARATIONS" ]; then
+		return 1
 	fi
-}
-
-hash_wails_inputs_digest() {
-	hash_wails_inputs | sha256sum | awk '{print $1}'
+	printf '%s' "$DECLARATIONS" | sha256sum | awk '{print $1}'
 }
 
 if [ -n "$CACHE_DIR" ]; then
 	mkdir -p "$CACHE_DIR"
-	HASH_FILE="$CACHE_DIR/hash"
+	STATE_FILE="$CACHE_DIR/state"
 	CACHED_WAILSJS="$CACHE_DIR/wailsjs"
-	NEW_HASH=$(hash_wails_inputs_digest)
-	if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$NEW_HASH" ] && [ -d "$CACHED_WAILSJS" ]; then
+
+	SOURCE_HASH=$(hash_common_sources)
+	STORED_KEY=''
+	STORED_SOURCES=''
+	STORED_DECLARATIONS=''
+	if [ -f "$STATE_FILE" ]; then
+		# Three space-separated fields, written as the last thing a successful
+		# run does; a torn or absent file reads as no cache at all.
+		read -r STORED_KEY STORED_SOURCES STORED_DECLARATIONS < "$STATE_FILE" || true
+	fi
+
+	# The cheap hash gates the expensive one. Byte-identical erun-common means
+	# the stored digest was computed from exactly these bytes, and a digest is
+	# only ever a stand-in for those bytes, so it is reused without asking the
+	# toolchain again. A changed erun-common still pays for a fresh digest --
+	# and a body-only change lands back on the digest it already had, which is
+	# the whole point of hashing declarations.
+	if [ -n "$STORED_DECLARATIONS" ] && [ "$STORED_SOURCES" = "$SOURCE_HASH" ]; then
+		DECLARATION_KEY="$STORED_DECLARATIONS"
+	elif DECLARATION_HASH=$(hash_common_declarations); then
+		DECLARATION_KEY="declarations:$DECLARATION_HASH"
+	else
+		# Conservative, and reachable: a package the toolchain cannot read
+		# falls back to hashing its file contents, which is at least a
+		# function of what is on disk. It must never fall back to a constant
+		# -- a constant matches the next unreadable package too, whatever it
+		# contains, and hands back bindings generated from source that is
+		# gone. The mode prefix keeps the two key spaces apart, so a run that
+		# could read the package and a run that could not never collide.
+		DECLARATION_KEY="contents:$SOURCE_HASH"
+		printf 'generate-wailsjs.sh: erun-common declarations unreadable; keying on its file contents instead\n' >&2
+	fi
+
+	NEW_KEY=$(
+		{
+			hash_bound_module_inputs
+			printf '%s\n' "$DECLARATION_KEY"
+		} | sha256sum | awk '{print $1}'
+	)
+
+	if [ -n "$STORED_KEY" ] && [ "$STORED_KEY" = "$NEW_KEY" ] && [ -d "$CACHED_WAILSJS" ]; then
 		if [ ! -d frontend/wailsjs ] || [ -z "$(ls -A frontend/wailsjs 2>/dev/null)" ]; then
 			rm -rf frontend/wailsjs
 			cp -a "$CACHED_WAILSJS" frontend/wailsjs
@@ -95,7 +154,9 @@ fi
 if [ -n "$CACHE_DIR" ]; then
 	rm -rf "$CACHED_WAILSJS"
 	cp -a frontend/wailsjs "$CACHED_WAILSJS"
-	printf '%s' "$NEW_HASH" > "$HASH_FILE"
+	# Key last: a run interrupted before this point leaves a cache that reads
+	# as a miss, never a key paired with bindings it did not come from.
+	printf '%s %s %s\n' "$NEW_KEY" "$SOURCE_HASH" "$DECLARATION_KEY" > "$STATE_FILE"
 fi
 
 printf 'generate-wailsjs.sh: generated bindings (%ss)\n' "$(($(date +%s) - STARTED_AT))" >&2
