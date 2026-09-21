@@ -73,9 +73,13 @@ var mcpReadOnlyTools = map[string]struct{}{
 	"exec_job_status":     {},
 	"exec_job_output":     {},
 	"exec_job_await":      {},
-	"review_list":         {},
-	"review_show":         {},
-	"review_queue_list":   {},
+	// jobs_list/jobs_show only observe the queue; the jobs_start/jobs_finish
+	// pair writes and is deliberately not here.
+	"jobs_list":         {},
+	"jobs_show":         {},
+	"review_list":       {},
+	"review_show":       {},
+	"review_queue_list": {},
 }
 
 // mcpOperateTools are the tools that drive an existing environment's own
