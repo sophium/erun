@@ -7,27 +7,24 @@ import (
 	"strings"
 )
 
-// resolveDockerBuildSecrets resolves the BuildKit build secrets a build
-// receives from `.erun/config.yaml`, before any of them reaches a docker
-// command line.
-//
-// A project that has not declared any — which is nearly every project — gets a
-// nil list, so its docker build command is byte-for-byte what it was before
+// loadProjectConfigForDockerSecrets reads the project config a build resolves
+// its `docker.secrets` from. It reports ok=false for a project that has no
+// `.erun/config.yaml` at all, which is not an error: such a project declares no
+// secrets, and its docker build command stays byte-for-byte what it was before
 // this key existed.
-func resolveDockerBuildSecrets(projectRoot, environment string) ([]DockerBuildSecret, error) {
+func loadProjectConfigForDockerSecrets(projectRoot string) (ProjectConfig, bool, error) {
 	if strings.TrimSpace(projectRoot) == "" {
-		return nil, nil
+		return ProjectConfig{}, false, nil
 	}
 
 	cfg, _, err := LoadProjectConfig(projectRoot)
 	if err != nil {
 		if errors.Is(err, ErrNotInitialized) {
-			return nil, nil
+			return ProjectConfig{}, false, nil
 		}
-		return nil, err
+		return ProjectConfig{}, false, err
 	}
-
-	return normalizeDockerBuildSecrets(cfg.DockerSecretsForEnvironment(environment))
+	return cfg, true, nil
 }
 
 // normalizeDockerBuildSecrets trims the configured entries, drops the wholly
@@ -124,14 +121,34 @@ func describeDockerBuildSecrets(secrets []DockerBuildSecret) string {
 // error here names the config key, the id, and the missing variable or path
 // instead, and the remedy is a one-line config or environment change.
 func applyDockerSecrets(ctx Context, projectRoot, environment string, build *DockerBuildSpec) error {
-	secrets, err := resolveDockerBuildSecrets(projectRoot, environment)
+	cfg, ok, err := loadProjectConfigForDockerSecrets(projectRoot)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	secrets, err := normalizeDockerBuildSecrets(cfg.DockerSecretsForEnvironment(environment))
 	if err != nil {
 		return err
 	}
 	if len(secrets) == 0 {
 		return nil
 	}
+	if err := validateDockerSecretsAvailable(secrets); err != nil {
+		return err
+	}
 
+	build.DockerSecrets = secrets
+	ctx.Trace("build: secrets configured as " + describeDockerBuildSecrets(secrets) +
+		" (.erun/config.yaml " + cfg.DockerSecretsOrigin(environment) + ")")
+	return nil
+}
+
+// validateDockerSecretsAvailable refuses a declared secret that cannot be
+// supplied, naming what is missing and the one-line remedy.
+func validateDockerSecretsAvailable(secrets []DockerBuildSecret) error {
 	for _, secret := range secrets {
 		if secret.Env != "" {
 			if strings.TrimSpace(os.Getenv(secret.Env)) == "" {
@@ -143,22 +160,7 @@ func applyDockerSecrets(ctx Context, projectRoot, environment string, build *Doc
 			return fmt.Errorf("docker.secrets entry %q needs %s, which cannot be read: fix the path, or point the entry at an environment variable with `env:`", secret.ID, secret.Src)
 		}
 	}
-
-	build.DockerSecrets = secrets
-	ctx.Trace("build: secrets configured as " + describeDockerBuildSecrets(secrets) + " (.erun/config.yaml " + currentDockerSecretsOrigin(projectRoot, environment) + ")")
 	return nil
-}
-
-// currentDockerSecretsOrigin names the config key the resolved secret list came
-// from, re-reading the config so a trace says which of the two sibling keys
-// decided it. A read that fails here cannot change the list already resolved,
-// so the project-wide name is a safe fallback.
-func currentDockerSecretsOrigin(projectRoot, environment string) string {
-	cfg, _, err := LoadProjectConfig(projectRoot)
-	if err != nil {
-		return "docker.secrets (project default)"
-	}
-	return cfg.DockerSecretsOrigin(environment)
 }
 
 // dockerSecretArgs renders each declared build secret as the
