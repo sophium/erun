@@ -226,6 +226,15 @@ composition and release invariants belong to root/shared logic, not chart policy
   cache generally: BuildKit's per-instruction layer cache inside a real
   `docker build` is untouched. `build_gate_test_stage_test.go` locks the detection
   and the refusal.
+- The test stage is also the definition other in-container runs of the Playwright
+  suite mirror, so its environment carries `ERUN_PLAYWRIGHT_ARTIFACTS_DIR`: the
+  suite's one artifact root (Playwright's output dir, the HTML report, every frame a
+  spec captures) pointed at a container-local path. A run that mirrors the stage by
+  bind-mounting a worktree over `/src` as root — `scripts/repro-gate-contention.sh`
+  does — otherwise leaves artifacts owned by uid 0 in a tree the environment user
+  owns, where `rm -rf` cannot remove them and every later run in that environment
+  fails with a bare `EACCES` inside whichever spec writes first, for every branch.
+  Change the value here and the mirror changes with it.
 - Previews show concrete commands for the operations selected, without adding
   build/push actions to a pure deploy.
 - **A test needing a real container runtime reaches it from a `RUN` step via the

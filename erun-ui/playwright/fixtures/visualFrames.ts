@@ -6,9 +6,11 @@ import { expect } from '@playwright/test';
 /**
  * Visual-bundle capture helpers.
  *
- * Frames under `test-results/<bundle>/` are operator-facing evidence: a
- * host-side orchestrator reviewing a remote environment reads the synced bundle
- * instead of driving the pod's desktop. A frame whose name claims a state its
+ * Frames under `<artifact root>/test-results/<bundle>/` are operator-facing
+ * evidence: a host-side orchestrator reviewing a remote environment reads the
+ * synced bundle instead of driving the pod's desktop — which is why the root
+ * defaults to the suite directory and only moves when a run is told to keep
+ * out of its tree (fixtures/artifacts.ts). A frame whose name claims a state its
  * pixels do not show is worse than a missing frame, because the bundle then
  * looks complete while documenting a state it never captured. These helpers
  * keep the pending half of a transition open for the capture, and make frames

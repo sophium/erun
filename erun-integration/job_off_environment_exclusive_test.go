@@ -3,7 +3,6 @@ package integration
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
 // TestJobOffEnvironmentExclusiveClaimIsEnforced is the exact reproduction
@@ -45,7 +45,7 @@ func TestJobOffEnvironmentExclusiveClaimIsEnforced(t *testing.T) {
 	emcpEnv = append(emcpEnv, "ERUN_ERUN_BIN="+bin, "ERUN_REPO_REMOTE=true")
 
 	emcpBin := emcpBinaryPath(t)
-	emcpCmd := exec.Command(emcpBin,
+	emcpCmd := harnessexec.Command(emcpBin,
 		"--host", "127.0.0.1", "--port", fmt.Sprint(mcpPort),
 		"--metrics-port", fmt.Sprint(metricsPort),
 		"--tenant", "team", "--environment", "dev", "--repo-path", repoPath,

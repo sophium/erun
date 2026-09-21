@@ -151,6 +151,18 @@ is stopped — and the groups that are safe to reclaim carry an action:
 Neither touches your worktree, a running session, or the Agent. Agent processes are shown without an
 action for exactly that reason: they are your work, not a leftover.
 
+A cache that only ever grows is also how a node's remaining space disappears without any one
+environment appearing to hold it. So each environment's build cache is bounded to a share of its own
+docker volume — 80% by default, leaving the rest to the images and containers a cache prune cannot
+reclaim — and it is reclaimed down to that bound automatically once the bound is reached. At 70% the
+environment says so, a tenth of the volume below the bound, so the growth is visible while the remedy
+is still ahead of you rather than alongside it.
+
+The bound is per environment on purpose. Each environment's docker sidecar owns its own volume, so a
+share of that volume is a limit no single environment can exceed on the others' behalf. An unbounded
+cache is exactly what that costs: the disk-headroom guard that prunes when the node runs low frees
+*the node's* space, so every other environment's next build repays its layers from cold.
+
 A session's running state is **observed in the pod** — its socket exists *and* a live program sits
 behind it — rather than inferred from how recently it printed something. An Agent waiting on a
 compile is silent but running; a dropped connection is quiet but finished. Inferring from output

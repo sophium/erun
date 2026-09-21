@@ -1,5 +1,6 @@
 import type { Route, Request } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
 import {
   SEED_TENANT,
@@ -144,9 +145,13 @@ test.describe('tenant dashboard — permission-derived surfaces (#1210)', () => 
       // never announced it. It now renders through InlineAlert (role="alert"),
       // queried here via the accessibility tree rather than an attribute match.
       await expect(app.tenantDashboard.activePanel().getByRole('alert')).toContainText('http 500');
-      await page.screenshot({ path: 'test-results/dashboard-panel-error-alert-light.png' });
+      await page.screenshot({
+        path: artifactPath('test-results/dashboard-panel-error-alert-light.png'),
+      });
       await app.titlebar.toggleTheme();
-      await page.screenshot({ path: 'test-results/dashboard-panel-error-alert-dark.png' });
+      await page.screenshot({
+        path: artifactPath('test-results/dashboard-panel-error-alert-dark.png'),
+      });
       await app.titlebar.toggleTheme();
 
       await app.tenantDashboard.selectTab('Audit log');
