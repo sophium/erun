@@ -694,4 +694,36 @@ count=$(grep -c '^            - name: ERUN_CLAUDE_AVAILABLE_MODELS$' "${rendered
 [ "${count}" = "1" ] ||
     fail "ERUN_CLAUDE_AVAILABLE_MODELS should render exactly once with a gateway on an AWS env, got ${count}"
 
+# --- 15. The build's cache bound and the docker claim describe the same volume ---
+# The byte count the build bounds this environment's BuildKit cache by is only a
+# bound if it is the size of the volume that cache actually lives on. Two
+# independently written numbers drift: the dind sidecar's image tag once shipped
+# as a literal that disagreed with the image VERSION beside it, and the fix it
+# carried was inert on every environment for a release because of exactly that.
+# Derived from the rendered claim rather than restated, so a change that moves
+# both sides together cannot pass.
+docker_claim_gi() {
+    awk '/^  name: test-docker$/{found=1}
+         found && /^      storage: /{sub(/^      storage: /,""); sub(/Gi$/,""); print; exit}' "$1"
+}
+
+cache_bound_bytes() {
+    grep -A1 '^            - name: ERUN_DOCKER_VOLUME_BYTES$' "$1" |
+        sed -n 's/^              value: "\([0-9]*\)"$/\1/p'
+}
+
+rendered=$(render --set dockerVolumeGi=120)
+claim_gi=$(docker_claim_gi "${rendered}")
+[ "${claim_gi}" = "120" ] ||
+    fail "the docker claim should render the configured volume (120Gi), got '${claim_gi}'"
+bound=$(cache_bound_bytes "${rendered}")
+[ "${bound}" = "$((claim_gi * 1073741824))" ] ||
+    fail "the build's cache bound should be the docker claim's own size (${claim_gi}Gi = $((claim_gi * 1073741824)) bytes), got '${bound}'"
+
+# A runtime env runs no dind sidecar and has no docker claim, so there is no
+# volume to bound and nothing should claim otherwise.
+rendered=$(render --set worktreeStorage=none)
+[ -z "$(cache_bound_bytes "${rendered}")" ] ||
+    fail "no cache bound should render for an env with no docker volume"
+
 echo "PASS: erun-devops chart pod shape"

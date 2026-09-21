@@ -1,3 +1,4 @@
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 
 // "Upgrade all" previews a cross-env upgrade plan before any deploy. This spec
@@ -124,7 +125,7 @@ test.describe('sidebar Upgrade all', () => {
     await expect(dialog.getByRole('button', { name: 'Upgrade 2' })).toBeEnabled();
 
     // Capture the populated plan for visual review of the layout.
-    await dialog.screenshot({ path: 'test-results/upgrade-all-plan.png' });
+    await dialog.screenshot({ path: artifactPath('test-results/upgrade-all-plan.png') });
 
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();

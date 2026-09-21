@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { captureHoverCard, expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
@@ -130,7 +131,7 @@ test.describe('environment usage on the hover cards', () => {
       // callback can race the backend sweep's own overwrite of the reading.
       await captureHoverCard(
         dialog,
-        'test-results/environment-usage-visual/env-hover-card-fresh.png',
+        artifactPath('test-results/environment-usage-visual/env-hover-card-fresh.png'),
       );
     });
   });
@@ -164,7 +165,7 @@ test.describe('environment usage on the hover cards', () => {
         // callback can race the backend sweep's own overwrite of the reading.
         await captureHoverCard(
           dialog,
-          'test-results/environment-usage-visual/env-hover-card-stale.png',
+          artifactPath('test-results/environment-usage-visual/env-hover-card-stale.png'),
         );
       },
     );
@@ -296,7 +297,7 @@ test.describe('environment usage on the hover cards', () => {
         // callback can race the backend sweep's own overwrite of the reading.
         await captureHoverCard(
           dialog,
-          'test-results/environment-usage-visual/env-hover-card-no-pod.png',
+          artifactPath('test-results/environment-usage-visual/env-hover-card-no-pod.png'),
         );
       },
     );
@@ -328,7 +329,7 @@ test.describe('environment usage on the hover cards', () => {
       // callback can race the backend sweep's own overwrite of the reading.
       await captureHoverCard(
         dialog,
-        'test-results/environment-usage-visual/orchestrator-card-usage.png',
+        artifactPath('test-results/environment-usage-visual/orchestrator-card-usage.png'),
       );
     });
   });

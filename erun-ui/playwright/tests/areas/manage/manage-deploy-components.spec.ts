@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { boundingBoxOf } from '../../../fixtures/boundingBox.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 
@@ -194,7 +195,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toHaveCount(0);
     }
     await page.screenshot({
-      path: 'test-results/runtime-picker-gated.png',
+      path: artifactPath('test-results/runtime-picker-gated.png'),
       animations: 'disabled',
     });
 
@@ -213,7 +214,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     }
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
     await page.screenshot({
-      path: 'test-results/runtime-picker-populated.png',
+      path: artifactPath('test-results/runtime-picker-populated.png'),
       animations: 'disabled',
     });
 
@@ -449,7 +450,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     const panelNotice = app.manageDialog.deployComponentsEmptyPanelNotice();
     await expect(panelNotice).toContainText('No charts are checked');
     await page.screenshot({
-      path: 'test-results/manage-deploy-components-emptied.png',
+      path: artifactPath('test-results/manage-deploy-components-emptied.png'),
       animations: 'disabled',
     });
 

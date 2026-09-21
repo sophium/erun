@@ -2,7 +2,6 @@ package integration
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +10,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
@@ -113,7 +113,7 @@ func seedExistingContributeClone(t testing.TB, dir, originURL string) {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
+		cmd := harnessexec.Command("git", args...)
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, string(out))

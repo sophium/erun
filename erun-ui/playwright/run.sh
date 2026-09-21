@@ -41,6 +41,22 @@
 #                          named tests/areas/<area> directories. Ignored when
 #                          an explicit target is already given, or in
 #                          --e2e-k3d mode.
+#   ERUN_PLAYWRIGHT_ARTIFACTS_DIR
+#                          Root for everything the suite leaves behind --
+#                          Playwright's output dir, the HTML report, and every
+#                          frame a spec captures (fixtures/artifacts.ts).
+#                          Unset keeps them in the suite directory, which is
+#                          what lets a reviewing orchestrator read a pod's
+#                          frames out of the synced worktree. Set it for a run
+#                          whose tree is not its to write to: every
+#                          in-container gate run (the erun-devops Dockerfile's
+#                          test stage and scripts/repro-gate-contention.sh,
+#                          which bind-mounts the worktree over /src and runs as
+#                          root) points it at a container-local path, because
+#                          artifacts written as root into an environment's own
+#                          tree cannot be removed there and fail every later
+#                          run in that environment. An unusable root is
+#                          refused at config load, naming the directory.
 
 set -eu
 
