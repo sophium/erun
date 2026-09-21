@@ -6,6 +6,7 @@ package erun
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -241,7 +242,22 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 		timeout = 120 * time.Second
 	}
 
-	cmd := exec.Command(bin, args...)
+	// The context exists so that WaitDelay can be armed at all. WaitDelay is
+	// documented to bound a wait "after the command has exited or (if the
+	// command does not exit) after the context is cancelled", and the second
+	// clause is the only one this harness can rely on: os/exec starts the
+	// goroutine that enforces WaitDelay solely when the Cmd has a non-nil
+	// context whose Done channel is non-nil, so a Cmd built without one accepts
+	// a WaitDelay value and never acts on it. A child that does not exit -- a
+	// command wedged past the timeout under the gate's CPU contention -- is
+	// never reaped, so Process.Wait never returns, the post-exit path that also
+	// consults WaitDelay is never reached, and Wait blocks forever however
+	// large the delay is. Cancelling this context is what turns a timeout into
+	// a bounded run.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, bin, args...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -278,7 +294,7 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 		t.Fatalf("start erun: %v", err)
 	}
 
-	err := supervise(cmd, timeout, waitDelay)
+	err := supervise(cmd, cancel, timeout, waitDelay)
 	if errors.Is(err, errTimeout) {
 		t.Fatalf("erun timed out after %s; args=%v\n--- subprocess goroutine dump (stderr) ---\n%s", timeout, args, stderr.String())
 	}
@@ -314,20 +330,30 @@ var errTimeout = errors.New("erun: child exceeded its timeout")
 // any other error means the child could not be run or observed at all.
 //
 // It arms delay on the child itself, rather than leaving that to its caller,
-// because that is the bound this whole function exists around: a child that
-// exits leaves its stdout/stderr pipes open for as long as any process it
-// started still holds them, and os/exec's own documentation names exactly
-// that case as the reason WaitDelay exists. Without it, Wait -- and therefore
-// this harness -- waits for the *pipe* rather than the child, and no timeout
-// can rescue it: a SIGKILL to a process that has already exited is a no-op,
-// and the copier goroutines blocked on those pipes never look at signals at
-// all. Owning the assignment here also keeps it reachable from a test that
-// drives the same wait with a short delay and a child chosen to hold its own
-// pipes open, which is the case that used to block forever.
+// because that is the bound this whole function exists around: a child leaves
+// its stdout/stderr pipes open for as long as any process it started still
+// holds them, and os/exec's own documentation names exactly that case as the
+// reason WaitDelay exists. Without it, Wait -- and therefore this harness --
+// waits for the *pipe* rather than the child, and no kill rescues it: the
+// copier goroutines blocked on those pipes never look at signals at all, and a
+// kill only ends the wait if the child was still running to receive it.
 //
-// timeout and delay are arguments rather than the fixed caps their callers
-// pass so that wait can be driven directly at test speed.
-func supervise(cmd *exec.Cmd, timeout, delay time.Duration) error {
+// Arming the delay is not on its own enough, which is why cancel is a
+// parameter. WaitDelay bounds a wait only after the child exits or after the
+// command's context is cancelled, and os/exec runs the goroutine that enforces
+// the second clause only for a Cmd that has such a context. The cancellation
+// on the timeout path below is therefore what makes the delay apply to the
+// case that actually wedged this suite: a child that has *not* exited, so that
+// Process.Wait never returns and the post-exit path -- which consults the
+// delay independently -- is never reached. Cancelling also kills the child if
+// it survived the signal below. With the context cancelled the wait becomes a
+// deadline this harness enforces itself: the child is killed, the pipes it
+// left open are closed, and the run concludes as the timeout it is rather than
+// wedging the whole package past the test binary's own deadline.
+//
+// cancel, timeout and delay are parameters rather than the fixed values their
+// caller passes so that wait can be driven directly at test speed.
+func supervise(cmd *exec.Cmd, cancel context.CancelFunc, timeout, delay time.Duration) error {
 	cmd.WaitDelay = delay
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -344,16 +370,16 @@ func supervise(cmd *exec.Cmd, timeout, delay time.Duration) error {
 		return err
 	case <-time.After(timeout):
 		// Give the signal a moment to flush the goroutine dump so the failure
-		// names the blocked call; fall back to Kill if the process ignores it.
-		// Both waits are bounded above by waitDelay, so a child that has
-		// already exited -- but whose pipes are still held open by something
-		// it started -- is reported as the timeout it is instead of wedging
-		// the whole package past the test binary's own deadline.
+		// names the blocked call, then cancel: cancellation is what arms the
+		// delay, and os/exec's own watcher kills the child if it outlives the
+		// signal. Waiting on done afterwards is bounded by delay for every
+		// state the child can be in -- running, already reaped, or reaped with
+		// a descendant holding its pipes -- so a timeout always concludes.
 		_ = cmd.Process.Signal(syscall.SIGQUIT)
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
-			_ = cmd.Process.Kill()
+			cancel()
 			<-done
 		}
 		return errTimeout
