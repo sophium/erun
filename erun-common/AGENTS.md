@@ -139,13 +139,20 @@ demonstrated:
   ID), and a genuine failure. The orphan warning is not proof of completed work;
   callers must inspect the job's own record. A wrapper's bounded-wait timeout is
   also not the underlying gate verdict (`scripts/agent-gate.sh`).
-- The wrapper's own 124 does not survive `make`: GNU Make collapses any nonzero
-  recipe exit to its generic exit 2, so a caller reading only `make check`'s exit
-  status cannot tell a bounded-wait timeout from a real failure. Keep the default
-  foreground-safe (bail at the first timeout) and let a caller that is not
-  foreground-constrained opt in with `AGENT_GATE_AWAIT_VERDICT=1`, which re-awaits
-  the same job across bounded `job await` calls until it reaches a real verdict.
-  `ERUN_JOB_ID` being set does not distinguish the two callers.
+- A wait expiring is the wrapper's own deadline, never the gated job's outcome.
+  On expiry the wrapper reads the job's own record, so a job that finished is
+  reported by its actual result and 124 is reserved for one still genuinely
+  running; an unreadable record is that same non-verdict, never a failure. That
+  non-verdict path must say so plainly and name the job, since the exit status
+  alone is not readable as "not a failure" once `make` is in between: GNU Make
+  collapses any nonzero recipe exit to its generic exit 2, so a caller reading
+  only `make check`'s exit status cannot tell a bounded-wait timeout from a real
+  failure. The `check` target therefore prints INCONCLUSIVE on 124, and the
+  wrapper's own 124 survives only for a direct caller.
+- Keep the default foreground-safe (bail at the first timeout) and let a caller
+  that is not foreground-constrained opt in with `AGENT_GATE_AWAIT_VERDICT=1`,
+  which re-awaits the same job across bounded `job await` calls until it reaches
+  a real verdict. `ERUN_JOB_ID` being set does not distinguish the two callers.
 
 ## Release recovery
 

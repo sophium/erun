@@ -40,9 +40,9 @@ type ContextStartInput struct {
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
-type ContextListResult struct {
-	CloudContexts []eruncommon.CloudContextStatus `json:"cloudContexts,omitempty"`
-}
+// ContextListResult aliases the shared envelope so the CLI and the MCP tool
+// cannot drift into two spellings of the same listing.
+type ContextListResult = eruncommon.CloudContextListResult
 
 type ContextActionResult struct {
 	Preview bool                          `json:"preview"`

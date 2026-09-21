@@ -118,7 +118,12 @@ function NotConnectedState(): React.ReactElement {
     <EmptyState
       icon={<Link2 />}
       heading="Connect this tenant to erunpaas.com"
-      body="This tenant isn't connected to a hosted erun platform yet, so Reviews, Merge queue, Builds, Users, and the Audit log can't load."
+      // This state replaces the dashboard before its tab strip renders, so no
+      // tab loads -- including the API log, which reads the environment rather
+      // than the platform. Never name a subset here: a list of some tabs reads
+      // as an account of what is unavailable and leaves the rest looking
+      // usable, and any list drifts as tabs are added.
+      body="This tenant isn't connected to a hosted erun platform yet, so none of this dashboard's tabs can load."
       action={
         <div className="grid w-full max-w-sm gap-2 text-left">
           <FieldLabel htmlFor="connect-platform-url" required>

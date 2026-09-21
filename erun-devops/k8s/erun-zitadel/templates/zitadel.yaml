@@ -38,6 +38,14 @@
     renders nothing.
   - ZITADEL_EXTERNAL* names the EXTERNALLY reachable origin, never a
     cluster-internal address: discovery hands those endpoints to the browser.
+  - The instance's Domain Policy is set at first-instance init
+    (DOMAINPOLICY_USERLOGINMUSTBEDOMAIN / DOMAINPOLICY_VALIDATEORGDOMAINS),
+    because Zitadel ships both false: a false login-must-be-domain makes login
+    names unique per INSTANCE rather than per organization, so every tenant's
+    users compete for one namespace, and a false validate-org-domains lets an
+    org claim a domain it does not control. Only a new instance is affected —
+    the settings are read when core initialises the first instance and are not
+    re-applied to one that already exists.
 
   Storage is the SHARED erun-backend-postgres instance (the same Service and
   password Secret the API uses) in its own `zitadel` database, so this component
@@ -543,6 +551,17 @@ spec:
               value: {{ printf "%s%s/login?authRequest=" $issuer $loginBasePath | quote }}
             - name: ZITADEL_OIDC_DEFAULTLOGOUTURLV2
               value: {{ printf "%s%s/logout?post_logout_redirect=" $issuer $loginBasePath | quote }}
+            # The instance's Domain Policy, applied when core sets the
+            # first instance up — Zitadel's own defaults here are false, which
+            # would make login names unique across the whole instance instead
+            # of per organization, and let an org claim a domain it does not
+            # control. These are read at first-instance init only, so they
+            # decide the shape of a freshly provisioned instance; they do not
+            # rewrite an instance that is already initialised.
+            - name: ZITADEL_DEFAULTINSTANCE_DOMAINPOLICY_USERLOGINMUSTBEDOMAIN
+              value: "true"
+            - name: ZITADEL_DEFAULTINSTANCE_DOMAINPOLICY_VALIDATEORGDOMAINS
+              value: "true"
           ports:
             - name: http
               containerPort: {{ $corePort }}

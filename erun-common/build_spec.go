@@ -206,6 +206,9 @@ func newDockerBuildSpec(ctx Context, store DockerStore, now NowFunc, projectRoot
 	}
 	applyDindResourceBuildArgs(store, projectRoot, environment, &build)
 	applyPlaywrightAreaBuildArgs(ctx, projectRoot, &build)
+	if err := applyDockerSecrets(ctx, projectRoot, environment, &build); err != nil {
+		return DockerBuildSpec{}, err
+	}
 	build.CgroupParent = buildContainerCPUCapCgroupParent()
 	return build, nil
 }

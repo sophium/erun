@@ -1277,7 +1277,7 @@ func finalizeRuntimeChartSpecs(ctx Context, target DeployTarget, resolvedTarget 
 			return err
 		}
 	}
-	return guardInPodLocalAgentRuntimeDeploy(os.Getenv, resolvedTarget, specs)
+	return guardInPodRuntimeDeploy(os.Getenv, resolvedTarget, specs)
 }
 
 func resolveDeploySpecsForResolvedTarget(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, resolvedTarget OpenResult, target DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]DeploySpec, error) {

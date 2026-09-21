@@ -132,9 +132,15 @@ LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 # runs package test binaries up to GOMAXPROCS at a time and otherwise takes
 # that number straight from the cgroup.
 #
-# The four module test targets plus the dns01-webhook one are siblings in
-# check-gate's own -j fan-out, so each unbounded one claims the whole quota and
-# five of them running side by side demand five times it. Measured on the 6-CPU
+# The four module test targets, the dns01-webhook one, and the integration
+# suite are siblings in check-gate's own -j fan-out, so each unbounded one
+# claims the whole quota and six of them running side by side demand six times
+# it. The integration suite is a Go test runner like the rest even though its
+# width arrives as `-parallel` from integration-test.sh rather than as
+# GOMAXPROCS, so it is counted here too and takes the same share -- otherwise
+# it sizes itself against the whole quota on top of the shares the counted
+# targets already demand, which is the oversubscription this bound exists to
+# prevent. Measured on the 6-CPU
 # in-pod gate arrangement (lint plus all four module test targets, warm build
 # cache, -j5): unbounded, 13.4% of CPU periods throttled and 127s of throttled
 # CPU-time; with each target held to a fifth of the quota, 3.6% and 6.1s -- a
@@ -149,7 +155,7 @@ LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 # the way lint does: make, not this recipe, is what runs them concurrently.
 # Floored at 1 so a small environment still runs; on a larger one each target
 # gets proportionally more.
-GO_TEST_TARGET_COUNT := 5
+GO_TEST_TARGET_COUNT := 6
 GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 	n=$$(( cpu / $(GO_TEST_TARGET_COUNT) )); \
 	[ "$$n" -ge 1 ] || n=1; \
@@ -388,6 +394,35 @@ FRONTEND_GATE_JOB_MEMORY_MIB := 650
 FRONTEND_GATE_JOB_COUNT := 15
 FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND_GATE_JOB_COUNT) $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
+# vitest sizes its worker pool from os.availableParallelism(), which reads the
+# container's whole CPU quota -- so a single `vitest run` claims all of it, and
+# the vitest workspaces below are dispatched as separate *concurrent* jobs in
+# the fan-out above. Two of them side by side therefore demand twice the quota
+# before the other frontend jobs (build, lint, typecheck) or any concurrent
+# check-gate target takes a share, and that oversubscription is spent as cgroup
+# throttling. This is the in-image gate's starvation mechanism: a 2.8MB tarball
+# fetches in 0.27s from an idle container on the same daemon, but the throttled
+# install spends minutes on it and then dies as ESOCKETTIMEDOUT, reading as a
+# network fault.
+#
+# Same bound, same reasoning, same shape as LINT_GOMAXPROCS above: divide the
+# environment's real quota by the number of these jobs that actually run
+# concurrently, rather than handing each the whole ceiling. It is derived from
+# parallel-gate.sh cpu-quota (not a constant and not `nproc`, both of which
+# misread a throttled cgroup -- see that script's comment) and floored at 1 so
+# a small environment still runs.
+#
+# FRONTEND_VITEST_JOB_COUNT counts only the workspaces whose `yarn test`
+# really runs vitest, since it is vitest's own pool that multiplies. A
+# workspace that switches runner has to be counted here too;
+# erun-integration/frontend_test_workers_bound_test.go reads this on every run
+# and fails if a vitest workspace's job stops naming the bound.
+FRONTEND_VITEST_JOB_COUNT := 2
+FRONTEND_VITEST_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(FRONTEND_VITEST_JOB_COUNT) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	echo $$n)
+
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
 # (erun-devops/docker/erun-devops/Dockerfile) covering all three workspaces.
@@ -438,12 +473,12 @@ test-frontend:
 		printf 'erun-ui-frontend-lint\terun-ui/frontend lint\tcd erun-ui/frontend && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/\n'; \
 		printf 'erun-ui-frontend-format\terun-ui/frontend format:check\tcd erun-ui/frontend && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json\n'; \
 		printf 'erun-ui-frontend-build\terun-ui/frontend build\tcd erun-ui/frontend && yarn build\n'; \
-		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test\n'; \
+		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n'; \
 		printf 'erun-console-typecheck\terun-console typecheck\tcd erun-console && yarn typecheck\n'; \
 		printf 'erun-console-lint\terun-console lint\tcd erun-console && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/\n'; \
 		printf 'erun-console-format\terun-console format:check\tcd erun-console && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json\n'; \
 		printf 'erun-console-build\terun-console build\tcd erun-console && yarn build\n'; \
-		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test\n' \
+		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n' \
 	) | ./scripts/parallel-gate.sh $(FRONTEND_GATE_PARALLELISM) test-frontend
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
@@ -695,7 +730,7 @@ integration-test:
 	./scripts/agent-gate.sh integration-test "make integration-test" -- $(MAKE) integration-test-gate
 
 integration-test-gate:
-	./erun-integration/scripts/integration-test.sh
+	GO_TEST_GOMAXPROCS=$(GO_TEST_GOMAXPROCS) ./erun-integration/scripts/integration-test.sh
 
 # The front door. Everywhere but an agent pod this is check-gate by another
 # name: scripts/agent-gate.sh execs it directly and exits with exactly its
@@ -752,7 +787,13 @@ CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_
 
 check:
 	@echo ">> concurrent-phase-spans: check-gate runs $(CHECK_GATE_TARGET_COUNT) targets at -j$(CHECK_GATE_PARALLELISM)"
-	./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) check-gate
+	@./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) check-gate; \
+	status=$$?; \
+	if [ $$status -eq 124 ]; then \
+		echo "make check: INCONCLUSIVE -- the gate is still running and reached no verdict." >&2; \
+		echo "make check: that is not a failure and says nothing about the change. GNU Make collapses every nonzero recipe exit to 2, so this exit status alone cannot tell you so; re-run 'make check' to re-attach to the same job and keep waiting." >&2; \
+	fi; \
+	exit $$status
 
 # The full in-build gate: golangci-lint, erun-ui's own Go tests,
 # erun-backend-api's own Go tests, erun-mcp's own Go tests,

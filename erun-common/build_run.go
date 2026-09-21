@@ -23,6 +23,7 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 	buildInput.Verbosity = ctx.Verbosity
 	traceGateTestStageDecision(ctx, buildInput)
+	tracePlaywrightGateSelection(ctx, buildInput)
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
 		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
@@ -59,15 +60,53 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 // traceIncrementalDecision: that trace is gated on a computed fingerprint, which
 // --no-incremental does not produce, and a build that skips promotion needs this
 // line *more* than one that does not. Suppressing it there is what made the flag
-// less truthful than the default (see ApplyIncrementalToDockerBuilds). Guarded on
-// dry-run for the same reason as traceIncrementalDecision: the only incrementally
-// promoted path is the real build, and the goldens must stay stable.
+// less truthful than the default (see ApplyIncrementalToDockerBuilds).
+//
+// It is the only emitter of the gate rebuild reason, in dry-run as well as in a
+// real run: traceIncrementalDecision returns before its own verdict for a gate
+// build, because resolution never inspected a fingerprint tag for one and it
+// would otherwise report the tag as "present locally" having looked at nothing.
+// A gate build's rebuild reason is the gate, not a cache state.
 func traceGateTestStageDecision(ctx Context, buildInput DockerBuildSpec) {
-	if ctx.DryRun || !buildInput.GateTestStage {
+	if !buildInput.GateTestStage {
 		return
 	}
 	tag := strings.TrimSpace(buildInput.Image.Tag)
 	ctx.Trace("rebuilding " + tag + " because its Dockerfile's test stage runs the build's own gate (never promoted from a cached fingerprint)")
+}
+
+// tracePlaywrightGateSelection states, at default verbosity, the Playwright
+// area selection this build actually threads into the gate. It reports the
+// value applyPlaywrightAreaBuildArgs resolved (build.PlaywrightTestAreas) and
+// never re-derives it: a second resolution would be a second answer, and the
+// one worth printing is the one the gate runs.
+//
+// This is the fourth way the stated and the executed selection can diverge
+// (AGENTS.md's "Integration Test Gate" already names three), and the only one
+// that was invisible: "all" reaches the gate both when a tree genuinely
+// resolved to it and when the selection could not be resolved at all, so the
+// two were indistinguishable from the build's output. An empty
+// PlaywrightTestAreas is exactly the unresolved case -- a real resolution
+// always returns a non-empty string, using "all" for the full suite -- which
+// is why the two branches below can be told apart from the threaded value
+// alone.
+//
+// Guarded on dry-run for the same reason as traceGateTestStageDecision: the
+// dry-run goldens are a frozen public contract. Guarded on Promote because a
+// promoted image never runs the gate stage, so the line would describe a run
+// that did not happen.
+func tracePlaywrightGateSelection(ctx Context, buildInput DockerBuildSpec) {
+	if ctx.DryRun || buildInput.Promote {
+		return
+	}
+	if !dockerfileConsumesPlaywrightTestAreas(buildInput.DockerfilePath) {
+		return
+	}
+	if selection := strings.TrimSpace(buildInput.PlaywrightTestAreas); selection != "" {
+		ctx.Trace("playwright gate selection: " + selection + " (from the diff against the merge base, threaded into the gate as PLAYWRIGHT_TEST_AREAS)")
+		return
+	}
+	ctx.Trace("playwright gate selection: all (the selection could not be resolved against a merge base, so the gate runs the full suite)")
 }
 
 // traceIncrementalDecision re-emits the fingerprint inspect already run during
@@ -77,6 +116,14 @@ func traceGateTestStageDecision(ctx Context, buildInput DockerBuildSpec) {
 // rebuild.
 func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
 	if buildInput.Fingerprint == "" {
+		return
+	}
+	// A gate build is never eligible for promotion, so resolution computed its
+	// fingerprint and stopped: it inspected no fingerprint tag and has no
+	// missing-platform set. Both lines below would then describe a check that did
+	// not happen and a cache state that does not exist. traceGateTestStageDecision
+	// already named the real reason.
+	if buildInput.GateTestStage {
 		return
 	}
 	missing := missingFingerprintPlatformSet(buildInput)

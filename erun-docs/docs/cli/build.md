@@ -92,6 +92,23 @@ The local Docker daemon must have binfmt installed for the foreign arch. The run
 
 An image whose Dockerfile builds `FROM` another image the same build produces resolves that base from the local build, for each architecture, without the base being published. So `erun build --version <version>` builds a whole release locally — dependent images included — which makes it usable as the gate to run *before* [`erun release`](/cli/release) moves any git ref. Nothing local is tagged as the plain published version; assembling that multi-arch manifest stays [`erun push`](/cli/push)'s job. See [Agent reference · CLI flag spec · `erun build`](/agent-reference/cli-flags#erun-build) for the exact build-arg rule.
 
+## Build secrets
+
+A build step sometimes needs a credential that must not end up in the image — a token to pull a chart from a registry that is not anonymously readable, for example. Declaring it under `docker.secrets` in `.erun/config.yaml` hands it to the build as a BuildKit secret, available to a `RUN` through a secret mount and never written into a layer:
+
+```yaml
+docker:
+    secrets:
+        - id: ghcr
+          env: GHCR_TOKEN
+```
+
+```dockerfile
+RUN --mount=type=secret,id=ghcr helm registry login ghcr.io --password-stdin < /run/secrets/ghcr
+```
+
+Each entry names where the value comes from — `env: <VAR>` for an environment variable, `src: <path>` for a file, exactly one of the two — never the value itself, so no secret ever reaches the command line, a build trace, or a log. Like `docker.platforms`, the list is a project-wide default that every environment inherits unless it declares `docker.secrets` of its own, and `secrets: []` opts an environment out. A declared secret that is not available (the variable unset, the file missing) fails the build with the name of what is missing, rather than letting a Dockerfile that guards its secret-dependent work skip it and still exit zero. See [Agent reference · Configuration · Build secrets](/reference/configuration#build-secrets) for the resolution order.
+
 ## `--dry-run` output
 
 `erun build --dry-run` streams the same `audit:` and `trace:` lines a real run would: the resolved build scope (project root, tenant, environment, version, registry), the per-component fingerprint-cache decision, and the `docker build` (one per architecture), `docker tag`, and — with `--release` — `docker push` / manifest commands it would run, without executing any of them. Values matching secret patterns are redacted. The trace is otherwise identical to the real run. Redaction follows the rules in [Agent reference · Dry-run redaction](/agent-reference/dry-run-redaction).

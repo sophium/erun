@@ -27,7 +27,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecResolvePlaywrightAreasCmd(findProjectRoot),
 		newExecWriteCmd(findProjectRoot),
 		newExecCommitCmd(findProjectRoot),
-		newExecPushCmd(findProjectRoot),
+		newExecPushCmd(findProjectRoot, store, deps),
 		newExecMergeCmd(findProjectRoot),
 		newExecGateMergeCmd(findProjectRoot),
 		newExecReportCommitStatusCmd(),
@@ -165,15 +165,16 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecDiffCommand(commandContext(cmd), findProjectRoot, runGit, execDiffOptions{
-				JSON:           jsonOutput,
+			commandCtx := commandContext(cmd)
+			return runExecDiffCommand(commandCtx, findProjectRoot, runGit, execDiffOptions{
+				JSON:           commandWantsJSON(commandCtx, jsonOutput),
 				Scope:          scope,
 				SelectedCommit: selectedCommit,
 			})
 		},
 	}
 	addDryRunFlag(cmd)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text (alias for --output json)")
 	cmd.Flags().StringVar(&scope, "scope", "", "Diff scope: current (default), all, or commit")
 	cmd.Flags().StringVar(&selectedCommit, "selected-commit", "", "Oldest commit hash to include when --scope=commit")
 	return cmd
@@ -384,7 +385,7 @@ func runExecCommitCommand(ctx common.Context, findProjectRoot common.ProjectFind
 	return ctx.WriteResult(result)
 }
 
-func newExecPushCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func newExecPushCmd(findProjectRoot common.ProjectFinderFunc, store common.CloudReadStore, cloudDeps common.CloudDependencies) *cobra.Command {
 	var remote string
 	cmd := &cobra.Command{
 		Use:   "push BRANCH",
@@ -399,7 +400,7 @@ func newExecPushCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecPushCommand(commandContext(cmd), findProjectRoot, args[0], remote)
+			return runExecPushCommand(commandContext(cmd), findProjectRoot, store, cloudDeps, common.PushWorkingTreeBranchDependencies{}, args[0], remote)
 		},
 	}
 	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to push to (defaults to origin)")
@@ -407,7 +408,7 @@ func newExecPushCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	return cmd
 }
 
-func runExecPushCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, branch, remote string) error {
+func runExecPushCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, store common.CloudReadStore, cloudDeps common.CloudDependencies, pushDeps common.PushWorkingTreeBranchDependencies, branch, remote string) error {
 	if findProjectRoot == nil {
 		findProjectRoot = common.FindProjectRoot
 	}
@@ -418,14 +419,28 @@ func runExecPushCommand(ctx common.Context, findProjectRoot common.ProjectFinder
 	result, err := common.PushWorkingTreeBranch(ctx, projectRoot, common.PushWorkingTreeBranchParams{
 		Branch: branch,
 		Remote: remote,
-	}, common.PushWorkingTreeBranchDependencies{})
+	}, pushDeps)
 	if err != nil {
 		return err
 	}
+	// The unqueued-branch warning is best-effort and never fails the push: it
+	// is a signal about work that will not land, not a reason to refuse work
+	// that already has. A dry run traces the check it would make without
+	// making it, the same way the push itself is traced.
 	if ctx.DryRun {
+		common.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, common.PushedBranchReviewNoticeParams{
+			ProjectRoot: projectRoot,
+			Branch:      result.Branch,
+			Remote:      result.Remote,
+		})
 		return nil
 	}
 	ctx.Info(fmt.Sprintf("Pushed %s to %s (%s).", result.Branch, result.Remote, result.Commit))
+	common.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, common.PushedBranchReviewNoticeParams{
+		ProjectRoot: projectRoot,
+		Branch:      result.Branch,
+		Remote:      result.Remote,
+	})
 	return ctx.WriteResult(result)
 }
 
@@ -496,6 +511,11 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"Commit messages are read verbatim from stdin, never a shell argument, so nothing in them is " +
 			"reinterpreted: one message per --source, in the same order, separated by NUL bytes (a single " +
 			"--source needs no separator at all).\n\n" +
+			"Each source branch's own load-bearing trailers — `Closes #N`, and the `Reproduces:` / " +
+			"`Regression-Test:` lines a defect fix declares — are appended beneath the message it is given, so " +
+			"what the branch declared about itself survives a squash that replaces the rest of its history. " +
+			"The message stays the commit's subject and the whole of its own body, and a trailer the message " +
+			"already carries is not repeated.\n\n" +
 			"The working tree must already be clean: this checks out a different local branch than whatever the " +
 			"tree is currently on, so uncommitted work there is refused rather than silently carried onto the " +
 			"prospective merge.\n\n" +
@@ -510,7 +530,7 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"corrupt each other's accounting — a drive has already reported pushing a commit that belonged to " +
 			"another batch's tree. A caller that took the claim itself passes --under-lease so its own hold " +
 			"does not refuse it.\n\n" +
-			"--dry-run traces the fetch, checkout, and each squash merge and commit without running them.",
+			"--dry-run traces the fetch, checkout, and each squash merge, trailer read and commit without running them.",
 		Example: "  echo 'Add widget' | erun exec gate-merge --source feature/add-widget --target main\n" +
 			"  printf 'Add widget\\0Add gadget' | erun exec gate-merge --source feature/add-widget " +
 			"--source feature/add-gadget --target main\n" +

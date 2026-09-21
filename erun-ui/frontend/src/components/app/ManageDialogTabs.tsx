@@ -2,6 +2,7 @@ import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from 'erun-kit';
 import { AlertTriangle, Rocket } from 'lucide-react';
 import * as React from 'react';
 
+import { deployComponentsEmptySelection } from '@/app/deployComponentsSelection';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -154,6 +155,9 @@ function DirtyAwareTabsTrigger({
 function RedeployBanner({ dialog }: { dialog: ManageDialogState }): React.ReactElement {
   const dispatch = useAppDispatch();
   const deploying = dialog.busyAction === 'save' || dialog.busy;
+  // "Redeploy now" reads the same checklist as the Runtime tab's Deploy, so an
+  // emptied one leaves it nothing to roll out either.
+  const noComponents = deployComponentsEmptySelection(dialog);
   return (
     <div
       role="alert"
@@ -167,7 +171,9 @@ function RedeployBanner({ dialog }: { dialog: ManageDialogState }): React.ReactE
       <div className="min-w-0">
         <div className="font-semibold text-foreground">Pending redeploy</div>
         <div className="text-muted-foreground">
-          Saved values are not yet applied to the running pod.
+          {noComponents
+            ? 'Saved values are not yet applied, and no charts are checked — check at least one on the Runtime tab to redeploy.'
+            : 'Saved values are not yet applied to the running pod.'}
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -185,7 +191,7 @@ function RedeployBanner({ dialog }: { dialog: ManageDialogState }): React.ReactE
         <Button
           type="button"
           size="sm"
-          disabled={deploying}
+          disabled={deploying || noComponents}
           onClick={() =>
             void dispatch(submitManageDeploy()).catch((error: unknown) => {
               dispatch(showTerminalError(readError(error)));

@@ -75,7 +75,12 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
       <PanelBody
         data={data}
         tab="reviews"
-        empty={<ReviewsEmptyState filterActive={filterActive} />}
+        empty={
+          <ReviewsEmptyState
+            filterActive={filterActive}
+            canCreateReview={data?.canCreateReview === true}
+          />
+        }
       >
         {visibleReviews.length > 0 ? (
           <ReviewsTable
@@ -134,7 +139,20 @@ function ReviewsFilterControls({
 // ReviewsEmptyState keeps "nothing exists yet" and "nothing matches this
 // filter" visually and textually distinct, per the repo's three-empty-states
 // rule — a filtered zero must not read as "this tenant has no reviews".
-function ReviewsEmptyState({ filterActive }: { filterActive: boolean }): React.ReactElement {
+//
+// The "nothing exists yet" body names two ways to open a review, so it may
+// only do that for a caller who has both: NewReviewAction renders a permission
+// notice in the button's place otherwise, and the CLI's `erun review create`
+// posts the same route canCreateReview is read from, so a refused caller is
+// refused there too. A caller without the write is pointed at the notice
+// beside this empty state instead of at either route.
+function ReviewsEmptyState({
+  filterActive,
+  canCreateReview,
+}: {
+  filterActive: boolean;
+  canCreateReview: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   if (filterActive) {
     return (
@@ -165,7 +183,11 @@ function ReviewsEmptyState({ filterActive }: { filterActive: boolean }): React.R
   return (
     <EmptyState
       heading="No reviews yet"
-      body="A review appears here once someone opens one from the CLI's erun review create or the New review button above."
+      body={
+        canCreateReview
+          ? "A review appears here once someone opens one from the CLI's erun review create or the New review button above."
+          : 'Creating a review needs additional access — the notice above says what is missing.'
+      }
     />
   );
 }

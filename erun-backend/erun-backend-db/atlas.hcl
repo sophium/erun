@@ -32,7 +32,9 @@ env "default" {
     "file://schema/tables/invite_requests.sql",
     "file://schema/tables/platform_rate_limits.sql",
     "file://schema/tables/gate_runs.sql",
+    "file://schema/tables/jobs.sql",
     "file://schema/tables/retention_runs.sql",
+    "file://schema/tables/environment_events.sql",
     "file://schema/indexes/users.sql",
     "file://schema/indexes/user_external_ids.sql",
     "file://schema/indexes/role_permissions.sql",
@@ -50,7 +52,9 @@ env "default" {
     "file://schema/indexes/invites.sql",
     "file://schema/indexes/invite_requests.sql",
     "file://schema/indexes/gate_runs.sql",
+    "file://schema/indexes/jobs.sql",
     "file://schema/indexes/retention_runs.sql",
+    "file://schema/indexes/environment_events.sql",
     "file://schema/triggers/comments.sql",
     "file://schema/triggers/timestamps.sql",
     "file://schema/fks/review_builds.sql",
@@ -76,6 +80,8 @@ env "default" {
     "file://schema/rls/ai_sessions.sql",
     "file://schema/rls/invites.sql",
     "file://schema/rls/gate_runs.sql",
+    "file://schema/rls/jobs.sql",
+    "file://schema/rls/environment_events.sql",
   ]
   url = var.database_url
   dev = "docker://postgres/18/dev?search_path=public"

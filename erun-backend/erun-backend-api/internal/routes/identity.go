@@ -491,7 +491,21 @@ func (r IdentityRoutes) updateSMTPSettings(w http.ResponseWriter, req *http.Requ
 // state initial can only be deleted not deactivated" is actionable for an
 // operator), falling back to 502 for a transport-level failure that never
 // got a Zitadel response at all.
+//
+// A taken login name is the one case that is not forwarded as-is. The
+// instance reports it as a bare AlreadyExists conflict whose message names
+// the account, not the name, so the caller was told something they could not
+// act on -- while the thing they can act on, the name they chose, was the one
+// thing not said. It becomes a conflict carrying its own code and the name,
+// so the console and the CLI can render a message that tells the user what to
+// change. Checked before the generic APIError branch, whose forwarding would
+// otherwise swallow it.
 func writeIdentityAdminError(w http.ResponseWriter, err error) {
+	var usernameTaken *zitadel.UsernameTakenError
+	if errors.As(err, &usernameTaken) {
+		writeErrorCode(w, http.StatusConflict, "USERNAME_TAKEN", usernameTaken.Error())
+		return
+	}
 	var apiErr *zitadel.APIError
 	if errors.As(err, &apiErr) {
 		status := apiErr.StatusCode

@@ -36,6 +36,12 @@ Every file in the tree is named `config.yaml` — only its directory distinguish
 
 Every file in the tree is named `config.yaml`; only the directory it sits in distinguishes the global, tenant, and environment configs.
 
+### The desktop keeps its own state beside this tree {#desktop-state-tree}
+
+The config root is lowercase `erun`. The desktop app keeps its own per-installation state — its identity key, its log, and the orchestrator bookkeeping it restores itself from — in a **separately spelled** `ERun` directory beside it, under the same config home. The two names differ only in case, so on the case-insensitive filesystems macOS ships with by default they resolve to a single directory and the distinction is invisible; on a case-sensitive volume, and on Linux, they are two directories.
+
+That matters when you go looking for a file by hand. A tenant's config, its secrets, the ACME state, and the port-forward records under `portforward/` are all in the lowercase tree in the table above; `desktopid.pub`, `erun-app.log`, and the orchestrator files are in the capitalized one. Do not merge the two by renaming either directory: the spelling a component resolves is what points it at its state, so renaming one hides every file the other name was reading. The port-forward records are part of the config tree, not the desktop's — the desktop only reads that convention, and never writes it.
+
 ### Config backups {#config-backups}
 
 Both the global config and each environment's `config.yaml` are snapshotted before they are overwritten. The first save on any given day copies the previous file to `<name>.<YYYY-MM-DD>.bak` next to it; later saves the same day are no-ops, and only the five most recent dailies are kept. Backups carry no secrets the live file does not.

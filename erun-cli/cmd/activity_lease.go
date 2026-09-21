@@ -51,10 +51,14 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 			"read, so a crashed job cannot keep an environment awake.\n\n" +
 			"Pass --exclusive before any mutating work in a target environment (erun#1245):\n" +
 			"at most one exclusive holder is allowed per --scope (default \"worktree\"), so a\n" +
-			"second agent job or orchestrator already working the same worktree is refused\n" +
-			"and named in the error, while a job in a different scope - a separate clone in\n" +
-			"the same pod - is unaffected. An exclusive take is also refused while an\n" +
-			"operator's own SSH session is active in the environment.",
+			"second exclusive take in that scope is refused and named in the error, while a\n" +
+			"holder in a different scope - a separate clone in the same pod - is\n" +
+			"unaffected. An exclusive take is also refused while an operator's own SSH\n" +
+			"session is active in the environment.\n\n" +
+			"Which work a claim refuses once it is held depends on its scope: only an\n" +
+			"\"environment\" claim refuses other job starts here, while a \"worktree\" claim\n" +
+			"- the default - is refused by erun exec gate-merge, which rewrites that one\n" +
+			"shared worktree. A claim at another scope refuses neither.",
 		Example: "  # From inside the environment, wrap a long build so it stays busy for the build.\n" +
 			"  erun activity lease take --tenant team --environment dev --name gradle-build --pid $$\n" +
 			"  trap 'erun activity lease release --tenant team --environment dev --id gradle-build' EXIT\n\n" +
@@ -88,7 +92,7 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim exclusivity over --scope instead of plain presence; a second exclusive take in the same scope is refused and told who holds it")
 	cmd.Flags().StringVar(&scope, "scope", "", "The resource this exclusive claim protects (default \"worktree\"); only meaningful with --exclusive")
 	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on the lease so a refusal can name who to go ask")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the lease as JSON")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the lease as JSON (alias for --output json)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -105,7 +109,7 @@ func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params c
 	if !resolved {
 		return nil
 	}
-	if jsonOutput {
+	if commandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(lease)
@@ -256,7 +260,7 @@ func newActivityLeaseListCmd(resolveOpen OpenResolver) *cobra.Command {
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the leases as JSON")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the leases as JSON (alias for --output json)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -292,7 +296,7 @@ func listLeases(ctx context.Context, commandCtx common.Context, resolveOpen Open
 }
 
 func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
-	if jsonOutput {
+	if commandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		if leases == nil {
@@ -364,7 +368,7 @@ func newActivitySampleCmd() *cobra.Command {
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&procRoot, "proc-root", common.DefaultProcRoot, "Process filesystem to sample")
 	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", common.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON (alias for --output json)")
 	return cmd
 }
 
@@ -413,7 +417,7 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 }
 
 func writeActivitySampleResult(ctx common.Context, result common.ResidentActivityResult, jsonOutput bool) error {
-	if jsonOutput {
+	if commandWantsJSON(ctx, jsonOutput) {
 		return json.NewEncoder(ctx.Stdout).Encode(result)
 	}
 	if !result.Busy {

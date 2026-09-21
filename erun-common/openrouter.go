@@ -71,14 +71,24 @@ type OpenRouterConfig struct {
 // A client cannot echo a block it never modelled, so the refusal is structural
 // and no invocation flag, environment value, or erun-side proxy can clear it.
 //
-// It is declared here rather than detected because a model id carries nothing
-// about the wire contract its provider enforces; the catalog is the one place
-// that already states what this install may select, so it is also the place
-// that can state a listing the lanes cannot actually drive. Declaring it keeps
-// the failure at the point erun chooses a model — it stops the entry being
-// advertised and selected — instead of at the turn the provider refuses, tens
-// of turns into work that is then checkpointed under a message that names
-// nothing.
+// The catalog declares this so an operator curating a listing they know about
+// can mark it, but the declaration alone is not enough to cover the installs
+// that need it. A catalog is written before the declaration is known: the editor
+// seeds an unconfigured one from the host's own Claude Code settings, so a host
+// already running one of these models writes back a row carrying nothing but an
+// id and a window, and the published configuration reference shows the same
+// shape. Those catalogs exist now and no edit reaches them, which is why
+// reasoningEchoModelIDs states the same fact against the model id itself: the
+// wire contract is a property of the model, so it is knowable without an
+// operator annotating a row.
+//
+// It is stated rather than detected because a model id carries nothing about the
+// wire contract its provider enforces, and because the refusal happens inside
+// Claude Code's own request building tens of turns into a conversation — erun
+// neither builds those requests nor survives the process that dies on them.
+// Stating it keeps the failure at the point erun chooses a model, where the lane
+// can still refuse to start, instead of at the turn the provider refuses, where
+// the work is already lost.
 type OpenRouterModel struct {
 	ID      string `yaml:"id" json:"id"`
 	Context int    `yaml:"context,omitempty" json:"context,omitempty"`
@@ -87,9 +97,30 @@ type OpenRouterModel struct {
 	RequiresReasoningEcho bool `yaml:"requiresreasoningecho,omitempty" json:"requiresReasoningEcho,omitempty"`
 }
 
+// reasoningEchoModelIDs are the model ids whose provider is known to refuse a
+// conversation erun's lanes drive, whether or not the catalog declares them.
+// They are matched case-insensitively on the whole id.
+//
+// Add an id here only on an observed refusal, and alongside a declaration in the
+// published catalog where one applies: listing a model that can in fact be
+// driven refuses a lane that would have worked, which is its own defect. The set
+// is deliberately the ids erun has evidence for rather than every model of a
+// suspect family, because a family shares a vendor but not necessarily a wire
+// contract.
+var reasoningEchoModelIDs = map[string]struct{}{
+	"deepseek/deepseek-v4.1-flash": {},
+}
+
+// modelRequiresReasoningEcho reports whether the id itself names a model erun
+// knows its lanes cannot drive, independent of any catalog.
+func modelRequiresReasoningEcho(id string) bool {
+	_, known := reasoningEchoModelIDs[strings.ToLower(strings.TrimSpace(id))]
+	return known
+}
+
 // driveable reports whether an erun AI lane can be launched on this listing.
 func (m OpenRouterModel) driveable() bool {
-	return !m.RequiresReasoningEcho
+	return !m.RequiresReasoningEcho && !modelRequiresReasoningEcho(m.ID)
 }
 
 // EffectiveGateway resolves the gateway an environment actually uses: the
@@ -183,25 +214,28 @@ func (c *OpenRouterConfig) ModelIDs() []string {
 	return out
 }
 
-// RequiresReasoningEcho reports whether the catalog lists id, and lists it as a
-// model whose provider demands its own reasoning back. It is deliberately false
-// for an id the catalog does not list at all: naming an uncurated model is a
-// supported act, and only an explicit listing of this one makes the lanes
-// refuse it.
+// RequiresReasoningEcho reports whether an erun AI lane would be refused on id:
+// either the catalog lists it as a model whose provider demands its own
+// reasoning back, or the id names one of reasoningEchoModelIDs.
+//
+// It stays false for an id that is merely absent from the catalog and unknown,
+// because naming an uncurated model is a supported act. A model erun has
+// evidence against is a different case, and the catalog's silence about it is
+// not evidence of anything — the listing may simply have been written before the
+// evidence existed.
 func (c *OpenRouterConfig) RequiresReasoningEcho(id string) bool {
-	if c == nil {
-		return false
-	}
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return false
 	}
-	for _, m := range c.Models {
-		if strings.TrimSpace(m.ID) == id {
-			return !m.driveable()
+	if c != nil {
+		for _, m := range c.Models {
+			if strings.TrimSpace(m.ID) == id {
+				return !m.driveable()
+			}
 		}
 	}
-	return false
+	return modelRequiresReasoningEcho(id)
 }
 
 // ContextFor returns the configured context window for a model id, or 0 when

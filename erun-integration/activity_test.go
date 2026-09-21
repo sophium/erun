@@ -777,6 +777,25 @@ func TestActivity(t *testing.T) {
 		golden.Equal(t, "activity/lease_help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("lease_take_help_names_what_an_exclusive_claim_actually_refuses", func(t *testing.T) {
+		// An exclusive take defaults to the "worktree" scope, and a job start
+		// consults only the "environment" scope. Help saying a second agent job
+		// is refused by a worktree claim describes a guard that does not fire:
+		// an orchestrator that takes one over MCP and starts a second job sees
+		// no refusal and reads that silence as protection.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"activity", "lease", "take", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "already working the same worktree is refused") {
+			t.Errorf("help must not claim a worktree-scoped claim refuses a second agent job, which only an environment-scoped claim does; got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "environment") {
+			t.Errorf("help must name the scope a job start actually consults; got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("lease_take_list_and_release", func(t *testing.T) {
 		// The lease lifecycle a wrapper drives: take before the long job, list to
 		// see what is holding the environment, release when it finishes. The

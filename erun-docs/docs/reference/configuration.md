@@ -109,7 +109,7 @@ One per environment. This is the most-edited file.
 | `sshd.workspacesync.enabled` | bool | desktop workspace-sync poller | Mirror a local folder into the runtime workspace. |
 | `sshd.workspacesync.localpath` | string | desktop workspace-sync poller | The local folder to mirror. |
 | `deploy.timeout` | duration (e.g. `5m0s`) | `erun deploy`, `erun upgrade` (helm `--timeout`) | Per-env helm rollout wait. How long `deploy` waits for the rollout to become ready before helm times out; the [pod monitor](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring) keeps waiting up to this bound while an image is still pulling and aborts earlier on a real failure. Unset → `5m0s`. Overridden per-deploy by `--rollout-timeout` / the MCP `deploy` `timeout` input. A malformed value fails the deploy. |
-| `deploy.components` | list | `erun deploy` | Per-machine saved deploy selection: the charts `erun deploy` rolls out for this env by default (chart directory names under `<tenant>-devops/k8s/`, plus the runtime release name `<tenant>-devops`). Set it with `erun init --components <a,b,…>`, or from the desktop app's Runtime-tab checklist (inside the Version-to-deploy picker, gated until you pick a version, "Set as default"). It is a **published-version view, the same for every env type**: once you pick a version it offers the component charts actually published at that version (plus the runtime) — the version, not the env's local source, decides which charts exist, so a version that never published a chart doesn't list it, and a local-agent env shows the same published components as a runtime env rather than its local working-tree chart directories. (Deploying local working-tree charts by name stays available to an operator via the CLI.) Deploy is opt-in: `--components` overrides this per run; when both are empty, deploy falls back to the project's [`k8s.deployments`](#per-project-config) plan, then to the runtime chart alone. See [selection precedence](/agent-reference/cli-flags#components-value-set). Empty → no saved selection. Because a saved selection wins over the plan permanently and tiers never merge, a plain deploy (no `--components`) sourced from the saved set **refuses** whenever the plan names something the saved set omits, tracing `deploy: saved components shadow the repo plan; plan also names <a, b, …>` and naming the fix: adopt the addition with `erun init --components <a,b,…>`, or clear the saved selection with `erun init --components ''` to return to the plan outright. `--components` passed explicitly for that one run bypasses the refusal (and the saved selection) entirely. |
+| `deploy.components` | list | `erun deploy` | Per-machine saved deploy selection: the charts `erun deploy` rolls out for this env by default (chart directory names under `<tenant>-devops/k8s/`, plus the runtime release name `<tenant>-devops`). Set it with `erun init --components <a,b,…>`, or from the desktop app's Runtime-tab checklist (inside the Version-to-deploy picker, gated until you pick a version, "Set as default"). It is a **published-version view, the same for every env type**: once you pick a version it offers the component charts actually published at that version (plus the runtime) — the version, not the env's local source, decides which charts exist, so a version that never published a chart doesn't list it, and a local-agent env shows the same published components as a runtime env rather than its local working-tree chart directories. (Deploying local working-tree charts by name stays available to an operator via the CLI.) Unchecking every chart in the checklist is not the same as leaving the selection unspecified: the checklist refuses an empty selection rather than let it fall through to the runtime chart alone, so its Deploy stays disabled with the reason named until at least one chart is checked. Deploy is opt-in: `--components` overrides this per run; when both are empty, deploy falls back to the project's [`k8s.deployments`](#per-project-config) plan, then to the runtime chart alone. See [selection precedence](/agent-reference/cli-flags#components-value-set). Empty → no saved selection. Because a saved selection wins over the plan permanently and tiers never merge, a plain deploy (no `--components`) sourced from the saved set **refuses** whenever the plan names something the saved set omits, tracing `deploy: saved components shadow the repo plan; plan also names <a, b, …>` and naming the fix: adopt the addition with `erun init --components <a,b,…>`, or clear the saved selection with `erun init --components ''` to return to the plan outright. `--components` passed explicitly for that one run bypasses the refusal (and the saved selection) entirely. |
 | `idle.timeout` | duration (e.g. `5m0s`) | chart (`ERUN_IDLE_TIMEOUT`), in-pod idle monitor | How long the env must be quiet before idle-stop fires. |
 | `idle.workinghours` | string (`HH:MM-HH:MM`) | chart (`ERUN_IDLE_WORKING_HOURS`), idle monitor | Window during which idle-stop is allowed to fire. |
 | `idle.timezone` | string | chart (`ERUN_IDLE_TIMEZONE`), idle monitor | Time zone for `workinghours`. |
@@ -156,6 +156,8 @@ Committed to the repo, applies to anyone who checks it out. A gitignored copy de
 | `environments.<env>.docker.fingerprints` | map | `erun build`, `erun build --release` | Per-image content fingerprints from the last published build. Drives the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache). |
 | `docker.platforms` | list | `erun build`, `erun push` | Project-wide default for the `docker --platform` targets of a non-release build/push (e.g. `[linux/amd64]`), inherited by every environment that declares no `platforms` of its own — for a project whose machines can only ever run one architecture. Declare it once here instead of repeating it per environment, which silently leaves any environment nobody listed on the multi-arch build. Never applies to `erun build --release` / `erun release`, which always build every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 | `environments.<env>.docker.platforms` | list | `erun build`, `erun push` | Pins the `docker --platform` targets for a non-release build/push in this env (e.g. `[linux/amd64]`), overriding the project-wide `docker.platforms` default. An explicit empty list (`platforms: []`) opts this env out of that default and keeps the multi-arch build — the escape hatch for a generic env name like `local` that can belong to a machine of any architecture. `--platform` on the command line overrides both for one invocation. Never applies to `erun build --release` / `erun release`. See [Multi-architecture](/cli/build#multi-architecture). |
+| `docker.secrets` | list | `erun build`, `erun push`, `erun build --release` | Project-wide default for the [BuildKit build secrets](#build-secrets) every build receives, inherited by every environment that declares no `secrets` of its own. Each entry is `{id, env}` or `{id, src}`. |
+| `environments.<env>.docker.secrets` | list | `erun build`, `erun push`, `erun build --release` | Pins the build secrets for builds in this env, overriding the project-wide `docker.secrets` default. An explicit empty list (`secrets: []`) opts this env out of that default. |
 | `environments.<env>.k8s.deployments[]` | ordered list | `erun deploy` | The ordered deploy plan for this env. Each step is either a single component name or a list of names deployed in parallel. |
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
 | `release.developbranch` | string | `erun release` | Develop branch name (default `develop`). |
@@ -437,6 +439,50 @@ A `deploy` registry need not also carry `build` or `to`: the image it serves may
 - **Deploy** copies each image the cluster needs (the runtime image and any locally-built component) from `from` to every `to` with `docker buildx imagetools create` (manifest-aware), then the cluster pulls from the `deploy` registry. The copy runs only when both `from` and `to` are set.
 
 **Migration:** a legacy single `containerregistry: X` scalar (project or env config) is read once as a one-entry list `[{registry: X, roles: [build, deploy]}]` and rewritten in the list shape on the next save.
+
+### Build secrets {#build-secrets}
+
+A build step sometimes needs a credential that must not be baked into the image — a token to pull a chart from a registry that is not anonymously readable, for instance. `docker.secrets` hands it to the build as a [BuildKit secret](https://docs.docker.com/build/building/secrets/), so it is available to a `RUN` through a secret mount and is neither written into a layer nor left in the image history.
+
+Declare each secret by the **id** the Dockerfile mounts, plus where its value comes from:
+
+```yaml
+docker:
+    secrets:
+        - id: ghcr
+          env: GHCR_TOKEN
+        - id: chart-repo-config
+          src: /home/you/.config/acme/docker-config.json
+```
+
+- `env: <VAR>` reads the credential from the environment variable `VAR`.
+- `src: <path>` reads it from a file on the machine running the build.
+
+Exactly one of the two per entry. In the Dockerfile, mount it by that same id:
+
+```dockerfile
+RUN --mount=type=secret,id=ghcr \
+    HELM_REGISTRY_CONFIG=/run/secrets/ghcr helm pull oci://ghcr.io/acme/charts/private
+```
+
+**The list resolves per environment**, in the same order as `docker.platforms`:
+
+1. `environments.<env>.docker.secrets` (per-project, per-env override).
+2. `docker.secrets` (per-project, top-level default).
+3. None declared anywhere → the build receives no secrets and its `docker build` command is unchanged.
+
+An explicit empty list (`secrets: []`) opts an environment out of the project-wide default.
+
+**Only a reference is ever put on the command line** — `--secret id=<id>,env=<VAR>` or `--secret id=<id>,src=<path>`, never the credential itself. docker reads the value from its own environment or from the file it is handed, so no secret value is stored, traced, or logged by erun. A `src:` path and an `env:` variable name are visible in `erun build --dry-run` output and in build traces; the values behind them are not.
+
+**A declared secret that cannot be supplied fails the build**, naming the entry and the missing variable or path:
+
+```
+docker.secrets entry "ghcr" needs the environment variable GHCR_TOKEN, which is not set:
+set it, or point the entry at a file with `src:`
+```
+
+That is deliberate. A Dockerfile typically guards secret-dependent work with `if [ -f /run/secrets/<id> ]`, so a secret that silently fails to arrive would make the build **skip** that work and still exit zero — reporting success having verified less than the project asked for. Failing loudly is the only outcome that cannot be mistaken for a passing check.
 
 ### Deploy chart source {#deploy-chart-source}
 

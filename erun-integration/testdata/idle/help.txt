@@ -17,7 +17,7 @@ Flags:
       --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Environment
   -h, --help                 help for idle
-      --json                 Write JSON output
+      --json                 Write JSON output (alias for --output json)
       --tenant string        Tenant
 
 Global Flags:

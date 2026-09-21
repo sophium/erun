@@ -48,6 +48,29 @@ var InternalAPIRoutes = map[string]bool{
 	// matching GET has a real operator surface (erun-console's environments
 	// panel), so it is not listed here.
 	"POST /v1/environments/{environment_id}/ai-sessions": true,
+	// The environment's own reporter appends to the sequenced event log --
+	// never something an operator clicks, the same self-report shape as the
+	// ai-session route above.
+	"POST /v1/environments/{environment_id}/events": true,
+	// The read half of that log is a resume position, not a report: a client
+	// reconnecting to a stream hands back the cursor it last reached and gets
+	// the backlog it missed. Its operator-facing form is a live-updating view
+	// this change does not build (that is client work, and the console has no
+	// live-update consumer of any kind yet), so it is recorded here as a
+	// transport endpoint driven by a client's own reconnect loop rather than
+	// left unclassified -- but it is not exempted as "nobody has needed a
+	// surface": a console live view is the reader it is ultimately for.
+	"GET /v1/events": true,
+	// The environment-scoped jobs read is what a caller that knows only its
+	// own environment id asks -- an in-pod agent or orchestrator checking
+	// what else is running alongside it before claiming more work. It is not
+	// a second operator view of the queue: the tenant-wide GET /v1/jobs
+	// returns exactly these rows and narrows to one environment with its own
+	// environmentId filter, which is what the console's Jobs section renders.
+	// The nested route earns its place by being reachable from the side that
+	// has no tenant-scoped job ids to filter by, not by giving an operator a
+	// capability the flat route does not already have.
+	"GET /v1/environments/{environment_id}/jobs": true,
 	// A one-time, operations-only repair action for a platform whose own
 	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
 	// its ERUN_TENANT was read at bootstrap (see erun-backend-api/AGENTS.md's

@@ -1,6 +1,6 @@
 ---
 name: erun-merge
-description: Take the current branch from "the work is done" to a review sitting at READY on the erun platform — resolve or accept a target branch, merge it in, commit and push, open or reuse the review, build and record the result. Stops at READY/FAILED and never advances the merge queue. Use when the user says "merge this branch", "land this change", "merge onto main", "advance the merge queue for this branch", "run erun-merge", or any similar request to take a finished change to review.
+description: Take the current branch from "the work is done" to a review sitting at READY on the erun platform — resolve or accept a target branch, merge it in, commit and push, open or reuse the review, build and record the result. Stops at READY/FAILED and never advances the merge queue. Needs a machine with a configured erun platform cloud alias; an agent environment has none and cannot obtain one, so there it stops after the push and hands the review rungs to a credentialed host. Use when the user says "merge this branch", "land this change", "merge onto main", "advance the merge queue for this branch", "run erun-merge", or any similar request to take a finished change to review.
 ---
 
 # Land the current branch: /erun-merge \<targetBranch\>
@@ -27,11 +27,54 @@ this skill does not restate that mechanism.
 
 ## Before doing anything: can this even run here?
 
+Two questions, both answered before touching git: is there an `erun` binary,
+and can it reach the platform these reviews live on? The rungs below do not
+all run in the same place — the build does not need platform credentials, and
+every `erun review` call does — so answering the second question up front is
+what decides whether this skill can run here at all.
+
 ```sh
 command -v erun >/dev/null 2>&1 || {
   echo "erun is not on PATH. On a laptop: install erun, then 'erun cloud init erun --api-url <url>' and 'erun cloud login --alias <alias>' to connect to the platform this branch's reviews live on."
   exit 1
 }
+
+# Resolve the platform alias without reaching the network: --dry-run resolves
+# the alias and builds the client, then stops before any HTTP call. erun exits
+# 127 when it cannot resolve a usable erun-type alias — its own documented code
+# for "this machine cannot make platform calls at all", readable from the exit
+# status alone rather than from error text a wrapper might swallow.
+probe=0
+erun review list --dry-run >/dev/null 2>&1 || probe=$?
+if [ "${probe}" -eq 127 ]; then
+  cat >&2 <<'EOF'
+This machine cannot make erun platform calls, so /erun-merge cannot finish
+here: no usable erun platform cloud provider alias is configured.
+
+Do not try to acquire one. `erun cloud init` succeeds unattended, but
+`erun cloud login` does not — both of its flows (Device Authorization Grant
+and Authorization Code + PKCE) need a human at a browser. No retry, no
+timeout, and no piped answer completes one from an unattended environment.
+
+Split the run by what each side can actually do:
+
+  * THIS environment can build. `erun build` needs no platform alias: with
+    none configured it simply skips reporting its outcome to the platform.
+  * A CREDENTIALED HOST makes every `erun review` call — the already-merged
+    check in rung 3, `erun review create` in rung 4, `erun review
+    record-build` in rung 5, and everything `erun-merge-queue-drive` runs.
+
+So stop here and hand the branch over. Commit and push it if it is not pushed
+yet — that needs only git, and this rung stopped before the merge rungs, so do
+not start those either. Then tell the operator that the review steps must run
+on a machine with `erun cloud login` already done: either run /erun-merge there
+from the top — every rung checks the state it would produce before acting, so
+an already-pushed branch resumes rather than repeating work — or complete the
+review steps by hand there. The pushed branch is what this environment can
+deliver; opening and building the review belongs to the credentialed side.
+EOF
+  exit 127
+fi
 ```
 
 Do this before touching git. `erun` exists inside a deployed env by
@@ -39,11 +82,14 @@ construction; on a laptop it may not, and there is no partial version of this
 skill to fall back to — merging without opening a review is not this skill's
 job half-done, it is a different, smaller thing.
 
-You do not need a separate check for the platform alias: the first platform
-call below (`erun review list`) fails cleanly and by itself if none is
-configured, naming `erun cloud init erun --api-url <url>` as the fix — see
-`erun-docs/docs/cli/review.md`'s error-behaviour table. Stop there and
-report the fix; do not guess a URL or an alias.
+The second check is a real check, not a warning: it is the CLI's own exit-code
+contract (`erun-docs/docs/cli/review.md` § Error behaviour documents 127 as
+"could not resolve a usable platform alias"), so an agent cannot read past it
+as advice. Any other nonzero probe result is left alone deliberately — a
+failure that is not specifically "no platform access" belongs to the real call
+that reports it, not to this rung. Stopping here is the whole point: an
+environment that walks past this and starts improvising login flows spends its
+run on something no unattended agent can complete.
 
 ## The rungs, each skipped when already satisfied
 
@@ -177,19 +223,47 @@ branch carries several unrelated commits and no single subject captures it.
 
 ```sh
 commit=$(git rev-parse HEAD)
-if erun build --release --output json > /tmp/erun-merge-build.json; then
+if erun build --output json > /tmp/erun-merge-build.json; then
   version=$(jq -r .version /tmp/erun-merge-build.json)
   erun review record-build "${review_id}" --commit "${commit}" --version "${version}"
 else
-  # release resolves the version before the per-arch builds run, so it is
-  # still knowable even though the failed run's own JSON was never written
-  # (the command errors before printing a result). --dry-run recomputes the
-  # identical version from the same repo state without touching anything.
-  version=$(erun build --release --dry-run --output json | jq -r .version)
+  # A plain build mints its version from a snapshot timestamp, so the failed
+  # run's own JSON was never written (the command errors before printing a
+  # result) and cannot be re-read. --dry-run mints a valid, same-form version
+  # from the same repo state without building anything — enough for a field
+  # nothing downstream resolves.
+  version=$(erun build --dry-run --output json | jq -r .version)
   erun review record-build "${review_id}" --commit "${commit}" --version "${version}" \
-    --failed --failure-detail "erun build --release failed; see the build log"
+    --failed --failure-detail "erun build failed; see the build log"
 fi
 ```
+
+**`READY` asserts "this commit builds", not "a publishable artifact exists
+at version X".** The plain build above mints the version `record-build`
+records and builds it; it publishes nothing. The artifact that ships is cut
+*after* merge, by the release the accepted review enqueues, which mints its
+own version — so nothing consumes a pre-merge `-pr.<sha>` image set, and no
+platform path resolves the version string this records. Reaching for
+`--release` here instead pays for a two-architecture publish on every pull
+request for an artifact with no consumer, and it discards the environment's
+`docker.platforms` pin.
+
+**Narrow the platform when the branch predates the environment's pin.** The
+build's platform set comes from the *checked-out branch's* `.erun/config.yaml`
+(`docker.platforms`, project-wide or per environment), not from the
+environment you are running in — so a branch cut before that pin landed still
+resolves both architectures and emulates the foreign one, invisibly, at two to
+three times the wall clock. A non-release build may narrow it explicitly,
+which root `AGENTS.md` § "Release Rules" permits and only `--release` refuses:
+
+```sh
+erun build --platform linux/amd64 --output json   # on a machine that only runs amd64
+```
+
+Check what the build resolved from its own trace line — `build: platforms
+configured as <platforms> (.erun/config.yaml <origin>)` — and pass `--platform`
+with the architecture the machine actually runs (`uname -m`) whenever that line
+names more than one.
 
 **Recording the build is the whole transition — there is no separate step
 that sets the review's status.** `erun review record-build` is the only way
@@ -224,8 +298,10 @@ make, never this skill's.
 - **Advancing the merge queue or overriding its unresolved-thread gate.**
   Both are out of scope by design, not by oversight — see the top of this
   file.
-- **Guessing a platform alias or API URL.** If none is configured, it stops
-  on the CLI's own error and names the exact setup command.
+- **Trying to acquire platform access it cannot acquire.** When no usable
+  alias is configured it stops at this rung's own check and hands the review
+  rungs to a credentialed host — never attempting `erun cloud login`, whose
+  flows all need a human at a browser, and never guessing an alias or API URL.
 - **Fabricating a commit message for uncommitted work it did not write.**
   It asks, rather than inventing one.
 

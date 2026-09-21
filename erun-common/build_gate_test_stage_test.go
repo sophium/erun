@@ -55,6 +55,28 @@ func TestDockerfileHasGateTestStageRequiresBothTheStageAndTheDependency(t *testi
 	}
 }
 
+// The two predicates answer different questions and must stay distinguishable:
+// a `test` stage nobody depends on is not a gate (nothing requires it to have
+// run), but it is still a place for tests to run, which is the question the
+// host-network entitlement is scoped by. Collapsing them would either withhold
+// the entitlement from a Dockerfile whose test stage runs by some dependency
+// other than the marker, or grant it to a Dockerfile with no test stage at all.
+func TestDockerfileDeclaresTestStageIsBroaderThanTheGateCheck(t *testing.T) {
+	dir := t.TempDir()
+	declared := writeTestDockerfile(t, dir, "FROM golang:1.26.0 AS test\nRUN make check\n\nFROM scratch\nCOPY . /app\n")
+	if dockerfileHasGateTestStage(declared) {
+		t.Fatal("fixture is wrong: this Dockerfile is meant to have an unconsumed test stage, so it is not a gate")
+	}
+	if !dockerfileDeclaresTestStage(declared) {
+		t.Fatal("expected a Dockerfile declaring AS test to be detected as declaring a test stage even when no later stage consumes it")
+	}
+
+	ordinary := writeTestDockerfile(t, t.TempDir(), "FROM scratch\nCOPY . /app\n")
+	if dockerfileDeclaresTestStage(ordinary) {
+		t.Fatal("expected an ordinary Dockerfile with no test stage to not be detected as declaring one")
+	}
+}
+
 // TestRealDevopsDockerfileStillMatchesTheGateConvention pins the artefact every
 // case above only models. Detection is what exempts erun-devops from
 // fingerprint promotion, so if the real Dockerfile stops matching the

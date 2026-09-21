@@ -24,7 +24,7 @@ import (
 // restriction POSIX permits and Linux enforces, so it works for a session the
 // caller is not in.
 func platformSessionProcesses() ([]sessionProcess, bool) {
-	out, err := exec.Command("ps", "-axo", "pid=,stat=").Output()
+	out, err := exec.Command("ps", "-axo", "pid=,ppid=,pgid=,stat=").Output()
 	if err != nil {
 		return nil, false
 	}
@@ -41,22 +41,31 @@ func platformSessionProcesses() ([]sessionProcess, bool) {
 	return procs, true
 }
 
-// parsePSProcessTable reads ps's pid and stat columns into a table whose
-// session ids the caller fills in. A row whose pid will not parse is dropped
-// rather than guessed at.
+// parsePSProcessTable reads ps's pid, ppid, pgid and stat columns into a table
+// whose session ids the caller fills in. Unlike the session column, ppid and
+// pgid are real columns here, so they need no second source. A row whose pid,
+// ppid or pgid will not parse is dropped rather than guessed at.
 func parsePSProcessTable(out []byte) []sessionProcess {
 	var procs []sessionProcess
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 {
+		if len(fields) < 4 {
 			continue
 		}
 		pid, err := strconv.Atoi(fields[0])
 		if err != nil {
 			continue
 		}
-		procs = append(procs, sessionProcess{pid: pid, zombie: psStatIsZombie(fields[1])})
+		parent, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+		group, err := strconv.Atoi(fields[2])
+		if err != nil {
+			continue
+		}
+		procs = append(procs, sessionProcess{pid: pid, parent: parent, group: group, zombie: psStatIsZombie(fields[3])})
 	}
 	return procs
 }

@@ -310,7 +310,7 @@ func registerIdleStopTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Hold a named lease for the lifetime of long work in this env, so it reports as busy and idle-stop leaves it alone. " +
 			"Take one before detaching a build, test suite, or agent run: a detached job makes no MCP calls while it runs, so without a lease the env reads as untouched and auto-stop would kill exactly the work worth protecting. " +
 			"Re-taking the same id renews it. Pass the detached job's pid so the lease is reclaimed if it dies; a lease also expires on its own, so it can never pin the env awake forever. " +
-			"Set exclusive=true before any mutating work (git checkout, staging, committing) in a target environment: at most one exclusive holder is allowed per scope (default 'worktree'), so a second agent job or orchestrator already working the same worktree is refused and named in the error, while a job in a different scope - a separate clone in the same pod - is unaffected. An exclusive take is also refused while an operator's own SSH session is active in the environment, since the operator never takes a lease of their own.",
+			"Set exclusive=true before any mutating work (git checkout, staging, committing) in a target environment: at most one exclusive holder is allowed per scope (default 'worktree'), so a second exclusive take in that scope is refused and named in the error, while a holder in a different scope - a separate clone in the same pod - is unaffected. An exclusive take is also refused while an operator's own SSH session is active in the environment, since the operator never takes a lease of their own. Which work a held claim refuses depends on its scope: only an 'environment' claim refuses other job starts here, while a 'worktree' claim - the default - is refused by erun exec gate-merge, which rewrites that one shared worktree, and a claim at another scope refuses neither.",
 	}, activityLeaseTakeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "activity_lease_release",
@@ -602,7 +602,7 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, reviewCloseTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_record-build",
-		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted (from the build tool's result) — required even when successful is false, since release resolves the version before the build step runs. gate records the merge queue's own GATE build kind instead: the environment a review's merge queue promoted to MERGE reports its own build of the prospective merge this way, and omits version since the gate publishes nothing. A gate build reported as failed whose failureDetail names a known erun infrastructure failure (a registry or the network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright — builds.successful has no INCONCLUSIVE, so recording it FAILED would move the review out of the merge queue for a network blip; report the gate run INCONCLUSIVE instead (exec_gate-run_report) and re-drive the review once the signature clears. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Record a build against a review on the erun platform. This is the only way to transition a review off OPEN: a successful build moves it to READY (and on to MERGE if it was already the merge queue's head), a failed one moves it to FAILED. There is no separate tool to set a review's status directly. commitId must be the full 40-character commit hash the build ran against, and version the version it minted, from the run's own build result (a plain erun build --output json, or --dry-run --output json when it failed before printing one) — required even when successful is false; a RECORDED build publishes nothing, so this is metadata no platform path resolves and a --release produced version is accepted but not required. gate records the merge queue's own GATE build kind instead: the environment a review's merge queue promoted to MERGE reports its own build of the prospective merge this way, and omits version since the gate publishes nothing. A gate build reported as failed whose failureDetail names a known erun infrastructure failure (a registry or the network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright — builds.successful has no INCONCLUSIVE, so recording it FAILED would move the review out of the merge queue for a network blip; report the gate run INCONCLUSIVE instead (exec_gate-run_report) and re-drive the review once the signature clears. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewRecordBuildTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_report-merged",
@@ -636,6 +636,22 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Name:        "gate_show",
 		Description: "Show one gate run in full on the erun platform. Supports preview.",
 	}, gateShowTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "jobs_list",
+		Description: "List jobs on the erun platform, the live queue first — what agents and orchestrators are working on right now, and what recently finished. Each entry names what is being done, by whom, and how long it has been going. A RUNNING job is work in flight; ABANDONED means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. Supports preview.",
+	}, jobsListTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "jobs_show",
+		Description: "Show one job in full on the erun platform. Supports preview.",
+	}, jobsShowTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "jobs_start",
+		Description: "Record that this actor is starting a piece of work, so the queue shows what is in flight before it finishes and a second actor can see it. With scope set this is a claim: a 409 means another open job already holds that scope, and the refusal names who holds it, what they are doing in prose, and since when — pick up something else rather than duplicating the work. The summary is prose describing the work, never the command that performs it. A real, immediate write, not a preview, unless preview is set.",
+	}, jobsStartTool(runtime))
+	addTool(reg, &mcp.Tool{
+		Name:        "jobs_finish",
+		Description: "Report how a job ended, or refresh what it is doing, on the erun platform. A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read. A real, immediate write, not a preview, unless preview is set.",
+	}, jobsFinishTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_queue_advance",
 		Description: "Advance a target branch's merge queue head to MERGE on the erun platform, which starts that review's merge-gate build. Refuses with the unresolved comment thread count when the queue head still has open threads — resolve them (review_resolve) or use review_queue_override_advance. A real, immediate mutation of shared control-plane state, not a preview, unless preview is set.",

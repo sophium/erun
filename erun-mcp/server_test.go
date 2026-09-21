@@ -163,7 +163,7 @@ var wantRegisteredTools = []string{
 	"exec_diff", "exec_gate-merge", "exec_gate-run_report", "exec_gate-run_start", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
 	"exec_merge", "exec_plan-ruleset-bypass", "exec_push", "exec_raw", "exec_reconcile-bypass", "exec_report-commit-status", "exec_route-check", "exec_write", "expose", "gate_list", "gate_show", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
-	"job_cancel", "job_output", "job_start", "job_status", "list", "observe",
+	"job_cancel", "job_output", "job_start", "job_status", "jobs_finish", "jobs_list", "jobs_show", "jobs_start", "list", "observe",
 	"outputs_download", "outputs_list", "pin", "platform_context_create",
 	"platform_context_get", "platform_context_list", "platform_env_delete",
 	"platform_env_deploy", "platform_env_get", "platform_env_list",

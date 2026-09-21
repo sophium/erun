@@ -276,6 +276,16 @@ COPY erun-docs/docs/reference/env-vars.md /src/erun-docs/docs/reference/env-vars
 COPY erun-skills/skills/erun-pin-version/SKILL.md /src/erun-skills/skills/erun-pin-version/SKILL.md
 COPY erun-docs/docs/cli/pin.md /src/erun-docs/docs/cli/pin.md
 
+# The two TestMergeSkillReadyRung* guards (erun-common) read the erun-merge
+# skill's own READY rung and assert the build policy it writes there, so that
+# one file has to sit at the same relative path here that it has in a full
+# checkout. It is the only skill file they read, and the same narrowing as the
+# pin-version COPY above applies: copying the wider erun-skills tree would put
+# every unrelated skill edit into this image's fingerprint for no test that
+# reads one. Omitting it fails the gate with "no such file or directory" while
+# a full checkout passes -- same reasoning as every COPY above.
+COPY erun-skills/skills/erun-merge/SKILL.md /src/erun-skills/skills/erun-merge/SKILL.md
+
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the
 # integration suite + coverage gate. A failing step fails the build, the

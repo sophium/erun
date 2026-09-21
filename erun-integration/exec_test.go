@@ -1613,6 +1613,95 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("gate_merge_real_run_carries_the_branchs_closes_trailer", func(t *testing.T) {
+		// The reported failure, on a real repository: the branch's own commit
+		// declares "Closes #N", the merge queue lands it with the review name
+		// as the squash message, and the declaration is gone — the issue stays
+		// open with its fix on the target and no commit there referencing it.
+		// The caller here passes only the review name, which is the state the
+		// report describes; a caller that passes the branch's message verbatim
+		// already carried the trailer by accident.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "Fix the widget\n\nCloses #2601\nReproduces: a caller reading the widget got its parts in the wrong order.\nRegression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Assemble the widget in declared order"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		if subject := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%s")); subject != "Assemble the widget in declared order" {
+			t.Fatalf("the squash commit must still lead with the review name, got %q", subject)
+		}
+		// The observable behaviour the report is about: a reader grepping the
+		// target for the issue reference finds the commit that closed it.
+		grepped := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "main", "--grep=Closes #2601", "--format=%s"))
+		if grepped != "Assemble the widget in declared order" {
+			t.Fatalf("expected the landed squash commit to be findable by its issue reference, got %q", grepped)
+		}
+		body := captureGit(t, setup.Cwd, "log", "-1", "--pretty=%B")
+		for _, want := range []string{
+			"Reproduces: a caller reading the widget got its parts in the wrong order.",
+			"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("expected the landed commit to carry %q, got:\n%s", want, body)
+			}
+		}
+		if strings.Contains(body, "Fix the widget") {
+			t.Fatalf("only the branch's trailers belong beneath the review name, not its subject, got:\n%s", body)
+		}
+	})
+
+	t.Run("gate_merge_real_run_accepts_a_url_remote", func(t *testing.T) {
+		// The reported failure: --remote takes a URL, not only a configured
+		// remote name. A URL creates no remote-tracking refs, so the ref the
+		// checkout and every squash-merge used to name ("<remote>/<branch>")
+		// does not exist for one, and the run died with "is not a commit and a
+		// branch 'main' cannot be created from it" while --dry-run exited 0
+		// having traced that same impossible ref. A file:// URL carries the ":"
+		// and "//" that made it unnameable as a ref, so it reproduces the
+		// report without reaching the network.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		remoteRoot := seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		remoteURL := "file://" + remoteRoot
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--remote", remoteURL, "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if parsed.Remote != remoteURL {
+			t.Fatalf("expected the URL remote to be reported back, got %q", parsed.Remote)
+		}
+		// A source that could not be resolved is skipped, not fatal, so a
+		// regression here would otherwise read as a clean empty run.
+		if len(parsed.Landed) != 1 || parsed.Landed[0].SourceBranch != "feature" {
+			t.Fatalf("expected feature to land against the URL remote, got landed=%+v skipped=%+v", parsed.Landed, parsed.Skipped)
+		}
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "feature.txt")); err != nil {
+			t.Fatalf("expected feature.txt to be squash-merged onto main: %v", err)
+		}
+	})
+
 	t.Run("gate_merge_real_run_batch_lands_multiple_sources", func(t *testing.T) {
 		// Two independent branches, both squashed onto one working tree by one
 		// gate-merge call — the batching this generalization exists for: a

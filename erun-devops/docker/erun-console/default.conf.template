@@ -12,6 +12,23 @@ server {
         return 200 "ok";
     }
 
+    # Conventional probe paths this console does not implement. A monitor's
+    # health predicate is "2xx", so answering any of these with the SPA shell
+    # below reports healthy unconditionally -- a check that cannot fail, which
+    # is worse than no check, because an outage looks exactly like a quiet day.
+    # A 404 fails it loudly, and the body names the endpoints that do answer
+    # this question so the operator has the next action. The trailing `/?`
+    # covers a monitor configured with one, which a per-path exact match would
+    # miss. The set is deliberately named rather than "any dotless path that is
+    # not an app route": an unknown app route must keep serving the shell below
+    # so client-side routing resolves it. A real endpoint later added under one
+    # of these names needs its own exact-match location, which nginx resolves
+    # ahead of this regex.
+    location ~ ^/(health|healthcheck|live|liveness|livez|metrics|ping|readiness|ready|readyz|status|version)/?$ {
+        default_type text/plain;
+        return 404 "no such endpoint; console health check: /healthz; console build version: /version.json\n";
+    }
+
     # The build actually serving this container — baked in at image build time
     # from ERUN_VERSION (see the Dockerfile) — so an operator or monitor can
     # tell which console build is deployed, the same question GET /v1/platform

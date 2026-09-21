@@ -82,7 +82,7 @@ Records a build against a review — the only way an erun client transitions a r
 |---|---|
 | `--commit` | Full 40-character commit hash the build ran against. |
 | `--gate` | Record the merge queue's own `GATE` build kind instead of an ordinary build — set by the environment a review's merge queue promoted to `MERGE`, reporting its own build of the prospective merge. Omit `--version` when this is set: the gate publishes nothing. |
-| `--version` | Version the build minted (from `erun build --release --output json`), required even for a failed build — release resolves the version before the build step runs. Omit with `--gate`. |
+| `--version` | Version the build minted — from the run's own `erun build --output json`, or from `erun build --dry-run --output json` when it failed before printing one. Required even for a failed build. A `RECORDED` build publishes nothing, so the version is metadata no platform path resolves: a version `erun build --release` produced is accepted but not required (see [Builds § Triggering builds](/collaboration/builds#triggering-builds)). Omit with `--gate`. |
 | `--failed` | Record the build as failed instead of successful. |
 | `--failure-detail` | Why the build failed. Only meaningful with `--failed`. |
 
@@ -179,3 +179,5 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `queue advance` on an empty queue, or whose head is not `READY`. | `404 Not Found`. |
 | `queue advance` whose head still has unresolved comment threads. | `409 Conflict`, naming the count and the review. Resolve them or use `queue override-advance`. |
 | `queue override-advance` with `--reason` omitted or blank. | Aborts before any network call. |
+
+**One exit code spans every "this machine has no usable platform access" case.** No alias configured, several configured with `--erun-alias` omitted, an alias of the wrong provider type, and an alias whose erun configuration is incomplete all abort before any network call and exit **`127`**. That code is reserved for this condition — an ordinary failure exits `1` — so a caller reading only the exit status can tell "this machine cannot reach the platform at all" apart from "it reached the platform and the call failed", and route the work to a credentialed host instead of retrying. [`erun-merge` and `erun-merge-queue-drive`](/collaboration/merge-queue#capability-split) use it exactly that way.
