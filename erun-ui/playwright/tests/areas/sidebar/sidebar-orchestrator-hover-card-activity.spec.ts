@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { captureHoverCard, expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 import type { AppShell } from '../../../pages/index.js';
@@ -164,7 +165,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       // name, with no rendered activity at all.
       await expect(dialog).toContainText('Busy — holding: gradle-build');
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/one-environment-busy.png');
+      await captureHoverCard(
+        dialog,
+        artifactPath('test-results/1383-visual/one-environment-busy.png'),
+      );
     });
   });
 
@@ -201,7 +205,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       await expect(dialog).toContainText('Busy — holding: gradle-build');
       await expect(dialog).toContainText('Idle');
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/two-environments.png');
+      await captureHoverCard(dialog, artifactPath('test-results/1383-visual/two-environments.png'));
     });
   });
 
@@ -266,7 +270,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       // Nudged more than once, and not capped, is its own distinguishable state.
       await expect(dialog).toContainText('Nudged 3x');
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/three-environments-and-nudges.png');
+      await captureHoverCard(
+        dialog,
+        artifactPath('test-results/1383-visual/three-environments-and-nudges.png'),
+      );
     });
   });
 
@@ -301,7 +308,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       await expect(environmentRow).not.toContainText('Not open here');
       await expect(environmentRow).not.toContainText('Idle');
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/no-forward-environment.png');
+      await captureHoverCard(
+        dialog,
+        artifactPath('test-results/1383-visual/no-forward-environment.png'),
+      );
     });
   });
 
@@ -346,7 +356,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       await expect(environmentRow).toContainText('Busy — holding: full-test-suite');
       await expect(environmentRow).not.toContainText('Not open here');
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/busy-from-elsewhere.png');
+      await captureHoverCard(
+        dialog,
+        artifactPath('test-results/1383-visual/busy-from-elsewhere.png'),
+      );
     });
   });
 
@@ -385,7 +398,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       await expect(environmentRow).toContainText('open it to check directly');
       await expect(environmentRow).not.toContainText('Not open here');
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/check-failed-environment.png');
+      await captureHoverCard(
+        dialog,
+        artifactPath('test-results/1383-visual/check-failed-environment.png'),
+      );
     });
   });
 
@@ -450,7 +466,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       expect(report.overflowBy).toBeLessThanOrEqual(1);
       expect(report.tailInsideBox).toBe(true);
 
-      await captureHoverCard(dialog, 'test-results/2352-remedy/check-failed-remedy-wraps.png');
+      await captureHoverCard(
+        dialog,
+        artifactPath('test-results/2352-remedy/check-failed-remedy-wraps.png'),
+      );
     });
   });
 
@@ -480,7 +499,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       await expect(environmentRow).not.toContainText('Not open here');
       await expect(environmentRow).not.toContainText('Idle');
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/outage-environment.png');
+      await captureHoverCard(
+        dialog,
+        artifactPath('test-results/1383-visual/outage-environment.png'),
+      );
     });
   });
 
@@ -523,7 +545,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       const cardBox = await dialog.boundingBox();
       expect(cardBox?.width).toBeLessThan(320);
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/long-values.png');
+      await captureHoverCard(dialog, artifactPath('test-results/1383-visual/long-values.png'));
     });
   });
 
@@ -546,7 +568,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       await expect(dialog).toContainText('Stopped nudging after 6 attempts');
       await expect(dialog).toContainText('reply or restart');
 
-      await captureHoverCard(dialog, 'test-results/1383-visual/capped-nudge.png');
+      await captureHoverCard(dialog, artifactPath('test-results/1383-visual/capped-nudge.png'));
     });
   });
 
@@ -658,7 +680,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
         await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
         // Taken while still converged and hovered — a screenshot outside this
         // callback can race the popover's own close-on-mouse-leave timer.
-        await captureHoverCard(dialog, 'test-results/orchestrator-card-live-state/card-outage.png');
+        await captureHoverCard(
+          dialog,
+          artifactPath('test-results/orchestrator-card-live-state/card-outage.png'),
+        );
       },
     );
 
@@ -672,7 +697,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
         await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 1_000 });
         await captureHoverCard(
           dialog,
-          'test-results/orchestrator-card-live-state/card-recovered.png',
+          artifactPath('test-results/orchestrator-card-live-state/card-recovered.png'),
         );
       },
     );
@@ -717,7 +742,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       // Scoped to this desktop on purpose -- the session may be healthy and
       // paced by something else, so the line must not read as a claim about
       // the session itself.
-      await captureHoverCard(dialog, 'test-results/1383-visual/unpaced-from-this-desktop.png');
+      await captureHoverCard(
+        dialog,
+        artifactPath('test-results/1383-visual/unpaced-from-this-desktop.png'),
+      );
     });
   });
 

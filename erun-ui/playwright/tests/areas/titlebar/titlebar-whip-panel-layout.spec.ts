@@ -1,3 +1,4 @@
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
 import {
   addOrchestrators,
@@ -126,7 +127,7 @@ test('a realistic population keeps the whip action reachable without scrolling',
     // the popover's own open transition before capturing, so the shot is
     // never a frozen mid-fade frame.
     await app.page.screenshot({
-      path: 'test-results/titlebar-whip-panel-layout-realistic-population.png',
+      path: artifactPath('test-results/titlebar-whip-panel-layout-realistic-population.png'),
       animations: 'disabled',
     });
   } finally {
