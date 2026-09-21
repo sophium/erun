@@ -46,7 +46,7 @@ func TestGateMergeOneSourceNamesACommitFailureReportedOnStdout(t *testing.T) {
 		},
 	}
 
-	_, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "feature", Message: "Add widget"}, "origin", deps)
+	_, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "feature", Message: "Add widget"}, "origin", "refs/erun/gate-merge/main", deps)
 	if err == nil {
 		t.Fatal("expected the failed commit to be reported as an error")
 	}

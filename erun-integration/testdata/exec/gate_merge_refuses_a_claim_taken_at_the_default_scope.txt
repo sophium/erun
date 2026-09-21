@@ -13,7 +13,8 @@ git -C <TMP> status --porcelain --untracked-files=no
 cd <TMP> && git fetch nonexistent +main:refs/erun/gate-merge/main +feature/add-widget:refs/erun/gate-merge/feature/add-widget
 cd <TMP> && git checkout -B main refs/erun/gate-merge/main
 cd <TMP> && git merge --squash refs/erun/gate-merge/feature/add-widget
-cd <TMP> && git commit -m '<message>'
+cd <TMP> && git log '--format=%B%x00' refs/erun/gate-merge/main..refs/erun/gate-merge/feature/add-widget
+cd <TMP> && git commit -m '<message + the branch trailers>'
 audit: erun exec gate-merge --dry-run --source [feature/add-widget] --target main --under-lease some-other-drive
 gate-merge: refused, merge-queue holds team/dev exclusively
 refusing to run gate-merge: this environment is held exclusively by orchestrator erun (merge-queue drive 2442, lease id merge-queue), and work that claims the environment must not overlap with anything else here

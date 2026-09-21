@@ -496,6 +496,11 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"Commit messages are read verbatim from stdin, never a shell argument, so nothing in them is " +
 			"reinterpreted: one message per --source, in the same order, separated by NUL bytes (a single " +
 			"--source needs no separator at all).\n\n" +
+			"Each source branch's own load-bearing trailers — `Closes #N`, and the `Reproduces:` / " +
+			"`Regression-Test:` lines a defect fix declares — are appended beneath the message it is given, so " +
+			"what the branch declared about itself survives a squash that replaces the rest of its history. " +
+			"The message stays the commit's subject and the whole of its own body, and a trailer the message " +
+			"already carries is not repeated.\n\n" +
 			"The working tree must already be clean: this checks out a different local branch than whatever the " +
 			"tree is currently on, so uncommitted work there is refused rather than silently carried onto the " +
 			"prospective merge.\n\n" +
@@ -510,7 +515,7 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"corrupt each other's accounting — a drive has already reported pushing a commit that belonged to " +
 			"another batch's tree. A caller that took the claim itself passes --under-lease so its own hold " +
 			"does not refuse it.\n\n" +
-			"--dry-run traces the fetch, checkout, and each squash merge and commit without running them.",
+			"--dry-run traces the fetch, checkout, and each squash merge, trailer read and commit without running them.",
 		Example: "  echo 'Add widget' | erun exec gate-merge --source feature/add-widget --target main\n" +
 			"  printf 'Add widget\\0Add gadget' | erun exec gate-merge --source feature/add-widget " +
 			"--source feature/add-gadget --target main\n" +

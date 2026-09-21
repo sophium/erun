@@ -3,4 +3,5 @@ git -C <TMP> status --porcelain --untracked-files=no
 cd <TMP> && git fetch nonexistent +main:refs/erun/gate-merge/main +feature/add-widget:refs/erun/gate-merge/feature/add-widget
 cd <TMP> && git checkout -B main refs/erun/gate-merge/main
 cd <TMP> && git merge --squash refs/erun/gate-merge/feature/add-widget
-cd <TMP> && git commit -m '<message>'
+cd <TMP> && git log '--format=%B%x00' refs/erun/gate-merge/main..refs/erun/gate-merge/feature/add-widget
+cd <TMP> && git commit -m '<message + the branch trailers>'
