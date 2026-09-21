@@ -45,6 +45,16 @@ func NewLoggerWithWriters(verbosity int, stdout, stderr io.Writer) Logger {
 
 func (l Logger) Verbosity() int { return l.verbosity }
 
+// withStdout returns a copy of the logger that writes its stdout lines to w
+// instead of to its own stdout writer. Used to put a build run's heartbeat
+// goroutine and its trace lines on one serialized stream (see
+// serializedWriter); callers that do not know they need that should leave the
+// logger alone.
+func (l Logger) withStdout(w io.Writer) Logger {
+	l.stdout = w
+	return l
+}
+
 // WithTraceSink returns a copy of the logger that mirrors every loggable
 // line into w, including lines terminal verbosity would suppress. Write
 // failures are ignored so a full or rotated trace file can never break the

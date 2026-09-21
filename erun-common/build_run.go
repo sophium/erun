@@ -9,6 +9,8 @@ import (
 )
 
 func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
+	ctx, stopProgress := withBuildProgress(ctx)
+	defer stopProgress()
 	traceDockerBuild(ctx, buildInput)
 	if ctx.DryRun {
 		return nil
@@ -38,6 +40,10 @@ func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 // is active — see startTimingStep) and wires PlatformObserver so the builder
 // reports each architecture's duration into it, tagged with the same cache
 // decision the trace already names.
+//
+// It is also where an image joins the run's heartbeat for as long as its build
+// takes, which is the only signal a run has that a long build is still working —
+// see build_heartbeat.go.
 func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
 	if build == nil {
 		build = DockerImageBuilder
@@ -50,7 +56,12 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 		stepCtx.recordTimingCache(hit, reason)
 	}
 	buildInput.PlatformObserver = stepCtx.timingPlatformObserver(cache)
+	// The heartbeat goes to the run's own log stream, not to stdout/stderr: those
+	// are per-image buffers under a concurrent wave, and a liveness line flushed
+	// after the build it describes finished would report nothing.
+	doneBuilding := ctx.progress.begin(dockerBuildStepName(buildInput))
 	err := build(buildInput, stdout, stderr)
+	doneBuilding()
 	finish(err)
 	return err
 }
@@ -188,6 +199,10 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 	if err != nil {
 		return err
 	}
+	// One heartbeat for the whole run, installed before any image starts so both
+	// the sequential loop below and the concurrent waves share it.
+	ctx, stopProgress := withBuildProgress(ctx)
+	defer stopProgress()
 	jobs := resolveBuildJobs(ctx, len(ordered))
 	if jobs <= 1 {
 		// Sequential keeps each image's decision lines next to its own build
