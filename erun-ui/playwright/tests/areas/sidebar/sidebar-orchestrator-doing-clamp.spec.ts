@@ -89,10 +89,7 @@ function doingRow(card: Locator): Locator {
 // fix: on both the fixed and the unfixed card it is the innermost span whose
 // text contains the command.
 function commandElement(card: Locator): Locator {
-  return doingRow(card)
-    .locator('span')
-    .filter({ hasText: LONG_SHELL_COMMAND })
-    .last();
+  return doingRow(card).locator('span').filter({ hasText: LONG_SHELL_COMMAND }).last();
 }
 
 interface DoingGeometry {
