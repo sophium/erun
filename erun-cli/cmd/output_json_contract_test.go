@@ -52,7 +52,7 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 			return writeListResult(ctx, common.ListResult{ConfigDirectory: "/tmp/erun"})
 		}},
 		{"context list", func(ctx common.Context) error {
-			return writeCloudContextList(ctx, []common.CloudContextStatus{{Status: "running"}})
+			return writeCloudContextList(ctx, common.CloudContextListResult{CloudContexts: []common.CloudContextStatus{{Status: "running"}}})
 		}},
 	}
 
