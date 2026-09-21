@@ -820,6 +820,26 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/fails_when_docker_secret_entry_has_no_id", normalize.Apply(result.Combined))
 	})
 
+	t.Run("fails_when_docker_secret_entry_declares_neither_env_nor_src", func(t *testing.T) {
+		// The other half of exactly-one-source: an entry naming an id but no
+		// source at all has nothing to mount, and passing it through would leave
+		// the Dockerfile's mount empty.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        - id: ghcr\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build to fail for a docker.secrets entry declaring neither env nor src; got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/fails_when_docker_secret_entry_declares_neither_env_nor_src", normalize.Apply(result.Combined))
+	})
+
 	t.Run("fails_when_docker_secret_entry_declares_both_env_and_src", func(t *testing.T) {
 		// Exactly one source per entry. Accepting both would silently pick one
 		// and mount a credential the project did not intend.
