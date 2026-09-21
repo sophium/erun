@@ -77,6 +77,23 @@ case "$1 $2 $3" in
 	exit "${STUB_OUTPUT_STATUS:-0}"
 	;;
 "exec job status")
+	# A test that sets STUB_STATUS_QUEUE (one "<exitstatus>|<line>" per line)
+	# gets a different answer on each successive status call, popped in order.
+	# The wrapper probes the record once before deciding whether to replay or
+	# start, then again when a wait expires, so proving it reads the job's own
+	# record *after* a timeout needs those two calls to disagree -- otherwise
+	# the same answer would have to serve both.
+	if [ -n "${STUB_STATUS_QUEUE:-}" ] && [ -s "$STUB_STATUS_QUEUE" ]; then
+		entry=$(head -n1 "$STUB_STATUS_QUEUE")
+		tail -n +2 "$STUB_STATUS_QUEUE" >"${STUB_STATUS_QUEUE}.tmp"
+		mv "${STUB_STATUS_QUEUE}.tmp" "$STUB_STATUS_QUEUE"
+		queue_status="${entry%%|*}"
+		queue_line="${entry#*|}"
+		if [ "$queue_status" -eq 0 ]; then
+			printf '%s\n' "$queue_line"
+		fi
+		exit "$queue_status"
+	fi
 	if [ "${STUB_STATUS_STATUS:-1}" -eq 0 ]; then
 		printf '%s\n' "${STUB_STATUS_LINE:-}"
 	fi
@@ -936,6 +953,109 @@ stub_erun "${case_dir}/bin"
 	[ "$STATUS" -eq 124 ] || fail "await verdict not set: expected exit 124 without opting in, got $STATUS ($OUT)"
 	awaits=$(grep -c 'exec job await' "$STUB_ARGV_FILE")
 	[ "$awaits" -eq 1 ] || fail "await verdict not set: must not peek at a later await result, expected 1 call, got $awaits"
+)
+
+# --- a wait that expires on a job which has, by the time the wait gives up,
+# actually PASSED must report that pass. The wait's own 124 is a deadline, not
+# an outcome, and the two are independent -- so before this expiry is allowed
+# to stand for a result, the job's own record is read. Reporting 124 here is
+# the reported bug exactly: a gate reported red for work that was green, with
+# nothing in the exit code telling the caller which it was.
+case_dir="${work_root}/timeout-then-verdict-pass"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset AGENT_GATE_AWAIT_VERDICT
+	export STUB_AWAIT_STATUS=124
+	export STUB_JOB_OUTPUT='late pass output'
+	# First status call is the pre-start probe and finds no record; the second
+	# is the one the wrapper makes once its wait has expired.
+	export STUB_STATUS_QUEUE="${case_dir}/status-queue"
+	printf '1|\n0|exited 0: make check\n' >"$STUB_STATUS_QUEUE"
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "timeout then verdict pass: expected the job's real pass (exit 0), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"late pass output"*) ;;
+	*) fail "timeout then verdict pass: expected the job's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"has reached no verdict"*) fail "timeout then verdict pass: must not report a non-verdict for a job that reached one, got: $OUT" ;;
+	*) ;;
+	esac
+)
+
+# --- the same expiry on a job that has actually FAILED must report that
+# failure, and report it as the job's own outcome rather than as a bare
+# timeout: the record is read and the job's output follows.
+case_dir="${work_root}/timeout-then-verdict-failure"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset AGENT_GATE_AWAIT_VERDICT
+	export STUB_AWAIT_STATUS=124
+	export STUB_JOB_OUTPUT='late failure output'
+	export STUB_STATUS_QUEUE="${case_dir}/status-queue"
+	# A record exists, so `job status` itself succeeds (0) even though the job
+	# it reports on failed -- the two exit statuses are unrelated.
+	printf '1|\n0|exited 1: make check\n' >"$STUB_STATUS_QUEUE"
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 1 ] || fail "timeout then verdict failure: expected the job's real failure (exit 1), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"late failure output"*) ;;
+	*) fail "timeout then verdict failure: expected the failed job's captured output, got: $OUT" ;;
+	esac
+)
+
+# --- a wait that expires with the job genuinely still running is a
+# non-verdict, and must say so: exit 124 (never a gate failure), name the job
+# a caller has to query, and tell them re-invoking re-attaches rather than
+# starting the gated work over. This is the third outcome, and the one the
+# issue is about -- it must be impossible to read as "your change is broken".
+case_dir="${work_root}/timeout-with-no-verdict"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset AGENT_GATE_AWAIT_VERDICT
+	export STUB_AWAIT_STATUS=124
+	export STUB_STATUS_QUEUE="${case_dir}/status-queue"
+	printf '1|\n0|running: make check\n' >"$STUB_STATUS_QUEUE"
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 124 ] || fail "timeout with no verdict: expected exit 124, got $STATUS ($OUT)"
+	job_id=$(grep 'exec job start' "$STUB_ARGV_FILE" | sed -n 's/.*--id \([^ ]*\).*/\1/p')
+	[ -n "$job_id" ] || fail "timeout with no verdict: could not read the job id the wrapper started"
+	case "$OUT" in
+	*"$job_id"*) ;;
+	*) fail "timeout with no verdict: must name the job a caller can query, expected $job_id in: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"NOT a failure"*) ;;
+	*) fail "timeout with no verdict: must say plainly that this is not a failure, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"re-attach to the same job"*) ;;
+	*) fail "timeout with no verdict: must say re-invoking re-attaches, got: $OUT" ;;
+	esac
+	if grep -q 'exec job output' "$STUB_ARGV_FILE"; then
+		fail "timeout with no verdict: must not read job output before the job finishes"
+	fi
 )
 
 # --- erun missing from PATH: degrade to running the command directly rather
