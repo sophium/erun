@@ -214,6 +214,18 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     // headline that a pristine env's zone 2 never renders. Comparing against
     // that shared, mutable row made this assertion depend on suite ordering
     // instead of on the fixed layout it's meant to lock down.
+    //
+    // The comparison below is over zone 2's ROWS, not its height. UsageState
+    // renders one line while the environment-usage sweep has no reading for
+    // the env and two (headline + age caption) once it does, and a fresh env
+    // starts unobserved -- the sweep runs on a 90s ticker and its first
+    // reading for a freshly seeded env can therefore land between the two
+    // reads below. That is a change of a value's line count, not of the
+    // zone's row set, so it is not what this test is about: a height
+    // comparison measures sweep timing as much as layout, and reported the
+    // conditional row as "changing zone 2" when only the reading's arrival
+    // had. What the Line mismatch row must not do is add, remove or move a
+    // row in zone 2, which comparing the rows states directly.
     const plainEnvironment = uniqueEnvironmentName('line-mismatch-zone-plain');
     seedEnvironment(SEED_TENANT, plainEnvironment);
     const environment = uniqueEnvironmentName('line-mismatch-zone');
@@ -224,29 +236,37 @@ test.describe('sidebar env hover card layout (#1901)', () => {
     });
     try {
       await waitForSeededRow(app, SEED_TENANT, plainEnvironment);
-      let plainZone2Height = 0;
+      let plainZone2Rows: string[] = [];
       await app.sidebar.readEnvHoverCard(SEED_TENANT, plainEnvironment, async (card) => {
         await expect(card).toBeVisible({ timeout: 1_000 });
-        plainZone2Height = await card
+        plainZone2Rows = await card
           .locator('dl')
           .nth(1)
-          .evaluate((el) => el.getBoundingClientRect().height, undefined, { timeout: 1_000 });
+          .locator('dt')
+          .allTextContents();
       });
 
       await waitForSeededRow(app, SEED_TENANT, environment);
-      let mismatchZone2Height = 0;
+      let mismatchZone2Rows: string[] = [];
       await app.sidebar.readEnvHoverCard(SEED_TENANT, environment, async (card) => {
         await expect(card).toBeVisible({ timeout: 1_000 });
         await expect(card.getByText('Line mismatch', { exact: true })).toBeVisible({
           timeout: 1_000,
         });
-        mismatchZone2Height = await card
+        // The conditional row belongs to zone 1, not zone 2 -- read both so a
+        // row that landed in the wrong zone cannot pass by being present
+        // somewhere in the card.
+        await expect(card.locator('dl').nth(0)).toContainText('Line mismatch', {
+          timeout: 1_000,
+        });
+        mismatchZone2Rows = await card
           .locator('dl')
           .nth(1)
-          .evaluate((el) => el.getBoundingClientRect().height, undefined, { timeout: 1_000 });
+          .locator('dt')
+          .allTextContents();
       });
 
-      expect(mismatchZone2Height).toBeCloseTo(plainZone2Height, 0);
+      expect(mismatchZone2Rows).toEqual(plainZone2Rows);
     } finally {
       removeEnvironment(SEED_TENANT, plainEnvironment);
       removeEnvironment(SEED_TENANT, environment);
