@@ -51,13 +51,23 @@ async function hoverAndClickDecoratedLink(app: AppShell): Promise<void> {
 // An unresolved pod path is deliberately decorated as plain text (no pointer
 // cursor), so there is no decoration to wait on -- the backend round trip its
 // own resolution makes is the only observable completion signal.
+//
+// That signal is also a dropped hover's only recovery, and a dropped hover is
+// the one failure this step has to tolerate: the same one hoverAndClickDecoratedLink
+// above re-drives for, and for the same reason. Left single-shot, a hover the
+// page never resolved waits on a response that will never come for the whole
+// 30s test budget and reports the failure against the test's own declaration
+// line rather than against the hover. Each attempt is bounded well inside
+// that, so a dropped hover costs one re-hover instead of the spec.
 async function hoverAndClickAfterBackendResolve(app: AppShell, page: Page): Promise<void> {
-  await Promise.all([
-    page.waitForResponse(
+  await expect(async () => {
+    const resolved = page.waitForResponse(
       (res) => parseInvoke(res.request())?.method === 'ResolveEnvironmentHostPath',
-    ),
-    app.terminalPane.hoverFirstRow(),
-  ]);
+      { timeout: 3_000 },
+    );
+    await app.terminalPane.hoverFirstRow();
+    await resolved;
+  }).toPass({ timeout: 10_000 });
   await app.terminalPane.clickFirstRow();
 }
 

@@ -599,7 +599,7 @@ esac
 		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
 			`case "$1 $2" in`,
 			`  "info -f") printf '%s' '` + dockerRoot + `' ;;`,
-			`  "builder prune") exit 0 ;;`,
+			`  "buildx prune") exit 0 ;;`,
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
@@ -655,7 +655,7 @@ esac
 			`case "$1 $2" in`,
 			`  "info -f") printf '%s' '` + dockerRoot + `' ;;`,
 			`  "system df") printf '%s\n' 'Images|0B' 'Containers|0B' 'Local Volumes|5.8GB (100%)' 'Build Cache|0B' ;;`,
-			`  "builder prune") exit 0 ;;`,
+			`  "buildx prune") exit 0 ;;`,
 			`  *) exit 0 ;;`,
 			`esac`,
 		}, "\n"))
