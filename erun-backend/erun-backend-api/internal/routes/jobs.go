@@ -97,7 +97,7 @@ func (r JobRoutes) claimJob(w http.ResponseWriter, req *http.Request) {
 	}
 	job, err := r.service.Claim(req.Context(), model.Job{
 		EnvironmentID: strings.TrimSpace(body.EnvironmentID),
-		JobType:       body.JobType,
+		JobType:       model.JobType(strings.ToLower(strings.TrimSpace(string(body.JobType)))),
 		IssueRef:      strings.TrimSpace(body.IssueRef),
 		Summary:       body.Summary,
 		Status:        model.JobStatus(strings.ToUpper(strings.TrimSpace(string(body.Status)))),
