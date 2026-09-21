@@ -354,6 +354,25 @@ ARG DIND_CPU_LIMIT=4
 # resolution -- the safe, fail-open direction is the full suite, never zero
 # coverage.
 ARG PLAYWRIGHT_TEST_AREAS=""
+# ERUN_PLAYWRIGHT_ARTIFACTS_DIR is the suite's one artifact root
+# (erun-ui/playwright/fixtures/artifacts.ts): Playwright's own output dir, the
+# HTML report, and every frame a spec captures by hand all resolve through it.
+# Set here to a container-local path instead of left at its default, which is
+# the suite's own directory inside /src.
+#
+# What this guards is not the reporters this stage writes (they land in a COPY
+# of the tree and are discarded with the build container). It is every *other*
+# in-container run of this suite that mirrors this stage, and above all
+# scripts/repro-gate-contention.sh: that one rebuilds this stage's arrangement
+# outside a build by bind-mounting an environment's own worktree over /src and
+# running as root, so artifacts left at the default path come back owned by uid
+# 0 in a tree the environment user owns -- where rm -rf cannot remove them and
+# every later run in that environment fails with a bare EACCES inside whichever
+# spec writes first, for every branch rather than only the one that poisoned
+# it. Declaring the container-local root here makes it part of what "the test
+# stage's environment" means, so a run that mirrors the stage inherits it
+# rather than having to re-derive why it needs one.
+ARG ERUN_PLAYWRIGHT_ARTIFACTS_DIR="/tmp/erun-playwright-artifacts"
 # golangci-lint's own analysis cache sat unmounted here even though the Go
 # module and build caches right above it were: HOME is /root in this stage
 # (root user, no ENV HOME override), so the tool's default cache dir is
@@ -434,6 +453,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     ERUN_WAILSJS_CACHE_DIR=/root/.cache/erun-wailsjs \
     ERUN_PLAYWRIGHT_LINT_CACHE_DIR=/src/.cache/frontend-lint \
+    ERUN_PLAYWRIGHT_ARTIFACTS_DIR="${ERUN_PLAYWRIGHT_ARTIFACTS_DIR}" \
     PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
     PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
     ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \

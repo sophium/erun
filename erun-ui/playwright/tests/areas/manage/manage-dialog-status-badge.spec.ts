@@ -1,5 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test } from '../../../fixtures/erunApp.js';
 
 // erun-kit's StatusBadge is the one canonical status badge in the product.
@@ -62,10 +63,14 @@ test('a workspace sync in progress reads as in-progress, with an icon, through t
   await expect(badgeLabel).toBeVisible();
   await expect(badgeLabel.locator('xpath=..').locator('svg')).toHaveCount(1);
   await badgeLabel.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: 'test-results/status-badge-workspace-sync-light.png' });
+  await page.screenshot({
+    path: artifactPath('test-results/status-badge-workspace-sync-light.png'),
+  });
 
   await forceDarkTheme(page);
-  await page.screenshot({ path: 'test-results/status-badge-workspace-sync-dark.png' });
+  await page.screenshot({
+    path: artifactPath('test-results/status-badge-workspace-sync-dark.png'),
+  });
 
   await app.manageDialog.cancel();
   await app.manageDialog.waitForClosed();
@@ -99,10 +104,12 @@ test('a pending cloud context reads as in-progress, with an icon, through the ca
   await expect(badgeLabel).toBeVisible();
   await expect(badgeLabel.locator('xpath=..').locator('svg')).toHaveCount(1);
   await badgeLabel.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: 'test-results/status-badge-cloud-context-light.png' });
+  await page.screenshot({
+    path: artifactPath('test-results/status-badge-cloud-context-light.png'),
+  });
 
   await forceDarkTheme(page);
-  await page.screenshot({ path: 'test-results/status-badge-cloud-context-dark.png' });
+  await page.screenshot({ path: artifactPath('test-results/status-badge-cloud-context-dark.png') });
 
   await app.manageDialog.cancel();
   await app.manageDialog.waitForClosed();

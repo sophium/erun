@@ -2,7 +2,6 @@ package integration
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
@@ -1158,7 +1158,7 @@ func seedBareOrigin(t *testing.T, setup env.Setup) string {
 func remoteMainSubjects(t *testing.T, repoDir string) string {
 	t.Helper()
 	fixture.RunGit(t, repoDir, "fetch", "-q", "origin")
-	cmd := exec.Command("git", "log", "--format=%s", "origin/main")
+	cmd := harnessexec.Command("git", "log", "--format=%s", "origin/main")
 	cmd.Dir = repoDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1169,7 +1169,7 @@ func remoteMainSubjects(t *testing.T, repoDir string) string {
 
 func remoteTags(t *testing.T, setup env.Setup) string {
 	t.Helper()
-	cmd := exec.Command("git", "ls-remote", "--tags", "origin")
+	cmd := harnessexec.Command("git", "ls-remote", "--tags", "origin")
 	cmd.Dir = setup.Cwd
 	output, err := cmd.CombinedOutput()
 	if err != nil {

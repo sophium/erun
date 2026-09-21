@@ -169,6 +169,11 @@ var (
 // is still too full afterward — rather than letting the build itself trigger
 // the eviction it cannot recover from.
 func ensureReleaseDiskHeadroom(ctx Context) error {
+	// The ceiling is checked first and unconditionally: it is a bound on how
+	// much cache this environment may hold, so it has to hold whether or not
+	// free space happens to be short this time. Reaching it also frees room,
+	// which is why it runs before the floor is measured rather than after.
+	ensureBuildCacheRetention(ctx, releaseDiskHeadroomPolicy)
 	return ensureDiskHeadroomWith(ctx, releaseDiskHeadroomPolicy, dockerRootDiskBytes, dockerReclaimableBytes, runDiskHeadroomPrune)
 }
 
@@ -176,6 +181,7 @@ func ensureReleaseDiskHeadroom(ctx Context) error {
 // warns instead of refusing. It is the one that actually runs between releases,
 // where the cache growth that fills a node happens.
 func ensureBuildDiskHeadroom(ctx Context) error {
+	ensureBuildCacheRetention(ctx, buildDiskHeadroomPolicy)
 	return ensureDiskHeadroomWith(ctx, buildDiskHeadroomPolicy, dockerRootDiskBytes, dockerReclaimableBytes, runDiskHeadroomPrune)
 }
 

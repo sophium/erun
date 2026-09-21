@@ -289,6 +289,21 @@ if [ -n \"\$REPRO_LOAD\" ]; then
 	fi
 fi
 exit \$suite_rc"
+	# ERUN_PLAYWRIGHT_ARTIFACTS_DIR points the suite's artifact root
+	# (erun-ui/playwright/fixtures/artifacts.ts: Playwright's output dir, the
+	# HTML report, and every frame a spec captures) at a container-local path.
+	# This is the binding that makes the plugin worth having: the worktree is
+	# bind-mounted at /src and the container runs as root, so anything the
+	# suite writes at its default path comes back owned by uid 0 inside the
+	# environment's own tree -- unremovable there, and fatal to every later run
+	# in that environment, not just to this attempt. Container-local means the
+	# artifacts leave with the container, which costs nothing here: this
+	# script's surfaces are the verdict it prints and the full attempt log it
+	# keeps, and it already forwards anything after `--` to playwright for a
+	# run that wants a trace instead. The Dockerfile's own test stage declares
+	# the same value, so this mirrors the stage rather than inventing a second
+	# arrangement.
+	#
 	# --user root, not the image's default erun user: the Dockerfile's test
 	# stage runs as root with HOME=/root (its own comment), and the gate's
 	# cache env (GOLANGCI_LINT_CACHE, ~/.cache/ms-playwright) is keyed to
@@ -312,6 +327,7 @@ exit \$suite_rc"
 		-e PARALLEL_GATE_CPU_LIMIT="$cpus" \
 		-e ERUN_PLAYWRIGHT_WORKERS="$workers" \
 		-e PLAYWRIGHT_TEST_AREAS="$areas" \
+		-e ERUN_PLAYWRIGHT_ARTIFACTS_DIR=/tmp/erun-playwright-artifacts \
 		-e "REPRO_LOAD=$repro_load" \
 		"$image" \
 		sh -c "$inner" \
