@@ -153,6 +153,7 @@ func TestEmptyListingCommandsEmitAnArrayNotNull(t *testing.T) {
 		value   any
 	}{
 		{"gate list", []common.PlatformGateRun(nil)},
+		{"jobs list", []common.PlatformJob(nil)},
 		{"review list", []common.PlatformReview(nil)},
 		{"review queue list", []common.PlatformReview(nil)},
 		{"review reviewers", []common.PlatformReviewer(nil)},
