@@ -1164,7 +1164,7 @@ a pod start rather than a cold rebuild. In-pod processes are not: a stop ends wh
 2. The per-user env config directory `<config-root>/<tenant>/<env>/`.
 3. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
 
-The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` are **not** removed; a later env with the same name overwrites them (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
+4. The local port-forward record for the env — the state file, the log, and the log's rotated generation, under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.{json,log,log.1}`. A log a forward that is still running holds open is kept (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
 
 ### Error codes
 
