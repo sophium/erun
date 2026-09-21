@@ -16,7 +16,7 @@ import (
 // then runs more workers (each a Go backend *and* a headless Chromium) than
 // the quota can host, concurrently with everything else in `make check`'s
 // fan-out, and the throttling that spends is what turns into a spec failing on
-// its wait budget (#2081).
+// its wait budget.
 //
 // What this gate locks is where that number is decided. It used to be computed
 // in the Dockerfile as DIND_CPU_LIMIT/2, inline in the RUN line -- which made a
