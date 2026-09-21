@@ -65,11 +65,13 @@ Split the run by what each side can actually do:
     record-build` in rung 5, and everything `erun-merge-queue-drive` runs.
 
 So stop here and hand the branch over. Commit and push it if it is not pushed
-yet — that needs only git — and tell the operator that the review rungs must
-run on a machine with `erun cloud login` already done, either by running
-/erun-merge there or by completing rungs 3-5 by hand. The pushed branch is the
-deliverable this environment can produce; opening and building the review is
-the credentialed side's.
+yet — that needs only git, and this rung stopped before the merge rungs, so do
+not start those either. Then tell the operator that the review steps must run
+on a machine with `erun cloud login` already done: either run /erun-merge there
+from the top — every rung checks the state it would produce before acting, so
+an already-pushed branch resumes rather than repeating work — or complete the
+review steps by hand there. The pushed branch is what this environment can
+deliver; opening and building the review belongs to the credentialed side.
 EOF
   exit 127
 fi
