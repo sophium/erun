@@ -20,11 +20,12 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 	if selectionSource != deploySelectionSourceDefault || len(selected) > 0 {
 		return false
 	}
-	// Only a runtime environment's pod is a projection of an environment the
-	// host owns. A local-agent env is covered by its own in-pod guard, which
-	// fires first and names the environment shape that resolve would get wrong
-	// (guardInPodLocalAgentRuntimeDeploy), and a remote-agent env owns its
-	// worktree inside the pod, so it keeps deploying itself.
+	// Narrow by type, because the other types reach this same fallback and are
+	// already refused for it one layer on: the fallback resolves a runtime-chart
+	// spec, and the in-pod runtime-chart guard refuses that spec for any
+	// environment's own pod (guardInPodRuntimeDeploy). This guard therefore only
+	// adds the earlier, selection-specific refusal for the type whose deploy the
+	// fallback genuinely owns.
 	if resolvedTarget.EnvConfig.ResolvedType() != EnvironmentTypeRuntime {
 		return false
 	}
@@ -43,7 +44,7 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 // operator selected on its previous version, and exits 0 — a silent partial
 // upgrade of a production environment. Refusing and naming both
 // remedies is the same fail-closed shape as the sibling in-pod guard
-// (guardInPodLocalAgentRuntimeDeploy) and the saved-selection shadow guard: the
+// (guardInPodRuntimeDeploy) and the saved-selection shadow guard: the
 // deploy is not resolvable from here, so it is not attempted from here.
 //
 // Deliberately narrow: only a runtime environment, only its own pod, and only
