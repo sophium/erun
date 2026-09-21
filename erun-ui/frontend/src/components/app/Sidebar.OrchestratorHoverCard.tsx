@@ -69,6 +69,14 @@ export function OrchestratorHoverCard({
           {children}
         </div>
       </PopoverAnchor>
+      {/* w-90 (22.5rem / 360px), not the environment card's w-72: this card's
+          value column has to hold a background shell's `Shell running for
+          10m45s:` label on one line at the shared 12px type size, and at w-72
+          that label wraps to two, which doubles the Doing row's height budget
+          on its own. The card is wide because it lists nine environments, not
+          because its values are long -- long values still truncate, never
+          widen it (OrchestratorEnvironments). The environment card keeps
+          w-72. */}
       <PopoverContent
         side="right"
         align="start"
@@ -78,7 +86,7 @@ export function OrchestratorHoverCard({
         }}
         onMouseEnter={openNow}
         onMouseLeave={closeSoon}
-        className="w-72 p-0"
+        className="w-90 p-0"
         role="dialog"
         aria-label={`${orchestrator.name} details`}
       >
@@ -194,7 +202,7 @@ function OrchestratorDoing({
 // motivated the whole card: it used to name two environments and say nothing
 // about either. min-w-0 on both the row and its text column is required for
 // truncate to engage on a grid/flex child (a long environment name or a long
-// busy detail elides instead of blowing out the card's fixed w-72).
+// busy detail elides instead of blowing out the card's fixed w-90).
 function OrchestratorEnvironments({
   environments,
 }: {

@@ -3,6 +3,10 @@ import { Ban, Plus, Rocket } from 'lucide-react';
 import * as React from 'react';
 
 import {
+  DEPLOY_COMPONENTS_EMPTY_NOTICE_ID,
+  deployComponentsEmptySelection,
+} from '@/app/deployComponentsSelection';
+import {
   environmentTypeBuildsHereLocally,
   environmentTypeIsHost,
   environmentTypeIsRemoteWorktree,
@@ -23,6 +27,7 @@ import { RUNTIME_CHART_NOTICE_ID, runtimeChartBlocksDeploy } from '@/app/runtime
 import type { AppState } from '@/app/state';
 import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
+import { DeployComponentsEmptyNotice } from '@/components/app/ManageDialogDeployComponents';
 import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivity';
 import { RuntimeChartField } from '@/components/app/ManageDialogRuntimeChart';
 import { RuntimeChartNotice } from '@/components/app/ManageDialogRuntimeChartNotice';
@@ -367,6 +372,19 @@ function parseAutoStartMode(mode: string): boolean | undefined {
   return undefined;
 }
 
+// deployUnavailableNoticeId names the notice that states why Deploy cannot fire
+// on the picked version, so the button describes itself with a reason that is
+// actually rendered. The chart blocks the version outright, so it speaks first.
+function deployUnavailableNoticeId(dialog: ManageDialog): string | undefined {
+  if (runtimeChartBlocksDeploy(dialog)) {
+    return RUNTIME_CHART_NOTICE_ID;
+  }
+  if (deployComponentsEmptySelection(dialog)) {
+    return DEPLOY_COMPONENTS_EMPTY_NOTICE_ID;
+  }
+  return undefined;
+}
+
 function RuntimeDeployField({
   dialog,
   configuredVersion,
@@ -425,15 +443,18 @@ function RuntimeDeployField({
           // until the operator picks one — never a build, never a guess — and
           // until that version's component charts have been probed, so it can't
           // fire the new version with the previous version's chart selection.
-          // ...and on a version the registry says has no runtime chart, with the
-          // reason named beside the button rather than discovered by failing.
+          // ...on a version the registry says has no runtime chart, and on a
+          // checklist the operator emptied, which would otherwise fall through to
+          // the runtime chart alone. Each with the reason named beside the button
+          // rather than discovered by failing.
           disabled={
             disabled === true ||
             overrideVersion.trim() === '' ||
             dialog.deployComponentsLoading ||
-            runtimeChartBlocksDeploy(dialog)
+            runtimeChartBlocksDeploy(dialog) ||
+            deployComponentsEmptySelection(dialog)
           }
-          aria-describedby={runtimeChartBlocksDeploy(dialog) ? RUNTIME_CHART_NOTICE_ID : undefined}
+          aria-describedby={deployUnavailableNoticeId(dialog)}
           onClick={onDeploy}
         >
           <Rocket aria-hidden="true" />
@@ -441,6 +462,7 @@ function RuntimeDeployField({
         </Button>
       </div>
       {!dialog.choicesOpen && <RuntimeChartNotice dialog={dialog} />}
+      {!dialog.choicesOpen && <DeployComponentsEmptyNotice dialog={dialog} />}
       {/* Deploy above installs an existing published version by reference and never
           builds. Producing a new version from this env's source is this explicit,
           separate action (local-agent envs only). */}
@@ -451,7 +473,9 @@ function RuntimeDeployField({
           size="sm"
           variant="outline"
           className="justify-self-start"
-          disabled={disabled}
+          // Scoped by the same checklist as Deploy above, so it refuses an empty
+          // one for the same reason: it would roll the saved default instead.
+          disabled={disabled === true || deployComponentsEmptySelection(dialog)}
           onClick={onCreateVersion}
         >
           <Plus aria-hidden="true" />

@@ -215,3 +215,46 @@ func pollUntilEnvironmentJob(tenant, environment, id string, timeout time.Durati
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// A job's own record must never read as running without a heartbeat. The
+// supervisor publishes that record before it opens the log, takes the activity
+// lease and starts its beat, so a reader landing in that window saw a running
+// job with no last-beat field at all -- which is the field every liveness
+// decision, and the exclusive-claim status line, read. Registering the job is
+// itself proof the supervisor is alive, so it stamps the beat it is already
+// evidence of rather than leaving a window a reader has to be lucky about.
+func TestRegisteredEnvironmentJobIsPublishedWithABeat(t *testing.T) {
+	isolateActivityCache(t)
+
+	const tenant = "job-beat-contract"
+	const environment = "beat-test"
+	const id = "gate"
+
+	if _, err := registerEnvironmentJob(EnvironmentJobSupervisorParams{
+		Tenant:      tenant,
+		Environment: environment,
+		ID:          id,
+		Name:        id,
+		Command:     []string{"sleep", "30"},
+	}); err != nil {
+		t.Fatalf("registerEnvironmentJob: %v", err)
+	}
+
+	dir, err := environmentJobDir(tenant, environment)
+	if err != nil {
+		t.Fatalf("environmentJobDir: %v", err)
+	}
+	// Read back through the store rather than the recorder, so this asserts
+	// what a reader of the record actually sees the moment it appears.
+	published, err := readEnvironmentJob(filepath.Join(dir, id+".json"))
+	if err != nil {
+		t.Fatalf("read published job record: %v", err)
+	}
+	if published.State != EnvironmentJobStateRunning {
+		t.Fatalf("published state = %q, want %q", published.State, EnvironmentJobStateRunning)
+	}
+	resolved := reconcileEnvironmentJob(dir, published, time.Now(), alwaysAlive, published.Hostname)
+	if resolved.AliveAgeMs == nil {
+		t.Fatalf("the first observable record of a running job reports no heartbeat at all: %+v", resolved)
+	}
+}

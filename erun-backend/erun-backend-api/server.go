@@ -272,42 +272,44 @@ func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManage
 // so registration reads as what each route needs rather than as 12 repeated
 // repository.NewXRepository(txManager) calls (#1302).
 type databaseRepositories struct {
-	reviews         *repository.ReviewRepository
-	reviewReviewers *repository.ReviewReviewerRepository
-	builds          *repository.BuildRepository
-	comments        *repository.CommentRepository
-	tenantIssuers   *repository.TenantIssuerRepository
-	tenants         *repository.TenantRepository
-	environments    *repository.EnvironmentRepository
-	aiSessions      *repository.AISessionRepository
-	contexts        *repository.ContextRepository
-	tenantQuotas    *repository.TenantQuotaRepository
-	usageEvents     *repository.UsageEventRepository
-	auditEvents     *repository.AuditEventRepository
-	releases        *repository.ReleaseRepository
-	rateLimits      *repository.PlatformRateLimitRepository
-	gateRuns        *repository.GateRunRepository
-	jobs            *repository.JobRepository
+	reviews           *repository.ReviewRepository
+	reviewReviewers   *repository.ReviewReviewerRepository
+	builds            *repository.BuildRepository
+	comments          *repository.CommentRepository
+	tenantIssuers     *repository.TenantIssuerRepository
+	tenants           *repository.TenantRepository
+	environments      *repository.EnvironmentRepository
+	aiSessions        *repository.AISessionRepository
+	contexts          *repository.ContextRepository
+	tenantQuotas      *repository.TenantQuotaRepository
+	usageEvents       *repository.UsageEventRepository
+	auditEvents       *repository.AuditEventRepository
+	releases          *repository.ReleaseRepository
+	rateLimits        *repository.PlatformRateLimitRepository
+	gateRuns          *repository.GateRunRepository
+	jobs              *repository.JobRepository
+	environmentEvents *repository.EnvironmentEventRepository
 }
 
 func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositories {
 	return databaseRepositories{
-		reviews:         repository.NewReviewRepository(txManager),
-		reviewReviewers: repository.NewReviewReviewerRepository(txManager),
-		builds:          repository.NewBuildRepository(txManager),
-		comments:        repository.NewCommentRepository(txManager),
-		tenantIssuers:   repository.NewTenantIssuerRepository(txManager),
-		tenants:         repository.NewTenantRepository(txManager),
-		environments:    repository.NewEnvironmentRepository(txManager),
-		aiSessions:      repository.NewAISessionRepository(txManager),
-		contexts:        repository.NewContextRepository(txManager),
-		tenantQuotas:    repository.NewTenantQuotaRepository(txManager),
-		usageEvents:     repository.NewUsageEventRepository(txManager),
-		auditEvents:     repository.NewAuditEventRepository(txManager),
-		releases:        repository.NewReleaseRepository(txManager),
-		rateLimits:      repository.NewPlatformRateLimitRepository(txManager),
-		gateRuns:        repository.NewGateRunRepository(txManager),
-		jobs:            repository.NewJobRepository(txManager),
+		reviews:           repository.NewReviewRepository(txManager),
+		reviewReviewers:   repository.NewReviewReviewerRepository(txManager),
+		builds:            repository.NewBuildRepository(txManager),
+		comments:          repository.NewCommentRepository(txManager),
+		tenantIssuers:     repository.NewTenantIssuerRepository(txManager),
+		tenants:           repository.NewTenantRepository(txManager),
+		environments:      repository.NewEnvironmentRepository(txManager),
+		aiSessions:        repository.NewAISessionRepository(txManager),
+		contexts:          repository.NewContextRepository(txManager),
+		tenantQuotas:      repository.NewTenantQuotaRepository(txManager),
+		usageEvents:       repository.NewUsageEventRepository(txManager),
+		auditEvents:       repository.NewAuditEventRepository(txManager),
+		releases:          repository.NewReleaseRepository(txManager),
+		rateLimits:        repository.NewPlatformRateLimitRepository(txManager),
+		gateRuns:          repository.NewGateRunRepository(txManager),
+		jobs:              repository.NewJobRepository(txManager),
+		environmentEvents: repository.NewEnvironmentEventRepository(txManager),
 	}
 }
 
@@ -379,8 +381,9 @@ func registerEnvironmentRoutes(register routes.ProtectedRouteRegistrar, options 
 	newJobAbandonReconciler(options, jobService)
 }
 
-// registerEventRoutes wires the two append-only tenant-wide event reads.
+// registerEventRoutes wires the three append-only tenant-wide event reads.
 func registerEventRoutes(register routes.ProtectedRouteRegistrar, repos databaseRepositories) {
+	routes.RegisterEnvironmentEventRoutes(register, repos.environmentEvents, repos.environments)
 	routes.RegisterUsageEventRoutes(register, repos.usageEvents)
 	routes.RegisterAuditEventRoutes(register, repos.auditEvents)
 }
@@ -404,8 +407,10 @@ func registerCredentialRoutes(register routes.ProtectedRouteRegistrar, options H
 	// therefore always registered; setAlias itself reports the missing
 	// configuration with a named, actionable 501 (the same pattern
 	// mintMCPToken uses for a nil signer) instead of the mux's bare 404.
-	var aliases routes.CloudProviderAliasWriter
-	var contextProvisioner routes.ContextProvisioner
+	var (
+		aliases            routes.CloudProviderAliasWriter
+		contextProvisioner routes.ContextProvisioner
+	)
 	if options.Cipher != nil {
 		concreteAliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
 		aliases = concreteAliases

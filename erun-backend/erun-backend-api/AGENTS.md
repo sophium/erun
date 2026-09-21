@@ -246,6 +246,13 @@ evidence, not a substitute for GitHub-side enforcement.
 - GitHub queue identity and platform machine identity are two trust domains.
   Name them coherently for attribution but never share the literal secret.
   Release participation and hosted-orchestrator attribution remain separate decisions.
+- **Until this lands, the working split is: an environment builds, a credentialed
+  host records.** `erun build` needs no platform alias (with none configured it
+  skips reporting its outcome); every `erun review` call aborts before any network
+  call and exits `127`. The merge skills check for a usable alias and stop there
+  rather than walking into a call that cannot succeed — see
+  `erun-docs/docs/collaboration/merge-queue.md` § "What runs where: the
+  build/platform split".
 
 ## Cloud-Provider-Alias Storage: A Nil-Cipher Route Must Refuse, Not Vanish (erun#2042 follow-up)
 

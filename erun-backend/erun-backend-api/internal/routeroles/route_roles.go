@@ -114,6 +114,12 @@ var Routes = map[string]Class{
 	"GET /v1/gate-runs/{gate_run_id}":   TenantUserClass,
 	"PATCH /v1/gate-runs/{gate_run_id}": TenantUserClass,
 
+	// environment_events.go — reading an environment's event log and
+	// appending to it is reading and operating environments that already
+	// exist, the same reach TenantUser already has over ai_sessions.
+	"GET /v1/events": TenantUserClass,
+	"POST /v1/environments/{environment_id}/events": TenantUserClass,
+
 	// comments.go — driving review comments.
 	"GET /v1/reviews/{review_id}/comments":                       TenantUserClass,
 	"POST /v1/reviews/{review_id}/comments":                      TenantUserClass,

@@ -37,15 +37,15 @@ func jobListStubServer(t testing.TB, jobs []map[string]any) *httptest.Server {
 // golden records the contract rather than the clock.
 func platformJobJSON(overrides map[string]any) map[string]any {
 	job := map[string]any{
-		"jobId":       "job_01HQ",
-		"jobType":     "fix",
-		"summary":     "fixing the jobs claim race",
-		"status":      "RUNNING",
-		"actorKind":   "agent",
-		"actorId":     "erun/code2",
-		"startedAt":   "2026-01-02T03:04:05Z",
-		"createdAt":   "2026-01-02T03:04:05Z",
-		"updatedAt":   "2026-01-02T03:04:05Z",
+		"jobId":         "job_01HQ",
+		"jobType":       "fix",
+		"summary":       "fixing the jobs claim race",
+		"status":        "RUNNING",
+		"actorKind":     "agent",
+		"actorId":       "erun/code2",
+		"startedAt":     "2026-01-02T03:04:05Z",
+		"createdAt":     "2026-01-02T03:04:05Z",
+		"updatedAt":     "2026-01-02T03:04:05Z",
 		"environmentId": "",
 	}
 	for key, value := range overrides {
@@ -253,9 +253,9 @@ func TestJobs(t *testing.T) {
 		setup := env.New(t)
 		server := jobListStubServer(t, []map[string]any{
 			platformJobJSON(map[string]any{
-				"jobId":   "job_01HQ_running",
-				"summary": "fixing the jobs claim race",
-				"scope":   "sophium/erun#1",
+				"jobId":    "job_01HQ_running",
+				"summary":  "fixing the jobs claim race",
+				"scope":    "sophium/erun#1",
 				"issueRef": "sophium/erun#1",
 			}),
 			platformJobJSON(map[string]any{

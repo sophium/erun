@@ -49,6 +49,12 @@ export class ManageDialog {
     return this.locator().getByRole('alert').filter({ hasText: 'Pending redeploy' });
   }
 
+  // The banner's own deploy action. It reads the same checklist selection as the
+  // Runtime tab's Deploy, so an emptied checklist refuses it too.
+  redeployNowButton(): Locator {
+    return this.redeployBanner().getByRole('button', { name: 'Redeploy now' });
+  }
+
   // Converge on the banner actually having rendered before asserting on it.
   // The save click and the banner's appearance are two separate steps (a save
   // round-trip, then a re-render), so a bare `expect(...).toBeVisible()`
@@ -255,6 +261,19 @@ export class ManageDialog {
   // id, not name, so it never collides with the dialog footer's Save.
   saveDeployComponentsButton(): Locator {
     return this.page.locator('#environment-config-save-deploy-components');
+  }
+
+  // The notice under the version row stating that every chart in the checklist is
+  // unchecked, so a disabled Deploy names its reason rather than stopping
+  // silently.
+  deployComponentsEmptyNotice(): Locator {
+    return this.page.locator('#environment-config-deploy-components-empty-notice');
+  }
+
+  // The same statement rendered inside the open version panel, which covers the
+  // row above it while the operator is unchecking the last chart.
+  deployComponentsEmptyPanelNotice(): Locator {
+    return this.page.locator('#environment-config-deploy-components-empty-notice-panel');
   }
 
   // The "Runtime chart" field states the chart coordinate -- which chart the
