@@ -211,9 +211,9 @@ Content-Type: application/json
 { "status": "READY" }
 ```
 
-Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. Refused with `404 Not Found` from any status other than `MERGE`.
+Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. Refused with `409 Conflict` and `REVIEW_NOT_MERGING` from any status other than `MERGE`, naming the status the review actually holds — the review was resolved by id, so reporting it as missing would describe something the caller can see.
 
-- **CLI:** `erun review requeue REVIEW_ID` — see [`erun review requeue`](/cli/review#review-requeue). Fetches the review first so a caller-side refusal names its actual status rather than surfacing the API's ambiguous 404.
+- **CLI:** `erun review requeue REVIEW_ID` — see [`erun review requeue`](/cli/review#review-requeue). Fetches the review first, so a review that is not at `MERGE` is refused before the write, naming its actual status; the server's own refusal names it too.
 - **MCP:** `review_requeue` — same behaviour, `reviewId` the only input.
 - Neither takes a reason: unlike [`override-advance`](#overriding-the-gate), this transition bypasses no safety gate, so there is nothing to make accountable.
 
@@ -222,10 +222,11 @@ Omitting `buildId` on a `READY` transition is what marks this as the missed-merg
 | Refusal | HTTP status | Body | How to unblock |
 |---|---|---|---|
 | No `READY` review waiting for that target branch (queue empty) | `404 Not Found` | `{code: "EMPTY_QUEUE", message}` (no `details`) | Wait for a review to reach `READY` — its build succeeded — then advance again. |
-| Another review is already `MERGE` for that target branch | `404 Not Found` | `{code: "NOT_FOUND", message}` (no `details`) | Wait for it to reach `MERGED`/`FAILED`, or see [When the gate wedges](#when-the-gate-wedges) if it looks stuck. |
+| Another review is already `MERGE` for that target branch | `409 Conflict` | `{code: "MERGE_QUEUE_OCCUPIED", message, details}` — `details` names `targetBranch`, `reviewId`, `name`, `sourceBranch` | Wait for that review to reach `MERGED`/`FAILED`, or `review requeue` it back to `READY` to free the slot — see [When the gate wedges](#when-the-gate-wedges) if it looks stuck. |
 | The head review has an unresolved comment thread | `409 Conflict` | structured — `{error, message, reviewId, unresolvedThreads}`, shown [above](#the-unresolved-thread-check) | Resolve the thread (its root author only), or [`override-advance`](#overriding-the-gate). |
+| A `READY` transition with no `buildId` on a review that is not at `MERGE` (the requeue path) | `409 Conflict` | `{code: "REVIEW_NOT_MERGING", message, details}` — `details` names `reviewId` and the `status` the review actually holds | Requeue only recovers a review stuck at `MERGE`; nothing to do for any other status, whose own path applies. |
 
-The first two rows both 404, but are distinguishable now: [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes) names `EMPTY_QUEUE` for the first case (nothing `READY` waiting), while the second — another review already merging — falls through to the generic `NOT_FOUND` code every 404 gets by default, since that case has no business-specific code of its own.
+Only the empty-queue case is a `404`. Every other advance refusal is a `409` that names what is actually in the way, so a reader is never sent after a missing resource: [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes) names `EMPTY_QUEUE` for the empty queue, `MERGE_QUEUE_OCCUPIED` for an occupied slot, and `REVIEW_NOT_MERGING` for a requeue from the wrong status.
 
 ## See also
 
