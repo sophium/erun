@@ -474,17 +474,27 @@ func reserveEnvironmentJobID(ctx Context, dir, id string) error {
 	return nil
 }
 
-// awaitEnvironmentJobRecord waits for the supervisor to register the job, so a
-// start either returns a handle that resolves or fails outright — never a handle
-// to nothing.
+// awaitEnvironmentJobRecord waits for the supervisor to register the job *and*
+// to name the work's own process, so a start either returns a handle that
+// resolves or fails outright — never a handle to nothing, and never a handle
+// whose process cancel cannot name. The supervisor publishes its running record
+// before it spawns the work, so a reader that stopped at the record's first
+// appearance could observe a running job with no child pid; `job cancel` reads
+// the same record, and with nothing else to name it would signal the
+// supervisor, the one process that has to survive to record the outcome. A
+// terminal record is a complete answer too: there is no work to name because
+// there is no longer any work.
 func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (EnvironmentJob, error) {
 	deadline := time.Now().Add(jobSupervisorReportTimeout)
 	for {
 		job, err := readEnvironmentJob(filepath.Join(dir, id+".json"))
-		if err == nil {
+		if err == nil && (job.ChildPID > 0 || job.Finished()) {
 			return job, nil
 		}
 		if !time.Now().Before(deadline) {
+			if err == nil {
+				return EnvironmentJob{}, fmt.Errorf("job supervisor %d registered job %q without naming the work's process within %s", supervisorPID, id, jobSupervisorReportTimeout)
+			}
 			return EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
 		}
 		if !processAlive(supervisorPID) {
@@ -655,16 +665,26 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	job := EnvironmentJob{
-		ID:               id,
-		Name:             name,
-		State:            EnvironmentJobStateRunning,
-		Kind:             environmentJobKind(agent),
-		AgentTool:        agent,
-		Command:          append([]string(nil), params.Command...),
-		Dir:              params.Dir,
-		PID:              os.Getpid(),
-		StartedAt:        time.Now(),
+		ID:        id,
+		Name:      name,
+		State:     EnvironmentJobStateRunning,
+		Kind:      environmentJobKind(agent),
+		AgentTool: agent,
+		Command:   append([]string(nil), params.Command...),
+		Dir:       params.Dir,
+		PID:       os.Getpid(),
+		StartedAt: now,
+		// Stamped in the same write that publishes the job as running, so a
+		// reader can never observe a running job that has not beaten: writing
+		// this record *is* the supervisor being alive, and the first
+		// startEnvironmentJobAliveBeat tick is only the next one. Leaving it
+		// for that tick left an observable window -- registering, then opening
+		// the log and taking the lease -- in which a running job reported no
+		// heartbeat at all. An attached job has no supervisor and is stamped by
+		// its own renew instead.
+		LastAliveAt:      now,
 		LogPath:          filepath.Join(dir, id+".log"),
 		OutputLimitBytes: limit,
 		LeaseID:          environmentJobLeaseID(id),
@@ -1545,6 +1565,33 @@ type CancelEnvironmentJobResult struct {
 	TargetPID int    `json:"targetPid,omitempty"`
 }
 
+// resolveEnvironmentJobCancelTarget names the process a cancel is to signal, or
+// explains why it cannot name one. It is the only place that decides this, so
+// the rule that a job's own supervisor is never a target lives in one place.
+func resolveEnvironmentJobCancelTarget(job EnvironmentJob) (int, error) {
+	// A task job's PID is this process's own -- there is no subprocess to fall
+	// back to signalling, and falling back anyway would send the signal to
+	// whatever is running this call instead of refusing outright.
+	if job.Kind == EnvironmentJobKindTask {
+		return 0, fmt.Errorf("job %q is a background task job with no subprocess to signal; wait for it or let it finish", job.ID)
+	}
+	if job.ChildPID > 0 {
+		return job.ChildPID, nil
+	}
+	// Falling back to PID is only ever right for an attached job, where PID
+	// *is* the process the caller attached. For a started job PID is the
+	// supervisor, and that is the one process a cancel must never reach: it is
+	// what has to survive to record the outcome, and killing it leaves the
+	// work running with nothing left to report for it. A started job's record
+	// with no ChildPID is one a reader observed before the supervisor named
+	// the work; see awaitEnvironmentJobRecord, which stops that state being
+	// handed back as a start handle at all.
+	if job.Attached && job.PID > 0 {
+		return job.PID, nil
+	}
+	return 0, fmt.Errorf("job %q has not recorded its work's process yet, so there is nothing to signal here but the supervisor; retry in a moment or wait for the job to start", job.ID)
+}
+
 // CancelEnvironmentJob signals the work behind a job. The target is the pid the
 // record holds, never a command-line pattern — a pattern can match the caller's
 // own shell, which is how a cancel once killed the sequence issuing it. The
@@ -1564,18 +1611,9 @@ func CancelEnvironmentJob(ctx Context, params CancelEnvironmentJobParams) (Cance
 		ctx.Trace(fmt.Sprintf("job: %s already finished (%s), nothing to signal", job.ID, job.State))
 		return result, nil
 	}
-	// A task job's PID is this process's own -- there is no subprocess to fall
-	// back to signalling, and falling back anyway would send the signal to
-	// whatever is running this call instead of refusing outright.
-	if job.Kind == EnvironmentJobKindTask {
-		return CancelEnvironmentJobResult{}, fmt.Errorf("job %q is a background task job with no subprocess to signal; wait for it or let it finish", job.ID)
-	}
-	target := job.ChildPID
-	if target <= 0 {
-		target = job.PID
-	}
-	if target <= 0 {
-		return CancelEnvironmentJobResult{}, fmt.Errorf("job %q records no process to signal", job.ID)
+	target, err := resolveEnvironmentJobCancelTarget(job)
+	if err != nil {
+		return CancelEnvironmentJobResult{}, err
 	}
 	result.TargetPID = target
 	ctx.Trace(fmt.Sprintf("job: sending SIG%s to process group %d (job %s)", signal, target, job.ID))

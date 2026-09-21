@@ -1,0 +1,15 @@
+[
+  {
+    "jobId": "job_01HQ_running",
+    "jobType": "fix",
+    "summary": "fixing the jobs claim race",
+    "status": "RUNNING",
+    "actorKind": "agent",
+    "actorId": "erun/code2",
+    "startedAt": "<TS>",
+    "createdAt": "<TS>",
+    "updatedAt": "<TS>"
+  }
+]
+audit: erun jobs list --output json
+platform: GET <PLATFORM_API>/v1/jobs

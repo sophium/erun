@@ -3,10 +3,12 @@ package zitadel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -224,6 +226,58 @@ func TestCreateHumanUserWithInitialPasswordSkipsTheEmailFlow(t *testing.T) {
 	email, _ := gotBody["email"].(map[string]any)
 	if email["isEmailVerified"] != true {
 		t.Fatalf("email.isEmailVerified = %v, want true -- otherwise Zitadel still emails an init link nothing can deliver", email["isEmailVerified"])
+	}
+}
+
+// TestCreateHumanUserReportsATakenUsernameAsErrUsernameTaken is the
+// reproduction of the reported failure: a login name the instance already
+// holds reached the caller as Zitadel's own AlreadyExists text, which names
+// the account rather than the one thing the caller can change, so an invitee
+// accepting an invite at that moment was told something they could not act
+// on. The instance signals the case with the message key
+// Errors.User.AlreadyExists.
+func TestCreateHumanUserReportsATakenUsernameAsErrUsernameTaken(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code":6,"message":"Errors.User.AlreadyExists"}`))
+	})
+	_, err := client.CreateHumanUser(context.Background(), CreateHumanUserParams{
+		Username: "login-client", Email: "ops@frs.example",
+	})
+	if !errors.Is(err, ErrUsernameTaken) {
+		t.Fatalf("err = %v, want ErrUsernameTaken", err)
+	}
+	var taken *UsernameTakenError
+	if !errors.As(err, &taken) {
+		t.Fatalf("err = %v, want a *UsernameTakenError carrying the name", err)
+	}
+	if taken.Username != "login-client" {
+		t.Fatalf("Username = %q, want the name the caller asked for", taken.Username)
+	}
+	if !strings.Contains(err.Error(), "login-client") {
+		t.Fatalf("err = %q, want the offending login name named in the message", err)
+	}
+}
+
+// TestCreateHumanUserLeavesAnUnrelatedConflictAsItself is the crossed state
+// of the test above: a conflict on this endpoint that is not the
+// user-already-exists collision must not be relabelled as a username
+// collision, or the caller is sent to change a name that was never the
+// problem.
+func TestCreateHumanUserLeavesAnUnrelatedConflictAsItself(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code":6,"message":"Errors.User.EmailAlreadyExists"}`))
+	})
+	_, err := client.CreateHumanUser(context.Background(), CreateHumanUserParams{
+		Username: "alice", Email: "a@example.com",
+	})
+	if errors.Is(err, ErrUsernameTaken) {
+		t.Fatalf("err = %v, must not be reported as a username collision", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict {
+		t.Fatalf("err = %v, want the instance's own conflict forwarded unchanged", err)
 	}
 }
 
