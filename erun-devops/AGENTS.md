@@ -222,21 +222,26 @@ composition and release invariants belong to root/shared logic, not chart policy
   and the refusal.
 - Previews show concrete commands for the operations selected, without adding
   build/push actions to a pure deploy.
-- **A test needing a real container runtime is reachable from a `RUN` step only
-  once the BuildKit `network.host` entitlement is granted, which `erun build` does
-  not pass yet (#2091).** Plain `docker build` refuses `RUN --network=host` with
-  `network.host is not allowed`; `docker build --allow network.host` lifts it, with
-  no separate container-driver builder instance needed. Verified live in this repo's
-  own `remote-agent` pod: with the flag, a `RUN --network=host` step reached the
-  pod's own dind sidecar at `DOCKER_HOST=tcp://127.0.0.1:2375` and ran a real
-  container end to end. That TCP endpoint is not deliberately wired up — it exists
-  because the dind sidecar always runs with `DOCKER_TLS_CERTDIR=""`, and the
-  vendored `docker:*-dind` image then adds an insecure `--host=tcp://0.0.0.0:2375`
-  listener bound to *all* interfaces, with no authentication, reachable by anything
-  sharing the pod's network namespace. That is a real pre-existing exposure this
-  repo has not hardened to loopback-only. Until `erun build` passes the flag
-  itself, a component Dockerfile adding `RUN --network=host` fails an `erun build`
-  with that exact refusal even though the daemon behind it is already reachable.
+- **A test needing a real container runtime reaches it from a `RUN` step via the
+  BuildKit `network.host` entitlement, which `erun build` grants.** Plain
+  `docker build` refuses `RUN --network=host` with `network.host is not allowed`;
+  `docker build --allow network.host` lifts it, with no separate container-driver
+  builder instance needed. Verified live in this repo's own `remote-agent` pod: with
+  the flag, a `RUN --network=host` step reached the pod's own dind sidecar at
+  `DOCKER_HOST=tcp://127.0.0.1:2375` and ran a real container end to end.
+  `dockerBuildArgs` passes the flag on every build, so a component test stage can
+  depend on it; `build_network_entitlement_test.go` locks that it is passed and that
+  it is paired with its value. The grant is a consequence of erun owning the builder,
+  not a safe default, and it must be documented as such: a `RUN --network=host` step
+  can reach the daemon that is building it, and start, stop, prune or inspect the
+  containers and images of its own build. A component's test stage is trusted code
+  running against its own environment's runtime, not a sandbox.
+- **The TCP endpoint that makes the above reachable is not deliberately wired up.**
+  It exists because the dind sidecar always runs with `DOCKER_TLS_CERTDIR=""`, and
+  the vendored `docker:*-dind` image then adds an insecure
+  `--host=tcp://0.0.0.0:2375` listener bound to *all* interfaces, with no
+  authentication, reachable by anything sharing the pod's network namespace. That is
+  a real pre-existing exposure this repo has not hardened to loopback-only.
 - **Under that entitlement a test may start its own container-runtime fixture; two
   classes never belong in a `test` stage.** In scope: a Testcontainers-style
   ephemeral dependency (a postgres, a compose-style sidecar) via
@@ -253,8 +258,11 @@ composition and release invariants belong to root/shared logic, not chart policy
   the root Makefile's `test-postgres-restart`/`test-retention`/
   `test-retention-grants`/`test-schema-drift`/`test-console-nginx` targets, run by
   hand or via `erun exec job` before merging a change to the behavior they cover.
-  Retiring them in favor of in-build test stages is tracked at the same issue as the
-  `erun build` entitlement above.
+  Retiring them is now blocked only by the migration itself: the entitlement above
+  has landed, so nothing but the per-component `test` stage work remains. Until that
+  lands they stay runnable only by hand or via `erun exec job`, never in `make check`
+  — see the venue note in the root Makefile, which is a real constraint rather than
+  an oversight.
 
 ## Release Workflow
 

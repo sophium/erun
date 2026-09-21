@@ -145,7 +145,7 @@ Tests that **do** require a running deployment — end-to-end checks against liv
 
 A test that starts its own container-runtime fixture — a Testcontainers-style ephemeral database, a compose-style sidecar — is a third category, distinct from both of the above. It needs no live cluster and no deployed version of the project under test; it only needs a docker daemon to start its own throwaway containers against.
 
-**`(Planned.)`** The [agent env](/concepts/environment-types) already runs a docker daemon of its own (the one `erun build` itself uses), reachable from a `RUN` step via BuildKit's `network.host` entitlement:
+The [agent env](/concepts/environment-types) already runs a docker daemon of its own (the one `erun build` itself uses), and `erun build` grants BuildKit's `network.host` entitlement on every build, so a `RUN` step can reach it:
 
 ```dockerfile
 RUN --network=host \
@@ -153,7 +153,7 @@ RUN --network=host \
     go test ./... -run TestAgainstRealPostgres
 ```
 
-`erun build` does not yet pass that entitlement to `docker build`, so this fails today with BuildKit's own refusal (`network.host is not allowed`) rather than a project-specific error — the daemon behind it is reachable once the entitlement is granted, but nothing grants it yet. Track this at [issue #2091](https://github.com/sophium/erun/issues/2091).
+Plain `docker build` would refuse this step with BuildKit's own refusal (`network.host is not allowed`) before any step ran; `erun build` grants the entitlement because it owns the builder, and the daemon being reached is the same environment's own. The grant is a deliberate capability, not a sandbox boundary: a `RUN --network=host` step can also reach the daemon that is building it, so a component's test stage is trusted code running against its own environment's runtime.
 
 Two categories never belong in the builder stage, even once the entitlement lands — both for the same reason as the deployed-environment case above, not a new rule:
 
