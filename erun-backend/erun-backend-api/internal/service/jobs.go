@@ -62,6 +62,7 @@ type JobRepository interface {
 	Get(ctx context.Context, jobID string) (model.Job, error)
 	FindOpenByScope(ctx context.Context, scope string) (model.Job, error)
 	Update(ctx context.Context, job model.Job) (model.Job, error)
+	AbandonStale(ctx context.Context, staleBefore time.Time) ([]model.Job, error)
 }
 
 type JobService struct {
@@ -208,6 +209,30 @@ func (s *JobService) Update(ctx context.Context, jobID string, status model.JobS
 		return model.Job{}, err
 	}
 	return s.jobs.Update(ctx, updated)
+}
+
+// DefaultJobAbandonTTL is how long a RUNNING job may go without an update
+// before a sweep treats its actor as gone. It is generous on purpose: an
+// agent working a real issue updates its job only at meaningful boundaries
+// (see the refresh path in Update), so a short TTL would abandon jobs that
+// are plainly still being worked.
+const DefaultJobAbandonTTL = 30 * time.Minute
+
+// SweepAbandoned closes every RUNNING job nobody has updated within ttl, so
+// an actor that disappears without closing its job cannot wedge a scope
+// forever — the failure a permanently orphaned running record produces on
+// the local side, where nothing ever clears it.
+//
+// This is an explicit sweep rather than implicit reaping: abandonment is a
+// recorded transition performed by a caller that means to perform it, never
+// something a read infers about a row it happens to look at. A claim never
+// steals a scope on the grounds that its holder looks stale; only this does,
+// and it leaves the row saying what happened.
+func (s *JobService) SweepAbandoned(ctx context.Context, ttl time.Duration) ([]model.Job, error) {
+	if ttl <= 0 {
+		ttl = DefaultJobAbandonTTL
+	}
+	return s.jobs.AbandonStale(ctx, time.Now().UTC().Add(-ttl))
 }
 
 // validateJobWrite mirrors the jobs table's own CHECK constraints and its

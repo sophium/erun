@@ -374,7 +374,9 @@ func registerEnvironmentRoutes(register routes.ProtectedRouteRegistrar, options 
 	routes.RegisterEnvironmentRoutes(register, repos.environments, repos.tenantQuotas, repos.tenants, repos.contexts, newEnvironmentProvisioner(options, repos.environments, repos.usageEvents, placementCredentials), newEnvironmentLifecycle(options, repos.environments, repos.usageEvents, placementCredentials), deleter, environmentAdmin)
 	newEnvironmentDeleteReconciler(options, repos.environments, repos.tenants, repos.contexts, deleter)
 	routes.RegisterAISessionRoutes(register, repos.aiSessions, repos.environments)
-	routes.RegisterJobRoutes(register, repos.jobs, repos.environments, service.NewJobService(repos.jobs))
+	jobService := service.NewJobService(repos.jobs)
+	routes.RegisterJobRoutes(register, repos.jobs, repos.environments, jobService)
+	newJobAbandonReconciler(options, jobService)
 }
 
 // registerEventRoutes wires the two append-only tenant-wide event reads.
@@ -574,6 +576,19 @@ func newEnvironmentDeleteReconciler(options HandlerOptions, environments *reposi
 		return
 	}
 	provision.NewEnvDeleteReconciler(options.DBOSContext, environments, tenants, contexts, deleter, provision.DefaultDeleteReconcileSchedule)
+}
+
+// newJobAbandonReconciler schedules the periodic sweep of RUNNING jobs whose
+// actor stopped updating them, so a scope held by a process that is gone is
+// released without an operator noticing and asking for it. Without a DBOS
+// context there is no scheduler to run it against, and the sweep stays an
+// operation a caller performs explicitly rather than something that quietly
+// does not happen.
+func newJobAbandonReconciler(options HandlerOptions, jobs service.JobAbandonSweeper) {
+	if options.DBOSContext == nil {
+		return
+	}
+	service.NewJobAbandonReconciler(options.DBOSContext, jobs, service.DefaultJobAbandonTTL, service.DefaultJobAbandonSchedule)
 }
 
 func registerHealthRoute(mux *http.ServeMux) {

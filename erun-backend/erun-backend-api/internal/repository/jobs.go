@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -166,6 +167,37 @@ func (r *JobRepository) FindOpenByScope(ctx context.Context, scope string) (mode
 		return normalizeNoRows(err)
 	})
 	return job, err
+}
+
+// AbandonStale closes every RUNNING job whose last update predates
+// staleBefore, returning the rows it closed so the sweep's effect is
+// observable rather than inferred from a count.
+//
+// This is deliberately not tenant-scoped. A sweep runs under the operations
+// role across every tenant at once — a job abandoned in one tenant must not
+// require that tenant to ask for it to be cleared — and it is the only write
+// in this repository that reads no tenant from the security context. The
+// tenant's own reads stay scoped in SQL rather than left to RLS, because
+// erun_operations' policy is unconditional (see List).
+//
+// One statement, not a read followed by a write: a row that a later update
+// refreshes between the two would otherwise be abandoned on the strength of
+// the state it had when it was read.
+func (r *JobRepository) AbandonStale(ctx context.Context, staleBefore time.Time) ([]model.Job, error) {
+	// A sweep that closed nothing is still a definite answer, so the slice is
+	// built non-nil and marshals as [] rather than null -- the same contract
+	// every list in this repository holds to.
+	abandoned := []model.Job{}
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewRaw(`
+			UPDATE jobs
+			   SET status = 'ABANDONED', ended_at = NOW()
+			 WHERE status = 'RUNNING'
+			   AND updated_at < ?
+			RETURNING `+jobColumns+`
+		`, staleBefore).Scan(ctx, &abandoned)
+	})
+	return abandoned, err
 }
 
 // Update persists a job's progress: its status, summary and local_job_id,
