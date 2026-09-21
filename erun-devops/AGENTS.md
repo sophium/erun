@@ -128,6 +128,20 @@ composition and release invariants belong to root/shared logic, not chart policy
   `applyDindResourceBuildArgs` into the test-stage parallel-gate overrides;
   unbounded cgroup readings must not size fan-out for the entire host.
   Report killed/resource-exhausted builds as resource failures, not lint verdicts.
+- Size the dind CPU cap from the node, never as a flat safe-looking constant:
+  a CPU limit is a ceiling, not a reservation, so a build capped well under the
+  node is throttled while the node sits idle, which is what a CPU-pressure
+  figure near 100% beside a load average far below the core count means.
+  `RuntimeDindCPULimit` (erun-common/runtime_resources.go) owns the rule — the
+  node's CPUs divided across the build-capable environments expected to be
+  building on it at once, floored at `MinimumRuntimeDindCPU` — and
+  `DefaultRuntimeDindCPU`, the chart's `runtime.dind.resources.limits.cpu`
+  fallback and the Dockerfile's `DIND_CPU_LIMIT` ARG default are three copies
+  of one number that move together (`runtime_dind_default_mirrors_test.go`).
+- Decide the desktop suite's Playwright worker count in the Makefile beside the
+  other quota-derived gate widths, never in the Dockerfile as arithmetic on
+  `DIND_CPU_LIMIT`: the two are independent decisions, and a value set in the
+  build's RUN step silently wins over the Makefile's.
 - CPU enforcement uses a distinct, tested mechanism: `dind-entrypoint.sh` mirrors
   its live `cpu.max` into a per-pod capped parent and in-pod builds pass that parent
   per invocation. Do not apply this to host builds or change daemon placement.

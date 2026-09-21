@@ -120,12 +120,89 @@ const (
 // `erun init`/`erun resize`'s own suggestion and the backend tenant-quota
 // floor derived from MinimumRuntimeNamespaceQuota) even though it is a bigger
 // ceiling for the node to have room for, not a hard cgroup enforcement of it.
+//
+// DefaultRuntimeDindCPU is not a constant: it is MinimumRuntimeDindCPU
+// divided across DefaultRuntimeDindCPUCoTenants on a
+// DefaultRuntimeDindCPUNodeCPUMilli node, i.e. RuntimeDindCPULimit's own
+// answer for the reference node the fleet is measured on. The default used to
+// be a flat "4" and that flatness was the bug: a limit of 4 on a 24-CPU node
+// leaves the node three-quarters idle while the build inside it is throttled,
+// because a CPU limit is a ceiling, not a claim on the node -- the scheduler
+// still shares the node fairly between whatever is actually runnable, so a
+// build capped well under the node's size is simply slower while a co-tenant's
+// own work goes unblocked either way.
 const (
-	DefaultRuntimeDindCPU           = "4"
+	// MinimumRuntimeDindCPU is the floor RuntimeDindCPULimit refuses to size a
+	// build below, and the value the flat default used to be. Below this a
+	// gate build spends most of its wall clock throttled: the measured shape
+	// this replaced was ~80% CPU 'some' pressure at a load average of 2.18 on
+	// 24 CPUs, with IO pressure near zero -- quota throttling, not node
+	// saturation. It is also what keeps a small or heavily co-tenanted node
+	// from being sized into a cap no build can finish under.
+	MinimumRuntimeDindCPU = "4"
+	// DefaultRuntimeDindCPUNodeCPUMilli is the node this default is sized
+	// against: the 24-CPU node the throttling above was measured on, and the
+	// size a stock cluster node is provisioned at.
+	DefaultRuntimeDindCPUNodeCPUMilli int64 = 24000
+	// DefaultRuntimeDindCPUCoTenants is how many of a node's build-capable
+	// environments erun assumes are building at once. Two rather than the
+	// node's environment count: a gate run is a burst an environment takes
+	// rarely, not a steady state every environment holds, so dividing the node
+	// by the number of environments merely co-scheduled would size every one
+	// of them for a collision that mostly does not happen. An operator whose
+	// node really does gate more than that at once resizes down with `erun
+	// resize --dind-cpu`, which is the lever this default is a starting point
+	// for rather than a substitute for.
+	DefaultRuntimeDindCPUCoTenants = 2
+
 	DefaultRuntimeDindMemory        = "20Gi"
 	DefaultRuntimeDindRequestCPU    = "0.25"
 	DefaultRuntimeDindRequestMemory = "1024Mi"
 )
+
+// DefaultRuntimeDindCPU is the dind sidecar's CPU limit for an environment
+// that has never been sized (`NormalizeRuntimeDindPodResources`), and the
+// namespace-quota floor's own dind term (`MinimumRuntimeNamespaceQuota`). The
+// mirrors that must move with it are the erun-devops chart's
+// `runtime.dind.resources.limits.cpu` fallback (kept in sync by the chart
+// tests) and the Dockerfile's own DIND_CPU_LIMIT ARG default, which is only
+// what a bare `docker build` with no erun environment resolved falls back to.
+var DefaultRuntimeDindCPU = RuntimeDindCPULimit(DefaultRuntimeDindCPUNodeCPUMilli, DefaultRuntimeDindCPUCoTenants)
+
+// RuntimeDindCPULimit sizes one environment's erun-dind build cap from the
+// node it runs on: the node's CPUs divided by the build-capable environments
+// expected to be building on it at once, floored at MinimumRuntimeDindCPU and
+// rounded up to whole cores.
+//
+// The divisor is deliberately not a reservation, and cannot be: a Kubernetes
+// CPU limit is a ceiling, so the sum of every environment's limit on a node is
+// allowed to exceed the node -- what the kernel then does is share the node
+// fairly between the builds that are actually running, which is a better
+// outcome than each of them being held under a quota too small to use the node
+// even when they have it to themselves. What the divisor does buy is the
+// honest kind of contention: four environments sized for one node each will
+// contend when all four build, and that shows up as real CPU pressure rather
+// than as each build being throttled at a quarter of a node nobody else asked
+// for. Sizing a node's environments is therefore a choice about how much
+// collision to accept, which is why this takes the co-tenant count rather than
+// assuming one.
+//
+// A node capacity of zero or less is the unknown-node case -- nothing has
+// established how large the node is -- and resolves to the floor rather than
+// to an invented capacity.
+func RuntimeDindCPULimit(nodeCPUMilli int64, coTenants int) string {
+	if nodeCPUMilli <= 0 {
+		return MinimumRuntimeDindCPU
+	}
+	if coTenants < 1 {
+		coTenants = 1
+	}
+	perEnvironment := nodeCPUMilli / int64(coTenants)
+	if floor, err := ParseKubernetesCPUToMilli(MinimumRuntimeDindCPU); err == nil && perEnvironment < floor {
+		perEnvironment = floor
+	}
+	return FormatKubernetesCPUFromMilli(scaleMilliToWholeCores(perEnvironment, 1))
+}
 
 // DefaultLimitRangeDefaultRequestCPU/Memory size the namespace LimitRange's
 // defaultRequest (namespaceResourceQuotaManifest in

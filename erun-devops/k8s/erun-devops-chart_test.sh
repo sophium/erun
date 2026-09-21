@@ -469,8 +469,8 @@ for gb in $(pvc_storage_requests "${rendered}"); do
     total_storage_gb=$((total_storage_gb + gb))
 done
 
-[ "${total_cpu_millicores}" = "8000" ] ||
-    fail "pod cpu limits should sum to 8000m (erun-devops ${runtime_cpu} + erun-dind ${dind_cpu}), got ${total_cpu_millicores}m"
+[ "${total_cpu_millicores}" = "16000" ] ||
+    fail "pod cpu limits should sum to 16000m (erun-devops ${runtime_cpu} + erun-dind ${dind_cpu}), got ${total_cpu_millicores}m"
 [ "${total_memory_mb}" = "36864" ] ||
     fail "pod memory limits should sum to 36864Mi (erun-devops ${runtime_memory}Mi + erun-dind ${dind_memory}Mi), got ${total_memory_mb}Mi"
 [ "${total_storage_gb}" = "72" ] ||

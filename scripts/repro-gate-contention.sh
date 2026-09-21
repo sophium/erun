@@ -46,7 +46,7 @@ set -eu
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 
-cpus=4
+cpus=12
 areas=""
 load="lint"
 jobs=""
@@ -63,11 +63,13 @@ usage() {
 	cat <<'EOF' >&2
 Usage: scripts/repro-gate-contention.sh [options] [-- <playwright args>]
 
-  --cpus N        CPU budget for the container (default 4, the gate's
-                  DIND_CPU_LIMIT default and the budget the failures were
-                  reported at). Sets the container's --cpus, the gate's own
-                  PARALLEL_GATE_CPU_LIMIT, ERUN_PLAYWRIGHT_WORKERS (N/2, the
-                  Dockerfile's own rule) and make's -j width.
+  --cpus N        CPU budget for the container (default 12, the gate's
+                  DIND_CPU_LIMIT default; the failures were reported at 4,
+                  which is still the floor the sizing rule clamps to, so pass
+                  --cpus 4 to reproduce them). Sets the container's --cpus,
+                  the gate's own PARALLEL_GATE_CPU_LIMIT,
+                  ERUN_PLAYWRIGHT_WORKERS (N/2, the Makefile's own rule) and
+                  make's -j width.
   --areas SEL     PLAYWRIGHT_TEST_AREAS for the run: unset/"all" is the full
                   suite, "smoke" or "smoke,<area>,..." is the gate's
                   area-scoped selection (erun-ui/playwright/AGENTS.md).
@@ -232,10 +234,12 @@ run_attempt() {
 	log="$log_dir/$attempt_tag.log"
 	started=$(date +%s)
 
-	# The Dockerfile's own worker rule for this budget: half the CPU budget,
-	# floored at one, capped at four. --workers pins it instead, which is the
-	# only way to change the budget without also changing the suite's
-	# concurrency -- the two effects the boot-wait failures could come from.
+	# The Makefile's own worker rule for this budget (ERUN_PLAYWRIGHT_WORKERS
+	# in the root Makefile spends it from parallel-gate.sh cpu-quota, which is
+	# this same number): two cores per worker, floored at one, capped at four.
+	# --workers pins it instead, which is the only way to change the budget
+	# without also changing the suite's concurrency -- the two effects the
+	# boot-wait failures could come from.
 	if [ -z "$workers_override" ]; then
 		workers=$((cpus / 2))
 		[ "$workers" -ge 1 ] || workers=1
