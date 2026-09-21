@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -166,6 +167,60 @@ func TestContextListNamesTheBatchedRefreshFailureAtBatchLevel(t *testing.T) {
 		if !strings.Contains(row, "status=unknown") {
 			t.Fatalf("row does not report the refuted state as unknown:\n%s", row)
 		}
+	}
+}
+
+// The structured form owes the same fact once. A JSON consumer that only sees
+// per-context messages would have to re-derive the batch from N identical
+// copies -- and would read the batch's whole command, instance IDs included,
+// in every row.
+func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
+	instanceIDs := []string{"i-0aaaa11111aaaa1111", "i-0bbbb22222bbbb2222"}
+	store := listRefreshTestStoreWithIDs(instanceIDs...)
+	deps := common.CloudContextDependencies{RunAWS: listRefreshTestFailingRunAWS()}
+
+	var buf bytes.Buffer
+	ctx := common.Context{
+		Output: common.OutputJSON,
+		Stdout: &buf,
+		Stderr: &buf,
+		Logger: common.NewLoggerWithWriters(common.VerbosityInfo, io.Discard, io.Discard),
+	}
+	if err := runContextListCommand(ctx, store, deps); err != nil {
+		t.Fatalf("context list: %v", err)
+	}
+
+	var result common.CloudContextListResult
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("decode %q: %v", buf.String(), err)
+	}
+	if len(result.RefreshFailures) != 1 {
+		t.Fatalf("got %d refresh failures, want exactly 1: %s", len(result.RefreshFailures), buf.String())
+	}
+	failure := result.RefreshFailures[0]
+	if failure.Alias != listRefreshTestAlias || failure.Region != listRefreshTestRegion {
+		t.Fatalf("failure not attributed to its batch: %+v", failure)
+	}
+	if !strings.Contains(failure.Message, "SSO session") {
+		t.Fatalf("failure does not carry the cause: %+v", failure)
+	}
+	if len(result.CloudContexts) != len(instanceIDs) {
+		t.Fatalf("got %d contexts, want %d", len(result.CloudContexts), len(instanceIDs))
+	}
+	for _, context := range result.CloudContexts {
+		requireUnknownWithoutSharedCause(t, context)
+	}
+}
+
+// requireUnknownWithoutSharedCause pins what a row owes once its batch failed:
+// the refuted state, and no copy of a cause that belongs to the batch.
+func requireUnknownWithoutSharedCause(t *testing.T, context common.CloudContextStatus) {
+	t.Helper()
+	if context.Message != "" {
+		t.Fatalf("context %s repeats the shared cause: %q", context.Name, context.Message)
+	}
+	if context.Status != common.CloudContextStatusUnknown {
+		t.Fatalf("context %s status = %q, want %q", context.Name, context.Status, common.CloudContextStatusUnknown)
 	}
 }
 
