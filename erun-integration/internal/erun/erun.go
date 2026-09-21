@@ -307,9 +307,11 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 var errTimeout = errors.New("erun: child exceeded its timeout")
 
 // supervise waits for an already-started child, killing it if it outlives
-// timeout. It returns the child's own Wait error -- nil, an *exec.ExitError,
-// or ErrWaitDelay, all of which describe an observed exit -- or errTimeout if
-// the cap was what ended the run.
+// timeout. An exit it could observe comes back as the child's own result --
+// nil, or an *exec.ExitError carrying its status -- with a wait rescued by
+// delay reported as the completed run it is rather than as the trouble the
+// wait itself ran into. errTimeout means the cap was what ended the run, and
+// any other error means the child could not be run or observed at all.
 //
 // It arms delay on the child itself, rather than leaving that to its caller,
 // because that is the bound this whole function exists around: a child that
