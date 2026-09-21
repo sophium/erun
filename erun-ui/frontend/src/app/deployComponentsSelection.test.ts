@@ -4,7 +4,10 @@ import { test } from 'vitest';
 
 import type { UIDeployableComponent } from '@/types';
 
-import { deployComponentsEmptySelection, toggleDeployComponentName } from './deployComponentsSelection';
+import {
+  deployComponentsEmptySelection,
+  toggleDeployComponentName,
+} from './deployComponentsSelection';
 import type { AppState } from './state';
 
 type ManageDialog = AppState['manageDialog'];

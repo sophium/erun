@@ -8,7 +8,8 @@ type ManageDialog = AppState['manageDialog'];
 // closed, and again inside the picker panel -- the panel is a modal popover that
 // covers the row beneath it, so the operator unchecking the last box would
 // otherwise see the reason only after closing it.
-export const DEPLOY_COMPONENTS_EMPTY_NOTICE_ID = 'environment-config-deploy-components-empty-notice';
+export const DEPLOY_COMPONENTS_EMPTY_NOTICE_ID =
+  'environment-config-deploy-components-empty-notice';
 export const DEPLOY_COMPONENTS_EMPTY_PANEL_NOTICE_ID =
   'environment-config-deploy-components-empty-notice-panel';
 

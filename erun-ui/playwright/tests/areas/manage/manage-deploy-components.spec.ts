@@ -436,16 +436,27 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     // must refuse it and say so, rather than falling through to the runtime.
     await runtime.click();
     await expect(runtime).not.toBeChecked();
+    // This is the reported defect: the button stayed enabled and the deploy went
+    // through, rolling out the runtime chart the operator had just declined.
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
     const panelNotice = app.manageDialog.deployComponentsEmptyPanelNotice();
     await expect(panelNotice).toContainText('No charts are checked');
-    await expect(app.manageDialog.deployButton()).toBeDisabled();
     await page.screenshot({
       path: 'test-results/manage-deploy-components-emptied.png',
       animations: 'disabled',
     });
 
-    // Closed, the same statement sits under the version row, beside Deploy, and
-    // the button points at it for assistive tech.
+    // The guard is the empty set itself, not the act of unchecking: restoring a
+    // chart restores the button, so an operator recovers in one click.
+    await runtime.click();
+    await expect(runtime).toBeChecked();
+    await expect(app.manageDialog.deployButton()).toBeEnabled();
+    await expect(panelNotice).toHaveCount(0);
+
+    // Emptying it again, then closing the panel: the same statement sits under the
+    // version row, beside Deploy, and the button points at it for assistive tech.
+    await runtime.click();
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
     await page.keyboard.press('Escape');
     await expect(app.manageDialog.deployComponentsEmptyNotice()).toContainText(
       'No charts are checked',
@@ -455,14 +466,6 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       'aria-describedby',
       'environment-config-deploy-components-empty-notice',
     );
-
-    // The guard is the empty set itself, not the act of unchecking: restoring a
-    // chart restores the button, so an operator recovers in one click.
-    await app.manageDialog.openVersionPicker();
-    await runtime.click();
-    await expect(runtime).toBeChecked();
-    await expect(app.manageDialog.deployButton()).toBeEnabled();
-    await expect(app.manageDialog.deployComponentsEmptyPanelNotice()).toHaveCount(0);
   });
 
   test('runtime row shows the erun-devops fallback when the tenant chart is unpublished (#767)', async ({
