@@ -121,7 +121,7 @@ type diskHeadroomFreeSpaceFunc func(limits diskHeadroomTimeouts) (diskHeadroomMe
 // dockerReclaimable is what docker's own stores could still free, from a
 // single `docker system df` reading. Two figures, two questions, one reading,
 // so the remedy a message names can never contradict the prune decision that
-// preceded it: buildCache is what the bounded `docker builder prune` this file
+// preceded it: buildCache is what the bounded `docker buildx prune` this file
 // runs can reach, and total is what the wider remedy that message names —
 // `docker system prune` plus removing unused images — could reach.
 type dockerReclaimable struct {
@@ -231,7 +231,7 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 	}
 
 	ctx.Trace(fmt.Sprintf("%s: docker root free disk is below the %s floor; pruning reclaimable build cache down to it", policy.label, formatGiB(floor)))
-	ctx.TraceCommand("", "docker", "builder", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10))
+	ctx.TraceCommand("", "docker", diskHeadroomPruneArgs(floor)...)
 	if err := prune(floor, policy.limits.prune); err != nil {
 		// The prune is not what the run depends on, so a failure here is not
 		// fatal — but it must not read as an act that happened. A prune that
@@ -390,18 +390,35 @@ func parseDockerSize(value string) (uint64, bool) {
 	return 0, false
 }
 
-// runDiskHeadroomPrune is diskHeadroomPruneFunc's real implementation:
-// --min-free-space makes the prune a no-op once free space reaches floor,
-// rather than reclaiming everything reclaimable the way an unqualified
-// `docker builder prune -f` does.
+// diskHeadroomPruneArgs is the prune both the trace and the real invocation
+// issue, built once so the command a run records cannot drift from the one it
+// actually runs.
+//
+// It is `docker buildx prune`, not `docker builder prune`, and that choice is
+// load-bearing rather than incidental: the classic command — still the one the
+// docker CLI this repository pins implements — accepts only --all, --filter,
+// --force and --keep-storage, so a --min-free-space bound aimed at it is
+// rejected as an unknown flag. The prune then reclaims nothing while the trace
+// above it advertises a reclaim, which is worse than not pruning: the shortfall
+// is discovered afterward against a disk nothing moved, and the headroom check
+// silently stops being the protective act it exists to be. --min-free-space is
+// also what expresses this check's actual invariant — prune until free space
+// reaches the floor — rather than capping how much cache is retained and
+// leaving the free space it was meant to recover unaddressed.
+func diskHeadroomPruneArgs(floor uint64) []string {
+	return []string{"buildx", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10)}
+}
+
+// runDiskHeadroomPrune is diskHeadroomPruneFunc's real implementation. See
+// diskHeadroomPruneArgs for the command and flag it is built from.
 //
 // It is bounded because the daemon it drives is the thing this check exists
 // for: the disk-floor case is precisely the one where a daemon can be too busy
 // — or too wedged — to answer at all, and an unbounded prune there is a build
 // that never returns instead of a build that proceeds on a full disk.
 func runDiskHeadroomPrune(floor uint64, limit time.Duration) error {
-	err := diskHeadroomRun(limit, "docker", "builder", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10))
-	return diskHeadroomReadFailure(limit, "docker builder prune", err)
+	err := diskHeadroomRun(limit, "docker", diskHeadroomPruneArgs(floor)...)
+	return diskHeadroomReadFailure(limit, "docker buildx prune", err)
 }
 
 // diskHeadroomOutput runs one headroom read under limit and returns its
