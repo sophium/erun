@@ -445,7 +445,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     await app.reboot();
     await disablePopoverEntranceAnimation(page);
     // Deliberately width-constrained, the way the deploy overlay's own
-    // narrow-width capture is: 11rem is well below the card's fixed w-72, so
+    // narrow-width capture is: 11rem is well below the card's fixed w-90, so
     // the string cannot fit on one line however the card is later sized.
     await page.addStyleTag({ content: '[role="dialog"] { width: 11rem !important; }' });
 
@@ -540,10 +540,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
       await expect(dialog).toBeVisible();
       // The full strings are in the DOM (rendered, not dropped) — truncation
       // is a CSS ellipsis, not a data loss — so the card's fixed width must
-      // not grow past the popover's own w-72.
+      // not grow past the popover's own w-90 (360px).
       await expect(dialog).toContainText(longEnvironment);
       const cardBox = await dialog.boundingBox();
-      expect(cardBox?.width).toBeLessThan(320);
+      expect(cardBox?.width).toBeLessThanOrEqual(360);
 
       await captureHoverCard(dialog, artifactPath('test-results/1383-visual/long-values.png'));
     });

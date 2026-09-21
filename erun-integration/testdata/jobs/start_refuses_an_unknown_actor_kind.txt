@@ -1,0 +1,2 @@
+audit: erun jobs start --actor erun/code2 --actor-kind robot --summary work --type fix
+unsupported actor kind "robot": expected agent, orchestrator or human

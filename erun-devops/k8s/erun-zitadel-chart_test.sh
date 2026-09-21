@@ -160,6 +160,19 @@ grep -q 'value: "https://auth.example.test/ui/v2/login/login?authRequest="' "${c
 grep -q 'value: "https://auth.example.test/ui/v2/login/logout?post_logout_redirect="' "${core}" ||
     fail "the OIDC logout URL must point at Login V2"
 
+# --- 6b. The instance's Domain Policy is set, so login names are org-scoped ---
+# Zitadel ships both of these as false. Left false, a login name is unique
+# across the whole instance rather than per organization — every tenant's
+# users compete for one global namespace — and an organization can claim a
+# domain it does not control. These are the only lever Zitadel offers for
+# username shape, and they are read during first-instance init, so this is
+# what a freshly provisioned instance gets.
+for var in ZITADEL_DEFAULTINSTANCE_DOMAINPOLICY_USERLOGINMUSTBEDOMAIN \
+    ZITADEL_DEFAULTINSTANCE_DOMAINPOLICY_VALIDATEORGDOMAINS; do
+    container "${rendered}" erun-zitadel | grep -A1 "name: ${var}" | grep -q 'value: "true"' ||
+        fail "${var} must be true on core; Zitadel's default is false, which leaves login names unscoped across orgs"
+done
+
 # --- 7. ZITADEL_EXTERNAL* is the reachable origin, not a cluster address ---
 # Discovery hands these endpoints to the browser, so a Service name here is a
 # silently broken sign-in rather than a rendering detail.

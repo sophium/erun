@@ -44,7 +44,12 @@ async function emitStaleEnvUsage(page: Page): Promise<void> {
           tenant,
           environment,
           available: true,
-          cpu: { available: true, utilization: '12.0%', quota: '2.00 cores' },
+          cpu: {
+            available: true,
+            utilization: '12.0%',
+            utilizationPercent: 12,
+            quota: '2.00 cores',
+          },
           memory: {
             available: true,
             current: '512Mi',
@@ -101,10 +106,14 @@ test('the env hover card still renders every field: version, branch+issue, activ
     await expect(card.getByText('Activity', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText('Idle', { timeout: 1_000 });
 
-    // Usage row: headline figures, staleness flag, and the reading's age.
-    await expect(card.getByText('Usage', { exact: true })).toBeVisible({ timeout: 1_000 });
-    await expect(card).toContainText('CPU 12.0%', { timeout: 1_000 });
-    await expect(card).toContainText('Mem 25% of 2048Mi', { timeout: 1_000 });
+    // Usage rows: separate CPU and Memory figures with their own strips, the
+    // staleness flag, and the reading's age. The labels are `dt`s of their own
+    // now, so they are asserted separately from the figures.
+    await expect(card.getByText('CPU', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card.getByText('Memory', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText('12.0%', { timeout: 1_000 });
+    await expect(card).toContainText('of 2048Mi', { timeout: 1_000 });
+    await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
     await expect(card).toContainText('Stale', { timeout: 1_000 });
     await expect(card).toContainText('ago', { timeout: 1_000 });
   }).toPass({ timeout: 20_000 });

@@ -1,0 +1,30 @@
+Record a job starting, so the queue shows what is in flight before it finishes and a second actor can see it.
+
+With --scope set this is a claim: if another open job already holds that scope, this fails with 409 naming who holds it, what they are doing, and since when -- so you can pick up something else instead of duplicating the work.
+
+The summary is prose describing the work, never the command that performs it.
+
+Usage:
+  erun jobs start [flags]
+
+Examples:
+  erun jobs start --type fix --issue sophium/erun#2109 --scope sophium/erun#2109 \
+    --summary "fixing the jobs claim race" --actor erun/code4
+
+Flags:
+      --actor string          Who is doing the work: the orchestrator id or agent identity
+      --actor-kind string     What kind of actor this is: agent, orchestrator, or human (default "agent")
+      --dry-run               Resolve and trace mutating actions without executing them.
+      --environment string    Local environment name this work runs in (omit for host-side work)
+  -h, --help                  help for start
+      --issue string          The issue this work belongs to, e.g. owner/repo#2109
+      --local-job-id string   The in-pod job id this mirrors, when there is one
+      --scope string          What this job claims, so a second actor is told who holds it
+      --summary string        What the work is, in prose (not the command that performs it)
+      --type string           Job type: fix, review, gate, release, deploy, investigate, plan, triage, or maintenance
+
+Global Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+      --output string       Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time                Print the elapsed runtime after the command finishes.
+  -v, --verbose count       Increase verbosity: -v streams external tool output, -vv adds erun command traces.
