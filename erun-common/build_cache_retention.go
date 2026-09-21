@@ -79,17 +79,24 @@ func resolveBuildCacheBounds(volumeBytes uint64) buildCacheBounds {
 	}
 }
 
+// errNoDockerVolume is the expected state of an environment that has no docker
+// volume to bound: a runtime env runs no dind sidecar, and a host build runs
+// against a daemon nobody declared a size for. It is separated from the other
+// ways the size can fail to resolve because it is the one of them that is not
+// news — an environment with no volume has no cache to bound, and saying so on
+// every build of every such environment would be noise around the case that
+// does matter.
+var errNoDockerVolume = errors.New("this environment declares no docker volume")
+
 // dockerVolumeBytes reads the size the deployment declared for this
 // environment's docker volume. An absent variable is not a volume of size zero,
-// and a malformed one is not a size to build a bound out of: both are reported
-// as "no ceiling applies, and here is why", so the run proceeds under the disk
-// floor alone rather than reclaiming against an invented number. An environment
-// with no docker volume at all — a runtime env runs no dind sidecar — is the
-// common case for the absent branch, and it has no cache to bound.
+// and a malformed one is not a size to build a bound out of: neither is
+// reclaimed against, so the run proceeds under the disk floor alone rather than
+// destroying cache against an invented number.
 func dockerVolumeBytes() (uint64, error) {
 	raw := strings.TrimSpace(os.Getenv(dockerVolumeBytesEnv))
 	if raw == "" {
-		return 0, fmt.Errorf("%s is unset, so this environment's docker volume size is unknown", dockerVolumeBytesEnv)
+		return 0, fmt.Errorf("%w (%s is unset)", errNoDockerVolume, dockerVolumeBytesEnv)
 	}
 	value, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil || value == 0 {
@@ -151,13 +158,25 @@ func ensureBuildCacheRetentionWith(
 	readCacheBytes func(time.Duration) (uint64, error),
 	prune func(ceiling uint64, limit time.Duration) error,
 ) {
-	ctx.TraceCommand("", "docker", "system", "df", "--format", "{{.Type}}|{{.Size}}")
+	// A dry run reports nothing here, and that is a deliberate exception to how
+	// the disk-headroom check beside it behaves: that one previews its own read
+	// because the read is its whole deliverable, while a preview of this one
+	// cannot say anything a reader could act on — whether a reclaim is due is a
+	// function of how much cache exists right now, which no preview knows. What
+	// a dry run must not do is imply a bound is in force where none is; it stays
+	// silent rather than printing a check it did not run.
 	if ctx.DryRun {
 		return
 	}
 
 	volume, err := readVolume()
 	if err != nil {
+		if errors.Is(err, errNoDockerVolume) {
+			return
+		}
+		// A size the deployment declared but this process cannot use is not the
+		// same quiet state: it is a deployment mistake, and one that would
+		// otherwise leave the cache unbounded with nothing to say why.
 		ctx.Trace(fmt.Sprintf("%s: no build-cache ceiling applies this run (%s)", policy.label, err))
 		return
 	}

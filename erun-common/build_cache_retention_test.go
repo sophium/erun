@@ -98,6 +98,10 @@ type buildCacheRetentionCase struct {
 	prunedTo   uint64
 	wantReads  int
 	wantTraces []string
+	// wantSilent is the strongest of the output assertions: the case must
+	// produce nothing at all, which is what a preview of this check owes a
+	// reader who cannot act on anything it would say.
+	wantSilent bool
 }
 
 func buildCacheRetentionCases() []buildCacheRetentionCase {
@@ -164,19 +168,31 @@ func buildCacheRetentionCases() []buildCacheRetentionCase {
 		},
 		{
 			// An environment with no docker volume — a runtime env runs no dind
-			// sidecar — has no cache to bound, and says so rather than measuring
-			// against a size it invented.
-			name:       "no declared volume size means no ceiling, and it says why",
-			volumeErr:  errors.New("volume size is unknown"),
+			// sidecar — has no cache to bound, and does not measure against a
+			// size it invented. It is also the common case, so it stays quiet
+			// rather than announcing itself on every build of every one of them.
+			name:      "an environment with no docker volume is left alone and silent",
+			volumeErr: errNoDockerVolume,
+			wantReads: 0,
+		},
+		{
+			// A size the deployment did declare but this process cannot use is
+			// not that quiet state: it is a deployment mistake, and one that
+			// would otherwise leave the cache unbounded with nothing to say why.
+			name:       "a declared but unusable volume size is reported",
+			volumeErr:  errors.New(`ERUN_DOCKER_VOLUME_BYTES="50Gi" is not a positive byte count`),
 			wantReads:  0,
 			wantTraces: []string{"no build-cache ceiling applies"},
 		},
 		{
-			name:       "dry run neither measures nor reclaims",
+			// Nothing is read, reclaimed, or printed: a preview cannot know
+			// whether a reclaim is due, so it must not imply that one is not.
+			name:       "dry run neither measures nor reclaims nor announces a bound",
 			dryRun:     true,
 			volume:     buildCacheTestVolume,
 			cacheBytes: buildCacheTestBounds().ceiling + (1 << 30),
 			wantReads:  0,
+			wantSilent: true,
 		},
 	}
 }
@@ -218,13 +234,23 @@ func runBuildCacheRetentionCase(t *testing.T, tc buildCacheRetentionCase) {
 	ctx := Context{DryRun: tc.dryRun, Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
 	ensureBuildCacheRetentionWith(ctx, buildDiskHeadroomPolicy, readVolume, readCacheBytes, prune)
 
-	message := logs.String()
+	if readCalls != tc.wantReads {
+		t.Fatalf("expected %d cache-size reads, got %d", tc.wantReads, readCalls)
+	}
 	if gotPrune := pruneCalls > 0; gotPrune != tc.wantPrune {
 		t.Fatalf("prune called = %v, want %v (calls=%d)", gotPrune, tc.wantPrune, pruneCalls)
 	}
 	if tc.wantPrune && prunedTo != tc.prunedTo {
 		t.Fatalf("the reclaim must be bounded to the ceiling %d, got %d", tc.prunedTo, prunedTo)
 	}
+	assertBuildCacheRetentionOutput(t, tc, logs.String())
+}
+
+// assertBuildCacheRetentionOutput checks what one pass said against what the
+// case expects it to say — and, where a preview is concerned, that it said
+// nothing at all.
+func assertBuildCacheRetentionOutput(t *testing.T, tc buildCacheRetentionCase, message string) {
+	t.Helper()
 	if gotWarn := strings.Contains(message, "warning:"); gotWarn != tc.wantWarn {
 		t.Fatalf("warning = %v, want %v; output was %q", gotWarn, tc.wantWarn, message)
 	}
@@ -233,8 +259,8 @@ func runBuildCacheRetentionCase(t *testing.T, tc buildCacheRetentionCase) {
 			t.Fatalf("expected the output to contain %q, got %q", want, message)
 		}
 	}
-	if readCalls != tc.wantReads {
-		t.Fatalf("expected %d cache-size reads, got %d", tc.wantReads, readCalls)
+	if tc.wantSilent && message != "" {
+		t.Fatalf("expected no output at all, got %q", message)
 	}
 }
 
