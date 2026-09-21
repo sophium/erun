@@ -20,7 +20,7 @@ CREATE TABLE "jobs" (
   "actor_id" text NOT NULL,
   "scope" text NULL,
   "local_job_id" text NULL,
-  "started_at" timestamptz NULL,
+  "started_at" timestamptz NOT NULL DEFAULT now(),
   "ended_at" timestamptz NULL,
   "created_at" timestamptz NULL,
   "updated_at" timestamptz NULL,

@@ -27,7 +27,10 @@ CREATE TABLE jobs (
   -- local_job_id mirrors the in-pod EnvironmentJob.ID when there is one, so
   -- the platform row and the pod's own job record can be tied together.
   local_job_id TEXT,
-  started_at TIMESTAMPTZ,
+  -- started_at is required: a claim's whole point is that a refused caller is
+  -- told when the holder started, so a holder with no start time would make
+  -- the refusal unactionable.
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   -- ended_at is NULL exactly while status is RUNNING, enforced below: a job
   -- that has stopped is never left without a time it stopped at.
   ended_at TIMESTAMPTZ,
