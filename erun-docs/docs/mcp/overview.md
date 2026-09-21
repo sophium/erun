@@ -396,6 +396,21 @@ A gate run is the first-class record of one attempt to gate a prospective merge,
 
 Same commands as [`erun exec gate-run start`](/cli/exec#exec-gate-run-start) / [`erun exec gate-run report`](/cli/exec#exec-gate-run-report) / [`erun gate list`](/cli/gate#gate-list) / [`erun gate show`](/cli/gate#gate-show). All four support `preview`; `gate_list` and `gate_show` are read-only. `exec_gate-run_start`/`exec_gate-run_report` are agent-callable only — the environment driving the gate reports its own attempt, never something an operator clicks. `gate_list`/`gate_show` are agent-callable too as this feature's first cut; a console/desktop surface is planned as a follow-up.
 
+### Jobs — what is being worked on now {#jobs}
+
+A job is the platform's record of work *in flight*, claimed before the work starts rather than reported only once it finishes the way builds and gate runs are. That is the half that lets two agents see each other: before starting, an agent claims the scope it is about to work on, and a second agent asking for the same scope is told who already holds it and what they are doing.
+
+| Tool | Read/Work | Purpose |
+|---|---|---|
+| `jobs_list` | Read | List the tenant's queue, the live work first, narrowed by any combination of `status`, `environmentId`, `issueRef`, `scope`, and `actorId`. Each entry names what is being done, by whom, and how long it has been going. `RUNNING` is work in flight; `ABANDONED` means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. An empty queue is `[]`, never `null`. |
+| `jobs_show` | Read | Fetch one job by `jobId`, including the scope it claims and the in-pod job id it mirrors, when there is one. |
+| `jobs_start` | Work | Record that this actor is starting a piece of work: `jobType` (one of `fix`, `review`, `gate`, `release`, `deploy`, `investigate`, `plan`, `triage`, `maintenance`), `summary`, `actorId`, and optionally `actorKind`, `environment`, `issueRef`, `scope`, and `localJobId`. With `scope` set this is a **claim**: if an open job already holds that scope, the call is refused with `409` naming the holder — its `actorId`, its prose `summary`, and when it `started` — so you can pick up something else instead of duplicating the work. Returns the new job's id; pass it to `jobs_finish`. The summary is prose describing the work, never the command that performs it — a summary that is only a shell command is refused. |
+| `jobs_finish` | Work | Move `jobId` forward: close it as `SUCCEEDED`, `FAILED`, `ABANDONED`, or `SUPERSEDED`, refresh its `summary`, or record the `localJobId` it mirrors. A job that has already finished cannot be updated (409): its outcome is the record coordination and reporting both read. |
+
+Same commands as [`erun jobs list`](/cli/jobs#jobs-list) / [`erun jobs show`](/cli/jobs#jobs-show) / [`erun jobs start`](/cli/jobs#jobs-start) / [`erun jobs finish`](/cli/jobs#jobs-finish). All four support `preview`; `jobs_list` and `jobs_show` are read-only. The panel these reads back lives in the hosted console's Jobs section.
+
+Claiming is deliberately advisory, not a distributed lock: two claims landing at the same instant can both be recorded. Making the scope exclusive in the database would wedge it permanently the moment an actor disappeared without closing its job — exactly the orphaned running record the sweep exists to clear. What `jobs_list` gives an operator is that overlap, made visible instead of silently prevented.
+
 ### Escape hatch
 
 | Tool | Purpose |
@@ -519,6 +534,10 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_queue_override-advance` | `erun review queue override-advance` | Work |
 | gate | `gate_list` | `erun gate list` | Read |
 | gate | `gate_show` | `erun gate show` | Read |
+| jobs | `jobs_list` | `erun jobs list` | Read |
+| jobs | `jobs_show` | `erun jobs show` | Read |
+| jobs | `jobs_start` | `erun jobs start` | Work |
+| jobs | `jobs_finish` | `erun jobs finish` | Work |
 | idle | `idle` | `erun idle` | Read |
 | idle | `idle_stop_history` | *(MCP-only)* | Read |
 | idle | `idle_stop_record` | *(MCP-only, desktop-only)* | Work |

@@ -114,7 +114,12 @@ cross-repository structural gates, not production helpers.
 - The threshold is a contract, not a target: raise it in the same commit as the
   scenarios that earned the increase, keeping a small margin below the measured
   total, and lower it only after the PR has discussed the shortfall — restore
-  coverage with meaningful CLI scenarios first. Function-touched rate is diagnostic,
+  coverage with meaningful CLI scenarios first. That margin is the explicit
+  `coverage_measured` / `coverage_margin` pair the script derives its default
+  from, so state it by moving `coverage_measured` to what a real run on main
+  reaches (`coverage/profile.txt`'s total, not the script's own 20-line tail)
+  and leaving `coverage_margin` at its floor; the bounds on that floor live in
+  `coverage_threshold_test.go`. Function-touched rate is diagnostic,
   not the enforced metric.
 - Prefer integration coverage for CLI-reachable behavior and remove equivalent
   white-box duplication. Do not invent public code paths merely to reach genuinely

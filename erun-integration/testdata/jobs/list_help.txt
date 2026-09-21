@@ -1,0 +1,25 @@
+List jobs, the live queue first, narrowed by any combination of the filters below. Each entry names what is being done, by whom, and how long it has been going.
+
+A RUNNING job is work in flight. ABANDONED means its actor stopped updating it and the platform swept it -- read it as dropped, not as failed.
+
+Usage:
+  erun jobs list [flags]
+
+Examples:
+  erun jobs list --status RUNNING
+  erun jobs list --issue sophium/erun#2109
+
+Flags:
+      --actor string            Filter by the actor holding the job
+      --dry-run                 Resolve and trace mutating actions without executing them.
+      --environment-id string   Filter by the platform's environment id
+  -h, --help                    help for list
+      --issue string            Filter by the issue the work belongs to, e.g. owner/repo#2109
+      --scope string            Filter by the scope a job claims
+      --status string           Filter by status: RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED
+
+Global Flags:
+      --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)
+      --output string       Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time                Print the elapsed runtime after the command finishes.
+  -v, --verbose count       Increase verbosity: -v streams external tool output, -vv adds erun command traces.
