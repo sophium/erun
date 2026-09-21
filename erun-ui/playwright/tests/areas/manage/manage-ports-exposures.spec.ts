@@ -70,6 +70,13 @@ const PENDING_CERTIFICATE = {
 // Every test below stubs it explicitly rather than falling through to the
 // real backend call: that fallthrough is exactly what let #1911 ship the
 // picker with these specs never actually exercising the paired read.
+// A round-trip failure, not a computed one. refreshManageExposures only ever
+// saw a pair rejection from a read whose RPC itself failed, so this stages the
+// bridge's { error } envelope rather than LOAD_FAILURE's computed
+// { configured, error } result: a computed failure resolves the promise, never
+// reaches the catch that blanked both panels, and so cannot reproduce #1934.
+const SERVICES_READ_FAILURE = { error: 'SERVICES_READ_FAILURE_MARKER' };
+
 const NO_SERVICES = { data: { configured: true, restricted: false, services: [] } };
 const SERVICES_POPULATED = {
   data: {
@@ -182,6 +189,47 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await retry.click();
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     expect(calls).toBe(2);
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  // #1934's defect, in the only direction the DOM can show it. The two reads
+  // are paired, so a rejection from either used to land in
+  // refreshManageExposures' one catch and overwrite *both* panels with that
+  // error -- the exposure list included, discarding a listing that had already
+  // resolved. Every other case here stubs both reads to the same class of
+  // outcome (both succeed, or the failed one is the exposures read), so a list
+  // blanked by the picker's failure was indistinguishable from one that simply
+  // had nothing to show.
+  //
+  // The failure has to come from the services read specifically: when the
+  // *exposures* read fails, ExposuresBody returns its error state before
+  // reaching ExposeServiceForm, so no picker renders at all and the two states
+  // are observationally identical.
+  test('a failed services read leaves the exposure list’s resolved addresses intact', async ({
+    app,
+    page,
+  }) => {
+    await stubExposureRpcs(page, {
+      ListEnvironmentExposures: () => POPULATED,
+      ListEnvironmentServices: () => SERVICES_READ_FAILURE,
+    });
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Ports');
+    const dialog = app.manageDialog.locator();
+
+    // The read that answered still renders what it answered ...
+    await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
+    // ... and is not wearing the failure of the read that did not.
+    await expect(dialog.getByText("Couldn't load public addresses")).toHaveCount(0);
+
+    // The picker reports its own failure, so the form still names the way out
+    // rather than silently losing its options.
+    const pickerFailure = dialog.getByText(/Could not read this environment's services/);
+    await expect(pickerFailure).toBeVisible();
+    await expect(pickerFailure).toContainText('SERVICES_READ_FAILURE_MARKER');
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
