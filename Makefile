@@ -132,9 +132,15 @@ LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 # runs package test binaries up to GOMAXPROCS at a time and otherwise takes
 # that number straight from the cgroup.
 #
-# The four module test targets plus the dns01-webhook one are siblings in
-# check-gate's own -j fan-out, so each unbounded one claims the whole quota and
-# five of them running side by side demand five times it. Measured on the 6-CPU
+# The four module test targets, the dns01-webhook one, and the integration
+# suite are siblings in check-gate's own -j fan-out, so each unbounded one
+# claims the whole quota and six of them running side by side demand six times
+# it. The integration suite is a Go test runner like the rest even though its
+# width arrives as `-parallel` from integration-test.sh rather than as
+# GOMAXPROCS, so it is counted here too and takes the same share -- otherwise
+# it sizes itself against the whole quota on top of the shares the counted
+# targets already demand, which is the oversubscription this bound exists to
+# prevent. Measured on the 6-CPU
 # in-pod gate arrangement (lint plus all four module test targets, warm build
 # cache, -j5): unbounded, 13.4% of CPU periods throttled and 127s of throttled
 # CPU-time; with each target held to a fifth of the quota, 3.6% and 6.1s -- a
@@ -149,7 +155,7 @@ LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 # the way lint does: make, not this recipe, is what runs them concurrently.
 # Floored at 1 so a small environment still runs; on a larger one each target
 # gets proportionally more.
-GO_TEST_TARGET_COUNT := 5
+GO_TEST_TARGET_COUNT := 6
 GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 	n=$$(( cpu / $(GO_TEST_TARGET_COUNT) )); \
 	[ "$$n" -ge 1 ] || n=1; \
@@ -724,7 +730,7 @@ integration-test:
 	./scripts/agent-gate.sh integration-test "make integration-test" -- $(MAKE) integration-test-gate
 
 integration-test-gate:
-	./erun-integration/scripts/integration-test.sh
+	GO_TEST_GOMAXPROCS=$(GO_TEST_GOMAXPROCS) ./erun-integration/scripts/integration-test.sh
 
 # The front door. Everywhere but an agent pod this is check-gate by another
 # name: scripts/agent-gate.sh execs it directly and exits with exactly its

@@ -54,6 +54,15 @@
 #     on, that blind spot is real: `nproc` reports 24, but cgroup cpu.max
 #     quotes only 6. test_parallelism below reuses parallel-gate.sh's `width`
 #     mode to read the real quota instead of trusting GOMAXPROCS.
+#   - Read under the gate, though, the real quota is the wrong number: this
+#     suite is one of the Go test runners in check-gate's -j fan-out, and the
+#     others take a share of that quota sized by GO_TEST_TARGET_COUNT. Sizing
+#     this one against the whole quota would claim it a second time, on top of
+#     the shares already demanded. So the gate hands down its per-target share
+#     as GO_TEST_GOMAXPROCS (the same value the module targets use) and this
+#     script uses it; the `width` fallback is for a standalone run, where no
+#     sibling is competing and the whole quota really is free. Measured on the
+#     6-CPU pod: standalone `width` gives 6, under the gate the share is 1.
 #   - Unlike the shell-dispatched fleets `width` was built for (N independent
 #     lint or helm-chart-test processes, each with its own roughly-fixed
 #     memory cost), this suite's memory use does not scale linearly with
@@ -170,7 +179,7 @@ export GOCOVERDIR="$cover_dir"
 test_output="$(mktemp "${TMPDIR:-/tmp}/erun-integration-test-output.XXXXXX")"
 cleanup_dirs+=("$test_output")
 
-test_parallelism="${INTEGRATION_TEST_PARALLELISM:-$("$here/../scripts/parallel-gate.sh" width 32 "")}"
+test_parallelism="${INTEGRATION_TEST_PARALLELISM:-${GO_TEST_GOMAXPROCS:-$("$here/../scripts/parallel-gate.sh" width 32 "")}}"
 
 if [[ "$update_golden" -eq 1 ]]; then
     echo ">> reseeding golden files (comparisons disabled, coverage gate skipped)"
