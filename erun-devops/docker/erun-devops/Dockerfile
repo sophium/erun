@@ -412,14 +412,16 @@ ARG PLAYWRIGHT_TEST_AREAS=""
 # what moved instead of the whole program, and tsc creates the directory
 # itself when the mount is empty.
 #
-# /src/.cache/frontend-vite is mounted for the same reason, but nothing in
-# this build writes to it: vite.config.ts's `cacheDir` holds Vite's
-# dependency pre-bundling cache, which `vite build` -- what this stage's
-# `yarn build` runs -- does not produce. It was measured with a real
-# pre-bundleable dependency (react/react-dom): the build succeeds and the
-# directory is never created. Only the dev server (and the deprecated
-# `vite optimize`) writes there, so the mount serves the in-pod dev loop, not
-# the gate. Do not read it as a gate-build saving.
+# /src/.cache/frontend-vite is mounted for the same reason, but it is not a
+# saving on the build step. vite.config.ts's `cacheDir` is where Vite keeps
+# its dependency pre-bundling cache, and `vite build` -- what this stage's
+# `yarn build` runs -- does not produce one: measured with a real
+# pre-bundleable dependency (react/react-dom), the build succeeds and the
+# directory is never created. What does write there is vitest, which
+# test-frontend's `yarn test` runs and which caches under `<cacheDir>/vitest`,
+# plus the dev server (and the deprecated `vite optimize`). So read this mount
+# as vitest's cache and the in-pod dev loop, not as an acceleration of the
+# 180s vite build.
 #
 # ERUN_WAILSJS_CACHE_DIR is erun-ui/generate-wailsjs.sh's skip-when-unchanged
 # cache (see that script's own comment): it keys the generated bindings on the
