@@ -28,11 +28,11 @@ import (
 // by something unrelated to what it bounds is a bound that quietly stops being
 // enforced.
 
-// PortForwardRoot is the directory holding every forward record, one subtree
+// portForwardRoot is the directory holding every forward record, one subtree
 // per kind. It is the parent of PortForwardStatePath's own directory, resolved
 // through the same config root so a sweep and a write cannot disagree about
 // where the tree is.
-func PortForwardRoot() (string, error) {
+func portForwardRoot() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -55,7 +55,7 @@ func ReclaimOrphanedPortForwardRecords(ctx Context) error {
 		ctx.Trace("portforward: skipping the orphan reclaim: the config store could not be listed, so which environments exist is unknown")
 		return nil
 	}
-	root, err := PortForwardRoot()
+	root, err := portForwardRoot()
 	if err != nil {
 		return err
 	}

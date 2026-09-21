@@ -13,9 +13,9 @@ import (
 // file.
 func seedPortForwardLogForTest(t *testing.T, kind, tenant, environment string) string {
 	t.Helper()
-	logPath, err := PortForwardLogPath(kind, tenant, environment)
+	logPath, err := portForwardLogPath(kind, tenant, environment)
 	if err != nil {
-		t.Fatalf("PortForwardLogPath: %v", err)
+		t.Fatalf("portForwardLogPath: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll log dir: %v", err)

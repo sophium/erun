@@ -78,8 +78,8 @@ func PortForwardLogPathForState(statePath string) string {
 	return strings.TrimSuffix(statePath, filepath.Ext(statePath)) + ".log"
 }
 
-// PortForwardLogPath is that same log resolved from a record's identity.
-func PortForwardLogPath(kind, tenant, environment string) (string, error) {
+// portForwardLogPath is that same log resolved from a record's identity.
+func portForwardLogPath(kind, tenant, environment string) (string, error) {
 	statePath, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
 		return "", err
