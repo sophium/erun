@@ -38,16 +38,16 @@ function dashboard(overrides: Partial<UITenantDashboard> = {}): UITenantDashboar
   };
 }
 
+function render(element: React.ReactElement): string {
+  return renderToStaticMarkup(React.createElement(Provider, { store, children: element }));
+}
+
 function renderReviewsTab(data: UITenantDashboard): string {
-  return renderToStaticMarkup(
+  return render(
     React.createElement(
-      Provider,
-      { store },
-      React.createElement(
-        Tabs,
-        { defaultValue: 'reviews' },
-        React.createElement(ReviewsPanel, { data }),
-      ),
+      Tabs,
+      { defaultValue: 'reviews' },
+      React.createElement(ReviewsPanel, { data }),
     ),
   );
 }
