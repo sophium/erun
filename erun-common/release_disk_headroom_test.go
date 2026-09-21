@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"errors"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -551,7 +552,7 @@ func TestDiskHeadroomPruneBoundStillReportsAVerdict(t *testing.T) {
 	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, `case "$1" in
   info) echo "`+root+`" ;;
   system) echo "Build Cache|40GB" ;;
-  builder) sleep 3600 ;;
+  buildx) sleep 3600 ;;
 esac`))
 	// 1 GiB free of ~435 GiB: below the floor, so the prune is reached.
 	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
@@ -577,6 +578,80 @@ echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
 	if !strings.Contains(message, "below the") {
 		t.Fatalf("expected the shortfall to still be reported against the disk that is actually free, got %q", message)
 	}
+}
+
+// TestDiskHeadroomPruneNamesACommandThatAcceptsItsBound covers the prune's own
+// argv, which the decision-logic tests above cannot see: they inject the prune
+// and so pass no matter which command the real one is built from. That is how
+// this check came to be inert — it issued `docker builder prune -f
+// --min-free-space <floor>`, and the classic command the docker CLI implements
+// accepts only --all, --filter, --force and --keep-storage, so every prune was
+// rejected as an unknown flag and reclaimed nothing. The trace above it
+// advertised a reclaim anyway, and the shortfall was then measured against a
+// disk nothing had moved: the read-first guarding elsewhere in this file held,
+// while the protective act it exists to fall back on did not.
+//
+// The bound is what keeps a prune from reclaiming everything reclaimable, so
+// the command and its bound are asserted together — through the
+// ERUN_DOCKER_BIN seam, which drives the real command rather than a fake.
+func TestDiskHeadroomPruneNamesACommandThatAcceptsItsBound(t *testing.T) {
+	root := t.TempDir()
+	argvLog := t.TempDir() + "/docker-argv"
+	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, `printf '%s ' "$@" >> `+argvLog+`
+printf '\n' >> `+argvLog+`
+case "$1" in
+  info) echo "`+root+`" ;;
+  system) echo "Build Cache|40GB" ;;
+esac`))
+	// 1 GiB free of ~435 GiB: below the floor, so the prune is reached.
+	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
+echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
+	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+
+	logs := &strings.Builder{}
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	policy := buildDiskHeadroomPolicy
+	policy.limits = diskHeadroomShortLimits()
+
+	if err := awaitHeadroomPreflight(t, ctx, policy); err != nil {
+		t.Fatalf("a build must proceed on a disk it pruned, got %v", err)
+	}
+
+	argv := recordedPruneArgv(t, argvLog)
+	if len(argv) == 0 {
+		t.Fatalf("expected the below-floor check to issue a prune, got docker invocations %q", logs.String())
+	}
+	if argv[0] != "buildx" || argv[1] != "prune" {
+		t.Fatalf("expected the prune to run through the command that accepts --min-free-space (`docker buildx prune`), got %q", argv)
+	}
+	if argv[2] != "-f" {
+		t.Fatalf("expected the prune to be non-interactive, got %q", argv)
+	}
+	if argv[3] != "--min-free-space" {
+		t.Fatalf("expected the prune bounded so it reclaims only down to the floor, got %q", argv)
+	}
+	if want := strconv.FormatUint(diskHeadroomTestFloor, 10); argv[4] != want {
+		t.Fatalf("expected the prune bounded to the %s-byte floor, got %q", want, argv)
+	}
+}
+
+// recordedPruneArgv returns the argv of the one recorded docker invocation
+// that is the build-cache prune. The stub the seam installs records every call
+// rather than only the prune, because which command the prune names is exactly
+// what is under test.
+func recordedPruneArgv(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading the recorded docker invocations: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == "prune" {
+			return fields
+		}
+	}
+	return nil
 }
 
 // TestDiskHeadroomAbsentExecutableIsNamedNotSpliced covers the third state the
