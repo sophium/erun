@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
 // TestJobOffEnvironmentAgentReinvocation drives the bounded-reinvocation
@@ -98,7 +98,7 @@ esac
 	)
 
 	emcpBin := emcpBinaryPath(t)
-	emcpCmd := exec.Command(emcpBin,
+	emcpCmd := harnessexec.Command(emcpBin,
 		"--host", "127.0.0.1", "--port", fmt.Sprint(mcpPort),
 		"--metrics-port", fmt.Sprint(metricsPort),
 		"--tenant", "team", "--environment", "dev", "--repo-path", repoPath,
@@ -176,7 +176,7 @@ func emcpBinaryPath(t *testing.T) string {
 			return
 		}
 		exe := filepath.Join(binDir, "emcp")
-		cmd := exec.Command("go", "build", "-o", exe, "./cmd/emcp")
+		cmd := harnessexec.Command("go", "build", "-o", exe, "./cmd/emcp")
 		cmd.Dir = moduleDir
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if out, buildErr := cmd.CombinedOutput(); buildErr != nil {

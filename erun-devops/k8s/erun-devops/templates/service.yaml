@@ -83,6 +83,20 @@ emitted; type is the single source of truth.
        builds, so the docker daemon sidecar (and its state PVC) has nothing to
        do there; only the env types that build get it. */ -}}
 {{- $dindEnabled := ne $envType "runtime" -}}
+{{- /* The size of the docker sidecar's state claim, declared once in GiB and
+       rendered twice: as the PVC's own request, and as the byte count the build
+       bounds this environment's BuildKit cache by. One value feeds both so they
+       cannot drift apart — the dind sidecar's image tag once shipped as a
+       literal that disagreed with the image VERSION beside it, and the fix it
+       carried was inert on every environment for a release because of exactly
+       that.
+
+       The build cannot read this from the mount it is handed: where the claim
+       lands on a node-local volume carrying no quota, df at /var/lib/docker
+       reports the whole node, so every environment on it reads the same total
+       and none of them can tell what it is actually sized for. Defaults to the
+       50Gi the claim has always requested. */ -}}
+{{- $dockerVolumeGi := int (default 50 .Values.dockerVolumeGi) -}}
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
 {{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
@@ -249,7 +263,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 50Gi
+      storage: {{ $dockerVolumeGi }}Gi
 {{- end }}
 {{- if eq $worktreeStorage "pvc" }}
 ---
@@ -801,6 +815,10 @@ spec:
                   optional: true
             - name: CLOUDFLARE_ACCOUNT_ID
               value: {{ $cloudflareAccountId | quote }}
+            {{- end }}
+            {{- if $dindEnabled }}
+            - name: ERUN_DOCKER_VOLUME_BYTES
+              value: {{ mul $dockerVolumeGi 1073741824 | quote }}
             {{- end }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster

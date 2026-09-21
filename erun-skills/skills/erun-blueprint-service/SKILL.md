@@ -199,7 +199,7 @@ Folding unrelated work into a single stage serialises it for nothing.
 
 **Cache mounts grow without bound** and are not reclaimed by
 `docker image prune`. On a long-lived builder, reclaim with
-`docker builder prune --min-free-space <bytes>`, which no-ops until free space
+`docker buildx prune --min-free-space <bytes>`, which no-ops until free space
 is actually short.
 
 ## The deploy contract (binding)
