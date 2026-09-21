@@ -32,6 +32,15 @@
 #      replaces, so pairing it with `add_header Content-Type text/plain`
 #      used to emit both -- a message RFC 9110 section 5.5 calls malformed,
 #      since Content-Type is a singleton field.
+#   6. The conventional probe paths this console does not implement (/health
+#      above all, plus /ready, /livez, /metrics, /version) 404 rather than
+#      answering 200 with the SPA shell. A monitor's health predicate is
+#      "2xx", so a shell served at /health reports healthy unconditionally --
+#      a check that cannot fail, which is this issue's complaint. 404 makes
+#      it fail loudly at a glance, and the body names the real endpoints so
+#      the operator has the next action. A trailing slash is covered too
+#      (/health/), because a monitor may well be configured with one and an
+#      exact-match carve-out would miss it.
 #
 # Lives beside the Dockerfile/template rather than in erun-integration: it
 # needs a real docker daemon to observe actual nginx `location`/`try_files`
@@ -127,6 +136,22 @@ assert_single_content_type() {
     [ "${count}" = "1" ] || fail "GET ${path}: expected exactly one Content-Type header, got ${count}"
 }
 
+assert_not_spa_shell() {
+    path="$1"
+    got="$(curl -s "${base}${path}")"
+    [ "${got}" != "SPA-SHELL" ] || fail "GET ${path}: fell through to the SPA shell"
+}
+
+assert_body_contains() {
+    path="$1"
+    needle="$2"
+    got="$(curl -s "${base}${path}")"
+    case "${got}" in
+        *"${needle}"*) : ;;
+        *) fail "GET ${path}: expected body to contain '${needle}', got '${got}'" ;;
+    esac
+}
+
 wait_for_ready || fail "nginx did not become ready"
 
 # --- 1. A missing content-hashed asset is a real 404, never the SPA shell ---
@@ -155,4 +180,22 @@ assert_status "/robots.txt" "404"
 # --- 5. /healthz emits exactly one Content-Type header (erun#2402) ---
 assert_single_content_type "/healthz"
 
-echo "OK: missing static-looking paths 404 (under /assets/ and at the root), app routes and existing static files serve correctly, healthz/version.json are not swallowed by the SPA fallback, healthz emits exactly one Content-Type header"
+# --- 6. Conventional probe paths this console does not implement are 404s ---
+assert_status "/health" "404"
+assert_not_spa_shell "/health"
+assert_body_contains "/health" "/healthz"
+# A trailing slash is the same failure with one character more; an exact-match
+# carve-out (location = /health) would leave this one still failing open.
+assert_status "/health/" "404"
+assert_not_spa_shell "/health/"
+assert_status "/ready" "404"
+assert_not_spa_shell "/ready"
+assert_status "/livez" "404"
+assert_not_spa_shell "/livez"
+assert_status "/metrics" "404"
+assert_not_spa_shell "/metrics"
+assert_status "/version" "404"
+assert_not_spa_shell "/version"
+assert_single_content_type "/health"
+
+echo "OK: missing static-looking paths 404 (under /assets/ and at the root), app routes and existing static files serve correctly, healthz/version.json are not swallowed by the SPA fallback, healthz emits exactly one Content-Type header, unimplemented probe paths 404 instead of answering the shell"
