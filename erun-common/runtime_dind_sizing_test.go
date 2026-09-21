@@ -32,7 +32,10 @@ func TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants(t *testing.T) {
 			nodeCPU: 24000, coTenants: 12, wantCPU: "4",
 		},
 		{
-			name:    "a node too small for even one co-tenant still floors",
+			name: "a small node divided across several co-tenants still floors",
+			// 8000/4 is 2 cores: a node small enough that proportional sharing
+			// would size every build on it under the floor, which is the same
+			// throttled shape at a smaller scale.
 			nodeCPU: 8000, coTenants: 4, wantCPU: "4",
 		},
 		{

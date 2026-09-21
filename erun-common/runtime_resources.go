@@ -121,16 +121,14 @@ const (
 // floor derived from MinimumRuntimeNamespaceQuota) even though it is a bigger
 // ceiling for the node to have room for, not a hard cgroup enforcement of it.
 //
-// DefaultRuntimeDindCPU is not a constant: it is MinimumRuntimeDindCPU
-// divided across DefaultRuntimeDindCPUCoTenants on a
-// DefaultRuntimeDindCPUNodeCPUMilli node, i.e. RuntimeDindCPULimit's own
-// answer for the reference node the fleet is measured on. The default used to
-// be a flat "4" and that flatness was the bug: a limit of 4 on a 24-CPU node
-// leaves the node three-quarters idle while the build inside it is throttled,
-// because a CPU limit is a ceiling, not a claim on the node -- the scheduler
-// still shares the node fairly between whatever is actually runnable, so a
-// build capped well under the node's size is simply slower while a co-tenant's
-// own work goes unblocked either way.
+// DefaultRuntimeDindCPU is not a constant: it is RuntimeDindCPULimit's own
+// answer for the reference node the fleet is measured on (below). The default
+// used to be a flat "4" and that flatness was the bug: a limit of 4 on a
+// 24-CPU node leaves the node three-quarters idle while the build inside it is
+// throttled, because a CPU limit is a ceiling, not a claim on the node -- the
+// scheduler still shares the node fairly between whatever is actually
+// runnable, so a build capped well under the node's size is simply slower
+// while a co-tenant's own work goes unblocked either way.
 const (
 	// MinimumRuntimeDindCPU is the floor RuntimeDindCPULimit refuses to size a
 	// build below, and the value the flat default used to be. Below this a
@@ -162,11 +160,13 @@ const (
 
 // DefaultRuntimeDindCPU is the dind sidecar's CPU limit for an environment
 // that has never been sized (`NormalizeRuntimeDindPodResources`), and the
-// namespace-quota floor's own dind term (`MinimumRuntimeNamespaceQuota`). The
-// mirrors that must move with it are the erun-devops chart's
-// `runtime.dind.resources.limits.cpu` fallback (kept in sync by the chart
-// tests) and the Dockerfile's own DIND_CPU_LIMIT ARG default, which is only
-// what a bare `docker build` with no erun environment resolved falls back to.
+// namespace-quota floor's own dind term (`MinimumRuntimeNamespaceQuota`). Two
+// files cannot read it and write it down again, so both are read back and
+// compared against it on every run
+// (runtime_dind_default_mirrors_test.go): the erun-devops chart's
+// `runtime.dind.resources.limits.cpu` fallback, and the Dockerfile's own
+// DIND_CPU_LIMIT ARG default, which is only what a bare `docker build` with no
+// erun environment resolved falls back to.
 var DefaultRuntimeDindCPU = RuntimeDindCPULimit(DefaultRuntimeDindCPUNodeCPUMilli, DefaultRuntimeDindCPUCoTenants)
 
 // RuntimeDindCPULimit sizes one environment's erun-dind build cap from the
