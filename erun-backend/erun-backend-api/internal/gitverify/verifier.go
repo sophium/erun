@@ -45,9 +45,11 @@ type Verifier interface {
 	// cannot answer once a branch lands by squash merge: the branch's own
 	// commits are deliberately not made ancestors of the target, so
 	// IsAncestor and a gate build both have nothing to point at, while the
-	// work itself is really there. contained is false, with no error, when
-	// the branches are unrelated, share no single merge base, or share no
-	// commit carrying the same change set.
+	// work itself is really there. A source tip that is already in the
+	// target's history — its own tip included — is answered by that ancestry
+	// before any change set is compared. contained is false, with no error,
+	// when the branches are unrelated, share no single merge base, or share
+	// no commit carrying the same change set.
 	ContainsChanges(ctx context.Context, remoteURL, targetBranch, sourceBranch string) (contained bool, commit string, err error)
 }
 
@@ -141,10 +143,10 @@ func (RemoteVerifier) IsAncestor(ctx context.Context, remoteURL, branch, ancesto
 
 // ContainsChanges answers whether sourceBranch's work is already in
 // targetBranch even though the branch's own commits are not — the shape a
-// squash merge leaves behind, and the only one that matters here: a branch
-// that really did land by merge commit or fast-forward is caught by the plain
-// ancestor case first, and a branch that adds nothing at all is refused
-// rather than treated as a landing.
+// squash merge leaves behind. A branch that landed by merge commit or
+// fast-forward — including one the target was fast-forwarded *onto*, where the
+// two tips are the same commit — is caught by the plain ancestor case first,
+// before any change set is compared.
 func (RemoteVerifier) ContainsChanges(ctx context.Context, remoteURL, targetBranch, sourceBranch string) (bool, string, error) {
 	remoteURL, targetBranch, sourceBranch, err := normalizeChangeArgs(remoteURL, targetBranch, sourceBranch)
 	if err != nil {
@@ -186,17 +188,25 @@ func normalizeChangeArgs(remoteURL, targetBranch, sourceBranch string) (string, 
 // while its own commits are not the whole story: the ordinary landing, where
 // the source tip really is in the target's history, and the squash landing,
 // where only the work is.
+//
+// A source tip equal to the target tip belongs to the first. It is the shape
+// a fast-forward of the target onto the branch leaves behind, which is a
+// sanctioned way for a change to land without this platform's queue, and a
+// commit is its own ancestor (IsAncestor's own contract) — so the branch is
+// contained in the target by identity. It is also the one shape the refs
+// cannot tell apart from a branch that never committed anything, and the
+// change-set comparison cannot separate them either: both leave an empty
+// fingerprint, and a branch that genuinely adds nothing is already answered as
+// contained whenever it trails the target rather than sitting exactly on it.
+// Refusing the equal-tip case would therefore buy no protection against a
+// landing that did not happen while refusing the landing that did.
 func branchLandedInTarget(repo *git.Repository, targetBranch, sourceBranch string, targetTip, sourceTip *object.Commit) (bool, string, error) {
-	// A source tip equal to the target tip is the degenerate case of a
-	// branch that is the target; it adds nothing and names no landing.
-	if sourceTip.Hash != targetTip.Hash {
-		alreadyLanded, err := sourceTip.IsAncestor(targetTip)
-		if err != nil {
-			return false, "", err
-		}
-		if alreadyLanded {
-			return true, sourceTip.Hash.String(), nil
-		}
+	alreadyLanded, err := sourceTip.IsAncestor(targetTip)
+	if err != nil {
+		return false, "", err
+	}
+	if alreadyLanded {
+		return true, sourceTip.Hash.String(), nil
 	}
 
 	wanted, base, err := branchChangeFingerprint(targetBranch, sourceBranch, targetTip, sourceTip)

@@ -397,12 +397,15 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 //
 // Any other review is one whose work landed without the queue — in practice a
 // GitHub squash merge, where the branch's own commits are not ancestors of
-// the target and no GATE build exists to name. Omit buildID: the platform
-// then confirms against the same remote that everything the review's source
-// branch adds is already present in the target branch's history, and moves
-// the review only if it is. A branch that did not land is refused just as
-// firmly, with the same MERGE_NOT_VERIFIED — either way the answer is a fact
-// about the repository rather than the caller's word.
+// the target and no GATE build exists to name, or a branch that landed by
+// merge commit or fast-forward, including one the target was fast-forwarded
+// onto. Omit buildID: the platform then confirms against the same remote that
+// everything the review's source branch adds is already present in the target
+// branch's history — or, for a landing whose ancestry answers directly, that
+// the branch tip is in it — and moves the review only if it is. A branch that
+// did not land is refused just as firmly, with the same MERGE_NOT_VERIFIED —
+// either way the answer is a fact about the repository rather than the
+// caller's word.
 func RunReviewReportMerged(ctx Context, store CloudReadStore, alias, reviewID, buildID, remoteURL string, deps CloudDependencies) (PlatformReview, error) {
 	if strings.TrimSpace(reviewID) == "" || strings.TrimSpace(remoteURL) == "" {
 		return PlatformReview{}, fmt.Errorf("review id and remote url are required")

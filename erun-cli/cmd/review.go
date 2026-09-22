@@ -433,7 +433,9 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 			"against. Any of those checks failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at " +
 			"MERGE.\n\n" +
 			"Any other review is one whose work landed without the queue — in practice a GitHub squash merge, " +
-			"where the branch's own commits are not ancestors of the target and no GATE build exists to name. " +
+			"where the branch's own commits are not ancestors of the target and no GATE build exists to name, " +
+			"or a branch that landed by merge commit or fast-forward, including one the target was fast-forwarded " +
+			"onto: that ancestry is confirmed directly. " +
 			"Omit --build-id: the platform confirms against the same remote that everything the review's source " +
 			"branch adds is already present in the target branch's history, and moves the review only if it is. " +
 			"A branch that did not land is refused just as firmly, with the same MERGE_NOT_VERIFIED. This is " +
