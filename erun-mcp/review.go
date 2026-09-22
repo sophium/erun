@@ -78,7 +78,7 @@ func reviewShowTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 
 type ReviewCreateInput struct {
 	platformAliasInput
-	Name         string `json:"name" jsonschema:"review name (unique per tenant; the eventual squash-merge message)"`
+	Name         string `json:"name" jsonschema:"review name (unique among the reviews that can still land; the eventual squash-merge message; a closed review's name is free to reuse)"`
 	TargetBranch string `json:"targetBranch" jsonschema:"branch this review proposes merging into"`
 	SourceBranch string `json:"sourceBranch" jsonschema:"branch this review proposes merging; must already be pushed to the remote (use exec_push)"`
 }

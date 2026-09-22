@@ -53,7 +53,7 @@ Fetches one review together with its comment threads and recorded builds.
 
 ### `review create`
 
-Opens a review. `--name` is the eventual squash-merge message and must be unique per tenant — a colliding name fails with a conflict. `--source-branch` must already be pushed (see [`exec push`](/cli/exec#exec-push)); the review references it by name and the platform can only ever fetch what has actually landed on the remote. A real, immediate write, not a preview, unless `--dry-run` is set.
+Opens a review. `--name` is the eventual squash-merge message and must be unique among the tenant's reviews that can still land or did land — a colliding name fails with `409 Conflict` (`REVIEW_NAME_TAKEN`, naming it), while a `CLOSED` review's name is free to reuse. `--source-branch` must already be pushed (see [`exec push`](/cli/exec#exec-push)); the review references it by name and the platform can only ever fetch what has actually landed on the remote. A real, immediate write, not a preview, unless `--dry-run` is set.
 
 ### `review comment`
 
@@ -161,7 +161,7 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | More than one erun-type alias configured, `--erun-alias` omitted. | Aborts asking for an explicit `--erun-alias`. |
 | `--mine`/`--waiting-on-me` combined with the equivalent explicit `--author-user-id`/`--reviewer-user-id` (`list`). | Aborts before any network call. |
 | `--status` names something other than `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED` (`list`; any casing). | Refused as a bad argument, naming the accepted values, before the alias lookup — a mistyped filter would otherwise return an empty listing, indistinguishable from a review queue that genuinely has nothing in that state. The API refuses the same value with `400 Bad Request` and code `INVALID_QUERY`. |
-| `create` with a `--name` that collides with an existing review. | `409 Conflict`. |
+| `create` with a `--name` that collides with a review in the tenant that can still land or did land. | `409 Conflict` (`REVIEW_NAME_TAKEN`), naming the name and the remedy: close the review holding it, or choose another. A `CLOSED` review reserves nothing — see [Name uniqueness](/collaboration/reviews#name-uniqueness). |
 | `create` with a `--source-branch` that already has a live (non-`MERGED`/`CLOSED`) review proposing it onto the same `--target-branch`. | `409 Conflict` — see [branch uniqueness](/collaboration/reviews#author-reviewers-and-discovery). |
 | `show`/`comment`/`close` on an unknown review id. | `404 Not Found`. |
 | `resolve`/`unresolve` addressed to a reply rather than its thread's root comment. | Aborts before the status change, naming the root comment id to retry against. |

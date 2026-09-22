@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -44,14 +45,61 @@ func (r *ReviewRepository) Create(ctx context.Context, review model.Review) (mod
 		// Catches both the tenant/name uniqueness contract and the one-live-
 		// review-per-source/target-branch partial unique index: a second live
 		// proposal of the same change is a conflict with the review already
-		// live, not a server error.
+		// live, not a server error. The two are told apart so a caller is told
+		// which one fired — a name collision names the name, a branch-pair
+		// collision names neither remedy the other needs.
 		if isUniqueViolation(err) {
-			return ErrConflict
+			return reviewConflictError(err, created)
 		}
 		return err
 	})
 	return created, err
 }
+
+// reviewConflictError names which of reviews' two uniqueness contracts a write
+// violated. An unrecognized constraint is reported as genuinely unknown rather
+// than guessed at as the most likely-sounding cause, the same discipline
+// UserRepository.Create applies to users' two.
+func reviewConflictError(err error, review model.Review) error {
+	constraint, ok := pgConstraintName(err)
+	if !ok {
+		return ErrConflict
+	}
+	switch constraint {
+	case "reviews_tenant_name_idx":
+		return &ReviewNameConflictError{Name: review.Name}
+	case "reviews_tenant_live_source_target_idx":
+		return &ReviewBranchPairConflictError{SourceBranch: review.SourceBranch, TargetBranch: review.TargetBranch}
+	default:
+		return ErrConflict
+	}
+}
+
+// ReviewNameConflictError refuses a review whose name a review that can still
+// land already holds. It carries the name so the refusal can say which one,
+// which is what the bare "Conflict" body this replaces never did.
+type ReviewNameConflictError struct {
+	Name string
+}
+
+func (e *ReviewNameConflictError) Error() string {
+	return fmt.Sprintf("a review named %q already exists in this tenant and can still land; close it, or choose another name", e.Name)
+}
+
+func (e *ReviewNameConflictError) Unwrap() error { return ErrConflict }
+
+// ReviewBranchPairConflictError refuses a second live review proposing a
+// branch pair one already proposes.
+type ReviewBranchPairConflictError struct {
+	SourceBranch string
+	TargetBranch string
+}
+
+func (e *ReviewBranchPairConflictError) Error() string {
+	return fmt.Sprintf("a live review already proposes %s onto %s; complete or close it before opening another", e.SourceBranch, e.TargetBranch)
+}
+
+func (e *ReviewBranchPairConflictError) Unwrap() error { return ErrConflict }
 
 func (r *ReviewRepository) Get(ctx context.Context, reviewID string) (model.Review, error) {
 	var review model.Review

@@ -87,7 +87,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 
 ## Reviews And Builds
 
-- Review `name` is the squash merge message.
+- Review `name` is the squash merge message, reserved by the reviews that can still reach `MERGED` or did reach it — a `CLOSED` review's name is free to reuse, so re-opening rebased work keeps the change's own subject. `ReviewRepository.Create` distinguishes the two uniqueness conflicts it can hit (`ReviewNameConflictError`, `ReviewBranchPairConflictError`) by the constraint that fired, and the route reports them as `409 REVIEW_NAME_TAKEN` / `409 REVIEW_BRANCH_PAIR_IN_USE` with the name or pair in `details`: they need opposite remedies, and the bare conflict body this replaces named neither.
 - Reviews must have both `targetBranch` and `sourceBranch`.
 - Review status values include `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, and `MERGED`; do not remove existing statuses when adding workflow states.
 - Successful builds should move `OPEN` or `FAILED` reviews into the per-target-branch merge queue as `READY`.

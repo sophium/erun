@@ -52,8 +52,11 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		mu.Lock()
 		defer mu.Unlock()
+		// A name is reserved by the reviews that can still land or did land,
+		// the same contract the real backend's partial unique index enforces:
+		// a closed review holds nothing.
 		for _, existing := range reviews {
-			if existing["name"] == body["name"] {
+			if existing["name"] == body["name"] && existing["status"] != "CLOSED" {
 				http.Error(w, "conflict: a review named "+body["name"]+" already exists", http.StatusConflict)
 				return
 			}
@@ -592,6 +595,45 @@ func TestReview(t *testing.T) {
 		}
 		if !strings.Contains(second.Combined, "conflict") {
 			t.Fatalf("expected a conflict error, got:\n%s", second.Combined)
+		}
+	})
+
+	// The reported reproduction, end to end: open a review, close it without
+	// merging, then re-open the same work under the same name — a rebase, a
+	// redo, a review abandoned and picked back up. It used to be refused with
+	// a bare "Conflict" naming nothing, because the name was reserved by every
+	// review ever created rather than by the ones that can still land.
+	t.Run("create_reuses_a_closed_reviews_name", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		const name = "Fix step-timing canonicalization silently disabling on a failed row"
+		first := createReviewJSON(t, setup, name, "bug/2076-auth-retry-gate-venue", "main")
+		closed := erun.Run(t, []string{"review", "close", first.ReviewID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if closed.ExitCode != 0 || !strings.Contains(closed.Combined, "status=CLOSED") {
+			t.Fatalf("close exit %d: %s", closed.ExitCode, closed.Combined)
+		}
+
+		second := erun.Run(t, []string{
+			"review", "create", "--name", name,
+			"--source-branch", "bug/2076-auth-retry-gate-venue", "--target-branch", "main", "--output", "json",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if second.ExitCode != 0 {
+			t.Fatalf("re-creating the closed review's name exit %d: %s", second.ExitCode, second.Combined)
+		}
+		var recreated struct {
+			ReviewID string `json:"reviewId"`
+			Name     string `json:"name"`
+		}
+		if err := json.Unmarshal([]byte(second.Stdout), &recreated); err != nil {
+			t.Fatalf("decode the re-created review: %v", err)
+		}
+		if recreated.ReviewID == first.ReviewID {
+			t.Fatalf("re-created review %s, want a new review", recreated.ReviewID)
+		}
+		if recreated.Name != name {
+			t.Fatalf("name = %q, want the change's own subject %q rather than a rewording forced by a dead review", recreated.Name, name)
 		}
 	})
 

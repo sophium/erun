@@ -23,6 +23,5 @@ CREATE TABLE reviews (
     AND (status <> 'MERGED' OR last_merged_build_id IS NOT NULL)
   ),
   CONSTRAINT reviews_tenant_review_key UNIQUE (tenant_id, review_id),
-  CONSTRAINT reviews_tenant_name_key UNIQUE (tenant_id, name),
   CONSTRAINT reviews_tenant_target_review_key UNIQUE (tenant_id, target_branch, review_id)
 );

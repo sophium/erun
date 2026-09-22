@@ -160,7 +160,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - If the database has no tenants, the first authenticated identity may bootstrap the system by creating an `OPERATIONS` tenant, mapping the token issuer to that tenant, creating the first user, and assigning both `ReadAll` and `WriteAll`.
 - Do not bootstrap another operations tenant once any tenant exists. Unknown issuers remain unauthorized; first-user enrollment for an existing zero-user tenant follows the explicit API bootstrap contract, not unrestricted subject creation.
 - The `reviews` table stores tenant-owned review records with tenant-scoped names, non-empty `target_branch`, and non-empty `source_branch`.
-- Review `name` is the squash merge message.
+- Review `name` is the squash merge message. It is reserved by the reviews that can still reach `MERGED` or did reach it: the uniqueness contract is a partial unique index over everything but `CLOSED` (`reviews_tenant_name_idx`), because a closed review never landed and its name was never used as a message.
 - `reviews.author_user_id` records who opened the review, defaulted from `erun_current_user_id()` and foreign-keyed to `users (tenant_id, user_id)`. It is set once, at creation, and never reassigned.
 - The `review_reviewers` table assigns reviewers to a review with `PRIMARY KEY (tenant_id, review_id, user_id)`, tenant-scoped FKs to `reviews` and `users`. Many reviewers per review is the default shape; assigning a reviewer does not gate any status transition on its own.
 - `reviews.status` must be one of `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED`.

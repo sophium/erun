@@ -169,10 +169,32 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 	review = r.service.PrepareCreate(review)
 	review, err := r.reviews.Create(req.Context(), review)
 	if err != nil {
-		writeRepositoryError(w, req, err)
+		writeCreateReviewError(w, req, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, review)
+}
+
+// writeCreateReviewError gives the two conflicts a review creation can hit
+// their documented machine codes, because they need opposite remedies: a name
+// another review holds means choose another name (or close the holder), while
+// a branch pair another live review proposes means go and read that review —
+// and the bare "Conflict" body this replaces said neither.
+func writeCreateReviewError(w http.ResponseWriter, req *http.Request, err error) {
+	var nameConflict *apirepository.ReviewNameConflictError
+	if errors.As(err, &nameConflict) {
+		writeErrorDetails(w, http.StatusConflict, "REVIEW_NAME_TAKEN", nameConflict.Error(), map[string]any{"name": nameConflict.Name})
+		return
+	}
+	var branchConflict *apirepository.ReviewBranchPairConflictError
+	if errors.As(err, &branchConflict) {
+		writeErrorDetails(w, http.StatusConflict, "REVIEW_BRANCH_PAIR_IN_USE", branchConflict.Error(), map[string]any{
+			"sourceBranch": branchConflict.SourceBranch,
+			"targetBranch": branchConflict.TargetBranch,
+		})
+		return
+	}
+	writeRepositoryError(w, req, err)
 }
 
 func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {

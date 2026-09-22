@@ -161,8 +161,9 @@ func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.
 		Use:   "create",
 		Short: "Open a review on the erun platform",
 		Long: "Open a review on the erun platform.\n\n" +
-			"--name is the eventual squash-merge message and must be unique per tenant; a colliding " +
-			"name fails with a conflict. --source-branch must already exist on the remote — push it " +
+			"--name is the eventual squash-merge message and must be unique among the reviews that can " +
+			"still land or did land; a colliding name fails with a conflict naming it, while a CLOSED " +
+			"review's name is free to reuse. --source-branch must already exist on the remote — push it " +
 			"first with `erun exec push` — since the review references it by name and the platform " +
 			"can only ever fetch what has actually landed there. A real, immediate write, not a preview.",
 		Args:         cobra.NoArgs,
@@ -186,7 +187,7 @@ func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.
 			return ctx.WriteResult(review)
 		},
 	}
-	cmd.Flags().StringVar(&params.Name, "name", "", "Review name (unique per tenant; the eventual squash-merge message)")
+	cmd.Flags().StringVar(&params.Name, "name", "", "Review name (unique among reviews that can still land; the eventual squash-merge message)")
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Branch this review proposes merging into")
 	cmd.Flags().StringVar(&params.SourceBranch, "source-branch", "", "Branch this review proposes merging (must already be pushed)")
 	addDryRunFlag(cmd)

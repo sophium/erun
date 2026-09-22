@@ -490,3 +490,77 @@ func TestUpdateReviewStatusMalformedJSONReportsInvalidBody(t *testing.T) {
 		t.Fatalf("body = %q, want code INVALID_BODY", rec.Body.String())
 	}
 }
+
+// unpackConflictBody decodes the {code, message, details} envelope
+// writeCreateReviewError answers a review conflict with.
+func unpackConflictBody(t *testing.T, body string) (code, message string, details map[string]any) {
+	t.Helper()
+	envelope := struct {
+		Code    string         `json:"code"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details"`
+	}{}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode %q: %v", body, err)
+	}
+	return envelope.Code, envelope.Message, envelope.Details
+}
+
+// TestCreateReviewNamesTheNameConflict is the reported failure's second half:
+// the refusal was the bare word "Conflict", which says nothing about which
+// review holds the name, whether it is still live, or what to do. A caller
+// handed that reworded its merge message to something no reader could connect
+// to the change.
+func TestCreateReviewNamesTheNameConflict(t *testing.T) {
+	routes := ReviewRoutes{
+		reviews: &stubReviewRepository{err: &apirepository.ReviewNameConflictError{Name: "Fix the widget"}},
+		service: &stubReviewService{},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews",
+		bytes.NewBufferString(`{"name":"Fix the widget","targetBranch":"main","sourceBranch":"feature/widget"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	code, message, details := unpackConflictBody(t, rec.Body.String())
+	if code != "REVIEW_NAME_TAKEN" {
+		t.Fatalf("code = %q, want REVIEW_NAME_TAKEN", code)
+	}
+	if details["name"] != "Fix the widget" {
+		t.Fatalf("details.name = %v, want the name the caller asked for", details["name"])
+	}
+	if !strings.Contains(message, "Fix the widget") || !strings.Contains(message, "close it") {
+		t.Fatalf("message = %q, want it to name the name and the remedy", message)
+	}
+}
+
+// TestCreateReviewNamesTheBranchPairConflict: the two conflicts a creation can
+// hit need opposite remedies, so an occupied branch pair must not be reported
+// as a taken name.
+func TestCreateReviewNamesTheBranchPairConflict(t *testing.T) {
+	routes := ReviewRoutes{
+		reviews: &stubReviewRepository{err: &apirepository.ReviewBranchPairConflictError{
+			SourceBranch: "feature/widget", TargetBranch: "main",
+		}},
+		service: &stubReviewService{},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews",
+		bytes.NewBufferString(`{"name":"Fix the widget","targetBranch":"main","sourceBranch":"feature/widget"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	code, message, details := unpackConflictBody(t, rec.Body.String())
+	if code != "REVIEW_BRANCH_PAIR_IN_USE" {
+		t.Fatalf("code = %q, want REVIEW_BRANCH_PAIR_IN_USE", code)
+	}
+	if details["sourceBranch"] != "feature/widget" || message == "" {
+		t.Fatalf("details = %v, message = %q, want the branch pair named", details, message)
+	}
+}

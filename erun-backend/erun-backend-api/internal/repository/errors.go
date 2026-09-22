@@ -36,6 +36,14 @@ var (
 	// of the table's two uniqueness contracts actually fired, instead of a
 	// single conflict message guessing at the cause.
 	ErrUsernameConflict = fmt.Errorf("a user with this username already exists in the target tenant: %w", ErrConflict)
+	// ErrReviewNameConflict signals reviews_tenant_name_idx specifically: a
+	// different review in the target tenant already holds the requested name
+	// and can still land or did land. Distinguished from the branch-pair
+	// conflict ReviewRepository.Create also guards against, so a caller is told
+	// which of the table's two uniqueness contracts actually fired — and told
+	// that a CLOSED review is not what is holding it, since reword the name is
+	// then the wrong remedy.
+	ErrReviewNameConflict = errors.New("a review with this name already exists in this tenant")
 	// ErrUnrecognizedConflict is UserRepository.Create's fallback for a
 	// uniqueness violation that matches neither users_tenant_username_key nor
 	// user_external_ids' primary key — reported as genuinely unknown rather

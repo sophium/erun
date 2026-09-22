@@ -8,6 +8,8 @@ title: Reviews
 
 A **review** is the unit of work-to-be-merged. It binds a source branch to a target branch and tracks the state of that pairing through to merge.
 
+A review's `name` is its eventual squash-merge message, so it is unique among the reviews of the tenant **that can still land or did land**. A `CLOSED` review never landed, so its name was never used as a merge message and is free to reuse: re-opening the same work after a rebase, a redo, or an abandoned review picked back up uses the change's own subject line rather than a rewording forced by a dead review. `REVIEW_NAME_TAKEN` is what a collision with a review that *can* still land reports, and it names the name.
+
 ## Resource shape
 
 ```jsonc
@@ -34,7 +36,7 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/reviews` | List reviews. Optional filters, all composable: `?targetBranch=<name>`, `?sourceBranch=<name>`, `?status=<OPEN\|CLOSED\|FAILED\|READY\|MERGE\|MERGED>`, `?authorUserId=<id>`, `?reviewerUserId=<id>`. |
-| `POST` | `/v1/reviews` | Create a review. Body: `name`, `sourceBranch`, `targetBranch`. Refused with `409 Conflict` if another non-`MERGED`/`CLOSED` review already proposes the same `sourceBranch` onto the same `targetBranch`. |
+| `POST` | `/v1/reviews` | Create a review. Body: `name`, `sourceBranch`, `targetBranch`. Refused with `409`/`REVIEW_NAME_TAKEN` if another non-`CLOSED` review already holds the name — the message names it, since only a review that can still land reserves one — and with `409`/`REVIEW_BRANCH_PAIR_IN_USE` if another non-`MERGED`/`CLOSED` review already proposes the same `sourceBranch` onto the same `targetBranch`. |
 | `GET` | `/v1/reviews/{reviewId}` | Fetch one review. |
 | `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`, and (only for `status: "MERGED"`) `remoteUrl` — the git remote the merge was pushed to, fetched to verify the report against the real repository. `buildId` is required for a review at `MERGE` and for `READY`/`FAILED`; a `MERGED` report for a review at any other status omits it, since there is no gate build for work that landed without the queue. |
 | `GET` | `/v1/reviews/merge-queue` | List reviews *waiting* to merge for a target branch (status `READY`, not yet promoted). Optional `?targetBranch=<name>`. |
@@ -65,9 +67,13 @@ The reviewer resource:
 
 The `authorUserId` and `reviewerUserId` list filters make two questions answerable directly, without client-side filtering: "my reviews" is `GET /v1/reviews?authorUserId=<me>`, and "reviews waiting on me" is `GET /v1/reviews?reviewerUserId=<me>`. Both compose with `status`, `targetBranch`, and `sourceBranch`.
 
+## Name uniqueness
+
+A review's `name` is the squash-merge message its branch will land as, so the uniqueness it needs is between changes that could both land. It is reserved by the reviews of a tenant that are not `CLOSED` — a closed review never landed, and re-opening its work under the same subject is the ordinary outcome of a rebase or a redo, not a conflict. A collision with a review that *can* still land is refused with `409`/`REVIEW_NAME_TAKEN`, naming the name so the caller knows which subject is taken (and that closing that review frees it). A review that has reached `MERGED` keeps its name: that message really was used.
+
 ## One live review per branch pair
 
-At most one non-`MERGED`, non-`CLOSED` review may propose a given `sourceBranch` onto a given `targetBranch` at a time. `POST /v1/reviews` for a branch pair that already has a live review fails with `409 Conflict`. Once that review reaches `MERGED` or `CLOSED`, the same branch pair can be proposed again — branch history is unbounded, only *live* duplicates are refused. This prevents two reviews from independently reaching the merge queue for the same change, where the second would merge a branch the target already contains.
+At most one non-`MERGED`, non-`CLOSED` review may propose a given `sourceBranch` onto a given `targetBranch` at a time. `POST /v1/reviews` for a branch pair that already has a live review fails with `409 Conflict` (`REVIEW_BRANCH_PAIR_IN_USE`). Once that review reaches `MERGED` or `CLOSED`, the same branch pair can be proposed again — branch history is unbounded, only *live* duplicates are refused. This prevents two reviews from independently reaching the merge queue for the same change, where the second would merge a branch the target already contains.
 
 ## Status lifecycle
 
@@ -157,6 +163,8 @@ The codes below are the ones this API's review/merge-queue routes can actually d
 | `REVIEW_NOT_MERGING` | `PATCH /status` to `READY` with no `buildId` — the missed-merge-window requeue — on a review that is not at `MERGE`. `details` names the `reviewId` and the `status` it actually holds. | `409` |
 | `INVALID_BODY` | Request body missing required field or fails type validation (malformed JSON), or `PATCH /status` to `READY`/`FAILED`/`MERGED` with no `buildId` (`details.field` names it: `buildId`). | `400` |
 | `INVALID_TARGET_BRANCH` | `targetBranch` is empty on `merge-queue/advance` or `override-advance`. | `400` |
+| `REVIEW_NAME_TAKEN` | `POST /reviews` with a `name` another non-`CLOSED` review in the tenant already holds. `details.name` names it; the message says to close the holder or choose another name. A `CLOSED` review's name is not reserved and does not produce this — see [Name uniqueness](#name-uniqueness). | `409` |
+| `REVIEW_BRANCH_PAIR_IN_USE` | `POST /reviews` proposing a `sourceBranch`/`targetBranch` pair another non-`MERGED`/`CLOSED` review already proposes. `details` names the pair. | `409` |
 | `INVALID_PATH_ID` | An id in the path — `{review_id}`, `{build_id}`, `{comment_id}`, `{user_id}` — is not a UUID. The message names the parameter and the value received. Shared by every route with an id in its path, so its full contract lives once in [API protocol · Request-level validation errors](/agent-reference/api-protocol#request-level-validation-errors). | `400` |
 
 ### Pagination + rate limits

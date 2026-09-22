@@ -134,7 +134,10 @@ type PlatformCreateReviewParams struct {
 }
 
 // CreateReview opens a review. name is the eventual squash-merge message and
-// is unique per tenant; a colliding name is reported as ErrPlatformConflict.
+// is unique among the tenant's reviews that can still land or did land — a
+// CLOSED review reserves nothing, so re-opening its work under the same
+// subject is ordinary. A colliding name is reported as ErrPlatformConflict,
+// with the platform's own message naming the name.
 func (c *PlatformClient) CreateReview(ctx context.Context, params PlatformCreateReviewParams) (PlatformReview, error) {
 	var review PlatformReview
 	err := c.do(ctx, http.MethodPost, "/v1/reviews", params, true, &review)

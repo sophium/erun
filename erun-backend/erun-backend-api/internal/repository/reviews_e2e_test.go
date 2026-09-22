@@ -640,3 +640,60 @@ func TestReviewReviewerListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 		t.Fatalf("List = %+v, want exactly the operations caller's own reviewer %s, not the stranger's as well", listed, opsReviewer)
 	}
 }
+
+// TestReviewNameIsReleasedWhenTheReviewIsClosed is the reported failure:
+// opening a review, closing it without merging, and then re-opening the
+// branch under the same name — a rebase, a redo, a review abandoned and
+// picked back up — was refused with a bare "Conflict", because the name
+// uniqueness contract reserved the squash-merge message for every review that
+// had ever been created rather than for the ones that could still land.
+func TestReviewNameIsReleasedWhenTheReviewIsClosed(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	ctx := reviewsContext(tenantID, author)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	const name = "Fix step-timing canonicalization silently disabling on a failed row"
+
+	first, err := reviews.Create(ctx, model.Review{
+		Name: name, TargetBranch: "main", SourceBranch: "bug/2076-auth-retry-gate-venue", Status: model.ReviewStatusOpen,
+	})
+	mustNoErr(t, err, "create the review")
+
+	// The name still protects what it was for: two changes that could land
+	// must not claim the same merge message.
+	_, err = reviews.Create(ctx, model.Review{
+		Name: name, TargetBranch: "main", SourceBranch: "bug/another-change", Status: model.ReviewStatusOpen,
+	})
+	var nameConflict *ReviewNameConflictError
+	if !errors.As(err, &nameConflict) {
+		t.Fatalf("a second live review with the same name: err = %v, want *ReviewNameConflictError", err)
+	}
+	if nameConflict.Name != name {
+		t.Fatalf("conflict names %q, want %q so the refusal can say which name is taken", nameConflict.Name, name)
+	}
+
+	// Close it without merging: it never landed, so its name was never used
+	// as a merge message and holds nothing.
+	first.Status = model.ReviewStatusClosed
+	if _, err := reviews.Update(ctx, first); err != nil {
+		t.Fatalf("close the review: %v", err)
+	}
+
+	second, err := reviews.Create(ctx, model.Review{
+		Name: name, TargetBranch: first.TargetBranch, SourceBranch: first.SourceBranch, Status: model.ReviewStatusOpen,
+	})
+	mustNoErr(t, err, "re-open the same work under the name the closed review was created with")
+	if second.ReviewID == first.ReviewID {
+		t.Fatalf("re-created review %s, want a new review", second.ReviewID)
+	}
+	if second.Name != name {
+		t.Fatalf("name = %q, want the change's own subject %q rather than a rewording forced by a dead review", second.Name, name)
+	}
+
+	// And the name is reserved again by the review that now holds it.
+	if _, err := reviews.Create(ctx, model.Review{
+		Name: name, TargetBranch: "main", SourceBranch: "feature/yet-another", Status: model.ReviewStatusOpen,
+	}); !errors.As(err, &nameConflict) {
+		t.Fatalf("a third review with the same name while the second is live: err = %v, want *ReviewNameConflictError", err)
+	}
+}
