@@ -1,0 +1,2 @@
+audit: erun review list --status BOGUS
+unsupported review status "BOGUS": expected one of OPEN, CLOSED, FAILED, READY, MERGE, MERGED

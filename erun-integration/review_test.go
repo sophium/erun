@@ -434,6 +434,81 @@ func TestReview(t *testing.T) {
 		golden.Equal(t, "review/list_rejects_mine_combined_with_author_user_id", normalize.Apply(result.Combined))
 	})
 
+	// The reported failure: a mistyped --status reached the platform verbatim,
+	// came back as a clean empty listing, and printed "no reviews" at exit 0 --
+	// indistinguishable from a review queue that genuinely has nothing in that
+	// state. Both halves are asserted together below, because the defect is
+	// precisely that the two were the same output.
+	t.Run("list_mistyped_status_is_refused_rather_than_listed_as_empty", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		// The control: a valid status that genuinely matches nothing. This one
+		// legitimately reports an empty result at exit 0.
+		empty := erun.Run(t, []string{"review", "list", "--status", "OPEN"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if empty.ExitCode != 0 {
+			t.Fatalf("a valid status matching nothing should still exit 0, got %d:\n%s", empty.ExitCode, empty.Combined)
+		}
+		if !strings.Contains(empty.Combined, "no reviews") {
+			t.Fatalf("expected the genuine empty listing to say 'no reviews', got:\n%s", empty.Combined)
+		}
+
+		// The reproduction: the same empty queue, reached by a typo.
+		bogus := erun.Run(t, []string{"review", "list", "--status", "BOGUS"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if bogus.ExitCode == 0 {
+			t.Fatalf("a mistyped --status must not exit 0, got:\n%s", bogus.Combined)
+		}
+		if strings.Contains(bogus.Combined, "no reviews") {
+			t.Fatalf("a mistyped --status must not be reported as an empty listing, got:\n%s", bogus.Combined)
+		}
+		for _, want := range []string{"BOGUS", "OPEN", "CLOSED", "FAILED", "READY", "MERGE", "MERGED"} {
+			if !strings.Contains(bogus.Combined, want) {
+				t.Fatalf("expected the refusal to name %q, got:\n%s", want, bogus.Combined)
+			}
+		}
+		golden.Equal(t, "review/list_mistyped_status_is_refused", normalize.Apply(bogus.Combined))
+
+		// A near-miss typo is the same refusal: the defect was that any value
+		// outside the vocabulary listed as empty, not only an obviously foreign one.
+		nearMiss := erun.Run(t, []string{"review", "list", "--status", "MERGEDD"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if nearMiss.ExitCode == 0 || strings.Contains(nearMiss.Combined, "no reviews") {
+			t.Fatalf("a near-miss --status must be refused too, got exit %d:\n%s", nearMiss.ExitCode, nearMiss.Combined)
+		}
+	})
+
+	// Case-insensitivity is the documented behavior here, so a lower-case
+	// spelling must resolve to the stored one rather than be refused with it:
+	// the rejection is only for values outside the six in any casing.
+	t.Run("list_lowercase_status_resolves_to_the_stored_spelling", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		createReviewJSON(t, setup, "Add widget", "feature/widget", "main")
+
+		result := erun.Run(t, []string{"review", "list", "--status", "open"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("a lower-case --status should resolve, not be refused, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Add widget") {
+			t.Fatalf("expected --status open to match the OPEN review, got:\n%s", result.Combined)
+		}
+	})
+
+	// The refusal is a bad-argument error, so it must not depend on the platform
+	// being configured at all: a caller with no alias still learns their filter
+	// was wrong rather than being sent to set up an alias that would not help.
+	t.Run("list_rejects_unknown_status_before_resolving_an_alias", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"review", "list", "--status", "BOGUS"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a mistyped --status, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "unsupported review status") {
+			t.Fatalf("expected the refusal, not an alias-resolution failure, got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("create_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")

@@ -3,18 +3,25 @@ package model
 import (
 	"time"
 
+	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/uptrace/bun"
 )
 
 type ReviewStatus string
 
+// The stored spellings come from erun-common's vocabulary rather than being
+// restated here, because that is the list `erun review list --status` and the
+// reviews route both validate against: a status this model accepts but the
+// shared validator does not (or the reverse) would be a filter no caller could
+// ever reach. The reviews table's own CHECK constraint is the third place the
+// set appears; it is the database's enforcement of the same vocabulary.
 const (
-	ReviewStatusOpen   ReviewStatus = "OPEN"
-	ReviewStatusClosed ReviewStatus = "CLOSED"
-	ReviewStatusFailed ReviewStatus = "FAILED"
-	ReviewStatusReady  ReviewStatus = "READY"
-	ReviewStatusMerge  ReviewStatus = "MERGE"
-	ReviewStatusMerged ReviewStatus = "MERGED"
+	ReviewStatusOpen   ReviewStatus = eruncommon.ReviewStatusOpen
+	ReviewStatusClosed ReviewStatus = eruncommon.ReviewStatusClosed
+	ReviewStatusFailed ReviewStatus = eruncommon.ReviewStatusFailed
+	ReviewStatusReady  ReviewStatus = eruncommon.ReviewStatusReady
+	ReviewStatusMerge  ReviewStatus = eruncommon.ReviewStatusMerge
+	ReviewStatusMerged ReviewStatus = eruncommon.ReviewStatusMerged
 )
 
 type Review struct {

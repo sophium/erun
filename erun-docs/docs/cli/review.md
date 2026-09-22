@@ -42,7 +42,7 @@ Lists reviews visible to the caller's tenant. Every filter is optional and compo
 | Flag | Description |
 |---|---|
 | `--target-branch` / `--source-branch` | Filter by branch name. |
-| `--status` | `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED`. |
+| `--status` | `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED`; any casing. Anything else is refused rather than listed — see [Error behaviour](#error-behaviour). |
 | `--author-user-id` / `--reviewer-user-id` | Filter by an explicit user id. |
 | `--mine` | Reviews you authored. Resolves your user id via a `whoami` call first; cannot be combined with `--author-user-id`. |
 | `--waiting-on-me` | Reviews you are a reviewer on. Resolves your user id via a `whoami` call first; cannot be combined with `--reviewer-user-id`. |
@@ -160,6 +160,7 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | No erun-type cloud alias configured. | Aborts before any network call, naming `erun cloud init erun --api-url <url>`. |
 | More than one erun-type alias configured, `--erun-alias` omitted. | Aborts asking for an explicit `--erun-alias`. |
 | `--mine`/`--waiting-on-me` combined with the equivalent explicit `--author-user-id`/`--reviewer-user-id` (`list`). | Aborts before any network call. |
+| `--status` names something other than `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED` (`list`; any casing). | Refused as a bad argument, naming the accepted values, before the alias lookup — a mistyped filter would otherwise return an empty listing, indistinguishable from a review queue that genuinely has nothing in that state. The API refuses the same value with `400 Bad Request` and code `INVALID_QUERY`. |
 | `create` with a `--name` that collides with an existing review. | `409 Conflict`. |
 | `create` with a `--source-branch` that already has a live (non-`MERGED`/`CLOSED`) review proposing it onto the same `--target-branch`. | `409 Conflict` — see [branch uniqueness](/collaboration/reviews#author-reviewers-and-discovery). |
 | `show`/`comment`/`close` on an unknown review id. | `404 Not Found`. |
