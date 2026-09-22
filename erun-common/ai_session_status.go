@@ -82,12 +82,16 @@ type AISessionRecord struct {
 // AISessionStatus is the resolved, caller-facing view of an AI session: the
 // read model derived from the last recorded event, never from silence.
 type AISessionStatus struct {
-	SessionID    string         `json:"sessionId"`
-	Tool         string         `json:"tool,omitempty"`
-	State        AISessionState `json:"state"`
-	Reason       string         `json:"reason"`
-	LastActivity time.Time      `json:"lastActivity,omitempty"`
-	ExitCode     *int           `json:"exitCode,omitempty"`
+	SessionID string         `json:"sessionId"`
+	Tool      string         `json:"tool,omitempty"`
+	State     AISessionState `json:"state"`
+	Reason    string         `json:"reason"`
+	// `omitzero` rather than `omitempty`: a session that has recorded no
+	// activity carries no lastActivity field at all, instead of Go's zero
+	// instant rendered as though it were a real time. Same rule as the idle
+	// markers' timestamps, so a consumer reads one convention.
+	LastActivity time.Time `json:"lastActivity,omitzero"`
+	ExitCode     *int      `json:"exitCode,omitempty"`
 }
 
 // AISessionEventParams is the input to RecordAISessionEvent.

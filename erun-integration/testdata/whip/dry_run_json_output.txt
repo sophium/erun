@@ -8,7 +8,6 @@
         "Name": "team/dev",
         "Reachable": true,
         "Alive": false,
-        "LastActiveAt": "<TS>",
         "NudgeCount": 0,
         "Capped": false
       },
@@ -24,7 +23,6 @@
         "Name": "Eng One",
         "Reachable": false,
         "Alive": false,
-        "LastActiveAt": "<TS>",
         "NudgeCount": 0,
         "Capped": false
       },
