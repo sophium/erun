@@ -52,7 +52,12 @@ if [ -d frontend ]; then
 	mkdir -p frontend/dist
 fi
 
-WAILS_BIN="$WAILS_BIN" "$SCRIPT_DIR/generate-wailsjs.sh"
+# Pass the skip-when-unchanged cache dir through when the caller set one, so
+# this call (reached inside test-playwright's headless erun-app build) hits the
+# generation test-frontend already did instead of re-running `wails generate
+# module`. Inherited, never hardcoded here: unset means unconditional
+# generation, exactly as a bare ./generate-wailsjs.sh run.
+ERUN_WAILSJS_CACHE_DIR="${ERUN_WAILSJS_CACHE_DIR:-}" WAILS_BIN="$WAILS_BIN" "$SCRIPT_DIR/generate-wailsjs.sh"
 
 if [ -d frontend ]; then
 	# Installed from the repo-root workspace lockfile, not frontend/yarn.lock:
