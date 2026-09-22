@@ -18,6 +18,9 @@ type stubReviewRepository struct {
 	reviews   []model.Review
 	err       error
 	gotFilter apirepository.ReviewFilter
+	// gotCreated records the review Create was handed, so a test can pin which
+	// values a request body was able to put into a new review.
+	gotCreated model.Review
 	// gotMergeQueue* record what ListMergeQueue was addressed with, so a test
 	// can prove the repository query parameter reaches the repository rather
 	// than being dropped on the way through the route.
@@ -25,8 +28,19 @@ type stubReviewRepository struct {
 	gotMergeQueueTargetBranch string
 }
 
-func (s *stubReviewRepository) Create(context.Context, model.Review) (model.Review, error) {
-	return model.Review{}, s.err
+// Create echoes the review it was handed, mirroring ReviewRepository.Create:
+// `created := review`, then `Returning("*")`, which fills the DB-backed columns
+// and leaves a field with no column (bun:"-") exactly as the caller left it. A
+// stub returning a zero review instead would hide that, and the issue
+// provenance the route tests below pin depends on seeing it.
+func (s *stubReviewRepository) Create(_ context.Context, review model.Review) (model.Review, error) {
+	s.gotCreated = review
+	if s.err != nil {
+		return model.Review{}, s.err
+	}
+	created := review
+	created.ReviewID = "review-1"
+	return created, nil
 }
 
 func (s *stubReviewRepository) Get(context.Context, string) (model.Review, error) {
@@ -93,10 +107,17 @@ type stubReviewService struct {
 	prepareErr           error
 }
 
+// PrepareCreate mirrors ReviewService.PrepareCreate's own contract, the OPEN
+// default included: a test that pins whether a request body can reach the
+// status of a new review has to see the status the platform actually stores,
+// not the stub's indifference to it.
 func (s *stubReviewService) PrepareCreate(review model.Review) (model.Review, error) {
 	s.preparedReview = review
 	if s.prepareErr != nil {
 		return model.Review{}, s.prepareErr
+	}
+	if review.Status == "" {
+		review.Status = model.ReviewStatusOpen
 	}
 	return review, nil
 }
@@ -624,6 +645,101 @@ func TestCreateReviewRefusesAnUnusableRepository(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"code":"INVALID_REPOSITORY"`) {
 		t.Fatalf("body = %q, want the INVALID_REPOSITORY code", rec.Body.String())
+	}
+}
+
+// TestCreateReviewRefusesACallerSuppliedIssueProvenance is the reproduction of
+// the forgery POST /v1/reviews allowed. The route decoded its body straight
+// into model.Review -- the same struct it returns -- so the two derived issue
+// fields were reachable from request input, and because nothing persists them
+// the `Returning("*")` that overwrites every stored column with the database's
+// own value could not overwrite these. A body asserting a declared reference
+// came back in the 201 as though the platform had established it, which is
+// exactly the claim the INFERRED marking exists to refuse.
+//
+// The source branch here deliberately follows no convention: that is the state
+// where the resolver has nothing of its own to replace a forged value with, so
+// the caller's value would have been the whole answer.
+func TestCreateReviewRefusesACallerSuppliedIssueProvenance(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewBufferString(
+		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"my-branch","issueRef":"9999","issueRefSource":"DECLARED"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("body %q is not a review object: %v", rec.Body.String(), err)
+	}
+	for _, field := range []string{"issueRef", "issueRefSource"} {
+		if value, ok := created[field]; ok {
+			t.Fatalf("%s = %v in the response, want it absent: a review's issue link and its provenance are the platform's to resolve, and a caller must not be able to assert either", field, value)
+		}
+	}
+	// The forgery has to be stopped at the boundary rather than scrubbed off
+	// the response afterwards: what the repository is handed is what the route
+	// built, and that value carries no issue link either. The resolver is the
+	// only writer of these two fields on the way out.
+	if reviews.gotCreated.IssueRef != "" || reviews.gotCreated.IssueRefSource != "" {
+		t.Fatalf("the repository was handed issueRef=%q issueRefSource=%q, want neither",
+			reviews.gotCreated.IssueRef, reviews.gotCreated.IssueRefSource)
+	}
+}
+
+// TestCreateReviewRefusesACallerSuppliedStatus: the same decode also reached
+// the stored status column, which belongs to the merge queue rather than to the
+// caller -- AdvanceMergeQueue is the only thing permitted to promote a review
+// to MERGE, and it refuses while the head has unresolved threads or while
+// another merge holds the branch. A caller could step past all of that by
+// creating the review there. A new review opens OPEN.
+func TestCreateReviewRefusesACallerSuppliedStatus(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewBufferString(
+		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"feature/widget","status":"MERGE"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	if reviews.gotCreated.Status != model.ReviewStatusOpen {
+		t.Fatalf("the repository was handed status %q, want %q: a caller cannot open a review at a status the merge queue owns",
+			reviews.gotCreated.Status, model.ReviewStatusOpen)
+	}
+}
+
+// TestCreateReviewCarriesTheBodyFieldsItDoesAccept guards the other direction
+// from the two refusals above: separating the request from the model must not
+// quietly drop the fields a create body is documented to carry.
+func TestCreateReviewCarriesTheBodyFieldsItDoesAccept(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewBufferString(
+		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"feature/widget"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	want := model.Review{
+		Repository:   "https://github.com/sophium/erun",
+		Name:         "Add widget",
+		TargetBranch: "main",
+		SourceBranch: "feature/widget",
+		Status:       model.ReviewStatusOpen,
+	}
+	if got := reviews.gotCreated; got.Repository != want.Repository || got.Name != want.Name ||
+		got.TargetBranch != want.TargetBranch || got.SourceBranch != want.SourceBranch || got.Status != want.Status {
+		t.Fatalf("the repository was handed %+v, want %+v", got, want)
 	}
 }
 

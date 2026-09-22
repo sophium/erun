@@ -23,7 +23,7 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
   "lastReadyBuildId": "bld_...",
   "lastMergedBuildId": "bld_...",
   "issueRef": "2212",                     // derived on read, never stored; absent when the branch names no issue
-  "issueRefSource": "INFERRED",           // DECLARED | INFERRED; present exactly when issueRef is
+  "issueRefSource": "INFERRED",           // always INFERRED today; present exactly when issueRef is
   "createdAt": "2026-05-24T10:42:00Z",
   "updatedAt": "2026-05-24T11:13:00Z"
 }
@@ -87,7 +87,9 @@ A review carries no issue of its own yet, so the source branch is the only link 
 { "sourceBranch": "bug/2212-issue-ref-from-branch", "issueRef": "2212", "issueRefSource": "INFERRED" }
 ```
 
-The derivation is **best-effort and clearly marked as such**. `issueRefSource` is `INFERRED` for a reference parsed out of a branch name — a guess that the branch was named honestly — and `DECLARED` for one a caller stated. A client that renders an inferred link as though the author had declared it claims a provenance erun does not have, which is why the two fields always travel together.
+The derivation is **best-effort and clearly marked as such**. `issueRefSource` is `INFERRED` for a reference parsed out of a branch name — a guess that the branch was named honestly — and `DECLARED` for one a review states itself. A client that renders an inferred link as though the author had declared it claims a provenance erun does not have, which is why the two fields always travel together.
+
+`DECLARED` is the vocabulary's other value, not a state this API returns yet: a review records no issue of its own, so there is nothing to declare and every `issueRef` in a response is `INFERRED`. It becomes reachable when a review can carry its own `issueRef` — a stored column, an `erun review create --issue` flag, and the resolution preferring that over the branch ([#2212](https://github.com/sophium/erun/issues/2212)). A client should still handle the value: the field is a provenance, and one that could only ever hold a single value would not need stating. A `POST /v1/reviews` body cannot produce it either way — `issueRef` and `issueRefSource` are not request fields, and a body carrying them is ignored the same way a body carrying `authorUserId` is.
 
 A branch that follows no convention leaves the review unlinked rather than guessed at: `feature/widget` — or any branch that merely contains a number — produces a review with no `issueRef` and no `issueRefSource` at all. An empty link is an answer; a wrong link sends someone to an issue nobody named.
 

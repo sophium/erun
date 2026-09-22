@@ -19,6 +19,11 @@ import (
 // side is empty because a review carries no issue of its own yet; the moment
 // one is recorded, it is passed here and wins over whatever the source branch
 // looks like, which is the rule erun-common's resolver already holds.
+//
+// That argument is the platform's, never the caller's: createReviewRequest has
+// no field a declared reference could arrive in, so a request cannot reach the
+// DECLARED branch of that resolver at all. This function is the only writer of
+// a returned review's IssueRef/IssueRefSource.
 func resolveReviewIssueRef(review model.Review) (eruncommon.IssueReference, bool) {
 	return eruncommon.ResolveIssueReference("", review.SourceBranch)
 }
