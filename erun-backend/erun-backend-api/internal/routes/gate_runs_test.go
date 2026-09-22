@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -147,19 +148,27 @@ func TestListGateRunsAcceptsRunningAsAStatusFilter(t *testing.T) {
 // API ever stores is therefore uppercase. listGateRuns must normalize its own
 // `?status=` filter the same way, or `GET /v1/gate-runs?status=failed`
 // silently returns zero rows against real, uppercase-stored data instead of
-// matching them.
+// matching them. The filter is validated as well as normalized, so the check
+// has to be a membership test on the normalized value: an entry point that
+// validated the raw `?status=` first would refuse `failed` for not being
+// spelled `FAILED` and break the case-insensitivity the CLI's examples rely
+// on.
 func TestListGateRunsNormalizesLowercaseStatusFilter(t *testing.T) {
-	repo := &stubGateRunRepository{}
-	routes := GateRunRoutes{gateRuns: repo}
-	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=failed", nil)
-	rec := httptest.NewRecorder()
+	for _, spelling := range []string{"failed", "FAILED", " Failed "} {
+		t.Run(spelling, func(t *testing.T) {
+			repo := &stubGateRunRepository{}
+			routes := GateRunRoutes{gateRuns: repo}
+			req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status="+url.QueryEscape(spelling), nil)
+			rec := httptest.NewRecorder()
 
-	routes.listGateRuns(rec, req)
+			routes.listGateRuns(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	if repo.listFilter.Status != model.GateRunStatusFailed {
-		t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusFailed)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			if repo.listFilter.Status != model.GateRunStatusFailed {
+				t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusFailed)
+			}
+		})
 	}
 }
