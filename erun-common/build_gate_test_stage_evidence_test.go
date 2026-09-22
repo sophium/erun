@@ -113,7 +113,7 @@ func gateBuildFixture(tag string) DockerBuildSpec {
 func runGateBuildThroughTheRealPath(t *testing.T, build DockerBuildSpec, buildOutput string) string {
 	t.Helper()
 	var log bytes.Buffer
-	ctx, finish := traceBuildUmbrella(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}, []DockerBuildSpec{build})
+	ctx, finish := traceBuildUmbrella(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}, []DockerBuildSpec{build}, false)
 
 	err := RunDockerBuild(ctx, build, func(input DockerBuildSpec, stdout, stderr io.Writer) error {
 		if input.PlatformObserver == nil {
