@@ -42,8 +42,15 @@ type ObserveResult struct {
 	// Drift names every disagreement found between the live release, the
 	// running pods, and what the env config records — the pre-deploy
 	// live-vs-plan diff an orchestrator must do before any env-shaping
-	// deploy. Empty means nothing disagreed, not that nothing was checked.
-	Drift []string `json:"drift,omitempty"`
+	// deploy.
+	//
+	// The field is always present in a real run, which is why it is not
+	// `omitempty`: an empty list is the verdict "the comparison ran and
+	// nothing disagreed", and a consumer must be able to tell that apart from
+	// "this key is never populated". A dry run reads nothing and so carries a
+	// null here, the same "not determined" answer its sibling lists report —
+	// never an empty list, which would assert a comparison that never ran.
+	Drift []string `json:"drift"`
 }
 
 // RunObservation reads pods, quota/limit usage, ingress routing, certificate
