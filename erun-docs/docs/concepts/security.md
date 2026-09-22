@@ -32,7 +32,7 @@ You don't need to grant an Agent special permissions — it has exactly the perm
 
 Each env is a separate Kubernetes namespace. The runtime pod and the application services for that env live there together.
 
-- **Namespace isolation** — default-deny NetworkPolicy on the runtime chart blocks cross-namespace ingress. Cross-env traffic requires an explicit opt-in policy.
+- **Namespace isolation** — the runtime chart deploys a default-deny ingress `NetworkPolicy` for the runtime pod, so a port it does not name is unreachable from every other pod, in any namespace. It re-permits `ssh`, `mcp`, and the metrics port by number, and only the metrics port is narrowed by source namespace, so those three are not blocked cross-namespace. Application services are not selected by it — see [Networking](/concepts/networking) for the namespace-wide pattern.
 - **PVC isolation** — workspace + docker daemon PVCs are scoped to one namespace. Dropping the namespace reclaims them.
 - **Service-account isolation** — one SA per env, with cluster-bound roles that name the namespace explicitly. An env's ServiceAccount can't read another env's secrets.
 
@@ -73,12 +73,12 @@ Two enforced rules: **never bake secrets into images; never log secret values.**
 
 ## Network
 
-Egress is open by default (envs need to pull images, fetch dependencies, install packages). Ingress is locked down by default to the env's own namespace.
+Egress is open by default (envs need to pull images, fetch dependencies, install packages). Ingress to the runtime pod is default-deny: the chart's `NetworkPolicy` admits only the ports it names, and only the metrics port is narrowed by source namespace.
 
 | Direction | Default | Override |
 |---|---|---|
 | Egress | Allowed | NetworkPolicy with `policyTypes: [Egress]` |
-| Ingress (cross-namespace) | Denied by the runtime chart | NetworkPolicy with `namespaceSelector` |
+| Ingress (cross-namespace) | Denied to the runtime pod on every port but `ssh`, `mcp`, and the metrics port | NetworkPolicy with `namespaceSelector` |
 | Ingress (external HTTP/TCP) | Off until you deploy an Ingress / `Service: LoadBalancer` | Helm chart in the env's namespace |
 
 → [Networking](/concepts/networking)

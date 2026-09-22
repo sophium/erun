@@ -28,6 +28,18 @@ erun app
 erun app --headless --port 34115
 ```
 
+## Which copy is launched
+
+Two copies of the desktop app can exist at once: one beside the `erun` binary, where an installed or hand-placed copy lands, and one in a checkout's `erun-ui/bin`, where `./erun-ui/build.sh` writes its rebuild. `erun app` launches whichever copy was written most recently, and reports which one that is:
+
+```
+app: launching /Users/me/erun/erun-ui/bin/ERun.app (newest of 2 copies found; not launched: /Users/me/erun/erun-cli/bin/ERun.app)
+```
+
+For an `.app` bundle, the time that counts is the later of the bundle itself and the executable inside it, so a rebuild counts whether it recreates the bundle or replaces the binary within it. Two copies written at the same moment cannot be told apart, and the one beside the `erun` binary is launched.
+
+If a rebuild appears to have changed nothing, that line names the copy that actually started. A desktop restarts from the copy it is already running from, so a stale copy keeps relaunching itself: quit the app and launch it again with `erun app` to move onto the newest copy, and remove the copy you no longer want so it cannot be picked again.
+
 ## Error behaviour
 
 | Failure | Behaviour |

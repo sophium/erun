@@ -593,9 +593,12 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 	EnvironmentRoutes{
 		environments: environments,
 		contexts:     &stubContextRepository{},
-		quotas:       stubTenantQuotaRepository{maxEnvironments: 10, maxCPUMillicores: 9000, maxMemoryMB: 30000, maxStorageGB: 100},
-		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
-		provisioner:  prov,
+		quotas: stubTenantQuotaRepository{
+			maxEnvironments: 10, maxCPUMillicores: minRuntimeCPUMillicores,
+			maxMemoryMB: minRuntimeMemoryMB, maxStorageGB: minRuntimeStorageGB,
+		},
+		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
+		provisioner: prov,
 	}.createEnvironment(rec, req)
 
 	if rec.Code != http.StatusAccepted {
@@ -605,8 +608,8 @@ func TestCreateEnvironmentStartsDeployWithResourceCaps(t *testing.T) {
 		t.Fatalf("Start called %d times, want 1", len(prov.started))
 	}
 	got := prov.started[0]
-	if got.MaxCPUMillicores != 9000 || got.MaxMemoryMB != 30000 || got.MaxStorageGB != 100 {
-		t.Fatalf("resource caps = %+v, want 9000/30000/100", got)
+	if got.MaxCPUMillicores != minRuntimeCPUMillicores || got.MaxMemoryMB != minRuntimeMemoryMB || got.MaxStorageGB != minRuntimeStorageGB {
+		t.Fatalf("resource caps = %+v, want %d/%d/%d", got, minRuntimeCPUMillicores, minRuntimeMemoryMB, minRuntimeStorageGB)
 	}
 }
 
@@ -656,8 +659,10 @@ func TestCreateEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 		environments: environments,
 		contexts:     &stubContextRepository{},
 		quotas: stubTenantQuotaRepository{
-			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 29396, maxStorageGB: 72,
-			maxTotalCPUMillicores: 8000, maxTotalMemoryMB: 29396, maxTotalStorageGB: 72,
+			maxEnvironments: 10, maxCPUMillicores: minRuntimeCPUMillicores,
+			maxMemoryMB: minRuntimeMemoryMB, maxStorageGB: minRuntimeStorageGB,
+			maxTotalCPUMillicores: minRuntimeCPUMillicores,
+			maxTotalMemoryMB:      minRuntimeMemoryMB, maxTotalStorageGB: minRuntimeStorageGB,
 		},
 		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner: prov,
@@ -687,8 +692,10 @@ func TestCreateEnvironmentAllowsWithinAggregateBudget(t *testing.T) {
 		environments: environments,
 		contexts:     &stubContextRepository{},
 		quotas: stubTenantQuotaRepository{
-			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 29396, maxStorageGB: 72,
-			maxTotalCPUMillicores: 16000, maxTotalMemoryMB: 58792, maxTotalStorageGB: 144,
+			maxEnvironments: 10, maxCPUMillicores: minRuntimeCPUMillicores,
+			maxMemoryMB: minRuntimeMemoryMB, maxStorageGB: minRuntimeStorageGB,
+			maxTotalCPUMillicores: 2 * minRuntimeCPUMillicores,
+			maxTotalMemoryMB:      2 * minRuntimeMemoryMB, maxTotalStorageGB: 2 * minRuntimeStorageGB,
 		},
 		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner: prov,
@@ -721,8 +728,10 @@ func TestDeployEnvironmentRejectsAggregateBudgetExceeded(t *testing.T) {
 		environments: environments,
 		contexts:     &stubContextRepository{},
 		quotas: stubTenantQuotaRepository{
-			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 29396, maxStorageGB: 72,
-			maxTotalCPUMillicores: 4000, maxTotalMemoryMB: 29396, maxTotalStorageGB: 72,
+			maxEnvironments: 10, maxCPUMillicores: minRuntimeCPUMillicores,
+			maxMemoryMB: minRuntimeMemoryMB, maxStorageGB: minRuntimeStorageGB,
+			maxTotalCPUMillicores: minRuntimeCPUMillicores / 2,
+			maxTotalMemoryMB:      minRuntimeMemoryMB, maxTotalStorageGB: minRuntimeStorageGB,
 		},
 		tenants:     stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		provisioner: prov,
@@ -1221,8 +1230,10 @@ var runtimeFloorQuotaCases = map[string]struct {
 	},
 	"meets runtime floor": {
 		quota: stubTenantQuotaRepository{
-			maxEnvironments: 10, maxCPUMillicores: 8000, maxMemoryMB: 29396, maxStorageGB: 72,
-			maxTotalCPUMillicores: 16000, maxTotalMemoryMB: 58792, maxTotalStorageGB: 144,
+			maxEnvironments: 10, maxCPUMillicores: minRuntimeCPUMillicores,
+			maxMemoryMB: minRuntimeMemoryMB, maxStorageGB: minRuntimeStorageGB,
+			maxTotalCPUMillicores: 2 * minRuntimeCPUMillicores,
+			maxTotalMemoryMB:      2 * minRuntimeMemoryMB, maxTotalStorageGB: 2 * minRuntimeStorageGB,
 		},
 		floorOK: true,
 	},

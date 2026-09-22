@@ -52,6 +52,29 @@ func startSilentPortForward(t *testing.T, port int) {
 	}()
 }
 
+// startDroppingPortForward binds port and closes every connection it accepts
+// without writing a reply — a forward that is up whose target never took the
+// call, which is what a pod mid-roll behind a working forward looks like from
+// the local side. It is the shape that must not be reported as a stale
+// forward: nothing about the tunnel is wrong.
+func startDroppingPortForward(t *testing.T, port int) {
+	t.Helper()
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Fatalf("listen on 127.0.0.1:%d: %v", port, err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+}
+
 // fakeMCPEdge stands in for the per-env erun-mcp server: it speaks the
 // streamable-HTTP handshake (initialize, then a 202 for the initialized
 // notification, then the call) and records what each request carried, so a
@@ -805,6 +828,35 @@ exit 3`)
 		}
 		if !strings.Contains(result.Combined, "erun open team dev") {
 			t.Fatalf("expected the same recovery guidance a missing forward gets, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("call_real_run_unready_target_is_not_sent_to_a_reopen", func(t *testing.T) {
+		// A forward whose target has not come up yet — an environment mid-roll
+		// after a deploy — takes the local connection and closes it without
+		// answering. The forward itself is working, so the recovery the stale
+		// case prints ("run `erun open …`") would replace nothing and leave the
+		// same wait ahead: the failure has to name the state it is actually in.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		startDroppingPortForward(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 126 {
+			t.Fatalf("expected exit 126 (channel unreachable) for a target that has not come up, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "still starting") {
+			t.Fatalf("expected the unready target to be named as such, got:\n%s", result.Combined)
+		}
+		// Re-opening is what the stale shape prints, and it replaces nothing
+		// while the forward is up and working.
+		if strings.Contains(result.Combined, "so the local MCP port-forward is up") {
+			t.Fatalf("an environment whose forward is up must not be sent to a re-open, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "if it stays unresponsive") {
+			t.Fatalf("the unready target still needs a way out when it does not recover, got:\n%s", result.Combined)
 		}
 	})
 

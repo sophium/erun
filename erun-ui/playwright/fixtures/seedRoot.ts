@@ -83,8 +83,16 @@ export function isolatedHomeDir(): string {
   return path.join(isolatedRoot(), 'home');
 }
 
-function stubsDir(): string {
+export function stubsDir(): string {
   return path.join(isolatedRoot(), 'stubs');
+}
+
+// stubRegistryPath is the file every long-lived stub appends its own pid to
+// before parking itself. It lives in the isolated root (per worker, removed with
+// it) and is what makes the stub population observable and reapable —
+// fixtures/stubProcesses.ts owns reading and reaping it.
+export function stubRegistryPath(): string {
+  return path.join(isolatedRoot(), 'stub-pids');
 }
 
 // stubBinPath is the on-disk path of a stub tool. On Windows the backend
@@ -170,6 +178,10 @@ export function backendEnv(): Record<string, string> {
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_CACHE_HOME: path.join(home, '.cache'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    // Where a long-lived stub records the pid it parks under, so the harness can
+    // reap a session it opened and never closed (fixtures/stubProcesses.ts).
+    // Inherited by every child the backend spawns, the stubs included.
+    ERUN_PLAYWRIGHT_STUB_REGISTRY: stubRegistryPath(),
   };
   if (e2eK3dEnabled()) {
     // k3d mode drives a live cluster with the real docker/kubectl/helm and
@@ -389,6 +401,15 @@ export function seedGitRemoteAgentForK3d(
 //   see signalSessionReadyOnLine in erun-ui/activity_queue_app.go) and then
 //   sleeps, so the tab behaves like a healthy opened session: alive, quiet,
 //   and killable on env close.
+//
+//   `--no-shell` is the non-interactive probe form (`erun open <t> <e>
+//   --no-shell --reconnect`, see buildOpenNoShellArgs in erun-ui/session.go):
+//   the real CLI sets the forwards up and EXITS, and every caller waits on
+//   that exit. Sleeping here instead hung whatever was waiting — which is
+//   why the Windows stub has always exited for it. Matching that here is not
+//   cosmetic: an orchestrator launch opens a linked env's edge before writing
+//   the MCP config naming it, so a probe that never returns delays the launch
+//   by its whole bound and the operator sees a stopped orchestrator.
 // - kubectl: answers the context listing with an empty set (the env-init
 //   dialog's deterministic empty state) and reports everything else as
 //   unreachable.
@@ -402,6 +423,27 @@ export function seedGitRemoteAgentForK3d(
 //   The stub prints a shell-prompt line (the action runner's setup-complete
 //   marker, see signalSessionReadyOnLine) and then sleeps, so the session is
 //   live, quiet, and killable.
+//
+// Both long-lived stubs register the pid they park under before blocking, so the
+// harness can end a session it opened and never closed — see
+// fixtures/stubProcesses.ts. Keep that in lockstep on POSIX and win32 (the
+// prebuilt PE's registerStub call in fixtures/winstub/main.go).
+// stubRegisterPreamble heads every long-lived stub: it records the pid the stub
+// is about to park under, and which stub it is, in the registry the harness
+// reaps (fixtures/stubProcesses.ts). `exec` keeps that pid, so the number
+// recorded here is the parked process itself. Best-effort by design — a stub
+// invoked outside the harness has no registry in its environment and must still
+// run.
+function stubRegisterPreamble(name: string): string[] {
+  return [
+    '#!/bin/sh',
+    'register_stub() {',
+    '  [ -n "$ERUN_PLAYWRIGHT_STUB_REGISTRY" ] || return 0',
+    `  printf '%s ${name}\\n' "$$" >> "$ERUN_PLAYWRIGHT_STUB_REGISTRY"`,
+    '}',
+  ];
+}
+
 function writeStubBinary(name: string): void {
   if (isWindows) {
     // CreateProcess cannot exec a shell script or a .cmd/.bat file, so copy the
@@ -413,10 +455,14 @@ function writeStubBinary(name: string): void {
   let body: string;
   if (name === 'erun') {
     body = [
-      '#!/bin/sh',
+      ...stubRegisterPreamble(name),
       '# erun playwright stub: keeps ERun/AI tabs alive and inert.',
+      'case "$*" in',
+      '  *--no-shell*) exit 0 ;;',
+      'esac',
       'case "$1" in',
       '  open)',
+      '    register_stub',
       "    printf 'erun@playwright:~$ \\n'",
       '    exec sleep 2147483647',
       '    ;;',
@@ -426,8 +472,9 @@ function writeStubBinary(name: string): void {
     ].join('\n');
   } else if (name === 'claude') {
     body = [
-      '#!/bin/sh',
+      ...stubRegisterPreamble(name),
       '# claude playwright stub: keeps an orchestrator session alive and inert.',
+      'register_stub',
       "printf 'claude@playwright:~$ \\n'",
       'exec sleep 2147483647',
       '',
@@ -651,6 +698,45 @@ export function writeHeldLease(tenant: string, environment: string, name: string
 
 export function removeHeldLease(tenant: string, environment: string, name: string): void {
   fs.rmSync(path.join(activityLeaseDir(tenant, environment), `${name}.json`), { force: true });
+}
+
+// environmentJobDir is the sibling of activityLeaseDir under the same
+// per-env activity directory: XDG_CACHE_HOME/erun/activity/<tenant>/<env>/jobs.
+function environmentJobDir(tenant: string, environment: string): string {
+  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment, 'jobs');
+}
+
+// writeCompletedJob stages a real, already-finished job record — the same
+// on-disk shape eruncommon.EnvironmentJob writes — so a headless spec can
+// prove a lease is genuinely backed by a job without spawning a real
+// supervisor process. A terminal state ("exited") skips the read-time
+// liveness reconciliation a "running" job would need a live PID for.
+export function writeCompletedJob(
+  tenant: string,
+  environment: string,
+  id: string,
+  name: string,
+): void {
+  const dir = environmentJobDir(tenant, environment);
+  fs.mkdirSync(dir, { recursive: true });
+  const startedAt = new Date(Date.now() - 60_000);
+  const endedAt = new Date();
+  fs.writeFileSync(
+    path.join(dir, `${id}.json`),
+    JSON.stringify({
+      id,
+      name,
+      state: 'exited',
+      succeeded: true,
+      exitCode: 0,
+      startedAt: startedAt.toISOString(),
+      endedAt: endedAt.toISOString(),
+    }),
+  );
+}
+
+export function removeCompletedJob(tenant: string, environment: string, id: string): void {
+  fs.rmSync(path.join(environmentJobDir(tenant, environment), `${id}.json`), { force: true });
 }
 
 // seedTenant writes the minimal tenant config.yaml ListTenantConfigs needs to

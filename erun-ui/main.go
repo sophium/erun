@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -23,39 +22,42 @@ import (
 // asset server, so the headless build and `wails dev` can run side-by-side.
 const defaultHeadlessPort = 34123
 
-// appUsage is what `erun-app --help` prints. The desktop is launched by the
-// `erun app` launcher and by the OS, never by a human typing flags, so this
-// file is the only place the binary explains itself — and it must do so
-// without starting a desktop. Launching on --help made an ordinary "what flags
-// does this take?" probe start a second instance with real side effects:
-// workspace syncs, orchestrator pacing, and a control record written over the
-// running desktop's.
-const appUsage = `ERun desktop app
+// cliUsage is printed for --help/-h and ahead of an unrecognized-flag error.
+// Keep it in sync with the flags parseHeadlessFlags actually recognizes.
+const cliUsage = `Usage: erun-app [flags]
 
-Usage:
-  erun-app [flags]
+erun-app is the ERun desktop application. Run with no flags to launch it.
 
 Flags:
-  -h, --help     Print this usage and exit.
-      --headless Serve the app over HTTP+SSE instead of opening a window.
-      --port     Port for --headless (default 34123).
+  -h, --help          Show this help message and exit.
+      --headless      Run without a native window, serving the UI over
+                       HTTP+SSE instead (see erun-ui/playwright/AGENTS.md).
+      --port <n>      Port for --headless mode to listen on (default 34123).
 `
 
 func main() {
-	// Ahead of every side effect, including the durable log this function
-	// defers: a help probe must start nothing and write nothing.
-	if wantsUsage(os.Args[1:]) {
-		printAppUsage(os.Stdout)
+	// This must run before any other work (app identity, durable logging,
+	// Wails startup): --help/-h and an unrecognized flag must produce no
+	// side effects at all, not just skip launching the app.
+	parsed := parseHeadlessFlags(os.Args[1:])
+	if parsed.Help {
+		_, _ = fmt.Fprint(os.Stdout, cliUsage)
 		return
 	}
+	if parsed.Unknown != "" {
+		_, _ = fmt.Fprintf(os.Stderr, "erun-app: unrecognized flag %q\n\n", parsed.Unknown)
+		_, _ = fmt.Fprint(os.Stderr, cliUsage)
+		os.Exit(1)
+	}
+
 	setAppIdentity("ERun")
 	defer initDurableAppLog()()
 
-	headless, port, leftover := parseHeadlessFlags(os.Args[1:])
+	headless, port := parsed.Headless, parsed.Port
 	// Strip recognized flags from os.Args before Wails parses them, so the
 	// Wails CLI machinery (which scans os.Args directly) does not reject
 	// our additions in normal mode.
-	os.Args = append([]string{os.Args[0]}, leftover...)
+	os.Args = append([]string{os.Args[0]}, parsed.Leftover...)
 
 	deps := erunUIDeps{
 		store:           eruncommon.ConfigStore{},
@@ -81,42 +83,46 @@ func main() {
 	runWails(app)
 }
 
-// wantsUsage reports whether args ask for usage rather than a launch. Any
-// position counts: the alternative is Wails' own argument parser rejecting a
-// flag this binary does accept.
-func wantsUsage(args []string) bool {
-	for _, arg := range args {
-		switch arg {
-		case "-h", "--help", "-help":
-			return true
-		}
-	}
-	return false
+// parsedCLIFlags is the outcome of parsing erun-app's own command-line
+// flags. Help and Unknown are mutually exclusive with a normal run: main
+// checks them before doing anything else that has a side effect.
+type parsedCLIFlags struct {
+	Headless bool
+	Port     int
+	Leftover []string
+	Help     bool
+	// Unknown holds the first unrecognized flag encountered, if any.
+	Unknown string
 }
 
-func printAppUsage(w io.Writer) {
-	_, _ = io.WriteString(w, appUsage)
-}
-
-func parseHeadlessFlags(args []string) (headless bool, port int, leftover []string) {
-	port = defaultHeadlessPort
-	leftover = make([]string, 0, len(args))
+func parseHeadlessFlags(args []string) parsedCLIFlags {
+	result := parsedCLIFlags{Port: defaultHeadlessPort, Leftover: make([]string, 0, len(args))}
 	i := 0
 	for i < len(args) {
 		a := args[i]
 		switch {
-		case matchHeadlessFlag(a, &headless):
+		case isHelpFlag(a):
+			result.Help = true
+			return result
+		case matchHeadlessFlag(a, &result.Headless):
 		case isPortFlag(a):
-			if consumePortFlagValue(args, i, &port) {
+			if consumePortFlagValue(args, i, &result.Port) {
 				i++
 			}
-		case matchPortAssignFlag(a, &port):
+		case matchPortAssignFlag(a, &result.Port):
+		case strings.HasPrefix(a, "-"):
+			result.Unknown = a
+			return result
 		default:
-			leftover = append(leftover, a)
+			result.Leftover = append(result.Leftover, a)
 		}
 		i++
 	}
-	return headless, port, leftover
+	return result
+}
+
+func isHelpFlag(arg string) bool {
+	return arg == "--help" || arg == "-help" || arg == "-h"
 }
 
 func matchHeadlessFlag(arg string, headless *bool) bool {

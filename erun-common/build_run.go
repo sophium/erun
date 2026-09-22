@@ -9,6 +9,8 @@ import (
 )
 
 func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
+	ctx, stopProgress := withBuildProgress(ctx)
+	defer stopProgress()
 	traceDockerBuild(ctx, buildInput)
 	if ctx.DryRun {
 		return nil
@@ -22,6 +24,8 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 // builds themselves are scheduled.
 func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 	buildInput.Verbosity = ctx.Verbosity
+	traceGateTestStageDecision(ctx, buildInput)
+	tracePlaywrightGateSelection(ctx, buildInput)
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
 		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
@@ -36,6 +40,10 @@ func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 // is active — see startTimingStep) and wires PlatformObserver so the builder
 // reports each architecture's duration into it, tagged with the same cache
 // decision the trace already names.
+//
+// It is also where an image joins the run's heartbeat for as long as its build
+// takes, which is the only signal a run has that a long build is still working —
+// see build_heartbeat.go.
 func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
 	if build == nil {
 		build = DockerImageBuilder
@@ -47,10 +55,69 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 		cache = &cacheDecision{hit: hit, missReason: reason}
 		stepCtx.recordTimingCache(hit, reason)
 	}
-	buildInput.PlatformObserver = stepCtx.timingPlatformObserver(cache)
+	buildInput.PlatformObserver = ctx.gateTestStage.withGateStageEvidence(buildInput, stepCtx.timingPlatformObserver(cache))
+	// The heartbeat goes to the run's own log stream, not to stdout/stderr: those
+	// are per-image buffers under a concurrent wave, and a liveness line flushed
+	// after the build it describes finished would report nothing.
+	doneBuilding := ctx.progress.begin(dockerBuildStepName(buildInput))
 	err := build(buildInput, stdout, stderr)
+	doneBuilding()
 	finish(err)
 	return err
+}
+
+// traceGateTestStageDecision names the builds whose Dockerfile runs the
+// project's own gate. It deliberately does not sit inside
+// traceIncrementalDecision: that trace is gated on a computed fingerprint, which
+// --no-incremental does not produce, and a build that skips promotion needs this
+// line *more* than one that does not. Suppressing it there is what made the flag
+// less truthful than the default (see ApplyIncrementalToDockerBuilds).
+//
+// It is the only emitter of the gate rebuild reason, in dry-run as well as in a
+// real run: traceIncrementalDecision returns before its own verdict for a gate
+// build, because resolution never inspected a fingerprint tag for one and it
+// would otherwise report the tag as "present locally" having looked at nothing.
+// A gate build's rebuild reason is the gate, not a cache state.
+func traceGateTestStageDecision(ctx Context, buildInput DockerBuildSpec) {
+	if !buildInput.GateTestStage {
+		return
+	}
+	tag := strings.TrimSpace(buildInput.Image.Tag)
+	ctx.Trace("rebuilding " + tag + " because its Dockerfile's test stage runs the build's own gate (never promoted from a cached fingerprint)")
+}
+
+// tracePlaywrightGateSelection states, at default verbosity, the Playwright
+// area selection this build actually threads into the gate. It reports the
+// value applyPlaywrightAreaBuildArgs resolved (build.PlaywrightTestAreas) and
+// never re-derives it: a second resolution would be a second answer, and the
+// one worth printing is the one the gate runs.
+//
+// This is the fourth way the stated and the executed selection can diverge
+// (AGENTS.md's "Integration Test Gate" already names three), and the only one
+// that was invisible: "all" reaches the gate both when a tree genuinely
+// resolved to it and when the selection could not be resolved at all, so the
+// two were indistinguishable from the build's output. An empty
+// PlaywrightTestAreas is exactly the unresolved case -- a real resolution
+// always returns a non-empty string, using "all" for the full suite -- which
+// is why the two branches below can be told apart from the threaded value
+// alone.
+//
+// Guarded on dry-run for the same reason as traceGateTestStageDecision: the
+// dry-run goldens are a frozen public contract. Guarded on Promote because a
+// promoted image never runs the gate stage, so the line would describe a run
+// that did not happen.
+func tracePlaywrightGateSelection(ctx Context, buildInput DockerBuildSpec) {
+	if ctx.DryRun || buildInput.Promote {
+		return
+	}
+	if !dockerfileConsumesPlaywrightTestAreas(buildInput.DockerfilePath) {
+		return
+	}
+	if selection := strings.TrimSpace(buildInput.PlaywrightTestAreas); selection != "" {
+		ctx.Trace("playwright gate selection: " + selection + " (from the diff against the merge base, threaded into the gate as PLAYWRIGHT_TEST_AREAS)")
+		return
+	}
+	ctx.Trace("playwright gate selection: all (the selection could not be resolved against a merge base, so the gate runs the full suite)")
 }
 
 // traceIncrementalDecision re-emits the fingerprint inspect already run during
@@ -60,6 +127,14 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 // rebuild.
 func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
 	if buildInput.Fingerprint == "" {
+		return
+	}
+	// A gate build is never eligible for promotion, so resolution computed its
+	// fingerprint and stopped: it inspected no fingerprint tag and has no
+	// missing-platform set. Both lines below would then describe a check that did
+	// not happen and a cache state that does not exist. traceGateTestStageDecision
+	// already named the real reason.
+	if buildInput.GateTestStage {
 		return
 	}
 	missing := missingFingerprintPlatformSet(buildInput)
@@ -124,6 +199,10 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 	if err != nil {
 		return err
 	}
+	// One heartbeat for the whole run, installed before any image starts so both
+	// the sequential loop below and the concurrent waves share it.
+	ctx, stopProgress := withBuildProgress(ctx)
+	defer stopProgress()
 	jobs := resolveBuildJobs(ctx, len(ordered))
 	if jobs <= 1 {
 		// Sequential keeps each image's decision lines next to its own build
@@ -160,19 +239,135 @@ func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build Do
 	return RunDockerBuilds(ctx, builds, build)
 }
 
+// ensureGateBuildActuallyBuilt refuses a gate build that would execute nothing.
+//
+// `erun build --gate` is the merge queue's verdict on a tree, and the only thing
+// `review record-build --gate` reads from it is the exit code. A run whose every
+// image promotes from the fingerprint cache -- and which plans no script or
+// linux package build -- produces that same exit code having compiled, tested
+// and executed nothing. That is not a weaker verification; it is a different
+// claim wearing the same green checkmark, and the caller cannot tell the two
+// apart. Refusing here is what keeps them distinguishable.
+//
+// The per-Dockerfile guard (dockerfileHasGateTestStage, applyIncrementalPromotion)
+// is the other half and stays the first line of defence: it keeps the build's own
+// test stage live in any CLI that carries it. This check does not depend on that
+// detection being right, on the Dockerfile keeping its marker, or on the deploy
+// being shaped the way the guard expects; it is judged from the resolved plan,
+// which is what the run will actually do.
+func ensureGateBuildActuallyBuilt(execution BuildExecutionSpec) error {
+	if !execution.gate {
+		return nil
+	}
+	// A script or linux package build runs unconditionally, so either one is a
+	// real execution however the images resolve.
+	if execution.script != nil || len(execution.linuxBuilds) > 0 {
+		return nil
+	}
+	promoted := make([]string, 0, len(execution.dockerBuilds))
+	for _, buildInput := range execution.dockerBuilds {
+		if !buildInput.Promote {
+			return nil
+		}
+		promoted = append(promoted, strings.TrimSpace(buildInput.Image.Tag))
+	}
+	if len(promoted) == 0 {
+		// Nothing planned at all is the empty-plan guard's case, not this one.
+		return nil
+	}
+	return newGateBuildNotRunError(promoted)
+}
+
+// gateTestStagePlanLines announces, before the run, which builds will run the
+// project's own gate (make check, see dockerfileHasGateTestStage). It is
+// deliberately separate from gateTestStageProvenanceLines, which reports what
+// each one actually did afterwards, and it deliberately avoids that function's
+// outcome vocabulary.
+//
+// The split is the fix, not a tidy-up: whether the gate *executed* is a fact
+// only the builder can report, so a plan line claiming LIVE would put the very
+// word a real gate run prints into the trace of a run BuildKit replayed from
+// its layer cache — leaving the two indistinguishable in the log, which is the
+// state this pair exists to end.
+//
+// An image promoted from a cached fingerprint image is left out: it never
+// reaches a docker build, so its outcome is the whole story and the outcome
+// line reports it.
+func gateTestStagePlanLines(builds []DockerBuildSpec) []string {
+	var lines []string
+	for _, buildInput := range builds {
+		if !buildInput.GateTestStage || buildInput.Promote {
+			continue
+		}
+		tag := strings.TrimSpace(buildInput.Image.Tag)
+		lines = append(lines, "test stage ("+tag+"): planned (this build's Dockerfile runs make check in its test stage)")
+	}
+	return lines
+}
+
+// gateTestStageProvenanceLines reports, for each build whose Dockerfile runs the
+// project's own gate, what this run's docker build actually did with that test
+// stage. Deliberately separate from the per-image incremental trace, which can
+// carry dozens of look-alike cache-hit lines: an orchestrator deciding whether
+// to trust this build's exit code should not have to find this fact buried
+// among them.
+//
+// There are three outcomes, and keeping all three distinct in the trace is the
+// point:
+//
+//	LIVE     this run's docker build executed the stage, so make check ran.
+//	CACHED   the image was promoted from a cached fingerprint image, so no
+//	         docker build ran at all. applyIncrementalPromotion and
+//	         DockerImageBuilder together make this unreachable.
+//	REPLAYED BuildKit was asked to build, but served the whole test stage from
+//	         its own layer cache: the cache-hit state *underneath* the
+//	         fingerprint one, which no plan-level guard can see and which this
+//	         line used to describe as a live run.
+//
+// A REPLAYED build is a memoized verdict on byte-identical content, not an
+// unverified one — the layer cache cannot hit on anything else — but it is a
+// different claim from "this run invoked make check", and it must not print as
+// one. evidence is the run's own record of what its builds reported (see
+// build_gate_test_stage_evidence.go); a run that produced no evidence at all
+// leaves the stage's outcome unknowable here, so the existing LIVE wording
+// stands rather than being guessed at.
+func gateTestStageProvenanceLines(builds []DockerBuildSpec, evidence *gateTestStageProvenance) []string {
+	var lines []string
+	for _, buildInput := range builds {
+		if !buildInput.GateTestStage {
+			continue
+		}
+		tag := strings.TrimSpace(buildInput.Image.Tag)
+		if buildInput.Promote {
+			lines = append(lines, "test stage ("+tag+"): CACHED (skipped, previous result reused) — refusing to treat this as a passing gate")
+			continue
+		}
+		if execution, ok := evidence.execution(tag); ok && execution.replayedWholeStage() {
+			lines = append(lines, "test stage ("+tag+"): REPLAYED (BuildKit served every step of this Dockerfile's test stage from its layer cache — make check did not execute in this run)")
+			continue
+		}
+		lines = append(lines, "test stage ("+tag+"): LIVE (this build invokes make check)")
+	}
+	return lines
+}
+
 // traceBuildUmbrella brackets a build with the `==> Building` / `==> Built`
 // markers the desktop's activity-queue parser keys off to drive its spinner,
 // and starts the step-timing root reported (as a duration-ordered table plus
 // a JSON record) when the bracket closes. Skipped in dry-run, which does no
 // work and must keep the integration goldens stable.
-func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
+func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*error)) {
 	if ctx.DryRun {
 		return ctx, func(*error) {}
 	}
 	started := time.Now()
 	ctx.Info("==> Building")
+	for _, line := range gateTestStagePlanLines(builds) {
+		ctx.Info(line)
+	}
 	root := newStepTiming("build", nil)
 	ctx.timing = root
+	ctx.gateTestStage = newGateTestStageProvenance()
 	return ctx, func(errp *error) {
 		var err error
 		if errp != nil {
@@ -180,6 +375,11 @@ func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
 		}
 		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
+		// The closing lines are the outcome, now that every build has reported
+		// whether it executed its test stage or had BuildKit replay it.
+		for _, line := range gateTestStageProvenanceLines(builds, ctx.gateTestStage) {
+			ctx.Info(line)
+		}
 		if err != nil {
 			ctx.Info("==> Build failed after " + elapsed.String())
 		} else {
@@ -196,7 +396,7 @@ func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
 // changes its own output because reporting is unavailable).
 func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
-	ctx, finish := traceBuildUmbrella(ctx)
+	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, nil, runScript, build, push, nil)
 }
@@ -205,7 +405,7 @@ func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript Buil
 // see its doc comment for store/deps.
 func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
-	ctx, finish := traceBuildUmbrella(ctx)
+	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, deploySpecs, nil, runScript, build, push, deploy)
 }
@@ -271,7 +471,7 @@ func buildExecutionProjectRootAndEnvironment(execution BuildExecutionSpec) (stri
 // `==> Building` one. Both entrypoints share one execution so the flow cannot
 // drift between them.
 func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
-	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
+	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution), execution.dockerBuilds)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
 }
@@ -285,6 +485,9 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 	if !buildExecutionPlansWork(execution) {
 		return newEmptyBuildPlanError("the resolved plan has nothing to build or test")
 	}
+	if err := ensureGateBuildActuallyBuilt(execution); err != nil {
+		return err
+	}
 	return runResolvedBuildExecution(ctx, execution, deploySpecs, runGit, runScript, build, push, deploy)
 }
 
@@ -294,7 +497,7 @@ func runResolvedBuildExecution(ctx Context, execution BuildExecutionSpec, deploy
 		// around the build+push so the version's images and charts exist, and
 		// resolve, before the tag and branch pushes make it public.
 		publisher := newReleasePublisher(execution, deploySpecs, runScript, build, push)
-		if err := runReleaseSpec(ctx, *execution.release, runGit, runScript, nil, publisher); err != nil {
+		if err := runReleaseSpec(ctx, *execution.release, runGit, runScript, nil, &publisher); err != nil {
 			return err
 		}
 	} else {

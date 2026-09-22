@@ -13,7 +13,9 @@
 # rather than silently comparing nothing while still reporting a green gate.
 #
 # Environment:
-#   COVERAGE_THRESHOLD             default 75 (percent). See note below.
+#   COVERAGE_THRESHOLD             override the default threshold (percent),
+#                                  which is `coverage_measured` minus
+#                                  `coverage_margin` below. See note below.
 #   GOCOVERDIR                     override the root directory raw counter
 #                                  files are collected under; defaults to a
 #                                  fresh, unique temp directory per invocation
@@ -54,6 +56,15 @@
 #     on, that blind spot is real: `nproc` reports 24, but cgroup cpu.max
 #     quotes only 6. test_parallelism below reuses parallel-gate.sh's `width`
 #     mode to read the real quota instead of trusting GOMAXPROCS.
+#   - Read under the gate, though, the real quota is the wrong number: this
+#     suite is one of the Go test runners in check-gate's -j fan-out, and the
+#     others take a share of that quota sized by GO_TEST_TARGET_COUNT. Sizing
+#     this one against the whole quota would claim it a second time, on top of
+#     the shares already demanded. So the gate hands down its per-target share
+#     as GO_TEST_GOMAXPROCS (the same value the module targets use) and this
+#     script uses it; the `width` fallback is for a standalone run, where no
+#     sibling is competing and the whole quota really is free. Measured on the
+#     6-CPU pod: standalone `width` gives 6, under the gate the share is 1.
 #   - Unlike the shell-dispatched fleets `width` was built for (N independent
 #     lint or helm-chart-test processes, each with its own roughly-fixed
 #     memory cost), this suite's memory use does not scale linearly with
@@ -71,7 +82,33 @@
 #     to 20GiB" by default, comfortably above every measured peak here with
 #     room to spare.
 #   - The default threshold tracks what the suite actually reaches, minus a
-#     small margin for cross-host variance. The historical gap families
+#     small margin for cross-host variance. The margin is the explicit pair
+#     `coverage_measured` / `coverage_margin` below, which the default is
+#     derived from rather than a literal the two can drift away from: the pin
+#     once sat on exactly the measured 75.1%, so the "margin" was the 0.0079
+#     points one-decimal rounding left under it — about three of the 37,060
+#     statements the profile covers, and only ~20 before the printed total
+#     would change at all. The gate still passed, but a branch adding
+#     uncovered production code arrived with no room to miss by, and main
+#     itself was one printed tenth from failing every gate on every branch.
+#     The measurement is not steady even run to run on one host: two
+#     back-to-back runs of the unmodified suite on the same pod differed by
+#     three statements (75.107933% and 75.099838%, both printing 75.1%), and
+#     the second was already under the old pin in raw terms -- it passed only
+#     because the printed one-decimal total is what gets compared.
+#     A margin therefore has to be at least one printed tenth (0.1 points, 37
+#     statements) to exist in the comparison at all, and 0.1 was already
+#     measured too thin here: this pin once held a 0.1-point margin (75.8
+#     against a measured 75.9) and was re-based to 0.3 for that reason. 0.3
+#     also stays below the 0.4-point regression this gate has actually had to
+#     catch, so a real coverage drop still fails instead of being absorbed.
+#     Re-base: run the suite unmodified on main and read the total from
+#     coverage/profile.txt, not from this script's own output (it prints only
+#     the last 20 lines of the per-function listing). `coverage_measured` takes
+#     that one-decimal value and the default follows it; `coverage_margin`
+#     moves only toward its floor, because a rise in the measured value raises
+#     the bar rather than buying back headroom.
+#     The historical gap families
 #     (interactive prompts, subprocess launchers, port-forward workers, IDE
 #     launchers, the shell loop, AWS error classifiers, config persistence)
 #     are covered via trace lifts, the ERUN_FORCE_TTY seam, scripted stdin,
@@ -117,7 +154,14 @@
 
 set -euo pipefail
 
-threshold="${COVERAGE_THRESHOLD:-75.1}"
+# The suite's measured total on current main, as the one-decimal value
+# `go tool cover -func` reports it, and the margin the default keeps below it.
+# The default is derived from the two instead of written out a third time, so
+# a re-base cannot leave the pin and its stated margin disagreeing. See the
+# note on the default threshold in the header.
+coverage_measured=75.1
+coverage_margin=0.3
+threshold="${COVERAGE_THRESHOLD:-$(awk -v measured="$coverage_measured" -v margin="$coverage_margin" 'BEGIN { printf "%.1f", measured - margin }')}"
 update_golden=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -167,7 +211,10 @@ fi
 
 export GOCOVERDIR="$cover_dir"
 
-test_parallelism="${INTEGRATION_TEST_PARALLELISM:-$("$here/../scripts/parallel-gate.sh" width 32 "")}"
+test_output="$(mktemp "${TMPDIR:-/tmp}/erun-integration-test-output.XXXXXX")"
+cleanup_dirs+=("$test_output")
+
+test_parallelism="${INTEGRATION_TEST_PARALLELISM:-${GO_TEST_GOMAXPROCS:-$("$here/../scripts/parallel-gate.sh" width 32 "")}}"
 
 if [[ "$update_golden" -eq 1 ]]; then
     echo ">> reseeding golden files (comparisons disabled, coverage gate skipped)"
@@ -177,7 +224,22 @@ if [[ "$update_golden" -eq 1 ]]; then
 fi
 
 "$here/../scripts/timed-step.sh" "running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)" \
-    go test -count=1 -parallel="$test_parallelism" ./...
+    go test -count=1 -parallel="$test_parallelism" ./... 2>&1 | tee "$test_output"
+
+# A coverage meta-data emit failure (concurrent invocations racing a
+# write-then-rename into a shared GOCOVERDIR) prints this line to the losing
+# invocation's own stdout/stderr without failing the scenario that was
+# running at the time. Left undetected, that invocation's counters never
+# land and the merged total below silently under-reports coverage instead of
+# the gate ever seeing why. Fail loudly here instead of computing a total
+# that quietly omitted data.
+if grep -q "coverage meta-data emit failed" "$test_output"; then
+    echo "!! a coverage meta-data emit failed during the run (see above) -- that" >&2
+    echo "!! invocation's counters never landed, so the merged total below would" >&2
+    echo "!! silently under-report coverage rather than reflect what actually ran." >&2
+    echo "!! Refusing to report a total; re-run the suite." >&2
+    exit 1
+fi
 
 # Every process that ran the instrumented binary wrote into its own private
 # subdirectory of $cover_dir (see the note above on why). Enumerate them and
@@ -233,10 +295,16 @@ total_pct=$(awk '{ gsub(/%/, "", $NF); print $NF }' <<<"$total_line")
 
 awk -v got="$total_pct" -v want="$threshold" '
     BEGIN {
-        if (got + 0 < want + 0) {
-            printf("\n!! coverage %.1f%% is below threshold %.1f%%\n", got + 0, want + 0) > "/dev/stderr"
+        # Compare the rounded values, which is what the message shows: the
+        # total is already the one-decimal figure `go tool cover -func`
+        # reports, and a threshold that fails by less than that has no way to
+        # say so without reporting a shortfall of 0.0.
+        got = sprintf("%.1f", got) + 0
+        want = sprintf("%.1f", want) + 0
+        if (got < want) {
+            printf("\n!! coverage %.1f%% is below threshold %.1f%% (short by %.1f)\n", got, want, want - got) > "/dev/stderr"
             exit 1
         }
-        printf("\nok  coverage %.1f%% (>= %.1f%%)\n", got + 0, want + 0)
+        printf("\nok  coverage %.1f%% (>= %.1f%%)\n", got, want)
     }
 '

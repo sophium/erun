@@ -1,5 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import {
   SEED_ENV_ALPHA,
@@ -381,14 +382,14 @@ test('renders correctly in both light and dark theme', async ({ app }) => {
   // other running CSS animation/transition) before capturing, so the shot is
   // never a frozen mid-fade frame -- deterministic without a wall-clock wait.
   await app.page.screenshot({
-    path: 'test-results/titlebar-whip-action-light.png',
+    path: artifactPath('test-results/titlebar-whip-action-light.png'),
     animations: 'disabled',
   });
 
   await forceDarkTheme(app.page);
   await expect(app.titlebar.whipRunButton()).toBeVisible();
   await app.page.screenshot({
-    path: 'test-results/titlebar-whip-action-dark.png',
+    path: artifactPath('test-results/titlebar-whip-action-dark.png'),
     animations: 'disabled',
   });
 });

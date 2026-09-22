@@ -38,7 +38,7 @@ That is: ASCII lowercase letters, digits, and hyphens; first character must be a
 | `code` | Cause |
 |---|---|
 | `INVALID_COMPONENT_NAME` | Name fails the regex. |
-| `COMPONENT_NAME_COLLISION` | A directory with this name already exists under `<tenant>-devops/docker/` or `<tenant>-devops/k8s/`. The skill writing the component aborts unless it was invoked with an explicit overwrite hint. |
+| `COMPONENT_NAME_COLLISION` | A directory with this name already exists under `<tenant>-devops/docker/`, `<tenant>-devops/k8s/`, or `<tenant>-devops/playwright/`. The skill writing the component aborts unless it was invoked with an explicit overwrite hint. |
 | `RESERVED_NAME` | The name `<tenant>-devops` is reserved for the runtime-pod chart (see below). |
 
 ### Usage sites
@@ -52,6 +52,7 @@ The component name appears identically in every location below:
 | VERSION file (optional per-component override) | `<projectRoot>/<tenant>-devops/docker/<component>/VERSION` |
 | Helm chart | `<projectRoot>/<tenant>-devops/k8s/<component>/Chart.yaml` |
 | Per-env values overlay | `<projectRoot>/<tenant>-devops/k8s/<component>/values.<env>.yaml` |
+| Playwright suite (optional, per component) | `<projectRoot>/<tenant>-devops/playwright/<component>/playwright.config.ts` |
 | Deploy plan | An entry in `ProjectConfig.environments.<env>.k8s.deployments[]` |
 | Image reference | `<registry>/<component>:<version>` |
 | Kubernetes resources | `Deployment.metadata.name = <component>`, `Service.metadata.name = <component>`, pod label `app: <component>` |
@@ -138,7 +139,26 @@ Because the test step is part of `docker build`, a failing test fails the build 
 
 Whether the test step runs before or after the compile step is toolchain-specific, and doesn't matter to the gate. `go test` compiles and runs the tests on its own, so it can precede the `go build` that produces the shipped binary (as in the skeleton above); a toolchain that exercises a compiled artefact would build first, then test. The only requirement is that the test command is a `RUN` in the builder stage, so a non-zero exit aborts the build before the runtime stage is reached.
 
-Tests that **do** require a running deployment — end-to-end checks against live services — cannot run in the builder stage. They run against a deployed environment after [`deploy`](/cli/deploy), not during build.
+Tests that **do** require a running deployment — end-to-end checks against live services — cannot run in the builder stage. They run against a deployed environment after [`deploy`](/cli/deploy), not during build: [`erun e2e`](/cli/e2e) discovers a `playwright/` folder the same way this section's algorithm discovers `docker/`, and runs it once with the deployed environment's resolved URL and version injected.
+
+### Tests that need a container runtime
+
+A test that starts its own container-runtime fixture — a Testcontainers-style ephemeral database, a compose-style sidecar — is a third category, distinct from both of the above. It needs no live cluster and no deployed version of the project under test; it only needs a docker daemon to start its own throwaway containers against.
+
+The [agent env](/concepts/environment-types) already runs a docker daemon of its own (the one `erun build` itself uses), and `erun build` grants BuildKit's `network.host` entitlement on a build whose Dockerfile declares a `test` stage, so a `RUN` step there can reach it:
+
+```dockerfile
+RUN --network=host \
+    DOCKER_HOST=tcp://127.0.0.1:2375 \
+    go test ./... -run TestAgainstRealPostgres
+```
+
+Plain `docker build` would refuse this step with BuildKit's own refusal (`network.host is not allowed`) before any step ran; `erun build` grants the entitlement because it owns the builder, and the daemon being reached is the same environment's own. The grant is scoped to a Dockerfile that declares a `test` stage, so a build with no tests in it never lifts BuildKit's default deny. It is a deliberate capability, not a sandbox boundary: a `RUN --network=host` step can also reach the daemon that is building it, so a component's test stage is trusted code running against its own environment's runtime.
+
+Two categories never belong in the builder stage, even once the entitlement lands — both for the same reason as the deployed-environment case above, not a new rule:
+
+- a test that needs the build's **own output** (an end-to-end suite driving a built application binary, for example) — the stage producing that output is the one such a test would have to depend on, which a test stage cannot do without inverting the dependency that gates the build in the first place;
+- a test asserting a **deployed** version — that is the "requires a running deployment" case immediately above, unchanged by this.
 
 ## Docker build context resolution
 
@@ -160,7 +180,21 @@ Algorithm:
 
 The standard layout (`<module>/docker/<image>/Dockerfile`) is ERun's convention for project Dockerfiles; the flat layout is the fallback for hand-built contexts.
 
-The `docker/` root the algorithm scans is the convention default (`<tenant>-devops/docker`) unless a project relocates it — along with the `k8s/` chart root, the `terraform-<tenant>` base, and the `VERSION` file — via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`. A configured `docker`/`k8s` path must still end in a `docker`/`k8s` segment, so the regex above is evaluated against the configured root.
+The `docker/` root the algorithm scans is the convention default (`<tenant>-devops/docker`) unless a project relocates it — along with the `k8s/` chart root, the `playwright/` suite root, the `terraform-<tenant>` base, and the `VERSION` file — via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`. A configured `docker`/`k8s`/`playwright` path must still end in a `docker`/`k8s`/`playwright` segment, so the regex above is evaluated against the configured root.
+
+## Playwright suite discovery
+
+`erun e2e` resolves the project's e2e suite the same way build resolves `docker/` and deploy resolves `k8s/`: the configured `paths.playwright` override (or a selected `components.<name>.playwright` entry), else the `<tenant>-devops/playwright` convention default.
+
+1. Resolve the `playwright/` root (override, then convention).
+2. If the root itself holds a `playwright.config.ts`/`.js`, it is the one suite. `--component` is not required and is ignored.
+3. Otherwise, each subdirectory holding its own `playwright.config.ts`/`.js` is a per-component suite, mirroring `<k8s>/<component>/Chart.yaml`.
+   - Exactly one such subdirectory and no `--component` → it auto-selects.
+   - More than one and no `--component` → the command fails naming every discovered component.
+   - `--component <name>` naming a subdirectory that doesn't exist → fails naming the component.
+4. No `playwright/` root resolves at all → `erun e2e` is a clean no-op (exit 0), the same tolerance `docker/`'s absence gets from `erun build`.
+
+`erun e2e` runs the resolved suite exactly once per invocation, regardless of whether the root is a single suite or several per-component subdirectories — the subdirectory is organisation, not a separate trigger. It refuses, naming the cause, before Playwright starts when the target environment is not deployed, the service is not exposed, or its certificate is not yet issued; and refuses a suite that sets `ignoreHTTPSErrors` or hardcodes its own `baseURL`, since both would silently defeat the resolved-URL/version injection (`ERUN_E2E_BASE_URL` / `ERUN_E2E_VERSION`) this command exists to guarantee.
 
 ## Multi-architecture build contract
 

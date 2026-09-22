@@ -61,6 +61,16 @@ FROM nginx:1.27.4-alpine3.21
 COPY --from=builder /src/erun-console/dist /usr/share/nginx/html
 COPY erun-devops/docker/erun-console/default.conf.template /etc/nginx/templates/default.conf.template
 
+# Stamps this instance's brand into the served index.html before nginx starts,
+# from the same platform.brand erun-backend-api serves as GET /v1/platform's
+# "brand" (the chart sets both from that one value, see
+# erun-devops/k8s/erun-console/templates/console.yaml). Without it the page
+# would paint the bundled product default and then repaint with the instance's
+# own name as discovery resolved — an identity change on every load. Runs
+# before the base image's own 20-envsubst-on-templates.sh by name order.
+COPY erun-devops/docker/erun-console/docker-entrypoint.d/05-platform-brand.sh /docker-entrypoint.d/05-platform-brand.sh
+RUN chmod +x /docker-entrypoint.d/05-platform-brand.sh
+
 # Stamps the build actually serving this container, read back at
 # GET /version.json (see default.conf.template) — the console's counterpart to
 # erun-backend-api's GET /v1/platform "version" field, since a static SPA has
@@ -76,6 +86,7 @@ RUN printf '{"version":"%s"}\n' "${ERUN_VERSION}" > /usr/share/nginx/html/versio
 # here just make a bare `docker run` serve something sane locally.
 ENV API_PROXY_HOST=127.0.0.1 \
     API_PROXY_PORT=17033 \
-    NGINX_PORT=8080
+    NGINX_PORT=8080 \
+    ERUN_PLATFORM_BRAND=
 
 EXPOSE 8080

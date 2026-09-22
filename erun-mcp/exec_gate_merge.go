@@ -11,7 +11,7 @@ import (
 // the order it should land, carrying its own commit message.
 type ExecGateMergeSource struct {
 	Branch  string `json:"branch" jsonschema:"branch to fetch and squash-merge in"`
-	Message string `json:"message" jsonschema:"this branch's own squash commit message — its review's name, since that commit is what ends up on targetBranch if the gate passes"`
+	Message string `json:"message" jsonschema:"this branch's own squash commit message — its review's name, since that commit is what ends up on targetBranch if the gate passes. The branch's own load-bearing trailers (Closes #N, Reproduces:, Regression-Test:) are appended beneath it automatically, and a trailer the message already carries is not repeated"`
 }
 
 // ExecGateMergeInput builds the prospective merge a merge queue promotion

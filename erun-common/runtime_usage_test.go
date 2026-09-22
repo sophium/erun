@@ -2,6 +2,8 @@ package eruncommon
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,7 +54,8 @@ type runtimeUsageReadingCase struct {
 
 func runtimeUsageReadingCases() []runtimeUsageReadingCase {
 	cases := runtimeUsageBaseReadingCases()
-	return append(cases, runtimeUsageMemoryObservationReadingCases()...)
+	cases = append(cases, runtimeUsageMemoryObservationReadingCases()...)
+	return append(cases, runtimeUsageDiskOwnUsageReadingCases()...)
 }
 
 func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
@@ -72,6 +75,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"cpu_time_before_ns=1000000000",
 				"cpu_time_after_ns=2000000000",
 				"disk_workspace=/dev/sda1        198234112  99117056   89006592  53% /home/erun",
+				"disk_own_used_kb=54000000",
 			}, "\n"),
 			// 100000 usec of CPU burned over 1 elapsed second, against a 1-core quota.
 			wantCPU: RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
@@ -80,7 +84,11 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 				OOMKillsObserved: true, CeilingHits: 21292, CeilingHitsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112)},
+			wantDisk: RuntimeDiskUsage{
+				Mount: runtimeUsageWatchedMount, NodeShared: true,
+				TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112),
+				OwnUsedBytes: 54000000 * 1024, OwnUsageObserved: true,
+			},
 		},
 		{
 			name: "unlimited memory.max reports Unlimited, not a fabricated percentage",
@@ -101,7 +109,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			wantMemory: RuntimeMemoryUsage{
 				CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true, Unlimited: true, OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "an empty df line should report unavailable"},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "an empty df line should report unavailable"},
 		},
 		{
 			name: "cgroup v1 (or no cgroup fs) reports memory and CPU unavailable, not an error",
@@ -117,11 +125,16 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"cpu_time_before_ns=",
 				"cpu_time_after_ns=",
 				"disk_workspace=/dev/sda1 100 50 40 55% /home/erun",
+				"disk_own_used_kb=50",
 			}, "\n"),
 			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cgroup v1 should report CPU unavailable"},
 			wantMemory: RuntimeMemoryUsage{Unavailable: "cgroup v1 should report memory unavailable"},
 			// Disk uses statfs via df, not cgroup, so it stays readable regardless.
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 100 * 1024, UsedBytes: 50 * 1024, PercentUsed: 50},
+			wantDisk: RuntimeDiskUsage{
+				Mount: runtimeUsageWatchedMount, NodeShared: true,
+				TotalBytes: 100 * 1024, UsedBytes: 50 * 1024, PercentUsed: 50,
+				OwnUsedBytes: 50 * 1024, OwnUsageObserved: true,
+			},
 		},
 		{
 			name: "memory.current missing reports unavailable without a fabricated zero",
@@ -132,7 +145,7 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			}, "\n"),
 			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
 			wantMemory: RuntimeMemoryUsage{Unavailable: "memory.current missing should report unavailable"},
-			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// A long filesystem identifier pushes df's data row onto its own
@@ -141,10 +154,56 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			// neighbor-based lookup exists to survive; the script's
 			// `tail -n1` already selects this line.
 			name:       "wrapped filesystem name still parses by column, not fixed index",
-			output:     "disk_workspace=1000 500 500 50% /home/erun",
+			output:     "disk_workspace=1000 500 500 50% /home/erun\ndisk_own_used_kb=300",
 			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "no cgroup_type key should report unavailable"},
 			wantMemory: RuntimeMemoryUsage{Unavailable: "no cgroup_type key should report unavailable"},
-			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, TotalBytes: 1000 * 1024, UsedBytes: 500 * 1024, PercentUsed: 50},
+			wantDisk: RuntimeDiskUsage{
+				Mount: runtimeUsageWatchedMount, NodeShared: true,
+				TotalBytes: 1000 * 1024, UsedBytes: 500 * 1024, PercentUsed: 50,
+				OwnUsedBytes: 300 * 1024, OwnUsageObserved: true,
+			},
+		},
+	}
+}
+
+// runtimeUsageDiskOwnUsageReadingCases is split out from
+// runtimeUsageBaseReadingCases the same way runtimeUsageMemoryObservationReadingCases
+// is: a dedicated table for a reading facet that must stay independent of the
+// rest of the disk reading, kept in its own function purely to bound the
+// parent table's length.
+func runtimeUsageDiskOwnUsageReadingCases() []runtimeUsageReadingCase {
+	return []runtimeUsageReadingCase{
+		{
+			// du and df read independent sources (a filesystem walk vs a
+			// statfs), so one being unreadable must not suppress the other --
+			// an operator can still learn their own footprint even when the
+			// node-wide figure is unavailable, and vice versa.
+			name: "own usage is observed independently of df availability",
+			output: strings.Join([]string{
+				"cgroup_type=cgroup2fs",
+				"memory_current=1048576",
+				"memory_max=2097152",
+				"memory_peak=1048576",
+				"memory_oom_kill=0",
+				"cpu_max=100000 100000",
+				"cpu_usage_before=0",
+				"cpu_usage_after=0",
+				"cpu_time_before_ns=1000000000",
+				"cpu_time_after_ns=2000000000",
+				"disk_workspace=",
+				"disk_own_used_kb=12345",
+			}, "\n"),
+			wantCPU: RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 0, IntervalSeconds: 1},
+			wantMemory: RuntimeMemoryUsage{
+				CurrentBytes: 1048576, PeakBytes: 1048576, PeakObserved: true,
+				LimitBytes: 2097152, PercentOfLimit: 50, OOMKillsObserved: true,
+			},
+			wantDisk: RuntimeDiskUsage{
+				Mount: runtimeUsageWatchedMount, NodeShared: true,
+				Unavailable:      "an empty df line should report unavailable even though own usage was read",
+				OwnUsedBytes:     12345 * 1024,
+				OwnUsageObserved: true,
+			},
 		},
 	}
 }
@@ -170,7 +229,7 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				CurrentBytes: 413589504, LimitBytes: 2147483648,
 				PercentOfLimit: 100 * float64(413589504) / float64(2147483648), OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// memory.events' oom_kill counter can be as unreadable as
@@ -189,7 +248,7 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// memory.events' "max" counter (cgroup ceiling hits) is exactly
@@ -210,7 +269,7 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 				OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, Unavailable: "missing df line should report unavailable"},
+			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 	}
 }
@@ -287,6 +346,13 @@ func assertRuntimeDisk(t *testing.T, got, want RuntimeDiskUsage) {
 	if got.Mount != want.Mount {
 		t.Errorf("Disk.Mount = %q, want %q", got.Mount, want.Mount)
 	}
+	if got.NodeShared != want.NodeShared {
+		t.Errorf("Disk.NodeShared = %t, want %t", got.NodeShared, want.NodeShared)
+	}
+	// Own usage comes from an independent read (du, not df/statfs), so it is
+	// checked before the Unavailable early-return below -- one being
+	// unreadable must not hide the other.
+	assertRuntimeDiskOwnUsage(t, got, want)
 	if (got.Unavailable == "") != (want.Unavailable == "") {
 		t.Errorf("Disk.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
 		return
@@ -302,6 +368,16 @@ func assertRuntimeDisk(t *testing.T, got, want RuntimeDiskUsage) {
 	}
 	if got.PercentUsed != want.PercentUsed {
 		t.Errorf("Disk.PercentUsed = %v, want %v", got.PercentUsed, want.PercentUsed)
+	}
+}
+
+func assertRuntimeDiskOwnUsage(t *testing.T, got, want RuntimeDiskUsage) {
+	t.Helper()
+	if got.OwnUsageObserved != want.OwnUsageObserved {
+		t.Errorf("Disk.OwnUsageObserved = %t, want %t", got.OwnUsageObserved, want.OwnUsageObserved)
+	}
+	if want.OwnUsageObserved && got.OwnUsedBytes != want.OwnUsedBytes {
+		t.Errorf("Disk.OwnUsedBytes = %d, want %d", got.OwnUsedBytes, want.OwnUsedBytes)
 	}
 }
 
@@ -382,13 +458,24 @@ func TestParseRuntimeUsageWarnings(t *testing.T) {
 		}
 	})
 
-	t.Run("disk warning fires at the threshold", func(t *testing.T) {
+	t.Run("disk warning fires at the threshold and names the node-shared scope", func(t *testing.T) {
 		output := "disk_workspace=/dev/sda1 1000 900 100 90% /home/erun"
 		usage := parseRuntimeUsage(req, output, interval)
-		if !hasWarningContaining(usage.Warnings, "disk usage") {
-			t.Errorf("90%% disk usage should warn, got %v", usage.Warnings)
-		}
+		assertDiskWarningNamesNodeSharedScope(t, usage.Warnings)
 	})
+}
+
+// assertDiskWarningNamesNodeSharedScope checks both halves of the disk
+// warning's wording, factored out of TestParseRuntimeUsageWarnings so the
+// two conditions don't count against that function's own complexity budget.
+func assertDiskWarningNamesNodeSharedScope(t *testing.T, warnings []string) {
+	t.Helper()
+	if !hasWarningContaining(warnings, "node disk is at 90%") {
+		t.Errorf("90%% disk usage should warn, got %v", warnings)
+	}
+	if !hasWarningContaining(warnings, "shared with every environment on this node") {
+		t.Errorf("the disk warning must name the node-shared scope so an operator does not clean up the wrong environment, got %v", warnings)
+	}
 }
 
 func cgroupMemoryFixture(currentPercent, peakPercent int) string {
@@ -443,6 +530,207 @@ func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
 	}
 	if !roundTripped.PeakObserved || roundTripped.PeakBytes != 0 {
 		t.Errorf("round trip = %+v, want PeakObserved=true, PeakBytes=0", roundTripped)
+	}
+}
+
+// TestRunRuntimeUsageReportsTheDindSidecarSeparately is the regression guard
+// for this defect: an environment mid-release can read 0.3% CPU / idle memory
+// from the runtime container while the erun-dind sidecar -- where the actual
+// build runs -- saturates its own cores, and before this fix nothing in the
+// reading let an operator tell a genuinely idle environment apart from one
+// whose build is grinding away in a container this reading could not see at
+// all. The fake runner answers differently per container, exactly like a
+// real busy-build/idle-runtime split, and asserts the busy sidecar reading
+// surfaces on RuntimeUsage.Dind rather than being silently dropped.
+func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
+	idleRuntimeReading := strings.Join([]string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=104857600", // ~100Mi
+		"memory_max=24696061952",   // ~23Gi
+		"memory_peak=104857600",
+		"memory_oom_kill=0",
+		"cpu_max=1200000 100000", // 12-core quota
+		"cpu_usage_before=1000000",
+		"cpu_usage_after=1003000", // 3ms burned over 1s: reads as idle
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	}, "\n")
+	busyDindReading := strings.Join([]string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=2040109465", // ~1.9Gi
+		"memory_max=15032385536",    // 14Gi
+		"memory_peak=3435973836",    // ~3.2Gi
+		"memory_oom_kill=0",
+		"cpu_max=400000 100000", // 4-core quota
+		"cpu_usage_before=1000000",
+		"cpu_usage_after=2900000", // 1.9 cores burned over 1s: a real build grinding
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	}, "\n")
+
+	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+		if container == runtimeDindContainerName {
+			return RemoteCommandResult{Stdout: busyDindReading}, nil
+		}
+		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
+	}
+
+	usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+	if err != nil {
+		t.Fatalf("RunRuntimeUsage: %v", err)
+	}
+	if !usage.ExcludesBuilds {
+		t.Fatalf("expected ExcludesBuilds=true for a local-agent env, got %+v", usage)
+	}
+	if usage.CPU.UtilizationPercent >= 5 {
+		t.Fatalf("expected the runtime container's own reading to look idle, got %+v", usage.CPU)
+	}
+	if usage.Dind == nil {
+		t.Fatalf("expected a Dind reading for a build-capable environment, got nil (the exact regression: the busy sidecar is invisible)")
+	}
+	if usage.Dind.CPU.UtilizationPercent < 40 {
+		t.Errorf("expected the sidecar's own reading to show the real build load (~47%% of its 4-core quota), got %+v", usage.Dind.CPU)
+	}
+	if usage.Dind.Memory.CurrentBytes != 2040109465 {
+		t.Errorf("expected the sidecar's own memory reading to carry through, got %+v", usage.Dind.Memory)
+	}
+}
+
+// TestRunRuntimeUsageDindExecFailureFailsSoft covers the fail-soft contract:
+// an environment whose sidecar cannot be reached (an older runtime image, a
+// sidecar mid-restart) must still get a usable runtime-container reading
+// instead of losing the whole call over a container this reading has always
+// been unable to see anyway.
+func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
+	idleRuntimeReading := "cgroup_type=cgroup2fs\nmemory_current=100\nmemory_max=200\nmemory_peak=100\nmemory_oom_kill=0\ncpu_max=100000 100000\ncpu_usage_before=0\ncpu_usage_after=0\ncpu_time_before_ns=1000000000\ncpu_time_after_ns=2000000000\ndisk_workspace=overlay 100 50 50 50% /home/erun"
+	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+		if container == runtimeDindContainerName {
+			return RemoteCommandResult{}, errors.New("container not found")
+		}
+		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
+	}
+
+	usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+	if err != nil {
+		t.Fatalf("a failed dind exec must not fail the whole call, got: %v", err)
+	}
+	if usage.Dind != nil {
+		t.Fatalf("expected Dind=nil when the sidecar exec fails, got %+v", usage.Dind)
+	}
+	if !usage.ExcludesBuilds {
+		t.Fatalf("expected ExcludesBuilds=true regardless of whether the sidecar could be read, got %+v", usage)
+	}
+	if usage.Memory.CurrentBytes != 100 {
+		t.Errorf("expected the runtime container's own reading to still come through, got %+v", usage.Memory)
+	}
+}
+
+// TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap is the regression
+// guard for this defect: a build pinned at its cap and a build merely busy at
+// it report the same utilisation percentage, so a build starved by its own
+// quota reads as a running build making no progress and nothing in the
+// reading says why. nr_throttled over nr_periods is the counter that
+// separates the two, and it has to be said out loud rather than left for an
+// operator to infer from a percentage that happens to sit at 100.
+func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
+	runtimeReading := strings.Join([]string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=104857600",
+		"memory_max=24696061952",
+		"memory_peak=104857600",
+		"memory_oom_kill=0",
+		"cpu_max=1200000 100000",
+		"cpu_usage_before=1000000",
+		"cpu_usage_after=1003000",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	}, "\n")
+	dindReading := func(cpuMax string, periods, throttled int64) string {
+		return strings.Join([]string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=2040109465",
+			"memory_max=15032385536",
+			"memory_peak=3435973836",
+			"memory_oom_kill=0",
+			"cpu_max=" + cpuMax,
+			"cpu_usage_before=1000000",
+			"cpu_usage_after=2900000",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			fmt.Sprintf("cpu_periods=%d", periods),
+			fmt.Sprintf("cpu_throttled_periods=%d", throttled),
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		}, "\n")
+	}
+
+	const throttleWarning = "the build was throttled in 200 of 200 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
+
+	cases := []struct {
+		name        string
+		dindReading string
+		wantWarning string
+	}{
+		{
+			// The reported failure: every period the cap granted was throttled,
+			// and the reading carried no warning saying so.
+			name:        "a build throttled in every period",
+			dindReading: dindReading("400000 100000", 200, 200),
+			wantWarning: throttleWarning,
+		},
+		{
+			name:        "a build working at its cap without being throttled",
+			dindReading: dindReading("400000 100000", 200, 0),
+			wantWarning: "",
+		},
+		{
+			name:        "no scheduling periods observed",
+			dindReading: dindReading("400000 100000", 0, 0),
+			wantWarning: "",
+		},
+		{
+			// The counters parse even when the quota does not, so an
+			// unavailable CPU reading must not warn off numbers it could not
+			// interpret.
+			name:        "an unreadable quota with throttled periods behind it",
+			dindReading: dindReading("max 100000", 200, 200),
+			wantWarning: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+			runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+				if container == runtimeDindContainerName {
+					return RemoteCommandResult{Stdout: tc.dindReading}, nil
+				}
+				return RemoteCommandResult{Stdout: runtimeReading}, nil
+			}
+
+			usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+			if err != nil {
+				t.Fatalf("RunRuntimeUsage: %v", err)
+			}
+			if tc.wantWarning == "" {
+				for _, warning := range usage.Warnings {
+					if strings.Contains(warning, "throttled in") {
+						t.Fatalf("expected no build-throttling warning, got %q", warning)
+					}
+				}
+				return
+			}
+			for _, warning := range usage.Warnings {
+				if warning == tc.wantWarning {
+					return
+				}
+			}
+			t.Fatalf("expected the build-throttling warning\n  %q\ngot warnings %q", tc.wantWarning, usage.Warnings)
+		})
 	}
 }
 

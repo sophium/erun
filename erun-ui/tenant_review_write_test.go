@@ -58,6 +58,11 @@ func reviewWriteAdvanceHandler(t *testing.T) func(w http.ResponseWriter, req *ht
 			_, _ = w.Write([]byte(`{"error":"unresolved_threads","message":"review review-2 has 3 unresolved comment thread(s)","reviewId":"review-2","unresolvedThreads":3}`))
 			return
 		}
+		if strings.Contains(string(body), `"targetBranch":"occupied"`) {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"code":"MERGE_QUEUE_OCCUPIED","message":"merge queue for occupied already has a review at MERGE: review-2 (Land the widget, feature/widget); complete it or requeue it back to READY before advancing","details":{"targetBranch":"occupied","reviewId":"review-2","name":"Land the widget","sourceBranch":"feature/widget"}}`))
+			return
+		}
 		if !strings.Contains(string(body), `"targetBranch":"main"`) {
 			t.Fatalf("expected the request to carry the target branch, got %s", body)
 		}
@@ -245,6 +250,31 @@ func TestAdvanceMergeQueueReportsUnresolvedThreadsAsABlockNotAnError(t *testing.
 	}
 	if !review.Blocked || review.ReviewID != "review-2" || review.UnresolvedThreads == nil || *review.UnresolvedThreads != 3 {
 		t.Fatalf("result = %+v, want Blocked=true ReviewID=review-2 UnresolvedThreads=3", review)
+	}
+}
+
+// TestAdvanceMergeQueueNamesTheReviewHoldingTheMergeSlot: an occupied MERGE
+// slot must not fall through to the generic conflict sentence, which says
+// somebody else changed something and to refresh — nothing changed under the
+// caller and retrying fails identically, so the operator would loop. The
+// platform names the review to requeue, and that is what has to surface.
+func TestAdvanceMergeQueueNamesTheReviewHoldingTheMergeSlot(t *testing.T) {
+	server := reviewWriteAPI(t, nil)
+	defer server.Close()
+
+	_, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+		Tenant: "frs", TargetBranch: "occupied",
+	})
+	if err == nil {
+		t.Fatal("AdvanceMergeQueue: want a refusal naming the occupying review, got no error")
+	}
+	for _, want := range []string{"review-2", "Land the widget", "feature/widget", "requeue"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want it to name %s", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "Refresh and try again") {
+		t.Fatalf("error = %q, want the named review rather than the generic conflict retry advice", err.Error())
 	}
 }
 

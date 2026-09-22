@@ -8,6 +8,7 @@ import {
 } from '@/app/api/environmentApi';
 import { readError } from '@/app/errors';
 import { InlineAlert } from '@/components/app/InlineAlert';
+import { RuntimePanelNotice } from '@/components/app/RuntimePanelNotice';
 import type { UISelection } from '@/types';
 import type { UIRuntimeProcessGroup } from '@/uiRuntimeTypes';
 
@@ -125,19 +126,18 @@ function RuntimeActivitySummary({
   if (loading) {
     return <p className="text-xs leading-[1.35] text-muted-foreground">Reading the runtime...</p>;
   }
+  if (available) {
+    return (
+      <p className="text-xs leading-[1.35] text-muted-foreground" role="status">
+        {message || 'Open the environment to see what it is running.'}
+      </p>
+    );
+  }
   // An unreadable pod explains itself rather than rendering an empty panel that
-  // reads as "nothing is running".
+  // reads as "nothing is running", through the Runtime tab's one rendering for
+  // a failed read so this panel cannot drift from its neighbours.
   return (
-    <p
-      className={
-        available
-          ? 'text-xs leading-[1.35] text-muted-foreground'
-          : 'text-xs leading-[1.35] text-amber-700 dark:text-amber-400'
-      }
-      role="status"
-    >
-      {message || 'Open the environment to see what it is running.'}
-    </p>
+    <RuntimePanelNotice failure={message} empty="Open the environment to see what it is running." />
   );
 }
 

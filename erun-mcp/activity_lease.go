@@ -22,11 +22,14 @@ type ActivityLeaseTakeInput struct {
 	ID          string `json:"id,omitempty" jsonschema:"lease id to take or renew; defaults to the name, so re-taking the same name renews rather than stacking"`
 	PID         int    `json:"pid,omitempty" jsonschema:"process id of the detached job; the lease is reclaimed once that process exits, so an abandoned lease cannot pin the environment awake"`
 	TTLSeconds  int64  `json:"ttlSeconds,omitempty" jsonschema:"seconds the lease holds without a renewal; defaults to 900, or 300 when exclusive is set"`
-	// Exclusive, Scope, and Orchestrator request the exclusive-claim mode
-	// added for erun#1245: at most one exclusive holder per scope, so a
-	// second agent job or orchestrator working the same worktree is refused
-	// and told who holds it, while a second job in a different scope (a
-	// separate clone in the same pod) is unaffected.
+	// Exclusive, Scope, and Orchestrator request the exclusive-claim mode: at
+	// most one exclusive holder per scope, so a second exclusive take in that
+	// scope is refused and told who holds it, while a holder in a different
+	// scope (a separate clone in the same pod) is unaffected. What a held
+	// claim then refuses depends on its scope: only an "environment" claim
+	// refuses other job starts, a "worktree" claim is refused by the
+	// worktree-rewriting gate-merge guard, and any other scope refuses
+	// neither.
 	Exclusive    bool   `json:"exclusive,omitempty" jsonschema:"take an exclusive claim instead of plain presence: a second exclusive take in the same scope is refused and told who holds it, rather than silently coexisting. Take this before any mutating work in a target environment."`
 	Scope        string `json:"scope,omitempty" jsonschema:"the resource this exclusive claim protects; defaults to 'worktree'. Only meaningful with exclusive=true - exclusivity is scoped, never environment-wide, so two jobs in two separate clones of the same repo in one pod can each hold their own claim"`
 	Orchestrator string `json:"orchestrator,omitempty" jsonschema:"the calling orchestrator's own id (its $ERUN_ORCHESTRATOR_ID), recorded on the lease so a refusal can name who to go ask"`

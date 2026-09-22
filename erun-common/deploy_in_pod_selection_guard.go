@@ -20,11 +20,12 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 	if selectionSource != deploySelectionSourceDefault || len(selected) > 0 {
 		return false
 	}
-	// Only a runtime environment's pod is a projection of an environment the
-	// host owns. A local-agent env is covered by its own in-pod guard, which
-	// fires first and names the environment shape that resolve would get wrong
-	// (guardInPodLocalAgentRuntimeDeploy), and a remote-agent env owns its
-	// worktree inside the pod, so it keeps deploying itself.
+	// Narrow by type: for this type the runtime chart is the whole environment,
+	// so reaching the fallback is a real rollout decision rather than one chart
+	// among others, and it earns the diagnosis below. The other types reach the
+	// same fallback and are refused for it one layer on by the in-pod
+	// runtime-chart guard (guardInPodRuntimeDeploy), so narrowing here leaves no
+	// state unguarded.
 	if resolvedTarget.EnvConfig.ResolvedType() != EnvironmentTypeRuntime {
 		return false
 	}
@@ -43,14 +44,16 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget Open
 // operator selected on its previous version, and exits 0 — a silent partial
 // upgrade of a production environment. Refusing and naming both
 // remedies is the same fail-closed shape as the sibling in-pod guard
-// (guardInPodLocalAgentRuntimeDeploy) and the saved-selection shadow guard: the
+// (guardInPodRuntimeDeploy) and the saved-selection shadow guard: the
 // deploy is not resolvable from here, so it is not attempted from here.
 //
 // Deliberately narrow: only a runtime environment, only its own pod, and only
-// the empty-selection default. An explicit --components selection is one-shot
-// and deliberate, a saved or plan-derived selection is a real selection, and an
-// off-pod resolve reads the operator's own config store — none of them are
-// touched.
+// the empty-selection default. This refusal exists for the fallback that cannot
+// be told apart from a genuinely empty selection; a selection that resolved to
+// something still reaches the runtime chart, and is refused for reading the
+// projection rather than the host store by the sibling guard one layer on
+// (guardInPodRuntimeDeploy). An off-pod resolve reads the operator's own config
+// store and is untouched by either.
 func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget OpenResult, target DeployTarget, selected []string, selectionSource string) error {
 	if !inPodBlindRuntimeOnlySelection(env, resolvedTarget, selected, selectionSource) {
 		return nil
@@ -58,6 +61,6 @@ func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget
 	tenant := strings.TrimSpace(resolvedTarget.Tenant)
 	environment := strings.TrimSpace(resolvedTarget.Environment)
 	runtimeName := RuntimeReleaseName(tenant)
-	return fmt.Errorf("deploy %s/%s: refusing to roll the runtime chart alone (%s) from inside this environment's own runtime pod — the in-pod config store is only the projection the chart injects (see `erun doctor --sync-config`), and it carries no deploy.components, so this process cannot tell a genuinely empty selection from the one saved on the host. Rolling on that fallback would upgrade the runtime chart, leave every component the operator selected on its previous version, and still report success. Run `erun deploy --tenant %s --environment %s --version %s` from the host CLI so the saved selection resolves there, or pass --components %s here to roll the runtime chart alone deliberately",
-		tenant, environment, runtimeName, tenant, environment, inPodGuardVersionHint(target.VersionOverride), runtimeName)
+	return fmt.Errorf("deploy %s/%s: refusing to roll the runtime chart alone (%s) from inside this environment's own runtime pod — the in-pod config store is only the projection the chart injects (see `erun doctor --sync-config`), and it carries no deploy.components, so this process cannot tell a genuinely empty selection from the one saved on the host. Rolling on that fallback would upgrade the runtime chart, leave every component the operator selected on its previous version, and still report success. Run `erun deploy --tenant %s --environment %s --version %s` from the host CLI, where the saved selection resolves and the rollout is resolved from the host config store rather than from this pod",
+		tenant, environment, runtimeName, tenant, environment, inPodGuardVersionHint(target.VersionOverride))
 }

@@ -99,7 +99,7 @@ func newMCPCallCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPCallCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), tool, arguments)
+			return runMCPCallCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), tool, arguments)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -122,7 +122,7 @@ func newMCPToolsCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPToolsCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment))
+			return runMCPToolsCommand(cmd.Context(), commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
 	addDryRunFlag(cmd)
@@ -145,7 +145,7 @@ func newMCPTokenCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMCPTokenCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment))
+			return runMCPTokenCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment))
 		},
 	}
 	addDryRunFlag(cmd)
@@ -308,6 +308,8 @@ func mcpEdgeTokenMinter(target mcpEdgeTarget) common.MCPTokenMinter {
 // a missing port-forward and an edge that does not trust this machine's identity.
 func mcpEdgeError(target mcpEdgeTarget, err error) error {
 	switch {
+	case errors.Is(err, common.ErrMCPTargetNotAnswering):
+		return fmt.Errorf("%w; the port-forward is up, so retry in a few seconds once %s/%s has finished starting — re-establish the forward with `erun open %s %s --reconnect` only if it stays unresponsive", err, target.tenant, target.environment, target.tenant, target.environment)
 	case errors.Is(err, common.ErrMCPEndpointUnreachable):
 		return fmt.Errorf("%w; run `erun open %s %s` so the local MCP port-forward is up", err, target.tenant, target.environment)
 	case errors.Is(err, common.ErrMCPUnauthorized):

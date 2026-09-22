@@ -213,4 +213,30 @@
   :where([data-slot='dialog-content'] .grid) {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  /* The same trap as above, one level down and not limited to dialogs: a
+     flex or grid item defaults to `min-width: auto`, which floors its size
+     at its own content's intrinsic width regardless of how little room its
+     container actually has. `flex-1` (`flex: 1 1 0%`) and a `grid-cols-*`
+     track already commit the item to being sized by its container rather
+     than its content, so that floor serves no layout this codebase
+     actually wants -- it only waits for an unbroken string (a cloud alias,
+     a file path, a status message) to drag the item, and the box around
+     it, wider than its parent. That has been independently filed and fixed
+     four times at the point of failure rather than at the mechanism
+     (`erun-kit`'s `DialogContent` above; `Titlebar`'s status/centre flex
+     rows; `SelectField`'s grid-item wrapper; the reconnect status panel's
+     flex header) because the symptom always shows up in whichever
+     component happens to be holding the long string, never in the shared
+     container shape. Kept as a `:where()` default so it stays inert
+     wherever a component still wants its item to protect its own intrinsic
+     width -- an explicit `min-w-*` on the item, same specificity fight as
+     above, keeps winning. */
+  :where(.flex-1) {
+    min-width: 0;
+  }
+
+  :where([class*='grid-cols-']) > * {
+    min-width: 0;
+  }
 }

@@ -27,35 +27,47 @@ async function printLine(app: AppShell, sessionId: number, text: string): Promis
   await expect(app.terminalPane.rows()).toContainText(visible);
 }
 
-// Synchronous link mechanisms (the web-links addon's URL matching, xterm's
-// own OSC 8 handling) resolve a hover in the same tick, so a plain click is
-// enough to activate them.
-async function clickLine(app: AppShell): Promise<void> {
-  await app.terminalPane.clickFirstRow();
-}
-
-// The custom file-path provider resolves asynchronously (it can call the
-// backend to map a pod path onto its host mirror), so a click has to wait for
-// that resolution to land before it fires -- otherwise xterm's own
-// mousedown handler finds no resolved link yet and the click is a no-op.
-// Host-side resolution decorates the link as a real pointer-cursor link;
-// waiting for that decoration is the deterministic signal it resolved.
-async function hoverAndClickResolvableLink(app: AppShell): Promise<void> {
-  await app.terminalPane.hoverFirstRow();
-  await expect(app.terminalPane.screen()).toHaveClass(/xterm-cursor-pointer/);
+// Every activatable link -- OSC 8, plain-URL pattern matching, and the custom
+// path provider alike -- decorates the terminal with the pointer cursor once
+// xterm resolves it (xterm defaults undecorated links to pointerCursor: true,
+// and the path provider sets it explicitly). Waiting for that decoration
+// rather than assuming a given provider resolves synchronously keeps this
+// deterministic even for providers that happen to resolve in the same tick
+// today (OSC 8, URL matching) -- relying on that implicitly would silently
+// turn into a race the moment either became asynchronous. A single hover can
+// still be dropped under load (see TerminalPane.hoverFirstRow), so the whole
+// hover-and-check step retries, re-hovering each attempt -- the same
+// convergence Sidebar.hoverEnvironmentRow uses for the hover card.
+async function hoverAndClickDecoratedLink(app: AppShell): Promise<void> {
+  await expect(async () => {
+    await app.terminalPane.hoverFirstRow();
+    await expect(app.terminalPane.screen()).toHaveClass(/xterm-cursor-pointer/, {
+      timeout: 2_000,
+    });
+  }).toPass({ timeout: 10_000 });
   await app.terminalPane.clickFirstRow();
 }
 
 // An unresolved pod path is deliberately decorated as plain text (no pointer
 // cursor), so there is no decoration to wait on -- the backend round trip its
 // own resolution makes is the only observable completion signal.
+//
+// That signal is also a dropped hover's only recovery, and a dropped hover is
+// the one failure this step has to tolerate: the same one hoverAndClickDecoratedLink
+// above re-drives for, and for the same reason. Left single-shot, a hover the
+// page never resolved waits on a response that will never come for the whole
+// 30s test budget and reports the failure against the test's own declaration
+// line rather than against the hover. Each attempt is bounded well inside
+// that, so a dropped hover costs one re-hover instead of the spec.
 async function hoverAndClickAfterBackendResolve(app: AppShell, page: Page): Promise<void> {
-  await Promise.all([
-    page.waitForResponse(
+  await expect(async () => {
+    const resolved = page.waitForResponse(
       (res) => parseInvoke(res.request())?.method === 'ResolveEnvironmentHostPath',
-    ),
-    app.terminalPane.hoverFirstRow(),
-  ]);
+      { timeout: 3_000 },
+    );
+    await app.terminalPane.hoverFirstRow();
+    await resolved;
+  }).toPass({ timeout: 10_000 });
   await app.terminalPane.clickFirstRow();
 }
 
@@ -74,7 +86,10 @@ test.describe('clickable terminal links (#1354)', () => {
     const url = 'https://example.com/erun-link-test';
     await printLine(app, sessionId, url);
 
-    const [popup] = await Promise.all([page.waitForEvent('popup'), clickLine(app)]);
+    const [popup] = await Promise.all([
+      page.waitForEvent('popup'),
+      hoverAndClickDecoratedLink(app),
+    ]);
     await expect.poll(() => popup.url()).toBe(url);
     await popup.close();
   });
@@ -91,7 +106,10 @@ test.describe('clickable terminal links (#1354)', () => {
     const uri = 'https://example.com/erun-osc8-target';
     await printLine(app, sessionId, osc8(uri, 'click here'));
 
-    const [popup] = await Promise.all([page.waitForEvent('popup'), clickLine(app)]);
+    const [popup] = await Promise.all([
+      page.waitForEvent('popup'),
+      hoverAndClickDecoratedLink(app),
+    ]);
     await expect.poll(() => popup.url()).toBe(uri);
     await popup.close();
   });
@@ -113,7 +131,7 @@ test.describe('clickable terminal links (#1354)', () => {
       popupFired = true;
     });
     await printLine(app, sessionId, osc8('javascript:alert(1)', 'click here'));
-    await clickLine(app);
+    await hoverAndClickDecoratedLink(app);
     // Bound the negative on a real round-trip rather than a delay: print a
     // second, known-good line and wait for it, so the window covers whatever
     // time a (wrongly) fired popup would have needed.
@@ -135,7 +153,7 @@ test.describe('clickable terminal links (#1354)', () => {
       await printLine(app, sessionId, target);
       const invokes = captureInvokes(page);
 
-      await hoverAndClickResolvableLink(app);
+      await hoverAndClickDecoratedLink(app);
 
       await expect.poll(() => openHostPathCalls(invokes)).toContain(target);
     } finally {
@@ -178,7 +196,7 @@ test.describe('clickable terminal links (#1354)', () => {
     await printLine(app, sessionId, '/etc/hosts');
     const invokes = captureInvokes(page);
 
-    await hoverAndClickResolvableLink(app);
+    await hoverAndClickDecoratedLink(app);
 
     await expect.poll(() => openHostPathCalls(invokes)).toContain('/etc/hosts');
     expect(resolveEnvironmentHostPathCalls(invokes)).toHaveLength(0);

@@ -185,7 +185,7 @@ type ReviewRecordBuildInput struct {
 	ReviewID      string `json:"reviewId" jsonschema:"review id to record the build against"`
 	CommitID      string `json:"commitId" jsonschema:"full 40-character commit hash the build ran against"`
 	Gate          bool   `json:"gate,omitempty" jsonschema:"record the merge queue's own GATE build kind instead of an ordinary build — set by the environment a review's merge queue promoted to MERGE, reporting its own build of the prospective merge; a GATE build carries no version"`
-	Version       string `json:"version,omitempty" jsonschema:"version the build minted (from the build tool's result), required even for a failed build since release resolves the version before the build step runs; omit when gate is true"`
+	Version       string `json:"version,omitempty" jsonschema:"version the build minted, from the run's own build result (a plain erun build --output json, or --dry-run --output json when it failed before printing one), required even for a failed build; a RECORDED build publishes nothing, so this is metadata no platform path resolves and a --release produced version is accepted but not required; omit when gate is true"`
 	Successful    bool   `json:"successful" jsonschema:"whether the build succeeded; false records a failed build"`
 	FailureDetail string `json:"failureDetail,omitempty" jsonschema:"why the build failed; only meaningful when successful is false"`
 }
@@ -227,7 +227,7 @@ type ReviewReportMergedInput struct {
 	platformAliasInput
 	ReviewID  string `json:"reviewId" jsonschema:"review id to report merged"`
 	BuildID   string `json:"buildId" jsonschema:"the successful GATE build's id"`
-	RemoteURL string `json:"remoteUrl" jsonschema:"the git remote the platform fetches to verify the merge"`
+	RemoteURL string `json:"remoteUrl" jsonschema:"the git remote the platform fetches to verify the merge, in any form git accepts; an SSH remote is read over its host's HTTPS without credentials"`
 }
 
 type ReviewReportMergedResult struct {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -348,20 +349,109 @@ func orchestratorMCPUnreachableNotice(name string, unreachable []orchestratorMCP
 		label, strings.Join(names, ", "))
 }
 
-// singleOrchestratorMCPUnreachableEnv reports the one environment a deploy
-// action can unambiguously target: exactly one unreachable env, whose Label
-// is guaranteed "<tenant>/<environment>" (orchestratorEnvLabel's well-formed
-// case — the only shape probeOrchestratorMCPEdges ever wires). More than one
-// unreachable env has no single env to attach the action to.
-func singleOrchestratorMCPUnreachableEnv(unreachable []orchestratorMCPUnreachable) (tenant, environment string, ok bool) {
-	if len(unreachable) != 1 {
-		return "", "", false
-	}
-	tenant, environment, found := strings.Cut(unreachable[0].Label, "/")
-	if !found || tenant == "" || environment == "" {
+// orchestratorMCPUnreachableEnv splits one unreachable edge's Label into the
+// environment a deploy action can target. The label is normally
+// orchestratorEnvLabel's well-formed "<tenant>/<environment>" — the shape
+// probeOrchestratorMCPEdges wires — so the degenerate shapes that helper also
+// produces report false and their notice carries no action: "?" is its
+// placeholder for the half of a malformed entry that did not resolve, and a
+// deploy aimed at it would be a control that cannot work.
+func orchestratorMCPUnreachableEnv(label string) (tenant, environment string, ok bool) {
+	tenant, environment, found := strings.Cut(label, "/")
+	if !found || tenant == "" || environment == "" || tenant == "?" || environment == "?" {
 		return "", "", false
 	}
 	return tenant, environment, true
+}
+
+// orchestratorEdgeRepairBudget bounds how long a launch waits for the edge of a
+// linked environment it has just found not answering. It is the same window an
+// MCP client allows its own first connect (erun-common's
+// mcpStartupReachabilityWait), so a launch never makes the operator wait longer
+// than the client behind it was already prepared to. The wait is a ceiling
+// rather than a delay: a rebind that settles sooner — and the ordinary rebind
+// does — returns the launch immediately.
+const orchestratorEdgeRepairBudget = 20 * time.Second
+
+// repairOrchestratorMCPEdges opens the port-forward for every linked
+// environment whose edge is not answering right now, and returns once each
+// rebind has settled or the budget has elapsed.
+//
+// This runs on the one path where the answer has to be right: the config
+// written moments later names a loopback port, and the client reading it
+// connects once, at launch, and does not ask again. An invoke of `erun open`
+// that merely got kicked off here would land after that connect, so the
+// environment would come back wired to a dead edge with every one of its tools
+// unavailable for the whole session — the operator told to run a command nobody
+// had asked them for.
+//
+// It is not a gate on the launch: an environment that genuinely cannot be
+// reached does not hold the orchestrator up, it is reported as unreachable by
+// the probe that follows (see wireOrchestratorMCP). Environments with no edge
+// to open — a host env, or one whose MCP port does not resolve — are left to
+// the builder, which reports them on their own terms.
+func (a *App) repairOrchestratorMCPEdges(envs []eruncommon.OrchestratorEnvConfig) {
+	dead := a.orchestratorEdgesNotAnswering(envs)
+	if len(dead) == 0 {
+		return
+	}
+	// Concurrently: several unreachable environments cost one budget between
+	// them, not one each, so a launch with a few dead links still returns
+	// inside a single window.
+	var wg sync.WaitGroup
+	for _, selection := range dead {
+		wg.Add(1)
+		go func(selection uiSelection) {
+			defer wg.Done()
+			a.ensureEnvRuntimeWithin(selection, envEnsureForBrokenForward, orchestratorEdgeRepairBudget)
+		}(selection)
+	}
+	wg.Wait()
+}
+
+// orchestratorEdgesNotAnswering narrows a linked scope to the environments that
+// have an MCP edge and are not carrying traffic through it. The probe is the
+// same round trip the builder uses, and a missing probe answers "cannot tell",
+// which must not be read as "not answering": repairing on a probe that never
+// ran would restart a forward on no evidence.
+func (a *App) orchestratorEdgesNotAnswering(envs []eruncommon.OrchestratorEnvConfig) []uiSelection {
+	var dead []uiSelection
+	for _, ref := range envs {
+		tenant := strings.TrimSpace(ref.Tenant)
+		environment := strings.TrimSpace(ref.Environment)
+		if tenant == "" || environment == "" || a.orchestratorRefNamesHostEnv(ref) {
+			continue
+		}
+		port := a.orchestratorMCPPort(tenant, environment)
+		if port <= 0 || a.mcpEdgeAnswers(port) {
+			continue
+		}
+		dead = append(dead, uiSelection{Tenant: tenant, Environment: environment})
+	}
+	return dead
+}
+
+// orchestratorMCPPort resolves a linked environment's local MCP port, or 0 when
+// none resolves. Shared with the builder so the environment a launch opens a
+// forward for is the one it is about to wire.
+func (a *App) orchestratorMCPPort(tenant, environment string) int {
+	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, tenant, environment)
+	if err != nil {
+		return 0
+	}
+	return ports.MCP
+}
+
+// orchestratorMCPEnvType resolves a linked environment's type, or its zero
+// value when the environment no longer resolves. An environment whose config
+// will not load has no known type, so it falls through to the port path and is
+// reported as the wiring failure it is — never silently excused as a host env.
+func (a *App) orchestratorMCPEnvType(tenant, environment string) eruncommon.EnvironmentType {
+	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
+	if err != nil {
+		return ""
+	}
+	return env.ResolvedType()
 }
 
 // writeOrchestratorMCPConfig writes a per-orchestrator Claude Code --mcp-config
@@ -385,25 +475,7 @@ func (a *App) writeOrchestratorMCPConfig(id string, envs []eruncommon.Orchestrat
 		return "", nil, nil, fmt.Errorf("%w: %w", errOrchestratorMCPExecutable, err)
 	}
 	config, skipped, unreachable := buildOrchestratorMCPConfig(envs, executable,
-		func(tenant, environment string) int {
-			ports, portErr := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, tenant, environment)
-			if portErr != nil {
-				return 0
-			}
-			return ports.MCP
-		},
-		func(tenant, environment string) eruncommon.EnvironmentType {
-			env, _, loadErr := a.deps.store.LoadEnvConfig(tenant, environment)
-			if loadErr != nil {
-				// An env whose config no longer resolves has no known type, so it
-				// falls through to the port path and is reported as the wiring
-				// failure it is -- never silently excused as a host env.
-				return ""
-			}
-			return env.ResolvedType()
-		},
-		a.deps.canReachMCPEndpoint,
-	)
+		a.orchestratorMCPPort, a.orchestratorMCPEnvType, a.deps.canReachMCPEndpoint)
 	if len(config.MCPServers) == 0 {
 		// Nothing wired because every linked env is a host env is a working
 		// configuration, not a failure: a host env has no MCP edge by design and

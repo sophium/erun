@@ -1,0 +1,3 @@
+audit: erun gate list
+platform: GET <PLATFORM_API>/v1/gate-runs
+platform api GET /v1/gate-runs: http 404: 404 page not found: platform api: not found; the deployed plane's router has no route matching this path at all (not an application-level not-found) -- it likely predates this route; run `erun exec route-check` to confirm, or `erun list --control-planes` to compare its deployed version against what's published

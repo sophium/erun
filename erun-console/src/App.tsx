@@ -11,6 +11,7 @@ import { beginLogin, signOut } from './auth/auth';
 import { fetchPlatformConfig } from './config/platform';
 import { AcceptInvitePage } from './identity/AcceptInvitePage';
 import { AppShell } from './shell/AppShell';
+import { consoleBrand, consoleBrandLabel } from './shell/brand';
 import { LandingScreen } from './shell/LandingScreen';
 import {
   ErrorScreen,
@@ -114,7 +115,12 @@ function computeLoadState(auth: AuthPhase, configQuery: ConfigQueryPhase): LoadS
 }
 
 interface PlatformInfo {
-  brand?: string;
+  // Resolved through consoleBrand, never undefined: the server's own value
+  // once discovery answers, the value the deploy injected into the served page
+  // before that, and the bundled product-level name when the instance names
+  // itself nowhere. Always a string so the pre-resolution paint cannot show a
+  // different name than the one discovery resolves to.
+  brand: string;
   docsUrl?: string;
   tagline?: string;
   logoUrl?: string;
@@ -123,12 +129,14 @@ interface PlatformInfo {
 // usePlatformInfo resolves the instance's white-label surface from discovery
 // (GET /v1/platform) and mirrors the brand into the document title — the one
 // thing that used to be a hardcoded literal (`erun console`) despite the
-// value already being fetched and parsed for OIDC config. Every field is
-// optional and left undefined when the backend has it unset (#1327); callers
-// fall back to bundled product-level defaults, never a hardcoded instance
-// name.
+// value already being fetched and parsed for OIDC config. The remaining fields
+// are optional and left undefined when the backend has it unset (#1327);
+// callers fall back to bundled product-level defaults, never a hardcoded
+// instance name.
 function usePlatformInfo(): PlatformInfo {
-  const [info, setInfo] = React.useState<PlatformInfo>({});
+  const [info, setInfo] = React.useState<PlatformInfo>(() => ({
+    brand: consoleBrand(undefined),
+  }));
   React.useEffect(() => {
     let cancelled = false;
     fetchPlatformConfig()
@@ -137,7 +145,7 @@ function usePlatformInfo(): PlatformInfo {
           return;
         }
         setInfo({
-          brand: platform.brand.length > 0 ? platform.brand : undefined,
+          brand: consoleBrand(platform.brand),
           docsUrl: platform.docsUrl.length > 0 ? platform.docsUrl : undefined,
           tagline: platform.tagline.length > 0 ? platform.tagline : undefined,
           logoUrl: platform.logoUrl.length > 0 ? platform.logoUrl : undefined,
@@ -149,7 +157,7 @@ function usePlatformInfo(): PlatformInfo {
     };
   }, []);
   React.useEffect(() => {
-    document.title = info.brand !== undefined ? `${info.brand} console` : 'ERun console';
+    document.title = consoleBrandLabel(info.brand);
   }, [info.brand]);
   return info;
 }

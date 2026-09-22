@@ -134,6 +134,14 @@ type orchestratorPacingCandidate struct {
 	lastActiveAt time.Time
 	nudgeCount   int
 	capped       bool
+	// unmanaged marks a candidate this desktop holds no session for at all: a
+	// configured orchestrator whose session was started outside it (a terminal,
+	// or a previous desktop instance). It is the transport fact Reachable
+	// carries — not a statement about the session, which may be perfectly alive
+	// and is exactly the case that must not be reported as dead. Zero value is
+	// the ordinary, reachable case, so a candidate built without it keeps
+	// today's meaning.
+	unmanaged bool
 }
 
 type orchestratorPacingDecision int
@@ -157,6 +165,15 @@ const (
 	orchestratorPacingReasonAlreadyCapped orchestratorPacingReason = "already-capped"
 	orchestratorPacingReasonCapCrossed    orchestratorPacingReason = "cap-crossed"
 	orchestratorPacingReasonNudge         orchestratorPacingReason = "nudge"
+	// orchestratorPacingReasonUnreachable is a configured orchestrator this
+	// desktop holds no session for, so no nudge can be written into it from
+	// here whatever its own session is doing. It is deliberately not
+	// orchestratorPacingReasonNotAlive: that is a claim about the session, and
+	// the sessions this covers are usually alive and reporting — reporting to a
+	// desktop that cannot answer them. Naming the transport rather than the
+	// session is the difference between "nothing is running" and "nothing here
+	// can reach what is running", and only the second one is true.
+	orchestratorPacingReasonUnreachable orchestratorPacingReason = "unreachable-from-transport"
 )
 
 // decideOrchestratorPacing is the automatic-pass bound (explicit=false): a
@@ -180,8 +197,12 @@ func decideOrchestratorPacing(c orchestratorPacingCandidate, now time.Time) (orc
 // requires.
 func decideOrchestratorWhip(c orchestratorPacingCandidate, now time.Time, explicit bool) (orchestratorPacingDecision, orchestratorPacingReason) {
 	candidate := eruncommon.WhipCandidate{
-		Kind:         eruncommon.WhipTargetOrchestrator,
-		Reachable:    true, // the desktop holds this orchestrator's PTY itself
+		Kind: eruncommon.WhipTargetOrchestrator,
+		// The desktop holds this orchestrator's own PTY, so it can write a
+		// nudge into it — except for a configured orchestrator it holds no
+		// session for, which nothing here can reach (see
+		// orchestratorPacingUnmanagedRows).
+		Reachable:    !c.unmanaged,
 		Alive:        c.alive,
 		LastActiveAt: c.lastActiveAt,
 		NudgeCount:   c.nudgeCount,
@@ -203,13 +224,16 @@ func orchestratorPacingDecisionFromWhip(decision eruncommon.WhipDecision) orches
 }
 
 // orchestratorPacingReasonFromWhip translates every reason DecideWhip can
-// return for a Reachable candidate. WhipReasonUnreachable never appears here:
-// an orchestrator's own reconciler always sets Reachable true (it holds the
-// PTY), unlike the CLI/MCP transports, which never can.
+// return. WhipReasonUnreachable reaches here only for a configured
+// orchestrator whose session this desktop does not hold (see
+// orchestratorPacingUnmanagedRows) — every other orchestrator row is one the
+// desktop holds the PTY of, which is what makes those candidates reachable.
 func orchestratorPacingReasonFromWhip(reason eruncommon.WhipReason) orchestratorPacingReason {
 	switch reason {
 	case eruncommon.WhipReasonNotAlive:
 		return orchestratorPacingReasonNotAlive
+	case eruncommon.WhipReasonUnreachable:
+		return orchestratorPacingReasonUnreachable
 	case eruncommon.WhipReasonAlreadyCapped:
 		return orchestratorPacingReasonAlreadyCapped
 	case eruncommon.WhipReasonCapCrossed:
@@ -270,17 +294,122 @@ type orchestratorPacingRow struct {
 	// environments this orchestrator actually linked, never whatever else
 	// happens to be running (erun#1699).
 	envs []eruncommon.OrchestratorEnvConfig
+	// unmanaged marks a configured orchestrator this desktop holds no session
+	// for, so it has no PTY to write into, no nudge budget to keep, and no
+	// wires that scope could have been read from. Everything that acts on a
+	// row is skipped for it; the reconciler still decides and logs for it,
+	// which is the whole point (see orchestratorPacingUnmanagedRows).
+	unmanaged bool
+}
+
+// quietMeasured is false when this row has no reference point to measure a
+// quiet period against: an orchestrator the desktop holds no session for has no
+// start time to count from, and without an activity report either there is
+// nothing else to measure. The log names that rather than printing a duration
+// measured from the zero time, which reads as an enormous, invented outage.
+func (r orchestratorPacingRow) quietMeasured(hasReport bool) bool {
+	return !r.unmanaged || hasReport
 }
 
 // reconcileOrchestratorPacing runs on the same 15s tick that already polls
 // session heartbeats and orchestrator activity. It is cheap to run every tick:
-// the read is a small file per orchestrator, and the decision only ever does
-// pty IO for a session that has been quiet for the full ten minutes.
+// the read is a small file per orchestrator plus one config read, and the
+// decision only ever does pty IO for a session that has been quiet for the full
+// ten minutes.
 func (a *App) reconcileOrchestratorPacing() {
 	refreshOrchestratorWhipConfig()
 	now := time.Now()
-	for _, row := range a.orchestratorPacingRows() {
+	rows := a.orchestratorPacingRows()
+	managed := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		managed[row.id] = struct{}{}
 		a.reconcileOrchestratorPacingOne(row, now, false)
+	}
+	a.forgetPacedOrchestrators(managed)
+	// The configured orchestrators the pass above cannot see, so the decision
+	// line below covers the whole configured population rather than only the
+	// part of it this desktop happens to hold a PTY for.
+	for _, row := range a.orchestratorPacingUnmanagedRows(managed) {
+		a.reconcileOrchestratorPacingOne(row, now, false)
+	}
+}
+
+// orchestratorPacingUnreachable reports whether a configured orchestrator is
+// being driven by a session this desktop does not own: it has no session here
+// while its own hooks are reporting one recently enough that the pacer would
+// have been deciding for it. It is what lets the hover card tell "no nudge was
+// needed" apart from "no nudge was possible from this desktop" — the two states
+// a nudge count frozen at zero cannot distinguish, and the reason an
+// orchestrator started in a terminal used to read exactly like a freshly
+// checked one.
+//
+// It is the read-model's own question, answered against the pacer's own stale
+// bound, so "there is a session out there" means here what it means to the
+// reconciler. An orchestrator with no session anywhere (an ordinary stopped
+// one) reports false: nothing is running outside this desktop, so there is
+// nothing to say beyond the "Stopped" the card already shows.
+func orchestratorPacingUnreachable(id string, now time.Time) bool {
+	report, ok := readOrchestratorPacingActivity(id)
+	return ok && now.Sub(report.at) <= getOrchestratorWhipConfig().StaleAfter
+}
+
+// orchestratorPacingUnmanagedRows names every configured orchestrator this
+// desktop holds no session for, one row each, carrying the reason last logged
+// for it so its line obeys the same once-per-transition rule a session-backed
+// row's does.
+//
+// It is what keeps the pacing log's coverage equal to the configured
+// population. A session started outside this desktop (in a terminal, or by a
+// previous desktop instance) writes the same activity and live-conversation
+// records a launched one does — so the desktop reads and shows it — but it has
+// no session object here, so it had no row, was never reconciled, and never
+// appeared in a log whose whole purpose is to make a quiet pane and a
+// suppressed one tell each other apart. An orchestrator that is never
+// evaluated is less legible than one that is suppressed, which is the inverse
+// of what that log exists for.
+func (a *App) orchestratorPacingUnmanagedRows(managed map[string]struct{}) []orchestratorPacingRow {
+	configs, err := a.loadOrchestratorConfigs()
+	if err != nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	rows := make([]orchestratorPacingRow, 0, len(configs))
+	for _, config := range configs {
+		id := strings.TrimSpace(config.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := managed[id]; ok {
+			continue
+		}
+		if _, ok := a.orchestrators[id]; ok {
+			continue
+		}
+		rows = append(rows, orchestratorPacingRow{
+			id:               id,
+			name:             config.Name,
+			unmanaged:        true,
+			lastLoggedReason: a.unmanagedPacingReason[id],
+		})
+	}
+	return rows
+}
+
+// forgetPacedOrchestrators drops the remembered line of every orchestrator this
+// pass observed a session for, because that orchestrator is no longer in the
+// unpaced population: its line now comes from the session's own row. Clearing
+// it here is what lets an orchestrator that later comes back to the unpaced
+// population — a session stopped, or one that was never the desktop's — report
+// its decision again instead of inheriting a line written before a session this
+// desktop has since run.
+func (a *App) forgetPacedOrchestrators(managed map[string]struct{}) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for id := range a.unmanagedPacingReason {
+		if _, ok := managed[id]; ok {
+			delete(a.unmanagedPacingReason, id)
+		}
 	}
 }
 
@@ -457,7 +586,7 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 	elapsed := now.Sub(lastActiveAt)
 	envBusy := orchestratorLinkedEnvBusyStateFor(row.id, row.envs, a.envActivitySnapshot())
 	if a.orchestratorPacingSuppressedByLinkedEnv(row, explicit, envBusy, elapsed) {
-		a.logOrchestratorPacingTransition(row, orchestratorPacingReasonEnvBusy, elapsed)
+		a.logOrchestratorPacingTransition(row, orchestratorPacingReasonEnvBusy, elapsed, true)
 		return orchestratorPacingNone, orchestratorPacingReasonEnvBusy
 	}
 
@@ -466,9 +595,10 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 		lastActiveAt: lastActiveAt,
 		nudgeCount:   row.nudgeCount,
 		capped:       row.capped,
+		unmanaged:    row.unmanaged,
 	}
 	decision, reason := decideOrchestratorWhip(candidate, now, explicit)
-	a.logOrchestratorPacingTransition(row, reason, elapsed)
+	a.logOrchestratorPacingTransition(row, reason, elapsed, row.quietMeasured(ok))
 
 	switch decision {
 	case orchestratorPacingNudge:
@@ -488,13 +618,23 @@ func (a *App) reconcileOrchestratorPacingOne(row orchestratorPacingRow, now time
 // It logs only on a transition (this orchestrator's reason changed since the
 // last tick), not on every 15s tick, since most orchestrators spend most of
 // their life in "fresh" and a per-tick line would drown the signal.
-func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason orchestratorPacingReason, elapsed time.Duration) {
+//
+// quietKnown is whether the elapsed period means anything: a row the desktop
+// holds no session for and that has never reported has no reference point at
+// all, and reporting a duration measured from the zero time would invent an
+// outage of fifty-odd years rather than admit nothing is known.
+func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason orchestratorPacingReason, elapsed time.Duration, quietKnown bool) {
 	if reason == row.lastLoggedReason {
 		return
 	}
 	a.mu.Lock()
 	if session := a.orchestrators[row.id]; session != nil {
 		session.pacingLastReason = reason
+	} else if row.unmanaged {
+		if a.unmanagedPacingReason == nil {
+			a.unmanagedPacingReason = make(map[string]orchestratorPacingReason)
+		}
+		a.unmanagedPacingReason[row.id] = reason
 	}
 	a.mu.Unlock()
 	// The id leads because it is the stable key every other surface uses — the
@@ -507,7 +647,11 @@ func (a *App) logOrchestratorPacingTransition(row orchestratorPacingRow, reason 
 	if name := strings.TrimSpace(row.name); name != "" && name != subject {
 		subject += " (" + name + ")"
 	}
-	log.Printf("erun-app: orchestrator %s pacing decision=%s quiet=%s", subject, reason, elapsed.Round(time.Second))
+	quiet := "unknown"
+	if quietKnown {
+		quiet = elapsed.Round(time.Second).String()
+	}
+	log.Printf("erun-app: orchestrator %s pacing decision=%s quiet=%s", subject, reason, quiet)
 }
 
 // rearmOrchestratorPacing clears the nudge count and the cap, so the next

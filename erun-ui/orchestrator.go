@@ -97,7 +97,10 @@ type orchestratorSession struct {
 	pacingLastNudgeAtUnix int64
 	// pacingLastReason is the reason decideOrchestratorPacing last returned for
 	// this orchestrator, so the reconciler logs a transition rather than
-	// repeating the same line every 15s tick. See logOrchestratorPacingTransition.
+	// repeating the same line every 15s tick. A configured orchestrator this
+	// desktop holds no session for has nowhere to keep this, so it is remembered
+	// in App.unmanagedPacingReason instead.
+	// See logOrchestratorPacingTransition.
 	pacingLastReason orchestratorPacingReason
 	// pacingAutoNudgeCount / pacingLastAutoNudgeAtUnix are the cumulative
 	// record of every automatic pacer nudge ever delivered to this session,
@@ -260,6 +263,12 @@ type orchestratorInfo struct {
 	LastWhipAtUnix         int64                 `json:"lastWhipAtUnix,omitempty"`
 	LastCappedAtUnix       int64                 `json:"lastCappedAtUnix,omitempty"`
 	NudgeHistoryUnreadable bool                  `json:"nudgeHistoryUnreadable,omitempty"`
+	// PacingUnreachable is true when this desktop holds no session for the
+	// orchestrator while its own hooks report one running elsewhere, so erun
+	// cannot pace it from here — see orchestratorPacingUnreachable. It is the
+	// hover card's could-not half: without it, a session this desktop cannot
+	// nudge reads exactly like one that needed no nudge.
+	PacingUnreachable bool `json:"pacingUnreachable,omitempty"`
 	// RestartRequired is true when this orchestrator's live session was spawned
 	// with an environment scope that no longer matches its persisted one. A
 	// live Claude Code session resolves --mcp-config once at launch, so nothing
@@ -510,6 +519,12 @@ here happen to have files — read the config every time.
 - **On completion, present the assumptions you took.** End with a concise list of
   every recommended assumption you made in place of asking, so the operator can
   course-correct. This list is required, not optional.
+- **Land work through the target repository's review and merge queue.** A branch
+  that arrives as a pull request may be gated and landed as one; a branch you
+  caused to exist must reach MERGE, which the platform verifies against the
+  recorded gate build and the remote's own tip. A closed pull request asserts a
+  landing rather than proving one, so it is never the finish line. Do not finish
+  delegated work by opening a pull request.
 - Make irreversible, remote, and cross-environment actions explicit beforehand.
   A heads-up does not replace approval when the action is outside the authorized
   scope. General engineering and direct in-pod interaction rules remain in the
@@ -1430,6 +1445,12 @@ type orchestratorPacingSnapshot struct {
 	// rather than a genuine "never nudged", because the persisted record
 	// could not be read back.
 	HistoryUnreadable bool
+	// Unreachable is true for a configured orchestrator this desktop holds no
+	// session for while its own records show one running — the population the
+	// pacer can decide for but never nudge (see orchestratorPacingUnreachable).
+	// It is a property of the record, not of a session, so it is set by the
+	// caller that knows which orchestrators have no session here.
+	Unreachable bool
 }
 
 // orchestratorPacingSnapshotFromSession reads a live session's pacing state,
@@ -1490,6 +1511,7 @@ func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfi
 		LastWhipAtUnix:         pacing.LastWhipAtUnix,
 		LastCappedAtUnix:       pacing.LastCappedAtUnix,
 		NudgeHistoryUnreadable: pacing.HistoryUnreadable,
+		PacingUnreachable:      pacing.Unreachable,
 		RestartRequired:        restartRequired,
 		RoleChanged:            roleChanged,
 	}
@@ -2249,6 +2271,12 @@ type orchestratorSpawn struct {
 // environment that is not there, which an agent reads as "not linked" rather
 // than "failed to wire".
 func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.OrchestratorEnvConfig) string {
+	// The config written below is read once, by a client that connects through it
+	// as it launches, so an environment that is merely unopened is indistinguishable
+	// to that client from one that is broken. Open the edges that are not answering
+	// before the config naming them exists; anything still dead afterwards is
+	// reported as unreachable by the probe inside the write.
+	a.repairOrchestratorMCPEdges(envs)
 	path, skipped, unreachable, err := a.writeOrchestratorMCPConfig(id, envs)
 	hostEnvs, problems := splitOrchestratorMCPHostSkips(skipped)
 	for _, skip := range skipped {
@@ -2279,26 +2307,42 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 		a.recordOrchestratorEdgeOutage(id, env.Label)
 	}
 	if len(unreachable) > 0 {
-		notice := orchestratorMCPUnreachableNotice(name, unreachable)
-		// A combined notice naming several environments has no single env to
-		// attach a deploy action to; only the common single-env case gets one.
-		if tenant, environment, ok := singleOrchestratorMCPUnreachableEnv(unreachable); ok {
-			a.emitEnvNotification("warning", tenant, environment,
-				notificationSourceOrchestratorEdgeUnreachable, notice, notificationActionDeploy)
-		} else {
-			a.emitAppNotification("warning", notice)
-		}
+		a.reportUnreachableOrchestratorEdges(name, unreachable)
 	}
 	return path
+}
+
+// reportUnreachableOrchestratorEdges warns about every linked environment whose
+// edge did not answer, one env-scoped notice each. Reported per environment
+// rather than as a single combined notice because the remedy is per environment
+// and the notice is what carries it: a combined notice names several envs, so
+// there is no one env its deploy action could target, and dropping the action
+// there left exactly the orchestrators with the most edges down — the ones that
+// need it most — with prose and nothing to click. One notice per env gives each
+// the same action, scoping, and later lifecycle clear the single-env case gets.
+// An edge whose label is not a well-formed <tenant>/<environment> still gets its
+// warning; it just has no env for an action to target.
+func (a *App) reportUnreachableOrchestratorEdges(name string, unreachable []orchestratorMCPUnreachable) {
+	for _, edge := range unreachable {
+		notice := orchestratorMCPUnreachableNotice(name, []orchestratorMCPUnreachable{edge})
+		tenant, environment, ok := orchestratorMCPUnreachableEnv(edge.Label)
+		if !ok {
+			a.emitAppNotification("warning", notice)
+			continue
+		}
+		a.emitEnvNotification("warning", tenant, environment,
+			notificationSourceOrchestratorEdgeUnreachable, notice, notificationActionDeploy)
+	}
 }
 
 // conversationToLaunch answers which conversation a spawn attaches to. A named
 // one (a restart hand-off, an operator attaching one deliberately) is taken as
 // given: it names the conversation that asked for this launch. Otherwise the
 // launch resolves what this orchestrator is on -- attached, or the derived
-// anchor -- and reports anything surprising about that answer: today, only an
-// attachment that could not be honoured, since a resume that lands somewhere
-// unexpected in silence is the whole defect.
+// anchor -- and reports anything surprising about that answer: an attachment
+// that could not be honoured, or an anchor that diverged from the conversation
+// this orchestrator's own session last reported. A resume that lands somewhere
+// unexpected in silence is the whole defect, and both are that.
 func (a *App) conversationToLaunch(id, named string) string {
 	if conversationID := strings.TrimSpace(named); conversationID != "" {
 		return conversationID
@@ -2493,6 +2537,22 @@ func orchestratorCrashResumePrompt() string {
 		"Resume the conversation exactly where it left off and carry any in-progress task through to its verified end without waiting to be asked."
 }
 
+// unreachableOrchestratorIDs names every configured orchestrator this desktop
+// cannot pace from here: one report read each, since the question is whether the
+// orchestrator's OWN hooks are reporting a session, which no in-memory state can
+// answer. See orchestratorPacingUnreachable.
+func unreachableOrchestratorIDs(configs []eruncommon.OrchestratorConfig, now time.Time) map[string]bool {
+	out := make(map[string]bool, len(configs))
+	for _, config := range configs {
+		id := strings.TrimSpace(config.ID)
+		if id == "" || !orchestratorPacingUnreachable(id, now) {
+			continue
+		}
+		out[id] = true
+	}
+	return out
+}
+
 // ListOrchestrators merges the persisted definitions (each tagged running or
 // stopped) with any transient running sessions (Investigate), id-ordered.
 func (a *App) ListOrchestrators() []orchestratorInfo {
@@ -2505,6 +2565,10 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 	// history from, so it falls back to this persisted record instead of the
 	// zero snapshot a stopped orchestrator otherwise reported unconditionally.
 	historyEntries, historyUnreadable := readOrchestratorNudgeHistoryEntries(a.deps.orchestratorNudgeHistoryPath)
+	// Gathered before the lock for the same reason the history above is: one
+	// small report read per configured orchestrator, and the result is only
+	// consulted for the ones this desktop turns out to hold no session for.
+	unreachable := unreachableOrchestratorIDs(configs, time.Now())
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := make([]orchestratorInfo, 0, len(configs)+len(a.orchestrators))
@@ -2516,6 +2580,10 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		shell := orchestratorShellSnapshot{}
 		historyEntry, _ := orchestratorNudgeHistoryEntryIn(historyEntries, config.ID)
 		pacing := orchestratorPacingSnapshotFromHistory(historyEntry, historyUnreadable)
+		// Only the stopped branch can be unpaced-but-running: a running one is
+		// a session this desktop holds, and the branch below rebuilds the
+		// snapshot from that session, which drops this flag by construction.
+		pacing.Unreachable = unreachable[config.ID]
 		restartRequired := false
 		roleChanged := false
 		if session := a.orchestrators[config.ID]; session != nil {

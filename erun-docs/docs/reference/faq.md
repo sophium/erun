@@ -55,7 +55,7 @@ Single-stage Dockerfiles, flat directory layouts, custom command logic — all w
 
 ## Can ERun manage multiple projects (tenants) on the same machine?
 
-Yes. Each tenant has its own folder under `~/.config/erun/<tenant>/` and each env has its own Kubernetes namespace. There's no shared state between tenants — open as many as your machine can host. Per-operator + per-tenant env naming patterns (`<operator>-develop`, `<operator>-hotfix`, …) are the convention for keeping things organised.
+Yes. Each tenant has its own folder under `<config-root>/<tenant>/` and each env has its own Kubernetes namespace. There's no shared state between tenants — open as many as your machine can host. Per-operator + per-tenant env naming patterns (`<operator>-develop`, `<operator>-hotfix`, …) are the convention for keeping things organised.
 
 ## How do I deal with secrets?
 
@@ -65,7 +65,7 @@ ERun uses Kubernetes' native `Secret` primitive. Your helm charts reference them
 
 ## Where does state live? What gets backed up?
 
-- **Per-user config** — `~/.config/erun/` on your machine. Back it up with the rest of your home directory.
+- **Per-user config** — `<config-root>/` on your machine. Back it up with the rest of your home directory.
 - **Per-project config** — `<repo>/.erun/config.yaml`, committed to git.
 - **In-env state** — Kubernetes PVCs in the env's namespace. Treat them as ephemeral by default: the namespace can be dropped and recreated. For data you want durable, run a stateful service (Postgres, etc.) in the env and configure its standard backup/restore.
 - **API state** — reviews, comments, builds, merge queue — lives in the hosted erun API's database. Persistence is administered there.

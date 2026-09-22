@@ -1,0 +1,3 @@
+audit: erun job start --agent claude --dry-run --environment dev --exclusive --name sweep --tenant team fix the failing tests
+mcp: team/dev edge resolved to http://<LOOPBACK>:17000/mcp
+mcp tools/call http://<LOOPBACK>:17000/mcp exec_agent '{"agent":"claude","environment":"dev","exclusive":true,"leaseTtlSeconds":900,"maxOutputBytes":16777216,"name":"sweep","prompt":"fix the failing tests","tenant":"team"}'

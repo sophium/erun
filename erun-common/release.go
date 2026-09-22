@@ -184,7 +184,7 @@ type ReleasePackagingSyncerFunc func(Context, ReleasePackagingSyncSpec) ([]Relea
 // when the bracket closes. `erun build --release` runs the same work under
 // its own `==> Building` umbrella instead of opening a second entry; dry-run
 // omits the markers and the timing so the release goldens stay stable.
-func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
+func traceReleaseUmbrella(ctx Context, version string, builds []DockerBuildSpec) (Context, func(*error)) {
 	if ctx.DryRun {
 		return ctx, func(*error) {}
 	}
@@ -195,8 +195,14 @@ func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 	}
 	started := time.Now()
 	ctx.Info(releasing)
+	// As in traceBuildUmbrella: the opening lines are the plan, the closing ones
+	// the outcome, and the run's gate-stage evidence is what tells them apart.
+	for _, line := range gateTestStagePlanLines(builds) {
+		ctx.Info(line)
+	}
 	root := newStepTiming("release", nil)
 	ctx.timing = root
+	ctx.gateTestStage = newGateTestStageProvenance()
 	return ctx, func(errp *error) {
 		var err error
 		if errp != nil {
@@ -204,6 +210,9 @@ func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 		}
 		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
+		for _, line := range gateTestStageProvenanceLines(builds, ctx.gateTestStage) {
+			ctx.Info(line)
+		}
 		if err != nil {
 			ctx.Info("==> Release failed after " + elapsed.String())
 		} else {
@@ -213,7 +222,7 @@ func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 	}
 }
 
-func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher ReleasePublisher) error {
+func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	if runGit == nil {
 		runGit = GitCommandRunner
 	}
@@ -230,11 +239,35 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	return runClaimedReleaseSpec(ctx, spec, runGit, runScript, syncPackagingChecksums, publisher)
 }
 
+// RunReleaseSpec marks a release in source control and nothing else. It
+// resolves the version, stamps it into charts and package-manager metadata,
+// commits it, tags it locally, pushes the tag and branches, syncs packaging
+// checksums, and prepares the next patch -- and it never builds, publishes, or
+// verifies an artifact.
+//
+// Build and publish are a different concern with different owners:
+// `erun build --release` composes this same stamp/tag work with the build and
+// the push, and `erun push --version <v>` republishes what a build produced.
+// So this exits 0 having published nothing, which is not a failure and not
+// corruption: a tag whose artifacts never landed names a dead version, and
+// because `erun deploy` never builds, a dead version is not deployable by
+// accident. If the release's source is wrong, fix it and release again.
+func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) error {
+	return runReleaseSpec(ctx, spec, runGit, runScript, nil, nil)
+}
+
 // runClaimedReleaseSpec is the release's actual work, run only once
 // runReleaseSpec has claimed the version being released.
-func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher ReleasePublisher) error {
+//
+// publisher may be nil. erun release marks source control and nothing else, so
+// it reaches these stages without one, and everything the publish owns is
+// skipped: the refusal to announce a version whose resolved images this run
+// would not publish, the pre-spend base-branch and disk-headroom checks, and
+// the build+publish itself. That is why a release's tag is a record of the
+// source it points at and never a claim that artifacts exist for it.
+func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	traceReleaseSpec(ctx, spec)
-	if err := ensureReleasePublishesResolvedImages(spec, publisher); err != nil {
+	if err := ensureReleaseCouldPublish(spec, publisher); err != nil {
 		return err
 	}
 	if err := ensureReleaseWorktreeClean(ctx, spec.ProjectRoot); err != nil {
@@ -244,10 +277,7 @@ func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	if err := runReleaseStages(ctx, spec, spec.Stages, runGit, syncPackagingChecksums); err != nil {
 		return err
 	}
-	if err := ensureReleaseReadyToPublish(ctx, spec, runGit); err != nil {
-		return err
-	}
-	if err := runReleasePublication(ctx, publisher); err != nil {
+	if err := publishClaimedRelease(ctx, spec, runGit, publisher); err != nil {
 		return err
 	}
 	if err := runReleaseStages(ctx, spec, spec.PostPublishStages, runGit, syncPackagingChecksums); err != nil {
@@ -258,6 +288,36 @@ func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	}
 
 	return runScriptSpecs(ctx, spec.LinuxReleases, runScript)
+}
+
+// ensureReleaseCouldPublish refuses a release whose resolved images nothing in
+// this run would publish. A nil publisher means the caller is marking source
+// control only (see RunReleaseSpec), which publishes nothing by definition and
+// so has no such mismatch to catch.
+func ensureReleaseCouldPublish(spec ReleaseSpec, publisher *ReleasePublisher) error {
+	if publisher == nil {
+		return nil
+	}
+	return ensureReleasePublishesResolvedImages(spec, *publisher)
+}
+
+// publishClaimedRelease runs the release's own publication, or reports that
+// there was none. With a publisher it first runs the checks that must pass
+// immediately before the build spends anything; without one -- erun release,
+// which marks source control only -- it says what did not happen, so a release
+// that exits 0 having published nothing cannot read as one that published
+// something.
+func publishClaimedRelease(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, publisher *ReleasePublisher) error {
+	if publisher == nil {
+		if spec.Version != "" {
+			ctx.Info("release version: " + spec.Version + " (source control only; no artifacts were built or published)")
+		}
+		return nil
+	}
+	if err := ensureReleaseReadyToPublish(ctx, spec, runGit); err != nil {
+		return err
+	}
+	return runReleasePublication(ctx, *publisher)
 }
 
 // ensureReleaseReadyToPublish runs the checks that must pass immediately

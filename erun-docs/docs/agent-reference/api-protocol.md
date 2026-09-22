@@ -43,6 +43,19 @@ ERun resolves the tenant from the token itself, not from the request path. Two d
 
 A single issuer can therefore map to **many** tenants (org-scoped), and multiple distinct issuers can map to the **same** tenant. The resolution key `(iss, org)` is kept unambiguous by a `UNIQUE NULLS NOT DISTINCT (issuer, org_field_value)` constraint. See the [database schema guidance](https://github.com/sophium/erun/blob/main/erun-backend/erun-backend-db/AGENTS.md) for the full table contract.
 
+### Login names under an org-scoped issuer {#org-scoped-login-names}
+
+An org-scoped issuer partitions tenants by `(iss, org)`; the login names inside it are partitioned the same way. The erun-shipped Zitadel enables its Domain Policy's `user_login_must_be_domain` and `validate_org_domains`, so a login name is unique **per organization** rather than per instance: Zitadel suffixes each login name with its own organization's primary domain, and an organization cannot claim a domain it does not control.
+
+| organization | login name supplied | whom the instance holds it as |
+|---|---|---|
+| `frs` | `login-client` | `login-client@frs.auth.erunpaas.com` |
+| `globex` | `login-client` | `login-client@globex.auth.erunpaas.com` |
+
+Two organizations can therefore hold the same bare login name without colliding — a cross-organization collision is structurally impossible, not avoided by naming discipline. The name stays unique **within** one organization: suffixing does not stop two users in the *same* organization wanting the same name, and that collision is reported as `409 USERNAME_TAKEN` rather than as the IdP's own conflict text (see [A taken login name](/agent-reference/identity-administration#username-taken)).
+
+Zitadel reads both settings when core first initialises the instance, so they describe a freshly provisioned platform. An instance that already exists does not have them re-applied, and enabling them there is deliberate operator work rather than a deploy step — it changes the login name every existing account signs in with, which is the intended outcome rather than a regression to roll back.
+
 ### Token verification algorithm
 
 For every authenticated request:
@@ -383,7 +396,7 @@ A newly-registered environment is `registered` — the row exists but nothing is
 
 **Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set by the operations-only [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) endpoint (below). Both the count and the cap are scoped explicitly to the tenant the write targets — the caller's own by default, or the `tenantId` named above for an operations caller — read off the security context rather than left to row-level security alone — the same operations-caller distinction the note under [First-identity bootstrap](#sign-in-oidc) above explains. **Environments mid-teardown do not count.** The comparison excludes rows at `deleting` and `deletion-blocked`: the delete that would free the slot is the same call that is stuck, so counting a wedged teardown would lock a tenant out of its own allowance. The aggregate resource budget below counts differently — it uses the tenant's runtime-environment count as-is, mid-teardown rows included.
 
-**Per-environment resource-cap floor.** For a `runtime` environment, the endpoint also checks the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the `erun-devops` chart's own minimum requirement — cpu `8000m`, memory `17832Mi`, storage `72Gi`, the pod's `erun-devops` and `erun-dind` containers summed together, since a Kubernetes `ResourceQuota` counts every container in the pod — and rejects with `409` if the tenant's cap is configured below it, naming the shortfall. This catches a knowable failure before it happens: a namespace `ResourceQuota` sized under the stock runtime pod's own footprint would otherwise let the create call succeed and only fail later, when Kubernetes refuses to admit the pod. [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) re-checks the same floor, since an operator can lower a tenant's quota after the environment already exists. See [Quotas](/concepts/hosted-platform#quotas) for how the caps are enforced and derived.
+**Per-environment resource-cap floor.** For a `runtime` environment, the endpoint also checks the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the `erun-devops` chart's own minimum requirement — cpu `16000m`, memory `36864Mi`, storage `72Gi`, the pod's `erun-devops` and `erun-dind` containers summed together, since a Kubernetes `ResourceQuota` counts every container in the pod — and rejects with `409` if the tenant's cap is configured below it, naming the shortfall. This catches a knowable failure before it happens: a namespace `ResourceQuota` sized under the stock runtime pod's own footprint would otherwise let the create call succeed and only fail later, when Kubernetes refuses to admit the pod. [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) re-checks the same floor, since an operator can lower a tenant's quota after the environment already exists. See [Quotas](/concepts/hosted-platform#quotas) for how the caps are enforced and derived.
 
 **Aggregate resource budget (#1113).** For a `runtime` environment, the endpoint also projects the tenant's total CPU/memory/storage if this environment is admitted — `(existing runtime environment count + 1) × the per-environment cap` — against `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb`, and rejects with `409` naming which resource and by how much the projection would exceed the budget. This is the separate tenant-wide ceiling the per-environment floor above does not cover: raising `maxEnvironments` alone lets a tenant multiply its total footprint with nothing capping the sum. [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) re-checks it too, using the count as-is (a redeploy does not add a new environment). See [Quotas](/concepts/hosted-platform#quotas) for the full budget model.
 
@@ -391,7 +404,7 @@ A newly-registered environment is `registered` — the row exists but nothing is
 
 **Server-side deploy executor.** When configured, the backend deploys the runtime chart itself: it runs the deploy as a Kubernetes `Job` in the tenant's `<tenant>-devops` runtime image (which carries `erun` + `helm` + `kubectl`) under a curated `<tenant>-env-provisioner` ClusterRole ServiceAccount (see [Provisioner RBAC](/concepts/hosted-platform#provisioner-rbac) — not `cluster-admin`), invoking `erun deploy <tenant> <env> --version <runtimeVersion>` (plus `--max-cpu`/`--max-memory`/`--max-storage` when the tenant's quota resolves — see [Quotas](/concepts/hosted-platform#quotas)) and, when the platform is configured for it, chaining `erun expose <tenant> <env> mcp --ip <ip> --skip-if-unconfigured` (see [Automatic exposure](/concepts/hosted-platform#automatic-exposure)) — and watches the Job to completion — succeeded → `running`, failed → `failed` with the reason on `provisionError` (a failed expose fails the whole Job, so the environment is never recorded `running` while unreachable). `stop`/`delete` run the same way with `erun stop`/`erun delete -y` (see [`POST .../stop`](#stop-endpoint) and [`DELETE`](#delete-endpoint) below). A durable workflow (DBOS) wraps deploy, keyed by environment id, so a control-plane restart resumes an in-flight deploy rather than double-deploying. `stop` still runs synchronously within the request (its Job is a short `kubectl scale`), but `delete` no longer does: a durable workflow wraps it too, keyed by the delete **attempt**, because a namespace stuck on an unsatisfiable finalizer can wedge for as long as Kubernetes is willing to sit in `Terminating` — see [`DELETE`](#delete-endpoint). The deploy image is `<registry>/<tenant>-devops:<runtimeVersion>`.
 
-**Bootstrapping the Job's own environment.** The Job's `command` replaces the image's entrypoint, so none of the entrypoint's usual setup runs — no kubeconfig, and no `~/.config/erun/<tenant>/<env>/config.yaml` for `erun deploy` to resolve (a freshly-registered environment was never baked into any image). The Job's command therefore seeds both explicitly before running `erun deploy`: a minimal `type: runtime` config for the tenant and environment, and a kubeconfig context — built from the pod's own mounted ServiceAccount token when the environment placed into the platform's own cluster, or (see [Placement](/concepts/hosted-platform#single-cluster-placement)) `kubectl config` commands authenticating against the placed context's own admin token when it named one. This keeps `erun deploy` itself an unchanged pure primitive — the Job is the caller supplying the environment's shape explicitly, the primitive still only ever consumes on-disk config exactly as it always has.
+**Bootstrapping the Job's own environment.** The Job's `command` replaces the image's entrypoint, so none of the entrypoint's usual setup runs — no kubeconfig, and no `<config-root>/<tenant>/<env>/config.yaml` for `erun deploy` to resolve (a freshly-registered environment was never baked into any image). The Job's command therefore seeds both explicitly before running `erun deploy`: a minimal `type: runtime` config for the tenant and environment, and a kubeconfig context — built from the pod's own mounted ServiceAccount token when the environment placed into the platform's own cluster, or (see [Placement](/concepts/hosted-platform#single-cluster-placement)) `kubectl config` commands authenticating against the placed context's own admin token when it named one. This keeps `erun deploy` itself an unchanged pure primitive — the Job is the caller supplying the environment's shape explicitly, the primitive still only ever consumes on-disk config exactly as it always has.
 
 **What `provisionError` carries on a failed deploy.** The failure happens inside the Job, so the executor reads it back before the Job's TTL reaps the pod and records it verbatim under a `deploy job failed for version <version>:` prefix. Three sources, in order — the first that yields anything wins:
 
@@ -871,8 +884,8 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
   "plan": [
     "provision: tenant acme (resolved from token)",
     "quota: tenant has 2 of 10 environments — within quota",
-    "quota: namespace capped at 8000m CPU / 17832Mi memory / 72Gi storage",
-    "quota: 2 runtime environment(s) at that cap project to 16000m CPU / 35664Mi memory / 144Gi storage against a tenant budget of 80000m / 178320Mi / 720Gi — within budget",
+    "quota: namespace capped at 16000m CPU / 36864Mi memory / 72Gi storage",
+    "quota: 2 runtime environment(s) at that cap project to 32000m CPU / 73728Mi memory / 144Gi storage against a tenant budget of 160000m / 368640Mi / 720Gi — within budget",
     "context: deploys into this platform's own cluster (v1 single-cluster placement)",
     "namespace: would create acme-prod",
     "register: would persist environment prod (runtime) in tenant acme referencing context ",
@@ -1143,7 +1156,7 @@ This endpoint requires the caller to already know the enrollee's `issuer`/`subje
 | `400` | `username` is empty, or the body is not valid JSON. | Send a non-empty `username`. |
 | `403` | `tenantId` (or `?tenantId=`) names a different tenant than the caller's own, and the caller's resolved tenant is not `OPERATIONS`. | Omit `tenantId` to act on your own tenant, or call from an operations-tenant token. |
 | `404` | `POST /v1/users`: a `roleIds` entry does not name a role in the target tenant. | Fix the role id, or create the role first via [`POST /v1/roles`](#roles-endpoints). |
-| `409` `USERNAME_TAKEN` | `POST /v1/users`: a *different* identity already holds that `username` in the target tenant (`users_tenant_username_key`). Re-enrolling the *same* `issuer`/`subject` that already holds a username is never this — see the `200`/`alreadyEnrolled` response above. | Use a different username, or omit `tenantId` if you meant your own tenant. |
+| `409` `USERNAME_TAKEN` | `POST /v1/users`: a *different* identity already holds that `username` in the target tenant (`users_tenant_username_key`). Re-enrolling the *same* `issuer`/`subject` that already holds a username is never this — see the `200`/`alreadyEnrolled` response above. **The code is shared with identity enrollment**, which reports it for a taken *IdP login name* and carries its own message; the two concern different fields, so tell them apart by `message`, not by the code (see [A taken login name](/agent-reference/identity-administration#username-taken)). | Use a different username, or omit `tenantId` if you meant your own tenant. |
 | `409` `UNRESOLVABLE_ISSUER_MAPPING` | `POST /v1/users` with `issuer`/`subject`: the target tenant's mapping for that issuer is one **no token can resolve through** — its org value contradicts the issuer's org-scoping mode, or the tenant has no mapping for that issuer at all. The enrollment would produce a user who can never sign in. The whole transaction rolls back, so no `users` row is left behind. | Repair the tenant's mapping first ([`PATCH /v1/tenant-issuers`](#patch-v1tenant-issuers), or check it with [`GET /v1/tenant-issuers`](#get-v1tenant-issuers)); a tenant in this state also reports `resolvable: false` on [`GET /v1/tenants`](#get-v1tenants). |
 | `409` `CONFLICT` | `POST /v1/users`: a uniqueness violation this endpoint does not recognize as either of the above. | Retry is unlikely to help without changing the request; treat as a server-side gap and report it. |
 
@@ -1305,7 +1318,8 @@ The half-landed-failure shape mirrors `POST /v1/identity/users` exactly: a failu
 | `400` | `token`/`username`/`password` empty, the body is not valid JSON, or `email` was supplied and does not match the invite's pinned email (case-insensitive). | Send all three required fields; match the pinned email exactly or omit it. |
 | `404` | `token` does not name any invite that ever existed (or it was revoked — revocation deletes the row). | Ask whoever invited you for a new link. |
 | `410` | The invite exists but has expired, or has already been consumed (single-use). | Ask whoever invited you for a new link. |
-| Forwarded from Zitadel | The IdP identity creation itself failed (e.g. the password does not meet the org's complexity policy). | The response body carries Zitadel's own message; act on it directly. |
+| `409` `USERNAME_TAKEN` | The chosen login name is already held by another user **in the invite's organization** — see [A taken login name](/agent-reference/identity-administration#username-taken). | Pick a different login name. This token is spent by the time the identity is created, so the same link cannot be reused — ask whoever invited you for a new one. |
+| Forwarded from Zitadel | The IdP identity creation itself failed for another reason (e.g. the password does not meet the org's complexity policy). | The response body carries Zitadel's own message; act on it directly. |
 
 **Not audited.** Unlike `POST`/`GET`/`DELETE /v1/invites` above (which run through the authenticated middleware that writes `audit_events` for every protected request), this endpoint is registered outside that middleware — the same as [`GET /v1/platform`](#platform-endpoint) — because there is no authenticated caller identity to attribute the row to. The invite's own `created_by_user_id` plus its `consumed_at` timestamp is today's record of who accepted it and when; a dedicated audit event for acceptance is a reasonable follow-up, not yet implemented.
 
@@ -1319,11 +1333,11 @@ Sets a tenant's full quota row — the environment-count cap the [`POST /v1/envi
 // PUT /v1/tenants/019a7fa5-…/quota body
 {
   "maxEnvironments": 50,          // required — the env-count cap (>= 0); 0 blocks all new environments
-  "maxCpuMillicores": 8000,       // required — per-environment namespace CPU ceiling in millicores (> 0)
-  "maxMemoryMb": 17832,           // required — per-environment namespace memory ceiling in MiB (> 0)
+  "maxCpuMillicores": 16000,      // required — per-environment namespace CPU ceiling in millicores (> 0)
+  "maxMemoryMb": 36864,           // required — per-environment namespace memory ceiling in MiB (> 0)
   "maxStorageGb": 72,             // required — per-environment namespace storage ceiling in GiB (> 0)
-  "maxTotalCpuMillicores": 80000, // required — aggregate tenant-wide CPU budget in millicores (> 0)
-  "maxTotalMemoryMb": 178320,     // required — aggregate tenant-wide memory budget in MiB (> 0)
+  "maxTotalCpuMillicores": 160000, // required — aggregate tenant-wide CPU budget in millicores (> 0)
+  "maxTotalMemoryMb": 368640,      // required — aggregate tenant-wide memory budget in MiB (> 0)
   "maxTotalStorageGb": 720        // required — aggregate tenant-wide storage budget in GiB (> 0)
 }
 
@@ -1331,18 +1345,18 @@ Sets a tenant's full quota row — the environment-count cap the [`POST /v1/envi
 {
   "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
   "maxEnvironments": 50,
-  "maxCpuMillicores": 8000,
-  "maxMemoryMb": 17832,
+  "maxCpuMillicores": 16000,
+  "maxMemoryMb": 36864,
   "maxStorageGb": 72,
-  "maxTotalCpuMillicores": 80000,
-  "maxTotalMemoryMb": 178320,
+  "maxTotalCpuMillicores": 160000,
+  "maxTotalMemoryMb": 368640,
   "maxTotalStorageGb": 720,
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:05:00Z"
 }
 ```
 
-**What the resource caps mean.** `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` are a **per-environment namespace ceiling**, not an aggregate tenant budget: every `runtime` environment this tenant provisions gets its own Kubernetes `ResourceQuota` + `LimitRange` capped at these same values (see [Quotas](/concepts/hosted-platform#quotas)), so a tenant with ten environments can use up to this cap in *each* of the ten namespaces, not this cap split across all ten. `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` are the separate **aggregate tenant-wide budget**: since every environment gets the identical per-environment cap, admission projects `(existing runtime environment count + 1) × the per-environment cap` against this budget and refuses a create that would exceed it (a redeploy uses the count as-is, since it does not add one). Absent a `tenant_quotas` row, a tenant gets the default cap: `maxEnvironments: 10`, `maxCpuMillicores: 8000`, `maxMemoryMb: 29396`, `maxStorageGb: 72` — sized to fit the `erun-devops` chart's own default runtime pod summed across **both** its containers (`erun-devops` cpu limit `4` + memory limit `8916Mi`, plus the `erun-dind` sidecar at cpu limit `4` + memory limit `20Gi` — the sidecar's own default is larger, since every image build's `make check` gate runs there) plus its three default PVCs (`2Gi + 50Gi + 20Gi = 72Gi`) — and `maxTotalCpuMillicores: 80000`, `maxTotalMemoryMb: 293960`, `maxTotalStorageGb: 720` (`maxEnvironments` × the per-environment defaults, so the default budget accommodates the default environment-count cap at the default per-environment size). Setting either resource cap below this floor is accepted here (an operator may deliberately want a tenant that cannot provision runtime environments yet), but the next [`POST /v1/environments`](#post-v1environments) or [`POST .../deploy`](#deploy-endpoint) for that tenant then refuses with `409` rather than letting the create/deploy proceed toward a pod Kubernetes will never admit.
+**What the resource caps mean.** `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` are a **per-environment namespace ceiling**, not an aggregate tenant budget: every `runtime` environment this tenant provisions gets its own Kubernetes `ResourceQuota` + `LimitRange` capped at these same values (see [Quotas](/concepts/hosted-platform#quotas)), so a tenant with ten environments can use up to this cap in *each* of the ten namespaces, not this cap split across all ten. `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` are the separate **aggregate tenant-wide budget**: since every environment gets the identical per-environment cap, admission projects `(existing runtime environment count + 1) × the per-environment cap` against this budget and refuses a create that would exceed it (a redeploy uses the count as-is, since it does not add one). Absent a `tenant_quotas` row, a tenant gets the default cap: `maxEnvironments: 10`, `maxCpuMillicores: 16000`, `maxMemoryMb: 36864`, `maxStorageGb: 72` — sized to fit the `erun-devops` chart's own default runtime pod summed across **both** its containers (`erun-devops` cpu limit `4` + memory limit `16384Mi`, plus the `erun-dind` sidecar at cpu limit `12` + memory limit `20Gi` — the sidecar's own default is larger, since every image build's `make check` gate runs there) plus its three default PVCs (`2Gi + 50Gi + 20Gi = 72Gi`) — and `maxTotalCpuMillicores: 160000`, `maxTotalMemoryMb: 368640`, `maxTotalStorageGb: 720` (`maxEnvironments` × the per-environment defaults, so the default budget accommodates the default environment-count cap at the default per-environment size). Setting either resource cap below this floor is accepted here (an operator may deliberately want a tenant that cannot provision runtime environments yet), but the next [`POST /v1/environments`](#post-v1environments) or [`POST .../deploy`](#deploy-endpoint) for that tenant then refuses with `409` rather than letting the create/deploy proceed toward a pod Kubernetes will never admit.
 
 **Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
@@ -1364,11 +1378,11 @@ Returns the caller's own tenant's full quota row by default — the identical sh
 {
   "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
   "maxEnvironments": 10,
-  "maxCpuMillicores": 8000,
-  "maxMemoryMb": 17832,
+  "maxCpuMillicores": 16000,
+  "maxMemoryMb": 36864,
   "maxStorageGb": 72,
-  "maxTotalCpuMillicores": 80000,
-  "maxTotalMemoryMb": 178320,
+  "maxTotalCpuMillicores": 160000,
+  "maxTotalMemoryMb": 368640,
   "maxTotalStorageGb": 720,
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:05:00Z"
@@ -1393,8 +1407,8 @@ Lists the caller's tenant's metering events, most recent first — the usage-met
     "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
     "environmentId": "019a7fa5-c2c0-7c55-bc70-714873a71f30",
     "eventType": "environment_provisioned",   // "environment_provisioned" | "environment_stopped" | "environment_deleted"
-    "cpuMillicores": 8000,    // the namespace cap applied at the time — only "environment_provisioned" carries these
-    "memoryMb": 17832,
+    "cpuMillicores": 16000,   // the namespace cap applied at the time — only "environment_provisioned" carries these
+    "memoryMb": 36864,
     "storageGb": 72,
     "createdAt": "2026-06-24T10:00:00Z"
   }
@@ -1435,6 +1449,16 @@ Every `401` the auth layer produces carries a JSON `{code, message}` envelope (t
 | `403` | *(none — plain text)* | `Forbidden` | Authenticated, but the user's roles/permissions do not allow the request's method + path. | Grant the needed role/permission (admin action). |
 
 The audit trail records every authorized request with `issuer`, `sub`, org, and timestamp. Rejected requests (missing/invalid token, unknown issuer, unresolved tenant, unenrolled subject, denied permission) are **not** audited — see [the audit log spec](/agent-reference/audit-log).
+
+#### Request-level validation errors
+
+Past authentication, a request whose own inputs cannot be used is answered as a client error, never as a `500`. Every route carrying an id in its path shares one code:
+
+| Status | `code` | Example `message` | Condition | Recovery |
+|---|---|---|---|---|
+| `400` | `INVALID_PATH_ID` | `path parameter "review_id" must be a UUID such as 01a01b39-0000-7000-8000-000000000000; got "not-a-uuid"` | A path parameter naming an externally visible id — every `/v1/<resource>/{…_id}` segment — is not a UUID. Both the parameter's name and the value received are in the message. The two path parameters that are deliberately not ids are excluded: `{alias}` (a cloud-provider credential's own name) and `{external_id}` (the identity provider's subject identifier). | Re-send the request with the id as it was returned to you. A typo or a truncated paste is the cause; this code never reports anything about the platform's own state. |
+
+Only the **spelling** is judged, not the version or existence: a well-formed id that names nothing is a `404`, not a `400`, so the two answers a caller acts on differently stay distinct. `00000000-0000-0000-0000-000000000000` is well-formed and is the ordinary absent-id probe; brace-, `urn:`- and unhyphenated UUID spellings are not accepted. The guard runs *after* authentication, so an unauthenticated caller gets `401` for every id shape and whether a given id parses is never observable before authorization.
 
 #### Structured error codes `(Planned.)`
 

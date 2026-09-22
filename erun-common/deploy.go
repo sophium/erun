@@ -1152,7 +1152,7 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	versionOverride = resolveDeployVersionOverride(target, versionOverride)
 
-	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	resolvedTarget, err := resolveDeployTarget(ctx.Command, ctx.CommandScopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -1235,7 +1235,7 @@ func resolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 
-	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	resolvedTarget, err := resolveDeployTarget(ctx.Command, ctx.CommandScopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return nil, err
 	}
@@ -1277,10 +1277,15 @@ func finalizeRuntimeChartSpecs(ctx Context, target DeployTarget, resolvedTarget 
 			return err
 		}
 	}
-	return guardInPodLocalAgentRuntimeDeploy(os.Getenv, resolvedTarget, specs)
+	return guardInPodRuntimeDeploy(os.Getenv, resolvedTarget, specs)
 }
 
 func resolveDeploySpecsForResolvedTarget(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, resolvedTarget OpenResult, target DeployTarget, buildOrchestration bool, runtimeImageOverride string) ([]DeploySpec, error) {
+	// Resolve the credential this env declared for its own runtime pod before any
+	// chart probe runs: the tenant-chart check below reads a registry ahead of the
+	// runtime-chart ladder, and both must authenticate rather than probe
+	// anonymously and be refused. Idempotent, so the ladder's own call is fine.
+	configureInPodDeclaredRegistryAuth(ctx, resolvedTarget)
 	if resolvedTarget.RemoteRepo() {
 		return resolvePublishedDeploySpecs(ctx, store, findProjectRoot, resolvedTarget, target)
 	}
@@ -1959,8 +1964,8 @@ func ResolveCurrentDeploySpecsForDockerTarget(ctx Context, store BuildDeployStor
 	return resolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, deployTarget, true)
 }
 
-func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
-	result, err := resolveDeployTargetOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+func resolveDeployTarget(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
+	result, err := resolveDeployTargetOpenResult(command, scopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return OpenResult{}, err
 	}
@@ -1970,7 +1975,7 @@ func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, r
 	return result, nil
 }
 
-func resolveDeployTargetOpenResult(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
+func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) (OpenResult, error) {
 	store, findProjectRoot, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	if strings.TrimSpace(target.Tenant) != "" || strings.TrimSpace(target.Environment) != "" || strings.TrimSpace(target.RepoPath) != "" {
@@ -1992,8 +1997,10 @@ func resolveDeployTargetOpenResult(store DeployStore, findProjectRoot ProjectFin
 	}
 
 	return resolveOpenWithFinder(store, findProjectRoot, OpenParams{
-		UseDefaultTenant:      true,
-		UseDefaultEnvironment: true,
+		UseDefaultTenant:          true,
+		UseDefaultEnvironment:     true,
+		Command:                   command,
+		CommandScopesTenantByFlag: scopesTenantByFlag,
 	})
 }
 
@@ -2025,7 +2032,9 @@ func ResolveDeployTargetScope(store DeployStore, findProjectRoot ProjectFinderFu
 	if tenant != "" && environment != "" {
 		return tenant, environment
 	}
-	resolved, err := resolveDeployTarget(store, findProjectRoot, nil, nil, nil, target)
+	// A nameless command on purpose: this is diagnostics that degrade quietly
+	// rather than fail, so it has no failure message to name a recovery in.
+	resolved, err := resolveDeployTarget("", false, store, findProjectRoot, nil, nil, nil, target)
 	if err != nil {
 		return tenant, environment
 	}
@@ -3647,15 +3656,20 @@ func isHelmChartNotFoundMessage(output string) bool {
 // tracePodWatchAction records the watcher action in the dry-run trace so the
 // --dry-run contract holds: every action a real run would take must appear
 // in the trace. The watcher itself only fires in real-run mode (DeployHelmChart
-// runs after RunHelmDeploy's DryRun early-return), but the trace here lets a
-// reader audit the plan before executing it.
+// runs after RunHelmDeploy's DryRun early-return), so under --dry-run the
+// wording stays conditional ("would watch") rather than asserting a watch that
+// never started.
 func tracePodWatchAction(ctx Context, releaseName, namespace, kubernetesContext string) {
 	releaseName = strings.TrimSpace(releaseName)
 	namespace = strings.TrimSpace(namespace)
 	if releaseName == "" || namespace == "" {
 		return
 	}
-	descriptor := "deploy: watching pods in " + namespace
+	verb := "watching"
+	if ctx.DryRun {
+		verb = "would watch"
+	}
+	descriptor := "deploy: " + verb + " pods in " + namespace
 	if c := strings.TrimSpace(kubernetesContext); c != "" {
 		descriptor += " on context " + c
 	}

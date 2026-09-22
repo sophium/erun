@@ -777,6 +777,25 @@ func TestActivity(t *testing.T) {
 		golden.Equal(t, "activity/lease_help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("lease_take_help_names_what_an_exclusive_claim_actually_refuses", func(t *testing.T) {
+		// An exclusive take defaults to the "worktree" scope, and a job start
+		// consults only the "environment" scope. Help saying a second agent job
+		// is refused by a worktree claim describes a guard that does not fire:
+		// an orchestrator that takes one over MCP and starts a second job sees
+		// no refusal and reads that silence as protection.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"activity", "lease", "take", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "already working the same worktree is refused") {
+			t.Errorf("help must not claim a worktree-scoped claim refuses a second agent job, which only an environment-scoped claim does; got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "environment") {
+			t.Errorf("help must name the scope a job start actually consults; got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("lease_take_list_and_release", func(t *testing.T) {
 		// The lease lifecycle a wrapper drives: take before the long job, list to
 		// see what is holding the environment, release when it finishes. The
@@ -1352,6 +1371,25 @@ func TestActivityAISession(t *testing.T) {
 		}
 		if rows[0]["sessionId"] != "a-session" || rows[1]["sessionId"] != "b-session" {
 			t.Fatalf("expected sessions sorted by id, got %v", rows)
+		}
+	})
+
+	// status_json_reports_empty_array_when_none_recorded pins the actual JSON
+	// text emitted for an environment with no recorded sessions: it must be
+	// "[]", never "null" - a caller doing result.length or
+	// ranging over the field must not have to special-case this one command.
+	// json.Unmarshal happily decodes "null" into a nil slice with no error,
+	// so statusJSON's []map[string]any helper cannot tell the two apart;
+	// this scenario asserts on the raw stdout text instead.
+	t.Run("status_json_reports_empty_array_when_none_recorded", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"activity", "ai-session", "status", "--tenant", "team", "--environment", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("status --json on an untouched environment: exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if got := strings.TrimSpace(result.Stdout); got != "[]" {
+			t.Fatalf("want status --json to print [] for no recorded sessions, got %q", got)
 		}
 	})
 

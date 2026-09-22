@@ -1,0 +1,2 @@
+audit: erun build --dry-run --e2e
+build deploy is not supported for project build scripts

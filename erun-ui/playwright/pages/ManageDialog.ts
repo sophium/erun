@@ -49,6 +49,12 @@ export class ManageDialog {
     return this.locator().getByRole('alert').filter({ hasText: 'Pending redeploy' });
   }
 
+  // The banner's own deploy action. It reads the same checklist selection as the
+  // Runtime tab's Deploy, so an emptied checklist refuses it too.
+  redeployNowButton(): Locator {
+    return this.redeployBanner().getByRole('button', { name: 'Redeploy now' });
+  }
+
   // Converge on the banner actually having rendered before asserting on it.
   // The save click and the banner's appearance are two separate steps (a save
   // round-trip, then a re-render), so a bare `expect(...).toBeVisible()`
@@ -257,6 +263,19 @@ export class ManageDialog {
     return this.page.locator('#environment-config-save-deploy-components');
   }
 
+  // The notice under the version row stating that every chart in the checklist is
+  // unchecked, so a disabled Deploy names its reason rather than stopping
+  // silently.
+  deployComponentsEmptyNotice(): Locator {
+    return this.page.locator('#environment-config-deploy-components-empty-notice');
+  }
+
+  // The same statement rendered inside the open version panel, which covers the
+  // row above it while the operator is unchecking the last chart.
+  deployComponentsEmptyPanelNotice(): Locator {
+    return this.page.locator('#environment-config-deploy-components-empty-notice-panel');
+  }
+
   // The "Runtime chart" field states the chart coordinate -- which chart the
   // runtime is installed from -- separately from the version, which names the
   // image. Empty means "the chart published with the deployed version".
@@ -363,6 +382,21 @@ export class ManageDialog {
 
   jobsUnreachableReconnectButton(): Locator {
     return this.locator().getByTestId('manage-jobs-unreachable-reconnect');
+  }
+
+  // The read was refused -- a pod timeout, an auth or parse failure -- rather
+  // than the runtime being unreachable. Its own surface, with its own retry;
+  // scoped by its message so it is never confused with the unreachable card's
+  // role="status" above (the two can never render together, but the assertion
+  // should still say which one it is looking at).
+  jobsReadFailure(): Locator {
+    return this.locator()
+      .getByRole('alert')
+      .filter({ hasText: "Could not read this environment's jobs" });
+  }
+
+  jobsReadFailureRetry(): Locator {
+    return this.locator().getByTestId('manage-jobs-retry');
   }
 
   jobRows(): Locator {

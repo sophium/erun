@@ -58,6 +58,18 @@ case "$1 $2 $3" in
 	exit "${STUB_START_STATUS:-0}"
 	;;
 "exec job await")
+	# A test that sets STUB_AWAIT_STATUS_QUEUE (one exit status per line) gets a
+	# different answer on each successive await call, popped in order -- this is
+	# what lets a test prove the AGENT_GATE_AWAIT_VERDICT=1 retry loop actually
+	# re-awaits the same job across multiple calls instead of trusting the
+	# first one. Falls back to the fixed STUB_AWAIT_STATUS every existing case
+	# already uses when no queue is set.
+	if [ -n "${STUB_AWAIT_STATUS_QUEUE:-}" ] && [ -s "$STUB_AWAIT_STATUS_QUEUE" ]; then
+		line=$(head -n1 "$STUB_AWAIT_STATUS_QUEUE")
+		tail -n +2 "$STUB_AWAIT_STATUS_QUEUE" >"${STUB_AWAIT_STATUS_QUEUE}.tmp"
+		mv "${STUB_AWAIT_STATUS_QUEUE}.tmp" "$STUB_AWAIT_STATUS_QUEUE"
+		exit "$line"
+	fi
 	exit "${STUB_AWAIT_STATUS:-0}"
 	;;
 "exec job output")
@@ -65,6 +77,23 @@ case "$1 $2 $3" in
 	exit "${STUB_OUTPUT_STATUS:-0}"
 	;;
 "exec job status")
+	# A test that sets STUB_STATUS_QUEUE (one "<exitstatus>|<line>" per line)
+	# gets a different answer on each successive status call, popped in order.
+	# The wrapper probes the record once before deciding whether to replay or
+	# start, then again when a wait expires, so proving it reads the job's own
+	# record *after* a timeout needs those two calls to disagree -- otherwise
+	# the same answer would have to serve both.
+	if [ -n "${STUB_STATUS_QUEUE:-}" ] && [ -s "$STUB_STATUS_QUEUE" ]; then
+		entry=$(head -n1 "$STUB_STATUS_QUEUE")
+		tail -n +2 "$STUB_STATUS_QUEUE" >"${STUB_STATUS_QUEUE}.tmp"
+		mv "${STUB_STATUS_QUEUE}.tmp" "$STUB_STATUS_QUEUE"
+		queue_status="${entry%%|*}"
+		queue_line="${entry#*|}"
+		if [ "$queue_status" -eq 0 ]; then
+			printf '%s\n' "$queue_line"
+		fi
+		exit "$queue_status"
+	fi
 	if [ "${STUB_STATUS_STATUS:-1}" -eq 0 ]; then
 		printf '%s\n' "${STUB_STATUS_LINE:-}"
 	fi
@@ -841,6 +870,194 @@ stub_erun "${case_dir}/bin"
 	esac
 )
 
+# --- with AGENT_GATE_AWAIT_VERDICT=1, a gate whose wait times out twice
+# before it actually passes must report the real pass, not the intermediate
+# timeout -- `make` collapses any nonzero recipe exit to its own generic exit
+# 2, so a caller reading only `make check`'s own exit status (rather than
+# re-invoking this script or the named inner job id) cannot tell a timeout
+# from a real failure once this script reports 124 for a job that was,
+# moments later, actually green.
+case_dir="${work_root}/await-verdict-eventual-pass"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export AGENT_GATE_AWAIT_VERDICT=1
+	export STUB_AWAIT_STATUS_QUEUE="${case_dir}/await-queue"
+	printf '124\n124\n0\n' >"$STUB_AWAIT_STATUS_QUEUE"
+	export STUB_JOB_OUTPUT='job finished output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "await verdict eventual pass: expected the real pass (exit 0), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"job finished output"*) ;;
+	*) fail "await verdict eventual pass: expected the job's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"AGENT_GATE_AWAIT_VERDICT=1 is set"*) ;;
+	*) fail "await verdict eventual pass: expected the keep-waiting notice, got: $OUT" ;;
+	esac
+	awaits=$(grep -c 'exec job await' "$STUB_ARGV_FILE")
+	[ "$awaits" -eq 3 ] || fail "await verdict eventual pass: expected 3 await calls (2 timeouts + 1 real verdict), got $awaits, argv was: $(cat "$STUB_ARGV_FILE")"
+)
+
+# --- with AGENT_GATE_AWAIT_VERDICT=1, a gate whose wait times out once
+# before it genuinely fails must still report that failure -- the previous
+# case's fix must not over-correct into swallowing a real red as a pass.
+case_dir="${work_root}/await-verdict-eventual-failure"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export AGENT_GATE_AWAIT_VERDICT=1
+	export STUB_AWAIT_STATUS_QUEUE="${case_dir}/await-queue"
+	printf '124\n7\n' >"$STUB_AWAIT_STATUS_QUEUE"
+	export STUB_JOB_OUTPUT='job failed output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 7 ] || fail "await verdict eventual failure: expected the real failure's own exit code (7), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"job failed output"*) ;;
+	*) fail "await verdict eventual failure: expected the failed job's captured output, got: $OUT" ;;
+	esac
+	awaits=$(grep -c 'exec job await' "$STUB_ARGV_FILE")
+	[ "$awaits" -eq 2 ] || fail "await verdict eventual failure: expected 2 await calls (1 timeout + 1 real verdict), got $awaits, argv was: $(cat "$STUB_ARGV_FILE")"
+)
+
+# --- without AGENT_GATE_AWAIT_VERDICT=1, a timeout must still bail out
+# immediately even when a later await in the same sequence would have shown a
+# real pass -- the opt-in must never change the default, foreground-safe
+# behaviour that protects a coding agent's own bounded tool-call window.
+case_dir="${work_root}/await-verdict-not-set-still-bails-immediately"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset AGENT_GATE_AWAIT_VERDICT
+	export STUB_AWAIT_STATUS_QUEUE="${case_dir}/await-queue"
+	printf '124\n0\n' >"$STUB_AWAIT_STATUS_QUEUE"
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 124 ] || fail "await verdict not set: expected exit 124 without opting in, got $STATUS ($OUT)"
+	awaits=$(grep -c 'exec job await' "$STUB_ARGV_FILE")
+	[ "$awaits" -eq 1 ] || fail "await verdict not set: must not peek at a later await result, expected 1 call, got $awaits"
+)
+
+# --- a wait that expires on a job which has, by the time the wait gives up,
+# actually PASSED must report that pass. The wait's own 124 is a deadline, not
+# an outcome, and the two are independent -- so before this expiry is allowed
+# to stand for a result, the job's own record is read. Reporting 124 here is
+# the reported bug exactly: a gate reported red for work that was green, with
+# nothing in the exit code telling the caller which it was.
+case_dir="${work_root}/timeout-then-verdict-pass"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset AGENT_GATE_AWAIT_VERDICT
+	export STUB_AWAIT_STATUS=124
+	export STUB_JOB_OUTPUT='late pass output'
+	# First status call is the pre-start probe and finds no record; the second
+	# is the one the wrapper makes once its wait has expired.
+	export STUB_STATUS_QUEUE="${case_dir}/status-queue"
+	printf '1|\n0|exited 0: make check\n' >"$STUB_STATUS_QUEUE"
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "timeout then verdict pass: expected the job's real pass (exit 0), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"late pass output"*) ;;
+	*) fail "timeout then verdict pass: expected the job's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"has reached no verdict"*) fail "timeout then verdict pass: must not report a non-verdict for a job that reached one, got: $OUT" ;;
+	*) ;;
+	esac
+)
+
+# --- the same expiry on a job that has actually FAILED must report that
+# failure, and report it as the job's own outcome rather than as a bare
+# timeout: the record is read and the job's output follows.
+case_dir="${work_root}/timeout-then-verdict-failure"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset AGENT_GATE_AWAIT_VERDICT
+	export STUB_AWAIT_STATUS=124
+	export STUB_JOB_OUTPUT='late failure output'
+	export STUB_STATUS_QUEUE="${case_dir}/status-queue"
+	# A record exists, so `job status` itself succeeds (0) even though the job
+	# it reports on failed -- the two exit statuses are unrelated.
+	printf '1|\n0|exited 1: make check\n' >"$STUB_STATUS_QUEUE"
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 1 ] || fail "timeout then verdict failure: expected the job's real failure (exit 1), got $STATUS ($OUT)"
+	case "$OUT" in
+	*"late failure output"*) ;;
+	*) fail "timeout then verdict failure: expected the failed job's captured output, got: $OUT" ;;
+	esac
+)
+
+# --- a wait that expires with the job genuinely still running is a
+# non-verdict, and must say so: exit 124 (never a gate failure), name the job
+# a caller has to query, and tell them re-invoking re-attaches rather than
+# starting the gated work over. This is the third outcome, and the one the
+# issue is about -- it must be impossible to read as "your change is broken".
+case_dir="${work_root}/timeout-with-no-verdict"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	unset AGENT_GATE_AWAIT_VERDICT
+	export STUB_AWAIT_STATUS=124
+	export STUB_STATUS_QUEUE="${case_dir}/status-queue"
+	printf '1|\n0|running: make check\n' >"$STUB_STATUS_QUEUE"
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 124 ] || fail "timeout with no verdict: expected exit 124, got $STATUS ($OUT)"
+	job_id=$(grep 'exec job start' "$STUB_ARGV_FILE" | sed -n 's/.*--id \([^ ]*\).*/\1/p')
+	[ -n "$job_id" ] || fail "timeout with no verdict: could not read the job id the wrapper started"
+	case "$OUT" in
+	*"$job_id"*) ;;
+	*) fail "timeout with no verdict: must name the job a caller can query, expected $job_id in: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"NOT a failure"*) ;;
+	*) fail "timeout with no verdict: must say plainly that this is not a failure, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"re-attach to the same job"*) ;;
+	*) fail "timeout with no verdict: must say re-invoking re-attaches, got: $OUT" ;;
+	esac
+	if grep -q 'exec job output' "$STUB_ARGV_FILE"; then
+		fail "timeout with no verdict: must not read job output before the job finishes"
+	fi
+)
+
 # --- erun missing from PATH: degrade to running the command directly rather
 # than failing outright.
 case_dir="${work_root}/no-erun"
@@ -974,6 +1191,103 @@ stub_erun "${case_dir}/bin"
 	[ "$starts" -eq 2 ] || fail "playwright stable id: expected both invocations to start a job with the same id, argv was: $(cat "$STUB_ARGV_FILE")"
 	grep -q -- 'spec one' "$STUB_ARGV_FILE" || fail "playwright stable id: first invocation's arguments were lost"
 	grep -q -- 'spec two' "$STUB_ARGV_FILE" || fail "playwright stable id: second invocation's arguments were lost"
+)
+
+# --- the gate's Playwright area selection survives the detach boundary.
+#
+# The reported failure: `erun exec resolve-playwright-areas` on a clean tree
+# printed `smoke` while `make check` -- the gate that actually runs in an agent
+# pod -- ran the full suite, with nothing in either output saying which of the
+# two it had used. The selection travels in PLAYWRIGHT_TEST_AREAS, and `check`
+# depends on test-playwright rather than being one of its prerequisites, so the
+# target-specific variable test-playwright declares is out of scope in the
+# recipe that hands the environment to agent-gate.sh and on to the job. What
+# crossed instead was the bare `export`'s empty-but-*defined* value: inside the
+# job, test-playwright's own `?=` read that as "the caller already supplied
+# this" and skipped the resolution, and run.sh read it as "no selection".
+#
+# This case drives the shipped Makefile: its `check` target and the
+# target-specific declarations and bare `export` that decide its environment,
+# the real agent-gate.sh, and a job boundary whose command runs under the
+# environment it inherited (what `erun exec job start` was measured doing).
+# Only the recipes that would actually run the suite are replaced, so the
+# environment under test is the shipped one; the observer is the real
+# test-playwright target, still carrying its own `?=`, reporting the value it
+# would hand to run.sh.
+case_dir="${work_root}/playwright-area-selection"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+cat >"${case_dir}/inner-observe.mk" <<'EOF'
+test-erun-ui-windows-build test-frontend:
+	@:
+test-playwright:
+	@printf 'gate-consumer PLAYWRIGHT_TEST_AREAS=[%s]\n' "$${PLAYWRIGHT_TEST_AREAS-}"
+EOF
+cat >"${case_dir}/boundary.mk" <<'EOF'
+check:
+	@./scripts/agent-gate.sh check "make check" -- $(MAKE) -f Makefile -f "$$INNER_OBSERVE_MK" test-playwright
+EOF
+(
+	cd "${script_dir}/.."
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=remote-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export INNER_OBSERVE_MK="${case_dir}/inner-observe.mk"
+	unset PLAYWRIGHT_TEST_AREAS AGENT_GATE_DETACHED RUN_SH_AGENT_GATED
+
+	# What the tree resolves to, computed the same way the Makefile does.
+	expected=$(cd erun-cli && go run . exec resolve-playwright-areas)
+	[ -n "$expected" ] || fail "area selection: the resolver produced no selection to compare against"
+
+	set +e
+	OUT=$(make -f Makefile -f "${case_dir}/boundary.mk" check 2>&1)
+	STATUS=$?
+	set -e
+	[ "$STATUS" -eq 0 ] || fail "area selection: the gate was expected to reach its observer cleanly, got $STATUS ($OUT)"
+
+	got=$(printf '%s\n' "$OUT" | sed -n 's/^gate-consumer PLAYWRIGHT_TEST_AREAS=\[\(.*\)\]$/\1/p' | head -1)
+	[ -n "$got" ] || fail "area selection: the gate never reported a selection to its consumer, output was: $OUT"
+	[ "$got" = "$expected" ] || fail "area selection: the gate ran with PLAYWRIGHT_TEST_AREAS=[$got] but the tree resolved [$expected] -- the gate must run the selection it resolved, not an empty one it inherited"
+)
+
+# --- the gate-scoping environment is part of what a job id identifies: a
+# cached pass recorded for one selection must never be replayed for a
+# differently-scoped request under the same job id and tree. Without this, a
+# narrowed run's green stands in for a full-suite request -- a gate reporting a
+# verdict for a selection it did not run.
+#
+# The two requests below are identical in argv and differ only in
+# PLAYWRIGHT_TEST_AREAS, and execution is observed through a side effect
+# rather than through the command's own output. Argv is already part of the
+# job id, so a case whose two runs differed there -- a "narrow selection"
+# label against a "full selection" one, say -- separates them whether or not
+# the selection is ever consulted, and passes against a key that ignores it.
+# Same argv, one channel of difference: only the selection can tell them
+# apart.
+case_dir="${work_root}/gate-scope-replay"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+runs_file="${case_dir}/runs"
+: >"$runs_file"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	PLAYWRIGHT_TEST_AREAS=smoke run_gate ui-playwright scoped-run -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "gate scope replay: narrowed run expected exit 0, got $STATUS ($OUT)"
+
+	PLAYWRIGHT_TEST_AREAS=all run_gate ui-playwright scoped-run -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "gate scope replay: full run expected exit 0, got $STATUS ($OUT)"
+
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "gate scope replay: a request under a different selection must actually run rather than replaying the other selection's recorded pass, ran $runs of 2"
 )
 
 echo "ok: agent-gate.sh"

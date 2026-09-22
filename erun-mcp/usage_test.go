@@ -65,6 +65,55 @@ func TestUsageToolOmitsSizingWithNoHistory(t *testing.T) {
 	}
 }
 
+// usageToolDescriptionForTest returns the `usage` tool's wire description, so
+// the cross-references it makes can be checked against the surfaces that
+// actually carry what it names.
+func usageToolDescriptionForTest(t *testing.T) string {
+	t.Helper()
+	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+	for _, tool := range listTools(t, session) {
+		if tool.Name == "usage" {
+			return tool.Description
+		}
+	}
+	t.Fatal("usage tool is not registered")
+	return ""
+}
+
+// TestUsageDescriptionNamesASurfaceThatCarriesTheVerdict covers the dead end
+// this fixes: the description cross-referenced `erun list` as reporting the
+// same raise/lower/hold verdict the `sizing` block carries, so a caller who
+// took it there instead of making a separate resize call found nothing. `list`
+// does read the same retained history, but the history lives in the
+// environment's own pod monitor, so a host that has never monitored the
+// environment has none and prints no verdict at all. The description has to
+// send a caller to a surface that actually carries it, and own that the
+// host-side ones are not it -- in the tool description and in the overview
+// page's sibling prose alike, since a caller reads whichever they reached.
+func TestUsageDescriptionNamesASurfaceThatCarriesTheVerdict(t *testing.T) {
+	const falseClaim = "the same raise/lower/hold verdict and evidence window `erun list` reports"
+	description := usageToolDescriptionForTest(t)
+	if strings.Contains(description, falseClaim) {
+		t.Errorf("usage tool description still sends callers to `erun list` for the sizing verdict:\n%s", description)
+	}
+	if !strings.Contains(description, "pod monitor") {
+		t.Errorf("usage tool description carries `sizing` without saying the history behind it is retained by the environment's own pod monitor, which is what makes a host-side read unable to derive one:\n%s", description)
+	}
+
+	docPath := filepath.Join(repoRootForOverviewDocTest(t), "erun-docs", "docs", "mcp", "overview.md")
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", docPath, err)
+	}
+	page := string(data)
+	if strings.Contains(page, "the same verdicts and evidence window `erun list` reports under `runtime-pod:`") {
+		t.Errorf("%s still sends callers to `erun list` for the sizing verdict", docPath)
+	}
+	if !strings.Contains(page, "pod monitor") {
+		t.Errorf("%s describes the `sizing` field without saying the history behind it is retained by the environment's own pod monitor", docPath)
+	}
+}
+
 // TestUsageToolDisclosesExcludesBuildsOnABuildCapableEnvironment pins the MCP
 // half of the excludes-builds caveat: a build-capable environment's reading
 // cannot see the erun-dind sidecar an image build actually runs in, so the

@@ -359,6 +359,144 @@ test.describe('tenant dashboard — reviews discovery (#1378)', () => {
       removeEnvironment(SEED_TENANT, environment);
     }
   });
+
+  // A tenant accumulates MERGED and CLOSED reviews forever, so an unfiltered
+  // list is mostly finished work with the actionable rows buried in it — one
+  // tenant was at 155 reviews of which 87 were merged and 68 closed. This pins
+  // the two halves of that: the status chips exist at all, and the list opens
+  // on OPEN+MERGE rather than on everything.
+  test('the status chips open on OPEN+MERGE and narrow the list to them', async ({ app, page }) => {
+    const environment = seedDashboardEnvironment('reviews-status-filter');
+    try {
+      const openReview = { ...REVIEW, reviewId: 'review-open', name: 'Add widget', status: 'OPEN' };
+      const mergedReview = {
+        ...REVIEW,
+        reviewId: 'review-merged',
+        name: 'Ship widget',
+        status: 'MERGED',
+      };
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [openReview, mergedReview],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+
+      // The group exists, and it opens on the two actionable statuses: the
+      // MERGED review is hidden without the operator asking for it.
+      await expect(app.tenantDashboard.reviewStatusFilterGroup()).toBeVisible();
+      await expect(app.tenantDashboard.reviewStatusFilterButton('OPEN')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await expect(app.tenantDashboard.reviewStatusFilterButton('MERGE')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await expect(app.tenantDashboard.reviewStatusFilterButton('MERGED')).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
+      // The count names both numbers, so a filtered "1" cannot be misread as
+      // the tenant's whole history.
+      await expect(app.tenantDashboard.reviewCountText()).toHaveText('1 of 2 reviews');
+
+      // Turning MERGED on brings the hidden row back.
+      await app.tenantDashboard.reviewStatusFilterButton('MERGED').click();
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(2);
+      await expect(app.tenantDashboard.reviewCountText()).toHaveText('2 reviews');
+
+      // And turning OPEN off leaves only MERGED: the chips narrow the list
+      // rather than acting as a mutually-exclusive tab strip.
+      await app.tenantDashboard.reviewStatusFilterButton('OPEN').click();
+      await expect(app.tenantDashboard.reviewsRows()).toHaveCount(1);
+      await expect(app.tenantDashboard.reviewCountText()).toHaveText('1 of 2 reviews');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});
+
+// The list row and the dialog over it name the same quantity — how many of a
+// review's threads are still open — so they must report the same number. They
+// come from two different reads: the dashboard row's own per-review
+// enrichment, which is best effort, and the detail dialog's comment load,
+// which holds the threads. A row whose enrichment produced no count used to
+// render a bare dash while the dialog over it said "1 unresolved".
+test.describe('tenant dashboard — the reviews row and the detail dialog agree on thread count', () => {
+  test('a row with no computed count reports the dialog’s count once the review has been opened', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-count-agreement');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            // No unresolvedThreads on the row at all: the exact shape the
+            // dashboard read model produces when its per-review comment read
+            // did not yield a count.
+            reviews: [{ ...REVIEW }],
+            panels: [{ tab: 'users' }, { tab: 'reviews' }],
+          });
+          return;
+        }
+        if (body.method === 'LoadReviewDetail') {
+          await fulfillJSON(route, {
+            ...reviewDetail([{ ...ROOT_COMMENT, status: 'OPEN' }]),
+            unresolvedThreads: 1,
+            canResolveComments: true,
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+
+      // A row that could not compute its count says so: a dash here reads as
+      // "none" beside a dialog that reports one.
+      const row = app.tenantDashboard.reviewsRows().first();
+      await expect(row).toContainText('Unknown');
+      await expect(row).not.toContainText('1 unresolved');
+
+      await app.tenantDashboard.openReview('Add widget');
+      await app.reviewDetailDialog.waitForOpen();
+      await expect(app.reviewDetailDialog.locator()).toContainText('1 unresolved');
+
+      // Dismissing the dialog leaves the row reporting what the dialog
+      // reported for the same review. The row is behind the modal's inert
+      // subtree while the dialog is open, so this is read after it closes.
+      await page.keyboard.press('Escape');
+      await app.reviewDetailDialog.waitForClosed();
+      await expect(row).toContainText('1 unresolved');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
 });
 
 // Resolution (#1378): a thread's status is visible and actionable from the
@@ -617,6 +755,68 @@ test.describe('tenant dashboard — review build profile (#2274)', () => {
       await page.keyboard.press('Escape');
       await app.buildProfileDialog.waitForClosed();
       await expect(app.reviewDetailDialog.locator()).toBeVisible();
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+  // The denial a caller refused a review actually sees. It has to carry the
+  // grant, filled in with the caller's own user id: an assertion that it
+  // merely names the missing read passes on the version that stopped short.
+  test('a review the caller may not open hands over the grant that lifts it', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('reviews-restricted-remedy');
+    try {
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = invokeBody(request);
+        if (body.method === 'LoadTenantDashboard') {
+          await fulfillJSON(route, {
+            tenant: SEED_TENANT,
+            environment,
+            apiUrl: 'http://127.0.0.1:1/unreachable',
+            user: { tenantId: 't1', userId: 'u1', username: 'operator' },
+            reviews: [REVIEW],
+            panels: [
+              { tab: 'users' },
+              { tab: 'reviews' },
+              { tab: 'queue' },
+              { tab: 'builds' },
+              { tab: 'audit' },
+            ],
+          });
+          return;
+        }
+        if (body.method === 'LoadReviewDetail') {
+          await fulfillJSON(route, {
+            reviewId: REVIEW.reviewId,
+            restricted: 'GET /v1/reviews/{review_id}',
+            accessRemedies: {
+              'GET /v1/reviews/{review_id}': {
+                command: 'erun platform user grant-role --user-id user-1 --role-id role-reviewer',
+                roleName: 'Reviewer',
+              },
+            },
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Reviews');
+      await app.tenantDashboard.openReview('Add widget');
+      await app.reviewDetailDialog.waitForOpen();
+
+      await expect(app.reviewDetailDialog.locator()).toContainText(
+        'You do not have access to this review',
+      );
+      await expect(app.reviewDetailDialog.locator()).toContainText(
+        'erun platform user grant-role --user-id user-1 --role-id role-reviewer',
+      );
+      await expect(app.reviewDetailDialog.locator()).toContainText('Reviewer');
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

@@ -17,6 +17,7 @@ import { hasShortcutModifier, isTypingTarget } from '@/app/reviewKeyboardShortcu
 import type { ReviewDetailState } from '@/app/state';
 import type { UIReviewComment } from '@/types';
 
+import { AccessDeniedBody } from './AccessRemedyNote';
 import { InlineAlert } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { RelativeTime } from './TenantDashboardMessage';
@@ -111,12 +112,7 @@ export function ReviewDetailComments({
   }, [detail.replyingTo, roots, focusedIndex]);
 
   if (detail.data?.commentsRestricted) {
-    return (
-      <EmptyState
-        heading="You do not have access to this review's comments"
-        body={`It needs ${detail.data.commentsRestricted}. Ask an administrator for access.`}
-      />
-    );
+    return <CommentsRestrictedNotice detail={detail} />;
   }
   if (detail.data?.commentsError) {
     return <InlineAlert>{detail.data.commentsError}</InlineAlert>;
@@ -524,5 +520,22 @@ function ReplyComposer({ detail }: { detail: ReviewDetailState }): React.ReactEl
         </Button>
       </div>
     </div>
+  );
+}
+
+// CommentsRestrictedNotice is the thread list's denial. It says what is
+// missing and hands over the grant that would lift it, so a caller refused
+// this read is not left to work out which command an administrator runs.
+function CommentsRestrictedNotice({ detail }: { detail: ReviewDetailState }): React.ReactElement {
+  const restricted = detail.data?.commentsRestricted ?? '';
+  return (
+    <EmptyState
+      heading="You do not have access to this review's comments"
+      body={
+        <AccessDeniedBody remedies={detail.data?.accessRemedies} restricted={restricted}>
+          {`It needs ${restricted}. Ask an administrator for access.`}
+        </AccessDeniedBody>
+      }
+    />
   );
 }

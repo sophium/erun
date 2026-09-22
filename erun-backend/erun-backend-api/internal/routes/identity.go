@@ -146,10 +146,25 @@ func (r IdentityRoutes) securityContext(w http.ResponseWriter, req *http.Request
 // here with Enrolled=false is a self-registered or otherwise unmapped IdP
 // account that cannot use erun, not a tenant member, and must not render as
 // one.
+//
+// The embedded zitadel.User's own ID is the OIDC subject: it is
+// the same value security.Context.ExternalUserID/model.User.ExternalUserID
+// carries for an enrolled row (mergeIdentityUsers below joins on exactly
+// that equality), and the same value GET /v1/whoami reports as `subject`
+// for the caller's own session. It is not renamed or duplicated onto a
+// second field here -- it is already the join key a client needs to
+// recognize "this is the same person" across the erun and IdP directories,
+// it was simply never rendered anywhere before this.
 type identityUserView struct {
 	zitadel.User
 	Enrolled   bool   `json:"enrolled"`
 	ErunUserID string `json:"erunUserId,omitempty"`
+	// ErunUsername is the enrolled erun user's own username (users.username)
+	// -- an independent string from the embedded zitadel.User.Username above,
+	// chosen at enrolment rather than mirrored from the IdP.
+	// Empty whenever Enrolled is false, since there is no erun user row to
+	// read it from.
+	ErunUsername string `json:"erunUsername,omitempty"`
 }
 
 func (r IdentityRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
@@ -201,6 +216,7 @@ func mergeIdentityUsers(idpUsers []zitadel.User, erunUsers []model.User) []ident
 		if erunUser, ok := enrolledBySubject[u.ID]; ok {
 			view.Enrolled = true
 			view.ErunUserID = erunUser.UserID
+			view.ErunUsername = erunUser.Username
 		}
 		views = append(views, view)
 	}
@@ -475,7 +491,21 @@ func (r IdentityRoutes) updateSMTPSettings(w http.ResponseWriter, req *http.Requ
 // state initial can only be deleted not deactivated" is actionable for an
 // operator), falling back to 502 for a transport-level failure that never
 // got a Zitadel response at all.
+//
+// A taken login name is the one case that is not forwarded as-is. The
+// instance reports it as a bare AlreadyExists conflict whose message names
+// the account, not the name, so the caller was told something they could not
+// act on -- while the thing they can act on, the name they chose, was the one
+// thing not said. It becomes a conflict carrying its own code and the name,
+// so the console and the CLI can render a message that tells the user what to
+// change. Checked before the generic APIError branch, whose forwarding would
+// otherwise swallow it.
 func writeIdentityAdminError(w http.ResponseWriter, err error) {
+	var usernameTaken *zitadel.UsernameTakenError
+	if errors.As(err, &usernameTaken) {
+		writeErrorCode(w, http.StatusConflict, "USERNAME_TAKEN", usernameTaken.Error())
+		return
+	}
 	var apiErr *zitadel.APIError
 	if errors.As(err, &apiErr) {
 		status := apiErr.StatusCode

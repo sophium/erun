@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -160,6 +161,29 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		mu.Lock()
 		defer mu.Unlock()
+		// One MERGE per target branch, the same invariant the real backend
+		// enforces: a branch whose slot is taken refuses with the review
+		// holding it rather than promoting the next one.
+		for _, id := range reviewOrder {
+			review := reviews[id]
+			if review["targetBranch"] != body["targetBranch"] || review["status"] != "MERGE" {
+				continue
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": "MERGE_QUEUE_OCCUPIED",
+				"message": fmt.Sprintf("merge queue for %v already has a review at MERGE: %v (%v, %v); complete it or requeue it back to READY before advancing",
+					review["targetBranch"], review["reviewId"], review["name"], review["sourceBranch"]),
+				"details": map[string]any{
+					"targetBranch": review["targetBranch"],
+					"reviewId":     review["reviewId"],
+					"name":         review["name"],
+					"sourceBranch": review["sourceBranch"],
+				},
+			})
+			return
+		}
 		for _, id := range reviewOrder {
 			review := reviews[id]
 			if review["targetBranch"] != body["targetBranch"] {
@@ -918,6 +942,54 @@ func TestReview(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "empty queue") {
 			t.Fatalf("expected the stub's empty-queue error to surface, got:\n%s", result.Combined)
+		}
+	})
+
+	// merge_queue_advance_names_the_occupying_review drives the reported
+	// failure end to end: a review already at MERGE (its gate build still
+	// running) while a second READY review is advanced. The refusal has to
+	// reach the operator naming the review holding the slot — which is the one
+	// they must finish or requeue — rather than as a not-found that sends them
+	// looking for a missing endpoint.
+	t.Run("merge_queue_advance_names_the_occupying_review", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		occupying := createReviewJSON(t, setup, "Land the widget", "feature/widget", "main")
+		for _, args := range [][]string{
+			{"review", "record-build", occupying.ReviewID, "--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3"},
+			{"review", "queue", "advance", "--target-branch", "main"},
+		} {
+			if result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()}); result.ExitCode != 0 {
+				t.Fatalf("%v exit %d: %s", args, result.ExitCode, result.Combined)
+			}
+		}
+
+		queued := createReviewJSON(t, setup, "Add the next widget", "feature/next-widget", "main")
+		build := erun.Run(t, []string{
+			"review", "record-build", queued.ReviewID,
+			"--commit", "def456abc123def456abc123def456abc123def4", "--version", "1.2.4",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if build.ExitCode != 0 {
+			t.Fatalf("record-build exit %d: %s", build.ExitCode, build.Combined)
+		}
+
+		result := erun.Run(t, []string{"review", "queue", "advance", "--target-branch", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit advancing while %s holds MERGE, got:\n%s", occupying.ReviewID, result.Combined)
+		}
+		if !strings.Contains(result.Combined, occupying.ReviewID) || !strings.Contains(result.Combined, "feature/widget") {
+			t.Fatalf("expected the refusal to name the occupying review %s and its source branch, got:\n%s", occupying.ReviewID, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "requeue") {
+			t.Fatalf("expected the refusal to name the requeue remedy, got:\n%s", result.Combined)
+		}
+		// The client decodes the refusal into its own typed error and renders
+		// that; a raw envelope here would mean the message reached the operator
+		// as an undecoded body instead of a sentence.
+		if strings.Contains(result.Combined, `"code":"MERGE_QUEUE_OCCUPIED"`) {
+			t.Fatalf("expected a decoded refusal, got the raw response body:\n%s", result.Combined)
 		}
 	})
 

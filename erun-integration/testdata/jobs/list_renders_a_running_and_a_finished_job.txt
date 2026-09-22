@@ -1,0 +1,6 @@
+  - RUNNING fixing the jobs claim race by erun/code2 (agent) issue=sophium/erun#1 scope=sophium/erun#1
+     id=job_01HQ_running
+  - SUCCEEDED gate passed for the jobs surface by erun/code2 (agent)
+     id=job_01HQ_done
+audit: erun jobs list
+platform: GET <PLATFORM_API>/v1/jobs

@@ -11,6 +11,9 @@ cross-repository structural gates, not production helpers.
 - `internal/erun` builds/runs the instrumented binary; `env` isolates scenarios;
   `fixture` seeds state/stubs; `normalize` removes nondeterminism; `golden`
   compares reviewed output. Read these implementations instead of copying examples.
+- `internal/harnessexec` is the module's only way to spawn a child process; see
+  § "Subprocess bounds" below. Every other package, test file, and stub binary
+  builds its commands through it.
 - Only subprocess coverage contributes to this gate's CLI/common percentage.
   Owner unit suites may validate genuinely non-CLI behavior; they do not contribute
   to that percentage.
@@ -53,6 +56,42 @@ cross-repository structural gates, not production helpers.
   Keep golden files LF via the narrowly scoped `.gitattributes` entry.
 - For shared fixture/harness changes, validate on Linux as well as the local host;
   local success must not depend on tools absent from the image test stage.
+
+## Subprocess bounds
+
+- Every child the harness spawns is built by `internal/harnessexec`, never by
+  `exec.Command` at the call site. `exec_bound_test.go` fails the build when a
+  bare constructor appears elsewhere in the module and names what to call
+  instead; the list is zero-tolerance with no baseline, so a new call site has
+  nowhere to hide.
+- The defect this exists for is not a slow child but a finished one. os/exec
+  drains a child's stdout/stderr from goroutines of its own and `Cmd.Wait`
+  waits for those goroutines, so a process the child left behind still holding
+  the write end keeps the drain from EOF and blocks `Wait` forever -- with
+  nothing left to wait for and no signal that ends it, because a kill only
+  concludes a wait whose child was still running. The block reads as a hang in
+  whichever test happened to be running, which is why patching call sites one
+  at a time moved it rather than fixing it.
+- `harnessexec` arms the two distinct bounds. `Cmd.WaitDelay` covers the state
+  above, and it applies to a child that has *exited* with no context at all --
+  a context is not what arms it, so a call site cannot substitute for the
+  constructor by supplying one. `HangNet`, reached through the context
+  cancellation, covers a child that never exits, where `Process.Wait` never
+  returns and the post-exit path consulting the delay is never reached. Both
+  are hang-nets rather than latency SLAs: `WaitDelay` sits far below the
+  suite's own deadline so a stranded descendant fails as a bounded, named
+  failure, and `HangNet` is deliberately longer than the package deadline so
+  it cannot fail a healthy child.
+- A caller whose child has its own legitimate deadline passes a context;
+  `RunOptions.Timeout` on the CLI under test is the case that matters, since
+  only it leaves processes behind that outlive it. A child meant to outlive its
+  caller -- the emcp server, a port holder a scenario keeps alive on purpose --
+  is ended by its own test cleanup.
+- Both bounds are driven at test speed in `internal/harnessexec`, including a
+  fixture that reproduces the unbounded wait through a bare `exec.Command` and
+  requires it to still be blocked. That fixture is why the guard's refusal is a
+  statement about a real wedge rather than a style preference: if a future
+  os/exec ever bounds the drain on its own, that test fails and says so.
 
 ## Prompts, ports, and parallelism
 
@@ -111,11 +150,23 @@ cross-repository structural gates, not production helpers.
 - Root `make integration-test` drives `scripts/integration-test.sh`: fresh raw
   counters, instrumented CLI run, merged CLI/common statement coverage, then the
   script-owned threshold. Keep `CoverPkgs` and enforcement aligned when scope changes.
-- Restore coverage with meaningful CLI scenarios; do not lower thresholds to
-  accommodate a change. Function-touched rate is diagnostic, not the enforced metric.
+- The threshold is a contract, not a target: raise it in the same commit as the
+  scenarios that earned the increase, keeping a small margin below the measured
+  total, and lower it only after the PR has discussed the shortfall — restore
+  coverage with meaningful CLI scenarios first. That margin is the explicit
+  `coverage_measured` / `coverage_margin` pair the script derives its default
+  from, so state it by moving `coverage_measured` to what a real run on main
+  reaches (`coverage/profile.txt`'s total, not the script's own 20-line tail)
+  and leaving `coverage_margin` at its floor; the bounds on that floor live in
+  `coverage_threshold_test.go`. Function-touched rate is diagnostic,
+  not the enforced metric.
 - Prefer integration coverage for CLI-reachable behavior and remove equivalent
   white-box duplication. Do not invent public code paths merely to reach genuinely
   transport-specific or defensive internals; use the owning suite for those.
+- A branch that looks unreachable from the binary is usually a production defect
+  rather than a missing test: fix the path so `--dry-run` reaches it, then write the
+  scenario. An entry in "Known integration coverage gaps" is a measured structural
+  limit, not an excuse to carve out another exception.
 - Re-measure cited baselines cleanly and without contention, verify zero skips,
   and compare per-file uncovered statements. Matching totals or repeated successful
   exit codes alone do not establish a regression or complete coverage.
@@ -139,14 +190,34 @@ cross-repository structural gates, not production helpers.
   keep real-repository enumeration in the wiring tests. Token presence is only a
   structural lower bound, not proof of usable UI; shared UX review still applies.
 
+- **Flags are audited one level down, not only whole commands.** An own,
+  non-inherited, non-`Hidden` flag on an operator-facing command needs its own
+  operator-surface reference, because a capability delivered as new flags on a
+  command that already has a desktop surface used to clear on the command's name
+  alone — which is how review discovery's seven CLI filters shipped with no
+  filter control (erun#2141). Opt out in `erun-cli/cmd/command_tree.go`:
+  `cliOnlyAgentFacingFlags` when the flag is structurally about the CLI's own
+  invocation and no affordance could exist, or the shrink-only
+  `knownUnsurfacedFlags` baseline only for a gap predating the gate — never a
+  fresh failure. `TestCLIFlagDeclarationsNameRealFlags` fails a key that no
+  longer names a real flag. Bounded honestly: a flag whose token is also an
+  ordinary display word (`--status`, `--source-branch`) clears on unrelated UI
+  copy, so this catches a distinctly-named dimension reliably and a
+  generically-named one only sometimes.
+
 ### Baseline for pre-existing gaps: KnownUnsurfacedRoutes
 
 This is a shrink-only list of real gaps, not an internal-only exemption. Do not
 add fresh omissions to it; remove an entry in the same change that surfaces it.
-Stale entries fail. Read the current list and family-specific reasons in
-`erun-backend-api/internal/routes/route_audit.go`, rather than preserving a count
-here. Remaining administration/release surfaces need designed workflows, not
-bare fetches that satisfy the matcher. Tracking: erun#1497.
+Stale entries fail. `erun-backend-api/internal/routes/route_audit.go` is the
+single source for the tracker, not a pointer to one: its own comment states that
+the map is the tracker of record for the remaining work, and what closing each
+entry out takes. Read the list, its family reasons, and its count there rather
+than preserving any of them here. Do not restore a tracking-issue reference in
+this section: naming an issue here once sent readers to a closed issue while
+eight entries were still in the map, so the entries themselves carry the record
+instead, and every one of them is open. Remaining administration/release
+surfaces need designed workflows, not bare fetches that satisfy the matcher.
 
 ## Role-classification gate
 
@@ -202,9 +273,9 @@ Verify callers and current scenarios before treating a historical gap as still o
 - Live release-archive checksums and anonymous registry probes lack full subprocess
   wire seams; published-chart/upgrade network reads may be shadowed by decision
   overrides. Preserve owning HTTP-level tests and exercise every reachable decision.
-- GitHub status/PR helpers have a wire seam available; remaining unit-only coverage
-  is conversion work, not a structural exemption. Ruleset bypass/reconciliation
-  already has real binary wire scenarios.
+- GitHub status/PR helpers, ruleset bypass/reconciliation, and their wire seams now
+  have real binary scenarios; a helper that is still unit-only is conversion work,
+  not a structural exemption.
 - Desktop/MCP-only common APIs, in-pod whip, and in-process MCP task jobs cannot be
   started by the CLI just to increase coverage. Test their owning transports;
   CLI scenarios can still validate persisted job records and parent outcomes.

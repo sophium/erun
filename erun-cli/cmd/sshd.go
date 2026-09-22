@@ -24,7 +24,7 @@ func newSSHDCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
-			params, err := resolveOpenParams(args, target)
+			params, err := resolveOpenParams(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}
@@ -52,7 +52,7 @@ func newSSHDCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if prepareContext != nil {
 				ctx = prepareContext(ctx)
 			}
-			params, err := resolveOpenParams(args, syncTarget)
+			params, err := resolveOpenParams(cmd.CommandPath(), args, syncTarget)
 			if err != nil {
 				return err
 			}

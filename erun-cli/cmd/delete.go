@@ -59,6 +59,9 @@ func runDeleteCommand(ctx common.Context, store common.DeleteStore, promptRunner
 		}
 		if !ctx.DryRun {
 			_, _ = fmt.Fprintf(ctx.Stdout, "deleted environment: %s/%s\n", result.Tenant, result.Environment)
+			if result.RemovedSSHHostAlias != "" {
+				_, _ = fmt.Fprintf(ctx.Stdout, "removed ssh config block: Host %s (that alias no longer resolves)\n", result.RemovedSSHHostAlias)
+			}
 		}
 	}
 	return ctx.WriteResult(result)

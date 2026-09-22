@@ -73,6 +73,21 @@ func seedDns01WebhookImageDrift(t *testing.T, root, rootConfigDir string) {
 	}
 }
 
+// A registry's tag list is not a release list: scratch tags live beside real
+// versions, and every entry `pin --list` enumerates is offered to an operator as
+// a pinnable version. The desktop picker maps this same list straight into its
+// select with no filter of its own, so a stray offered here is offered there
+// too. Asserting only that real versions are present cannot catch one.
+func assertNoStrayTagOffered(t *testing.T, combined string) {
+	t.Helper()
+	for _, line := range strings.Split(combined, "\n") {
+		switch strings.TrimSpace(line) {
+		case "permcheck-tmp", "authprobe", "latest":
+			t.Fatalf("a scratch tag must not be offered as a pinnable version:\n%s", combined)
+		}
+	}
+}
+
 func TestPin(t *testing.T) {
 	t.Parallel()
 	t.Run("help", func(t *testing.T) {
@@ -117,8 +132,12 @@ func TestPin(t *testing.T) {
 		for _, want := range []string{
 			"terraform-ref",
 			"helm-dependency",
-			"runtime-version",
 			"1.0.175",
+			// The environment's own runtime coordinate is not erun's to move
+			// here: team/dev records no runtimeimage, so a deploy of it installs
+			// the tenant's own team-devops image, and the plan says so rather
+			// than listing a runtime-version site the caller did not ask about.
+			"skipped: runtimeversion team/dev rides team-devops",
 		} {
 			if !strings.Contains(result.Combined, want) {
 				t.Fatalf("the plan must name %q:\n%s", want, result.Combined)
@@ -380,8 +399,11 @@ func TestPin(t *testing.T) {
 
 	// A tenant's own runtimechart line is a real, deliberate configuration —
 	// --runtime-chart exists precisely so the chart can be versioned
-	// separately from the image and the erun release. A re-pin must leave it
-	// exactly as stated, even while the rest of the coordinate moves.
+	// separately from the image and the erun release. A re-pin must leave the
+	// whole coordinate exactly as stated: the env running that umbrella runs
+	// the image the umbrella publishes, so its runtimeversion is that line's
+	// number too, and writing the erun target into it hands the environment a
+	// version its own release line never publishes.
 	t.Run("real_run_leaves_a_tenant_own_runtimechart_line_unchanged", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -406,9 +428,34 @@ func TestPin(t *testing.T) {
 		if !strings.Contains(string(after), "runtimechart: oci://ghcr.io/sophium/charts/team-devops:1.0.76") {
 			t.Fatalf("a tenant's own runtimechart line must be left alone, got:\n%s", after)
 		}
-		if !strings.Contains(string(after), "runtimeversion: 1.0.175") {
-			t.Fatalf("runtimeversion should still move, got:\n%s", after)
+		if !strings.Contains(string(after), "runtimeversion: 1.0.0") {
+			t.Fatalf("an own-umbrella env's runtimeversion must be left alone too, got:\n%s", after)
 		}
+	})
+
+	// The reported case, binary-reachable: the environment states no
+	// runtimeimage, so only its own umbrella names the line its runtime pod
+	// runs. The plan must skip runtimeversion with a note saying what it read,
+	// rather than adding the erun target to an environment whose own release
+	// line never publishes it.
+	t.Run("skips_an_own_umbrella_envs_runtimeversion_and_says_so", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "frs", "build")
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "frs", "build", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("runtimechart: oci://ghcr.io/sophium/charts/frs-devops:1.0.134\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+
+		result := erun.Run(t, []string{"pin", "frs", "build", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "pin/skips_an_own_umbrella_envs_runtimeversion_and_says_so", normalize.Apply(result.Combined))
 	})
 
 	// Discovery answers "what can I pin to" from the registry, so choosing a
@@ -419,7 +466,7 @@ func TestPin(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"latest"}]}`)
+			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"1.0.172-snapshot-20260821151853"},{"name":"permcheck-tmp"},{"name":"authprobe"},{"name":"latest"}]}`)
 		}))
 		defer server.Close()
 		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n  namespace: acme\n  repository: erun-devops\n  baseurl: "+server.URL+"\n")
@@ -428,11 +475,16 @@ func TestPin(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{"latest stable: 1.0.174", "1.0.173"} {
+		for _, want := range []string{
+			"latest stable: 1.0.174",
+			"1.0.173",
+			"1.0.172-snapshot-20260821151853",
+		} {
 			if !strings.Contains(result.Combined, want) {
 				t.Fatalf("expected %q in the listing:\n%s", want, result.Combined)
 			}
 		}
+		assertNoStrayTagOffered(t, result.Combined)
 	})
 
 	// The reported nit: `erun pin --list` is the literal example in this
@@ -443,7 +495,7 @@ func TestPin(t *testing.T) {
 		setup := env.New(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"latest"}]}`)
+			_, _ = fmt.Fprint(w, `{"next":"","results":[{"name":"1.0.174"},{"name":"1.0.173"},{"name":"1.0.172-snapshot-20260821151853"},{"name":"permcheck-tmp"},{"name":"authprobe"},{"name":"latest"}]}`)
 		}))
 		defer server.Close()
 		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n  namespace: acme\n  repository: erun-devops\n  baseurl: "+server.URL+"\n")
@@ -455,11 +507,16 @@ func TestPin(t *testing.T) {
 		if strings.Contains(result.Combined, "default tenant is not configured") {
 			t.Fatalf("--list must not require a default tenant:\n%s", result.Combined)
 		}
-		for _, want := range []string{"latest stable: 1.0.174", "1.0.173"} {
+		for _, want := range []string{
+			"latest stable: 1.0.174",
+			"1.0.173",
+			"1.0.172-snapshot-20260821151853",
+		} {
 			if !strings.Contains(result.Combined, want) {
 				t.Fatalf("expected %q in the listing:\n%s", want, result.Combined)
 			}
 		}
+		assertNoStrayTagOffered(t, result.Combined)
 	})
 
 	// Pinning to a version the registry does not carry produces a tree that only

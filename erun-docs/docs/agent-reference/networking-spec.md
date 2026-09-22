@@ -183,7 +183,7 @@ Either way, `expose` **references** the pre-issued Secret and sets **no** `cert-
 
 ## Cross-namespace traffic semantics
 
-Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny `NetworkPolicy` as a **copy-paste pattern you apply per env** — the runtime chart does **not** auto-deploy one (no `NetworkPolicy` template ships in it). Apply this manifest to an env's namespace to block ingress from outside it. The shape:
+Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny `NetworkPolicy` as a **copy-paste pattern you apply per env**. The runtime chart ships one policy, but it is not this one: it selects only the runtime pod (`app: <release>`), and in exchange for isolating that pod it re-permits `ssh`, `mcp`, and the metrics port by number — see [Metrics spec · Endpoint](/agent-reference/metrics-spec) for the exact permitted set. Every other pod in the namespace, application services included, is ungoverned until you apply the manifest below. Apply it to an env's namespace to block ingress from outside it. The shape:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -225,7 +225,7 @@ Then label the consumer namespace:
 kubectl label namespace <tenant>-env-a allow-shared-<service>=true
 ```
 
-The runtime chart can apply this label via a `values.yaml` flag (`runtime.sharedDbConsumer: true`) so the policy is committed in the source rather than applied ad-hoc.
+The label is applied by hand, per consumer namespace: the runtime chart renders no value for it, so there is nothing to commit in the env's own source.
 
 ## Egress semantics
 
@@ -295,7 +295,18 @@ On each open, `erun open` reconciles the recorded state per channel:
 3. If the local port is still in use, the holder is inspected: a `kubectl port-forward` whose argv matches the one `erun open` would start itself is adopted — the state file is rewritten with that PID — while any other holder aborts with `local <channel> port <n> is already in use by <holder>`.
 4. Otherwise a new detached `kubectl port-forward` is started, its output appended to `logPath`, and the state file is rewritten with the new PID.
 
-When the forwarded `processId` exits, the file is left in place for diagnostic purposes; the next `erun open` overwrites it. `erun delete` does not remove these files either — a later env with the same name simply overwrites them.
+When the forwarded `processId` exits, the file is left in place for diagnostic purposes; the next `erun open` reuses or rewrites it.
+
+### Retention
+
+Each forward log is capped at 5 MiB: a log that has outgrown the cap is renamed to `<logPath>.1` before the next append, and one backup generation is kept. The cap is re-applied whenever `erun open` finds or adopts a live forward, not only when it starts one — a reused forward holds the file it opened at start as its own `stdout`/`stderr`, so a forward that stays up for weeks would otherwise never reach an open-time rotation.
+
+Two things remove a forward log, and both remove the `.1` generation beside it:
+
+- `erun delete` removes the deleted environment's state file and log for all three channels.
+- `erun open` reclaims records whose tenant or environment the config store no longer knows, together with the directories they leave empty. This runs on the forward-setup path, alongside the cap — never on a timer, and never from a command that has nothing to do with forwards.
+
+A log is kept when something may still be writing to it. The record's `processId` is checked first; a log — or the `.1` generation beside it, which is what a rotated log a live forward holds is named — that a process still holds open is kept even when no record names it. Deleting an environment whose forward was still running therefore removes the state file and leaves that running forward's log in place. Reclaiming is skipped entirely when the config store was never initialized, so "the config could not be read" is never answered as "no environment exists".
 
 `UserConfigDir` follows Go's `os.UserConfigDir`: `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%AppData%` on Windows. Installs that predate this layout kept the state under `os.UserCacheDir` (`<UserCacheDir>/erun/{mcp,sshd,api}/...`); the first access after upgrading silently renames each file (and its log) into the config-dir path.
 

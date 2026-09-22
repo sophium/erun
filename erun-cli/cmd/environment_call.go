@@ -37,7 +37,7 @@ func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, 
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
-	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, scopedOpenParams(tenant, environment))
+	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, scopedOpenParams(commandCtx.Command, tenant, environment))
 	if err != nil {
 		return decoded, false, err
 	}

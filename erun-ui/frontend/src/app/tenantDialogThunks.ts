@@ -361,6 +361,20 @@ export const setReviewFilter =
     await dispatch(loadTenantDashboard());
   };
 
+// setReviewStatusFilter narrows the Reviews tab by status.
+//
+// It deliberately does not reload the dashboard, unlike setReviewFilter above.
+// mine/waitingOnMe are answered by the platform (author=/reviewer= on
+// GET /v1/reviews), so they cost a read; statuses are narrowed locally from the
+// list the panel already holds, so a round-trip would refetch exactly what is on
+// screen and make a chip click feel like a page load.
+export const setReviewStatusFilter =
+  (statuses: string[]): AppThunk =>
+  (dispatch, getState) => {
+    const reviewFilter = { ...getState().tenantDashboard.reviewFilter, statuses };
+    dispatch(patchTenantDashboard({ reviewFilter }));
+  };
+
 // tenantDashboardWhoamiResolved reports whether loadTenantDashboard's own
 // load actually reached the platform's GET /v1/whoami -- true for every
 // platformState except the three that mean the identity resolution never

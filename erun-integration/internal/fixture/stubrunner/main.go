@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
 func main() {
@@ -46,7 +48,7 @@ func main() {
 	if strings.TrimSpace(shell) == "" {
 		shell = "sh"
 	}
-	cmd := exec.Command(shell, script)
+	cmd := harnessexec.Command(shell, script)
 	cmd.Env = append(os.Environ(), "ERUN_STUB_ARGV_FILE="+argvFile.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

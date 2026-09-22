@@ -48,6 +48,29 @@ var InternalAPIRoutes = map[string]bool{
 	// matching GET has a real operator surface (erun-console's environments
 	// panel), so it is not listed here.
 	"POST /v1/environments/{environment_id}/ai-sessions": true,
+	// The environment's own reporter appends to the sequenced event log --
+	// never something an operator clicks, the same self-report shape as the
+	// ai-session route above.
+	"POST /v1/environments/{environment_id}/events": true,
+	// The read half of that log is a resume position, not a report: a client
+	// reconnecting to a stream hands back the cursor it last reached and gets
+	// the backlog it missed. Its operator-facing form is a live-updating view
+	// this change does not build (that is client work, and the console has no
+	// live-update consumer of any kind yet), so it is recorded here as a
+	// transport endpoint driven by a client's own reconnect loop rather than
+	// left unclassified -- but it is not exempted as "nobody has needed a
+	// surface": a console live view is the reader it is ultimately for.
+	"GET /v1/events": true,
+	// The environment-scoped jobs read is what a caller that knows only its
+	// own environment id asks -- an in-pod agent or orchestrator checking
+	// what else is running alongside it before claiming more work. It is not
+	// a second operator view of the queue: the tenant-wide GET /v1/jobs
+	// returns exactly these rows and narrows to one environment with its own
+	// environmentId filter, which is what the console's Jobs section renders.
+	// The nested route earns its place by being reachable from the side that
+	// has no tenant-scoped job ids to filter by, not by giving an operator a
+	// capability the flat route does not already have.
+	"GET /v1/environments/{environment_id}/jobs": true,
 	// A one-time, operations-only repair action for a platform whose own
 	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
 	// its ERUN_TENANT was read at bootstrap (see erun-backend-api/AGENTS.md's
@@ -80,18 +103,36 @@ var InternalAPIRoutes = map[string]bool{
 // permanently internal (most need a real surface, not an exemption) or
 // weakening the gate itself. It is the opposite claim from InternalAPIRoutes
 // above: an entry here asserts nothing about whether the route deserves a
-// surface, only that it does not have one yet. See erun-integration/AGENTS.md
-// § "Desktop-surface gate" § "Baseline for pre-existing gaps" for the
-// tracking issue and the shrink-only enforcement
-// (desktopsurface.FindStaleBaselineEntries): a route that gains a real
-// reference in either tree must be removed from this map in the same change,
-// or the gate fails. What remains today needs a surface too large for a
-// single change: erun's own hosted release view (the four "GET /v1/releases"
-// family entries -- no console/desktop UI exists anywhere for the release
-// system itself, unlike reviews/builds/merge-queue which already have one),
-// tenant-issuer administration and the usage-event log (both need a new
-// admin surface designed, not just a fetch wired up), and the DNS-01 token
-// mint (needs `erun expose` itself redesigned to call it, not a bare button).
+// surface, only that it does not have one yet.
+//
+// This map is the tracker of record for that remaining work, and its entries
+// are the whole answer to "is this still open?": every one of them is work
+// nobody has done yet -- not a settled decision, and not deferred to a
+// document or an issue that can move on without it. Nothing here cites a
+// tracking issue, deliberately: root AGENTS.md § "Code Comments" keeps
+// tracker references out of source (enforced by
+// erun-integration/issue_reference_test.go), and the one indirect pointer
+// this map used to carry -- a document naming the issue that tracked it --
+// was followed to a closed issue while entries remained here, which taught a
+// reader nothing about whether the rest was abandoned or forgotten. What
+// keeps the list honest is the shrink-only enforcement
+// (desktopsurface.FindStaleBaselineEntries, erun-integration/AGENTS.md
+// § "Desktop-surface gate" § "Baseline for pre-existing gaps"): a route that
+// gains a real reference in either tree must be removed from this map in the
+// same change, or the gate fails. That check reads the routes the API
+// registers, so it catches an entry whose gap has since been closed, but not
+// one whose route no longer exists at all: remove an entry here by hand when
+// the route itself goes. Closing one out means giving it that surface, or
+// moving it to InternalAPIRoutes above with the reason it needs none.
+//
+// What remains needs a surface too large for a single change: erun's own
+// hosted release view (the "GET /v1/releases" family entries, plus the
+// single build's detail route that reads the same way -- no console/desktop
+// UI exists anywhere for the release system itself, unlike
+// reviews/builds/merge-queue which already have one), tenant-issuer
+// administration and the usage-event log (both need a new admin surface
+// designed, not just a fetch wired up), and the DNS-01 token mint (needs
+// `erun expose` itself redesigned to call it, not a bare button).
 var KnownUnsurfacedRoutes = map[string]bool{
 	// Creating an org on the platform's own IdP is what makes a second tenant
 	// possible: an org-scoped issuer resolves tenants by the org claim, so a new

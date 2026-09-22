@@ -81,8 +81,9 @@ func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if jsonOutput {
-				encoder := json.NewEncoder(commandContext(cmd).Stdout)
+			commandCtx := commandContext(cmd)
+			if commandWantsJSON(commandCtx, jsonOutput) {
+				encoder := json.NewEncoder(commandCtx.Stdout)
 				encoder.SetIndent("", "  ")
 				return encoder.Encode(status)
 			}
@@ -90,7 +91,7 @@ func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write JSON output (alias for --output json)")
 	return cmd
 }
 
@@ -112,7 +113,7 @@ func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write a JSON summary of the stop decision to stdout regardless of exit code")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write a JSON summary of the stop decision to stdout regardless of exit code (alias for --output json)")
 	cmd.Flags().StringVar(&cloudContextName, "cloud-context", "", "Cloud context name to record on the pending entry (informational)")
 	return cmd
 }
@@ -133,7 +134,7 @@ func runActivityStopReady(cmd *cobra.Command, store common.OpenStore, tenant, en
 	if err != nil {
 		return err
 	}
-	if jsonOutput {
+	if commandWantsJSON(commandContext(cmd), jsonOutput) {
 		if err := emitStopReadyJSON(commandContext(cmd).Stdout, status, result); err != nil {
 			return err
 		}

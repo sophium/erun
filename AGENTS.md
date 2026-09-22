@@ -108,8 +108,11 @@ operators may interact directly with in-pod agents without an orchestrator.
 - Convenience orchestration switches are for interactive operators only.
   Programmatic callers compose primitives and pass the version explicitly.
 - `push` publishes images and runtime charts; `deploy` only installs a
-  published version. `release` is the contracted build/publish/tag
-  orchestrator and must verify publication before exposing release metadata.
+  published version. `release` marks source control and nothing else: it stamps,
+  commits, tags and pushes the version, and never builds, publishes, or verifies
+  an artifact. `build --release` is the one that composes that stamp/tag work
+  with the build and the publish, and verifies what it published before it
+  reports a released version.
 
 ## Answering The Operator's Questions
 
@@ -258,6 +261,57 @@ controls: its own final turn.
   deploy the changed artifact, repeat the original flow from the same vantage
   point, report anything that could not be exercised, and remove probe artifacts.
 
+## A Defect Fix Names Its Reproduction (Mandatory)
+
+**A fix for a reported defect must, in the same change, carry a test that reproduces the failure the report described — and must say which test that is.**
+
+The defect this rule exists to prevent is not "a fix with no tests". It is narrower, and it is what an audit of ~80 closed issues actually found, three times over in three unrelated subsystems (desktop dashboard, desktop dialog, release pipeline): **the fix is correct, the neighbouring states all get tests, and the one state the report described gets none.** In each case a refactor away, the operator-visible bug comes straight back with a green suite beside it.
+
+- `#1932`'s gates tab got tests for "renders returned runs", "renders `INCONCLUSIVE`", and "shows the empty state" — but none for `ListGateRuns` **failing**, which is the state the live platform is actually in.
+- `#1934`'s title is literally "one failed read blanks the other's already-resolved panel", and all nine of its tests stub both reads to the *same* class of outcome. None crosses them.
+- `#1921`'s docker stub is all-or-nothing on `image inspect`, so no scenario has the local answer *present* while the registry answers *missing* — precisely the disagreement that produced the reported `unknown blob`.
+
+So the bar is not "did you add a test". Every one of those three changes added tests. The bar is: **which case is the reproduction of the reported failure?**
+
+- **A test that exercises the changed function is not a reproduction.** The reproduction is the case that fails on the pre-fix code for the reason the report gave, and passes after. If you cannot say which case that is, you have not written it yet.
+- **A probabilistic or load-dependent failure needs a deterministic reproduction constructed on purpose** — a simulated broken transport, a forced overlap, a controllable stand-in process. A single green run of a racy flow proves nothing, and "it passes now" is not a reproduction. Several fixes in this repo needed exactly this; see `erun-integration/AGENTS.md` § "Scenario shape and dry-run contract" and `erun-ui/playwright/AGENTS.md` for the seams that make it possible.
+- **Cross the states the report crossed.** When the report is about two things disagreeing (two panels, two registries, two reads), a scenario that drives both to the same outcome does not reproduce it. Disagree them.
+
+### The declaration
+
+State it as commit trailers on any commit in the branch — the same place `Closes #N` already lives, because provenance belongs in git history (§ "Code Comments"):
+
+```
+Reproduces: <the state, the input, and the wrong behaviour the report described>
+Regression-Test: <path/to/file_test.go>::<name of the case>
+```
+
+`Regression-Test` is repeatable. The named path must be a real test file that **this change adds or modifies**, and the named case string must really be in it — pointing at a pre-existing test somewhere else in the repo is not a reproduction of a defect you just fixed.
+
+When a fix genuinely cannot carry one — and there are real cases — say so explicitly, with a kind from the closed set below and a reason a reviewer can weigh:
+
+```
+Regression-Test: none
+Regression-Test-Exemption: <kind>: <why>
+```
+
+| Kind | Meaning | Checked mechanically? |
+| --- | --- | --- |
+| `docs-only` | prose and images only, nothing executable | yes — the diff must contain no non-documentation file |
+| `revert` | reverts a commit whose own coverage still stands | yes — a commit in the range must carry `This reverts commit <sha>` |
+| `covered-by-existing` | an existing test already reproduces it | partly — also needs `Regression-Test-Existing: <path>::<case>`, which must resolve |
+| `no-reproducible-failure` | no test this repo can run reproduces it (hardware, a third-party outage, human perception) | no — a claim a reviewer accepts or rejects |
+
+**Silence is never how a change opts out.** That is the same discipline `InternalAPIRoutes` and `cliOnlyAgentFacingCommands` already enforce elsewhere, applied to the thing that actually kept regressing.
+
+### What the gate can and cannot decide
+
+`scripts/check-regression-coverage.mjs` enforces this, run by `make fast-check` (see below) and by the `erun-merge` skill before it pushes. It **cannot** decide whether the named test genuinely reproduces the reported failure — no static analysis can read an issue report and judge that, and pretending otherwise would produce a check that is wrong most of the time. What it does decide is that the claim is named, specific, resolvable, and impossible to make by silence, so a reviewer answers one bounded question instead of having to notice an absence. A wrong named claim is a review finding; an absence is what shipped three times.
+
+It also cannot run inside `check-gate`: it reads git history, and `check-gate` runs inside the `erun-devops` image test stage's Docker build context, which has no `.git`. Its pure classifier is unit-tested in `scripts/check-regression-coverage.test.mjs`, which `test-frontend` **does** run inside `check-gate`, so the enforcement logic is gated even though the git-dependent invocation is not.
+
+`--audit` mode answers only the diff-derived half ("does this change carry any test at all?") for commits that predate the convention. Run it over history, not over your branch — on a branch it would let exactly the three shapes above through.
+
 ## Integration Test Gate
 
 - Run the validation required by every affected module. Refactors of shared
@@ -294,19 +348,46 @@ controls: its own final turn.
   checks. They do not require deploying or rebuilding unchanged app behavior;
   changes to embedded instruction templates also run their provisioning tests.
 
+### Regression-suite gating strategy for `erun build` (#2086 — under discussion, do not implement)
+
+- **This is not a decision.** #2086 proposes change-scoped suites on the merge gate and the unconditional full suite (including `test-playwright`) on the release gate only. Its own author commented fourteen minutes after filing it: the design was still being worked through with the operator, "the trigger model, the stage vocabulary, and where each suite belongs are all open," and no implementation should start until the operator confirms the plan. Read every "Recommendation" and "Rejected" line in #2086 as a position in an open discussion, not settled guidance. Do not wire a path→suite map, split `test-playwright` off the merge gate, or otherwise implement from that issue without first checking whether the operator has since confirmed a plan.
+- **The specific rationale #2086 gives against running everything unconditionally ("Option A" in its own vocabulary) was already stale the day it was filed.** #2086 rejects Option A because it "puts four known flakes on every merge" (#1786, #1772, #1945, #2045). All four are closed (#1786, #1772: 2026-08-31; #1945, #2045: 2026-09-03), and separately — not as a response to #2086 — `check-gate` gained `test-playwright` unconditionally the same day #2086 was filed (`c446e9fc`, merged 2026-09-04T06:13Z, ~2 hours after the issue). That landing was not casual: #2021's own review thread measured the suite honestly before merging it (2/5 clean → 4/5 after four specs were fixed with real root causes → the residual filed as #2045 rather than papered over → #2045 turned out to be a genuine application bug, not a test problem → 5/5, then re-measured 3/3 at 517/517 against the actual tree it would gate). So Option A is not a hypothetical being weighed against the issue's proposed C/D; it is what `check-gate` runs today, on the strength of a measured, not assumed, stability record. That does not retroactively decide #2086 — the ~15 extra minutes `test-playwright` adds to the gate (§ "Integration Test Gate" above; ~7m gate alone vs. ~21-22m with the suite) is a real, separate cost change-scoping or a release-only tier would still reduce — but whoever resumes this discussion should argue from latency, not from a flake count that has since been fixed.
+- **Two constraints bind whatever the operator eventually decides, because they come from measured failure modes, not preference:**
+  - A change-scoped or tiered gate must keep three outcomes visibly distinct per suite: "ran and passed," "skipped because the diff didn't match the suite's mapped paths," and "promoted from a cached fingerprint image without rebuilding" (#2090's caching leg is closed at the source: `applyIncrementalPromotion` never promotes a Dockerfile matching the test-stage-gate convention, so the gate always goes through a real `docker build` — `dockerfileHasGateTestStage`, `build_gate_test_stage_test.go`; the scoping leg is unaffected by that closure and still binds). Collapsing any two of those into the same green checkmark reintroduces #2090's exact failure mode — a gate that reports success without having verified anything — in the shape of scoping instead of caching. #2086's own design already defaults an unmapped path to "run" (fail-slow, not fail-blind); the same discipline has to extend to the trace output, not just the routing decision.
+  - Change-scoping decides *which* suites run for a diff, not the venue or concurrency they run under. This repository's venue- and concurrency-dependent bugs this week (#2076 — auth-failure-retry scenarios failing only inside `erun build`; #2151 — a Playwright spec flaking only under repeated same-worker runs) were found by running suites in their real venue at real concurrency, not by running everything on every diff. A change-scoped gate only misses them if its path→suite map fails to route the diffs that trigger them to the suite that contains them — a mapping-completeness risk, not a scoping-in-principle risk — and only if the suites it does select run somewhere other than the real build environment. Neither #2076 nor #2151 is an argument against scoping; both are arguments for keeping "which suites run" and "where and how they run" as separate questions, and for erring toward running when a mapping is uncertain.
+- This section exists so a future reader checking AGENTS.md before touching the gate — human or agent — finds the hold on #2086 here too, not only in the issue's own comment thread.
+
 ## Release Rules
 
-- A successful release means every versioned artifact is deployable. Refuse
-  incomplete builds and verify images and charts from their published source
-  before pushing the release tag or other outward-facing metadata.
-- Keep recoverable local preparation before publication and outward-facing
-  changes after verification. Version bumps occur only after publication so a
+- A successful release marks source control; it says nothing about artifacts.
+  `build --release` is what refuses an incomplete build and verifies images and
+  charts from their published source, before it reports the version it released.
+  A tag whose artifacts never landed names a dead version rather than corrupting
+  anything: `deploy` never builds, so a dead version is not deployable by
+  accident, and the remedy is to fix the source and release again.
+- Keep recoverable local preparation before the outward-facing pushes.
+  `build --release` bumps the version only once its publish has succeeded, so a
   failed run can retry the same version.
-- Account for the base branch moving during a release: check before expensive
-  work and reconcile safely before the final push.
+- Account for the base branch moving during a `build --release`: check before
+  expensive work and reconcile safely before the final push. The guard belongs
+  to the build, which is the step that spends.
 - Release builds cover `linux/amd64` and `linux/arm64`; non-release builds may
   narrow platforms explicitly. Verify daemon support before multi-architecture
   work and publish local base images before dependent images.
+- **A pre-merge `READY` build is not a release.** The drive builds the pushed
+  branch with a plain `erun build` and records the version it mints
+  (`erun-merge`, rung 5); that build asserts only that the commit builds. The
+  version is metadata no platform path resolves — the artifact that ships is
+  cut after merge, by the release the accepted review enqueues, which mints its
+  own. A `--release` at that step instead publishes a two-architecture
+  `-pr.<sha>` image and chart set per pull request that nothing consumes, and
+  it discards the environment's `docker.platforms` pin, which a release never
+  consults. The merge queue's own gate build stays plain `erun build` too.
+- That pre-merge build reads `docker.platforms` from the **checked-out
+  branch's** `.erun/config.yaml`, so a branch cut before the pin landed still
+  builds both architectures and emulates the foreign one. Read the build's own
+  `build: platforms configured as ...` trace line and pass `--platform` with
+  the architecture the machine actually runs when it names more than one.
 - Treat release changes as repository-wide. Validate `erun-common`, `erun-cli`,
   and `erun-mcp`, plus desktop packaging and runtime chart contracts when
   affected. Add regression coverage for every fixed release failure mode.

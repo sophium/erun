@@ -22,12 +22,14 @@ import {
 } from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
 import {
+  reviewDetailUnresolvedThreads,
   reviewStatusTone,
   unresolvedThreadsLabel,
   unresolvedThreadsTone,
 } from '@/app/tenantDashboardPanels';
 import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 
+import { AccessDeniedBody } from './AccessRemedyNote';
 import { BuildProfileDialog, BuildProfileViewButton } from './BuildProfileDialog';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
@@ -97,7 +99,11 @@ function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.Reac
     return (
       <EmptyState
         heading="You do not have access to this review"
-        body={`It needs ${data.restricted}. Ask an administrator for access.`}
+        body={
+          <AccessDeniedBody remedies={data.accessRemedies} restricted={data.restricted}>
+            {`It needs ${data.restricted}. Ask an administrator for access.`}
+          </AccessDeniedBody>
+        }
       />
     );
   }
@@ -162,7 +168,10 @@ function ReviewDetailThreadStatus({
   if (roots.length === 0) {
     return null;
   }
-  const unresolved = data.unresolvedThreads ?? 0;
+  const unresolved = reviewDetailUnresolvedThreads(data);
+  if (unresolved === undefined) {
+    return null;
+  }
   return (
     <div>
       <StatusBadge
@@ -260,7 +269,11 @@ function ReviewDetailBuilds({
     return (
       <EmptyState
         heading="You do not have access to this review's builds"
-        body={`It needs ${data.buildsRestricted}. Ask an administrator for access.`}
+        body={
+          <AccessDeniedBody remedies={data.accessRemedies} restricted={data.buildsRestricted}>
+            {`It needs ${data.buildsRestricted}. Ask an administrator for access.`}
+          </AccessDeniedBody>
+        }
       />
     );
   }

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
-	sshconfig "github.com/sophium/erun/internal/sshconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -14,30 +13,32 @@ func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc
 	var gateEnvironment string
 	var controlPlanes bool
 	var failOnDrift bool
+	var erunAlias string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured tenants and environments",
 		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
 			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. When an environment's version is not recorded locally, its deployed release is read live to tell a confirmed absence (\"none\") apart from a version that could not be determined at all (\"undetermined\", excluded from the max/behind computation with the reason stated); --dry-run traces that check instead of running it. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
-			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
+			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. A plane whose own discovery document advertises an apiUrl resolving to a genuinely different address is flagged distinctly, since that is not a benign alias. Add --erun-alias to narrow the check to one configured erun-hosted alias instead of probing every configured one. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
 			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, controlPlanes, failOnDrift)
+			return runListCommand(commandContext(cmd), store, findProjectRoot, versionDriftTenant, gateEnvironment, erunAlias, controlPlanes, failOnDrift)
 		},
 	}
 	cmd.Flags().StringVar(&versionDriftTenant, "tenant", "", "Report erun-version drift across this tenant's environments instead of the full listing")
 	cmd.Flags().StringVar(&gateEnvironment, "gate-environment", "", "With --tenant, name the environment driving that tenant's merge-queue gate and flag whether it is behind any environment it gates")
 	cmd.Flags().BoolVar(&controlPlanes, "control-planes", false, "Report every configured erun-hosted control plane's deployed version against the newest version erun's own registry has published, instead of the full listing")
 	cmd.Flags().BoolVar(&failOnDrift, "fail-on-drift", false, "With --tenant or --control-planes, exit non-zero when the report finds drift instead of always exiting 0")
+	cmd.Flags().StringVar(&erunAlias, "erun-alias", "", "With --control-planes, narrow the check to this one configured erun-hosted alias instead of every configured one (defaults to checking all)")
 	addDryRunFlag(cmd)
-	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --tenant erun --fail-on-drift\n  erun list --control-planes\n  erun list --control-planes --dry-run\n  erun list --control-planes --fail-on-drift"
+	cmd.Example = "  erun list\n  erun list --tenant erun\n  erun list --tenant erun --gate-environment build\n  erun list --tenant erun --gate-environment build --output json\n  erun list --tenant erun --fail-on-drift\n  erun list --control-planes\n  erun list --control-planes --dry-run\n  erun list --control-planes --fail-on-drift\n  erun list --control-planes --erun-alias erun+api.acme.services.erunpaas.com@erun"
 	return cmd
 }
 
-func validateListFlags(controlPlanes, failOnDrift bool, versionDriftTenant, gateEnvironment string) error {
+func validateListFlags(controlPlanes, failOnDrift bool, versionDriftTenant, gateEnvironment, erunAlias string) error {
 	if gateEnvironment != "" && versionDriftTenant == "" {
 		return fmt.Errorf("--gate-environment requires --tenant")
 	}
@@ -47,14 +48,22 @@ func validateListFlags(controlPlanes, failOnDrift bool, versionDriftTenant, gate
 	if failOnDrift && versionDriftTenant == "" && !controlPlanes {
 		return fmt.Errorf("--fail-on-drift requires --tenant or --control-planes")
 	}
+	return validateListControlPlaneAliasFlag(controlPlanes, erunAlias)
+}
+
+func validateListControlPlaneAliasFlag(controlPlanes bool, erunAlias string) error {
+	if erunAlias != "" && !controlPlanes {
+		return fmt.Errorf("--erun-alias requires --control-planes")
+	}
 	return nil
 }
 
-func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment string, controlPlanes, failOnDrift bool) error {
+func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot common.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
 	ctx.TraceCommand("", "erun", "list")
 	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
-	if err := validateListFlags(controlPlanes, failOnDrift, versionDriftTenant, gateEnvironment); err != nil {
+	erunAlias = strings.TrimSpace(erunAlias)
+	if err := validateListFlags(controlPlanes, failOnDrift, versionDriftTenant, gateEnvironment, erunAlias); err != nil {
 		return err
 	}
 
@@ -67,7 +76,7 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 	}
 
 	if controlPlanes {
-		return runListControlPlanes(ctx, result, failOnDrift)
+		return runListControlPlanes(ctx, result, erunAlias, failOnDrift)
 	}
 
 	if versionDriftTenant != "" {
@@ -95,8 +104,11 @@ func runListVersionDrift(ctx common.Context, result common.ListResult, versionDr
 	return versionDriftExitError(drift)
 }
 
-func runListControlPlanes(ctx common.Context, result common.ListResult, failOnDrift bool) error {
-	drift := common.ResolveControlPlaneVersionDrift(ctx, result, common.DefaultCloudDependencies(), common.ResolveDefaultRuntimeRegistryVersions)
+func runListControlPlanes(ctx common.Context, result common.ListResult, erunAlias string, failOnDrift bool) error {
+	drift, err := common.ResolveControlPlaneVersionDrift(ctx, result, erunAlias, common.DefaultCloudDependencies(), common.ResolveDefaultRuntimeRegistryVersions)
+	if err != nil {
+		return err
+	}
 	if ctx.Output == common.OutputJSON {
 		if err := ctx.WriteResult(drift); err != nil {
 			return err
@@ -152,9 +164,9 @@ func versionDriftExitError(drift common.TenantVersionDrift) error {
 
 // controlPlaneVersionDriftExitError makes control-plane version drift a
 // non-zero exit when --fail-on-drift asks for it: any plane behind or ahead
-// of the published version, any plane erun could not reach, or a baseline
-// erun could not even resolve -- none of those confirm a plane is running
-// what erun actually published.
+// of the published version, any plane erun could not reach, any plane
+// advertising a foreign apiUrl, or a baseline erun could not even resolve --
+// none of those confirm a plane is running what erun actually published.
 func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) error {
 	var problems []string
 	if drift.PublishedVersionError != "" {
@@ -170,10 +182,28 @@ func controlPlaneVersionDriftExitError(drift common.ControlPlaneVersionDrift) er
 	if len(ahead) > 0 {
 		problems = append(problems, fmt.Sprintf("%d plane(s) ahead of published: %s", len(ahead), strings.Join(ahead, ", ")))
 	}
+	if mismatched := controlPlaneAPIURLMismatches(drift.Planes); len(mismatched) > 0 {
+		problems = append(problems, fmt.Sprintf("%d plane(s) advertising a foreign apiUrl: %s", len(mismatched), strings.Join(mismatched, ", ")))
+	}
 	if len(problems) == 0 {
 		return nil
 	}
 	return fmt.Errorf("control plane version drift: %s", strings.Join(problems, "; "))
+}
+
+// controlPlaneAPIURLMismatches names every plane whose own discovery document
+// advertised an apiUrl resolving to a different backend than the one erun
+// actually reached -- the one condition here that is never routine drift, so
+// --fail-on-drift reports it alongside behind/ahead rather than folding it
+// into either.
+func controlPlaneAPIURLMismatches(planes []common.ControlPlaneVersionStatus) []string {
+	var mismatched []string
+	for _, plane := range planes {
+		if plane.AdvertisedAPIURLMismatch != "" {
+			mismatched = append(mismatched, plane.Alias)
+		}
+	}
+	return mismatched
 }
 
 // classifyControlPlaneVersionDrift buckets every plane, and its linked
@@ -302,7 +332,7 @@ func writeControlPlaneVersionReport(ctx common.Context, drift common.ControlPlan
 			return err
 		}
 	}
-	if _, err := fmt.Fprintln(ctx.Stdout, "Control planes:"); err != nil {
+	if _, err := fmt.Fprintln(ctx.Stdout, controlPlanesSectionHeader(drift.Planes)); err != nil {
 		return err
 	}
 	if len(drift.Planes) == 0 {
@@ -317,12 +347,37 @@ func writeControlPlaneVersionReport(ctx common.Context, drift common.ControlPlan
 	return nil
 }
 
+// controlPlanesSectionHeader names both the number of distinct backends
+// found and the number of configured aliases that reach them -- when the two
+// differ, that gap is exactly the signal that two or more aliases were
+// collapsed into one plane, and a bare "Control planes:" header
+// would hide it.
+func controlPlanesSectionHeader(planes []common.ControlPlaneVersionStatus) string {
+	if len(planes) == 0 {
+		return "Control planes:"
+	}
+	aliasCount := 0
+	for _, plane := range planes {
+		aliasCount += 1 + len(plane.AdditionalAliases)
+	}
+	return fmt.Sprintf("Control planes (%s, %s):", pluralCount(len(planes), "backend", "backends"), pluralCount(aliasCount, "alias", "aliases"))
+}
+
+func pluralCount(n int, singular, plural string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %s", n, plural)
+}
+
 func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlaneVersionStatus) error {
 	line := "  - " + plane.Alias + " api-url=" + quotedValueOrNone(plane.APIURL)
 	if !plane.Reachable {
 		line += " reachable=no reason=" + quotedValueOrNone(plane.UnreachableReason)
-		_, err := fmt.Fprintln(ctx.Stdout, line)
-		return err
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
+			return err
+		}
+		return writeControlPlaneAdditionalAliases(ctx, plane.AdditionalAliases)
 	}
 	line += " reachable=yes version=" + quotedValueOrNone(plane.Version)
 	switch {
@@ -334,10 +389,32 @@ func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlane
 	if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 		return err
 	}
+	if err := writeControlPlaneAdditionalAliases(ctx, plane.AdditionalAliases); err != nil {
+		return err
+	}
+	// Above the nested console: this is a property of the plane itself, so it
+	// reads with the plane's own line rather than under its console.
+	if plane.AdvertisedAPIURLMismatch != "" {
+		if _, err := fmt.Fprintln(ctx.Stdout, "    [advertised apiUrl mismatch: "+plane.AdvertisedAPIURLMismatch+"]"); err != nil {
+			return err
+		}
+	}
 	if plane.Console == nil {
 		return nil
 	}
 	return writeControlPlaneConsoleEntry(ctx, *plane.Console)
+}
+
+// writeControlPlaneAdditionalAliases names every other configured alias that
+// resolved to this same backend, so collapsing duplicate aliases into one
+// plane never hides which aliases are actually configured.
+func writeControlPlaneAdditionalAliases(ctx common.Context, aliases []common.ControlPlaneAliasRef) error {
+	for _, alias := range aliases {
+		if _, err := fmt.Fprintf(ctx.Stdout, "      also reachable as: %s api-url=%s\n", alias.Alias, quotedValueOrNone(alias.APIURL)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVersionStatus) error {
@@ -348,6 +425,9 @@ func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVer
 		return err
 	}
 	line += " reachable=yes version=" + quotedValueOrNone(console.Version)
+	if console.Reason != "" {
+		line += " reason=" + quotedValueOrNone(console.Reason)
+	}
 	switch {
 	case console.Behind:
 		line += " [behind published -- roll it]"
@@ -359,6 +439,12 @@ func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVer
 }
 
 func writeListResult(ctx common.Context, result common.ListResult) error {
+	if err := ctx.WriteResult(result); err != nil {
+		return err
+	}
+	if ctx.Output == common.OutputJSON {
+		return nil
+	}
 	if err := writeListHeaderSections(ctx, result); err != nil {
 		return err
 	}
@@ -708,7 +794,7 @@ func sshHostAliasLabel(tenantName, environmentName, alias string) string {
 	if alias == "" {
 		return valueOrNone(alias)
 	}
-	configured, err := sshconfig.DefaultConfigHasAlias(alias)
+	configured, err := common.DefaultSSHConfigHasAlias(alias)
 	if err != nil || configured {
 		return alias
 	}

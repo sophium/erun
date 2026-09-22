@@ -1,0 +1,3 @@
+Dry run: erun platform user role grant planned.
+audit: erun platform user grant-role --dry-run --role-id role-reviewer --user-id user-1
+platform: POST https://api.example.test/v1/users/user-1/roles (roleId=role-reviewer)

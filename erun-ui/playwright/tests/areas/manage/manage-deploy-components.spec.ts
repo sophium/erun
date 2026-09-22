@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { boundingBoxOf } from '../../../fixtures/boundingBox.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 
@@ -112,6 +113,13 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
     await expect(saveDefault).toBeDisabled();
+
+    // This save stored an empty selection (the runtime was the only box checked),
+    // which leaves the banner's own deploy with nothing to roll out. It reads the
+    // same checklist as the Runtime tab's Deploy, so it refuses on the same
+    // grounds rather than falling through to the runtime chart alone.
+    await expect(app.manageDialog.redeployNowButton()).toBeDisabled();
+    await expect(app.manageDialog.redeployBanner()).toContainText('no charts are checked');
   });
 
   test('a sourceless (runtime) env offers the publishable platform components by reference', async ({
@@ -187,7 +195,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
       await expect(app.manageDialog.deployComponentCheckbox(component)).toHaveCount(0);
     }
     await page.screenshot({
-      path: 'test-results/runtime-picker-gated.png',
+      path: artifactPath('test-results/runtime-picker-gated.png'),
       animations: 'disabled',
     });
 
@@ -206,7 +214,7 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     }
     await expect(app.manageDialog.deployComponentCheckbox(runtimeName)).toBeVisible();
     await page.screenshot({
-      path: 'test-results/runtime-picker-populated.png',
+      path: artifactPath('test-results/runtime-picker-populated.png'),
       animations: 'disabled',
     });
 
@@ -361,6 +369,111 @@ test.describe('manage dialog — components to deploy (#718)', () => {
         .versionPickerPopover()
         .getByText('Runtime — published pw-devops chart', { exact: true }),
     ).toBeVisible();
+  });
+
+  // Stub the picker plus a checklist shaped like the reported one: the runtime
+  // checked by default, alongside component charts the operator has not checked.
+  // A resolved runtimeChart keeps runtimeChartBlocksDeploy out of the way, so the
+  // empty checklist is the only thing that can disable Deploy.
+  async function stubChecklistOfComponents(page: Page): Promise<void> {
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadVersionSuggestions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { suggestions: [{ label: 'Latest stable', version: '1.0.20' }], notices: [] },
+          }),
+        });
+      }
+      if (body.method === 'LoadDeployComponents') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              components: [
+                { name: 'pw-devops', runtime: true, source: 'published-chart', selected: true },
+                {
+                  name: 'pw-backend-api',
+                  runtime: false,
+                  source: 'published-chart',
+                  selected: false,
+                },
+                { name: 'pw-docs', runtime: false, source: 'published-chart', selected: false },
+              ],
+              runtimeChart: {
+                reference: 'oci://ghcr.io/sophium/charts/erun-devops',
+                version: '1.0.20',
+                chart: 'erun-devops',
+                source: 'canonical',
+                missing: false,
+                unknown: false,
+              },
+            },
+          }),
+        });
+      }
+      await route.continue();
+    });
+  }
+
+  // The checklist's helper promises "Deploy rolls out exactly the checked charts",
+  // and an empty selection was the one state it could not keep that in. The
+  // desktop threads no --components flag for it, so `erun deploy` read it as an
+  // omitted flag -- "unspecified" -- and fell through the precedence tiers to the
+  // runtime chart alone (bootstrap/heal). Unchecking the runtime and pressing
+  // Deploy rolled out the one chart the operator had just declined, and a runtime
+  // upgrade restarts the environment's pod (#2384).
+  test('an emptied checklist disables Deploy rather than rolling the runtime chart alone (#2384)', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    await stubChecklistOfComponents(page);
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.pickVersion('1.0.20');
+
+    const runtime = app.manageDialog.deployComponentCheckbox('pw-devops');
+    await expect(runtime).toBeChecked();
+    await expect(app.manageDialog.deployComponentCheckbox('pw-backend-api')).not.toBeChecked();
+    await expect(app.manageDialog.deployButton()).toBeEnabled();
+
+    // Unchecking the only checked chart leaves nothing to roll out. The button
+    // must refuse it and say so, rather than falling through to the runtime.
+    await runtime.click();
+    await expect(runtime).not.toBeChecked();
+    // This is the reported defect: the button stayed enabled and the deploy went
+    // through, rolling out the runtime chart the operator had just declined.
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
+    const panelNotice = app.manageDialog.deployComponentsEmptyPanelNotice();
+    await expect(panelNotice).toContainText('No charts are checked');
+    await page.screenshot({
+      path: artifactPath('test-results/manage-deploy-components-emptied.png'),
+      animations: 'disabled',
+    });
+
+    // The guard is the empty set itself, not the act of unchecking: restoring a
+    // chart restores the button, so an operator recovers in one click.
+    await runtime.click();
+    await expect(runtime).toBeChecked();
+    await expect(app.manageDialog.deployButton()).toBeEnabled();
+    await expect(panelNotice).toHaveCount(0);
+
+    // Emptying it again, then closing the panel: the same statement sits under the
+    // version row, beside Deploy, and the button points at it for assistive tech.
+    await runtime.click();
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await expect(app.manageDialog.deployComponentsEmptyNotice()).toContainText(
+      'No charts are checked',
+    );
+    await expect(app.manageDialog.deployButton()).toBeDisabled();
+    await expect(app.manageDialog.deployButton()).toHaveAttribute(
+      'aria-describedby',
+      'environment-config-deploy-components-empty-notice',
+    );
   });
 
   test('runtime row shows the erun-devops fallback when the tenant chart is unpublished (#767)', async ({

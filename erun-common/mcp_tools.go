@@ -153,6 +153,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"platform_identity_org_create":       {Family: "platform", CLIPath: []string{"platform", "identity", "org", "create"}, Title: "Create an organization on the platform's identity provider", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_user_list":                 {Family: "platform", CLIPath: []string{"platform", "user", "list"}, Title: "List platform users", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_user_enroll":               {Family: "platform", CLIPath: []string{"platform", "user", "enroll"}, Title: "Enrol a user into a tenant", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
+	"platform_user_grant-role":           {Family: "platform", CLIPath: []string{"platform", "user", "grant-role"}, Title: "Grant a role to an enrolled user", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"platform_env_list":                  {Family: "platform", CLIPath: []string{"platform", "env", "list"}, Title: "List hosted environments", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_env_get":                   {Family: "platform", CLIPath: []string{"platform", "env", "get"}, Title: "Get one hosted environment", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"platform_env_register":              {Family: "platform", CLIPath: []string{"platform", "env", "register"}, Title: "Register a hosted environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
@@ -177,7 +178,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// environment a review's merge queue promoted to MERGE ever calls this,
 	// after it has fetched, gate-built, and pushed the prospective merge
 	// itself — no desktop surface authors this report either.
-	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED after gate-building and pushing its prospective merge", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED, verified as a queue-driven merge or as work that landed elsewhere", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// Requeue recovers a merge-queue wedge: a review stuck at
 	// MERGE with no desktop button to move it, only ever hit by whichever
 	// tooling drove gate-merge/the merge queue in the first place — the same
@@ -199,7 +200,19 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// console/desktop surface; remove AgentFacing once it exists.
 	"gate_list": {Family: "gate", CLIPath: []string{"gate", "list"}, Title: "List gate runs: what is gating now, and what recent gates decided", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	"gate_show": {Family: "gate", CLIPath: []string{"gate", "show"}, Title: "Show one gate run in full", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
-	"idle":      {Family: "idle", CLIPath: []string{"idle"}, Title: "Report an environment's idle and auto-stop state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	// The jobs_* tools are the platform-backed queue: what agents and
+	// orchestrators are working on right now, and what recently finished.
+	// jobs_list/jobs_show are human-facing reads with a real operator surface
+	// (erun-console's Jobs section), so they are not AgentFacing.
+	// jobs_start/jobs_finish are the self-report writes an actor makes about
+	// its own work -- an operator watches the queue, never edits someone
+	// else's row -- which is the same AgentFacing exemption the
+	// exec_gate-run_start/exec_gate-run_report pair carries.
+	"jobs_list":   {Family: "jobs", CLIPath: []string{"jobs", "list"}, Title: "List jobs: what is being worked on now, and what recently finished", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"jobs_show":   {Family: "jobs", CLIPath: []string{"jobs", "show"}, Title: "Show one job in full", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
+	"jobs_start":  {Family: "jobs", CLIPath: []string{"jobs", "start"}, Title: "Record that this actor is starting a piece of work", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"jobs_finish": {Family: "jobs", CLIPath: []string{"jobs", "finish"}, Title: "Report a job's progress or its outcome", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
+	"idle":        {Family: "idle", CLIPath: []string{"idle"}, Title: "Report an environment's idle and auto-stop state", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
 	// The idle_stop_* primitives record and query the auto-stop supervisor's
 	// own decisions; a human reads that history through the already-covered
 	// `idle` report, never by calling these directly.
@@ -254,6 +267,12 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"expose":      {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
 	"unexpose":    {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
 	"terraform":   {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
+	// e2e has no desktop surface to reference yet -- AgentFacing here is a
+	// deliberate, temporary scope decision for this feature's CLI/MCP-first
+	// delivery, not a claim that no human ever runs it, mirroring gate_list
+	// above. A follow-up issue tracks adding a desktop "Run e2e" surface;
+	// remove AgentFacing once it exists.
+	"e2e": {Family: "", CLIPath: []string{"e2e"}, Title: "Run the project's Playwright suite against a deployed environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// job_start has no working handler: it is a removed-tool stub (see
 	// mcpRemovedTools) whose only behavior is to name the tool that took over
 	// its capability.

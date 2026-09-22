@@ -8,17 +8,39 @@ ERun's configuration lives in a small number of well-known files.
 
 ## Per-user (your machine)
 
+The per-user tree lives under the platform's config directory, with an `erun/` root inside it. That directory is resolved the way the XDG base-directory spec defines it: an absolute `XDG_CONFIG_HOME` wins on every platform, and otherwise each platform has its own default — on macOS that default is *not* `~/.config`:
+
+| OS | Per-user config root |
+|---|---|
+| macOS | `$XDG_CONFIG_HOME/erun`, else `~/Library/Application Support/erun` |
+| Linux | `$XDG_CONFIG_HOME/erun`, else `~/.config/erun` |
+| Windows | `%XDG_CONFIG_HOME%\erun`, else `%LOCALAPPDATA%\erun` |
+
+So on a Mac with no `XDG_CONFIG_HOME` set, `~/.config/erun` does not exist and the tree is under `~/Library/Application Support/erun`. Do not guess the root: [`erun doctor`](/cli/doctor) prints the one ERun actually resolved.
+
+Elsewhere in this documentation, `<config-root>` stands for the per-user config root in the table above.
+
+Every file in the tree is named `config.yaml` — only its directory distinguishes the global, tenant, and environment configs:
+
 ```
-$XDG_CONFIG_HOME/erun/                    # or ~/.config/erun on Linux/macOS
+<config-root>/
 ├── config.yaml                           # global defaults (default tenant, default env)
 ├── config.yaml.<YYYY-MM-DD>.bak          # daily backups of the global config (last 5 kept)
 └── <tenant>/
-    ├── tenant.yaml                       # tenant config
+    ├── config.yaml                       # tenant config (default environment, API URL)
     └── <environment>/
         ├── config.yaml                   # env config (kube context, registry, runtime)
         ├── config.yaml.<YYYY-MM-DD>.bak  # daily backups of this env's config (last 5 kept)
         └── (workspace caches, idle logs, …)
 ```
+
+Every file in the tree is named `config.yaml`; only the directory it sits in distinguishes the global, tenant, and environment configs.
+
+### The desktop keeps its own state beside this tree {#desktop-state-tree}
+
+The config root is lowercase `erun`. The desktop app keeps its own per-installation state — its identity key, its log, and the orchestrator bookkeeping it restores itself from — in a **separately spelled** `ERun` directory beside it, under the same config home. The two names differ only in case, so on the case-insensitive filesystems macOS ships with by default they resolve to a single directory and the distinction is invisible; on a case-sensitive volume, and on Linux, they are two directories.
+
+That matters when you go looking for a file by hand. A tenant's config, its secrets, the ACME state, and the port-forward records under `portforward/` are all in the lowercase tree in the table above; `desktopid.pub`, `erun-app.log`, and the orchestrator files are in the capitalized one. Do not merge the two by renaming either directory: the spelling a component resolves is what points it at its state, so renaming one hides every file the other name was reading. The port-forward records are part of the config tree, not the desktop's — the desktop only reads that convention, and never writes it.
 
 ### Config backups {#config-backups}
 
@@ -84,13 +106,7 @@ Every environment-scoped command (`open`, `doctor`, `deploy`, a scoped `upgrade`
 
 `--dry-run` does no work and skips step timing entirely, the same as it skips the `==> Building` / `==> Releasing` / `==> Pushing` / `==> Deploying` markers.
 
-The XDG base dir follows the OS conventions:
-
-| OS | Path |
-|---|---|
-| macOS | `~/Library/Application Support` (via `os.UserConfigDir`) |
-| Linux | `$XDG_CONFIG_HOME` if set, else `~/.config` |
-| Windows | `%AppData%` |
+Unlike the per-user config root above, `~/.erun` is always the home directory and never moves with `XDG_CONFIG_HOME`.
 
 ## Per-project (committed in the repo)
 
@@ -111,4 +127,4 @@ This file is checked into the repository so that everyone on the team uses the s
 └── .erun/<tenant>/<env>/trace.log        # rolling trace of in-pod erun commands
 ```
 
-The runtime container reads the same `~/.config/erun/...` layout as your laptop, just inside the pod.
+The runtime container reads the same per-user config layout as your machine (the [per-user root](#per-user-your-machine) above, resolved inside the pod, where it is `~/.config/erun/...`).

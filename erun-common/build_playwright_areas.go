@@ -55,6 +55,14 @@ const erunUIRoot = "erun-ui/"
 // Left empty (the Dockerfile's own ARG default, which runs the full suite) when
 // the Dockerfile does not consume it, or when the selection could not be
 // resolved -- a gap in the git history must cost time, never coverage.
+//
+// Empty is therefore this field's one unresolved signal, and its only one: a
+// successful resolution is never empty (classifyPlaywrightChangedFiles returns
+// "all" for the full suite). tracePlaywrightGateSelection reports the threaded
+// value at default verbosity and relies on that, so a resolution that started
+// returning "" for the full suite would make the build claim "unresolved" over
+// a real answer -- TestClassifyPlaywrightChangedFilesNeverReturnsAnEmptySelection
+// pins it.
 func applyPlaywrightAreaBuildArgs(ctx Context, projectRoot string, build *DockerBuildSpec) {
 	if !dockerfileConsumesPlaywrightTestAreas(build.DockerfilePath) {
 		return

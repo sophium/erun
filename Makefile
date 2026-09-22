@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -127,6 +127,40 @@ LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
 
+# GO_TEST_GOMAXPROCS is the same bound as LINT_GOMAXPROCS above, for the other
+# internally-parallel Go fan-out in the gate: `go test ./...`, which builds and
+# runs package test binaries up to GOMAXPROCS at a time and otherwise takes
+# that number straight from the cgroup.
+#
+# The four module test targets, the dns01-webhook one, and the integration
+# suite are siblings in check-gate's own -j fan-out, so each unbounded one
+# claims the whole quota and six of them running side by side demand six times
+# it. The integration suite is a Go test runner like the rest even though its
+# width arrives as `-parallel` from integration-test.sh rather than as
+# GOMAXPROCS, so it is counted here too and takes the same share -- otherwise
+# it sizes itself against the whole quota on top of the shares the counted
+# targets already demand, which is the oversubscription this bound exists to
+# prevent. Measured on the 6-CPU
+# in-pod gate arrangement (lint plus all four module test targets, warm build
+# cache, -j5): unbounded, 13.4% of CPU periods throttled and 127s of throttled
+# CPU-time; with each target held to a fifth of the quota, 3.6% and 6.1s -- a
+# 95% cut in the CPU-time spent queued behind the cgroup ceiling, at the same
+# wall clock (183s vs 179s, and the gate's tests all still run: same packages,
+# same -race, same -count=1). Throttling this deep is what turns into the
+# syscall-timeout-shaped failures -- a timed-out package fetch, a timed-out
+# linter run -- that read as network faults and are not (see the yarn
+# --network-timeout note under test-frontend below).
+#
+# Divide the quota by the count of these targets rather than by a fan-out width
+# the way lint does: make, not this recipe, is what runs them concurrently.
+# Floored at 1 so a small environment still runs; on a larger one each target
+# gets proportionally more.
+GO_TEST_TARGET_COUNT := 6
+GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(GO_TEST_TARGET_COUNT) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	echo $$n)
+
 # Run golangci-lint across the gated modules concurrently (bounded by
 # LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
 # none, so it uses the default linters). Every module's combined stdout/stderr
@@ -184,7 +218,7 @@ lint:
 # of bug go dark again.
 test-erun-ui:
 	@echo ">> go test erun-ui"
-	@(cd erun-ui && go test -race -count=1 ./...)
+	@(cd erun-ui && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -race -count=1 ./...)
 
 # erun-backend-api's own Go tests. LINT_MODULES above already gives this
 # module golangci-lint, but nothing ran `go test ./...` for it: its Dockerfile
@@ -215,7 +249,7 @@ test-erun-ui:
 # describes.
 test-erun-backend-api:
 	@echo ">> go test erun-backend-api"
-	@(cd erun-backend/erun-backend-api && go test -count=1 ./...)
+	@(cd erun-backend/erun-backend-api && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -count=1 ./...)
 
 # erun-mcp's own Go tests. LINT_MODULES above already gives this module
 # golangci-lint, but nothing ran `go test ./...` for it: erun-mcp is unioned
@@ -236,7 +270,7 @@ test-erun-backend-api:
 # drifted tool index.
 test-erun-mcp:
 	@echo ">> go test erun-mcp"
-	@(cd erun-mcp && go test -count=1 ./...)
+	@(cd erun-mcp && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -count=1 ./...)
 
 # erun-common's own Go tests. LINT_MODULES above already gives this module
 # golangci-lint, but nothing ran `go test ./...` for it: erun-common is its
@@ -269,7 +303,7 @@ test-erun-mcp:
 # keep this class of bug from going undetected again.
 test-erun-common:
 	@echo ">> go test erun-common"
-	@(cd erun-common && go test -race -count=1 ./...)
+	@(cd erun-common && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -race -count=1 ./...)
 
 # erun-devops/dns01-webhook's own Go tests. This module has no entry in
 # LINT_MODULES and no test stage of its own -- its Dockerfile only builds the
@@ -278,7 +312,7 @@ test-erun-common:
 # reachable only by a contributor running `go test` from the module by hand.
 test-erun-dns01-webhook:
 	@echo ">> go test erun-devops/dns01-webhook"
-	@(cd erun-devops/dns01-webhook && go test ./...)
+	@(cd erun-devops/dns01-webhook && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test ./...)
 
 # All three Yarn-workspace members: the shared frontend kit (erun-kit), the
 # desktop frontend (erun-ui/frontend), and the hosted console (erun-console).
@@ -306,6 +340,16 @@ test-erun-dns01-webhook:
 # across three separate flat configs could not do on its own. It needs only
 # the `typescript` package this step's own `yarn install` already resolves,
 # not each package's full type-aware lint setup.
+#
+# Only the *self-test* of the regression-coverage gate (root AGENTS.md § "A
+# Defect Fix Names Its Reproduction") runs here, never the gate itself: the
+# gate reads git history, and this target runs inside the erun-devops image
+# test stage's Docker build context, which has no `.git`. Running its pure
+# classifier here is still the point -- it keeps the enforcement logic itself
+# gated by check-gate, the same split erun-integration's structural gates use
+# (classifier unit-tested on synthetic data, wiring supplies the real state).
+# The gate's real invocation lives in fast-check below, which root AGENTS.md
+# already requires before every push.
 #
 # erun-ui/frontend imports generated Wails bindings (wailsjs/) that are
 # gitignored/dockerignored like any other generated artifact (dist,
@@ -350,6 +394,67 @@ FRONTEND_GATE_JOB_MEMORY_MIB := 650
 FRONTEND_GATE_JOB_COUNT := 15
 FRONTEND_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(FRONTEND_GATE_JOB_COUNT) $(FRONTEND_GATE_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
 
+# vitest sizes its worker pool from os.availableParallelism(), which reads the
+# container's whole CPU quota -- so a single `vitest run` claims all of it, and
+# the vitest workspaces below are dispatched as separate *concurrent* jobs in
+# the fan-out above. Two of them side by side therefore demand twice the quota
+# before the other frontend jobs (build, lint, typecheck) or any concurrent
+# check-gate target takes a share, and that oversubscription is spent as cgroup
+# throttling. This is the in-image gate's starvation mechanism: a 2.8MB tarball
+# fetches in 0.27s from an idle container on the same daemon, but the throttled
+# install spends minutes on it and then dies as ESOCKETTIMEDOUT, reading as a
+# network fault.
+#
+# Same bound, same reasoning, same shape as LINT_GOMAXPROCS above: divide the
+# environment's real quota by the number of these jobs that actually run
+# concurrently, rather than handing each the whole ceiling. It is derived from
+# parallel-gate.sh cpu-quota (not a constant and not `nproc`, both of which
+# misread a throttled cgroup -- see that script's comment) and floored at 1 so
+# a small environment still runs.
+#
+# FRONTEND_VITEST_JOB_COUNT counts only the workspaces whose `yarn test`
+# really runs vitest, since it is vitest's own pool that multiplies. A
+# workspace that switches runner has to be counted here too;
+# erun-integration/frontend_test_workers_bound_test.go reads this on every run
+# and fails if a vitest workspace's job stops naming the bound.
+FRONTEND_VITEST_JOB_COUNT := 2
+FRONTEND_VITEST_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(FRONTEND_VITEST_JOB_COUNT) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	echo $$n)
+
+# ERUN_PLAYWRIGHT_WORKERS is the desktop suite's worker count, and it is
+# resolved here -- beside every other quota-derived gate width -- rather than
+# in the erun-devops Dockerfile, which used to compute it as DIND_CPU_LIMIT/2
+# inline in a RUN line. That made a test-parallelism decision an incidental
+# function of a resource limit: raising the sidecar's CPU cap silently raised
+# the suite's worker count, and a cap of 4 could only ever yield 2 workers no
+# matter what the gate could actually afford. The number is decided on its own
+# terms now, and the CPU cap only reaches it as the environment's CPU quota,
+# the same input every other width here divides.
+#
+# Two cores per worker, which is playwright.config.ts's own measured rule (a
+# worker is a Go backend *and* a headless Chromium, and they compete: 3 workers
+# on 4 cores timed out two specs, 2 passed clean; the 12-core environment runs
+# 6 without a contention failure). One environment's worth of that rule is
+# deliberately not the ceiling here: `make check` runs this suite concurrently
+# with the five Go test targets, golangci-lint, the integration suite and the
+# chart tests, all dividing the same quota, so the suite takes a bounded share
+# of it rather than the whole of it -- 4 workers needs 8 of the environment's
+# cores and leaves the rest of the fan-out its budget. Raise it by hand
+# (`make test-playwright ERUN_PLAYWRIGHT_WORKERS=6`) on an environment that is
+# not running the rest of the gate. Floored at 1 so a small environment still
+# runs, and the same `?=` shape as the widths above so a caller (the
+# contention repro script, or a one-off measurement) can override it.
+PLAYWRIGHT_CPU_PER_WORKER := 2
+PLAYWRIGHT_WORKER_CEILING := 4
+ERUN_PLAYWRIGHT_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(PLAYWRIGHT_CPU_PER_WORKER) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	[ "$$n" -le $(PLAYWRIGHT_WORKER_CEILING) ] || n=$(PLAYWRIGHT_WORKER_CEILING); \
+	echo $$n)
+export ERUN_PLAYWRIGHT_WORKERS
+
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
 # (erun-devops/docker/erun-devops/Dockerfile) covering all three workspaces.
@@ -386,6 +491,8 @@ test-frontend:
 		yarn install --frozen-lockfile --prefer-offline --network-timeout 600000
 	@./scripts/timed-step.sh "issue-reference gate (erun-kit, erun-ui/frontend, erun-console)" \
 		sh -c 'node --test scripts/check-issue-references.test.mjs && node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src'
+	@./scripts/timed-step.sh "regression-coverage gate self-test" \
+		node --test scripts/check-regression-coverage.test.mjs
 	@./scripts/timed-step.sh "generating erun-ui/frontend wailsjs bindings" \
 		./erun-ui/generate-wailsjs.sh
 	@( \
@@ -398,12 +505,12 @@ test-frontend:
 		printf 'erun-ui-frontend-lint\terun-ui/frontend lint\tcd erun-ui/frontend && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/\n'; \
 		printf 'erun-ui-frontend-format\terun-ui/frontend format:check\tcd erun-ui/frontend && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json\n'; \
 		printf 'erun-ui-frontend-build\terun-ui/frontend build\tcd erun-ui/frontend && yarn build\n'; \
-		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test\n'; \
+		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n'; \
 		printf 'erun-console-typecheck\terun-console typecheck\tcd erun-console && yarn typecheck\n'; \
 		printf 'erun-console-lint\terun-console lint\tcd erun-console && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/\n'; \
 		printf 'erun-console-format\terun-console format:check\tcd erun-console && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json\n'; \
 		printf 'erun-console-build\terun-console build\tcd erun-console && yarn build\n'; \
-		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test\n' \
+		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n' \
 	) | ./scripts/parallel-gate.sh $(FRONTEND_GATE_PARALLELISM) test-frontend
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
@@ -465,16 +572,38 @@ test-playwright: test-erun-ui-windows-build test-frontend
 # resolve-playwright-areas` (a thin CLI wrapper around the same
 # erun-common.ResolvePlaywrightTestAreaSelection function `erun build` calls
 # above), so a developer or agent iterating locally pays the same cost the
-# gate does. This is a target-specific variable (scoped to test-playwright
-# and whatever depends on it) using `?=`, so it is only evaluated when the
-# caller has not already supplied PLAYWRIGHT_TEST_AREAS -- the Dockerfile
-# test stage's own build-arg thread, including its empty-string "run
-# everything" default, is left untouched. `export` (no value) marks the
-# variable for export to the recipe's environment whenever it does get a
-# value, from either source. Declared after the recipe, not beside it: the
-# coverage gate in erun-integration reads a target's recipe from its first
-# definition line, so that line has to stay adjacent to the recipe.
+# gate does. This is a target-specific variable using `?=`, so it is only
+# evaluated when the caller has not already supplied PLAYWRIGHT_TEST_AREAS --
+# the Dockerfile test stage's own build-arg thread, including its
+# empty-string "run everything" default, is left untouched. `export` (no
+# value) marks the variable for export to a recipe's environment whenever it
+# does get a value, from either source. Declared after the recipe, not beside
+# it: the coverage gate in erun-integration reads a target's recipe from its
+# first definition line, so that line has to stay adjacent to the recipe.
 test-playwright: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
+
+# The same resolution on `check`, which needs its own copy rather than
+# inheriting test-playwright's: Make gives a target-specific variable to the
+# target that declares it and to the chain of prerequisites *below* it, and
+# `check` sits above test-playwright rather than below it. What reached
+# `check` instead was the bare `export` on the next line -- an empty but
+# *defined* PLAYWRIGHT_TEST_AREAS, and "defined" is the operative word.
+# `check`'s recipe is the boundary where the job's environment is captured
+# (scripts/agent-gate.sh hands it to `erun exec job start`), so inside that job
+# test-playwright's own `?=` read the empty value as "the caller already
+# supplied this" and never resolved, and run.sh read it as "no selection":
+# `make check` in an agent pod ran the full suite while `erun exec
+# resolve-playwright-areas` on the same clean tree printed `smoke`, with
+# nothing in the gate's output saying which of the two it had used. Resolving
+# at the boundary makes the selection that crosses it the one the tree
+# resolved. `?=` still preserves a value the caller supplied (the Dockerfile
+# build-arg thread), and an unresolvable tree still resolves to "all" through
+# the CLI's own fail-safe. Both declarations sit above the `export` because
+# the bare `export` defines the variable, and a target-specific `?=` parsed
+# after that definition is skipped -- the ordering is load-bearing, not
+# stylistic. Declared after their recipes, not beside them: the coverage gate
+# in erun-integration reads a target's recipe from its first definition line.
+check: PLAYWRIGHT_TEST_AREAS ?= $(shell cd erun-cli && go run . exec resolve-playwright-areas 2>/dev/null)
 export PLAYWRIGHT_TEST_AREAS
 
 # Cross-compiles erun-app for Windows to prove the one other platform erun-ui
@@ -588,6 +717,25 @@ test-retention-grants:
 test-schema-drift:
 	sh erun-devops/docker/erun-backend-db/schema_drift_test.sh
 
+# Proof that erun-backend-db's baked migration directory is internally
+# consistent -- every migrations/default/*.sql file hashes to the atlas.sum
+# entry recorded for it -- checked purely against the files on disk, no
+# postgres and no docker. Unlike test-schema-drift/test-postgres-restart/
+# test-retention* above, this needs only the `atlas` CLI, which the
+# erun-devops image test stage already installs (for erun-integration's
+# gate-merge scenarios) and the final runtime image installs too, so it runs
+# inside `make check` itself rather than needing a separate by-hand/job
+# invocation. This is the release gate that was missing when v1.0.247
+# shipped with `20260902130000_gate_runs.sql`'s atlas.sum entry not matching
+# its own file content (the migration was edited after `atlas migrate hash`
+# was run for it, and the mismatch landed on main undetected through a
+# squash-merge), and nothing validated the baked migration directory before
+# that image was built and published. `atlas migrate validate` reports
+# exactly the "checksum mismatch" atlas reports at deploy time, before an
+# image is ever built.
+test-atlas-validate:
+	sh erun-devops/docker/erun-backend-db/atlas_validate_test.sh
+
 # End-to-end proof that the console's nginx config (default.conf.template)
 # never resolves a missing content-hashed asset or a health/version request to
 # the SPA shell (erun#2064). Same "needs a real docker daemon" exclusion from
@@ -614,7 +762,7 @@ integration-test:
 	./scripts/agent-gate.sh integration-test "make integration-test" -- $(MAKE) integration-test-gate
 
 integration-test-gate:
-	./erun-integration/scripts/integration-test.sh
+	GO_TEST_GOMAXPROCS=$(GO_TEST_GOMAXPROCS) ./erun-integration/scripts/integration-test.sh
 
 # The front door. Everywhere but an agent pod this is check-gate by another
 # name: scripts/agent-gate.sh execs it directly and exits with exactly its
@@ -671,7 +819,13 @@ CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_
 
 check:
 	@echo ">> concurrent-phase-spans: check-gate runs $(CHECK_GATE_TARGET_COUNT) targets at -j$(CHECK_GATE_PARALLELISM)"
-	./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) check-gate
+	@./scripts/agent-gate.sh check "make check" -- $(MAKE) -j$(CHECK_GATE_PARALLELISM) check-gate; \
+	status=$$?; \
+	if [ $$status -eq 124 ]; then \
+		echo "make check: INCONCLUSIVE -- the gate is still running and reached no verdict." >&2; \
+		echo "make check: that is not a failure and says nothing about the change. GNU Make collapses every nonzero recipe exit to 2, so this exit status alone cannot tell you so; re-run 'make check' to re-attach to the same job and keep waiting." >&2; \
+	fi; \
+	exit $$status
 
 # The full in-build gate: golangci-lint, erun-ui's own Go tests,
 # erun-backend-api's own Go tests, erun-mcp's own Go tests,
@@ -687,22 +841,40 @@ check:
 # it to bypass failures; diagnose against comparable state and fix them under
 # root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
-# These ten run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# These eleven run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
 # rather than scripts/parallel-gate.sh is what drives it here, and where the
 # two real ordering dependencies -- test-playwright and
 # test-erun-ui-windows-build each needing test-frontend -- are declared).
-# Do not drop any of the ten from this line to move the fan-out elsewhere:
+# Do not drop any of the eleven from this line to move the fan-out elsewhere:
 # erun-integration/build_check_coverage_test.go and
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
 # if any of these names is missing from it.
-check-gate: lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-erun-ui-windows-build test-playwright helm-chart-tests integration-test-gate
+# The prerequisite ORDER on this line is load-bearing when the resolved fan-out
+# width is narrower than the target list, not cosmetic: `make -j` dispatches
+# prerequisites in the order listed, filling each free slot with the next one,
+# so a target listed late cannot start until enough earlier targets have
+# finished. `test-frontend` heads the single longest chain in the gate --
+# test-frontend -> {test-playwright, test-erun-ui-windows-build}, where
+# test-playwright then builds the wailsjs bindings and the desktop erun-app
+# before any spec can run -- so while it sat seventh it took a slot only after
+# the six lint/module targets ahead of it began to drain, and at the reference
+# 4-CPU build container those are the longest jobs in the gate. Listing the
+# critical-path targets first lets the chain head take a slot in the first
+# dispatch batch. This is a no-op when the width already covers every target
+# (the in-pod gate resolves -j10 and dispatches all eleven within 0.32s), which is
+# why it is a scheduling fix and not on its own a wall-time reduction.
+# Reordering this line is safe (nothing keys on the order); DROPPING a name is
+# not -- see the coverage-test note directly above.
+check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests test-atlas-validate integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
-# tracker-reference gate (root AGENTS.md § "Code Comments"), and prettier
-# formatting. This is NOT a substitute for check/check-gate -- it runs no
+# tracker-reference gate (root AGENTS.md § "Code Comments"), the
+# regression-coverage gate (root AGENTS.md § "A Defect Fix Names Its
+# Reproduction"), and prettier formatting. This is NOT a substitute for
+# check/check-gate -- it runs no
 # tests, no build, and no integration suite, so a green fast-check says
 # nothing about those. It exists purely so a contributor (human or agent)
 # can catch the failures it does cover in seconds locally instead of one
@@ -734,6 +906,16 @@ check-gate: lint test-erun-common test-erun-ui test-erun-backend-api test-erun-m
 # elsewhere in the tree replayed a stale cached "ok" and missed it -- caught
 # by hand while validating this target, not theoretical.
 #
+# The regression-coverage gate is the one step here that has no check-gate
+# home to be scoped down from: it reads this branch's own commits and diff,
+# and check-gate runs inside a Docker build context with no `.git`. fast-check
+# is where it belongs anyway -- root AGENTS.md requires fast-check before
+# every push, which is exactly the moment a defect fix either does or does not
+# name the case that reproduces the failure it was filed for. Its own
+# self-test runs immediately before it (and again inside check-gate, via
+# test-frontend) so a broken classifier fails loudly rather than waving every
+# change through.
+#
 # Prettier runs the same `yarn format:check` each workspace's own
 # package.json already defines, across all three workspaces at once via
 # scripts/parallel-gate.sh (same aggregated-output/single-failure-report
@@ -749,6 +931,9 @@ fast-check: lint
 	@echo ">> issue-reference gate (TypeScript: erun-kit, erun-ui/frontend, erun-console)"
 	@node --test scripts/check-issue-references.test.mjs
 	@node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src
+	@echo ">> regression-coverage gate (this branch)"
+	@node --test scripts/check-regression-coverage.test.mjs
+	@node scripts/check-regression-coverage.mjs
 	@echo ">> prettier --check (erun-kit, erun-ui/frontend, erun-console)"
 	@for d in erun-kit erun-ui/frontend erun-console; do \
 		printf '%s\t%s\t%s\n' "$$d" "prettier $$d" "cd $$d && yarn format:check"; \

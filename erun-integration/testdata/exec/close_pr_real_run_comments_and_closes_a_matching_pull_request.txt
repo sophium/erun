@@ -1,0 +1,7 @@
+audit: erun exec close-pr --gated-commit sourcesha0000000000000000000000000000000 --landing-commit landedsha0000000000000000000000000000000 --remote-url https://github.com/sophium/erun.git --target main feature/add-widget
+close-pr: resolving inputs
+close-pr: resolving owner/repo from remote-url
+close-pr: owner = sophium, repo = erun
+github: GET <GITHUB_API>/repos/sophium/erun/pulls?base=main&head=sophium%3Afeature%2Fadd-widget&state=open
+close-pr: resolving a github token
+Closed pull request #42 for sophium/erun.

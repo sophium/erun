@@ -134,11 +134,38 @@ demonstrated:
 - Release cadence/coalescing is an unwired design in
   `erun-backend/erun-backend-api/AGENTS.md` § "Release cadence policy".
   Do not treat drift reporting as an automated release drainer.
+- A build's own trace states what the builder did with its Dockerfile's `test`
+  stage, not what the plan intended. `dockerfileHasGateTestStage` keeps a gate
+  image out of the *fingerprint* promotion path, but BuildKit's layer cache sits
+  underneath that guard and can serve the whole test stage on its own: the build
+  finishes in seconds at zero CPU, `make check` never executes, and the exit code
+  is 0 — the same green as a real gate run. `gateTestStagePlanLines` announces the
+  plan and must not use the outcome vocabulary; `gateTestStageProvenanceLines`
+  reports the outcome — LIVE, CACHED or REPLAYED — read from the builder's own
+  captured `--progress=plain` stream, which is the one report a warm cache cannot
+  fake (an in-image marker is replayed along with the layer holding it). Keep the
+  stage's `FROM` step out of that evidence: BuildKit reports it DONE even when
+  every instruction below it was CACHED, which would hide the replay
+  (`build_gate_test_stage_evidence.go`).
 - Preserve the gate wrapper's distinction between a clean pass, an exit-zero
   process that left unsupervised work (reported with an explicit warning and job
   ID), and a genuine failure. The orphan warning is not proof of completed work;
   callers must inspect the job's own record. A wrapper's bounded-wait timeout is
   also not the underlying gate verdict (`scripts/agent-gate.sh`).
+- A wait expiring is the wrapper's own deadline, never the gated job's outcome.
+  On expiry the wrapper reads the job's own record, so a job that finished is
+  reported by its actual result and 124 is reserved for one still genuinely
+  running; an unreadable record is that same non-verdict, never a failure. That
+  non-verdict path must say so plainly and name the job, since the exit status
+  alone is not readable as "not a failure" once `make` is in between: GNU Make
+  collapses any nonzero recipe exit to its generic exit 2, so a caller reading
+  only `make check`'s exit status cannot tell a bounded-wait timeout from a real
+  failure. The `check` target therefore prints INCONCLUSIVE on 124, and the
+  wrapper's own 124 survives only for a direct caller.
+- Keep the default foreground-safe (bail at the first timeout) and let a caller
+  that is not foreground-constrained opt in with `AGENT_GATE_AWAIT_VERDICT=1`,
+  which re-awaits the same job across bounded `job await` calls until it reaches
+  a real verdict. `ERUN_JOB_ID` being set does not distinguish the two callers.
 
 ## Release recovery
 
@@ -148,6 +175,15 @@ demonstrated:
   `release_disk_headroom.go`.
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
+- A push the registry rejects for a blob it does not hold is the concurrent-publisher
+  shape, not a local defect: two releases sharing layers can have the loser's manifest
+  rejected while the peer's upload is still committing. `DockerImagePusher` re-pushes
+  it, bounded, gated on `IsDockerUnknownBlobError` alone. Do not add a second retry
+  for it at a higher layer and do not widen the predicate — an auth, policy, or network
+  failure must still surface on its first occurrence. The promote path's
+  rebuild-from-source fallback remains the deeper recovery for the one blob rejection
+  a re-push cannot clear: a stale local "already pushed" record that skips the upload
+  again.
 - Refuse an existing release tag at a different HEAD. If it is an unpushed,
   unincorporated interrupted-run tag, name that diagnosis and the explicit remedy;
   never automatically delete it. Preserve retryable version state.

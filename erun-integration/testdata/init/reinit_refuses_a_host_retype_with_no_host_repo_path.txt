@@ -6,7 +6,7 @@ Loaded tenant configuration
 Loading environment configuration
 ==> Initializing team/dev
 init: runtime version not given; keeping <VERSION>
-init: runtime pod resources not given; keeping cpu=4 memory=8916Mi
-init: erun-dind sidecar resources not given; keeping cpu=4 memory=20Gi
+init: runtime pod resources not given; keeping cpu=4 memory=16384Mi
+init: erun-dind sidecar resources not given; keeping cpu=12 memory=20Gi
 ==> Initialization failed team/dev
 cannot change team/dev to type host: cannot use an empty repository path: it needs a host directory to use — run init from the project directory or pass --project-root

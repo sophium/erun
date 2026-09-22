@@ -144,12 +144,16 @@ func TestClearAIActivityIfQuietBouncesNewOutput(t *testing.T) {
 }
 
 type capturedEmits struct {
-	mu     sync.Mutex
-	byName map[string][]any
+	mu       sync.Mutex
+	arrived  *sync.Cond
+	byName   map[string][]any
+	deadline bool
 }
 
 func newCapturedEmits() *capturedEmits {
-	return &capturedEmits{byName: make(map[string][]any)}
+	c := &capturedEmits{byName: make(map[string][]any)}
+	c.arrived = sync.NewCond(&c.mu)
+	return c
 }
 
 func (c *capturedEmits) fn() func(string, ...any) {
@@ -160,7 +164,39 @@ func (c *capturedEmits) fn() func(string, ...any) {
 		if len(args) == 0 {
 			c.byName[name] = append(c.byName[name], nil)
 		}
+		c.arrived.Broadcast()
 	}
+}
+
+// waitFor blocks until the captured events satisfy pred, returning false only
+// if bound elapses first. It waits on the emitter's own signal rather than
+// re-reading a snapshot on a short wall-clock budget: the emit a test waits
+// for arrives from a background goroutine, so a budget sized for an idle
+// machine turns CPU contention into a failure that says nothing about the
+// code — which is how the orchestrator forward-open test went red under a
+// full gate run and green on its own. Because the wait returns the instant
+// the emit lands, bound is a safety net for "never arrives" and costs the
+// happy path nothing.
+//
+// pred reads byName under the lock and must not call back into capturedEmits.
+func (c *capturedEmits) waitFor(bound time.Duration, pred func(byName map[string][]any) bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.deadline = false
+	timer := time.AfterFunc(bound, func() {
+		c.mu.Lock()
+		c.deadline = true
+		c.mu.Unlock()
+		c.arrived.Broadcast()
+	})
+	defer timer.Stop()
+	for !pred(c.byName) {
+		if c.deadline {
+			return false
+		}
+		c.arrived.Wait()
+	}
+	return true
 }
 
 func (c *capturedEmits) events(name string) []any {

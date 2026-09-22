@@ -115,7 +115,7 @@ func TestArtifactReadOnlyRoundTrip(t *testing.T) {
 		t.Fatalf("expected write bit cleared on the read-only mirror, got mode %v", info.Mode().Perm())
 	}
 
-	requireWorkspaceSyncNoError(t, makeArtifactsWritable(root), "make writable")
+	requireWorkspaceSyncNoError(t, makeArtifactsWritable(root, []string{"erun-app.exe"}), "make writable")
 	info, err = os.Stat(artifact)
 	requireWorkspaceSyncNoError(t, err, "stat after writable")
 	if info.Mode().Perm()&0o200 == 0 {

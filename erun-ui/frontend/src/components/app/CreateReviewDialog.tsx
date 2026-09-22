@@ -27,6 +27,7 @@ import { resolveTenantPlatformAlias } from '@/app/platformSignIn';
 import type { CreateReviewDialogState } from '@/app/reviewWriteState';
 import { selectReviewTargetBranches } from '@/app/selectors';
 
+import { AccessRemedyNote } from './AccessRemedyNote';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
@@ -60,7 +61,12 @@ export function CreateReviewDialog(): React.ReactElement {
             proposing it merge into a target branch.
           </DialogDescription>
         </DialogHeader>
-        {restricted && <PermissionNotice>{restricted}</PermissionNotice>}
+        {restricted && (
+          <PermissionNotice>
+            {restricted}
+            <AccessRemedyNote remedy={dialog.capabilityRemedy} />
+          </PermissionNotice>
+        )}
         <div className="flex flex-col gap-4">
           <PushBranchStep dialog={dialog} />
           <ReviewDetailsStep dialog={dialog} />

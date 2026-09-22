@@ -76,7 +76,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 		"activity_lease_list", "ai_sessions", "cloud_list", "context_list", "diff", "environment", "exec_diff",
 		"exec_job_await", "exec_job_output", "exec_job_status",
 		"idle", "idle_stop_history",
-		"job_await", "job_output", "job_status", "list", "observe",
+		"job_await", "job_output", "job_status", "jobs_list", "jobs_show", "list", "observe",
 		"outputs_download", "outputs_list", "review_list", "review_queue_list", "review_show", "usage", "version",
 	}
 	if !slices.Equal(got, want) {

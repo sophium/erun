@@ -1,5 +1,16 @@
 import type { Locator, Page } from '@playwright/test';
 
+import type { ElementBox } from '../fixtures/boundingBox.js';
+
+export interface TabBox extends ElementBox {
+  label: string;
+}
+
+export interface TabStripGeometry {
+  list: ElementBox;
+  tabs: TabBox[];
+}
+
 export type TenantDashboardTab =
   | 'Users'
   | 'Reviews'
@@ -39,8 +50,63 @@ export class TenantDashboard {
     return this.page.getByRole('tab');
   }
 
+  // tabStrip is the dashboard's own tab list. The terminal tab strip is a
+  // second role="tablist" on the same page, so this scopes by a tab only the
+  // dashboard carries rather than taking the first match.
+  tabStrip(): Locator {
+    return this.page
+      .getByRole('tablist')
+      .filter({ has: this.page.getByRole('tab', { name: 'API log' }) });
+  }
+
+  // tabStripGeometry samples the strip and every tab it holds in one round
+  // trip, so the boxes it returns describe one layout pass. Reading them tab
+  // by tab would let a resize or re-render land between two reads and produce
+  // a set of rectangles that never co-existed on screen.
+  async tabStripGeometry(): Promise<TabStripGeometry> {
+    return this.tabStrip().evaluate((list) => {
+      const box = (el: Element): ElementBox => {
+        const rect = el.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      };
+      return {
+        list: box(list),
+        tabs: [...list.querySelectorAll('[role="tab"]')].map((tab) => ({
+          label: (tab.textContent ?? '').trim(),
+          ...box(tab),
+        })),
+      };
+    });
+  }
+
+  // coveredTabs hit-tests every tab at its own centre and names the ones
+  // something else is painting over. Geometry alone cannot tell a tab that
+  // covers a button from a tab a button covers, and only the second one is
+  // unclickable.
+  async coveredTabs(): Promise<string[]> {
+    return this.tabStrip().evaluate((list) =>
+      [...list.querySelectorAll('[role="tab"]')].flatMap((tab) => {
+        const rect = tab.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        if (hit && (hit === tab || tab.contains(hit))) {
+          return [];
+        }
+        const label = (tab.textContent ?? '').trim();
+        const blocker = hit
+          ? `${hit.tagName}${hit.textContent ? ` "${hit.textContent.trim()}"` : ''}`
+          : 'nothing';
+        return [`${label} is covered at its own centre by ${blocker}`];
+      }),
+    );
+  }
+
+  // The note is the whole status region, not just the sentence that opens it:
+  // the grant it carries renders as a sibling of that sentence, so a locator
+  // on the sentence alone sees a note that never names its remedy.
   restrictedAccessNote(): Locator {
-    return this.page.getByText('Some panels are hidden because you do not have access to');
+    return this.page
+      .getByText('Some panels are hidden because you do not have access to')
+      .locator('..');
   }
 
   async clickRefresh(): Promise<void> {
@@ -67,6 +133,23 @@ export class TenantDashboard {
 
   auditEmptyState(): Locator {
     return this.activePanel().getByText('No audit events', { exact: true });
+  }
+
+  // API log tab. A failed read renders InlineAlert (role="alert") while a log
+  // with nothing in it renders the panel's empty state, so the two are asserted
+  // separately: this panel deliberately distinguishes "the read failed" from
+  // "nothing logged yet", and a spec has to be able to hold it to that.
+  apiLogAlert(): Locator {
+    return this.activePanel().getByRole('alert');
+  }
+
+  apiLogEmptyState(): Locator {
+    return this.activePanel().getByText('No API log returned', { exact: true });
+  }
+
+  // The log body is a <pre> of raw container output with no role of its own.
+  apiLogBody(): Locator {
+    return this.activePanel().locator('pre');
   }
 
   // The Users tab is the tenant's roster, so its rows are the tenant's users —
@@ -126,6 +209,24 @@ export class TenantDashboard {
 
   waitingOnMeFilterButton(): Locator {
     return this.activePanel().getByRole('button', { name: 'Waiting on me' });
+  }
+
+  // reviewStatusFilterButton matches one status chip by label prefix, because
+  // each chip's accessible name carries its count badge (e.g. "OPEN 3") — the
+  // same shape mineFilterButton handles.
+  reviewStatusFilterButton(status: string): Locator {
+    return this.activePanel().getByRole('button', { name: new RegExp(`^${status}\\b`) });
+  }
+
+  // reviewStatusFilterGroup scopes a status-chip query to the filter group, so
+  // a status word appearing elsewhere in the panel is never matched.
+  reviewStatusFilterGroup(): Locator {
+    return this.activePanel().getByRole('group', { name: 'Filter reviews by status' });
+  }
+
+  // reviewCountText is the "N reviews" / "N of M reviews" line above the table.
+  reviewCountText(): Locator {
+    return this.activePanel().getByText(/^\d+( of \d+)? reviews?$/);
   }
 
   async openReview(name: string): Promise<void> {
@@ -201,6 +302,13 @@ export class TenantDashboard {
     return this.page.getByText('Connect this tenant to erunpaas.com', { exact: true });
   }
 
+  // The card replaces the dashboard before its tab strip renders, so its body
+  // must not name a subset of the tabs — a list of some of them reads as an
+  // account of what is unavailable and leaves the rest looking usable.
+  notConnectedBody(): Locator {
+    return this.page.getByText(/This tenant isn't connected to a hosted erun platform yet/);
+  }
+
   connectApiUrlInput(): Locator {
     return this.page.getByLabel('Platform API URL');
   }
@@ -209,8 +317,11 @@ export class TenantDashboard {
     return this.page.getByRole('button', { name: 'Connect', exact: true });
   }
 
+  // Addressed by id, not by role: the alert this names is one of several that
+  // can be on screen at once (the sidebar carries its own), so a page-wide
+  // getByRole('alert') is ambiguous exactly when something else has failed.
   connectErrorAlert(): Locator {
-    return this.page.getByRole('alert');
+    return this.page.locator('#platform-connect-error');
   }
 
   chooseAliasHeading(): Locator {
@@ -247,8 +358,9 @@ export class TenantDashboard {
     return this.page.locator('#enroll-admin-command');
   }
 
+  // Addressed by id for the same reason as connectErrorAlert above.
   enrollErrorAlert(): Locator {
-    return this.page.getByRole('alert');
+    return this.page.locator('#platform-enroll-error');
   }
 
   noPermissionHeading(): Locator {

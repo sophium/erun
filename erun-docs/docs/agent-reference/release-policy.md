@@ -30,7 +30,7 @@ A version is rejected before any side effect when it fails the match.
 | Class | Version pattern | Examples | Behaviour |
 |---|---|---|---|
 | **Stable** | No hyphen suffix. | `1.0.76`, `2.4.0`, `10.0.0` | Full release flow. Chart `version` + `appVersion` synced. Homebrew formula + Scoop manifest + any other registered package-manager metadata updated and committed. Release tag created on `release.mainbranch`. `release.developbranch` is advanced to the next patch. |
-| **Candidate** | Hyphen suffix present. | `1.0.76-rc.1`, `1.0.76-beta.2`, `2.5.0-canary`, `3.0.0-alpha.7` | Images and chart published; package-manager metadata **not** touched. Release tag created. No bump on `release.developbranch`. |
+| **Candidate** | Hyphen suffix present. | `1.0.76-rc.1`, `1.0.76-beta.2`, `2.5.0-canary`, `3.0.0-alpha.7` | Package-manager metadata **not** touched. Release tag created. No bump on `release.developbranch`. |
 | **Rejected** | Fails the regex. | `1.0`, `latest`, `foo-bar`, `1.0.76-` | `erun release` aborts before any git or registry side effect with code `INVALID_VERSION`. |
 
 `<X.Y.Z>-snapshot-<UTC-timestamp>` tags emitted by `erun build` in an agent env are **candidate-shaped** by this rule, but in practice they never reach `erun release` — they are produced by `erun build` and are not promotable through this command.
@@ -44,7 +44,7 @@ A version is rejected before any side effect when it fails the match.
 
 ## Multi-arch contract
 
-Every release-tagged image is multi-architecture. The release pipeline refuses to publish a single-arch artifact: after each per-arch `docker push`, `erun release` verifies the manifest list contains both `linux/amd64` and `linux/arm64` entries. A missing entry aborts the release before the tag is created on git.
+Every release-tagged image is multi-architecture. The build pipeline refuses to publish a single-arch artifact: after each per-arch `docker push`, `erun build --release` verifies the manifest list contains both `linux/amd64` and `linux/arm64` entries. A missing entry aborts the build, which is the step that publishes. `erun release` never publishes and so never performs this check.
 
 The check applies whether the build is local (in which case `docker buildx imagetools inspect <tag>` is the verification call) or run inside the runtime pod (where the same check runs against the pushed registry copy).
 
@@ -56,32 +56,31 @@ The check applies whether the build is local (in which case `docker buildx image
 4. Sync `<chart>/Chart.yaml`'s `version` and `appVersion` fields to `<version>`. Commit on `release.mainbranch`.
 5. If **stable**: update package-manager metadata. Commit alongside the chart sync.
 6. Create the release tag **locally**. Nothing is public yet.
-7. Re-read the base branch from origin (`git fetch origin <branch>`, then `git rev-list --count HEAD..FETCH_HEAD`). A non-zero count means the branch moved after step 4's rebase onto it, and the release aborts with `BASE_BRANCH_MOVED` before the build spends anything. A remote that cannot be read is not an answer: the count is skipped and the release proceeds.
-8. Build per-arch images and push to the registry. Assemble the manifest list. Verify multi-arch coverage (see above). Publish every co-located helm chart and read each one back.
-9. Re-resolve each published image's manifest from the registry. A tag that does not resolve aborts here, before anything is public.
-10. `git push` the release tag. If **stable**: sync the package-manager checksums against the now-public source archive and commit.
-11. If **stable**: open a follow-up commit that bumps the canonical `VERSION` to the next patch (`X.Y.Z+1`), merge to `release.developbranch`, and `git push --follow-tags` both branches. A rejected branch push is retried up to twice, each time after `git fetch origin <branch>` + `git rebase FETCH_HEAD`; the retry also pushes `v<version>` by name, because the rebase rewrites the commit `--follow-tags` was tracking. A rebase that cannot apply is aborted (`git rebase --abort`) and the push's own error is reported as `GIT_PUSH_FAILED`.
-12. Exit `0`.
+7. `git push` the release tag. If **stable**: sync the package-manager checksums against the now-public source archive and commit.
+8. If **stable**: open a follow-up commit that bumps the canonical `VERSION` to the next patch (`X.Y.Z+1`), merge to `release.developbranch`, and `git push --follow-tags` both branches. A rejected branch push is retried up to twice, each time after `git fetch origin <branch>` + `git rebase FETCH_HEAD`; the retry also pushes `v<version>` by name, because the rebase rewrites the commit `--follow-tags` was tracking. A rebase that cannot apply is aborted (`git rebase --abort`) and the push's own error is reported as `GIT_PUSH_FAILED`.
+9. Exit `0`.
 
-Steps 1–9 leave nothing public: a failure there rolls back nothing on the remote because nothing reached it, and the canonical `VERSION` still holds the version being released, so re-running retries the same version. Registry pushes themselves are not rolled back — republishing a version is idempotent. From step 10 the tag is public, but by then the artifacts it names are too.
+There is no build and no publish in that sequence. Everything before step 7 leaves nothing public, and the canonical `VERSION` still holds the version being released, so re-running retries the same version. From step 7 the tag is public — and that is all it is: a record of the source that was attempted, never a claim that artifacts exist for it. `erun deploy` never builds, so a tag whose artifacts were never produced names a dead version rather than corrupting anything; the remedy is to fix the source and release again.
 
-A base branch that moves while a release is in flight is therefore answered at both ends: step 7 refuses a move it can still see cheaply, and step 11 absorbs one that lands during the build. Neither depends on the branch being frozen for the duration of a release.
+`erun build --release` composes this same stamp/tag work with the build it owns: it refuses a version whose resolved images nothing in the run would publish, re-reads the base branch from origin and checks the node has room immediately before it spends anything (aborting `BASE_BRANCH_MOVED` before the build starts), builds and pushes every image and chart the version resolves, verifies each published manifest resolves, and only then reports the released version. A base branch that moves while *that* is in flight is answered at both ends: the pre-spend check refuses a move it can still see cheaply, and the final push absorbs one that lands during the build.
 
 ## Error codes
 
-| Code | Cause | Exit code |
-|---|---|---|
-| `INVALID_VERSION` | Canonical `VERSION` fails the version regex. | `1` |
-| `DIRTY_WORKTREE` | Uncommitted changes in the working tree. | `1` |
-| `TAG_CONFLICT` | Release tag already exists in git or in the registry. | `1` |
-| `MULTI_ARCH_VERIFY_FAILED` | Manifest list missing `linux/amd64` or `linux/arm64`. The release tag is **not** pushed. | `2` |
-| `UNPUBLISHABLE_RELEASE_IMAGE` | The release stamps an image no build in this run publishes — usually `erun release` run from inside one component's build directory. Refused during resolution, before any stage runs. | `1` |
-| `REGISTRY_CREDENTIAL_MISSING` | No credential resolves for a ghcr.io registry the release would publish to at all (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`). GHCR never accepts an anonymous push, so this is refused before the build rather than at the push. | `1` |
-| `BASE_BRANCH_MOVED` | `origin/<release.mainbranch>` gained commits after the release rebased onto it, so the final push could not land. Refused before the build; nothing is published and the canonical `VERSION` is untouched. Recover with `git pull --rebase origin <branch>` then `erun release --force` (`--force` recreates the local tag the rebase leaves behind). | `1` |
-| `PUBLISHED_ARTIFACT_UNRESOLVABLE` | A just-pushed image manifest did not resolve on read-back. The release tag is **not** pushed. | `2` |
-| `REGISTRY_PUSH_AUTH_FAILED` | Registry rejected the push after one interactive-login retry. The release tag is **not** pushed. | `2` |
-| `GIT_PUSH_FAILED` | `git push --follow-tags` failed and the bounded rebase-and-retry could not absorb it (network / permission, or a rebase that does not apply). The version's images and charts are already published; rerun `erun release` to complete the ref push. | `2` |
-| `PACKAGE_METADATA_WRITE_FAILED` | Homebrew formula / Scoop manifest write failed after the registry push. Registry has the tag; rerun `--dry-run` to inspect, fix manually. | `2` |
+| Code | Raised by | Cause | Exit code |
+|---|---|---|---|
+| `INVALID_VERSION` | `erun release` | Canonical `VERSION` fails the version regex. | `1` |
+| `DIRTY_WORKTREE` | `erun release` | Uncommitted changes in the working tree. | `1` |
+| `TAG_CONFLICT` | `erun release` | Release tag already exists in git or in the registry. | `1` |
+| `GIT_PUSH_FAILED` | `erun release` | `git push --follow-tags` failed and the bounded rebase-and-retry could not absorb it (network / permission, or a rebase that does not apply). Rerun `erun release` to complete the ref push. | `2` |
+| `PACKAGE_METADATA_WRITE_FAILED` | `erun release` | Homebrew formula / Scoop manifest write failed. Rerun `--dry-run` to inspect, fix manually. | `2` |
+| `UNPUBLISHABLE_RELEASE_IMAGE` | `erun build --release` | The version stamps an image no build in this run publishes — usually a build run from inside one component's build directory. Refused during resolution, before any stage runs. | `1` |
+| `REGISTRY_CREDENTIAL_MISSING` | `erun build --release` | No credential resolves for a ghcr.io registry the version would publish to at all (no docker config entry, no gh session, no `GH_TOKEN`/`GITHUB_TOKEN`). GHCR never accepts an anonymous push, so this is refused before the build rather than at the push. | `1` |
+| `BASE_BRANCH_MOVED` | `erun build --release` | `origin/<release.mainbranch>` gained commits after the release rebased onto it, so the run refuses rather than building on a stale base. Nothing is published and the canonical `VERSION` is untouched. Recover with `git pull --rebase origin <branch>` then `erun build --release --force` (`--force` recreates the local tag the rebase leaves behind). | `1` |
+| `MULTI_ARCH_VERIFY_FAILED` | `erun build --release` | Manifest list missing `linux/amd64` or `linux/arm64`. The release tag is **not** pushed. | `2` |
+| `PUBLISHED_ARTIFACT_UNRESOLVABLE` | `erun build --release` | A just-pushed image manifest did not resolve on read-back. The release tag is **not** pushed. | `2` |
+| `REGISTRY_PUSH_AUTH_FAILED` | `erun build --release` | Registry rejected the push after one interactive-login retry. The release tag is **not** pushed. | `2` |
+
+The codes are split because the work is: `erun release` can only fail on source control, and every registry or build failure belongs to `erun build --release`, which is the command that touches a registry.
 
 In every case, `--dry-run` reports the planned steps without executing them.
 

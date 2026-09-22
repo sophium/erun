@@ -29,7 +29,7 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		input.mcpBearer = a.mcpBearer(tenant, strings.TrimSpace(input.Environment))
 		log, err := a.deps.loadAPILog(ctx, input)
 		if err != nil {
-			dashboard.APILogError = err.Error()
+			dashboard.APILogError = "Could not read this environment's API log. " + err.Error()
 		} else {
 			dashboard.APILog = log
 		}
@@ -52,13 +52,30 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	defer cancel()
-	loadTenantDashboardData(requestCtx, resolution.client, &dashboard, input)
+	capabilities := loadTenantDashboardData(requestCtx, resolution.client, &dashboard, input)
 	// The caller's own invite-request status needs only the bearer this
 	// resolution already minted, never tenant membership — read it even when
 	// loadTenantDashboardData above downgraded PlatformState to not-enrolled/
 	// no-permission, since that is exactly the caller this status is for.
 	loadTenantDashboardMyInviteRequest(requestCtx, resolution.client, &dashboard)
+	loadTenantDashboardAccessRemedies(requestCtx, resolution.client, capabilities, &dashboard)
 	return dashboard, nil
+}
+
+// loadTenantDashboardAccessRemedies gives each restricted panel the copyable
+// grant that would lift its restriction, so a refused tab offers the request
+// rather than only naming the read it needs. Panels are the only place the
+// dashboard records a refused read, so they are also the whole input here.
+func loadTenantDashboardAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+	var userID string
+	if dashboard.User != nil {
+		userID = dashboard.User.UserID
+	}
+	reads := make([]string, 0, len(dashboard.Panels))
+	for _, panel := range dashboard.Panels {
+		reads = append(reads, panel.Restricted)
+	}
+	dashboard.AccessRemedies = loadAccessRemedies(ctx, client, capabilities, userID, reads...)
 }
 
 const tenantDashboardTimeout = 10 * time.Second
@@ -102,13 +119,13 @@ const (
 // loadTenantDashboardData resolves every panel independently. One panel the
 // caller may not read, or one call that fails, must not blank the panels that
 // worked — and a panel the caller may not read must not read as an empty one.
-func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard, input uiTenantDashboardInput) {
+func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard, input uiTenantDashboardInput) eruncommon.PlatformCapabilities {
 	whoami, err := client.Whoami(ctx)
 	if err != nil {
 		// Identity is the dashboard's own precondition: without it there is no
 		// capability set to gate the remaining panels honestly.
 		dashboard.PlatformState, dashboard.APIError = tenantDashboardIdentityFailure(err)
-		return
+		return nil
 	}
 	dashboard.User = &uiTenantDashboardUser{
 		TenantID: whoami.TenantID,
@@ -146,6 +163,7 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	dashboard.CanOverrideMergeQueue = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteOverrideAdvanceMergeQueue) == ""
 	dashboard.CanApproveInviteRequests = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteApproveInvite) == ""
 	dashboard.CanDeclineInviteRequests = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeclineInvite) == ""
+	return capabilities
 }
 
 // loadTenantDashboardInviteRequests loads the operator/admin queue: every

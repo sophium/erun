@@ -55,7 +55,7 @@ func (e *MissingGHCRCreatePackageError) Error() string {
 			"  3. Generate a token with scopes: write:packages and read:packages.\n"+
 			"  4. docker logout %s\n"+
 			"  5. echo $TOKEN | docker login %s -u <owner> --password-stdin\n"+
-			"  6. Re-run erun release (or erun push).\n"+
+			"  6. Re-run erun build --release (or erun push).\n"+
 			"After the package exists once, the owner can grant Write access to others (per-package "+
 			"settings, or \"Inherit access from source repository\" on a linked repo); future versions "+
 			"can then be pushed by anyone with that access.",

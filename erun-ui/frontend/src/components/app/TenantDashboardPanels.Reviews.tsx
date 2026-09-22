@@ -14,14 +14,23 @@ import {
   submitAdvanceMergeQueue,
 } from '@/app/mergeQueueThunks';
 import { resolveTenantPlatformAlias } from '@/app/platformSignIn';
+import {
+  defaultReviewStatuses,
+  reviewCountLabel,
+  reviewsMatchingStatuses,
+  reviewStatusCounts,
+  reviewStatusFilterIsDefault,
+  toggleReviewStatus,
+} from '@/app/reviewDetailState';
 import { openReviewDetail } from '@/app/reviewDetailThunks';
 import {
   reviewAuthorInitials,
+  reviewRowUnresolvedThreads,
   reviewStatusTone,
-  unresolvedThreadsLabel,
+  unresolvedThreadsCountLabel,
   unresolvedThreadsTone,
 } from '@/app/tenantDashboardPanels';
-import { setReviewFilter } from '@/app/tenantDialogThunks';
+import { setReviewFilter, setReviewStatusFilter } from '@/app/tenantDialogThunks';
 import type { UITenantDashboardReview } from '@/types';
 
 import { PermissionNotice } from './InlineAlert';
@@ -35,6 +44,10 @@ import {
   type TenantDashboardData,
 } from './TenantDashboardMessage';
 import { MergeQueueBlockedAlert } from './TenantDashboardPanels.MergeQueueBlocked';
+import {
+  ReviewFilterSegmentedControl,
+  ReviewStatusFilterControl,
+} from './TenantDashboardPanels.ReviewFilter';
 
 // ReviewsPanel is the review object's own home: status, branches, and — via
 // each row — its builds, comment threads, and merge-queue position. The
@@ -43,37 +56,35 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   const dispatch = useAppDispatch();
   const reviewFilter = useAppSelector((state) => state.tenantDashboard.reviewFilter);
   const reviews = data?.reviews ?? [];
-  const filterActive = reviewFilter.mine || reviewFilter.waitingOnMe;
+  const visibleReviews = reviewsMatchingStatuses(reviews, reviewFilter.statuses);
+  const filterActive =
+    reviewFilter.mine ||
+    reviewFilter.waitingOnMe ||
+    !reviewStatusFilterIsDefault(reviewFilter.statuses);
   return (
     <TabsContent value="reviews" className="min-h-0 overflow-auto">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-[13px] text-muted-foreground">
-            {reviews.length} review{reviews.length === 1 ? '' : 's'}
+            {reviewCountLabel(visibleReviews.length, reviews.length)}
           </span>
-          <ReviewFilterSegmentedControl
-            mine={reviewFilter.mine}
-            waitingOnMe={reviewFilter.waitingOnMe}
-            mineCount={data?.mineReviewCount}
-            waitingOnMeCount={data?.waitingOnMeReviewCount}
-            onToggleMine={() => {
-              void dispatch(setReviewFilter({ mine: !reviewFilter.mine }));
-            }}
-            onToggleWaitingOnMe={() => {
-              void dispatch(setReviewFilter({ waitingOnMe: !reviewFilter.waitingOnMe }));
-            }}
-          />
+          <ReviewsFilterControls data={data} reviews={reviews} />
         </div>
         <NewReviewAction data={data} />
       </div>
       <PanelBody
         data={data}
         tab="reviews"
-        empty={<ReviewsEmptyState filterActive={filterActive} />}
+        empty={
+          <ReviewsEmptyState
+            filterActive={filterActive}
+            canCreateReview={data?.canCreateReview === true}
+          />
+        }
       >
-        {reviews.length > 0 ? (
+        {visibleReviews.length > 0 ? (
           <ReviewsTable
-            reviews={reviews}
+            reviews={visibleReviews}
             currentUserId={data?.user?.userId}
             showThreads
             onSelect={(review) => {
@@ -86,101 +97,81 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   );
 }
 
-// ReviewFilterSegmentedControl is one grouped control, not two independent
-// buttons (#1378): Mine and Waiting-on-me visually merge into a single pill,
-// matching the DiffSourceButton segmented-toggle pattern the review panel's
-// Env/ERun source switch already uses (Nielsen #4, consistency). Each side
-// still toggles independently — a review can be both — so this is a grouped
-// filter chip pair, not a mutually-exclusive tab strip. The count on each
-// side is the discovery signal itself: which pile has work in it is visible
-// before either is clicked, rather than only after.
-function ReviewFilterSegmentedControl({
-  mine,
-  waitingOnMe,
-  mineCount,
-  waitingOnMeCount,
-  onToggleMine,
-  onToggleWaitingOnMe,
+// ReviewsFilterControls is the Reviews tab's filter row: the authorship chips
+// (answered by the platform) and the status chips (narrowed locally, see
+// ReviewFilterState.statuses for why). Splitting them out keeps ReviewsPanel
+// itself inside eslint's complexity budget, and keeps every filter change in
+// one place.
+function ReviewsFilterControls({
+  data,
+  reviews,
 }: {
-  mine: boolean;
-  waitingOnMe: boolean;
-  mineCount: number | undefined;
-  waitingOnMeCount: number | undefined;
-  onToggleMine: () => void;
-  onToggleWaitingOnMe: () => void;
+  data: TenantDashboardData;
+  reviews: UITenantDashboardReview[];
 }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const reviewFilter = useAppSelector((state) => state.tenantDashboard.reviewFilter);
   return (
-    <div className="flex items-center gap-1 rounded-[var(--radius)] border border-input bg-background p-1 text-[13px]">
-      <ReviewFilterToggle label="Mine" count={mineCount} active={mine} onClick={onToggleMine} />
-      <ReviewFilterToggle
-        label="Waiting on me"
-        count={waitingOnMeCount}
-        active={waitingOnMe}
-        onClick={onToggleWaitingOnMe}
+    <>
+      <ReviewFilterSegmentedControl
+        mine={reviewFilter.mine}
+        waitingOnMe={reviewFilter.waitingOnMe}
+        mineCount={data?.mineReviewCount}
+        waitingOnMeCount={data?.waitingOnMeReviewCount}
+        onToggleMine={() => {
+          void dispatch(setReviewFilter({ mine: !reviewFilter.mine }));
+        }}
+        onToggleWaitingOnMe={() => {
+          void dispatch(setReviewFilter({ waitingOnMe: !reviewFilter.waitingOnMe }));
+        }}
       />
-    </div>
-  );
-}
-
-// ReviewFilterToggle is a one-click discovery affordance, not a form field:
-// clicking answers "which are mine" or "which are waiting on me" directly.
-// The count renders inside the button's own accessible name (e.g. "Mine 2")
-// so a screen reader announces the same distribution a sighted operator sees.
-function ReviewFilterToggle({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number | undefined;
-  active: boolean;
-  onClick: () => void;
-}): React.ReactElement {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        'flex cursor-pointer items-center gap-1.5 rounded-[calc(var(--radius)-2px)] px-2.5 py-1 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none',
-        active
-          ? 'bg-primary text-primary-foreground'
-          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-      )}
-    >
-      {label}
-      {count !== undefined && (
-        <span
-          className={cn(
-            'inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-[11px] leading-4 font-semibold',
-            active ? 'bg-primary-foreground/20' : 'bg-muted text-foreground',
-          )}
-        >
-          {count}
-        </span>
-      )}
-    </button>
+      <ReviewStatusFilterControl
+        statuses={reviewFilter.statuses}
+        counts={reviewStatusCounts(reviews)}
+        onToggle={(status) => {
+          dispatch(setReviewStatusFilter(toggleReviewStatus(reviewFilter.statuses, status)));
+        }}
+      />
+    </>
   );
 }
 
 // ReviewsEmptyState keeps "nothing exists yet" and "nothing matches this
 // filter" visually and textually distinct, per the repo's three-empty-states
 // rule — a filtered zero must not read as "this tenant has no reviews".
-function ReviewsEmptyState({ filterActive }: { filterActive: boolean }): React.ReactElement {
+//
+// The "nothing exists yet" body names two ways to open a review, so it may
+// only do that for a caller who has both: NewReviewAction renders a permission
+// notice in the button's place otherwise, and the CLI's `erun review create`
+// posts the same route canCreateReview is read from, so a refused caller is
+// refused there too. A caller without the write is pointed at the notice
+// beside this empty state instead of at either route.
+function ReviewsEmptyState({
+  filterActive,
+  canCreateReview,
+}: {
+  filterActive: boolean;
+  canCreateReview: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   if (filterActive) {
     return (
       <EmptyState
         heading="No reviews match this filter"
-        body="Nothing is both Mine and Waiting on me right now, whichever you've turned on."
+        body="Nothing matches the status and authorship filters you've turned on. Clear them to see every review this tenant has."
         action={
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() => {
-              void dispatch(setReviewFilter({ mine: false, waitingOnMe: false }));
+              void dispatch(
+                setReviewFilter({
+                  mine: false,
+                  waitingOnMe: false,
+                  statuses: defaultReviewStatuses(),
+                }),
+              );
             }}
           >
             Clear filter
@@ -192,7 +183,11 @@ function ReviewsEmptyState({ filterActive }: { filterActive: boolean }): React.R
   return (
     <EmptyState
       heading="No reviews yet"
-      body="A review appears here once someone opens one from the CLI's erun review create or the New review button above."
+      body={
+        canCreateReview
+          ? "A review appears here once someone opens one from the CLI's erun review create or the New review button above."
+          : 'Creating a review needs additional access — the notice above says what is missing.'
+      }
     />
   );
 }
@@ -449,6 +444,7 @@ function ReviewsTable({
       {reviews.map((review) => {
         const title = review.name || review.reviewId;
         const author = displayReviewAuthor(review, currentUserId);
+        const rowUnresolvedThreads = reviewRowUnresolvedThreads(review);
         return (
           <tr key={review.reviewId}>
             <td className="px-2 py-2.5">
@@ -498,14 +494,14 @@ function ReviewsTable({
             </DataCell>
             {showThreads && (
               <DataCell>
-                {review.unresolvedThreads === undefined ? (
-                  '-'
-                ) : (
-                  <StatusBadge
-                    tone={unresolvedThreadsTone(review.unresolvedThreads)}
-                    label={unresolvedThreadsLabel(review.unresolvedThreads)}
-                  />
-                )}
+                <StatusBadge
+                  tone={
+                    rowUnresolvedThreads === undefined
+                      ? 'muted'
+                      : unresolvedThreadsTone(rowUnresolvedThreads)
+                  }
+                  label={unresolvedThreadsCountLabel(rowUnresolvedThreads)}
+                />
               </DataCell>
             )}
           </tr>

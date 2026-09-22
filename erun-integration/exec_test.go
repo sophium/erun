@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
@@ -40,7 +42,7 @@ func mustReadFile(t testing.TB, path string) string {
 
 func captureGit(t testing.TB, dir string, args ...string) string {
 	t.Helper()
-	cmd := osexec.Command("git", args...)
+	cmd := harnessexec.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -68,7 +70,7 @@ func atlasBin(t testing.TB) string {
 // real Atlas checksum rather than a hand-authored placeholder.
 func runAtlasHash(t testing.TB, dir string) {
 	t.Helper()
-	cmd := osexec.Command(atlasBin(t), "migrate", "hash", "--dir", "file://migrations")
+	cmd := harnessexec.Command(atlasBin(t), "migrate", "hash", "--dir", "file://migrations")
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("atlas migrate hash: %v: %s", err, out)
@@ -80,7 +82,7 @@ func runAtlasHash(t testing.TB, dir string) {
 // contract end to end rather than trusting that regeneration preserved it.
 func captureAtlasValidate(t testing.TB, dir string) (string, bool) {
 	t.Helper()
-	cmd := osexec.Command(atlasBin(t), "migrate", "validate", "--dir", "file://migrations")
+	cmd := harnessexec.Command(atlasBin(t), "migrate", "validate", "--dir", "file://migrations")
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err == nil
@@ -1493,6 +1495,51 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/gate_merge_refuses_while_the_environment_is_held_exclusively", normalize.Apply(result.Combined))
 	})
 
+	t.Run("gate_merge_refuses_a_claim_taken_at_the_default_scope", func(t *testing.T) {
+		// A drive that names no --scope gets the documented default, "worktree",
+		// which is the environment's one shared worktree and exactly the resource
+		// gate-merge rewrites. That is the shape both transports record from an
+		// ordinary exclusive take, so it has to refuse here; reading only the
+		// "environment" scope left the guard inert for it and let the drive
+		// rewrite the tree under a claim that was held -- failing open.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := inEnvironment(append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev"))
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "merge-queue drive 2442", "--id", "merge-queue", "--exclusive", "--orchestrator", "erun",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		list := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		refused := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main", "--dry-run"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add widget\n"})
+		if refused.ExitCode == 0 {
+			t.Fatalf("expected a refusal while a default-scoped exclusive claim is held, got 0:\n%s", refused.Combined)
+		}
+		// --under-lease exempts that claim and only that claim, so the drive that
+		// took it proceeds where an unrelated id still does not.
+		own := erun.Run(t, []string{
+			"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main",
+			"--under-lease", "merge-queue", "--remote", "nonexistent", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add widget\n"})
+		if own.ExitCode != 0 {
+			t.Fatalf("the claim's own holder must not be refused: exit %d: %s", own.ExitCode, own.Combined)
+		}
+		other := erun.Run(t, []string{
+			"exec", "gate-merge", "--source", "feature/add-widget", "--target", "main",
+			"--under-lease", "some-other-drive", "--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "Add widget\n"})
+		if other.ExitCode == 0 {
+			t.Fatalf("--under-lease must exempt only the caller's own claim, got 0:\n%s", other.Combined)
+		}
+		golden.Equal(t, "exec/gate_merge_refuses_a_claim_taken_at_the_default_scope", normalize.Apply(
+			take.Combined+list.Combined+refused.Combined+own.Combined+other.Combined))
+	})
+
 	t.Run("gate_merge_under_lease_is_not_refused_by_the_callers_own_claim", func(t *testing.T) {
 		// A merge-queue drive holds the environment for its whole window, which
 		// spans several separate processes and so cannot be expressed as a job.
@@ -1567,6 +1614,95 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("gate_merge_real_run_carries_the_branchs_closes_trailer", func(t *testing.T) {
+		// The reported failure, on a real repository: the branch's own commit
+		// declares "Closes #N", the merge queue lands it with the review name
+		// as the squash message, and the declaration is gone — the issue stays
+		// open with its fix on the target and no commit there referencing it.
+		// The caller here passes only the review name, which is the state the
+		// report describes; a caller that passes the branch's message verbatim
+		// already carried the trailer by accident.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "Fix the widget\n\nCloses #2601\nReproduces: a caller reading the widget got its parts in the wrong order.\nRegression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Assemble the widget in declared order"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		if subject := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%s")); subject != "Assemble the widget in declared order" {
+			t.Fatalf("the squash commit must still lead with the review name, got %q", subject)
+		}
+		// The observable behaviour the report is about: a reader grepping the
+		// target for the issue reference finds the commit that closed it.
+		grepped := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "main", "--grep=Closes #2601", "--format=%s"))
+		if grepped != "Assemble the widget in declared order" {
+			t.Fatalf("expected the landed squash commit to be findable by its issue reference, got %q", grepped)
+		}
+		body := captureGit(t, setup.Cwd, "log", "-1", "--pretty=%B")
+		for _, want := range []string{
+			"Reproduces: a caller reading the widget got its parts in the wrong order.",
+			"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("expected the landed commit to carry %q, got:\n%s", want, body)
+			}
+		}
+		if strings.Contains(body, "Fix the widget") {
+			t.Fatalf("only the branch's trailers belong beneath the review name, not its subject, got:\n%s", body)
+		}
+	})
+
+	t.Run("gate_merge_real_run_accepts_a_url_remote", func(t *testing.T) {
+		// The reported failure: --remote takes a URL, not only a configured
+		// remote name. A URL creates no remote-tracking refs, so the ref the
+		// checkout and every squash-merge used to name ("<remote>/<branch>")
+		// does not exist for one, and the run died with "is not a commit and a
+		// branch 'main' cannot be created from it" while --dry-run exited 0
+		// having traced that same impossible ref. A file:// URL carries the ":"
+		// and "//" that made it unnameable as a ref, so it reproduces the
+		// report without reaching the network.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		remoteRoot := seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		remoteURL := "file://" + remoteRoot
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--remote", remoteURL, "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Add widget"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if parsed.Remote != remoteURL {
+			t.Fatalf("expected the URL remote to be reported back, got %q", parsed.Remote)
+		}
+		// A source that could not be resolved is skipped, not fatal, so a
+		// regression here would otherwise read as a clean empty run.
+		if len(parsed.Landed) != 1 || parsed.Landed[0].SourceBranch != "feature" {
+			t.Fatalf("expected feature to land against the URL remote, got landed=%+v skipped=%+v", parsed.Landed, parsed.Skipped)
+		}
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "feature.txt")); err != nil {
+			t.Fatalf("expected feature.txt to be squash-merged onto main: %v", err)
+		}
+	})
+
 	t.Run("gate_merge_real_run_batch_lands_multiple_sources", func(t *testing.T) {
 		// Two independent branches, both squashed onto one working tree by one
 		// gate-merge call — the batching this generalization exists for: a
@@ -1616,6 +1752,68 @@ func TestExec(t *testing.T) {
 		subjects := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "--format=%s", "main~2..main"))
 		if subjects != "Add b\nAdd a" {
 			t.Fatalf("expected two stacked squash commits, one per source, got: %q", subjects)
+		}
+	})
+
+	t.Run("gate_merge_real_run_skips_a_source_that_contributes_nothing", func(t *testing.T) {
+		// The no-op half of the same report. A source whose content is already
+		// on the target — here a branch still at main's own tip, so `git merge
+		// --squash` reports "Already up to date" and stages nothing — used to
+		// abort the whole batch: the code asked git to commit the empty squash
+		// anyway, that commit exited non-zero, and the failure came back as a
+		// bare exit status that named no cause (git explains it on stdout,
+		// which the commit call discarded). A no-op source contributes nothing
+		// and must be skipped like a conflicting one, with the rest of the
+		// batch still gating — an already-landed branch is a no-op, not a dead
+		// gate.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		// `already` never diverges from main, so squashing it stages nothing.
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "already")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "already")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "feature commit")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "already", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Already\x00Add feature"})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit 0 — a source that contributes nothing must not fail the batch:\n%s", result.Combined)
+		}
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 1 || parsed.Landed[0].SourceBranch != "feature" {
+			t.Fatalf("expected feature to land, got: %+v", parsed.Landed)
+		}
+		if len(parsed.Skipped) != 1 || parsed.Skipped[0].SourceBranch != "already" {
+			t.Fatalf("expected already to be skipped, got: %+v", parsed.Skipped)
+		}
+		// The skip must say it staged nothing — not be misreported as a
+		// conflict, the other thing that produces a skip.
+		if !strings.Contains(parsed.Skipped[0].Reason, "staged no changes") {
+			t.Fatalf("expected the skip to name the no-op cause, got: %q", parsed.Skipped[0].Reason)
+		}
+		if len(parsed.Skipped[0].ConflictedFiles) != 0 {
+			t.Fatalf("expected no conflicted files for a no-op source, got: %+v", parsed.Skipped[0].ConflictedFiles)
+		}
+		if !strings.Contains(result.Combined, "Skipped") {
+			t.Fatalf("expected the CLI to report the skip, got:\n%s", result.Combined)
+		}
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "feature.txt")); err != nil {
+			t.Fatalf("expected feature.txt to be squash-merged onto main: %v", err)
+		}
+		subjects := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "--format=%s", "main~1..main"))
+		if subjects != "Add feature" {
+			t.Fatalf("expected exactly one squash commit, for the contributing source only, got: %q", subjects)
 		}
 	})
 
@@ -2005,6 +2203,43 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/report_commit_status_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
 	})
 
+	t.Run("report_commit_status_real_run_succeeds", func(t *testing.T) {
+		// Drives the real wire path (postGitHubCommitStatus) through
+		// ERUN_GITHUB_API_BASE_URL_OVERRIDE -- the same seam
+		// TestExecRulesetBypass uses -- instead of only the dry-run trace.
+		setup := env.New(t)
+		github := githubCommitStatusStubServer(t, 0)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--remote-url", "https://github.com/sophium/erun.git",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_real_run_succeeds", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
+	t.Run("report_commit_status_real_run_github_rejects", func(t *testing.T) {
+		// postGitHubCommitStatus's own non-2xx branch: the request reached
+		// GitHub but the state was refused.
+		setup := env.New(t)
+		github := githubCommitStatusStubServer(t, http.StatusUnprocessableEntity)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "report-commit-status", "deadbeefcafe",
+			"--state", "success",
+			"--description", "gate build passed",
+			"--remote-url", "https://github.com/sophium/erun.git",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when github rejects the status, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/report_commit_status_real_run_github_rejects", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
 	t.Run("close_pr_help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"exec", "close-pr", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -2095,6 +2330,70 @@ func TestExec(t *testing.T) {
 			t.Fatalf("expected non-zero exit with no token available, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "exec/close_pr_real_run_fails_cleanly_without_a_token", normalize.Apply(result.Combined))
+	})
+
+	t.Run("close_pr_real_run_no_open_pull_request_is_a_no_op", func(t *testing.T) {
+		// findAndClosePullRequest's no-pulls branch: a queued plain branch
+		// with no open pull request is legitimate, so this is a no-op result
+		// rather than an error.
+		setup := env.New(t)
+		github := githubPullRequestStubServer(t, nil)
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_real_run_no_open_pull_request_is_a_no_op", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
+	t.Run("close_pr_real_run_comments_and_closes_a_matching_pull_request", func(t *testing.T) {
+		// The full mutating path: postGitHubIssueComment then
+		// closeGitHubPullRequest, once the open pull request's head matches
+		// --gated-commit.
+		setup := env.New(t)
+		github := githubPullRequestStubServer(t, &githubPullRequestStubPull{
+			Number: 42, HeadSHA: "sourcesha0000000000000000000000000000000",
+		})
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_real_run_comments_and_closes_a_matching_pull_request", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
+	})
+
+	t.Run("close_pr_real_run_refuses_when_head_moved", func(t *testing.T) {
+		// The open pull request's head no longer matches --gated-commit --
+		// something pushed to the branch after the gate fetched it, so
+		// closing would silently discard whatever moved it.
+		setup := env.New(t)
+		github := githubPullRequestStubServer(t, &githubPullRequestStubPull{
+			Number: 42, HeadSHA: "movedsha00000000000000000000000000000000",
+		})
+		envVars := append(setup.Env(), githubStubEnv(github)...)
+		result := erun.Run(t, []string{
+			"exec", "close-pr", "feature/add-widget",
+			"--target", "main",
+			"--remote-url", "https://github.com/sophium/erun.git",
+			"--gated-commit", "sourcesha0000000000000000000000000000000",
+			"--landing-commit", "landedsha0000000000000000000000000000000",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the pull request head moved, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "exec/close_pr_real_run_refuses_when_head_moved", normalize.Apply(result.Combined, stubServerRule(github, "<GITHUB_API>")))
 	})
 
 	t.Run("gate_run_help", func(t *testing.T) {
@@ -2532,6 +2831,58 @@ func githubStubEnv(server *httptest.Server) []string {
 		"ERUN_GITHUB_API_BASE_URL_OVERRIDE=" + server.URL + "/",
 		"GITHUB_TOKEN=gho_stub_token",
 	}
+}
+
+// githubCommitStatusStubServer answers the one call `exec
+// report-commit-status` makes in real-run mode (postGitHubCommitStatus).
+// forceStatus, when non-zero, makes the endpoint refuse instead of succeed.
+func githubCommitStatusStubServer(t testing.TB, forceStatus int) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /repos/sophium/erun/statuses/{commit}", func(w http.ResponseWriter, _ *http.Request) {
+		if forceStatus != 0 {
+			http.Error(w, `{"message":"Validation Failed"}`, forceStatus)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1,"state":"success"}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+// githubPullRequestStubPull is the one open pull request `exec close-pr`
+// should find for feature/add-widget -> main, or nil for the no-open-PR
+// scenario.
+type githubPullRequestStubPull struct {
+	Number  int
+	HeadSHA string
+}
+
+// githubPullRequestStubServer answers the three calls `exec close-pr` makes
+// in real-run mode: the open-pull-requests lookup, the landing-commit
+// comment, and the close itself.
+func githubPullRequestStubServer(t testing.TB, pull *githubPullRequestStubPull) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/sophium/erun/pulls", func(w http.ResponseWriter, _ *http.Request) {
+		if pull == nil {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = fmt.Fprintf(w, `[{"number":%d,"head":{"sha":%q}}]`, pull.Number, pull.HeadSHA)
+	})
+	mux.HandleFunc("POST /repos/sophium/erun/issues/{number}/comments", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	})
+	mux.HandleFunc("PATCH /repos/sophium/erun/pulls/{number}", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"state":"closed"}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
 }
 
 // TestExecRulesetBypass drives the two ruleset-bypass commands against stub

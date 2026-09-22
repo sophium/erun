@@ -163,9 +163,12 @@ grep -q '^  replicas: 1$' "${rendered}" ||
     fail "an environment with no stop recorded should render replicas: 1"
 
 # --- 8. An enabled metrics listener gets its containerPort, its env vars, and
-# a NetworkPolicy that keeps ssh/mcp exactly as unrestricted as before this
-# chart rendered any NetworkPolicy, while actually restricting the new port to
-# same-namespace traffic plus a namespace labelled as a scraper (erun#1323) ---
+# a NetworkPolicy that makes the pod's ingress default-deny and then re-permits
+# exactly ssh, mcp, and the metrics port by number -- ssh/mcp from any source,
+# the metrics port only from same-namespace traffic plus a namespace labelled
+# as a scraper. The policy is what isolates the pod: a port it does not name is
+# unreachable from other pods, so the permitted set below is a security
+# boundary and is enumerated as one. ---
 rendered=$(render)
 grep -q '^            - name: ERUN_METRICS_ENABLED$' "${rendered}" ||
     fail "ERUN_METRICS_ENABLED should be wired on the runtime container"
@@ -184,10 +187,10 @@ grep -q '^  name: test-metrics$' "${netpol_block}" ||
     fail "the NetworkPolicy should be named after the release"
 grep -q '^      app: test$' "${netpol_block}" ||
     fail "the NetworkPolicy should select this release's pods"
-# ssh (17022) and mcp (17000) each get their own ports-only, from-less rule so
-# they stay reachable from anywhere -- exactly as unrestricted as they were
-# with no NetworkPolicy at all, since selecting a pod with any NetworkPolicy
-# makes every other port on it default-deny unless a rule allows it.
+# ssh (17022) and mcp (17000) each get their own ports-only, from-less rule:
+# the pod is default-deny for every port the policy does not name, so those two
+# rules are what keeps ssh/mcp reachable from anywhere, and they stay reachable
+# only because they are named.
 grep -q '^        - port: 17022$' "${netpol_block}" ||
     fail "the NetworkPolicy should keep the ssh port open"
 grep -q '^        - port: 17000$' "${netpol_block}" ||
@@ -196,6 +199,34 @@ grep -q '^        - port: 9100$' "${netpol_block}" ||
     fail "the NetworkPolicy should scope the metrics port"
 grep -q 'network-policy/erun-metrics-scraper: "true"$' "${netpol_block}" ||
     fail "the NetworkPolicy should admit a namespace labelled as a metrics scraper"
+
+# The permitted set is enumerable, so enumerate it. A rule that omitted its
+# ports: key would admit every port on the pod, and a port the chart stops
+# rendering but the policy still names would leave that port open on a pod that
+# no longer serves it.
+ingress_block="${work_root}/netpol-ingress.yaml"
+awk '/^  ingress:/{inside=1;next} inside' "${netpol_block}" >"${ingress_block}"
+[ "$(grep -c '^    - ' "${ingress_block}")" = "3" ] ||
+    fail "the NetworkPolicy should render exactly three ingress rules"
+[ "$(grep -c '^    - ports:$' "${ingress_block}")" = "3" ] ||
+    fail "every ingress rule must name its ports -- a rule without ports: admits every port"
+[ "$(sed -n 's/^        - port: //p' "${ingress_block}" | sort -n | tr '\n' ' ')" = "9100 17000 17022 " ] ||
+    fail "the permitted set should be exactly the metrics, mcp, and ssh ports"
+[ "$(awk '/^    - ports:$/{n++} /^      from:$/{print n}' "${ingress_block}")" = "3" ] ||
+    fail "only the third (metrics) rule should carry a from: restriction"
+
+# The permitted set follows the resolved ports rather than being fixed: with
+# the MCP edge off, 17000 must leave the policy too, or the pod would keep
+# re-permitting a port it no longer serves.
+rendered=$(render --set mcpEnabled=false)
+netpol_block="${work_root}/netpol-mcp-disabled.yaml"
+awk '/^kind: NetworkPolicy$/{f=1} f{print} f && /^---$/{exit}' "${rendered}" >"${netpol_block}"
+grep -q '^        - port: 17000$' "${netpol_block}" &&
+    fail "a disabled MCP edge should not stay in the NetworkPolicy"
+grep -q '^        - port: 17022$' "${netpol_block}" ||
+    fail "the ssh port should stay permitted without the MCP edge"
+grep -q '^        - port: 9100$' "${netpol_block}" ||
+    fail "the metrics port should stay permitted without the MCP edge"
 
 # --- 9. A disabled metrics listener renders no containerPort and no
 # NetworkPolicy at all, so a deploy that turns metrics off is byte-for-byte
@@ -438,10 +469,10 @@ for gb in $(pvc_storage_requests "${rendered}"); do
     total_storage_gb=$((total_storage_gb + gb))
 done
 
-[ "${total_cpu_millicores}" = "8000" ] ||
-    fail "pod cpu limits should sum to 8000m (erun-devops ${runtime_cpu} + erun-dind ${dind_cpu}), got ${total_cpu_millicores}m"
-[ "${total_memory_mb}" = "29396" ] ||
-    fail "pod memory limits should sum to 29396Mi (erun-devops ${runtime_memory}Mi + erun-dind ${dind_memory}Mi), got ${total_memory_mb}Mi"
+[ "${total_cpu_millicores}" = "16000" ] ||
+    fail "pod cpu limits should sum to 16000m (erun-devops ${runtime_cpu} + erun-dind ${dind_cpu}), got ${total_cpu_millicores}m"
+[ "${total_memory_mb}" = "36864" ] ||
+    fail "pod memory limits should sum to 36864Mi (erun-devops ${runtime_memory}Mi + erun-dind ${dind_memory}Mi), got ${total_memory_mb}Mi"
 [ "${total_storage_gb}" = "72" ] ||
     fail "the pod's PVCs should sum to 72Gi (home 2Gi + docker 50Gi + worktree 20Gi), got ${total_storage_gb}Gi"
 
@@ -662,5 +693,37 @@ rendered=$(render \
 count=$(grep -c '^            - name: ERUN_CLAUDE_AVAILABLE_MODELS$' "${rendered}")
 [ "${count}" = "1" ] ||
     fail "ERUN_CLAUDE_AVAILABLE_MODELS should render exactly once with a gateway on an AWS env, got ${count}"
+
+# --- 15. The build's cache bound and the docker claim describe the same volume ---
+# The byte count the build bounds this environment's BuildKit cache by is only a
+# bound if it is the size of the volume that cache actually lives on. Two
+# independently written numbers drift: the dind sidecar's image tag once shipped
+# as a literal that disagreed with the image VERSION beside it, and the fix it
+# carried was inert on every environment for a release because of exactly that.
+# Derived from the rendered claim rather than restated, so a change that moves
+# both sides together cannot pass.
+docker_claim_gi() {
+    awk '/^  name: test-docker$/{found=1}
+         found && /^      storage: /{sub(/^      storage: /,""); sub(/Gi$/,""); print; exit}' "$1"
+}
+
+cache_bound_bytes() {
+    grep -A1 '^            - name: ERUN_DOCKER_VOLUME_BYTES$' "$1" |
+        sed -n 's/^              value: "\([0-9]*\)"$/\1/p'
+}
+
+rendered=$(render --set dockerVolumeGi=120)
+claim_gi=$(docker_claim_gi "${rendered}")
+[ "${claim_gi}" = "120" ] ||
+    fail "the docker claim should render the configured volume (120Gi), got '${claim_gi}'"
+bound=$(cache_bound_bytes "${rendered}")
+[ "${bound}" = "$((claim_gi * 1073741824))" ] ||
+    fail "the build's cache bound should be the docker claim's own size (${claim_gi}Gi = $((claim_gi * 1073741824)) bytes), got '${bound}'"
+
+# A runtime env runs no dind sidecar and has no docker claim, so there is no
+# volume to bound and nothing should claim otherwise.
+rendered=$(render --set worktreeStorage=none)
+[ -z "$(cache_bound_bytes "${rendered}")" ] ||
+    fail "no cache bound should render for an env with no docker volume"
 
 echo "PASS: erun-devops chart pod shape"

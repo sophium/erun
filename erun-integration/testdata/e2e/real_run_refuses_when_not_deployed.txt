@@ -1,0 +1,3 @@
+audit: erun e2e --dry-run
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+erun e2e: team/dev is not deployed (deployment "team-devops" not found in namespace "team-dev"); run `erun deploy team dev` first

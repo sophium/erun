@@ -56,11 +56,50 @@
 # mistaken for a real one, and only for that case does the tree+command key
 # above have to carry the whole safety burden.
 #
-# This script's own exit code distinguishes three outcomes, not two: 0 for a
+# A bounded wait timing out (exit 124, "still running") is not this gate's
+# verdict, and nothing here may report it as one -- but the exit code that
+# means that clearly to a caller checking it directly stops meaning anything
+# once `make` is between them and it: GNU Make collapses any nonzero recipe
+# exit to its own generic exit 2, so a caller that only sees `make check`'s
+# own exit status (an outer job supervisor polling this whole invocation as
+# one unit, rather than re-invoking it or querying the named inner job id
+# itself) cannot tell a timeout from a real failure -- both read back as the
+# same exit 2, and a bounded wait that expired has already been reported as a
+# gate failure this way once. The default behaviour for a live,
+# foreground-constrained caller (a coding agent's own shell tool call, which
+# is exactly what this whole detach mechanism exists to protect, see the file
+# header above) must not change to fix that: it cannot safely block past its
+# own bounded wait without risking the exact foreground-timeout trap this
+# script exists to avoid. `ERUN_JOB_ID` being set is not a safe signal to
+# tell the two kinds of caller apart either -- it is set on a coding agent's
+# own foreground call just as often as on an asynchronous orchestrator's,
+# whenever the agent's own session is itself supervised as a job. So a caller
+# that is *not* foreground-constrained -- an external orchestrator polling
+# this environment asynchronously over its own MCP edge, a human at a
+# terminal, or CI with a generous budget -- opts in explicitly with
+# AGENT_GATE_AWAIT_VERDICT=1: this keeps re-awaiting the same job across
+# repeated bounded `job await` calls (each still capped the same way) until
+# it reaches a real verdict (pass or fail), so `make check`'s own exit status
+# is only ever a genuine 0 or a genuine failure -- never a swallowed timeout.
+# Without it, behaviour stays foreground-safe: one bounded wait, and 124 if
+# that wait ends with no verdict.
+#
+# A timeout never stands for an outcome on its own. The job's own record is
+# read first, so a job that finished either side of the expiry is reported by
+# its actual result rather than by the wait that happened to notice first; 124
+# is reserved for a job still genuinely running, and an unreadable record
+# counts as the same non-verdict rather than as a failure.
+#
+# This script's own exit code distinguishes four outcomes, not two: 0 for a
 # clean pass, 0 (with a named warning on stderr) for a pass that exited 0 but
-# left unsupervised background work running behind it, and nonzero only for a
-# genuine gate failure. See erun-common/AGENTS.md's "Gate execution and
-# verdicts" for the distinction between wrapper status and completed work.
+# left unsupervised background work running behind it, nonzero for a genuine
+# gate failure, and 124 -- distinct, and never a failure -- for a wait that
+# expired with the job still running and no verdict reached. Only the first
+# three survive `make`: GNU Make collapses every nonzero recipe exit to 2, so
+# a caller that reads only `make check`'s exit status cannot separate the
+# fourth from the third, and must read the job id this script names instead.
+# See erun-common/AGENTS.md's "Gate execution and verdicts" for the
+# distinction between wrapper status and completed work.
 
 set -eu
 
@@ -135,12 +174,31 @@ tree_state_key() {
 	} 2>/dev/null | hash_stdin | cut -c1-16
 }
 
+# gate_scope_env names the environment variables a gate's *selection* travels
+# in -- for the Playwright suite, which areas of it run. They are as much a
+# part of what a run means as its argv: `run.sh --skip-app-gates` under
+# PLAYWRIGHT_TEST_AREAS=all is a different run from the same command under
+# "smoke", and keying them the same would replay one's pass over the other's
+# request. That is the same failure the command hash above exists to prevent,
+# in the one channel the command hash cannot see.
+gate_scope_env="PLAYWRIGHT_TEST_AREAS"
+
 # cmd_state_key prints a key that changes whenever the command being gated
 # does, so a job id built from it can never satisfy a request for a
 # differently-scoped run (e.g. a full `make check-gate` reusing a narrower
 # run's cached result under the same job id).
 cmd_state_key() {
-	printf '%s\0' "$@" | hash_stdin | cut -c1-16
+	{
+		printf '%s\0' "$@"
+		for name in $gate_scope_env; do
+			# printenv, not an indirect expansion of the shell variable, so the
+			# key reflects the environment the gate will actually run under:
+			# a value that never reached this process cannot scope a run it is
+			# not in.
+			value=$(printenv "$name" 2>/dev/null) || value=""
+			printf '%s\0%s\0' "$name" "$value"
+		done
+	} | hash_stdin | cut -c1-16
 }
 
 resolved_job_id="${job_id}-$(tree_state_key)-$(cmd_state_key "$@")"
@@ -239,15 +297,51 @@ else
 	printf '%s\n' "$start_output" >&2
 fi
 
-await_status=0
-erun exec job await \
-	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-	--id "$resolved_job_id" --timeout "$await_timeout" >&2 || await_status=$?
+while :; do
+	await_status=0
+	erun exec job await \
+		--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+		--id "$resolved_job_id" --timeout "$await_timeout" >&2 || await_status=$?
 
-if [ "$await_status" -eq 124 ]; then
-	printf 'agent-gate: %s is still running after %s; run this command again to keep waiting\n' "$job_name" "$await_timeout" >&2
-	exit 124
-fi
+	if [ "$await_status" -ne 124 ]; then
+		break
+	fi
+
+	# 124 is this wait's own deadline, not the job's outcome, and the two are
+	# independent: the job can reach its verdict either side of the moment the
+	# wait gives up. So read the job's own record before letting the expiry
+	# stand for anything -- a job that has since reached an outcome is reported
+	# by that outcome below, and only a job still genuinely running is a
+	# non-verdict. An unreadable record is the same non-verdict: an unknown
+	# outcome is never a failure.
+	late_status_line=$(erun exec job status \
+		--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+		--id "$resolved_job_id" 2>/dev/null) || late_status_line=""
+
+	case "$late_status_line" in
+	running:* | "")
+		if [ "${AGENT_GATE_AWAIT_VERDICT:-}" != "1" ]; then
+			printf 'agent-gate: %s has reached no verdict -- job %s is still running after %s. This is NOT a failure of the gated work: run this command again to re-attach to the same job and keep waiting.\n' "$job_name" "$resolved_job_id" "$await_timeout" >&2
+			exit 124
+		fi
+
+		printf 'agent-gate: %s has reached no verdict -- job %s is still running after %s; AGENT_GATE_AWAIT_VERDICT=1 is set, so waiting again for a real verdict instead of reporting the bounded wait itself as a failure\n' "$job_name" "$resolved_job_id" "$await_timeout" >&2
+		;;
+	*)
+		# The job finished after all. Report its own outcome, never the
+		# expired wait that happened to notice first.
+		case "$late_status_line" in
+		"exited 0:"*)
+			await_status=0
+			;;
+		*)
+			await_status=1
+			;;
+		esac
+		break
+		;;
+	esac
+done
 
 # `job await`'s own exit status collapses two different outcomes into the same
 # nonzero code: a genuinely failed gate, and a gate that exited 0 but left

@@ -45,7 +45,7 @@ A [hosted platform](/concepts/hosted-platform)'s runtime environments run this s
 
 ## Inter-env communication
 
-**Isolating envs from each other is opt-in.** Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny NetworkPolicy as a copy-paste pattern — it does **not** auto-deploy one. Apply it to an env's namespace to block ingress from outside it; cross-env traffic then requires an explicit opt-in NetworkPolicy on the target plus a matching label on the consumer namespace. Needing this is rare and usually a sign you should be using one env rather than two. See [Networking spec · Cross-namespace traffic semantics](/agent-reference/networking-spec#cross-namespace-traffic-semantics) for the manifests.
+**Isolating envs from each other is opt-in.** Vanilla Kubernetes lets pods reach across namespaces, so ERun provides a default-deny NetworkPolicy as a copy-paste pattern for a whole namespace. The runtime chart *does* deploy a policy, but it selects only the runtime pod and re-permits `ssh`, `mcp`, and the metrics port there, so application services are not covered by it. Apply that pattern to an env's namespace to block ingress from outside it; cross-env traffic then requires an explicit opt-in NetworkPolicy on the target plus a matching label on the consumer namespace. Needing this is rare and usually a sign you should be using one env rather than two. See [Networking spec · Cross-namespace traffic semantics](/agent-reference/networking-spec#cross-namespace-traffic-semantics) for the manifests.
 
 ## Per-env DNS
 

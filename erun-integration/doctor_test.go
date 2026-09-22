@@ -1485,6 +1485,72 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_tracked_project_config_reports_nothing", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_stale_desktop_app_bundle", func(t *testing.T) {
+		// The installed desktop app bundle can drift arbitrarily far
+		// behind the CLI with nothing to say so. A single ~/Applications/ERun.app
+		// bundle whose Info.plist version differs from this CLI's own build
+		// version must surface under "== Desktop app ==", identically in
+		// --dry-run and for real since this is a pure file read.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		writeDesktopAppBundle(t, filepath.Join(setup.Home, "Applications", "ERun.app"), "1.0.51")
+		envVars := append(setup.Env(),
+			"ERUN_HOST_OS_OVERRIDE=darwin",
+			"ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE="+filepath.Join(setup.Home, "no-system-applications"),
+		)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Multiple ERun.app bundles") {
+			t.Fatalf("expected no multiple-bundle warning for a single bundle, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_stale_desktop_app_bundle", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_reports_shadowed_desktop_app_bundle", func(t *testing.T) {
+		// The operator-reported shape: a current bundle at
+		// ~/Applications/ERun.app sits alongside a stale one at
+		// /Applications/ERun.app (both simulated here since a test must never
+		// touch a real /Applications -- ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE
+		// is the seam for that). Both share the bundle id com.sophium.erun, so
+		// Finder/Spotlight/the Dock can launch either one regardless of which
+		// is current -- doctor must name both bundles, flag the stale one
+		// against this CLI's own version, and warn about the shadow-copy
+		// hazard even though this CLI's own build (a "dev" build here) happens
+		// to match one of the two.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		systemApplications := filepath.Join(setup.Home, "system-applications")
+		writeDesktopAppBundle(t, filepath.Join(setup.Home, "Applications", "ERun.app"), "dev")
+		writeDesktopAppBundle(t, filepath.Join(systemApplications, "ERun.app"), "1.0.51")
+		envVars := append(setup.Env(),
+			"ERUN_HOST_OS_OVERRIDE=darwin",
+			"ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE="+systemApplications,
+		)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_shadowed_desktop_app_bundle", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_no_desktop_app_bundle_reports_nothing", func(t *testing.T) {
+		// The common case (this host's HOST_OS_OVERRIDE isn't even darwin, and
+		// even on darwin, no bundle installed anywhere): no "== Desktop app =="
+		// section at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "Desktop app") {
+			t.Fatalf("expected no desktop-app finding when nothing is installed, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_no_desktop_app_bundle_reports_nothing", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_reports_expired_host_credentials", func(t *testing.T) {
 		// The failure #903 was filed for: the profile is present and well-formed
 		// but its credentials lapsed overnight, which otherwise first surfaces as
@@ -1601,6 +1667,74 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_prune_images_and_build_cache_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_prune_host_env_acts_on_this_machines_daemon", func(t *testing.T) {
+		// A host env is a worktree on this machine with no pod, so its builds
+		// run against this machine's docker daemon: a prune it asks for must
+		// act on that daemon and say so. The kubectl stub answers the way a
+		// machine with no cluster does, so the run also proves the read and
+		// the prune no longer wait on a pod (and on a cluster) this env does
+		// not have.
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		state := t.TempDir()
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlNoCluster(t, stubs)
+		stubDoctorHostDocker(t, stubs)
+		stubDoctorHostDf(t, stubs)
+		envVars := append(setup.Env(),
+			append(fixture.StubEnv(stubs, "helm", "kubectl", "docker", "df"), "ERUN_STUB_STATE="+state)...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_prune_host_env_acts_on_this_machines_daemon", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_prune_refuses_an_environment_with_no_build_daemon", func(t *testing.T) {
+		// A runtime env installs published versions and never builds, so it has
+		// no erun-dind sidecar and no daemon holding build images. A prune asked
+		// for there must fail naming that -- not run against whatever container
+		// the doctor's own context happens to reach and print docker's success
+		// for it. The kubectl stub fails loudly on any dind exec, so a prune
+		// that still dispatched one surfaces as that failure.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlFailsOnDindExec(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("a prune that cannot run must not exit 0: %s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "dispatched a dind exec anyway") {
+			t.Fatalf("doctor pruned a daemon that does not hold this environment's build images:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_prune_refuses_an_environment_with_no_build_daemon", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_prune_reports_a_prune_that_freed_nothing", func(t *testing.T) {
+		// The reported failure: the operator follows the build's own
+		// remedy, the prune prints docker's success, and the disk does not move.
+		// The stub answers with the report's own numbers -- 11.32GB reclaimable
+		// before and after, docker claiming 4.105MB reclaimed -- so the run must
+		// name the daemon it pruned and say plainly that the reclaim it printed
+		// did not free the space the build needs, instead of leaving docker's
+		// "Total reclaimed space" as the only verdict.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlPruneReclaimsNothing(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_prune_reports_a_prune_that_freed_nothing", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_without_tty_skips_optional_prune_prompts", func(t *testing.T) {
@@ -2224,6 +2358,131 @@ func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
 }
 
+// stubDoctorKubectlFailsOnDindExec answers every read-only doctor surface
+// normally and fails loudly on a dind exec, so a prune that dispatches one is
+// visible as itself rather than as a quiet success.
+func stubDoctorKubectlFailsOnDindExec(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"docker system df"*|*"df -h /var/lib/docker"*|*"docker image prune"*|*"docker builder prune"*|*"docker container prune"*) printf '%s\n' 'dispatched a dind exec anyway' >&2; exit 1 ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *" exec "*) printf '%s\n' 'git push access: no credential found' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorKubectlNoCluster answers kubectl the way a machine with no cluster
+// does -- the shape a host environment's own machine has -- while keeping every
+// read-only surface that does not need the cluster intact.
+func stubDoctorKubectlNoCluster(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`echo 'error: no configuration has been provided, try setting KUBERNETES_MASTER environment variable' >&2`,
+		`exit 1`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorHostDocker answers the docker CLI a host environment's daemon is
+// reached through. The store reading is stateful the way a real prune is: the
+// first read reports images to reclaim, the prune removes them, and the read
+// after it reports none -- which is what the run's own before/after has to
+// relay.
+func stubDoctorHostDocker(t *testing.T, stubsDir string) {
+	t.Helper()
+	before := []string{
+		`'TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE'`,
+		`'Images          21        0         11.32GB   11.32GB (100%)'`,
+		`'Build Cache     0         0         0B        0B'`,
+	}
+	after := []string{
+		`'TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE'`,
+		`'Images          0         0         0B        0B'`,
+		`'Build Cache     0         0         0B        0B'`,
+	}
+	script := strings.Join([]string{
+		`reads="${ERUN_STUB_STATE}/df-reads"`,
+		`count=0`,
+		`[ -f "$reads" ] && count=$(cat "$reads")`,
+		`case "$*" in`,
+		`  *"system df --format"*)`,
+		`    printf '%s\n' "$((count + 1))" >"$reads"`,
+		`    if [ "$count" -eq 0 ]; then`,
+		`      printf '%s\n' 'Images|11.32GB|11.32GB (100%)' 'Build Cache|0B|0B'`,
+		`    else`,
+		`      printf '%s\n' 'Images|0B|0B' 'Build Cache|0B|0B'`,
+		`    fi`,
+		`    ;;`,
+		// The tables a real run shows: the inspection's read is the store as it
+		// stands, and the prune action's own trailing table is the store after
+		// the prune it just ran (two machine-readable reads in).
+		`  *"system df"*)`,
+		`    if [ "$count" -ge 2 ]; then`,
+		`      printf '%s\n' ` + strings.Join(after, " ") + ``,
+		`    else`,
+		`      printf '%s\n' ` + strings.Join(before, " ") + ``,
+		`    fi`,
+		`    ;;`,
+		`  *"image prune"*) printf '%s\n' 'Deleted Images:' 'Total reclaimed space: 11.32GB' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "docker", script)
+}
+
+// stubDoctorHostDf answers the reads of the daemon's own root directory, which
+// a host machine's docker keeps somewhere it can be stat'd (unlike the dind
+// sidecar's, which is inside that container).
+func stubDoctorHostDf(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"-h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Use%  Mounted on' '/dev/vda1   200G  180G  11G    95%   /var/lib/docker' ;;`,
+		`  *"-i /var/lib/docker"*) printf '%s\n' 'Filesystem  Inodes  IUsed  IFree  IUse%  Mounted on' '/dev/vda1   13M    1.2M   11.8M  9%     /var/lib/docker' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "df", script)
+}
+
+// stubDoctorKubectlPruneReclaimsNothing answers a prune's dind exec with the
+// reported shape: docker prints a reclaim (4.105MB) while the store
+// it pruned still reports the same 11.32GB reclaimable, which is a prune that
+// freed none of the space the build needs. Every other doctor surface keeps the
+// default stub's answers.
+func stubDoctorKubectlPruneReclaimsNothing(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *" wait "*) : ;;`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *"erun-doctor-read:before"*)`,
+		`    printf '%s\n' \`,
+		`      'erun-doctor-read:before' \`,
+		`      'Images|11.32GB|11.32GB (100%)' \`,
+		`      'Build Cache|0B|0B' \`,
+		`      'erun-doctor-read:before:end' \`,
+		`      'Total reclaimed space: 4.105MB' \`,
+		`      'erun-doctor-read:after' \`,
+		`      'Images|11.32GB|11.32GB (100%)' \`,
+		`      'Build Cache|0B|0B' \`,
+		`      'erun-doctor-read:after:end' \`,
+		`      '== Docker system df ==' \`,
+		`      'Images          21        0         11.32GB   11.32GB (100%)' \`,
+		`      'Build Cache     0         0         0B        0B'`,
+		`    ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
 // stubDoctorKubectlWithGitPushAccess answers the git-push-access read script
 // with a fixed remote/fetch/gh-auth/push-credential verdict — the decision
 // input dry-run cannot supply — while keeping every other doctor arm intact.
@@ -2375,4 +2634,19 @@ func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	if got := info.Mode().Perm(); got != want {
 		t.Errorf("expected %s mode %o, got %o", path, want, got)
 	}
+}
+
+// writeDesktopAppBundle stages the minimal shape of a macOS ERun.app bundle
+// (Contents/Info.plist carrying CFBundleShortVersionString) that
+// reportInstalledDesktopAppVersion reads, at bundlePath.
+func writeDesktopAppBundle(t *testing.T, bundlePath, version string) {
+	t.Helper()
+	plist := "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
+		"<plist version=\"1.0\">\n" +
+		"  <dict>\n" +
+		"    <key>CFBundleShortVersionString</key>\n" +
+		"    <string>" + version + "</string>\n" +
+		"  </dict>\n" +
+		"</plist>\n"
+	mustWriteFile(t, filepath.Join(bundlePath, "Contents", "Info.plist"), plist)
 }

@@ -37,6 +37,10 @@ type ProjectPathsConfig struct {
 	// Version is the path to the VERSION file that mints the build version. A
 	// directory is accepted and resolves to <dir>/VERSION.
 	Version string `yaml:"version,omitempty"`
+	// Playwright is the directory (named "playwright") holding the project's
+	// e2e suite -- either a Playwright project directly, or per-component
+	// subdirectories mirroring docker/ and k8s/. Default <tenant>-devops/playwright.
+	Playwright string `yaml:"playwright,omitempty"`
 }
 
 // IsZero reports whether no path override is set, i.e. every folder uses its
@@ -46,7 +50,8 @@ func (c ProjectPathsConfig) IsZero() bool {
 		strings.TrimSpace(c.DockerContext) == "" &&
 		strings.TrimSpace(c.K8s) == "" &&
 		strings.TrimSpace(c.Terraform) == "" &&
-		strings.TrimSpace(c.Version) == ""
+		strings.TrimSpace(c.Version) == "" &&
+		strings.TrimSpace(c.Playwright) == ""
 }
 
 // resolveProjectPath resolves a configured override against the project root.

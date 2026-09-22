@@ -30,6 +30,21 @@ type Capability struct {
 	// renderWhipPanel) must still count as a match. Ignored when Pattern is
 	// set.
 	Token string
+	// Tokens is Token's any-of form: the capability counts as referenced when
+	// the operator surface contains any one of them. CLI flags use it because
+	// one flag has two equally plausible spellings on the frontend side --
+	// the kebab-case flag name a call site passes through verbatim
+	// ("waiting-on-me") and the camelCase field a request model names it by
+	// ("waitingOnMe") -- and either is a real way in. Ignored when Pattern is
+	// set; Token is ignored when Tokens is non-empty.
+	Tokens []string
+	// FlagTokens marks Tokens as a CLI flag's spellings, matched with
+	// containsFlagIdentifier rather than as a bare substring. A flag's
+	// camelCase spelling is an ordinary word (roleName, tokenName, keyName),
+	// so a bare substring match counts any component that merely reads
+	// someone else's same-named field -- or an interface that declares one --
+	// as an operator way in for a flag nothing actually surfaces.
+	FlagTokens bool
 	// Pattern, when set, is a regular expression searched for
 	// case-insensitively instead of Token. API routes use this: a
 	// parameterized path's literal segments (e.g. "/v1/users/{user_id}/roles")
@@ -96,8 +111,15 @@ func (m Missing) Message() string {
 			"or erun-common/operator_settable_config.go's OperatorSettableConfigFields for a config field"
 	}
 	what := fmt.Sprintf("%q", m.Capability.Token)
-	if m.Capability.Pattern != "" {
+	switch {
+	case m.Capability.Pattern != "":
 		what = fmt.Sprintf("anything matching %q", m.Capability.Pattern)
+	case len(m.Capability.Tokens) > 0:
+		quoted := make([]string, 0, len(m.Capability.Tokens))
+		for _, token := range m.Capability.Tokens {
+			quoted = append(quoted, fmt.Sprintf("%q", token))
+		}
+		what = "any of " + strings.Join(quoted, " / ")
 	}
 	return fmt.Sprintf(
 		"%s %q has no operator entry point: neither erun-ui/frontend/src nor erun-console/src reference %s.\n"+
@@ -117,7 +139,58 @@ type FrontendSource string
 // Contains reports whether the source references a token anywhere,
 // case-insensitively.
 func (s FrontendSource) Contains(token string) bool {
-	return strings.Contains(strings.ToLower(string(s)), strings.ToLower(token))
+	return s.prepare().contains(token)
+}
+
+// preparedSource is a FrontendSource with its lowercased form computed once.
+// The two operator-surface trees concatenate to megabytes, and the gate now
+// audits hundreds of capabilities against them, so lowercasing per capability
+// would re-walk the whole source for every check.
+type preparedSource struct {
+	raw   string
+	lower string
+}
+
+func (s FrontendSource) prepare() preparedSource {
+	return preparedSource{raw: string(s), lower: strings.ToLower(string(s))}
+}
+
+func (p preparedSource) contains(token string) bool {
+	return strings.Contains(p.lower, strings.ToLower(token))
+}
+
+// containsFlagIdentifier reports whether token appears in the source in a
+// context that could actually be a way in for a CLI flag, rather than
+// incidentally. Two shapes are excluded, because neither can pass a flag:
+//
+//   - a property access (`remedy.roleName`) -- a read of someone else's field
+//   - an optional field declaration (`roleName?: string`) -- an interface
+//     declaring a field of that name, not a call site
+//
+// A real binding keeps counting: a JSX attribute (`roleName={x}`), an
+// object-literal key (`roleName: x`), a destructured local, a positional
+// argument. Those have neither shape, so this narrows the false positives
+// without dropping a genuine way in.
+func (p preparedSource) containsFlagIdentifier(token string) bool {
+	needle := strings.ToLower(token)
+	for from := 0; ; {
+		i := strings.Index(p.lower[from:], needle)
+		if i < 0 {
+			return false
+		}
+		at := from + i
+		after := at + len(needle)
+		propertyAccess := at > 0 && p.lower[at-1] == '.'
+		optionalField := strings.HasPrefix(p.lower[after:], "?:")
+		if !propertyAccess && !optionalField {
+			return true
+		}
+		from = after
+	}
+}
+
+func (p preparedSource) containsPattern(pattern string) bool {
+	return regexp.MustCompile("(?i)" + pattern).MatchString(p.raw)
 }
 
 // ContainsPattern reports whether the source matches the regular expression
@@ -150,12 +223,13 @@ func APIRoutePattern(path string) string {
 // FindMissingDesktopSurface returns every non-agent-facing capability with no
 // reference in frontendSource, ordered by name for a stable report.
 func FindMissingDesktopSurface(capabilities []Capability, frontendSource FrontendSource) []Missing {
+	prepared := frontendSource.prepare()
 	var missing []Missing
 	for _, c := range capabilities {
 		if c.AgentFacing || c.KnownGap {
 			continue
 		}
-		if referencedInFrontend(c, frontendSource) {
+		if referencedInFrontend(c, prepared) {
 			continue
 		}
 		missing = append(missing, Missing{Capability: c})
@@ -167,18 +241,32 @@ func FindMissingDesktopSurface(capabilities []Capability, frontendSource Fronten
 }
 
 // referencedInFrontend reports whether c's Pattern (or, absent one, its
-// Token) appears in frontendSource. A Pattern-bearing capability with no
-// Pattern match gets one more chance through WailsBinding, since some routes
-// are only ever reachable from TypeScript by a Go method name, never their
-// own path -- see Capability.WailsBinding.
-func referencedInFrontend(c Capability, frontendSource FrontendSource) bool {
+// Tokens/Token) appears in frontendSource. A Pattern-bearing capability with
+// no Pattern match gets one more chance through WailsBinding, since some
+// routes are only ever reachable from TypeScript by a Go method name, never
+// their own path -- see Capability.WailsBinding.
+func referencedInFrontend(c Capability, frontendSource preparedSource) bool {
 	if c.Pattern != "" {
-		if frontendSource.ContainsPattern(c.Pattern) {
+		if frontendSource.containsPattern(c.Pattern) {
 			return true
 		}
-		return c.WailsBinding != "" && frontendSource.Contains(c.WailsBinding)
+		return c.WailsBinding != "" && frontendSource.contains(c.WailsBinding)
 	}
-	return frontendSource.Contains(c.Token)
+	if len(c.Tokens) > 0 {
+		for _, token := range c.Tokens {
+			if c.FlagTokens {
+				if frontendSource.containsFlagIdentifier(token) {
+					return true
+				}
+				continue
+			}
+			if frontendSource.contains(token) {
+				return true
+			}
+		}
+		return false
+	}
+	return frontendSource.contains(c.Token)
 }
 
 // StaleBaselineEntry is a KnownGap capability that has gained a real
@@ -210,12 +298,13 @@ func (s StaleBaselineEntry) Message() string {
 // amnesty, so this is what lets the gate enforce "the baseline only shrinks"
 // rather than merely documenting it.
 func FindStaleBaselineEntries(capabilities []Capability, frontendSource FrontendSource) []StaleBaselineEntry {
+	prepared := frontendSource.prepare()
 	var stale []StaleBaselineEntry
 	for _, c := range capabilities {
 		if !c.KnownGap {
 			continue
 		}
-		if referencedInFrontend(c, frontendSource) {
+		if referencedInFrontend(c, prepared) {
 			stale = append(stale, StaleBaselineEntry{Capability: c})
 		}
 	}

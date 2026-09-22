@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { captureHoverCard, expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
@@ -23,7 +24,7 @@ interface UsageEvent {
     environment: string;
     available: boolean;
     message?: string;
-    cpu: { available: boolean; utilization?: string; quota?: string };
+    cpu: { available: boolean; utilization?: string; utilizationPercent?: number; quota?: string };
     memory: {
       available: boolean;
       unlimited?: boolean;
@@ -45,7 +46,7 @@ function freshUsagePayload(overrides: Partial<UsageEvent> = {}): UsageEvent {
       tenant: SEED_TENANT,
       environment: SEED_ENV_ALPHA,
       available: true,
-      cpu: { available: true, utilization: '12.0%', quota: '2.00 cores' },
+      cpu: { available: true, utilization: '12.0%', utilizationPercent: 12, quota: '2.00 cores' },
       memory: {
         available: true,
         current: '512Mi',
@@ -106,8 +107,22 @@ test.describe('environment usage on the hover cards', () => {
       await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(dialog).toBeVisible({ timeout: 1_000 });
-      await expect(dialog).toContainText('CPU 12.0%', { timeout: 1_000 });
-      await expect(dialog).toContainText('Mem 25% of 2048Mi', { timeout: 1_000 });
+      // CPU and memory are separate labelled rows, not one joined
+      // "CPU 12.0% · Mem 25% of 2048Mi" string: each label is its own `dt`,
+      // so the labels and the figures are asserted separately.
+      await expect(dialog.getByText('CPU', { exact: true })).toBeVisible({ timeout: 1_000 });
+      await expect(dialog.getByText('Memory', { exact: true })).toBeVisible({ timeout: 1_000 });
+      await expect(dialog).toContainText('12.0%', { timeout: 1_000 });
+      await expect(dialog).toContainText('of 2048Mi', { timeout: 1_000 });
+      // Each metric carries its own decile strip: 12% -> 2 filled segments,
+      // 25% -> 3, and neither is near its ceiling so neither reads amber.
+      const strips = dialog.locator('[data-decile-fill]');
+      await expect(strips).toHaveCount(2, { timeout: 1_000 });
+      await expect(strips.nth(0)).toHaveAttribute('data-decile-fill', '2', { timeout: 1_000 });
+      await expect(strips.nth(1)).toHaveAttribute('data-decile-fill', '3', { timeout: 1_000 });
+      await expect(strips.nth(0)).toHaveAttribute('data-decile-alert', 'false', {
+        timeout: 1_000,
+      });
       // The figure carries a unit, a window (the % is "of" the limit), and its
       // own age -- not a bare number an operator cannot interpret.
       await expect(dialog).toContainText('As of', { timeout: 1_000 });
@@ -116,7 +131,7 @@ test.describe('environment usage on the hover cards', () => {
       // callback can race the backend sweep's own overwrite of the reading.
       await captureHoverCard(
         dialog,
-        'test-results/environment-usage-visual/env-hover-card-fresh.png',
+        artifactPath('test-results/environment-usage-visual/env-hover-card-fresh.png'),
       );
     });
   });
@@ -150,8 +165,93 @@ test.describe('environment usage on the hover cards', () => {
         // callback can race the backend sweep's own overwrite of the reading.
         await captureHoverCard(
           dialog,
-          'test-results/environment-usage-visual/env-hover-card-stale.png',
+          artifactPath('test-results/environment-usage-visual/env-hover-card-stale.png'),
         );
+      },
+    );
+  });
+
+  // The two states the encoding exists to keep apart. A measured zero is a
+  // reading and renders an EMPTY (outlined) strip; a never-sampled environment
+  // renders no strip at all. If a zero loses its strip, "idle" and "unmeasured"
+  // look identical again and the card is back where it started.
+  test('a measured zero renders an empty strip, not a missing one', async ({ app, page }) => {
+    test.setTimeout(60_000);
+    await app.reboot();
+
+    const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await driveEnvUsage(
+      page,
+      freshUsagePayload({
+        usage: {
+          tenant: SEED_TENANT,
+          environment: SEED_ENV_ALPHA,
+          available: true,
+          // The real wire shape for a zero: the Go side marks these fields
+          // `omitempty`, so a 0% arrives with the formatted string present and
+          // the number absent.
+          cpu: { available: true, utilization: '0.0%' },
+          memory: { available: true, current: '0Mi', limit: '2048Mi', oomKills: 0 },
+        },
+      }),
+      async () => {
+        await page.mouse.move(0, 0);
+        await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+        await expect(dialog).toBeVisible({ timeout: 1_000 });
+
+        const strips = dialog.locator('[data-decile-fill]');
+        await expect(strips).toHaveCount(2, { timeout: 1_000 });
+        await expect(strips.nth(0)).toHaveAttribute('data-decile-fill', '0', { timeout: 1_000 });
+        await expect(strips.nth(1)).toHaveAttribute('data-decile-fill', '0', { timeout: 1_000 });
+        await expect(dialog).toContainText('0.0%', { timeout: 1_000 });
+      },
+    );
+  });
+
+  // Amber above 80%, and the segment count carries the same claim so a
+  // colour-blind or greyscale render loses nothing.
+  test('a reading above 80% renders amber and nine filled segments', async ({ app, page }) => {
+    test.setTimeout(60_000);
+    await app.reboot();
+
+    const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await driveEnvUsage(
+      page,
+      freshUsagePayload({
+        usage: {
+          tenant: SEED_TENANT,
+          environment: SEED_ENV_ALPHA,
+          available: true,
+          cpu: {
+            available: true,
+            utilization: '85.0%',
+            utilizationPercent: 85,
+            quota: '2.00 cores',
+          },
+          memory: {
+            available: true,
+            current: '900Mi',
+            limit: '1024Mi',
+            percentOfLimit: 88,
+            oomKills: 0,
+          },
+        },
+      }),
+      async () => {
+        await page.mouse.move(0, 0);
+        await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+        await expect(dialog).toBeVisible({ timeout: 1_000 });
+
+        const strips = dialog.locator('[data-decile-fill]');
+        // ceil(85/10) = 9, ceil(88/10) = 9.
+        await expect(strips.nth(0)).toHaveAttribute('data-decile-fill', '9', { timeout: 1_000 });
+        await expect(strips.nth(1)).toHaveAttribute('data-decile-fill', '9', { timeout: 1_000 });
+        await expect(strips.nth(0)).toHaveAttribute('data-decile-alert', 'true', {
+          timeout: 1_000,
+        });
+        await expect(strips.nth(1)).toHaveAttribute('data-decile-alert', 'true', {
+          timeout: 1_000,
+        });
       },
     );
   });
@@ -190,11 +290,14 @@ test.describe('environment usage on the hover cards', () => {
           timeout: 1_000,
         });
         await expect(dialog).not.toContainText('0%', { timeout: 1_000 });
+        // No metrics to draw gauges from, so no gauges at all -- an empty strip
+        // here would be read as "measured 0%".
+        await expect(dialog.locator('[data-decile-fill]')).toHaveCount(0, { timeout: 1_000 });
         // Taken while still converged and hovered — a screenshot outside this
         // callback can race the backend sweep's own overwrite of the reading.
         await captureHoverCard(
           dialog,
-          'test-results/environment-usage-visual/env-hover-card-no-pod.png',
+          artifactPath('test-results/environment-usage-visual/env-hover-card-no-pod.png'),
         );
       },
     );
@@ -226,7 +329,7 @@ test.describe('environment usage on the hover cards', () => {
       // callback can race the backend sweep's own overwrite of the reading.
       await captureHoverCard(
         dialog,
-        'test-results/environment-usage-visual/orchestrator-card-usage.png',
+        artifactPath('test-results/environment-usage-visual/orchestrator-card-usage.png'),
       );
     });
   });

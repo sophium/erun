@@ -45,6 +45,13 @@ type dockerAuthEntry struct {
 // access is intermittently blocked (endpoint security, a locked keychain) — the
 // failure that otherwise strands the picker on anonymous access. owner scopes the
 // credential to the account that owns the namespace.
+//
+// A deploy running inside the target env's own runtime pod adds one route below
+// all three: the dockerconfigjson Secret that env declared as its imagePullSecret
+// (configureInPodDeclaredRegistryAuth). It is appended rather than preferred so
+// every existing route keeps its precedence exactly, and it fires only when the
+// pod genuinely has none of the three — the state the pod boots in, and the one
+// that otherwise leaves a private read anonymous and therefore inconclusive.
 func resolveGHCRBasicAuth(owner string) (registryBasicAuth, bool) {
 	if auth, ok := resolveRegistryBasicAuth("ghcr.io"); ok {
 		return auth, true
@@ -54,6 +61,9 @@ func resolveGHCRBasicAuth(owner string) (registryBasicAuth, bool) {
 	}
 	if token, ok := ghcrTokenFromEnv(); ok {
 		return ghcrTokenBasicAuth(owner, token), true
+	}
+	if auth, ok := inPodDeclaredRegistryAuthFor("ghcr.io"); ok {
+		return auth, true
 	}
 	return registryBasicAuth{}, false
 }
@@ -296,8 +306,10 @@ func ecrRegionFromHost(host string) (string, bool) {
 }
 
 // resolveOCIRegistryBasicAuth resolves a pull credential for any registry host,
-// preferring the credential docker itself pulls with. For ECR it falls back to
-// the AWS CLI, mirroring the gh fallback for ghcr: an ECR authorization token
+// preferring the credential docker itself pulls with, then — for a deploy inside
+// the target env's own runtime pod — the dockerconfigjson Secret that env
+// declared as its imagePullSecret (see configureInPodDeclaredRegistryAuth).
+// For ECR it falls back to the AWS CLI, mirroring the gh fallback for ghcr: an ECR authorization token
 // expires after twelve hours, so the docker credential is routinely stale or
 // absent, and without this fallback version listing degrades to anonymous and
 // the registry reports the image as unreadable.
@@ -312,7 +324,10 @@ func resolveOCIRegistryBasicAuth(host string) (registryBasicAuth, bool) {
 			return registryBasicAuth{username: "AWS", secret: token}, true
 		}
 	}
-	return resolveRegistryBasicAuth(host)
+	if auth, ok := resolveRegistryBasicAuth(host); ok {
+		return auth, true
+	}
+	return inPodDeclaredRegistryAuthFor(host)
 }
 
 func execECRLoginPassword(region string) (string, bool) {

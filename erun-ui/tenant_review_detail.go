@@ -49,6 +49,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReview); restricted != "" {
 		detail.Restricted = restricted
+		detail.AccessRemedies = loadAccessRemedies(requestCtx, client, capabilities, whoami.UserID, restricted)
 		return detail, nil
 	}
 	review, err := client.GetReview(requestCtx, reviewID)
@@ -71,6 +72,8 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 	if detail.CanAssignReviewers {
 		detail.AvailableReviewers = tenantDashboardEnrolledReviewerChoices(requestCtx, client, capabilities)
 	}
+	detail.AccessRemedies = loadAccessRemedies(requestCtx, client, capabilities, whoami.UserID,
+		detail.CommentsRestricted, detail.BuildsRestricted, detail.ReviewersRestricted)
 	return detail, nil
 }
 

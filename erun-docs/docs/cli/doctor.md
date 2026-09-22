@@ -61,7 +61,12 @@ See [Configuration reference · Execution modes](/reference/configuration#execut
 Beyond reporting, `doctor` offers these fixes (each prompts first, or runs non-interactively with its flag). Without a TTY on stdin — an MCP client, an orchestrator, a CI step, or `erun doctor … </dev/null` — `doctor` skips the optional prune prompts instead of blocking on them, names each skipped step in the report, and still exits on the health of what it examined. Nothing is pruned without either an explicit `--prune-*` flag or an answer to the prompt, and a skipped optional step is never reported as a failed check: `doctor` is the command you reach for when a deploy has already failed, which is exactly when nobody is at a terminal to answer it.
 
 - **Deploy recovery** — when the diagnosis shows the runtime release is unhealthy, `doctor` recommends the **one** recovery that fits: clearing a stuck pending helm release when a deploy died mid-upgrade and left it locked, or rolling back to the last successful revision when the current one is bad. It prompts for that single action (never both — they are alternative fixes, and running both would roll the release back a revision too far). These mutate the live release and are offered only when the release looks unhealthy, never on a healthy env. To rebuild and roll out fresh images instead, re-run `erun deploy --force`.
-- **Docker cleanup** — prune the environment's unused images, build cache, or stopped containers. These run against the environment's Docker, not your laptop's.
+- **Docker cleanup** — prune the environment's unused images, build cache, or stopped containers, against the docker daemon that actually holds them. Which daemon that is follows the environment's type, and every line the report prints about docker storage names it:
+  - a **local-agent or remote-agent** environment builds in the `erun-dind` sidecar inside its runtime pod, so the prune runs there — the same daemon the build's own disk-headroom preflight measures;
+  - a **host** environment has no pod and builds against the docker daemon on the machine you run `erun doctor` from, so the prune runs there and says so;
+  - a **runtime** environment installs published versions and never builds, so it carries no daemon holding build images. A prune requested against one fails naming that (and naming a build environment to prune instead) rather than printing a successful prune of a daemon that holds nothing.
+
+  After a prune, the report states what it did to that daemon: the reclaimable space docker reported before and after it. A prune that freed nothing is reported as that, rather than resting on docker's own `Total reclaimed space` line alone.
 - **Root config repair** — restore the root erun config from a dated backup, or re-initialize orphaned cloud provider aliases.
 - **Environment config restore** — restore one environment's `config.yaml` from a dated backup when a setting was changed or corrupted (for example an environment type that resolved to the wrong value). Each save snapshots the previous config alongside it, so there is a daily backup to roll back to.
 - **JetBrains Gateway** — clear cached backend metadata for the environment when a Gateway connection is stuck.
@@ -104,8 +109,8 @@ A healthy local-side run against an env named `local` on Docker Desktop:
 ```
 erun doctor — my-tenant / local
   config:
-    tenant config         ok  ~/.config/erun/my-tenant/tenant.yaml
-    environment config    ok  ~/.config/erun/my-tenant/local/config.yaml
+    tenant config         ok  ~/Library/Application Support/erun/my-tenant/config.yaml
+    environment config    ok  ~/Library/Application Support/erun/my-tenant/local/config.yaml
     project config        ok  /Users/you/code/my-project/.erun/config.yaml
   cluster:
     kubernetes context    ok  docker-desktop
@@ -121,8 +126,8 @@ An unhealthy run after an interrupted init:
 ```
 erun doctor — my-tenant / rihards-dev
   config:
-    tenant config         ok  ~/.config/erun/my-tenant/tenant.yaml
-    environment config    ok  ~/.config/erun/my-tenant/rihards-dev/config.yaml
+    tenant config         ok  ~/Library/Application Support/erun/my-tenant/config.yaml
+    environment config    ok  ~/Library/Application Support/erun/my-tenant/rihards-dev/config.yaml
   cluster:
     kubernetes context    ok  erun-004-020362606330-eu-west-2
     runtime pod      missing  no pod found in namespace my-tenant-rihards-dev
@@ -148,6 +153,7 @@ The check format is fixed (`<category>: <name> <status> <detail>`); machine-read
 | `--rollback` with no prior successful revision. | `helm rollback` reports it has no revision to roll back to; nothing changes. Use `--clear-pending-helm` then `erun deploy --force` instead. |
 | Both `--clear-pending-helm` and `--rollback` passed. | Aborts immediately with `--clear-pending-helm and --rollback are alternative recoveries; pass only one`; exit code 1; nothing runs. |
 | Prune not confirmed and no `--prune-*` flag. | No Docker state is touched — prunes run only on confirmation or with the matching flag. |
+| A `--prune-*` action requested against an environment with no daemon holding build images (a runtime environment, or one whose type is unset). | The prune is refused with the reason and the environment to prune instead; exit code 1. Nothing is dispatched: pruning some other daemon would report a reclaim this environment's builds cannot use. Without a prune flag the docker-storage section reports the same reason and the rest of the run continues. |
 | No TTY on stdin, so the optional prune prompts cannot be answered. | Each optional prune is reported as `skipped:` with its flag named as the way to run it explicitly. This is not a failed check: the run completes and the exit code reflects the health of what was actually examined, so an orchestrator or CI step gets the diagnosis instead of `Doctor failed …: ^D`. |
 | Stdin reaches EOF at a prompt `doctor` cannot skip — a recovery that mutates the live release, or a repair you asked for with a flag. | The step is **not run**: a missing answer is not consent. The report says the prompt went unconfirmed and names the flag that runs it without one (`--clear-pending-helm`, `--rollback`, `--repair-config`, …), and the rest of the diagnosis still runs. An unanswered prompt is never reported as a failed environment. |
 | Run inside a runtime pod with a complete init. | Reports "nothing to finish" and exits 0. |

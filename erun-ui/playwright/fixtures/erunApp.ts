@@ -1,6 +1,7 @@
 import { expect, type Locator } from '@playwright/test';
 import { AppShell } from '../pages/index.js';
 import { test as base } from './workerBackend.js';
+import { reapStubProcesses } from './stubProcesses.js';
 import {
   SEED_TENANT,
   e2eK3dEnabled,
@@ -66,7 +67,23 @@ export const test = base.extend<{
   seededEnv: SeededEnvironment;
   seededRuntimeEnv: SeededEnvironment;
   seededHostEnv: SeededEnvironment;
+  stubReaper: void;
 }>({
+  // stubReaper ends the stub processes a spec leaves behind. The desktop spawns
+  // them (`erun open` for a tab session, `claude` for an orchestrator session)
+  // and parks them for the life of the session, so a spec that opens one and
+  // never closes it leaks a live process into the rest of the run — a full ALL
+  // run reached 117, all competing with the suite for the gate's CPUs (#2512).
+  // Reaping on every spec's teardown bounds the population to one spec's worth;
+  // the worker teardown (fixtures/workerBackend.ts) sweeps whatever the last spec
+  // left. Automatic rather than opt-in, so no spec has to remember it.
+  stubReaper: [
+    async ({}, use) => {
+      await use();
+      reapStubProcesses();
+    },
+    { auto: true },
+  ],
   // The fixture's own timeout, not the test's: app.open() is a BOOT, and its
   // cost is the machine's, not the spec's. Every spec pays it in setup, so
   // charging it to the 30s test budget means a contended gate reports "Test

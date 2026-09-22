@@ -16,11 +16,12 @@ import (
 // reopen re-checks reachability.
 const envEnsureTTL = 30 * time.Second
 
-// envEnsureReason says why a rebind is being asked for, because the two callers
-// hold different evidence. A tab spawn is one of a burst and has no reason to
-// think anything is wrong, so a recent success stands in for it. A forward
-// repair has watched the forward stop carrying traffic *since* that success, so
-// the window it stamped is exactly the thing that must not suppress it.
+// envEnsureReason says why a rebind is being asked for, because callers hold
+// different evidence. A tab spawn is one of a burst and has no reason to think
+// anything is wrong, so a recent success stands in for it. A forward repair --
+// and an orchestrator launch that has just probed the edge and found nothing
+// answering -- has evidence that outranks that success, so the window it
+// stamped is exactly the thing that must not suppress it.
 type envEnsureReason int
 
 const (
@@ -36,26 +37,40 @@ func (a *App) ensureEnvRuntimeOnce(selection uiSelection) {
 	a.ensureEnvRuntime(selection, envEnsureForTabSpawn)
 }
 
-// claimEnvRuntimeEnsure takes the per-env rebind latch and reports whether this
-// caller got it. The in-flight half applies to every caller — it is what keeps
-// one rebind per environment at a time — while the completed window only stands
-// in for a caller with no evidence that anything is wrong.
-func (a *App) claimEnvRuntimeEnsure(key string, reason envEnsureReason) bool {
+// envEnsureRun is one rebind in flight. A caller that must not proceed until
+// the environment's edge is up waits on settled; reached is written before
+// settled is closed, so a waiter woken by that close reads it without the lock.
+// Callers that merely ask for a rebind and move on ignore both.
+type envEnsureRun struct {
+	settled chan struct{}
+	reached bool
+}
+
+// claimEnvRuntimeEnsure takes the per-env rebind latch. The in-flight half
+// applies to every caller — it is what keeps one rebind per environment at a
+// time — while the completed window only stands in for a caller with no
+// evidence that anything is wrong.
+//
+// A caller refused because a rebind is already running gets that run back, so
+// it can wait for the one rebind rather than starting a second or giving up on
+// the answer. mine reports whether this call is the one that must perform it.
+func (a *App) claimEnvRuntimeEnsure(key string, reason envEnsureReason) (run *envEnsureRun, mine bool) {
 	a.envEnsureMu.Lock()
 	defer a.envEnsureMu.Unlock()
 	if a.envEnsureInflight == nil {
-		a.envEnsureInflight = make(map[string]struct{})
+		a.envEnsureInflight = make(map[string]*envEnsureRun)
 		a.envEnsureDone = make(map[string]time.Time)
 		a.envEnsureFailNotified = make(map[string]struct{})
 	}
-	if _, inflight := a.envEnsureInflight[key]; inflight {
-		return false
+	if inflight, ok := a.envEnsureInflight[key]; ok {
+		return inflight, false
 	}
 	if done, ok := a.envEnsureDone[key]; ok && reason == envEnsureForTabSpawn && time.Since(done) < envEnsureTTL {
-		return false
+		return nil, false
 	}
-	a.envEnsureInflight[key] = struct{}{}
-	return true
+	run = &envEnsureRun{settled: make(chan struct{})}
+	a.envEnsureInflight[key] = run
+	return run, true
 }
 
 // ensureEnvRuntime is the rebind itself, and reports whether this call is the
@@ -67,54 +82,97 @@ func (a *App) claimEnvRuntimeEnsure(key string, reason envEnsureReason) bool {
 // stamp the success window, so the next tab open retries instead of being
 // suppressed for the whole TTL while the user stares at a dead env.
 func (a *App) ensureEnvRuntime(selection uiSelection, reason envEnsureReason) bool {
-	// a.ctx is set by startup() in both desktop and headless modes and stays
-	// nil in unit tests: the ensure must never fall back from a test app to
-	// the machine's real CLI and config.
-	if a.ctx == nil {
+	selection, run, mine := a.beginEnvRuntimeEnsure(selection, reason)
+	if !mine {
 		return false
+	}
+	go a.runEnvRuntimeEnsure(selection, selectionKey(selection), run)
+	return true
+}
+
+// ensureEnvRuntimeWithin is the same rebind, waited on: it blocks until a
+// rebind for this environment settles or budget elapses, and reports whether
+// the runtime was reached within it. A caller uses it when the next thing it
+// does is unreachable without an open edge — an orchestrator launch is about to
+// hand an MCP client a config pointing at this port — so a fire-and-forget
+// kickoff would open the edge after the client had already given up on it.
+//
+// The wait is a ceiling, not a delay: the ordinary case returns as soon as the
+// reconnect does. Exhausting it is not a failure verdict — the rebind keeps
+// running and stamps the success window when it lands, so a slow open still
+// arrives for a client that is still waiting on its own first connect.
+func (a *App) ensureEnvRuntimeWithin(selection uiSelection, reason envEnsureReason, budget time.Duration) bool {
+	selection, run, mine := a.beginEnvRuntimeEnsure(selection, reason)
+	if run == nil {
+		return false
+	}
+	if mine {
+		go a.runEnvRuntimeEnsure(selection, selectionKey(selection), run)
+	}
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case <-run.settled:
+		return run.reached
+	case <-timer.C:
+		return false
+	}
+}
+
+// beginEnvRuntimeEnsure gates a rebind on the shared latch and reports the run
+// to watch. A nil run means no rebind is coming for this caller: the runtime
+// was confirmed reached inside the success window, or the app has no context to
+// run one from (a.ctx is set by startup() in both desktop and headless modes
+// and stays nil in unit tests, so the ensure can never fall back from a test
+// app to the machine's real CLI and config).
+func (a *App) beginEnvRuntimeEnsure(selection uiSelection, reason envEnsureReason) (uiSelection, *envEnsureRun, bool) {
+	if a.ctx == nil {
+		return selection, nil, false
 	}
 	selection = normalizeSelection(selection)
-	key := selectionKey(selection)
-	if !a.claimEnvRuntimeEnsure(key, reason) {
-		return false
-	}
+	run, mine := a.claimEnvRuntimeEnsure(selectionKey(selection), reason)
+	return selection, run, mine
+}
 
-	go func() {
-		var ensureErr error
-		defer func() {
-			a.envEnsureMu.Lock()
-			delete(a.envEnsureInflight, key)
-			reached := ensureErr == nil
-			// Stamp the dedup window only on success: a failed reconnect must
-			// not suppress the next tab's retry for the whole TTL.
-			if reached {
-				a.envEnsureDone[key] = time.Now()
-				// Reached again — end this failure episode so a later failure
-				// re-surfaces its notification.
-				delete(a.envEnsureFailNotified, key)
-			}
-			a.envEnsureMu.Unlock()
-			// Runtime reached — any prior "could not reach the runtime" or
-			// deploy-failed warning for this env is now stale; clear it.
-			if reached {
-				a.emitClearEnvNotification(selection.Tenant, selection.Environment, "")
-			}
-		}()
-		result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-			Tenant:      selection.Tenant,
-			Environment: selection.Environment,
-		})
-		if err != nil {
-			ensureErr = err
-			a.surfaceEnvRuntimeEnsureFailure(selection, err)
-			return
+// runEnvRuntimeEnsure performs one rebind and records its outcome where a
+// caller waiting on the same run can read it. It is the only writer of that
+// run, so the settle-and-publish below needs no lock beyond the map access.
+func (a *App) runEnvRuntimeEnsure(selection uiSelection, key string, run *envEnsureRun) {
+	var ensureErr error
+	defer func() {
+		a.envEnsureMu.Lock()
+		delete(a.envEnsureInflight, key)
+		reached := ensureErr == nil
+		// Stamp the dedup window only on success: a failed reconnect must
+		// not suppress the next tab's retry for the whole TTL.
+		if reached {
+			a.envEnsureDone[key] = time.Now()
+			// Reached again — end this failure episode so a later failure
+			// re-surfaces its notification.
+			delete(a.envEnsureFailNotified, key)
 		}
-		onLine := newActivityTraceLineHandler(a, selection, sessionKindOpen)
-		if ensureErr = a.deps.reconnectMCP(context.Background(), result, onLine); ensureErr != nil {
-			a.surfaceEnvRuntimeEnsureFailure(selection, ensureErr)
+		run.reached = reached
+		close(run.settled)
+		a.envEnsureMu.Unlock()
+		// Runtime reached — any prior "could not reach the runtime" or
+		// deploy-failed warning for this env is now stale; clear it.
+		if reached {
+			a.emitClearEnvNotification(selection.Tenant, selection.Environment, "")
 		}
 	}()
-	return true
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		ensureErr = err
+		a.surfaceEnvRuntimeEnsureFailure(selection, err)
+		return
+	}
+	onLine := newActivityTraceLineHandler(a, selection, sessionKindOpen)
+	if ensureErr = a.deps.reconnectMCP(context.Background(), result, onLine); ensureErr != nil {
+		a.surfaceEnvRuntimeEnsureFailure(selection, ensureErr)
+	}
 }
 
 // surfaceEnvRuntimeEnsureFailure makes a failed runtime reconnect visible and

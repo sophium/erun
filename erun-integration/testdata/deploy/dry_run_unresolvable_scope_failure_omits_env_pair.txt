@@ -1,5 +1,5 @@
 audit: erun deploy --dry-run --version <VERSION>
 deploy: tenant= environment= version-override=<VERSION> components=[] force=false current=false
-deploy: spec resolution failed: default tenant is not configured, and open could not infer one from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default
-==> Deploy failed: default tenant is not configured, and open could not infer one from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default
-default tenant is not configured, and open could not infer one from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default
+deploy: spec resolution failed: default tenant is not configured, and one could not be inferred from the working directory either — pass a tenant explicitly with `erun deploy --tenant <name>`, or run `erun init --tenant <name> --set-default-tenant` to set a default
+==> Deploy failed: default tenant is not configured, and one could not be inferred from the working directory either — pass a tenant explicitly with `erun deploy --tenant <name>`, or run `erun init --tenant <name> --set-default-tenant` to set a default
+default tenant is not configured, and one could not be inferred from the working directory either — pass a tenant explicitly with `erun deploy --tenant <name>`, or run `erun init --tenant <name> --set-default-tenant` to set a default

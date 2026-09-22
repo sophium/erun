@@ -49,7 +49,7 @@ func newPlatformWhoamiCmd(store common.CloudReadStore, alias *string, deps commo
 				return err
 			}
 			if ctx.Output != common.OutputJSON {
-				if _, err := fmt.Fprintf(ctx.Stdout, "%s (tenant %s, user %s)\n", quotedValueOrNone(whoami.Username), whoami.TenantID, whoami.UserID); err != nil {
+				if _, err := fmt.Fprintf(ctx.Stdout, "%s (tenant %s named %q, user %s)\n", quotedValueOrNone(whoami.Username), whoami.TenantID, quotedValueOrNone(whoami.TenantName), whoami.UserID); err != nil {
 					return err
 				}
 			}
@@ -311,8 +311,49 @@ func newPlatformUserCmd(store common.CloudReadStore, alias *string, deps common.
 		"user",
 		"Manage users on the erun platform",
 		newPlatformUserEnrollCmd(store, alias, deps),
+		newPlatformUserGrantRoleCmd(store, alias, deps),
 		newPlatformUserListCmd(store, alias, deps),
 	)
+}
+
+func newPlatformUserGrantRoleCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	var params common.PlatformGrantUserRoleParams
+	cmd := &cobra.Command{
+		Use:   "grant-role",
+		Short: "Grant a role to an already-enrolled user on the erun platform",
+		Long: "Grant one role to a user who is already enrolled in the caller's tenant.\n\n" +
+			"This is the post-enrollment grant `erun platform user enroll` cannot perform: " +
+			"enrolling an identity that is already enrolled is a no-op that leaves the existing " +
+			"user's roles untouched, so re-running enroll with --role-id does not elevate anyone. " +
+			"List the tenant's roles and their permissions with the platform's `GET /v1/roles` to " +
+			"find the id of the role whose permissions cover what the user needs.\n\n" +
+			"Granting is permission-gated: the caller must already hold a role that includes " +
+			"POST /v1/users/{user_id}/roles.",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		Example:      "  erun platform user grant-role --user-id 019a7fa5-c2c0-7c55-bc70-714873a71f60 --role-id 019a7fa5-c2c0-7c55-bc70-714873a71f70",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := commandContext(cmd)
+			if err := common.RunPlatformGrantUserRole(ctx, store, *alias, params, deps); err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform user role grant planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				_, err := fmt.Fprintf(ctx.Stdout, "granted role %s to user %s\n", params.RoleID, params.UserID)
+				return err
+			}
+			return ctx.WriteResult(map[string]string{"userId": params.UserID, "roleId": params.RoleID})
+		},
+	}
+	cmd.Flags().StringVar(&params.UserID, "user-id", "", "User id to grant the role to")
+	cmd.Flags().StringVar(&params.RoleID, "role-id", "", "Role id to grant")
+	_ = cmd.MarkFlagRequired("user-id")
+	_ = cmd.MarkFlagRequired("role-id")
+	addDryRunFlag(cmd)
+	return cmd
 }
 
 func newPlatformUserEnrollCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {

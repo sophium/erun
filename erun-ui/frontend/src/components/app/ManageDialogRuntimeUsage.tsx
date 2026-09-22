@@ -3,6 +3,7 @@ import { RefreshCw, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { useGetRuntimeUsageQuery } from '@/app/api/environmentApi';
+import { RuntimePanelNotice } from '@/components/app/RuntimePanelNotice';
 import { UsageMeter } from '@/components/app/UsageMeter';
 import type { UISelection } from '@/types';
 import type {
@@ -112,25 +113,21 @@ function RuntimeUsageSummary({
   if (loading) {
     return <p className="text-xs leading-[1.35] text-muted-foreground">Reading the runtime...</p>;
   }
-  const text = message || 'Open the environment to see its own resource usage.';
-  // An unreachable pod explains itself rather than rendering an empty panel
-  // that reads as "nothing to see". The icon carries the state alongside the
-  // colour, so it survives a colourblind reader and a forced-colors mode.
   if (available) {
     return (
       <p className="text-xs leading-[1.35] text-muted-foreground" role="status">
-        {text}
+        {message || 'Open the environment to see its own resource usage.'}
       </p>
     );
   }
+  // An unreachable pod explains itself rather than rendering an empty panel
+  // that reads as "nothing to see", through the Runtime tab's one rendering
+  // for a failed read so this panel cannot drift from its neighbours.
   return (
-    <p
-      className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-700 dark:text-amber-400"
-      role="status"
-    >
-      <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
-      <span>{text}</span>
-    </p>
+    <RuntimePanelNotice
+      failure={message}
+      empty="Open the environment to see its own resource usage."
+    />
   );
 }
 

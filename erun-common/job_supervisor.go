@@ -297,11 +297,20 @@ var agentAuthFailureSignatures = []string{
 	"not logged in",
 }
 
-// agentAuthFailureReason returns a clarified failure reason when a failed
-// agent job's own folded error looks like an authentication problem, and ""
-// otherwise — never guessing on a message that does not match one of the
-// tools' own known phrasings.
-func agentAuthFailureReason(tool, message string) string {
+// agentGatewayRoundTripFailureSignatures are phrases a gateway serving a
+// reasoning model uses when it refuses a conversation because it must be handed
+// the model's own reasoning back. The refusal is the provider's, and it lands
+// mid-run however long the conversation has already run: the client can only
+// echo reasoning the gateway returned, so a turn whose reasoning the gateway
+// withheld cannot be replayed by any client, including this one.
+var agentGatewayRoundTripFailureSignatures = []string{
+	"`reasoning_content` in the thinking mode",
+}
+
+// agentFailureReason returns a clarified failure reason when a failed agent
+// job's own folded error names a known cause, and "" otherwise — never guessing
+// on a message that does not match one of the tools' own known phrasings.
+func agentFailureReason(tool, message string) string {
 	trimmed := strings.TrimSpace(message)
 	if trimmed == "" {
 		return ""
@@ -310,6 +319,11 @@ func agentAuthFailureReason(tool, message string) string {
 	for _, signature := range agentAuthFailureSignatures {
 		if strings.Contains(lower, signature) {
 			return fmt.Sprintf("%s reported an authentication failure (%s); this environment's %s credentials are missing or stale, not a problem with the work itself", tool, trimmed, tool)
+		}
+	}
+	for _, signature := range agentGatewayRoundTripFailureSignatures {
+		if strings.Contains(lower, signature) {
+			return fmt.Sprintf("%s was refused mid-run by the gateway model's provider (%s): the model's reasoning cannot be echoed back through this gateway, so the conversation was rejected mid-run rather than the work failing; the working tree it left is preserved, and dispatching the work again starts a fresh conversation", tool, trimmed)
 		}
 	}
 	return ""
@@ -460,17 +474,27 @@ func reserveEnvironmentJobID(ctx Context, dir, id string) error {
 	return nil
 }
 
-// awaitEnvironmentJobRecord waits for the supervisor to register the job, so a
-// start either returns a handle that resolves or fails outright — never a handle
-// to nothing.
+// awaitEnvironmentJobRecord waits for the supervisor to register the job *and*
+// to name the work's own process, so a start either returns a handle that
+// resolves or fails outright — never a handle to nothing, and never a handle
+// whose process cancel cannot name. The supervisor publishes its running record
+// before it spawns the work, so a reader that stopped at the record's first
+// appearance could observe a running job with no child pid; `job cancel` reads
+// the same record, and with nothing else to name it would signal the
+// supervisor, the one process that has to survive to record the outcome. A
+// terminal record is a complete answer too: there is no work to name because
+// there is no longer any work.
 func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (EnvironmentJob, error) {
 	deadline := time.Now().Add(jobSupervisorReportTimeout)
 	for {
 		job, err := readEnvironmentJob(filepath.Join(dir, id+".json"))
-		if err == nil {
+		if err == nil && (job.ChildPID > 0 || job.Finished()) {
 			return job, nil
 		}
 		if !time.Now().Before(deadline) {
+			if err == nil {
+				return EnvironmentJob{}, fmt.Errorf("job supervisor %d registered job %q without naming the work's process within %s", supervisorPID, id, jobSupervisorReportTimeout)
+			}
 			return EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
 		}
 		if !processAlive(supervisorPID) {
@@ -641,16 +665,26 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	job := EnvironmentJob{
-		ID:               id,
-		Name:             name,
-		State:            EnvironmentJobStateRunning,
-		Kind:             environmentJobKind(agent),
-		AgentTool:        agent,
-		Command:          append([]string(nil), params.Command...),
-		Dir:              params.Dir,
-		PID:              os.Getpid(),
-		StartedAt:        time.Now(),
+		ID:        id,
+		Name:      name,
+		State:     EnvironmentJobStateRunning,
+		Kind:      environmentJobKind(agent),
+		AgentTool: agent,
+		Command:   append([]string(nil), params.Command...),
+		Dir:       params.Dir,
+		PID:       os.Getpid(),
+		StartedAt: now,
+		// Stamped in the same write that publishes the job as running, so a
+		// reader can never observe a running job that has not beaten: writing
+		// this record *is* the supervisor being alive, and the first
+		// startEnvironmentJobAliveBeat tick is only the next one. Leaving it
+		// for that tick left an observable window -- registering, then opening
+		// the log and taking the lease -- in which a running job reported no
+		// heartbeat at all. An attached job has no supervisor and is stamped by
+		// its own renew instead.
+		LastAliveAt:      now,
 		LogPath:          filepath.Join(dir, id+".log"),
 		OutputLimitBytes: limit,
 		LeaseID:          environmentJobLeaseID(id),
@@ -677,7 +711,19 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 // observed. It returns only after the work has finished and its result is
 // durable, so the caller of this function is the process whose liveness the job
 // record is reconciled against.
+//
+// Registering the job is the point of no return: from there on, this process is
+// the only writer of that record's outcome, so every way its own body can end --
+// a returned setup error, or a panic in its finish path -- is turned into a
+// recorded outcome rather than into a record left reading "running". See
+// recordEnvironmentJobSupervisorFailure.
 func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
+	// Claim orphaned descendants before any is created. This has to happen
+	// before the work starts, not at the finish check that reads it: the
+	// reparenting it arranges is decided by the kernel at the moment the
+	// spawning process exits, and cannot be retrofitted afterwards.
+	enableEnvironmentJobSubreaper()
+	adoptedBaseline := environmentJobDescendantBaseline(os.Getpid())
 	env, err := normalizeEnvironmentJobEnv(params.Env)
 	if err != nil {
 		return err
@@ -687,6 +733,56 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	if err != nil {
 		return err
 	}
+	// Registered before runRegisteredEnvironmentJobSupervisor's own deferred
+	// stops, so those have already run by the time this writes: a reader that
+	// observes the terminal record never races this supervisor's own tail, the
+	// same ordering job_task.go's runTaskEnvironmentJob takes for the same
+	// reason.
+	var panicked any
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = r
+		}
+		recordEnvironmentJobSupervisorFailure(recorder, err, panicked)
+	}()
+	err = runRegisteredEnvironmentJobSupervisor(recorder, params, adoptedBaseline)
+	return err
+}
+
+// recordEnvironmentJobSupervisorFailure settles a job whose supervising process
+// is ending without an outcome of its own. A registered record still reading
+// EnvironmentJobStateRunning is the worst shape this store can hold: once the
+// supervisor's process is gone, every later read can only reconcile the record
+// against that death and demote it to EnvironmentJobStateUnknown -- no exit
+// code, and nothing naming what happened to the work. The supervisor itself did
+// observe why it is ending, so recording that turns an unknowable fate into a
+// definite, actionable one.
+//
+// A no-op once an outcome is already durable, so it can never overwrite the one
+// finishEnvironmentJob wrote.
+func recordEnvironmentJobSupervisorFailure(recorder *jobRecorder, err error, panicked any) {
+	if recorder == nil || (err == nil && panicked == nil) {
+		return
+	}
+	if recorder.snapshot().State != EnvironmentJobStateRunning {
+		return
+	}
+	reason := fmt.Sprintf("job supervisor could not run this job: %v", err)
+	if panicked != nil {
+		reason = fmt.Sprintf("job supervisor panicked before it could record an outcome: %v", panicked)
+	}
+	code := 1
+	recorder.update(func(job *EnvironmentJob) {
+		job.State = EnvironmentJobStateExited
+		job.EndedAt = time.Now()
+		job.ExitCode = &code
+		job.Reason = reason
+	})
+}
+
+// runRegisteredEnvironmentJobSupervisor is RunEnvironmentJobSupervisor's body
+// for a job whose running record is already durable.
+func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params EnvironmentJobSupervisorParams, adoptedBaseline map[int]struct{}) error {
 	job := recorder.snapshot()
 	log, err := os.OpenFile(job.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
@@ -753,9 +849,9 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 			procState = cmd.ProcessState
 		}
 
-		resumeCommand, reinvoke := considerEnvironmentJobReinvocation(recorder, beat, childPID, procState, waitErr, reinvocationDeadline)
+		resumeCommand, reinvoke := considerEnvironmentJobReinvocation(recorder, beat, childPID, procState, waitErr, reinvocationDeadline, adoptedBaseline)
 		if !reinvoke {
-			return finishEnvironmentJob(recorder, beat, writer, childPID, procState, waitErr)
+			return finishEnvironmentJob(recorder, beat, writer, childPID, procState, waitErr, adoptedBaseline)
 		}
 		command = resumeCommand
 	}
@@ -778,11 +874,11 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 // already resolved one way or another — keeping one function as the single
 // source of "what happened this turn" is simpler than threading the tuple
 // through two call sites.
-func considerEnvironmentJobReinvocation(recorder *jobRecorder, beat *jobHeartbeat, childPID int, state *os.ProcessState, waitErr error, deadline time.Time) ([]string, bool) {
+func considerEnvironmentJobReinvocation(recorder *jobRecorder, beat *jobHeartbeat, childPID int, state *os.ProcessState, waitErr error, deadline time.Time, adoptedBaseline map[int]struct{}) ([]string, bool) {
 	// Folds the stream's tail before SessionID is read below, so a session id
 	// the tool only reported in its very last bytes is not missed.
 	beat.refresh(false)
-	_, _, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
+	_, _, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr, adoptedBaseline)
 	job := recorder.snapshot()
 	prompt, ok := decideEnvironmentJobReinvocation(job, jobState, startedJobFailed, reason, deadline)
 	if !ok {
@@ -897,14 +993,14 @@ func buildEnvironmentJobReinvocationPrompt(job EnvironmentJob, outcome string) s
 // not just a stale field. settle is applied to an in-memory copy first (no
 // disk write), reclaim is decided and acted on against that settled copy, and
 // only then does the single recorder.update below make any of it durable.
-func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error) error {
+func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *jobOutputWriter, childPID int, state *os.ProcessState, waitErr error, adoptedBaseline map[int]struct{}) error {
 	// Fold the stream's tail before the outcome lands, so the finished record
 	// carries what the run last did rather than the poll's stale view of it.
 	beat.refresh(false)
 
 	cancelledBy, wasCancelled := consumeEnvironmentJobCancelRequest(recorder.dir, recorder.snapshot().ID)
 
-	code, signal, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr)
+	code, signal, reason, jobState, startedJobFailed := resolveEnvironmentJobOutcome(recorder, childPID, state, waitErr, adoptedBaseline)
 	// A job that already spent its bounded reinvocations (see
 	// considerEnvironmentJobReinvocation) and still ends up here gate-incomplete
 	// or naming a StartedJobFailed exhausted its automatic "later" -- say so,
@@ -918,7 +1014,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 			reason = reason + " (" + note + ")"
 		}
 	}
-	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot())
+	worktree := captureAgentJobWorktreeOutcome(recorder.snapshot(), recorder.dir)
 	// Captured once resolveEnvironmentJobOutcome returns, before the reclaim
 	// decision runs, so EndedAt reflects when this job's own outcome was
 	// actually settled — which, for a job that waited out one it started (see
@@ -933,7 +1029,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 		job.OutputTruncated = writer.truncated()
 		job.Signal = signal
 		if reason == "" && code != 0 && job.Kind == EnvironmentJobKindAgent && job.Progress != nil {
-			reason = agentAuthFailureReason(job.AgentTool, job.Progress.Error)
+			reason = agentFailureReason(job.AgentTool, job.Progress.Error)
 		}
 		job.Reason = reason
 		job.ExitCode = &code
@@ -959,9 +1055,16 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 // resolveEnvironmentJobOutcome decides the exit code, signal, reason,
 // terminal state, and started-job failure finishEnvironmentJob records. State
 // and reason can be overridden by work the job left behind that it never
-// waited for: a process still alive in its own process group (abandoned) is
-// decided immediately, since nothing about an orphaned process group member
-// is worth waiting on. A sibling job record naming this job as its
+// waited for: a process still alive in the job's own process group, in its
+// session, or reparented onto this supervisor (abandoned) is decided
+// immediately, since nothing about a leftover process is worth waiting on. The
+// three are widest-last: the group misses work backgrounded into a fresh group
+// of its own, the session misses work that called setsid as well, and the
+// supervisor's own adopted descendants miss nothing -- see
+// environmentJobDescendantSurvivors. Work is only reported as abandoned when
+// it is this job's to report at all, which is why the widest scan runs against
+// an exclusion set rather than the bare process table (see
+// environmentJobLeftoverExclusions). A sibling job record naming this job as its
 // StartedByJobID is different: rather than declaring the outcome incomplete
 // on the spot, this waits for it (see awaitEnvironmentJobRunningChildren) —
 // the whole motivation being that a caller reading this job's own record
@@ -971,7 +1074,7 @@ func finishEnvironmentJob(recorder *jobRecorder, beat *jobHeartbeat, writer *job
 // finished, its failure (if any) is folded into startedJobFailed instead, so
 // a clean exit code from this job's own process never overshadows a real
 // failure in work it waited for.
-func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os.ProcessState, waitErr error) (code int, signal, reason, jobState, startedJobFailed string) {
+func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os.ProcessState, waitErr error, adoptedBaseline map[int]struct{}) (code int, signal, reason, jobState, startedJobFailed string) {
 	code = -1
 	switch {
 	case state != nil:
@@ -982,12 +1085,14 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 	case waitErr != nil:
 		reason = "failed to start: " + waitErr.Error()
 	}
-	jobState = EnvironmentJobStateExited
-	if state != nil && (environmentJobProcessGroupSurvivors(childPID) || environmentJobSessionSurvivors(childPID)) {
-		jobState = EnvironmentJobStateAbandoned
-		reason = "the job's own process exited, but it left other processes still running in its process group or session — background work it started and never waited for; nothing further will be reported for that work"
-	}
 	self := recorder.snapshot()
+	jobState = EnvironmentJobStateExited
+	if state != nil && (environmentJobProcessGroupSurvivors(childPID) ||
+		environmentJobSessionSurvivors(childPID) ||
+		environmentJobDescendantSurvivors(os.Getpid(), environmentJobLeftoverExclusions(recorder.dir, self.ID, adoptedBaseline))) {
+		jobState = EnvironmentJobStateAbandoned
+		reason = "the job's own process exited, but it left other processes still running in its process group, session, or reparented onto this supervisor — background work it started and never waited for; nothing further will be reported for that work"
+	}
 	if running := awaitEnvironmentJobRunningChildren(recorder.dir, self.ID, resolveEnvironmentJobGateIncompleteWaitCap()); len(running) > 0 {
 		jobState = EnvironmentJobStateGateIncomplete
 		reason = environmentJobGateIncompleteReason(running)
@@ -997,6 +1102,45 @@ func resolveEnvironmentJobOutcome(recorder *jobRecorder, childPID int, state *os
 		startedJobFailed = environmentJobFailedChildReason(failed)
 	}
 	return code, signal, reason, jobState, startedJobFailed
+}
+
+// environmentJobLeftoverExclusions names the pids a job's own finish check must
+// not count as leftover work it is answerable for: the baseline already
+// captured (see environmentJobDescendantBaseline), plus the supervisor of every
+// job this one deliberately handed off.
+//
+// The second half is what keeps handoff meaning what it says. A handed-off job
+// is by definition work the parent does not wait for, and it is stored that way
+// by the record relationship alone — the child's Handoff field, which
+// environmentJobRunningChildren and the failed-child scan both already honor.
+// The descendant scan cannot see that: it reads a process table, and the
+// handed-off job's supervisor is reparented onto this one as soon as the work
+// that started it exits (that supervisor deliberately detached, so it is
+// exactly the shape the scan was added to catch). Without this, a job that
+// handed work off would report itself abandoned over the very job it said it
+// was not waiting for.
+//
+// Scoped to this job's own children, the same scope every other read of the
+// handoff relationship uses: a supervisor reparented onto this process is
+// always a descendant of this job's work, and a handed-off job this job did
+// not start is not its to reason about.
+func environmentJobLeftoverExclusions(dir, parentID string, adoptedBaseline map[int]struct{}) map[int]struct{} {
+	excluded := adoptedBaseline
+	for _, child := range environmentJobChildren(dir, parentID, time.Now()) {
+		if !child.Handoff || child.PID <= 0 {
+			continue
+		}
+		if _, known := excluded[child.PID]; known {
+			continue
+		}
+		merged := make(map[int]struct{}, len(excluded)+1)
+		for pid := range excluded {
+			merged[pid] = struct{}{}
+		}
+		merged[child.PID] = struct{}{}
+		excluded = merged
+	}
+	return excluded
 }
 
 // awaitEnvironmentJobRunningChildren blocks until no non-handoff job started
@@ -1207,6 +1351,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 		ID:          job.LeaseID,
 		PID:         job.PID,
 		TTL:         h.ttl,
+		Holder:      environmentJobHolder(h.tenant),
 	})
 	h.renewExclusiveClaim(job, name)
 	h.leaseName = name
@@ -1237,7 +1382,7 @@ func (h *jobHeartbeat) renewExclusiveClaim(job EnvironmentJob, name string) {
 		TTL:         h.ttl,
 		Exclusive:   true,
 		Scope:       EnvironmentActivityLeaseScopeEnvironment,
-		Holder:      EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(os.Getenv(OrchestratorIDEnvVar)), Tenant: h.tenant},
+		Holder:      environmentJobHolder(h.tenant),
 	})
 }
 
@@ -1358,6 +1503,7 @@ func AttachEnvironmentJob(ctx Context, params AttachEnvironmentJobParams) (Envir
 		ID:          job.LeaseID,
 		PID:         job.PID,
 		TTL:         ttl,
+		Holder:      environmentJobHolder(params.Tenant),
 	}); err != nil {
 		return EnvironmentJob{}, err
 	}
@@ -1419,6 +1565,33 @@ type CancelEnvironmentJobResult struct {
 	TargetPID int    `json:"targetPid,omitempty"`
 }
 
+// resolveEnvironmentJobCancelTarget names the process a cancel is to signal, or
+// explains why it cannot name one. It is the only place that decides this, so
+// the rule that a job's own supervisor is never a target lives in one place.
+func resolveEnvironmentJobCancelTarget(job EnvironmentJob) (int, error) {
+	// A task job's PID is this process's own -- there is no subprocess to fall
+	// back to signalling, and falling back anyway would send the signal to
+	// whatever is running this call instead of refusing outright.
+	if job.Kind == EnvironmentJobKindTask {
+		return 0, fmt.Errorf("job %q is a background task job with no subprocess to signal; wait for it or let it finish", job.ID)
+	}
+	if job.ChildPID > 0 {
+		return job.ChildPID, nil
+	}
+	// Falling back to PID is only ever right for an attached job, where PID
+	// *is* the process the caller attached. For a started job PID is the
+	// supervisor, and that is the one process a cancel must never reach: it is
+	// what has to survive to record the outcome, and killing it leaves the
+	// work running with nothing left to report for it. A started job's record
+	// with no ChildPID is one a reader observed before the supervisor named
+	// the work; see awaitEnvironmentJobRecord, which stops that state being
+	// handed back as a start handle at all.
+	if job.Attached && job.PID > 0 {
+		return job.PID, nil
+	}
+	return 0, fmt.Errorf("job %q has not recorded its work's process yet, so there is nothing to signal here but the supervisor; retry in a moment or wait for the job to start", job.ID)
+}
+
 // CancelEnvironmentJob signals the work behind a job. The target is the pid the
 // record holds, never a command-line pattern — a pattern can match the caller's
 // own shell, which is how a cancel once killed the sequence issuing it. The
@@ -1438,18 +1611,9 @@ func CancelEnvironmentJob(ctx Context, params CancelEnvironmentJobParams) (Cance
 		ctx.Trace(fmt.Sprintf("job: %s already finished (%s), nothing to signal", job.ID, job.State))
 		return result, nil
 	}
-	// A task job's PID is this process's own -- there is no subprocess to fall
-	// back to signalling, and falling back anyway would send the signal to
-	// whatever is running this call instead of refusing outright.
-	if job.Kind == EnvironmentJobKindTask {
-		return CancelEnvironmentJobResult{}, fmt.Errorf("job %q is a background task job with no subprocess to signal; wait for it or let it finish", job.ID)
-	}
-	target := job.ChildPID
-	if target <= 0 {
-		target = job.PID
-	}
-	if target <= 0 {
-		return CancelEnvironmentJobResult{}, fmt.Errorf("job %q records no process to signal", job.ID)
+	target, err := resolveEnvironmentJobCancelTarget(job)
+	if err != nil {
+		return CancelEnvironmentJobResult{}, err
 	}
 	result.TargetPID = target
 	ctx.Trace(fmt.Sprintf("job: sending SIG%s to process group %d (job %s)", signal, target, job.ID))

@@ -5,7 +5,12 @@ export { GlobalConfigDialog } from './GlobalConfigDialog';
 export { EnvironmentInitDialog } from './EnvironmentInitDialog';
 export { ManageDialog, type ManageTab } from './ManageDialog';
 export { BuildProfileDialog } from './BuildProfileDialog';
-export { TenantDashboard, type TenantDashboardTab } from './TenantDashboard';
+export {
+  type TabBox,
+  type TabStripGeometry,
+  TenantDashboard,
+  type TenantDashboardTab,
+} from './TenantDashboard';
 export { TenantDialog } from './TenantDialog';
 export { ReviewDetailDialog } from './ReviewDetailDialog';
 export { CreateReviewDialog } from './CreateReviewDialog';

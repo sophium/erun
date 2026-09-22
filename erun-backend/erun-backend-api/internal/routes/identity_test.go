@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -246,6 +248,46 @@ func TestListUsersDistinguishesEnrolledFromIdPOnly(t *testing.T) {
 	}
 }
 
+// TestListUsersReportsErunUsernameAlongsideIdPUsername locks the backend
+// half: an enrolled row's own erun username travels alongside the
+// IdP's own username field rather than being merged away, so a client can
+// render both when they diverge instead of rendering only the IdP one under
+// a caller who is used to seeing their erun username everywhere else
+// (whoami's own `username`, reviews, audit entries). The row's own `id` is
+// asserted too: it is the OIDC subject, the one stable value that actually
+// joins the two directories, and it must keep flowing through unrenamed for
+// a client to recognize "this is the same person" against whoami's subject.
+func TestListUsersReportsErunUsernameAlongsideIdPUsername(t *testing.T) {
+	admin := &stubIdentityAdminClient{users: []zitadel.User{
+		{ID: "sub-1", Username: "zadmin@frs.auth.example.com", Email: "admin@example.com"},
+	}}
+	erunUsers := &stubEnrolledUserLister{users: []model.User{
+		{UserID: "erun-1", Username: "erun", ExternalUserID: "sub-1"},
+	}}
+	routes := IdentityRoutes{admin: admin, erunUsers: erunUsers}
+	rec := httptest.NewRecorder()
+	routes.listUsers(rec, identityRequest(http.MethodGet, "/v1/identity/users", "", string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var views []identityUserView
+	if err := json.Unmarshal(rec.Body.Bytes(), &views); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("got %d views, want 1", len(views))
+	}
+	if views[0].Username != "zadmin@frs.auth.example.com" {
+		t.Fatalf("views[0].Username = %q, want the IdP username unchanged", views[0].Username)
+	}
+	if views[0].ErunUsername != "erun" {
+		t.Fatalf("views[0].ErunUsername = %q, want the enrolled erun user's own username", views[0].ErunUsername)
+	}
+	if views[0].ID != "sub-1" {
+		t.Fatalf("views[0].ID = %q, want the OIDC subject reported so a client can join whoami's own subject against it", views[0].ID)
+	}
+}
+
 func TestCreateUserRejectsMissingFields(t *testing.T) {
 	enroller := &stubIdentityEnroller{}
 	routes := IdentityRoutes{enroller: enroller}
@@ -285,6 +327,53 @@ func TestCreateUserReports201WithErrorOnMappingFailure(t *testing.T) {
 	}
 	if !bytes.Contains(rec.Body.Bytes(), []byte("idp-2")) {
 		t.Fatalf("body = %s, want it to name the orphaned idp user", rec.Body.String())
+	}
+}
+
+// TestCreateUserReportsATakenLoginNameAsUsernameTaken is the route-level half
+// of the reported failure: the instance rejects the create with its bare
+// AlreadyExists conflict, so the caller must get a code and the name they
+// chose rather than the IdP's own account-naming text. It is wrapped the way
+// the service wraps it, so the check proves the error is still recognized
+// through that wrap.
+func TestCreateUserReportsATakenLoginNameAsUsernameTaken(t *testing.T) {
+	enroller := &stubIdentityEnroller{err: fmt.Errorf("create identity provider user: %w",
+		&zitadel.UsernameTakenError{Username: "login-client"})}
+	routes := IdentityRoutes{enroller: enroller}
+	rec := httptest.NewRecorder()
+	routes.createUser(rec, identityRequest(http.MethodPost, "/v1/identity/users", `{"username":"login-client","email":"ops@frs.example"}`, string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"USERNAME_TAKEN"`) {
+		t.Fatalf("body = %q, want the USERNAME_TAKEN machine code", body)
+	}
+	if !strings.Contains(body, "login-client") {
+		t.Fatalf("body = %q, want the offending login name named in the message", body)
+	}
+}
+
+// TestCreateUserForwardsAnUnrelatedConflictFromTheIdP is the crossed state of
+// the test above: a conflict that is not the user-already-exists collision
+// keeps the instance's own status and body, so the caller is not sent to
+// change a login name that was never the problem.
+func TestCreateUserForwardsAnUnrelatedConflictFromTheIdP(t *testing.T) {
+	enroller := &stubIdentityEnroller{err: &zitadel.APIError{
+		StatusCode: http.StatusConflict,
+		Body:       `{"code":6,"message":"Errors.User.EmailAlreadyExists"}`,
+	}}
+	routes := IdentityRoutes{enroller: enroller}
+	rec := httptest.NewRecorder()
+	routes.createUser(rec, identityRequest(http.MethodPost, "/v1/identity/users", `{"username":"alice","email":"a@example.com"}`, string(model.TenantTypeOperations)))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want the instance's own 409 forwarded; body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "USERNAME_TAKEN") {
+		t.Fatalf("body = %q, must not relabel an unrelated conflict as a taken login name", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Errors.User.EmailAlreadyExists") {
+		t.Fatalf("body = %q, want the instance's own message forwarded unchanged", rec.Body.String())
 	}
 }
 

@@ -16,6 +16,10 @@ in `erun-common/AGENTS.md`.
 - Register new capabilities in the real command tree and expose an operator
   surface where appropriate. Follow `erun-integration/AGENTS.md` §
   "Desktop-surface gate" for explicit agent-only/hidden/deprecated exceptions.
+- This applies to a new **flag** on a command that already has a surface, not
+  only to a new command: a flag is audited on its own, so give it an affordance
+  or declare it in `cliOnlyAgentFacingFlags` / `knownUnsurfacedFlags`
+  (`erun-cli/cmd/command_tree.go`) per that same section.
 
 ## CLI Help And MCP Tool Descriptions
 

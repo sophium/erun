@@ -1,9 +1,13 @@
 import { Button } from 'erun-kit';
+import { AlertTriangle } from 'lucide-react';
 import * as React from 'react';
 
 import {
+  DEPLOY_COMPONENTS_EMPTY_NOTICE_ID,
+  DEPLOY_COMPONENTS_EMPTY_PANEL_NOTICE_ID,
   deployComponentLabel,
   deployComponentSelectionChanged,
+  deployComponentsEmptySelection,
 } from '@/app/deployComponentsSelection';
 import { readError } from '@/app/errors';
 import { useAppDispatch } from '@/app/hooks';
@@ -111,8 +115,47 @@ export function DeployComponentsField({ dialog }: { dialog: ManageDialog }): Rea
               ))}
             </div>
           )}
+          {/* Under the list, where the last uncheck happened: the checklist has
+              promised exactly the checked charts, so it must say what an empty
+              one means before Deploy is pressed rather than after it rolls.
+              Panel id, so it never collides with the row's twin below the
+              popover during the panel's close animation. */}
+          <DeployComponentsEmptyNotice
+            dialog={dialog}
+            id={DEPLOY_COMPONENTS_EMPTY_PANEL_NOTICE_ID}
+          />
         </>
       )}
+    </div>
+  );
+}
+
+// DeployComponentsEmptyNotice states that nothing is checked and names the action
+// that clears it, so a Deploy greyed out on an empty checklist is a stated
+// condition rather than a button that stopped working.
+export function DeployComponentsEmptyNotice({
+  dialog,
+  id = DEPLOY_COMPONENTS_EMPTY_NOTICE_ID,
+}: {
+  dialog: ManageDialog;
+  id?: string;
+}): React.ReactElement | null {
+  if (!deployComponentsEmptySelection(dialog)) {
+    return null;
+  }
+  return (
+    <div
+      id={id}
+      role="status"
+      className="mt-2 grid gap-1 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] leading-[1.4] text-foreground"
+    >
+      <span className="flex items-start gap-2">
+        <AlertTriangle aria-hidden="true" className="mt-[1px] size-3.5 shrink-0" />
+        <span>
+          No charts are checked, so nothing would roll out. Deploy installs exactly the checked
+          charts &mdash; check at least one above to deploy.
+        </span>
+      </span>
     </div>
   );
 }

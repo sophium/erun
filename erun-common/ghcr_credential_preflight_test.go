@@ -24,7 +24,7 @@ func TestVerifyGHCRCredentialConfiguredRefusesWhenNothingResolves(t *testing.T) 
 		t.Fatalf("expected *MissingGHCRCredentialError, got %T: %v", err, err)
 	}
 	message := missing.Error()
-	for _, want := range []string{"ghcr.io", "gh auth login", "docker login", "erun release"} {
+	for _, want := range []string{"ghcr.io", "gh auth login", "docker login", "erun build --release"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("the error must tell the operator how to fix it, missing %q in:\n%s", want, message)
 		}

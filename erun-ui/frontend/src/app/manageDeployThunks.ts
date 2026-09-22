@@ -15,8 +15,11 @@ export const submitManageDeploy = (): AppThunk<Promise<void>> => async (dispatch
     return;
   }
   const version = normalizeDialogValue(dialog.version);
-  // Deploys exactly what the operator checked (opt-in only); an empty set leaves
-  // deploy to fall back to the env's saved default.
+  // Deploys exactly what the operator checked (opt-in only). The checklist's own
+  // controls refuse an empty selection rather than letting it fall through to the
+  // runtime chart alone, so this only ever carries an empty set from a caller that
+  // means the runtime on purpose -- the health check's "runtime not deployed"
+  // recovery, which deploys it by name.
   const components = [...dialog.deployComponentSelection];
   // Resolve the runtime image while the dialog is still open: closeManageDialog
   // resets the dialog slice (including its version suggestions), and the image is

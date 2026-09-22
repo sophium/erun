@@ -43,6 +43,9 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 
 	matches := stateMatchesSSHDTarget(state, expectedState)
 	if matches && !stateHasDeprecatedLocalProxy(state) && canReachLocalSSHEndpoint(info.Port) {
+		// A reachable forward is reused as-is and keeps writing to the log it
+		// opened when it started, so this touch is the chance to re-apply the cap.
+		rotatePortForwardLogIfOversized(ctx, "sshd", sshdPortForwardLogPath(statePath))
 		return info, nil
 	}
 	args := kubectlPortForwardArgs(result, info.Port)
@@ -91,6 +94,7 @@ func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected 
 	adopted := expected
 	adopted.ProcessID = pid
 	adopted.LogPath = sshdPortForwardLogPath(statePath)
+	rotatePortForwardLogIfOversized(ctx, "sshd", adopted.LogPath)
 	if err := saveSSHDPortForwardState(statePath, adopted); err != nil {
 		return false, fmt.Errorf("adopt SSHD port-forward (PID %d): %w", pid, err)
 	}
@@ -154,10 +158,7 @@ func startSSHDPortForward(ctx common.Context, statePath string, expectedState ss
 }
 
 func launchSSHDPortForwardProcess(logPath string, args []string) (*os.Process, error) {
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return nil, err
-	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logFile, err := openPortForwardLog(logPath)
 	if err != nil {
 		return nil, err
 	}

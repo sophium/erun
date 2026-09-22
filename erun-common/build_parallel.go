@@ -146,6 +146,13 @@ func traceBuildWavePlan(ctx Context, waves []buildWave) {
 // finishes, so a reader sees one image's output at a time and two runs of the
 // same build produce the same stream. At a degree of one the output streams live
 // instead, which keeps the single-job path exactly what it was.
+//
+// The run's heartbeat is the one deliberate exception, and it is not buffered:
+// it goes straight to the run's log stream while the wave is still running,
+// because a liveness line held back until the wave it describes has finished
+// would be reporting the past. It is time-based and therefore not reproducible
+// either, which is why it is emitted at default verbosity only by a run that is
+// actually building — see build_heartbeat.go.
 func runBuildWaves(ctx Context, waves []buildWave, build DockerImageBuilderFunc, jobs int) error {
 	for _, wave := range waves {
 		if err := runBuildWave(ctx, wave, build, jobs); err != nil {

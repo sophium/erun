@@ -424,12 +424,8 @@ type UpgradeOccupancyError struct {
 }
 
 func (e *UpgradeOccupancyError) Error() string {
-	names := make([]string, 0, len(e.Holders))
-	for _, lease := range e.Holders {
-		names = append(names, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
-	}
 	return fmt.Sprintf("%s/%s is held by %s -- an upgrade restarts the runtime pod and would interrupt that work; pass --override-lease to roll it anyway, or wait until it finishes",
-		e.Tenant, e.Environment, strings.Join(names, "; "))
+		e.Tenant, e.Environment, FormatLeaseHolders(e.Holders))
 }
 
 // LeaseGuardedUpgradeDeployer wraps deploy so a held environment refuses
@@ -455,7 +451,7 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 			if !override {
 				return &UpgradeOccupancyError{Tenant: item.Tenant, Environment: item.Environment, Holders: leases}
 			}
-			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), leaseHolderSummary(leases)))
+			ctx.Trace(fmt.Sprintf("upgrade: %s/%s overriding %d held lease(s): %s", item.Tenant, item.Environment, len(leases), FormatLeaseHolders(leases)))
 		}
 		// A dry run must show this refusal (or override) exactly as a real run
 		// would, but must not itself claim the exclusive lease -- that would be
@@ -478,14 +474,6 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 
 		return deploy(ctx, item)
 	}
-}
-
-func leaseHolderSummary(leases []EnvironmentActivityLease) string {
-	names := make([]string, 0, len(leases))
-	for _, lease := range leases {
-		names = append(names, fmt.Sprintf("%s (lease %q)", lease.Holder.String(), lease.Name))
-	}
-	return strings.Join(names, "; ")
 }
 
 // UpgradeItemFailure records a member whose deploy returned an error.
@@ -523,7 +511,7 @@ func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) U
 			result.UpToDate = append(result.UpToDate, item)
 			continue
 		}
-		ctx.Info(fmt.Sprintf("==> Upgrading %s/%s %s -> %s (%s)", item.Tenant, item.Environment, displayVersion(item.Current), item.Target, item.Channel))
+		ctx.Info(upgradeItemAnnouncement(ctx.DryRun, item))
 		if err := deploy(ctx, item); err != nil {
 			ctx.Trace(fmt.Sprintf("upgrade: %s/%s failed: %s", item.Tenant, item.Environment, err.Error()))
 			result.Failed = append(result.Failed, UpgradeItemFailure{Item: item, Error: err.Error()})
@@ -531,8 +519,29 @@ func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) U
 		}
 		result.Upgraded = append(result.Upgraded, item)
 	}
-	ctx.Info(fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed)))
+	ctx.Info(upgradeCompletionSummary(ctx.DryRun, result))
 	return result
+}
+
+// upgradeItemAnnouncement reports one member's roll. Under --dry-run nothing
+// has deployed yet, so the wording stays conditional ("would upgrade") rather
+// than asserting a rollout that never happened.
+func upgradeItemAnnouncement(dryRun bool, item UpgradePlanItem) string {
+	verb := "Upgrading"
+	if dryRun {
+		verb = "Would upgrade"
+	}
+	return fmt.Sprintf("==> %s %s/%s %s -> %s (%s)", verb, item.Tenant, item.Environment, displayVersion(item.Current), item.Target, item.Channel)
+}
+
+// upgradeCompletionSummary is the final tally. Under --dry-run it stays in the
+// conditional so the summary can never be mistaken for a real rollout's
+// "N upgraded" report.
+func upgradeCompletionSummary(dryRun bool, result UpgradeResult) string {
+	if dryRun {
+		return fmt.Sprintf("==> Dry run: would upgrade %d, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed))
+	}
+	return fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed))
 }
 
 func unresolvedReasonSuffix(item UpgradePlanItem) string {

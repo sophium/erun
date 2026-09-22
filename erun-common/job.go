@@ -403,8 +403,10 @@ type EnvironmentJob struct {
 	// tell "still beating" from "the same timestamp read twice".
 	AliveSeq int64 `json:"aliveSeq,omitempty"`
 	// AliveAgeMs is computed fresh on every read as now-LastAliveAt, in the
-	// pod's own clock, and is nil only when the job has never beaten (an
-	// attached job, or one whose supervisor has not registered yet). A caller
+	// pod's own clock, and is nil only when the job has never beaten — an
+	// attached job that has not renewed, which has no supervisor to beat for
+	// it. Every record a supervisor wrote for itself carries a beat from the
+	// instant it was published as running. A caller
 	// that sees this exceed EnvironmentJobAliveStaleMs treats the job as
 	// failed — reported as an unknown outcome, never as success and never as
 	// a tool error — rather than waiting on a beat a dead supervisor can no
@@ -603,6 +605,19 @@ func reconcileEnvironmentJobWithRestartCheck(dir string, job EnvironmentJob, now
 		job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
 		job.Succeeded = environmentJobSucceeded(job)
 		return job
+	}
+	// The record above was read before this liveness check, so it can still
+	// say "running" for a supervisor that finished in between: the supervisor
+	// writes its terminal state and only then exits. Re-read before retiring
+	// the job, so the demotion below can never overwrite an outcome that
+	// landed while this check was being made -- and, because a supervisor
+	// that really did die without recording still reads back as running here,
+	// a genuinely lost job is demoted exactly as it was before.
+	if fresh, err := readEnvironmentJob(filepath.Join(dir, job.ID+".json")); err == nil && fresh.State != EnvironmentJobStateRunning {
+		fresh.AliveAgeMs = environmentJobAliveAgeMs(fresh.LastAliveAt, now)
+		fresh.OutputBytes = environmentJobOutputSize(fresh.LogPath, fresh.OutputBytes)
+		fresh.Succeeded = environmentJobSucceeded(fresh)
+		return fresh
 	}
 	job = demoteEnvironmentJobToUnknown(job, now, hostname, restartRunner)
 	job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)

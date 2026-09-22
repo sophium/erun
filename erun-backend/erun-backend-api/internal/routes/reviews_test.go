@@ -151,6 +151,55 @@ func TestAdvanceMergeQueueBlockedReportsCountAndReview(t *testing.T) {
 	}
 }
 
+// TestAdvanceMergeQueueOccupiedNamesTheBlocker: an occupied MERGE slot is a
+// conflict with the branch's current state, not a missing resource, and the
+// body has to carry the review holding it — that review is the operator's next
+// move (finish it, or requeue it back to READY).
+func TestAdvanceMergeQueueOccupiedNamesTheBlocker(t *testing.T) {
+	svc := &stubReviewService{err: &service.MergeQueueOccupiedError{
+		TargetBranch: "main",
+		ReviewID:     "review-9",
+		Name:         "Land the widget",
+		SourceBranch: "feature/widget",
+	}}
+	routes := ReviewRoutes{service: svc}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
+	rec := httptest.NewRecorder()
+	routes.advanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"code":"MERGE_QUEUE_OCCUPIED"`, `"reviewId":"review-9"`, `"sourceBranch":"feature/widget"`, `"targetBranch":"main"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body = %q, want it to carry %s", body, want)
+		}
+	}
+	if !strings.Contains(body, "requeue") {
+		t.Fatalf("body = %q, want the message to name the requeue remedy", body)
+	}
+}
+
+// TestUpdateReviewStatusRequeueRefusalNamesTheStatus: requeue recovers only a
+// review at MERGE, so a refusal from any other status has to name the status
+// the review is actually in rather than reporting it as missing.
+func TestUpdateReviewStatusRequeueRefusalNamesTheStatus(t *testing.T) {
+	svc := &stubReviewService{err: &service.ReviewNotMergingError{ReviewID: "review-1", Status: model.ReviewStatusReady}}
+	routes := ReviewRoutes{service: svc}
+
+	rec := patchReviewStatus(t, routes, `{"status":"READY"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"REVIEW_NOT_MERGING"`) || !strings.Contains(body, `"reviewId":"review-1"`) || !strings.Contains(body, `"status":"READY"`) {
+		t.Fatalf("body = %q, want the code and the review's actual status", body)
+	}
+}
+
 // TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason: the route is a
 // thin adapter over the service, so its only job is getting both request
 // fields to OverrideAdvanceMergeQueue unchanged.

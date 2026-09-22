@@ -166,6 +166,19 @@ COPY erun-devops/dns01-webhook /src/erun-devops/dns01-webhook
 # member whose own gate `test-frontend` now runs here too (see root
 # AGENTS.md's Makefile comment).
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
+# test-atlas-validate runs erun-devops/docker/erun-backend-db/
+# atlas_validate_test.sh, which resolves the db module relative to its own
+# script_dir and copies `${db_module}/migrations/default` out of it. That is
+# the COPY-or-`cd`-fails rule the LINT_MODULES note above states, applied to a
+# directory rather than a module, and the target was added without it: the
+# script's `cd` into erun-backend/erun-backend-db failed here while the
+# identical command passed in a full checkout, so `make check` went red inside
+# every erun-devops image build and no release could be produced at all. Only
+# migrations/default is copied, including the atlas.sum it validates against --
+# that is the whole of what the script reads, and copying the wider module
+# would put unrelated schema/, retention/ and AGENTS.md edits into this image's
+# fingerprint.
+COPY erun-backend/erun-backend-db/migrations/default /src/erun-backend/erun-backend-db/migrations/default
 # TestDockerfileLdflagsActuallyStampsTheBinary reads this Dockerfile at test
 # time to lock its -ldflags target to the real release build, so the test
 # stage needs the file even though nothing here builds the eapi image itself.
@@ -219,6 +232,17 @@ COPY erun-devops/docker/erun-oci-registry/VERSION /src/erun-devops/docker/erun-o
 COPY erun-devops/docker/erun-ubuntu/VERSION /src/erun-devops/docker/erun-ubuntu/VERSION
 COPY erun-devops/docker/erun-zitadel/VERSION /src/erun-devops/docker/erun-zitadel/VERSION
 COPY erun-devops/docker/erun-zitadel-login/VERSION /src/erun-devops/docker/erun-zitadel-login/VERSION
+# TestPassthroughWrapperDockerfilesReclaimProvenanceLabel (erun-common) globs
+# `erun-devops/docker/*/Dockerfile` and fails loudly when that finds fewer than
+# two wrappers, so this stage needs the Dockerfiles themselves, not just the
+# VERSION pins above (a wrapper is only recognised when its VERSION sibling is
+# present). Without them the glob matches nothing at /src, the canary trips, and
+# a full checkout still passes -- the same in-build-only failure the pins below
+# document. The whole tree is copied rather than a wildcard source: a wildcard
+# (`erun-devops/docker/*/Dockerfile`) flattens every match onto a single file at
+# the destination, which is precisely the empty discovery this copy prevents,
+# and an enumerated list would go stale the moment a wrapper is added.
+COPY erun-devops/docker /src/erun-devops/docker
 # erun-backend-db-chart_test.sh cross-checks the data-retention doc's claimed
 # default and chart-value keys (retention.enabled, retention.dryRun) against
 # what this chart actually renders; only the one page is needed.
@@ -231,12 +255,36 @@ COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
 # checks erun-common's known infrastructure-failure signature list against
 # this page's spec of the gate-run/gate-build failure classifier.
 COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-reference/skills-spec.md
+# TestConfigLocationsDocMatchesResolver (erun-integration) derives the per-user
+# config paths from erun-common's own resolvers and asserts this page documents
+# them; only the one file is needed.
+COPY erun-docs/docs/reference/config-locations.md /src/erun-docs/docs/reference/config-locations.md
 # TestOrchestratorSessionEnvVarsAreDocumented cross-checks the orchestrator
 # session variables erun-common actually sets against this page, which is the
 # one that enumerates them; only the one file is needed, not the built site.
 # Omitting it fails the gate with "no such file or directory" while a full
 # checkout passes, so this COPY is what makes the drift test real in the build.
 COPY erun-docs/docs/reference/env-vars.md /src/erun-docs/docs/reference/env-vars.md
+
+# TestEverySurfaceDescribingARepinNamesEveryPinSiteKind (erun-common) reads
+# every surface that enumerates what a re-pin rewrites and asserts each names
+# every kind; the pin-version skill and the `erun pin` CLI page are two of
+# those surfaces, and only those two files are needed, not the built docs
+# site. Omitting them fails the gate with "no such file or directory" while a
+# full checkout passes, so these COPYs are what make the drift test real in
+# the build -- same reasoning as every COPY above.
+COPY erun-skills/skills/erun-pin-version/SKILL.md /src/erun-skills/skills/erun-pin-version/SKILL.md
+COPY erun-docs/docs/cli/pin.md /src/erun-docs/docs/cli/pin.md
+
+# The two TestMergeSkillReadyRung* guards (erun-common) read the erun-merge
+# skill's own READY rung and assert the build policy it writes there, so that
+# one file has to sit at the same relative path here that it has in a full
+# checkout. It is the only skill file they read, and the same narrowing as the
+# pin-version COPY above applies: copying the wider erun-skills tree would put
+# every unrelated skill edit into this image's fingerprint for no test that
+# reads one. Omitting it fails the gate with "no such file or directory" while
+# a full checkout passes -- same reasoning as every COPY above.
+COPY erun-skills/skills/erun-merge/SKILL.md /src/erun-skills/skills/erun-merge/SKILL.md
 
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the
@@ -270,31 +318,35 @@ COPY erun-docs/docs/reference/env-vars.md /src/erun-docs/docs/reference/env-vars
 # own resolved value already tracks the environment.
 ARG DIND_MEMORY_LIMIT_MIB=20480
 # DIND_CPU_LIMIT is the same blind-cgroup problem as DIND_MEMORY_LIMIT_MIB
-# above, for CPU instead of memory. playwright.config.ts's own worker-count
-# derivation reads os.availableParallelism() -- quota-aware everywhere else --
-# but this RUN step is a sibling of the erun-dind sidecar's own limited
-# cgroup, not a descendant of it, so cpu.max reads "max" here regardless of
-# the sidecar's configured limit and the derivation falls through to the
-# node's real core count (24 on the pod #2081 was measured on), oversized for
-# an environment that does not own that many cores exclusively -- 6 workers
-# (6 Go backends + 6 headless Chromiums) contending with everything else
-# scheduled on the node produced a different spec failing every run (#2081).
-# Default mirrors runtime.dind.resources.limits.cpu / eruncommon.DefaultRuntimeDindCPU
-# ("4"), the same source DIND_MEMORY_LIMIT_MIB's default mirrors for memory --
-# the CPU budget the operator actually provisioned for this environment's
-# build work, rather than the node's raw core count. ERUN_PLAYWRIGHT_WORKERS
-# applies the config's own "two cores per worker" rule (a worker is a Go
-# backend *and* a headless Chromium, and they compete) to that budget instead
-# of to the unbounded node, floored at 1 and capped at 4 -- one more than the
-# config comment's own "2 workers clean on 4 cores" data point, kept as a
-# ceiling rather than raised further without new measurement. Like
-# DIND_MEMORY_LIMIT_MIB above, `erun build` passes this as a real --build-arg
-# resolved from EnvConfig.RuntimeDindPod, so the default below is only the
-# bare-`docker build` fallback -- the same constant the sidecar's own chart
-# default and NormalizeRuntimeDindPodResources use, never the node's core
-# count. A tenant image with a different sidecar CPU default only needs to
-# change this fallback to match.
-ARG DIND_CPU_LIMIT=4
+# above, for CPU instead of memory: this RUN step is a sibling of the
+# erun-dind sidecar's own limited cgroup, not a descendant of it, so cpu.max
+# reads "max" here regardless of the sidecar's configured limit and anything
+# deriving a width from the cgroup falls through to the node's real core
+# count. What this ARG carries is therefore the CPU budget the operator
+# actually provisioned for this environment's build work, resolved by
+# `erun build` from EnvConfig.RuntimeDindPod.
+#
+# Default mirrors runtime.dind.resources.limits.cpu /
+# eruncommon.DefaultRuntimeDindCPU ("12"), the same source
+# DIND_MEMORY_LIMIT_MIB's default mirrors for memory, and the same rule
+# produced it: a 24-CPU node divided across the two build-capable environments
+# erun assumes are building on it at once. It is a ceiling, not a reservation
+# -- see eruncommon.RuntimeDindCPULimit, which owns the rule and the reasons
+# both halves of it are what they are. The value used to be a flat 4, which
+# throttled a build to a sixth of an otherwise-idle node; that is the shape
+# this default exists to stop shipping. Like DIND_MEMORY_LIMIT_MIB above, this
+# is only the bare-`docker build` fallback -- the same constant the sidecar's
+# own chart default and NormalizeRuntimeDindPodResources use, never the node's
+# core count. A tenant image with a different sidecar CPU default only needs
+# to change this fallback to match.
+#
+# ERUN_PLAYWRIGHT_WORKERS is deliberately *not* derived from this ARG here any
+# more; the Makefile resolves it from the same CPU quota, beside every other
+# gate width (see its own comment). DIND_CPU_LIMIT is still what reaches that
+# quota through PARALLEL_GATE_CPU_LIMIT below, so a resized environment still
+# gets a wider suite -- but as one of the gate's widths rather than as an
+# inline halving of a resource limit.
+ARG DIND_CPU_LIMIT=12
 # PLAYWRIGHT_TEST_AREAS carries `erun build`'s resolved smoke+area selection
 # (applyPlaywrightAreaBuildArgs in erun-common/build_playwright_areas.go,
 # derived from the Playwright spec-file diff against the merge base) into
@@ -306,6 +358,25 @@ ARG DIND_CPU_LIMIT=4
 # resolution -- the safe, fail-open direction is the full suite, never zero
 # coverage.
 ARG PLAYWRIGHT_TEST_AREAS=""
+# ERUN_PLAYWRIGHT_ARTIFACTS_DIR is the suite's one artifact root
+# (erun-ui/playwright/fixtures/artifacts.ts): Playwright's own output dir, the
+# HTML report, and every frame a spec captures by hand all resolve through it.
+# Set here to a container-local path instead of left at its default, which is
+# the suite's own directory inside /src.
+#
+# What this guards is not the reporters this stage writes (they land in a COPY
+# of the tree and are discarded with the build container). It is every *other*
+# in-container run of this suite that mirrors this stage, and above all
+# scripts/repro-gate-contention.sh: that one rebuilds this stage's arrangement
+# outside a build by bind-mounting an environment's own worktree over /src and
+# running as root, so artifacts left at the default path come back owned by uid
+# 0 in a tree the environment user owns -- where rm -rf cannot remove them and
+# every later run in that environment fails with a bare EACCES inside whichever
+# spec writes first, for every branch rather than only the one that poisoned
+# it. Declaring the container-local root here makes it part of what "the test
+# stage's environment" means, so a run that mirrors the stage inherits it
+# rather than having to re-derive why it needs one.
+ARG ERUN_PLAYWRIGHT_ARTIFACTS_DIR="/tmp/erun-playwright-artifacts"
 # golangci-lint's own analysis cache sat unmounted here even though the Go
 # module and build caches right above it were: HOME is /root in this stage
 # (root user, no ENV HOME override), so the tool's default cache dir is
@@ -386,9 +457,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     ERUN_WAILSJS_CACHE_DIR=/root/.cache/erun-wailsjs \
     ERUN_PLAYWRIGHT_LINT_CACHE_DIR=/src/.cache/frontend-lint \
+    ERUN_PLAYWRIGHT_ARTIFACTS_DIR="${ERUN_PLAYWRIGHT_ARTIFACTS_DIR}" \
     PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
     PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
-    ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \
     PLAYWRIGHT_TEST_AREAS="${PLAYWRIGHT_TEST_AREAS}" \
     make check && touch /test-ok
 

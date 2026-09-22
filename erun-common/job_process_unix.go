@@ -92,8 +92,12 @@ func signalEnvironmentJobProcessGroup(pid int, signal string) error {
 // ran (not the supervisor) dies before it can wait() on its own child, e.g. a
 // cancel's SIGTERM reaching the whole group at once. That shape is completed
 // work nobody has reaped yet, not abandoned background work, so it must not
-// read as a survivor. `ps`'s STAT column tells the two apart; the signal
-// probe is only the fallback for when `ps` itself cannot be consulted.
+// read as a survivor. The platform's own process table tells the two apart,
+// and `ps`'s STAT column after that; the signal probe is only the fallback for
+// when neither can be consulted. That a zombie is not a survivor matters more
+// now that the supervisor is a child subreaper: an orphan that dies as the
+// work is being reaped is handed to the supervisor rather than to init, so it
+// is this job's own process group that holds it while it waits to be reaped.
 //
 // The same SIGTERM that just ended the leader reaches every other group
 // member at once, but the kernel does not process it atomically across
@@ -123,11 +127,30 @@ const (
 )
 
 func environmentJobProcessGroupHasLiveMember(pgid int) bool {
+	if alive, ok := platformProcessGroupHasLiveMember(pgid); ok {
+		return alive
+	}
 	if alive, ok := psProcessGroupHasLiveMember(pgid); ok {
 		return alive
 	}
 	err := syscall.Kill(-pgid, 0)
 	return err == nil || err == syscall.EPERM
+}
+
+// platformProcessGroupHasLiveMember answers the group question from this
+// host's own process table, which is the only source that can tell a running
+// member from one that has already exited (see groupHasLiveMember). It is the
+// primary path for the same reason environmentJobSessionHasLiveMember's is:
+// on a host with no `ps` to consult -- a distilled container image, or the
+// integration suite's deliberately scrubbed PATH -- the signal probe below is
+// all that is left, and that probe answers true for a zombie. The second
+// return is false when the platform has no table to offer, so the caller falls
+// back instead of trusting a default answer.
+func platformProcessGroupHasLiveMember(pgid int) (bool, bool) {
+	if procs, ok := environmentJobSessionProcessesFunc(); ok {
+		return groupHasLiveMember(procs, pgid), true
+	}
+	return false, false
 }
 
 // psProcessGroupHasLiveMember answers whether pgid still has a non-zombie

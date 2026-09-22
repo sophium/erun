@@ -302,6 +302,44 @@ func TestJob(t *testing.T) {
 		}
 	})
 
+	t.Run("start_exclusive_off_environment_dry_run_forwards_the_claim_to_the_edge", func(t *testing.T) {
+		// The scenario above proves the claim once job start reaches
+		// StartEnvironmentJob directly, which only happens in-environment.
+		// Off-environment -- an operator's own machine, or any other pod,
+		// targeting this one through its MCP edge -- job start never calls
+		// that function directly: it calls the edge's exec_raw tool instead,
+		// and --exclusive never reached that call's arguments at all until
+		// this fix, so the edge enforced nothing while the caller was told
+		// the job started. No `inEnvironment` here is the point: this is the
+		// host-caller path.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "check", "--dry-run", "--exclusive",
+			"--", "work",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/start_exclusive_off_environment_dry_run_forwards_the_claim_to_the_edge", normalize.Apply(result.Combined))
+	})
+
+	t.Run("agent_start_exclusive_off_environment_dry_run_forwards_the_claim_to_the_edge", func(t *testing.T) {
+		// Same gap, the other off-environment dispatch tool: an agent job
+		// started off-environment goes through exec_agent rather than
+		// exec_raw, and it had the identical missing forward.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"job", "start", "--tenant", "team", "--environment", "dev", "--name", "sweep", "--agent", "claude", "--exclusive", "--dry-run",
+			"--", "fix the failing tests",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "job/agent_start_exclusive_off_environment_dry_run_forwards_the_claim_to_the_edge", normalize.Apply(result.Combined))
+	})
+
 	t.Run("an_exclusive_job_refuses_every_other_job_start_and_names_the_holder", func(t *testing.T) {
 		// The whole point of the claim, and the asymmetry that makes it worth
 		// more than a mutex between exclusive jobs: while a gate holds the
@@ -546,6 +584,64 @@ func TestJob(t *testing.T) {
 		}
 		if !strings.Contains(payload.Reason, "credentials are missing or stale") {
 			t.Fatalf("expected the reason to reframe the failure as a credential problem, got %q", payload.Reason)
+		}
+	})
+
+	t.Run("agent_progress_reports_a_gateway_reasoning_refusal_as_the_reason", func(t *testing.T) {
+		// A gateway serving a reasoning model refuses the conversation when it
+		// wants the model's own reasoning handed back, and a client can only echo
+		// reasoning the gateway returned — so the refusal lands mid-run however
+		// far the job already got, and the work it did up to that point is all it
+		// has to show. The two events below are captured verbatim from `claude -p
+		// --output-format stream-json` on that refusal (the second is the closing
+		// envelope erun folds the error from), and the failed job's reason must
+		// say what was refused and that the work itself did not fail, rather than
+		// reporting a bare exit code under a checkpoint that names nothing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		refusal := "API Error: 400 The `reasoning_content` in the thinking mode must be passed back to the API."
+		events := []string{
+			`{"type":"assistant","message":{"model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"` + refusal + `"}]}}`,
+			`{"type":"result","subtype":"success","is_error":true,"result":"` + refusal + `"}`,
+		}
+		quoted := make([]string, 0, len(events))
+		for _, event := range events {
+			quoted = append(quoted, "'"+event+"'")
+		}
+		fixture.StubBinaryWithScript(t, stubs, "claude",
+			"printf '%s\\n' "+strings.Join(quoted, " ")+"\nexit 1")
+		envVars := inEnvironment(append(setup.Env(), fixture.StubEnv(stubs, "claude")...))
+
+		start := startJob(t, setup, envVars, "sweep", "--agent", "claude", "--", "fix the failing tests")
+		if start.ExitCode != 0 {
+			t.Fatalf("start: exit %d: %s", start.ExitCode, start.Combined)
+		}
+		await := erun.Run(t, []string{"job", "await", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--timeout", "30s"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if await.ExitCode != 1 {
+			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
+		}
+		status := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", "sweep", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if status.ExitCode != 0 {
+			t.Fatalf("status: exit %d: %s", status.ExitCode, status.Combined)
+		}
+		var payload struct {
+			Reason   string `json:"reason"`
+			Progress struct {
+				Error string `json:"error"`
+			} `json:"progress"`
+		}
+		if err := json.Unmarshal([]byte(status.Stdout), &payload); err != nil {
+			t.Fatalf("parse job status JSON: %v\n%s", err, status.Stdout)
+		}
+		if !strings.Contains(payload.Progress.Error, "reasoning_content") {
+			t.Fatalf("expected the gateway's raw refusal preserved in progress.error, got %q", payload.Progress.Error)
+		}
+		if !strings.Contains(payload.Reason, "reasoning cannot be echoed back through this gateway") {
+			t.Fatalf("expected the reason to name the gateway's reasoning round-trip as the cause, got %q", payload.Reason)
+		}
+		if !strings.Contains(payload.Reason, "rather than the work failing") {
+			t.Fatalf("expected the reason to distinguish the refusal from a failed task, got %q", payload.Reason)
 		}
 	})
 

@@ -52,6 +52,14 @@ composition and release invariants belong to root/shared logic, not chart policy
   mount-source clones. Keep mutable Terraform state, plans, and provider data on
   the home PVC, outside the read-only baked tree. Test adoption/linking preservation
   and interrupted-run recovery.
+- Agent MCP configuration is reconciled once per container boot, never per shell.
+  The shell hook is sourced by every interactive shell and every `sh -lc` remote
+  exec, so run each configure script under one container-lifetime claim
+  (`/tmp/erun-agent-config`, tests via `ERUN_AGENT_CONFIG_STATE_DIR`), never the
+  home PVC. `entrypoint_test.sh` locks exactly-once structurally, not by wall clock.
+- The IMDS region probe pays one timeout, not two. Where nothing answers the
+  link-local address the probe drains curl's whole budget; skip the IMDSv1 fallback
+  on that timeout and bound the connect phase. Keep both halves.
 
 ## Runtime Chart Rules
 
@@ -104,14 +112,44 @@ composition and release invariants belong to root/shared logic, not chart policy
 - Declare dind requests/limits explicitly, not through ambient LimitRange defaults.
   Under embedded BuildKit, build steps can escape the sidecar's memory cgroup:
   its configured memory remains capacity guidance, not a proven aggregate ceiling.
+- Size the runtime container's own default for the gate it runs, not for a serving
+  app: agents run `make check-gate` in it — the same ten-target gate the sidecar
+  runs during an image build. `DefaultRuntimePodMemory` and the chart's
+  `runtime.resources.limits.memory` fallback move together, and a lowered limit
+  re-creates the OOM kills that destroy an in-pod agent run and its unpushed work.
+  A cold full gate has been measured pinning a 6Gi limit (peak equal to the limit,
+  ceiling hits throughout lint) against 78% of 16384Mi with no ceiling hits, and
+  a warm one at about a quarter of it.
 - Do not write limits to a node-shared `docker/buildkit` cgroup. Standalone
   buildkitd configuration is not read by dockerd's embedded builder; daemon-wide
   cgroup-parent changes broke exec/readiness. Per-leaf caps do not prove aggregate
   isolation. Keep this memory-enforcement gap explicit.
+- BuildKit attributes its cache records and cache mounts to the daemon's own
+  engine id (moby's builder passes `ID: opt.EngineID`), which dockerd persists
+  at `<data-root>/engine-id` on the docker-state volume and reuses on every
+  later start — so a rolled pod keeps serving the cache that volume already
+  holds, `<engine-id>::<ref>` keys and all. Do not anchor a worker id in
+  `dind-entrypoint.sh`: `<buildkit>/workerid` is read only by standalone
+  buildkitd's runc/containerd workers, so writing one changes no key.
+  `dind-entrypoint.sh` carries the measured detail beside the wrapper.
 - Thread resolved environment CPU/memory limits through
   `applyDindResourceBuildArgs` into the test-stage parallel-gate overrides;
   unbounded cgroup readings must not size fan-out for the entire host.
   Report killed/resource-exhausted builds as resource failures, not lint verdicts.
+- Size the dind CPU cap from the node, never as a flat safe-looking constant:
+  a CPU limit is a ceiling, not a reservation, so a build capped well under the
+  node is throttled while the node sits idle, which is what a CPU-pressure
+  figure near 100% beside a load average far below the core count means.
+  `RuntimeDindCPULimit` (erun-common/runtime_resources.go) owns the rule — the
+  node's CPUs divided across the build-capable environments expected to be
+  building on it at once, floored at `MinimumRuntimeDindCPU` — and
+  `DefaultRuntimeDindCPU`, the chart's `runtime.dind.resources.limits.cpu`
+  fallback and the Dockerfile's `DIND_CPU_LIMIT` ARG default are three copies
+  of one number that move together (`runtime_dind_default_mirrors_test.go`).
+- Decide the desktop suite's Playwright worker count in the Makefile beside the
+  other quota-derived gate widths, never in the Dockerfile as arithmetic on
+  `DIND_CPU_LIMIT`: the two are independent decisions, and a value set in the
+  build's RUN step silently wins over the Makefile's.
 - CPU enforcement uses a distinct, tested mechanism: `dind-entrypoint.sh` mirrors
   its live `cpu.max` into a per-pod capped parent and in-pod builds pass that parent
   per invocation. Do not apply this to host builds or change daemon placement.
@@ -144,8 +182,17 @@ composition and release invariants belong to root/shared logic, not chart policy
   Enable with either a base domain or explicit apex, support explicit disable, and
   record the resolved state/reason in the status ConfigMap. Share certificate SANs
   and Secret without racing a second issuer request; DNS is separate configuration.
-  Preserve canonical OIDC origin. Nginx's SPA fallback must not return HTML for
-  missing hashed assets.
+  Preserve canonical OIDC origin. Nginx's SPA fallback must not return HTML for a
+  missing static asset: carve out any request whose final path segment carries a
+  file extension, not just the `/assets/` prefix, so a root-level file
+  (`favicon.svg`) or a probed `/favicon.ico` 404s instead of serving the shell.
+  The same fallback must not answer a conventional probe path the console does
+  not implement — a monitor's predicate is "2xx", so a shell served at `/health`
+  reports healthy unconditionally, the fail-open shape this carve-out exists to
+  remove; such paths 404 and name the endpoints that do answer (`/healthz`,
+  `/version.json`). Keep that set named rather than "any dotless path that is
+  not an app route": an unknown app route must keep serving the shell. The
+  `/v1/` proxy location takes `^~` so it stays ahead of both regex locations.
 
 ## Wrapping And Pinning Third-Party Service Images
 
@@ -190,8 +237,75 @@ composition and release invariants belong to root/shared logic, not chart policy
   is a different artifact even without source changes. Snapshot identity uses its
   stable base-snapshot value. Promotion requires every requested architecture;
   do not silently reuse an incomplete platform set.
+- **Incremental promotion never skips a Dockerfile matching the test-stage-gate
+  convention (`AS test` plus a later `COPY --from=test`), however unchanged its
+  inputs are.** A matching fp-tagged image proves the *inputs* are unchanged, not
+  that the gate ran: promoting one reports the same exit 0 as a build that actually
+  ran `make check`. Detect the convention by Dockerfile content
+  (`dockerfileHasGateTestStage`), always rebuild such a Dockerfile instead of
+  promoting it, and refuse outright if a build is ever marked both `GateTestStage`
+  and `Promote`. This is deliberately narrower than disabling the Docker build
+  cache generally: BuildKit's per-instruction layer cache inside a real
+  `docker build` is untouched. `build_gate_test_stage_test.go` locks the detection
+  and the refusal.
+- The test stage is also the definition other in-container runs of the Playwright
+  suite mirror, so its environment carries `ERUN_PLAYWRIGHT_ARTIFACTS_DIR`: the
+  suite's one artifact root (Playwright's output dir, the HTML report, every frame a
+  spec captures) pointed at a container-local path. A run that mirrors the stage by
+  bind-mounting a worktree over `/src` as root — `scripts/repro-gate-contention.sh`
+  does — otherwise leaves artifacts owned by uid 0 in a tree the environment user
+  owns, where `rm -rf` cannot remove them and every later run in that environment
+  fails with a bare `EACCES` inside whichever spec writes first, for every branch.
+  Change the value here and the mirror changes with it.
 - Previews show concrete commands for the operations selected, without adding
   build/push actions to a pure deploy.
+- **A test needing a real container runtime reaches it from a `RUN` step via the
+  BuildKit `network.host` entitlement, which `erun build` grants.** Plain
+  `docker build` refuses `RUN --network=host` with `network.host is not allowed`;
+  `docker build --allow network.host` lifts it, with no separate container-driver
+  builder instance needed. Verified live in this repo's own `remote-agent` pod: with
+  the flag, a `RUN --network=host` step reached the pod's own dind sidecar at
+  `DOCKER_HOST=tcp://127.0.0.1:2375` and ran a real container end to end.
+  `dockerBuildEntitlementArgs` passes the flag on a build whose Dockerfile declares a
+  `test` stage — the only build that has anywhere to run tests — so a component test
+  stage can depend on it. It is deliberately not passed to a Dockerfile with no
+  `test` stage: the entitlement hands a build step the *builder's* network namespace,
+  which is this environment pod's, and a production image has no use for it. Such a
+  build keeps BuildKit's default deny and fails loudly at LLB load if it asks anyway.
+  `build_network_entitlement_test.go` locks both arms and that the flag is paired with
+  its value; `build/dry_run_dockerfile_test_stage_grants_host_network_entitlement`
+  locks the granted arm end to end. The grant is a consequence of erun owning the
+  builder, not a safe default, and it must be documented as such: a `RUN
+  --network=host` step can reach the daemon that is building it, and start, stop,
+  prune or inspect the containers and images of its own build. A component's test
+  stage is trusted code running against its own environment's runtime, not a sandbox.
+- **The TCP endpoint that makes the above reachable is not deliberately wired up.**
+  It exists because the dind sidecar always runs with `DOCKER_TLS_CERTDIR=""`, and
+  the vendored `docker:*-dind` image then adds an insecure
+  `--host=tcp://0.0.0.0:2375` listener bound to *all* interfaces, with no
+  authentication, reachable by anything sharing the pod's network namespace. That is
+  a real pre-existing exposure this repo has not hardened to loopback-only.
+- **Under that entitlement a test may start its own container-runtime fixture; two
+  classes never belong in a `test` stage.** In scope: a Testcontainers-style
+  ephemeral dependency (a postgres, a compose-style sidecar) via
+  `RUN --network=host` + `DOCKER_HOST=tcp://127.0.0.1:2375` — it needs a daemon, not
+  a deployment, and the build already has one. Out of scope permanently: a test
+  needing the build's own output (`erun-ui/playwright` needs a built `erun-app`, and
+  this stage cannot depend on the `builder` stage it gates without inverting the
+  marker order), and a test asserting a deployed version (that runs after `deploy`,
+  per the `/pipeline` convention, never during build). The concrete in-scope
+  instances are `erun-backend-db/migrate_test.sh`, `retention*_test.sh`,
+  `schema_drift_test.sh`, and `erun-console/nginx_test.sh` — each needs only a real
+  docker daemon (`migrate_test.sh` additionally needs the atlas CLI, a toolchain
+  `COPY` away) — and none is migrated into a component `test` stage yet: they remain
+  the root Makefile's `test-postgres-restart`/`test-retention`/
+  `test-retention-grants`/`test-schema-drift`/`test-console-nginx` targets, run by
+  hand or via `erun exec job` before merging a change to the behavior they cover.
+  Retiring them is now blocked only by the migration itself: the entitlement above
+  has landed, so nothing but the per-component `test` stage work remains. Until that
+  lands they stay runnable only by hand or via `erun exec job`, never in `make check`
+  — see the venue note in the root Makefile, which is a real constraint rather than
+  an oversight.
 
 ## Release Workflow
 

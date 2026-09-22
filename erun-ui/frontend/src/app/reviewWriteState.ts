@@ -1,3 +1,5 @@
+import type { UIAccessRemedy } from '@/types';
+
 // State for the desktop's review write surface: the Merge Queue
 // panel's "Advance queue" action and the "Open a review" dialog. Split out
 // of state.ts to keep that file under eslint's 500-line max-lines cap, the
@@ -66,6 +68,9 @@ export interface CreateReviewDialogState {
   // failed probe, not a known restriction, so it never blocks Create.
   capabilityLoading: boolean;
   capabilityRestricted: string;
+  // capabilityRemedy is the copyable grant behind capabilityRestricted, when
+  // one was resolved: the same hand-over the not-enrolled screen makes.
+  capabilityRemedy?: UIAccessRemedy;
   capabilityError: string;
 }
 

@@ -7,7 +7,7 @@ title: Configuration overview
 ERun's configuration lives in three layers. Each layer holds different kinds of settings and is consulted at different points in the lifecycle.
 
 <figure className="erun-hero-figure">
-  <img src="/img/config-layers.svg" alt="Three configuration layer cards side by side. PER-USER (cyan-stroked) at ~/.config/erun/, edited by you / erun init / desktop, read every command, holds ERunConfig · TenantConfig · EnvConfig. PER-PROJECT (cyan-stroked) at &lt;repo&gt;/.erun/config.yaml, edited by team in PRs, read every build/push/deploy, holds ProjectConfig. PER-POD ENV VARS (charcoal) set by helm at deploy, derived automatically, read by erun in the runtime pod, examples ERUN_TENANT and ERUN_NAMESPACE." />
+  <img src="/img/config-layers.svg" alt="Three configuration layer cards side by side. PER-USER (cyan-stroked) at the per-user config root, edited by you / erun init / desktop, read every command, holds ERunConfig · TenantConfig · EnvConfig. PER-PROJECT (cyan-stroked) at &lt;repo&gt;/.erun/config.yaml, edited by team in PRs, read every build/push/deploy, holds ProjectConfig. PER-POD ENV VARS (charcoal) set by helm at deploy, derived automatically, read by erun in the runtime pod, examples ERUN_TENANT and ERUN_NAMESPACE." />
   <figcaption>At deploy time the helm chart derives the per-pod environment variables from the per-user and per-project layers.</figcaption>
 </figure>
 
@@ -17,7 +17,7 @@ For exact file paths see [Config locations](/reference/config-locations). For th
 
 ## Per-user config
 
-### `ERunConfig` (`~/.config/erun/config.yaml`) {#erunconfig}
+### `ERunConfig` (`<config-root>/config.yaml`) {#erunconfig}
 
 Global defaults that apply across all tenants.
 
@@ -40,7 +40,7 @@ Global defaults that apply across all tenants.
 The gateway catalog is one list the operator maintains and every environment selects from, rather than a per-environment setting:
 
 ```yaml
-# ~/.config/erun/config.yaml
+# <config-root>/config.yaml
 openrouter:
   baseurl: https://openrouter.ai/api
   authtokenref: claude-gateway
@@ -58,7 +58,7 @@ The **credential Secret is offered rather than recalled**: ERun settings reads t
 
 A catalog that is not yet configured **opens pre-filled from this machine's own Claude Code settings** (`~/.claude/settings.json`, or `CLAUDE_CONFIG_DIR` when set): the gateway's base URL, the model those settings run on, and the context window they declare for it. Nothing is stored by opening the dialog — the operator still saves — and a catalog already configured is never overwritten. The credential is not read from those settings at all: they hold a token *value*, while the catalog names a Secret the pod resolves.
 
-### `TenantConfig` (`~/.config/erun/<tenant>/tenant.yaml`)
+### `TenantConfig` (`<config-root>/<tenant>/config.yaml`)
 
 One per tenant.
 
@@ -70,7 +70,7 @@ One per tenant.
 | `cloudprovideraliases[]` | list of strings | `erun init`, `erun open` | Cloud provider aliases the tenant is allowed to use. |
 | `primarycloudprovideralias` | string | `erun open` (suggesting cloud bindings) | Default cloud provider alias for new envs in this tenant. |
 
-### `EnvConfig` (`~/.config/erun/<tenant>/<env>/config.yaml`) {#envconfig}
+### `EnvConfig` (`<config-root>/<tenant>/<env>/config.yaml`) {#envconfig}
 
 One per environment. This is the most-edited file.
 
@@ -89,7 +89,7 @@ One per environment. This is the most-edited file.
 | `runtimeregistry` | string | `erun open`, `erun deploy` | Per-env override for where the environment resolves ERun's own artifacts: it is the first registry the [runtime chart search](/cli/deploy#where-the-runtime-chart-comes-from) probes, and it is projected into the pod as `RUNTIME_REGISTRY` for in-pod platform image resolution. Set it with `erun init --runtime-registry <host>` when the env's `deploy`-marked registry holds only your project's own images — ERun publishes `charts/erun-devops` beside the runtime image it releases, never beside your application images. A successful deploy or `open` records the registry the runtime chart actually resolved from here, so the next search starts there — but only to fill the field in or confirm it: a value you set is never replaced by a deploy that resolved somewhere else, which is traced instead. |
 | `runtimeimage` | string | `erun open`, `erun deploy` | Points the env's runtime pod at a custom image instead of the published `<registry>/erun-devops:<version>` default. A full reference (`ghcr.io/acme/acme-runtime:1.2.3`) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>`. Set by `erun init --runtime-image`; carried to the published chart as `imageOverrides.erun-devops` on every deploy (see [Advanced chart values](#advanced-chart-values)). **Optional for a tenant that publishes its own `charts/<tenant>-devops` umbrella** — that deploy defaults the image to the umbrella's own `<tenant>-devops` image, so set `runtimeimage` only to pin a different image; an image-only env riding the shared `charts/erun-devops` chart still needs it. A value that resolves to the stock `erun-devops` image is **ignored on an umbrella deploy** (see [Advanced chart values](#advanced-image-overrides)). |
 | `runtimerunningimage` | string | `erun deploy` (healed on every deploy of the runtime chart) | Display-only memo of the runtime image a deploy last actually resolved for this env's pod — the same value that lands on the release as `imageOverrides.erun-devops`, or the chart's own stock default when no override applied. Never read back to influence a deploy's own image choice (`runtimeimage` above is the field deploy reads for that); it exists only so a reader can tell which release line `runtimeversion`'s number belongs to — ERun's own, or a tenant's own `<tenant>-devops` line, which can differ even between two environments of the same tenant. `erun list` renders it beside `runtime-version` as `<version> (<line> line, <registry>/<image>)`, flags the case where the release name and the image disagree, and reads `line undetermined` when no deploy under this field has run yet (never guessed from the tenant or release name). See [`erun list` · release lines](/cli/list#release-lines). |
-| `runtimechart` | string | `erun deploy`, `erun pin` | Names the runtime chart this env rides, as an OCI reference that may carry its own version (`oci://ghcr.io/sophium/charts/erun-devops:1.0.178`). Set it when the runtime **image** is versioned on the project’s own release line rather than ERun’s: the chart is ERun’s artifact and exists only at ERun’s versions, so deriving both from `runtimeversion` names a chart that was never published and the deploy fails `FetchReference … not found`. With the chart stated here, `runtimeversion` keeps stamping the env and tagging the image, and each artifact is named on the line it ships on — see [`erun deploy` · naming the chart and the image separately](/cli/deploy#runtime-chart-coordinate). Omit the `:<version>` suffix to name only a different registry, keeping the paired version. Empty (the default) keeps the published lookup at the runtime version, which is right whenever [`erun push`](/cli/push) published chart and image together. Overridable for one run with [`erun deploy --runtime-chart`](/cli/deploy), which is not persisted. When it names ERun's own stock `erun-devops` chart at an explicit version, [`erun pin`](/cli/pin) moves that version alongside `runtimeversion` on a re-pin; a chart naming a tenant's own line is left alone. Editable in the desktop app under an environment’s Runtime tab (**Runtime chart**). |
+| `runtimechart` | string | `erun deploy`, `erun pin` | Names the runtime chart this env rides, as an OCI reference that may carry its own version (`oci://ghcr.io/sophium/charts/erun-devops:1.0.178`). Set it when the runtime **image** is versioned on the project’s own release line rather than ERun’s: the chart is ERun’s artifact and exists only at ERun’s versions, so deriving both from `runtimeversion` names a chart that was never published and the deploy fails `FetchReference … not found`. With the chart stated here, `runtimeversion` keeps stamping the env and tagging the image, and each artifact is named on the line it ships on — see [`erun deploy` · naming the chart and the image separately](/cli/deploy#runtime-chart-coordinate). Omit the `:<version>` suffix to name only a different registry, keeping the paired version. Empty (the default) keeps the published lookup at the runtime version, which is right whenever [`erun push`](/cli/push) published chart and image together. Overridable for one run with [`erun deploy --runtime-chart`](/cli/deploy), which is not persisted. When it names ERun's own stock `erun-devops` chart at an explicit version, [`erun pin`](/cli/pin) moves that version alongside `runtimeversion` on a re-pin, and a deploy to a newer version moves it the same way (recording the chart it installed) whenever the env's runtime image rides ERun's own line; a chart naming a tenant's own line, or an env whose image is versioned on that line, keeps its stated version. Editable in the desktop app under an environment’s Runtime tab (**Runtime chart**). |
 | `mcpauthpublickeypath` | string | `erun deploy`, `erun init`, `erun open` | Path to the PEM public key the env's `erun-mcp` edge verifies bearer tokens against — the desktop `file://` path. Recorded by a deploy that enabled authentication (`erun deploy --mcp-auth-public-key <path>`, `erun init --mcp-auth-public-key <path>`) at the moment it applies the key to the cluster rather than after the rollout completes — so a rollout that fails afterwards still leaves the env naming the key its release trusts — and rethreaded by every later deploy of the runtime chart, so a plain version bump keeps the edge authenticated instead of falling back to the chart default. Cleared only by `erun deploy --no-mcp-auth`, once that unauthenticated release has rolled out. Empty means the env never had desktop MCP authentication. See [`erun deploy` · MCP edge authentication is sticky](/cli/deploy#mcp-auth-sticky). |
 | `imagepullsecrets` | list of strings | `erun deploy`, helm chart | Names Kubernetes `dockerconfigjson` secrets the runtime pod authenticates image pulls with — needed when the runtime image is a **private** registry package (e.g. a private `<tenant>-devops` umbrella image; ERun's own `erun-devops`/`erun-dind` images are public, so a default env needs none). Threaded to the chart as `imagePullSecrets[i].name`, re-scoped under the `erun-devops` subchart key for an umbrella. Empty (the default) leaves the pod pulling anonymously, so public-image envs are unaffected. Each named secret is re-minted from a host-resolved credential on every `erun deploy` when one is available (ECR via the AWS CLI, anything else via your local docker session) — see [Advanced chart values](#advanced-image-pull-secrets). For a `ghcr.io`-hosted runtime image specifically, `erun deploy` no longer needs an entry here set up front at all: it auto-provisions and appends one on its own when a credential resolves, and refuses the deploy outright when none does and the image can't be confirmed public — see [Private image pull secrets](#advanced-image-pull-secrets). |
 | `mountsource` | bool | `erun deploy` (runtime worktree storage + clone wiring), helm chart | Runtime-only opt-in for real-time patching: when true (together with `repourl`), the runtime pod gets a PVC-backed worktree it clones from `repourl` at the deployed release tag on first boot. A no-op without `repourl`, and ignored for agent envs (which already carry source). Default false keeps a runtime env sourceless (deploy-by-reference). Set from the desktop's Runtime tab → **Mount source code**. See [Environment types → Hotfix pattern](/concepts/environment-types#hotfix-pattern). |
@@ -100,16 +100,16 @@ One per environment. This is the most-edited file.
 | `upgradechannel` | string (enum) | [`erun upgrade`](/cli/upgrade) | Release channel an upgrade targets: `stable` (semver releases) or `snapshot` (latest snapshot build, or the stable release once one is published on top of it — see [`erun upgrade`](/cli/upgrade#what-opted-in-means)). Orthogonal to `type`. When unset, defaults from `type` — runtime → `stable`, agent → `snapshot`. |
 | `stopped` | bool | [`erun stop`](/cli/stop), [`erun open`](/cli/open), `erun deploy`, helm chart (`stopped`) | Records that the Operator stopped this environment. `erun stop` sets it and scales the runtime Deployment to zero; `erun open` clears it and scales back up. `deploy` renders the chart's `stopped` value from it, so the chart emits `replicas: 0` and a `helm upgrade` reconciles the stop instead of silently restarting the pod — a bare scale patch alone would be drift the next upgrade reverts. `deploy` therefore never wakes an environment; opening it does. Clearing the field is an Operator gesture: `erun open --reconnect`, the form a supervisor uses to re-establish a dropped session, leaves it set (see [`erun open`](/agent-reference/cli-flags#erun-open)), so a stop is not erased by the reconnects the stop itself triggers. Default false. |
 | `runtimepod.cpu` | string | helm chart (`runtime.resources.limits.cpu`) | CPU limit for the runtime pod (e.g. `4`, `500m`). |
-| `runtimepod.memory` | string | helm chart (`runtime.resources.limits.memory`) | Memory limit (e.g. `8916Mi`, `2Gi`). |
-| `runtimedindpod.cpu` | string | helm chart (`runtime.dind.resources.limits.cpu`) | CPU limit for the `erun-dind` sidecar — the container that actually runs `erun build`/`erun release`, independent of `runtimepod.cpu`. Default `4`. Set with `erun init --dind-cpu` / `erun resize --dind-cpu`. |
-| `runtimedindpod.memory` | string | helm chart (`runtime.dind.resources.limits.memory`) | Memory limit for the `erun-dind` sidecar — every image build's `make check` gate runs here, and a single run alone can peak well above the runtime pod's own default. Default `20Gi`; raise it further if a release still reports resource exhaustion inside the sidecar. Set with `erun init --dind-memory` / `erun resize --dind-memory`. |
+| `runtimepod.memory` | string | helm chart (`runtime.resources.limits.memory`) | Memory limit (e.g. `16384Mi`, `2Gi`). Default `16384Mi`: agents run `make check-gate` in this container, which is the same ten-target gate the `erun-dind` sidecar runs during an image build (see the row below). Trim it for an env that only serves an app; raise it with `erun resize --memory` if the cgroup reports OOM kills. |
+| `runtimedindpod.cpu` | string | helm chart (`runtime.dind.resources.limits.cpu`) | CPU limit for the `erun-dind` sidecar — the container that actually runs `erun build`/`erun release`, independent of `runtimepod.cpu`. Default `12`, which is a sizing rule rather than a fixed number: the node's CPUs divided across the build-capable environments erun expects to be building on it at once, floored at `4` (see [Sizing the build CPU cap](/concepts/runtime-pods#sizing-the-build-cpu-cap)). A limit is a ceiling, not a reservation, so size it for the node — a cap well under the node throttles the build while the node sits idle. Set with `erun init --dind-cpu` / `erun resize --dind-cpu`. |
+| `runtimedindpod.memory` | string | helm chart (`runtime.dind.resources.limits.memory`) | Memory limit for the `erun-dind` sidecar — every image build's `make check` gate runs here, against a measured peak the runtime container's own default is sized from. Default `20Gi`; raise it further if a release still reports resource exhaustion inside the sidecar. Set with `erun init --dind-memory` / `erun resize --dind-memory`. |
 | `sshd.enabled` | bool | `erun open`, chart (SSH port-forward setup) | Whether the in-pod SSH server is exposed via port forward. Needed for IDE attach. |
 | `sshd.localport` | int | `erun open` | Local port the desktop binds for the SSH forward. `0` = auto-allocate. |
 | `sshd.publickeypath` | string | `erun open --vscode`, `erun open --intellij`, SSH key sync | Path to the SSH public key authorized for the env. |
 | `sshd.workspacesync.enabled` | bool | desktop workspace-sync poller | Mirror a local folder into the runtime workspace. |
 | `sshd.workspacesync.localpath` | string | desktop workspace-sync poller | The local folder to mirror. |
 | `deploy.timeout` | duration (e.g. `5m0s`) | `erun deploy`, `erun upgrade` (helm `--timeout`) | Per-env helm rollout wait. How long `deploy` waits for the rollout to become ready before helm times out; the [pod monitor](/agent-reference/cli-flags#rollout-wait-and-pod-monitoring) keeps waiting up to this bound while an image is still pulling and aborts earlier on a real failure. Unset → `5m0s`. Overridden per-deploy by `--rollout-timeout` / the MCP `deploy` `timeout` input. A malformed value fails the deploy. |
-| `deploy.components` | list | `erun deploy` | Per-machine saved deploy selection: the charts `erun deploy` rolls out for this env by default (chart directory names under `<tenant>-devops/k8s/`, plus the runtime release name `<tenant>-devops`). Set it with `erun init --components <a,b,…>`, or from the desktop app's Runtime-tab checklist (inside the Version-to-deploy picker, gated until you pick a version, "Set as default"). It is a **published-version view, the same for every env type**: once you pick a version it offers the component charts actually published at that version (plus the runtime) — the version, not the env's local source, decides which charts exist, so a version that never published a chart doesn't list it, and a local-agent env shows the same published components as a runtime env rather than its local working-tree chart directories. (Deploying local working-tree charts by name stays available to an operator via the CLI.) Deploy is opt-in: `--components` overrides this per run; when both are empty, deploy falls back to the project's [`k8s.deployments`](#per-project-config) plan, then to the runtime chart alone. See [selection precedence](/agent-reference/cli-flags#components-value-set). Empty → no saved selection. Because a saved selection wins over the plan permanently and tiers never merge, a plain deploy (no `--components`) sourced from the saved set **refuses** whenever the plan names something the saved set omits, tracing `deploy: saved components shadow the repo plan; plan also names <a, b, …>` and naming the fix: adopt the addition with `erun init --components <a,b,…>`, or clear the saved selection with `erun init --components ''` to return to the plan outright. `--components` passed explicitly for that one run bypasses the refusal (and the saved selection) entirely. |
+| `deploy.components` | list | `erun deploy` | Per-machine saved deploy selection: the charts `erun deploy` rolls out for this env by default (chart directory names under `<tenant>-devops/k8s/`, plus the runtime release name `<tenant>-devops`). Set it with `erun init --components <a,b,…>`, or from the desktop app's Runtime-tab checklist (inside the Version-to-deploy picker, gated until you pick a version, "Set as default"). It is a **published-version view, the same for every env type**: once you pick a version it offers the component charts actually published at that version (plus the runtime) — the version, not the env's local source, decides which charts exist, so a version that never published a chart doesn't list it, and a local-agent env shows the same published components as a runtime env rather than its local working-tree chart directories. (Deploying local working-tree charts by name stays available to an operator via the CLI.) Unchecking every chart in the checklist is not the same as leaving the selection unspecified: the checklist refuses an empty selection rather than let it fall through to the runtime chart alone, so its Deploy stays disabled with the reason named until at least one chart is checked. Deploy is opt-in: `--components` overrides this per run; when both are empty, deploy falls back to the project's [`k8s.deployments`](#per-project-config) plan, then to the runtime chart alone. See [selection precedence](/agent-reference/cli-flags#components-value-set). Empty → no saved selection. Because a saved selection wins over the plan permanently and tiers never merge, a plain deploy (no `--components`) sourced from the saved set **refuses** whenever the plan names something the saved set omits, tracing `deploy: saved components shadow the repo plan; plan also names <a, b, …>` and naming the fix: adopt the addition with `erun init --components <a,b,…>`, or clear the saved selection with `erun init --components ''` to return to the plan outright. `--components` passed explicitly for that one run bypasses the refusal (and the saved selection) entirely. |
 | `idle.timeout` | duration (e.g. `5m0s`) | chart (`ERUN_IDLE_TIMEOUT`), in-pod idle monitor | How long the env must be quiet before idle-stop fires. |
 | `idle.workinghours` | string (`HH:MM-HH:MM`) | chart (`ERUN_IDLE_WORKING_HOURS`), idle monitor | Window during which idle-stop is allowed to fire. |
 | `idle.timezone` | string | chart (`ERUN_IDLE_TIMEZONE`), idle monitor | Time zone for `workinghours`. |
@@ -156,12 +156,14 @@ Committed to the repo, applies to anyone who checks it out. A gitignored copy de
 | `environments.<env>.docker.fingerprints` | map | `erun build`, `erun build --release` | Per-image content fingerprints from the last published build. Drives the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache). |
 | `docker.platforms` | list | `erun build`, `erun push` | Project-wide default for the `docker --platform` targets of a non-release build/push (e.g. `[linux/amd64]`), inherited by every environment that declares no `platforms` of its own — for a project whose machines can only ever run one architecture. Declare it once here instead of repeating it per environment, which silently leaves any environment nobody listed on the multi-arch build. Never applies to `erun build --release` / `erun release`, which always build every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 | `environments.<env>.docker.platforms` | list | `erun build`, `erun push` | Pins the `docker --platform` targets for a non-release build/push in this env (e.g. `[linux/amd64]`), overriding the project-wide `docker.platforms` default. An explicit empty list (`platforms: []`) opts this env out of that default and keeps the multi-arch build — the escape hatch for a generic env name like `local` that can belong to a machine of any architecture. `--platform` on the command line overrides both for one invocation. Never applies to `erun build --release` / `erun release`. See [Multi-architecture](/cli/build#multi-architecture). |
+| `docker.secrets` | list | `erun build`, `erun push`, `erun build --release` | Project-wide default for the [BuildKit build secrets](#build-secrets) every build receives, inherited by every environment that declares no `secrets` of its own. Each entry is `{id, env}` or `{id, src}`. |
+| `environments.<env>.docker.secrets` | list | `erun build`, `erun push`, `erun build --release` | Pins the build secrets for builds in this env, overriding the project-wide `docker.secrets` default. An explicit empty list (`secrets: []`) opts this env out of that default. |
 | `environments.<env>.k8s.deployments[]` | ordered list | `erun deploy` | The ordered deploy plan for this env. Each step is either a single component name or a list of names deployed in parallel. |
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
 | `release.developbranch` | string | `erun release` | Develop branch name (default `develop`). |
 | `platform` | map | `erun deploy` (PowerDNS), `erun expose` | Per-instance platform deployment config. Absent for non-platform projects. See [`platform:` block](#platform-block). |
-| `paths` | map | `erun build`, `erun push`, `erun deploy`, `erun terraform` | Overrides where erun discovers the devops assets — the `docker/` and `k8s/` folders, the `terraform-<tenant>` root, and the `VERSION` file. Absent → the conventional layout. See [`paths:` block](#paths-block). |
-| `components` | map | `erun build`, `erun push`, `erun deploy` | Declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s` root. Absent → `paths:` is the project's only root, unchanged. See [`components:` block](#components-block). |
+| `paths` | map | `erun build`, `erun push`, `erun deploy`, `erun e2e`, `erun terraform` | Overrides where erun discovers the devops assets — the `docker/`, `k8s/`, and `playwright/` folders, the `terraform-<tenant>` root, and the `VERSION` file. Absent → the conventional layout. See [`paths:` block](#paths-block). |
+| `components` | map | `erun build`, `erun push`, `erun deploy`, `erun e2e` | Declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s`/`playwright` root. Absent → `paths:` is the project's only root, unchanged. See [`components:` block](#components-block). |
 
 #### `paths:` block {#paths-block}
 
@@ -176,6 +178,7 @@ Every field is optional; an unset field keeps the conventional location. A confi
 | `k8s` | string | `<tenant>-devops/k8s` | Directory (named `k8s`) whose subdirectories are the per-component Helm charts (`<k8s>/<component>/Chart.yaml`). Read by `erun deploy`, and by `erun build` for chart packaging. |
 | `terraform` | string | `terraform-<tenant>` or `<tenant>-devops/terraform-<tenant>` | Base directory under which the per-environment Terraform roots live; erun still appends `/<environment>`. Read by `erun terraform`, which by convention checks `terraform-<tenant>/` then `<tenant>-devops/terraform-<tenant>/` (the same `-devops` discovery as `docker`/`k8s`) before this override is needed. |
 | `version` | string | walk up from the build dir to the project root | Path to the `VERSION` file that mints the build version. A directory resolves to `<dir>/VERSION`. Read by `erun build` / `erun push` / `erun release`. |
+| `playwright` | string | `<tenant>-devops/playwright` | Directory (named `playwright`) holding the project's e2e suite — either a Playwright project directly, or per-component subdirectories (`<playwright>/<component>/playwright.config.ts`) mirroring `docker`/`k8s`. Read by `erun e2e`. |
 
 ```yaml
 # <repo>/.erun/config.yaml — a devops repo that holds the folders at its root
@@ -188,14 +191,14 @@ paths:
 
 **Error behaviour.** A configured override that does not resolve fails the command (exit code 1) rather than silently falling back to convention:
 
-- `paths.docker` / `paths.k8s` pointing at a directory that is missing, not named `docker`/`k8s`, or holding no build contexts / charts → `configured docker path "<p>" (.erun/config.yaml paths.docker) is not a docker build module: …` (and the `k8s` analogue).
+- `paths.docker` / `paths.k8s` / `paths.playwright` pointing at a directory that is missing, not named `docker`/`k8s`/`playwright`, or holding no build contexts / charts / suites → `configured docker path "<p>" (.erun/config.yaml paths.docker) is not a docker build module: …` (and the `k8s`/`playwright` analogues).
 - `paths.terraform` with no `<base>/<environment>/` directory → `no Terraform root at <dir> … the .erun/config.yaml paths.terraform base "<p>" must contain a <env>/ dir …`.
 - `paths.version` pointing at a missing file → `configured version file <p> (.erun/config.yaml paths.version) not found`.
 - `paths.dockercontext` set to anything other than `repo-root` or `component` → `invalid docker context "<v>" (.erun/config.yaml paths.dockercontext): expected "repo-root" or "component"`.
 
 #### `components:` block {#components-block}
 
-The `components:` block declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s` root — a repo shaped like `harnesses/<name>/{docker,k8s}`, where each harness carries its own `docker/`, `k8s/`, and `VERSION`. `paths:` cannot express this: it is a single, project-global root, so a repo with N independent harnesses could commit only one of them at a time. `components:` is additive — present only for a repo that needs it — and each entry is exactly `paths:`-shaped (`docker`, `dockercontext`, `k8s`, `terraform`, `version`), reusing the same fields and resolution rules documented above. A project with no `components:` map keeps resolving through `paths:` exactly as before this block existed.
+The `components:` block declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s` root — a repo shaped like `harnesses/<name>/{docker,k8s}`, where each harness carries its own `docker/`, `k8s/`, and `VERSION`. `paths:` cannot express this: it is a single, project-global root, so a repo with N independent harnesses could commit only one of them at a time. `components:` is additive — present only for a repo that needs it — and each entry is exactly `paths:`-shaped (`docker`, `dockercontext`, `k8s`, `terraform`, `version`, `playwright`), reusing the same fields and resolution rules documented above. A project with no `components:` map keeps resolving through `paths:` exactly as before this block existed.
 
 ```yaml
 # <repo>/.erun/config.yaml — a monorepo of independent harnesses
@@ -288,7 +291,7 @@ The helm chart writes these into the runtime pod at deploy time. They're derived
 
 The runtime chart accepts more values than erun manages. At deploy time erun passes two layers to `helm upgrade --install`:
 
-1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing. Environments that deploy the [published `erun-devops` chart](/cli/deploy#where-the-runtime-chart-comes-from) have no local chart directory; for them the overlay lives next to the env's config at `<UserConfigDir>/erun/<tenant>/<environment>/values.yaml` (e.g. `~/.config/erun/<tenant>/<environment>/values.yaml` on Linux) and is optional — when absent, the chart defaults plus erun's `--set` list fully describe the deploy.
+1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing. Environments that deploy the [published `erun-devops` chart](/cli/deploy#where-the-runtime-chart-comes-from) have no local chart directory; for them the overlay lives next to the env's config at `<UserConfigDir>/erun/<tenant>/<environment>/values.yaml` (e.g. `<config-root>/<tenant>/<environment>/values.yaml` on Linux) and is optional — when absent, the chart defaults plus erun's `--set` list fully describe the deploy.
 2. erun's own `--set`/`--set-string` list, derived from `EnvConfig` and the resolved plan.
 
 Helm gives `--set` precedence over `-f`, so for every key erun manages the overlay can never win. The keys below are exactly the ones erun's `--set` list never includes — for them the `values.<env>.yaml` overlay is authoritative, which makes it the supported escape hatch for behaviour erun doesn't model.
@@ -437,6 +440,50 @@ A `deploy` registry need not also carry `build` or `to`: the image it serves may
 
 **Migration:** a legacy single `containerregistry: X` scalar (project or env config) is read once as a one-entry list `[{registry: X, roles: [build, deploy]}]` and rewritten in the list shape on the next save.
 
+### Build secrets {#build-secrets}
+
+A build step sometimes needs a credential that must not be baked into the image — a token to pull a chart from a registry that is not anonymously readable, for instance. `docker.secrets` hands it to the build as a [BuildKit secret](https://docs.docker.com/build/building/secrets/), so it is available to a `RUN` through a secret mount and is neither written into a layer nor left in the image history.
+
+Declare each secret by the **id** the Dockerfile mounts, plus where its value comes from:
+
+```yaml
+docker:
+    secrets:
+        - id: ghcr
+          env: GHCR_TOKEN
+        - id: chart-repo-config
+          src: /home/you/.config/acme/docker-config.json
+```
+
+- `env: <VAR>` reads the credential from the environment variable `VAR`.
+- `src: <path>` reads it from a file on the machine running the build.
+
+Exactly one of the two per entry. In the Dockerfile, mount it by that same id:
+
+```dockerfile
+RUN --mount=type=secret,id=ghcr \
+    HELM_REGISTRY_CONFIG=/run/secrets/ghcr helm pull oci://ghcr.io/acme/charts/private
+```
+
+**The list resolves per environment**, in the same order as `docker.platforms`:
+
+1. `environments.<env>.docker.secrets` (per-project, per-env override).
+2. `docker.secrets` (per-project, top-level default).
+3. None declared anywhere → the build receives no secrets and its `docker build` command is unchanged.
+
+An explicit empty list (`secrets: []`) opts an environment out of the project-wide default.
+
+**Only a reference is ever put on the command line** — `--secret id=<id>,env=<VAR>` or `--secret id=<id>,src=<path>`, never the credential itself. docker reads the value from its own environment or from the file it is handed, so no secret value is stored, traced, or logged by erun. A `src:` path and an `env:` variable name are visible in `erun build --dry-run` output and in build traces; the values behind them are not.
+
+**A declared secret that cannot be supplied fails the build**, naming the entry and the missing variable or path:
+
+```
+docker.secrets entry "ghcr" needs the environment variable GHCR_TOKEN, which is not set:
+set it, or point the entry at a file with `src:`
+```
+
+That is deliberate. A Dockerfile typically guards secret-dependent work with `if [ -f /run/secrets/<id> ]`, so a secret that silently fails to arrive would make the build **skip** that work and still exit zero — reporting success having verified less than the project asked for. Failing loudly is the only outcome that cannot be mistaken for a passing check.
+
 ### Deploy chart source {#deploy-chart-source}
 
 `erun deploy` installs charts **by reference from the published registry** — the runtime chart (`oci://<registry>/charts/erun-devops` + `imageOverrides.erun-devops`) and each selected platform component (`oci://<registry>/charts/erun-<component>`), threading `tenant`/`environment` and the env's config as top-level `--set`. A **runtime env needs no local source**: its worktree is `none`, and components deploy by reference (release-named `<tenant>-<component>`, in default-rank order), so the deploy runs from anywhere — the operator's machine or the control plane. When the env's repo *is* local (an agent env, or an in-pod checkout for real-time patching) and carries a chart for a selected component, that local chart is used instead — the optional patch path.
@@ -470,7 +517,7 @@ For Docker build context / version resolution, see [Build path resolution](/refe
 
 A handful of operations can run either as a subprocess shelling out to a CLI (`aws`, and more tools over time) or through an equivalent Go library call. Both paths trace the identical CLI-equivalent command for `--dry-run`/audit purposes, and produce the same result — the switch only changes what actually executes.
 
-`execution.modes` in `~/.config/erun/config.yaml` is a map from operation name to mode:
+`execution.modes` in `<config-root>/config.yaml` is a map from operation name to mode:
 
 ```yaml
 execution:

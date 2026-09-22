@@ -55,8 +55,8 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--runtime-registry <host>` | string (registry host, optional org path) | unset — the [runtime chart search](#deploy-runtime-chart-search) then resolves ERun's artifacts from the env's `deploy`-marked registry, widening to the runtime image's registry when the chart is not there. | Recorded verbatim (trimmed); no scheme, no `charts/` suffix. | `EnvConfig.runtimeregistry`, which the chart search and the in-pod `RUNTIME_REGISTRY` projection both honour first. Init's own runtime deploy sees it in the same run, so it is also the recovery path for an env that cannot complete a deploy. It is the only writer that replaces the field: a deploy records the registry its chart search resolved at, but only when the field is empty or already agrees — a value set here survives a deploy that resolved elsewhere, which traces `deploy: the env's runtime registry <recorded> stands; the runtime chart resolved from <resolved> instead (…)` rather than overwriting it. |
 | `--bootstrap` | bool | `false` | — | **Deprecated, ignored.** Prints a deprecation warning; `init` no longer scaffolds a `<tenant>-devops/` module — envs deploy the published `erun-devops` chart. |
 | `--runtime-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimepod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
-| `--runtime-memory <value>` | Kubernetes quantity | A **new** env takes `8916Mi`; an **existing** env keeps `EnvConfig.runtimepod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. Merges with `--runtime-cpu` the same way. |
-| `--dind-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimedindpod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimedindpod.cpu` — the `erun-dind` sidecar's own limit, independent of `--runtime-cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
+| `--runtime-memory <value>` | Kubernetes quantity | A **new** env takes `16384Mi`; an **existing** env keeps `EnvConfig.runtimepod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. Merges with `--runtime-cpu` the same way. Sized for an in-pod `make check-gate` (the same ten-target gate the `erun-dind` sidecar runs during an image build), so an env that only serves an app can be trimmed below it. |
+| `--dind-cpu <value>` | Kubernetes quantity | A **new** env takes `12`; an **existing** env keeps `EnvConfig.runtimedindpod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimedindpod.cpu` — the `erun-dind` sidecar's own limit, independent of `--runtime-cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. Unlike `--runtime-cpu`, this default is a sizing rule rather than a constant (`eruncommon.RuntimeDindCPULimit`: the node's CPUs divided across the build-capable environments expected to be building on it at once, floored at `4`), because a limit is a ceiling and not a reservation — see [Sizing the build CPU cap](/concepts/runtime-pods#sizing-the-build-cpu-cap). |
 | `--dind-memory <value>` | Kubernetes quantity | A **new** env takes `20Gi`; an **existing** env keeps `EnvConfig.runtimedindpod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimedindpod.memory`. Merges with `--dind-cpu` the same way. Raise this when a multi-arch `erun release`/`erun build --release` OOMs inside the sidecar — every image build runs there, not in the runtime container. |
 | `--codecommit-ssh-key-id <id>` | string (`APKA…` shape) | unset | Must start with `APKA`; must be a valid IAM key id (length 21). | Stored in the in-pod bootstrap marker (`bootstrap.yaml` → `codecommitSshKeyId`). |
 | `--confirm-environment` | bool | `false` | — | Equivalent to `-y` for the env-overwrite confirmation only. |
@@ -95,8 +95,8 @@ An env created by this same run skips the reconcile entirely — it was written 
 
 `erun init` writes these files in this order:
 
-1. `~/.config/erun/<tenant>/tenant.yaml` (creating `~/.config/erun/<tenant>/` if missing).
-2. `~/.config/erun/<tenant>/<env>/config.yaml`.
+1. `<config-root>/<tenant>/config.yaml` (creating `<config-root>/<tenant>/` if missing).
+2. `<config-root>/<tenant>/<env>/config.yaml`.
 3. `<projectroot>/.erun/config.yaml`. Existing values are preserved; new defaults are merged.
 4. Helm-installs the runtime chart into the namespace `<tenant>-<environment>` — the repo-local chart when the project has one, otherwise the published `oci://<registry>/charts/erun-devops` chart pinned to the runtime version (see [`erun deploy`](/cli/deploy#where-the-runtime-chart-comes-from)).
 5. With `--remote`: writes the in-pod marker at `/home/erun/.erun/<tenant>/<env>/bootstrap.yaml`.
@@ -165,7 +165,7 @@ An env created by this same run skips the reconcile entirely — it was written 
 
 | Code | Cause | Exit code |
 |---|---|---|
-| `TENANT_NOT_CONFIGURED` | Resolved tenant has no `~/.config/erun/<tenant>/tenant.yaml`. | `1` |
+| `TENANT_NOT_CONFIGURED` | Resolved tenant has no `<config-root>/<tenant>/config.yaml`. | `1` |
 | `HOST_ENV_NO_SHELL` | The environment is a [host env](/concepts/environment-types#host) — no pod and no cluster to open a kubectl-exec shell into. Checked before every other step (before `KUBE_CONTEXT_MISSING`, before any port-forward). Message names the worktree directory to open directly instead. | `1` |
 | `KUBE_CONTEXT_MISSING` | `EnvConfig.kubernetescontext` is absent from `~/.kube/config`. | `1` |
 | `CLUSTER_UNREACHABLE` | Cluster API does not respond after 5 minutes. | `2` |
@@ -349,7 +349,7 @@ The dry-run trace names the decision per spec: `deploy: version <v> pinned; inst
 A tenant that publishes its own artifacts ships **umbrella** charts — the runtime `<tenant>-devops` and each `<tenant>-<component>` — that wrap the canonical `erun-<base>` chart as a subchart (dependency name `erun-<base>`, no alias; the `erun-build-env` / `erun-blueprint-platform` pattern). helm does **not** pass top-level `--set` values into subchart scope, so a by-reference deploy of such a chart would leave the wrapped subchart's `{{ required }}` `tenant`/`environment` unset (`tenant is required` at render). Deploy closes that gap for any chart it installs by reference whose name is tenant-prefixed (not the canonical `erun-<base>`):
 
 1. **Re-scopes the threaded `--set`s** under the subchart key `erun-<base>` (`--set-string erun-backend-api.tenant=<t>`, …), so every value erun resolves at deploy time — `tenant`/`environment`, ports, cloud context, MCP auth, `imageOverrides`, registry — reaches the wrapped subchart exactly as it would a chart installed directly. A canonical `erun-<base>` chart installed directly (the `erun` product tenant, or an explicitly selected `erun-*` chart) is **not** re-scoped — its top-level `--set`s already reach it.
-2. **Applies the chart's bundled `values.<env>.yaml`.** Before the rollout, deploy runs `helm pull <ref> --version <v> --untar --untardir <tmp>` and adds `-f <tmp>/<chart>/values.<env>.yaml`, forwarding the tenant's own authored per-env subchart values (pod-shape: `extraContainers`/`extraVolumes`/`extraEnv`/`extraRules`, and any overrides authored under the subchart key). This is the by-reference analogue of a worktree deploy's local `values.<env>.yaml`. The file is `-f`'d **before** any config-dir overlay (`~/.config/erun/<tenant>/<env>/values.yaml`), and the re-scoped `--set`s win over both — so erun-resolved values are authoritative and a key authored in the bundled file that erun also threads (e.g. `api.oidcAllowedIssuers`) is owned by erun, not the file.
+2. **Applies the chart's bundled `values.<env>.yaml`.** Before the rollout, deploy runs `helm pull <ref> --version <v> --untar --untardir <tmp>` and adds `-f <tmp>/<chart>/values.<env>.yaml`, forwarding the tenant's own authored per-env subchart values (pod-shape: `extraContainers`/`extraVolumes`/`extraEnv`/`extraRules`, and any overrides authored under the subchart key). This is the by-reference analogue of a worktree deploy's local `values.<env>.yaml`. The file is `-f`'d **before** any config-dir overlay (`<config-root>/<tenant>/<env>/values.yaml`), and the re-scoped `--set`s win over both — so erun-resolved values are authoritative and a key authored in the bundled file that erun also threads (e.g. `api.oidcAllowedIssuers`) is owned by erun, not the file.
 
 The dry-run trace shows the `helm pull … --untar` line before the `helm upgrade` line; the temp dir is removed after the rollout. Local (worktree) deploys are unchanged: a local runtime umbrella re-scopes via its Chart.yaml `erun-devops` dependency and `-f`s its worktree `values.<env>.yaml`; a local component umbrella `-f`s its worktree `values.<env>.yaml` (which is why authoring the nested subchart values there is still required for the worktree path).
 
@@ -556,8 +556,8 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 
 | Check id | What it inspects | Recovery if missing |
 |---|---|---|
-| `config.tenant` | `~/.config/erun/<tenant>/tenant.yaml` exists and parses. | Suggests `erun init <tenant>`. |
-| `config.environment` | `~/.config/erun/<tenant>/<env>/config.yaml` exists and parses. | Suggests `erun init <tenant> <env>`. |
+| `config.tenant` | `<config-root>/<tenant>/config.yaml` exists and parses. | Suggests `erun init <tenant>`. |
+| `config.environment` | `<config-root>/<tenant>/<env>/config.yaml` exists and parses. | Suggests `erun init <tenant> <env>`. |
 | `config.project` | `<projectroot>/.erun/config.yaml` exists. | Suggests `erun init`. |
 | `cluster.kube_context` | `EnvConfig.kubernetescontext` is in `~/.kube/config`. | Lists available contexts. |
 | `cluster.runtime_pod` | A pod matching the runtime-chart's labels is `Running` in `<tenant>-<env>`. | Suggests `erun open`. |
@@ -656,7 +656,9 @@ The MCP `list` tool exposes the same behavior as `controlPlanes` (bool) and `pre
 
 Every configured cloud-provider alias with `provider: erun` is treated as a control plane. For each one, the command calls that plane's own unauthenticated `GET /v1/platform` to read its deployed `version`; a plane that does not answer (network failure, non-2xx) is reported `reachable: false` with `unreachableReason` set, and never gets a `behind`/`ahead` verdict — an unreachable plane is never reported current. The published baseline comes from the same registry lookup `erun pin`/`erun upgrade` already use (`ResolveDefaultRuntimeRegistryVersions`, erun's own `ghcr.io/sophium/erun-devops` image tags) rather than a hand-maintained list, so it can never drift from what erun has actually shipped.
 
-**Each reachable plane's own `GET /v1/platform` response also names its linked console's URL** (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias). When that field is non-empty, the command additionally calls the console's own unauthenticated `GET /version.json` (a static file `erun-devops/docker/erun-console`'s image stamps from `ERUN_VERSION` at build time — the console's counterpart to the API's `-ldflags`-baked version) and reports the result nested under the plane as a `console` field (`ConsoleVersionStatus`: `url`, `reachable`, `unreachableReason`, `version`, `behind`, `ahead` — the same shape and the same published baseline as the plane's own fields). A plane whose response carries no `consoleUrl` gets no `console` field at all (omitted from JSON, no `console:` line in text), never a guessed one. The plane's own reachability and the console's are independent: a reachable plane can have an unreachable console and vice versa.
+**Each reachable plane's own `GET /v1/platform` response also names its linked console's URL** (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias). When that field is non-empty, the command additionally calls the console's own unauthenticated `GET /version.json` (a static file `erun-devops/docker/erun-console`'s image stamps from `ERUN_VERSION` at build time — the console's counterpart to the API's `-ldflags`-baked version) and reports the result nested under the plane as a `console` field (`ConsoleVersionStatus`: `url`, `reachable`, `unreachableReason`, `version`, `reason`, `behind`, `ahead` — the same shape and the same published baseline as the plane's own fields). A plane whose response carries no `consoleUrl` gets no `console` field at all (omitted from JSON, no `console:` line in text), never a guessed one. The plane's own reachability and the console's are independent: a reachable plane can have an unreachable console and vice versa.
+
+The console check distinguishes a transport failure from a content failure, because they point at different remedies. A request that never gets an HTTP response (connection refused, DNS failure, TLS failure, timeout) is `reachable: false` with `unreachableReason` set, same as the plane's own check. A request that *does* get an HTTP response, but the body isn't the expected `{"version": "..."}` JSON document — most commonly an SPA's `index.html` served by a wildcard fallback route for a console build whose nginx config doesn't yet exact-match `/version.json` — is reported `reachable: true`, `version: "unknown"`, with `reason` naming the HTTP status code and `Content-Type` it actually served (e.g. `/version.json returned 200 text/html (expected application/json)`). The console answered, so it is never folded into `reachable: false`; it also never gets a `behind`/`ahead` verdict, since there is no parsed version to compare. `reason` is only ever set alongside `reachable: true` and an unparseable `version`; it is distinct from `unreachableReason`, which is only ever set alongside `reachable: false`.
 
 ```
 $ erun list --control-planes
@@ -664,6 +666,12 @@ published version: 1.0.247
 Control planes:
   - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
     console: url="https://console.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+```
+
+A console serving the wrong document instead prints:
+
+```
+    console: url=https://console.erunpaas.com reachable=yes version=unknown reason=/version.json returned 200 text/html (expected application/json)
 ```
 
 `behind` is set only when both the deployed version and the registry's published latest stable parse as plain three-part semver, and the deployed version orders strictly *below* the published one — routine drift, the deployable simply hasn't been rolled onto an already-published release yet. `ahead` is the opposite order: the deployable is running something the registry has never published at all, reported distinctly because it is a more alarming condition than routine drift (an unpublished build reached a live deployable some other way), never folded into `behind`. Neither is set when the registry lookup itself failed (`publishedVersionError`, printed as `published version: unresolved (<reason>)`) or either version fails to parse as plain semver — absent evidence is reported explicitly rather than guessed at. This applies identically to a plane's own fields and to its nested `console` fields, since both compare against the one published baseline the report resolves once per run.
@@ -770,13 +778,24 @@ Resolves tenant/environment/namespace the same way every other typed command doe
   "tenant": "myapp", "environment": "prod",
   "cpu": { "quotaCores": 1, "utilizationPercent": 12.4, "intervalSeconds": 1 },
   "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
-  "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ],
+  "disk": [ { "mount": "/home/erun", "nodeShared": true, "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0, "ownUsedBytes": 45097156608, "ownUsageObserved": true } ],
   "warnings": [],
-  "excludesBuilds": true
+  "excludesBuilds": true,
+  "sizing": {
+    "knob": "runtimepod",
+    "verdicts": [
+      { "resource": "memory", "action": "hold", "current": "2048Mi", "reason": "peak 1010Mi of 2048Mi (49%) leaves no room to shrink at 1.5x headroom" },
+      { "resource": "cpu", "action": "insufficient-evidence", "current": "1", "reason": "n/a of scheduling periods throttled (0 of 0), but only 4m observed of the 24h0m a shrink needs" }
+    ],
+    "evidence": { "observedSeconds": 240, "samples": 8, "restarts": 0, "memoryLimitBytes": 2147483648, "observedPeakMemoryBytes": 1059061760, "observedOomKills": 0, "cpuQuotaMilli": 1000, "signals": ["cgroup memory.peak", "cgroup memory.events oom_kill", "cgroup cpu.stat usage_usec/nr_throttled"] }
+  }
 }
 ```
 
 `cpu.quotaCores` is `cpu.max`'s quota ÷ period; `memory.percentOfLimit` is `memory.current` ÷ `memory.max`; `disk[].percentUsed` is `df`'s used ÷ total for the watched mount (the runtime chart's `HOME`, `/home/erun`, is the only mount watched today). `warnings` is omitted (empty) unless a threshold below is crossed.
+
+**`disk[].totalBytes`/`usedBytes`/`percentUsed` describe the node, not this environment (`nodeShared: true`).** `df` statfs's the whole mount, which every environment scheduled on the same node shares — two environments on the same node report the identical total/used/percent even though only one of them may actually be filling it. `disk[].ownUsedBytes` (a `du` of the watched mount, scoped to this environment's own directory tree, bounded to 30s) is the figure this environment can actually reduce by cleaning up its own files; `ownUsageObserved` distinguishes a genuine reading from `du` timing out or being unreadable, the same pattern `memory.peak`'s `peakObserved` already uses.
+`sizing` is the environment's standing sizing recommendation — the same `knob`/`verdicts`/`evidence` contract [`erun list`](/cli/list#the-sizing-recommendation) reports under `runtime-pod:`, and the same one the `resize` tool applies. It is omitted only when there is nothing observed to reason from at all. The reading above is folded into the retained history as one further observation before the verdicts are computed, so `sizing` and `warnings` are always derived from the same counters in the same call and cannot contradict each other; a memory warning therefore always carries a `memory` verdict whose `action` is `raise`. `evidence.samples` counts the reading itself when no history was retained alongside it.
 
 `excludesBuilds` is `true` whenever the environment's type carries the `erun-dind` sidecar (every type except `runtime` and `host` — `EnvironmentType.UsesDindSidecar`), omitted (false) otherwise. `cpu`/`memory` above are read from the `erun-devops` container's own cgroup alone; an image build (`erun build`/`erun release`) actually runs in `erun-dind`, a separate cgroup whose build containers are cgroup siblings rather than descendants of this one, so there is no path from inside `erun-devops` to read them. `excludesBuilds` names that gap explicitly rather than let a busy build read as an idle environment — the same disclosure the desktop's Runtime tab caption makes (`usageExcludesBuilds` in `erun-ui/frontend/src/components/app/Sidebar.helpers.ts`) and the non-JSON output states as a `Note:` line. [`erun observe`](/agent-reference/cli-flags#erun-observe) reports the sidecar's own resource limits.
 
@@ -791,6 +810,7 @@ Every field group reports its own unavailability rather than failing the whole c
 | `memory.max` is `max` (unlimited). | `memory.unlimited: true`; `memory.limitBytes`/`percentOfLimit` stay zero rather than a fabricated percentage. |
 | `memory.current` could not be read. | `memory.unavailable` names the reason. |
 | `df` reported nothing for the watched mount. | that entry's `disk[].unavailable` names the reason. |
+| `du` timed out (30s) or could not be read. | `disk[].ownUsageObserved` stays `false` and `ownUsedBytes` is omitted, independently of whether `df` succeeded. |
 
 `memory.oomKills` comes from `memory.events`' `oom_kill` counter — a real kill count, not a guess made after the fact.
 
@@ -802,10 +822,33 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 |---|---|
 | `memory.percentOfLimit` ≥ 85%. | A container this close to its limit is one build step away from an OOM kill. |
 | `memory.peak` ÷ `memory.limitBytes` ≥ 95%. | `memory.peak` is a high-water mark, so a near-limit peak matters even after current usage drops back down. |
-| any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. |
+| any `disk[].percentUsed` ≥ 90%. | Disk fills silently — no kernel counter tracks "close calls" the way `memory.peak` does for RAM — so the warning threshold sits ahead of the failure rather than reacting to it. The warning text names the node-shared scope ("shared with every environment on this node") since `percentUsed` is the node's fill level, not this environment's alone. |
 | `memory.oomKills` > 0. | Always reported: a kill already happened. |
 | the environment's *retained* peak ÷ `memory.limitBytes` ≥ 95%, when it exceeds the live `memory.peak`. | `memory.peak` is a per-container counter, so a restart resets it — and a restart is often how an OOM manifests. The retained high-water mark keeps a pre-restart near-limit peak visible. Scored against the current limit, so raising `runtimepod` clears it. |
 | the environment's *retained* OOM-kill total exceeds the live `memory.oomKills`. | `memory.events` resets with the container, so a kill that already happened stays reported after a restart the current container cannot account for. |
+
+Every memory entry above is answered by the `sizing` recommendation in the same result, and the 85% memory threshold is deliberately the same figure the memory raise is decided at — see [§ Raised by an alarm](#usage-warning-remedy).
+
+### Raised by an alarm {#usage-warning-remedy}
+
+A memory warning and the memory raise that answers it are two readings of one threshold, and the
+guarantee is that the first never appears without the second:
+
+- The `memory.percentOfLimit` warning fires at `memory.current` ÷ `memory.max` ≥ 85%, and the raise
+  is decided at `max(memory.peak, memory.current)` ÷ `memory.max` ≥ 85% — the same 85%, and the peak
+  is never below the current reading. So every memory warning implies a raise.
+- `memory.peak` ÷ `memory.limitBytes` ≥ 95% implies the same, for the same reason.
+- `memory.oomKills` > 0 raises on its own, sized from the limit that proved too small.
+
+The raise is high confidence in all three cases, because all three are facts about something that
+already happened rather than an argument from a quiet window. Acting on it is
+[`erun resize --apply-recommendation`](/cli/resize).
+
+Two boundaries worth stating exactly. The guarantee covers memory; a `disk[].percentUsed` warning has
+no sizing verdict behind it, because `runtimepod` does not size the workspace volume — disk pressure
+is answered by pruning, not resizing. And a raise needs no observation window: only the *lower*
+direction is gated on the 24-hour window and its sample count, so an environment ERun has watched for
+one reading can still be told to grow.
 
 ### Error behaviour
 
@@ -1027,8 +1070,8 @@ The credential material never appears in an argument, a trace line, or a golden 
 
 ## `erun stop`
 
-`erun stop` scales an environment's runtime Deployment to zero, returning the runtime container's
-resource limits **and** its unlimited `dind` sidecar's real consumption to the node. It is the
+`erun stop` scales an environment's runtime Deployment to zero, returning the resource limits and
+requests of both the runtime container **and** its `dind` sidecar to the node. It is the
 counterpart to `erun open`, which is the only thing that starts an environment again. There is
 deliberately **no MCP `stop` tool**: the env's MCP edge runs inside the runtime container, so
 stopping over MCP would kill the caller mid-call. Lifecycle is host-side, as it always has been for
@@ -1118,10 +1161,10 @@ a pod start rather than a cold rebuild. In-pod processes are not: a stop ends wh
 ### What is removed
 
 1. The Kubernetes namespace `<tenant>-<env>` (cascades to every Deployment, PVC, Service, ConfigMap, Secret inside).
-2. The per-user env config directory `~/.config/erun/<tenant>/<env>/`.
+2. The per-user env config directory `<config-root>/<tenant>/<env>/`.
 3. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
 
-The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` are **not** removed; a later env with the same name overwrites them (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
+4. The local port-forward record for the env — the state file, the log, and the log's rotated generation, under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.{json,log,log.1}`. A log a forward that is still running holds open is kept (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
 
 ### Error codes
 
@@ -1220,7 +1263,7 @@ An activity lease is **presence** — many holders coexist, and taking one says 
 |---|---|---|
 | `exclusive` | bool | Whether this job holds the environment's claim. It is what the job actually holds, not what its caller asked for: a job running under an ancestor's claim reads `false`. `job status` appends `, holding this environment exclusively` to its line. |
 
-`scripts/agent-gate.sh` passes `--exclusive` for every gate it detaches (`make check`, `make integration-test`, `erun-ui/playwright/run.sh`), so the repository's own long gates hold the pod by default. `erun exec gate-merge` is gated by the same claim from the other direction: it rewrites the environment's one shared worktree, so it is refused while anything else holds the environment exclusively — two merge-queue drives racing that worktree is how a batch came to report pushing another batch's commit and closed two pull requests against work that had not landed. A caller that took the claim itself (a drive holding the environment across several separate processes, which cannot be expressed as one job) passes `erun exec gate-merge --under-lease <leaseId>` so its own hold does not refuse it.
+`scripts/agent-gate.sh` passes `--exclusive` for every gate it detaches (`make check`, `make integration-test`, `erun-ui/playwright/run.sh`), so the repository's own long gates hold the pod by default. `erun exec gate-merge` is gated by the same claim from the other direction: it rewrites the environment's one shared worktree, so it is refused by any exclusive claim covering that worktree — the `environment` scope this section describes, and the `worktree` scope an exclusive take defaults to when its caller names none, which is what an orchestrator driving the queue over MCP records. Two merge-queue drives racing that worktree is how a batch came to report pushing another batch's commit and closed two pull requests against work that had not landed. A caller that took the claim itself (a drive holding the environment across several separate processes, which cannot be expressed as one job) passes `erun exec gate-merge --under-lease <leaseId>` so its own hold does not refuse it; a claim held by anyone else still does, whichever scope it is on.
 
 ### The alive contract {#alive-contract}
 
@@ -1230,7 +1273,7 @@ An activity lease is **presence** — many holders coexist, and taking one says 
 |---|---|---|
 | `lastAliveAt` | RFC3339 timestamp | The supervisor's own clock timestamp at its last beat, stamped every ~1 second (`EnvironmentJobAliveHeartbeatInterval`) for as long as the supervisor runs — an image pull or a silent test suite beats exactly as often as a chatty one. |
 | `aliveSeq` | integer | A monotonic counter bumped on every beat, so a caller can distinguish "still beating" from "the same timestamp read twice" at second resolution. |
-| `aliveAgeMs` | integer or `null` | Computed fresh on every read as `now − lastAliveAt`, **in the reader's own process, using the same clock `lastAliveAt` was stamped with** — never a caller subtracting its own wall clock from a pod timestamp, which a few seconds of skew would turn into a false failure against a 5-second bound. `null` only when the job has never beaten: an attached job (no supervisor loop exists for it) or one whose supervisor has not registered its first beat yet. |
+| `aliveAgeMs` | integer or `null` | Computed fresh on every read as `now − lastAliveAt`, **in the reader's own process, using the same clock `lastAliveAt` was stamped with** — never a caller subtracting its own wall clock from a pod timestamp, which a few seconds of skew would turn into a false failure against a 5-second bound. `null` only when the job has never beaten: an attached job, which has no supervisor loop to beat for it. A started job's record carries a beat from the instant it is published as `running` — writing it is the supervisor proving it is alive — so a running job never reports `null` here. |
 
 **The caller rule:** once `aliveAgeMs` exceeds `5000`, stop waiting and treat the job as failed — report it as an `unknown` outcome, never as a success and never as the tool itself having errored — even if `state` still reads `running`. 1 second of beat cadence against a 5 second bound is 5× headroom for poll jitter and scheduling delay, not slack for the beat itself to run late by design. A silent-but-healthy command never trips this: the beat has nothing to do with `outputBytes`.
 
@@ -1406,9 +1449,11 @@ stdout and stderr are **merged** into one log in write order, and served as the 
 | `--signal <name>` | `TERM` \| `INT` \| `HUP` \| `KILL` | `TERM` | Signal to send. |
 | `--dry-run` | bool | `false` | Trace the target without signalling. |
 
-The signal goes to the **process group of the pid the record holds**, so a cancel can only reach the work it names — not a process that merely looks like it, and not the shell issuing the cancel. Two guards make the latter impossible: signalling erun's own pid is refused, and so is signalling erun's own process group.
+The signal goes to the **process group of the job's work** — the child pid its record holds — so a cancel can only reach the work it names, not a process that merely looks like it, and not the shell issuing the cancel. Two guards make the latter impossible: signalling erun's own pid is refused, and so is signalling erun's own process group.
 
 The job's supervisor is deliberately **not** signalled, so it survives to record the outcome; the cancelled job then reads back as a normal `exited` job carrying `signal`. Cancelling a job that already finished is not an error — it reports `signalled: false`.
+
+A cancel therefore refuses outright rather than fall back to the record's supervisor pid when the work's own pid is not in the record yet. A started job's record only exists once `job start` has returned a handle that names the work, so this is reachable only for records written before that guarantee; the error says so and names retrying as the next action. An attached job is the one case where the record's pid *is* the process to signal, because erun did not start it and there is no child to name.
 
 On Windows there are no signals: every name maps to a `taskkill /F /T` of the recorded pid, and `signal` is never populated on the resulting record.
 

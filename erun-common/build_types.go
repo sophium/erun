@@ -64,6 +64,28 @@ type DockerImageReference struct {
 	Insecure bool
 }
 
+// DockerBuildSecret is one BuildKit build secret a project declares under
+// `docker.secrets` in .erun/config.yaml, resolved for the build's environment.
+//
+// It carries a *reference* to the credential — the name of an environment
+// variable, or a host path — and never the credential itself. That is the
+// property that keeps a secret out of every surface erun writes: the value is
+// never in this struct, so it cannot reach the docker build argv as a literal,
+// a trace line, a log, or a timing record. docker resolves it from its own
+// (inherited) environment, or reads it from the file it is handed.
+type DockerBuildSecret struct {
+	// ID is the secret id the Dockerfile mounts, as in
+	// `RUN --mount=type=secret,id=<ID>`.
+	ID string `yaml:"id"`
+	// Env names the environment variable holding the credential, rendered as
+	// `--secret id=<ID>,env=<Env>`. docker reads the value from its own
+	// environment, so it never enters this process.
+	Env string `yaml:"env,omitempty"`
+	// Src names a host file or directory holding the credential, rendered as
+	// `--secret id=<ID>,src=<Src>`.
+	Src string `yaml:"src,omitempty"`
+}
+
 type DockerBuildSpec struct {
 	ContextDir     string
 	DockerfilePath string
@@ -79,6 +101,13 @@ type DockerBuildSpec struct {
 	// build is skipped and the existing image is re-tagged and pushed instead of
 	// rebuilt.
 	Promote bool
+	// GateTestStage marks a Dockerfile whose builder stage depends on a `test`
+	// stage's marker (see dockerfileHasGateTestStage) — i.e. this build is the
+	// project's own merge gate. applyIncrementalPromotion never sets Promote for
+	// such a build, and DockerImageBuilder refuses outright if it ever finds the
+	// two set together, so a cached fingerprint can never stand in for the gate
+	// having actually run.
+	GateTestStage bool
 	// MissingFingerprintPlatforms lists platforms that lacked a matching
 	// fingerprint tag, so the trace can explain why a build is rebuilding rather
 	// than promoting. For non-multi-platform builds the slot is the empty string.
@@ -121,6 +150,13 @@ type DockerBuildSpec struct {
 	// a sibling cgroup (erun#2255). Left empty outside an injected runtime pod.
 	// See buildContainerCPUCapCgroupParent.
 	CgroupParent string
+	// DockerSecrets carries the build secrets declared under `docker.secrets`
+	// (resolved for this build's environment) into the docker build argv as
+	// `--secret id=<id>,env=<VAR>` / `,src=<path>` references. Each entry holds
+	// a reference, never a credential value, which is what keeps a secret out of
+	// every trace, log, and timing record this build writes — see
+	// DockerBuildSecret.
+	DockerSecrets []DockerBuildSecret
 	// PlatformObserver, when set, is called after each platform's build (or
 	// promote+push) finishes, reporting that platform's elapsed time, error,
 	// build-cgroup cost (nil for a promote, which runs no docker build), and
@@ -157,6 +193,10 @@ type BuildExecutionSpec struct {
 	// (validate); a build that pushes publishes them.
 	componentCharts []HelmChartPublishSpec
 	skippedLinux    bool
+	// gate marks the merge queue's gate build (`erun build --gate`): a run whose
+	// exit code is read as the verdict on a tree by `review record-build --gate`.
+	// Such a run must execute something -- see ensureGateBuildActuallyBuilt.
+	gate bool
 }
 
 type DockerPushExecutionSpec struct {
@@ -179,8 +219,22 @@ type DockerCommandTarget struct {
 	// caller — the shared resolvers never read it. See root AGENTS.md § "Command
 	// primitives vs orchestration".
 	Build bool
+	// E2E is the `erun build --e2e` operator shortcut: implies Deploy, and after
+	// the deploy completes runs the project's discovered playwright/ suite
+	// against the environment just deployed. Orchestration policy owned by the
+	// CLI caller — the shared resolvers never read it. See root AGENTS.md §
+	// "Command primitives vs orchestration".
+	E2E bool
 	// NoIncremental disables the default fingerprint-based incremental build cache.
 	NoIncremental bool
+	// Gate declares this build the merge queue's gate: the run whose exit code
+	// `review record-build --gate` turns into the verdict on a tree. A gate build
+	// never *forces* a rebuild -- the per-Dockerfile guard that already keeps its
+	// test stage live (dockerfileHasGateTestStage) still decides that -- but it
+	// refuses to report success for a run that would execute nothing at all,
+	// which is the one outcome a cache hit cannot be distinguished from by the
+	// caller reading the exit code. See ensureGateBuildActuallyBuilt.
+	Gate bool
 	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
 	// resolve docker/release contexts directly.
 	DisableBuildScriptDiscovery bool

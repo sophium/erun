@@ -49,6 +49,13 @@ func TestMain(m *testing.M) {
 	if os.Getenv(jobAliveSupervisorHelperEnv) != "" {
 		os.Exit(runJobAliveSupervisorHelper())
 	}
+	// The supervisor-failure test re-enters this binary as a supervisor that
+	// ends on its own setup failure (job_supervisor_failure_test.go), for the
+	// same reason the alive-contract helper above is a real process: the record
+	// must be reconciled against a supervisor pid that genuinely ran and exited.
+	if os.Getenv(jobSupervisorSetupFailureHelperEnv) != "" {
+		os.Exit(runJobSupervisorSetupFailureHelper())
+	}
 	// This suite must never depend on the invoking shell's own environment:
 	// running `go test` from inside an actual runtime pod (as this repo's own
 	// agent environments do) otherwise leaves ERUN_TENANT/ERUN_ENVIRONMENT set,

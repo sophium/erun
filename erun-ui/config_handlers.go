@@ -186,11 +186,42 @@ func (a *App) InitAWSCloudProvider(input uiAWSCloudAliasInput) (uiCloudProviderS
 }
 
 func (a *App) LoginCloudProvider(alias string) (uiCloudProviderStatus, error) {
-	status, err := eruncommon.LoginCloudProviderAlias(eruncommon.Context{}, a.deps.store, eruncommon.CloudLoginParams{Alias: alias}, a.deps.cloudDeps)
+	status, err := eruncommon.LoginCloudProviderAlias(a.desktopCloudLoginContext(), a.deps.store, a.desktopCloudLoginParams(alias), a.deps.cloudDeps)
 	if err != nil {
 		return uiCloudProviderStatus{}, err
 	}
 	return cloudProviderStatusToUI(status), nil
+}
+
+// desktopCloudLoginParams is the flow a Wails-bound sign-in runs under.
+// Authorization code + PKCE is requested rather than left to auto: the
+// desktop completes it by opening the operator's own browser, whereas the
+// device grant's whole instruction is a code this app has no surface to show,
+// so auto's device-first ordering left the button apparently inert until the
+// grant expired and the auth-code fallback finally ran.
+func (a *App) desktopCloudLoginParams(alias string) eruncommon.CloudLoginParams {
+	return eruncommon.CloudLoginParams{Alias: alias, Flow: eruncommon.ERunLoginFlowAuthCode}
+}
+
+// desktopCloudLoginContext routes an interactive grant's own instructions
+// somewhere the operator can read them. Every prompt the login writes (the URL
+// the browser was sent to, or the URL to open by hand when no browser could be
+// launched) otherwise goes to a nil Stdout and the sign-in looks like a button
+// that does nothing for as long as it waits. The message center keeps that
+// instruction reachable instead of silent.
+func (a *App) desktopCloudLoginContext() eruncommon.Context {
+	return eruncommon.Context{Stdout: desktopLoginPromptWriter{app: a}}
+}
+
+type desktopLoginPromptWriter struct {
+	app *App
+}
+
+func (w desktopLoginPromptWriter) Write(p []byte) (int, error) {
+	if message := strings.TrimSpace(string(p)); message != "" {
+		w.app.emitAppNotification("info", message)
+	}
+	return len(p), nil
 }
 
 func (a *App) LogoutCloudProvider(alias string) (uiCloudProviderStatus, error) {
@@ -210,7 +241,9 @@ func (a *App) LogoutCloudProvider(alias string) (uiCloudProviderStatus, error) {
 // signed in rather than landing the alias signed out with nothing to show
 // for it.
 func (a *App) SwitchCloudProviderIdentity(alias string) (uiCloudProviderStatus, error) {
-	status, err := eruncommon.LoginCloudProviderAlias(eruncommon.Context{}, a.deps.store, eruncommon.CloudLoginParams{Alias: alias, Force: true}, a.deps.cloudDeps)
+	params := a.desktopCloudLoginParams(alias)
+	params.Force = true
+	status, err := eruncommon.LoginCloudProviderAlias(a.desktopCloudLoginContext(), a.deps.store, params, a.deps.cloudDeps)
 	if err != nil {
 		return uiCloudProviderStatus{}, err
 	}
@@ -308,7 +341,7 @@ func openRouterConfigToUI(config *eruncommon.OpenRouterConfig) *uiOpenRouterConf
 		DefaultModel: strings.TrimSpace(config.DefaultModel),
 	}
 	for _, m := range config.Models {
-		out.Models = append(out.Models, uiOpenRouterModel{ID: strings.TrimSpace(m.ID), Context: m.Context})
+		out.Models = append(out.Models, uiOpenRouterModel{ID: strings.TrimSpace(m.ID), Context: m.Context, RequiresReasoningEcho: m.RequiresReasoningEcho})
 	}
 	return out
 }
@@ -327,7 +360,7 @@ func openRouterConfigFromUI(config *uiOpenRouterConfig) *eruncommon.OpenRouterCo
 		if id == "" {
 			continue
 		}
-		out.Models = append(out.Models, eruncommon.OpenRouterModel{ID: id, Context: m.Context})
+		out.Models = append(out.Models, eruncommon.OpenRouterModel{ID: id, Context: m.Context, RequiresReasoningEcho: m.RequiresReasoningEcho})
 	}
 	return out
 }
@@ -477,9 +510,10 @@ const notificationSourceForwardOutage = "port-forward-outage"
 const notificationSourceDeployFailed = "deploy-failed"
 
 // notificationSourceOrchestratorEdgeUnreachable tags the "wired tools for …,
-// but its edge is not answering" warning an orchestrator launch posts when
-// exactly one linked environment's edge failed its reachability probe — the
-// only case with an unambiguous env to attach the deploy action to (#1390).
+// but its edge is not answering" warning an orchestrator launch posts for a
+// linked environment whose edge failed its reachability probe. Posted once per
+// such environment and tagged with that env, so each one carries the deploy
+// action for the env it names and each is cleared by its own env's lifecycle.
 const notificationSourceOrchestratorEdgeUnreachable = "orchestrator-edge-unreachable"
 
 // notificationSourceMCPUnreachable tags the "the local MCP endpoint isn't

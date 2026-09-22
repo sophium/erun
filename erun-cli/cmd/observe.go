@@ -40,7 +40,7 @@ func newObserveCmd(resolveOpen OpenResolver) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runObserveCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), checks)
+			return runObserveCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), checks)
 		},
 	}
 	addDryRunFlag(cmd)

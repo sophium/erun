@@ -78,8 +78,12 @@ func platformAPIStubServer(t testing.TB) *httptest.Server {
 		if !requireBearer(w, r) {
 			return
 		}
+		// tenantName ("acme") deliberately matches GET /v1/tenants' own name for
+		// tenant-1 below, and deliberately differs from username ("test-user") --
+		// The defect was an operator reading whoami's username as if it were the
+		// tenant's name, so this scenario proves the two stay visibly distinct.
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"tenantId": "tenant-1", "userId": "user-1", "username": "test-user", "issuer": "https://idp.example", "subject": "sub-1",
+			"tenantId": "tenant-1", "tenantName": "acme", "userId": "user-1", "username": "test-user", "issuer": "https://idp.example", "subject": "sub-1",
 		})
 	})
 	mux.HandleFunc("POST /v1/identity/orgs", func(w http.ResponseWriter, r *http.Request) {
@@ -336,6 +340,12 @@ func TestPlatform(t *testing.T) {
 		if !strings.Contains(result.Combined, "test-user") || !strings.Contains(result.Combined, "tenant-1") {
 			t.Fatalf("expected whoami output to name the resolved identity, got:\n%s", result.Combined)
 		}
+		// whoami must print the tenant's real name ("acme", matching
+		// GET /v1/tenants' name for the same tenant-1 id above), not just the
+		// username ("test-user") -- the two must never be the only name shown.
+		if !strings.Contains(result.Combined, "acme") {
+			t.Fatalf("expected whoami output to name the tenant (matching tenant list), got:\n%s", result.Combined)
+		}
 	})
 
 	t.Run("version_dry_run_traces_resolved_call", func(t *testing.T) {
@@ -516,6 +526,23 @@ func TestPlatform(t *testing.T) {
 		if !strings.Contains(result.Combined, "org-probeco-repaired") {
 			t.Fatalf("expected the repaired org value to be reported, got:\n%s", result.Combined)
 		}
+	})
+
+	// The post-enrollment grant: the one an operator reaches for after a user
+	// already exists, since re-enrolling an enrolled identity is a no-op that
+	// leaves its roles untouched. Both ids have to reach the request.
+	t.Run("user_grant_role_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{
+			"platform", "user", "grant-role",
+			"--user-id", "user-1", "--role-id", "role-reviewer", "--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/user_grant_role_dry_run", normalize.Apply(result.Combined))
 	})
 
 	t.Run("user_enroll_dry_run", func(t *testing.T) {

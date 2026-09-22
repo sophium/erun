@@ -27,6 +27,24 @@ func blockForever() {
 	}
 }
 
+// registerStub records this process's pid, and which stub it is, in the
+// harness's stub registry, so a session the suite opened and never closed can be
+// reaped (fixtures/stubProcesses.ts). Best-effort: outside the harness there is
+// no registry in the environment and the stub must still run. Keep in lockstep
+// with the POSIX register_stub preamble in fixtures/seedRoot.ts.
+func registerStub(name string) {
+	registry := os.Getenv("ERUN_PLAYWRIGHT_STUB_REGISTRY")
+	if registry == "" {
+		return
+	}
+	f, err := os.OpenFile(registry, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = fmt.Fprintf(f, "%d %s\n", os.Getpid(), name)
+}
+
 func main() {
 	name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
 	args := os.Args[1:]
@@ -50,9 +68,10 @@ func main() {
 			// as the setup-complete marker (see signalSessionReadyOnLine in
 			// activity_queue_app.go), then block so the tab behaves like a healthy,
 			// quiet, killable session.
+			registerStub(name)
 			fmt.Print("erun@playwright:~$ \n")
 			_ = os.Stdout.Sync()
-			blockForever() // stay alive like `exec sleep`; killed on env close via taskkill
+			blockForever() // stay alive like `exec sleep`; ended by the harness reap or env close
 		}
 		os.Exit(0)
 	case "claude":
@@ -61,9 +80,10 @@ func main() {
 		// (no TTY, no credentials) — it exits at once and the spec that opened
 		// the orchestrator times out waiting for the running dot. Block instead,
 		// printing the same setup-complete marker the POSIX stub does.
+		registerStub(name)
 		fmt.Print("claude@playwright:~$ \n")
 		_ = os.Stdout.Sync()
-		blockForever() // stay alive like `exec sleep`; killed on session close
+		blockForever() // stay alive like `exec sleep`; ended by the harness reap or session close
 	case "kubectl":
 		// Answer the context listing with an empty set (the dialog's
 		// deterministic empty state); report everything else as unreachable.

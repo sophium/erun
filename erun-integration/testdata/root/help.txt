@@ -32,6 +32,7 @@ Available Commands:
   deploy       Install a published version into an environment
   devops       DevOps utilities
   doctor       Diagnose and repair an environment's runtime and config
+  e2e          Run the project's Playwright suite against a deployed environment
   exec         Repository execution utilities
   expose       Expose an environment's Service at a public HTTPS hostname
   gate         See what is being gated, and what recent gates decided
@@ -39,6 +40,7 @@ Available Commands:
   idle         Show environment idle stop status
   init         Initialize configuration for the current project
   inputs       Place a host file inside the runtime pod
+  jobs         See what agents and orchestrators are working on, and what recently finished
   list         List configured tenants and environments
   mcp          Run ERun as an MCP server over HTTP
   observe      Report an environment's Kubernetes state, read-only
@@ -48,7 +50,7 @@ Available Commands:
   pin          Re-pin every erun version reference for an environment
   platform     Operate a hosted erun platform's control-plane API
   publish      Mirror a built version's images to the shared registry
-  release      Cut a release: publish the version's images and charts, then tag and announce it
+  release      Cut a release: stamp, tag, and push the release's source control
   resize       Change the runtime pod's or erun-dind sidecar's CPU/memory limits and roll it out
   review       Review code changes on the erun platform
   sshd         Remote SSH utilities

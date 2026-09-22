@@ -9,7 +9,7 @@ The titlebar's **Contribute** toggle (the git-fork icon) lets you patch ERun its
 When you toggle Contribute on, the desktop:
 
 1. Clones the ERun source into `~/git/erun` inside the env (the host for a local-agent env, the runtime pod for a remote-agent env). The clone is idempotent — a checkout that already points at the canonical ERun remote is reused as-is.
-2. Installs a small shim at `~/.erun/contribute/bin/erun` that forwards every invocation to the clone's `erun-cli/run.sh`. Subsequent `erun` calls inside the contribute tabs — whether typed at the prompt or spawned as child processes by an Agent — go through that script, which rebuilds the binary from the current source on each run.
+2. Installs a small shim at `~/.erun/contribute/bin/erun` that forwards every invocation to the clone's `erun-cli/run.sh`. Subsequent `erun` calls inside the contribute tabs — whether typed at the prompt or spawned as child processes by an Agent — go through that script, which rebuilds the binary from the current source on each run. A help or completion request (`erun --help`, `erun help app`) is the exception: it is answered from the binary already built, so reading usage never pays for a compile.
 3. Opens two extra tabs alongside the env's normal ERun + AI + Local tabs: **ERun (contribute)** is a shell pointing at the clone; **AI (contribute)** is the Agent attached to the clone. Both tabs are marked with the git-fork icon in the tab strip so you never confuse a contribute terminal with the env's own.
 4. Adds an **Env / ERun** segmented control in the review panel's changed-files sidebar. Flipping it switches what the diff view shows: the env's worktree or the ERun clone's worktree, side by side as you iterate.
 

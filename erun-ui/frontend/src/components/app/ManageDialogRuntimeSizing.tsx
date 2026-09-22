@@ -8,8 +8,19 @@ import {
 } from '@/app/api/environmentApi';
 import { readError } from '@/app/errors';
 import { InlineAlert } from '@/components/app/InlineAlert';
+import { RuntimePanelNotice } from '@/components/app/RuntimePanelNotice';
 import type { UISelection } from '@/types';
 import type { UIRuntimeSizingAction, UIRuntimeSizingRecommendation } from '@/uiRuntimeTypes';
+
+// The reader reports both "nothing to recommend yet" and "could not read the
+// recommendation" as available=false with Message set
+// (erun-ui/runtime_sizing.go), so the panel cannot tell them apart by shape.
+// The reader's own copy for the empty state is what separates a benign "no
+// recommendation yet" from a failed read, and only the latter is a failure:
+// the empty state keeps plain status text while a failed read renders like
+// every other Runtime-tab panel's.
+const SIZING_EMPTY_STATE =
+  'No standing sizing recommendation is available for this environment yet.';
 
 // RuntimeSizingField turns the environment's own standing sizing
 // recommendation into a one-click action (erun#1320): applying it is
@@ -262,8 +273,9 @@ function RuntimeSizingSummary({
     );
   }
   return (
-    <p className="text-xs leading-[1.35] text-muted-foreground" role="status">
-      {message || 'No standing sizing recommendation is available for this environment yet.'}
-    </p>
+    <RuntimePanelNotice
+      failure={message === SIZING_EMPTY_STATE ? '' : message}
+      empty={message || SIZING_EMPTY_STATE}
+    />
   );
 }

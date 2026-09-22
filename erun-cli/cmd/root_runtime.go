@@ -42,14 +42,20 @@ func newCommandGroup(use, short string, commands ...*cobra.Command) *cobra.Comma
 // scopedOpenParams adapts the --tenant/--environment flag pair every
 // environment-scoped command shares: an omitted flag means "the current scope",
 // resolved the same way as for `deploy` or `open`.
-func scopedOpenParams(tenant, environment string) common.OpenParams {
+// cmd supplies the command's own invocation (CommandPath), so a
+// tenant-resolution failure names the command the operator actually ran and
+// offers that command's own recovery. Every scoped command routing through
+// here is what keeps that true when a new command adopts the flag pair.
+func scopedOpenParams(command, tenant, environment string) common.OpenParams {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	return common.OpenParams{
-		Tenant:                tenant,
-		Environment:           environment,
-		UseDefaultTenant:      tenant == "",
-		UseDefaultEnvironment: environment == "",
+		Tenant:                    tenant,
+		Environment:               environment,
+		UseDefaultTenant:          tenant == "",
+		UseDefaultEnvironment:     environment == "",
+		Command:                   command,
+		CommandScopesTenantByFlag: true,
 	}
 }
 

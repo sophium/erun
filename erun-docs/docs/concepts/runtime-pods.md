@@ -132,6 +132,41 @@ are live. Under-provisioning shows up as a killed agent. Over-provisioning shows
 all — it just quietly holds capacity that the free figure above then reports as unavailable to
 everyone else on the node.
 
+The `erun-dind` sidecar has no standing recommendation of its own — it is a different container
+with a different cgroup, and nothing in the environment reads it — so its build CPU cap is the one
+figure below that is a rule rather than an observation.
+
+### Sizing the build CPU cap {#sizing-the-build-cpu-cap}
+
+Every image build runs in the `erun-dind` sidecar, so its CPU limit is the ceiling on how much of a
+node a single `erun build` can use. The default is `12`, and it is derived rather than fixed: the
+node's CPUs divided across the build-capable environments erun expects to be building on it at
+once, floored at `4`.
+
+Two things about that rule are easy to get backwards.
+
+**A CPU limit is a ceiling, not a reservation.** Kubernetes schedules on requests — erun pins those
+to a small fixed value — so the sum of every environment's limit on a node is allowed to exceed the
+node. What the kernel then does is share the node fairly between whatever is actually running,
+which is a better outcome than each build being held under a quota too small to use the node even
+when it has the node to itself. A build capped at a fraction of an idle node does not go faster
+because the node is free: it spends its wall clock throttled, which is what a CPU-pressure figure
+near 100% alongside a load average far below the core count means. Sizing the cap to a "safe" small
+number is the failure, not the cautious choice.
+
+**Limits do not reserve, so co-tenants do contend.** The corollary is that four environments on one
+node each sized for the whole node will contend for it when they all build at once, and that
+contention is real CPU pressure rather than quota throttling. That is the trade the divisor makes,
+and it is why the number takes a co-tenant count rather than always assuming one: an environment on
+a node it shares with several other build-capable environments wants a smaller cap than one alone
+on a node. The floor of `4` bounds the other end — below it a build is throttled on any node — and
+it is also what an environment whose node size erun has never established falls back to.
+
+Move either end with [`erun resize --dind-cpu`](/cli/resize), which rolls the sidecar onto the new
+limit; `erun init --dind-cpu` sets it for a new environment. Because a resize restarts the runtime
+pod, it refuses while the environment is held by a build, a deploy or an agent session unless you
+override that.
+
 ## What is holding the environment's resources
 
 A build leaves things running. Gradle keeps its daemons alive for the next build, Testcontainers
@@ -150,6 +185,18 @@ is stopped — and the groups that are safe to reclaim carry an action:
 
 Neither touches your worktree, a running session, or the Agent. Agent processes are shown without an
 action for exactly that reason: they are your work, not a leftover.
+
+A cache that only ever grows is also how a node's remaining space disappears without any one
+environment appearing to hold it. So each environment's build cache is bounded to a share of its own
+docker volume — 80% by default, leaving the rest to the images and containers a cache prune cannot
+reclaim — and it is reclaimed down to that bound automatically once the bound is reached. At 70% the
+environment says so, a tenth of the volume below the bound, so the growth is visible while the remedy
+is still ahead of you rather than alongside it.
+
+The bound is per environment on purpose. Each environment's docker sidecar owns its own volume, so a
+share of that volume is a limit no single environment can exceed on the others' behalf. An unbounded
+cache is exactly what that costs: the disk-headroom guard that prunes when the node runs low frees
+*the node's* space, so every other environment's next build repays its layers from cold.
 
 A session's running state is **observed in the pod** — its socket exists *and* a live program sits
 behind it — rather than inferred from how recently it printed something. An Agent waiting on a
@@ -183,11 +230,11 @@ For cloud-native secret stores (AWS Secrets Manager, GCP Secret Manager, Vault) 
 
 ## How many envs can run at once
 
-The hard limit is your machine's CPU + memory (for local clusters) or the cloud context's instance type (for managed clusters). In practice, the runtime pod fits in ~4 CPU and ~9 GiB; a typical app stack adds 2–8 GiB per env. So:
+The hard limit is your machine's CPU + memory (for local clusters) or the cloud context's instance type (for managed clusters). In practice, the runtime pod is sized for ~4 CPU and ~16 GiB — that is the default because an agent runs the full `make check-gate` inside that container, the same gate an image build runs in the `erun-dind` sidecar. An env that only serves an app needs far less; trim it with [`erun resize`](/cli/resize) and a typical app stack adds 2–8 GiB per env. So:
 
-- **16 GiB laptop** — 1–2 envs running side by side comfortably.
-- **32 GiB laptop** — 3–4 envs.
-- **64 GiB laptop** — 6–8 envs, or more if you trim per-env runtime-pod sizing to fit your workload.
+- **16 GiB laptop** — 1 env at the default sizing, 2 if you trim the ones that do not run gates.
+- **32 GiB laptop** — 2 envs at the default sizing.
+- **64 GiB laptop** — 4 envs, or more if you trim per-env runtime-pod sizing to fit your workload.
 
 Those numbers are about envs running *at once*, not envs you have. Configured envs cost nothing;
 only running ones reserve capacity. So the usual way past the limit is not a bigger machine — it is

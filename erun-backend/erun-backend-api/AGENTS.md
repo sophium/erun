@@ -57,6 +57,29 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 
 - Own path/query/body adaptation, registration, status, and JSON. Protected routes
   rely on middleware auth; do not repeat user-auth checks in every handler.
+- **A path parameter that names an externally visible id is validated once, at
+  registration, never per handler.** `routes.WithUUIDPathIDs`
+  (`internal/routes/path_ids.go`) wraps every route registered through
+  `ProtectedRouteRegistrar`, so a segment that cannot be a UUID is answered
+  `400 INVALID_PATH_ID` — naming the parameter and the value — before the
+  handler runs. Without it a malformed id travelled to the database, which
+  rejected it at parse time, and the route layer's generic fallback reported a
+  typo as a server fault: it tells the caller the platform is broken when their
+  own id is mistyped, and it puts every such typo into the platform's 5xx rate.
+  The classification is an **exception list, not an allow-list**, matching the
+  "all externally visible IDs are UUIDv7" rule below: every `{...}` segment is
+  treated as an id unless it is named in `nonUUIDPathParams` (today only
+  `{alias}`, a credential's own chosen name, and `{external_id}`, the IdP's
+  subject identifier), so a route added later is covered without its author
+  opting in. Only the spelling is judged, not the version or existence — a
+  well-formed id that names nothing is still a `404`. The guard sits inside the
+  auth wrapper, so an unauthenticated caller gets `401` for every id shape and
+  parsing is not observable before authorization. `normalizeNoRows`' own
+  `invalid_text_representation` mapping stays as the second line of defence for
+  a non-route caller. Rotation: `internal/routes/path_ids_test.go` covers the
+  guard, `malformed_path_id_e2e_test.go` the real handler against a real
+  migrated PostgreSQL (opt-in, `ERUN_E2E_MERGE_DATABASE_URL`). Registering a
+  route directly on the mux instead of through the registrar bypasses it.
 - Keep request structs local unless a real shared transport contract owns them.
 - Classify every route in `routeroles.Routes` and the operator-surface audit.
   A genuinely internal route needs an explicit reason; missing UI is not itself
@@ -183,13 +206,24 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 ## Merge Queue
 
 - The merge queue is what makes `MERGED` mean something happened, not something a caller asserted — but the guarantee is now a fact checked about the repository, not a claim believed because of who reported it. Promoting a review to `MERGE` (`ReviewService.AdvanceMergeQueue`) is the cue for whichever environment gets promoted to fetch the review's target and source, build the prospective squash merge locally, gate it with a real `erun build`, and push only on green — using its own already-warm workspace and daemon, not a Job standing up a cold one.
-- `MERGED` is reached by `PATCH /v1/reviews/{review_id}/status` — from any caller — via `ReviewService.acceptMerged`, never by a privileged internal path. Before accepting it, `acceptMerged` checks all three: `verifyGateBuild` confirms `buildId` names an already-recorded, successful `GATE` build against this exact review; `verifyRepositoryState` fetches the caller-supplied `remoteUrl` (`internal/gitverify.RemoteVerifier`, real `go-git`, no `git` binary needed in this container) to confirm the build's commit is really reachable from the target branch's tip, and that `gatedTargetTip` — the merge commit of whichever review most recently reached `MERGED` on the same target branch, or nothing to compare against for the first merge through the queue on a branch — is really its *ancestor*. Any of the three failing refuses with `*MergeNotVerifiedError` (409, `MERGE_NOT_VERIFIED`) and leaves the review at `MERGE`.
+- **`MERGED` has two verification stories, and which one applies is decided by the review's own status, never by the caller's claim.** A review holding `MERGE` goes through `acceptMerged`; any other review goes through `reconcileMerged` (see "Landed without the queue" below). Both are reached by the same `PATCH /v1/reviews/{review_id}/status`, from any caller, never by a privileged internal path — and neither trusts its caller.
+- `acceptMerged`, for a review at `MERGE`, checks all three: `verifyGateBuild` confirms `buildId` names an already-recorded, successful `GATE` build against this exact review; `verifyRepositoryState` fetches the caller-supplied `remoteUrl` (`internal/gitverify.RemoteVerifier`, real `go-git`, no `git` binary needed in this container) to confirm the build's commit is really reachable from the target branch's tip, and that `gatedTargetTip` — the merge commit of whichever review most recently reached `MERGED` on the same target branch, or nothing to compare against for the first merge through the queue on a branch — is really its *ancestor*. Any of the three failing refuses with `*MergeNotVerifiedError` (409, `MERGE_NOT_VERIFIED`) and leaves the review at `MERGE`.
 - Verify gatedTargetTip ancestry, not immediate-parent equality: release metadata commits may intervene. Preserve refusal for replaced/unrelated target history and acceptance with intervening commits (`internal/gitverify` tests).
+- **The verification fetch is credential-less, so the form of `remoteUrl` is the platform's problem, not the caller's.** `internal/gitverify`'s `fetchableRemoteURL` rewrites an SSH remote — scp-like `git@host:owner/repo.git`, `ssh://host/owner/repo.git`, which is what `git remote get-url origin` returns on an SSH checkout — to the same host's HTTPS before fetching, because the platform only reads and a public repository reads that way with no key. A URL already readable anonymously (https, http, git, file, a local path) is left exactly as given. An SSH remote on a port of its own has no HTTPS equivalent and is refused up front, naming the form the platform needs, rather than being sent to a fetch that fails on `SSH_AUTH_SOCK`. A fetch that still fails says the platform could not read the remote **and that the merge's landing was not judged** — by the time it runs the branch is already pushed, so the message must not read as a verdict that the merge did not happen. Coverage: `TestFetchableRemoteURL` (the rewrite), `TestRemoteVerifierFetchesAnSSHRemoteOverHTTPS` (the fetch-level outcome, over a real local repository), `TestRemoteVerifierNamesTheRequiredFormForAnSSHRemoteItCannotRewrite`, and `TestRemoteVerifierSeparatesAFailedReadFromAFailedMerge`.
 - The gate is `erun build`, never `erun release`. The gate publishes nothing — releasing stays exactly where #1030 put it, after the merge lands, triggered off the merge commit the gate produced. `ReviewService` calls `ReleaseTrigger.TriggerRelease` directly on a successful `acceptMerged` — no cycle, because `ReleaseService` does not depend back on `ReviewService` the way the old Job-dispatching `MergeQueueService` had to avoid one.
 - A failed `GATE` build does not need this verification: reporting one through the ordinary `POST /builds` route reaches `ReviewService.MarkBuildResult`, which (being kind-agnostic) already moves a `MERGE` review straight to `FAILED` exactly as a failed `RECORDED` build would. Only a *successful* `GATE` build's `MERGED` claim needs the separate, verified `PATCH .../status` call.
 - One merge in flight per `(tenant, target_branch)` falls out of the existing invariant `AdvanceMergeQueue` already enforced: it refuses to promote while a `MERGE` review is active on that branch. Because the head is always gated against the *current* target, re-testing after each landed merge is automatic rather than a separate invalidation pass — and it is what makes reading `gatedTargetTip` at verification time equivalent to reading it at promotion time: nothing else can move a target branch's recorded tip while this review is the one holding `MERGE` on it.
 - A build reported for one review can promote a *different* review to `MERGE`. Every call site that can produce a promotion has to observe the promoted review, not assume it is the one it was already looking at.
 - Unattended agent platform credentials remain blocked by the design below; do not imply a fresh pod can self-authenticate.
+
+### Landed without the queue (erun#2575)
+
+- **A review whose work landed by GitHub squash merge could never reach `MERGED`.** The branch's own commits are deliberately not ancestors of the target, and no `GATE` build was ever recorded for it, so neither of `acceptMerged`'s conditions can ever hold however long it sits there. `review close` renders landed work as `CLOSED` — abandoned — which is worse than leaving it `OPEN`, so such reviews sat `OPEN` forever and the operator-facing open count grew by one for every change that landed this way (measured: 63 OPEN, 44 of them already on `main`).
+- `reconcileMerged` is the second verification story, and it verifies rather than believes: `gitverify.ContainsChanges` fetches both branches from `remoteURL` and confirms that everything the source branch adds, relative to where it diverged from the target, is present in the target's history. The comparison is a **fingerprint of the change set** (every added, removed and modified path with the blob it moved to or from, `changeFingerprint`, order-independent), not of the commit graph — so it survives the target advancing under the squash, which is the ordinary case. A branch that landed by merge commit or fast-forward is caught first by the plain ancestor case; a branch that adds nothing, or shares no single merge base, names no landing and is refused.
+- `reconcileMerged` refuses `CLOSED` (terminal) and `MERGE` (the queue's, which must go through `acceptMerged`). It records **no `lastMergedBuildId`** and triggers **no release**: there was no build, and the landing it reports already happened elsewhere and published whatever it published.
+- `FindLastMergedReview` therefore filters on `last_merged_build_id IS NOT NULL`. It is what `gatedTargetTip` anchors the next queue-driven merge on; returning a build-less merge would resolve an empty build id and fail every subsequent `report-merged` on that branch.
+- The client surface is `report-merged` with `--build-id` omitted — a review at `MERGE` still requires it, any other review does not. Both refusals stay `409 MERGE_NOT_VERIFIED`, so a caller still cannot tell a lie about the repository, only state which review it is talking about.
+- `reconcileMerged`'s tests live in `internal/service/reviews_test.go` (`TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus`, `TestReconcileMergedRefusesWhenTheBranchIsNotInTheTarget`, `TestReconcileMergedRefusesWithNoVerifier`, `TestReconcileMergedRefusesAClosedReview`), and the git check's own against real local repositories in `internal/gitverify/verifier_test.go` (`TestRemoteVerifierContainsChangesFindsASquashLandedBranch`, which also asserts the branch tip is *not* an ancestor of the squash commit — the half of the reproduction that shows the old check could never hold — plus the unrelated-commits-in-between, ordinary-landing, and refusal cases).
 
 ### What a hand-run merge-queue script should hand off to erun vs keep as operator policy (#1987)
 
@@ -235,6 +269,13 @@ evidence, not a substitute for GitHub-side enforcement.
 - GitHub queue identity and platform machine identity are two trust domains.
   Name them coherently for attribution but never share the literal secret.
   Release participation and hosted-orchestrator attribution remain separate decisions.
+- **Until this lands, the working split is: an environment builds, a credentialed
+  host records.** `erun build` needs no platform alias (with none configured it
+  skips reporting its outcome); every `erun review` call aborts before any network
+  call and exits `127`. The merge skills check for a usable alias and stop there
+  rather than walking into a call that cannot succeed — see
+  `erun-docs/docs/collaboration/merge-queue.md` § "What runs where: the
+  build/platform split".
 
 ## Cloud-Provider-Alias Storage: A Nil-Cipher Route Must Refuse, Not Vanish (erun#2042 follow-up)
 

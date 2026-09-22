@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
 
-import { orchestratorHasNudgeHistory, orchestratorNudgeSummary } from './orchestratorNudgeSummary';
+import {
+  orchestratorHasNudgeHistory,
+  orchestratorNudgeSummary,
+  orchestratorPacingUnreachableNote,
+} from './orchestratorNudgeSummary';
 
 function fields(overrides: Partial<Parameters<typeof orchestratorNudgeSummary>[0]> = {}) {
   return {
@@ -108,4 +112,18 @@ test('orchestratorHasNudgeHistory is true for cumulative history, a cap, or an u
   assert.equal(orchestratorHasNudgeHistory(fields({ lastCappedAtUnix: 123 })), true);
   assert.equal(orchestratorHasNudgeHistory(fields({ nudgeCapped: true })), true);
   assert.equal(orchestratorHasNudgeHistory(fields({ nudgeHistoryUnreadable: true })), true);
+});
+
+// The could-not half of the Nudges row: a frozen count cannot say whether an
+// orchestrator needed no nudge or whether no nudge was possible from here.
+test('a session this desktop cannot pace says so, scoped to this desktop', () => {
+  const note = orchestratorPacingUnreachableNote({ pacingUnreachable: true });
+  // The scope wording is the point: the session may be healthy and paced by
+  // something else, so the line claims only what this desktop can know.
+  assert.match(note, /^Not paced from this desktop/);
+});
+
+test('a session this desktop owns says nothing extra about pacing', () => {
+  assert.equal(orchestratorPacingUnreachableNote({ pacingUnreachable: false }), '');
+  assert.equal(orchestratorPacingUnreachableNote({}), '');
 });

@@ -3,6 +3,14 @@
 // the same pattern). Nothing here changes shape; types.ts re-exports the
 // whole module so every existing `from './types'` import keeps working.
 
+// UIAccessRemedy is the copyable hand-over a capability denial offers: the
+// grant command already resolved for this caller, and the name of the role it
+// grants so the request can be made in the platform's own vocabulary.
+export interface UIAccessRemedy {
+  command?: string;
+  roleName?: string;
+}
+
 export interface UITenantDashboardInput {
   tenant: string;
   environment?: string;
@@ -49,6 +57,11 @@ export interface UITenantDashboard {
   platformUrl?: string;
   platformIssuer?: string;
   platformSubject?: string;
+  // accessRemedies keys a restricted route to the copyable grant that would
+  // give the caller the access they were refused, so a restricted tab hands
+  // over the request rather than only naming what is missing. Absent when no
+  // role covers the access or the tenant's roles could not be read.
+  accessRemedies?: Record<string, UIAccessRemedy>;
   user?: UITenantDashboardUser;
   // users is the Users tab's roster: the tenant's users, from GET /v1/users.
   // Distinct from user above, which is the caller's own identity — the tab
@@ -440,10 +453,17 @@ export interface UITenantDashboardBuild {
 }
 
 // UIConnectERunPlatformInput is the "Connect to erunpaas.com" action's input:
-// just the API base URL, discovered against the platform itself the same way
-// `erun cloud init erun` already does.
+// the API base URL — discovered against the platform itself the same way
+// `erun cloud init erun` already does — and the tenant the click came from.
+//
+// tenant is omitted only by the machine-wide settings dialog, which attaches
+// the alias globally and has no tenant to attach it to. A click on a tenant's
+// dashboard carries that tenant: an alias attached only machine-globally
+// cannot move a tenant whose own alias selection is already non-empty, so
+// without it the Connect card re-renders unchanged.
 export interface UIConnectERunPlatformInput {
   apiUrl: string;
+  tenant?: string;
 }
 
 // UIPlatformUserEnrollInput is the "not enrolled" state's enrollment attempt.

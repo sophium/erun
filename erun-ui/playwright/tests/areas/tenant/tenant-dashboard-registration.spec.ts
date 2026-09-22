@@ -385,4 +385,43 @@ test.describe('tenant dashboard — Registration tab', () => {
       removeEnvironment(SEED_TENANT, environment);
     }
   });
+
+  // A caller who may read Registration but write neither is exactly who the two
+  // hidden write gates leave stranded: the tab used to show two empty lists and
+  // say nothing about the access it was withholding, while the empty states
+  // still pointed at the absent forms. The read gates on this same tab already
+  // name their access; these two write gates must match.
+  test('a read-only caller is told which write access is missing, not pointed at absent forms', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('registration-read-only');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      await routeInvoke(page, {
+        LoadTenantDashboard: () =>
+          registrationDashboardData(environment, {
+            canCreateContext: false,
+            canRegisterEnvironment: false,
+          }),
+      });
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Registration');
+
+      const panel = app.tenantDashboard.activePanel();
+      await expect(panel).toContainText('registering a cloud context needs additional access');
+      await expect(panel).toContainText('registering a hosted environment needs additional access');
+
+      // The controls these sentences used to name are not rendered at all.
+      await expect(app.tenantDashboard.previewEnvironmentButton()).toHaveCount(0);
+      await expect(app.tenantDashboard.envNameInput()).toHaveCount(0);
+      await expect(panel).not.toContainText('Preview a plan above');
+      await expect(panel).not.toContainText('Register one below');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
 });

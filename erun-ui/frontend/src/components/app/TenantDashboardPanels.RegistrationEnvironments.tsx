@@ -262,11 +262,19 @@ function EnvironmentsList({
   }
   const environments = data?.environments ?? [];
   if (environments.length === 0) {
+    // Only the caller who may register gets the form above, so this copy may
+    // name it only for them. EnvironmentSection renders a permission notice in
+    // its place otherwise, and the empty state points at that instead of at
+    // controls that are not on screen.
     return (
       <EmptyState
         icon={<Server />}
         heading="No hosted environments registered"
-        body="Preview a plan above, then register an environment to give it a hosted counterpart."
+        body={
+          data?.canRegisterEnvironment === true
+            ? 'Preview a plan above, then register an environment to give it a hosted counterpart.'
+            : 'Registering one needs additional access — the notice above says what is missing.'
+        }
       />
     );
   }

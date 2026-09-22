@@ -24,7 +24,7 @@ export function PinVersionAction({
       <div className="min-w-0">
         <div className="text-sm font-medium">erun version pins</div>
         <div className="text-[11px] text-muted-foreground">
-          Re-pin the Terraform refs, chart dependencies and build-env image together.
+          Re-pin the Terraform refs, chart dependencies, images and runtime version together.
         </div>
       </div>
       <Button

@@ -151,6 +151,16 @@ type OpenParams struct {
 	Environment           string
 	UseDefaultTenant      bool
 	UseDefaultEnvironment bool
+	// Command is the operator-facing invocation of the command resolving this
+	// target (for example "erun usage", "erun outputs list"), used only to name
+	// that command's own recovery in a resolution failure. Empty means the
+	// caller did not name itself: the failure then falls back to the
+	// command-free wording rather than borrowing another command's name, so a
+	// new command can adopt this path without inheriting a misleading one.
+	Command string
+	// CommandScopesTenantByFlag gates whether the recovery may name Command's
+	// --tenant flag as the fix — see Context.CommandScopesTenantByFlag.
+	CommandScopesTenantByFlag bool
 }
 
 type OpenResult struct {
@@ -202,8 +212,12 @@ type ShellLaunchParams struct {
 	AITool     string
 	Claude     EnvironmentClaudeConfig
 	// Gateway is the erun-level OpenRouter catalog, when the operator has
-	// configured one. Set by the callers that launch an AI session; nil for
-	// every other use of these params, which leaves the launch unchanged.
+	// configured one. Set by the callers that launch an AI session, and by the
+	// callers that diagnose an environment: the deploy diagnosis resolves this
+	// environment's effective gateway through it to tell a gateway-routed
+	// environment whose pod template never consumed the gateway from a healthy
+	// one (runtime_agent_credentials.go). Nil for every other use of these
+	// params, which leaves both the launch and the diagnosis unchanged.
 	Gateway *OpenRouterConfig
 	// RuntimeImage lets the AI session prelude advise on the erun-build-env
 	// skill only when the env still runs the default published runtime image.
@@ -409,6 +423,36 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 	}, nil
 }
 
+// tenantResolutionRemedy renders the second half of resolveOpenTenant's
+// inference-permitted-but-unresolved error: that working-directory inference
+// also came up empty, and what the operator can do about it.
+//
+// The recovery is stated for the command that actually failed, with that
+// command's own flag, because it is the next thing the operator runs. A fixed
+// command name here sends the reader to an operation they never invoked and
+// did not need — `erun usage` failing must not report that `open` could not
+// infer a tenant, since the reasonable readings of that are all wrong (a typo,
+// a hidden delegation to open, or open being the fault).
+//
+// command is empty for a caller that did not name itself; the wording then
+// keeps the disclosure and both remedies but names no operation, which stays
+// correct rather than guessing. That is also what keeps this correct as new
+// commands adopt the resolution path: naming yourself is what buys the
+// command-specific recovery, and not naming yourself is never wrong.
+func tenantResolutionRemedy(command string, scopesTenantByFlag bool) string {
+	const (
+		cause    = "one could not be inferred from the working directory either"
+		setState = "or run `erun init --tenant <name> --set-default-tenant` to set a default"
+	)
+	if command == "" {
+		return fmt.Sprintf("%s — pass a tenant explicitly, %s", cause, setState)
+	}
+	if !scopesTenantByFlag {
+		return fmt.Sprintf("%s — pass a tenant explicitly to `%s`, %s", cause, command, setState)
+	}
+	return fmt.Sprintf("%s — pass a tenant explicitly with `%s --tenant <name>`, %s", cause, command, setState)
+}
+
 func resolveOpenTenant(store OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (string, error) {
 	tenant := params.Tenant
 	if tenant == "" && params.UseDefaultTenant {
@@ -424,7 +468,7 @@ func resolveOpenTenant(store OpenStore, findProjectRoot ProjectFinderFunc, param
 		resolved, err := loadOpenDefaultTenant(store)
 		if err != nil {
 			if errors.Is(err, ErrDefaultTenantNotConfigured) {
-				return "", fmt.Errorf("%w, and open could not infer one from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default", err)
+				return "", fmt.Errorf("%w, and %s", err, tenantResolutionRemedy(params.Command, params.CommandScopesTenantByFlag))
 			}
 			return "", err
 		}
@@ -938,8 +982,8 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 // takeover half of the reattach contract erun-cli's own shell tabs already
 // run under (screen -d -r semantics: the session keeps running, an evicted
 // viewer only loses its own view) — exported so a caller outside
-// erun-cli/erun-common (the WSS session-attach gateway erun#1106 adds) can
-// reuse it instead of reimplementing the owner-id handoff. launchCommand runs
+// erun-cli/erun-common (the WSS session-attach gateway) can reuse it instead
+// of reimplementing the owner-id handoff. launchCommand runs
 // only the first time the session is created; a reattach connects to
 // whatever it is already running.
 //

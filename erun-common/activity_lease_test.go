@@ -94,6 +94,40 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 	}
 }
 
+// TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases is the regression test
+// for the second complaint: a job's plain presence lease and its
+// exclusive environment claim are one piece of work, but a refusal that lists
+// every lease separately reported them as two unrelated claimants. Once both
+// leases carry the same Holder, the refusal must say so once.
+func TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases(t *testing.T) {
+	sameHolder := EnvironmentActivityLeaseHolder{Orchestrator: "erun-devops", Tenant: "erun"}
+	leases := []EnvironmentActivityLease{
+		{Name: "release erun 1.0.248", Holder: sameHolder},
+		{Name: "release 1.0.248", Holder: sameHolder},
+	}
+	got := FormatLeaseHolders(leases)
+	want := `orchestrator erun-devops, tenant erun (leases "release erun 1.0.248", "release 1.0.248")`
+	if got != want {
+		t.Errorf("FormatLeaseHolders() = %q, want %q", got, want)
+	}
+}
+
+// TestFormatLeaseHoldersKeepsDistinctHoldersSeparate guards the other side of
+// the same fix: leases genuinely held by different people must still be
+// reported as separate claimants, never merged just because both happen to be
+// unnamed.
+func TestFormatLeaseHoldersKeepsDistinctHoldersSeparate(t *testing.T) {
+	leases := []EnvironmentActivityLease{
+		{Name: "gradle-build", Holder: EnvironmentActivityLeaseHolder{Orchestrator: "eng-42"}},
+		{Name: "agent-run"},
+	}
+	got := FormatLeaseHolders(leases)
+	want := `orchestrator eng-42 (lease "gradle-build"); an unnamed holder (lease "agent-run")`
+	if got != want {
+		t.Errorf("FormatLeaseHolders() = %q, want %q", got, want)
+	}
+}
+
 func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
 	// A wrapper's exit trap must not fail a job that already finished, so
 	// releasing a lease that was never taken is success -- but the outcome
@@ -531,5 +565,74 @@ func TestEnvironmentOperatorPresenceReason(t *testing.T) {
 		if _, present := EnvironmentOperatorPresenceReason(status); present {
 			t.Errorf("marker %q must not by itself report an operator present", kind)
 		}
+	}
+}
+
+func TestLeaseReleaseNamesTheStoreHoldingIt(t *testing.T) {
+	isolateActivityCache(t)
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+
+	// An exclusive claim released without --exclusive: the shared store holds
+	// nothing, so a bare no-match would read as "already gone" while the claim
+	// stays held for its full TTL.
+	requireTakeLease(t, "job-fix-1301", now, true)
+	outcome, err := ReleaseEnvironmentActivityLease("erun", "ux", "job-fix-1301")
+	expectReleaseOutcome(t, "shared release of an exclusive claim", outcome, err, EnvironmentActivityLeaseHeldElsewhere)
+	requireHeldCount(t, "erun", "ux", now, 1, "expected the exclusive claim to survive a release aimed at the shared store")
+	requireNoteNames(t, "job-fix-1301", false, "exclusive", "--exclusive")
+
+	if _, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1301"); err != nil {
+		t.Fatalf("release exclusive: %v", err)
+	}
+	requireHeldCount(t, "erun", "ux", now, 0, "expected the claim gone once released in its own shape")
+
+	// The reverse: a shared lease released with --exclusive.
+	requireTakeLease(t, "job-fix-1302", now, false)
+	outcome, err = ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1302")
+	expectReleaseOutcome(t, "exclusive release of a shared lease", outcome, err, EnvironmentActivityLeaseHeldElsewhere)
+	requireHeldCount(t, "erun", "ux", now, 1, "expected the shared lease to survive a release aimed at the exclusive store")
+	requireNoteNames(t, "job-fix-1302", true, "shared", "without --exclusive")
+
+	// An id held nowhere still reports NotHeld, and carries no note to stand
+	// behind.
+	outcome, err = ReleaseEnvironmentActivityLease("erun", "ux", "job-fix-1303")
+	expectReleaseOutcome(t, "release of an unheld id", outcome, err, EnvironmentActivityLeaseNotHeld)
+	requireNoNote(t, "job-fix-1303", false)
+}
+
+// requireTakeLease takes a lease for requireTakeLease's caller, exclusive or
+// not, failing the test rather than returning the error to every caller.
+func requireTakeLease(t *testing.T, id string, now time.Time, exclusive bool) {
+	t.Helper()
+	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+		Tenant: "erun", Environment: "ux", Name: id, ID: id, Exclusive: exclusive, Now: now,
+	}); err != nil {
+		t.Fatalf("take %s (exclusive=%v): %v", id, exclusive, err)
+	}
+}
+
+// requireNoteNames asserts the held-elsewhere note names each of wants.
+func requireNoteNames(t *testing.T, id string, releasedExclusive bool, wants ...string) {
+	t.Helper()
+	note, err := EnvironmentActivityLeaseHeldElsewhereNote("erun", "ux", id, releasedExclusive)
+	if err != nil {
+		t.Fatalf("note for %s: %v", id, err)
+	}
+	for _, want := range wants {
+		if !strings.Contains(note, want) {
+			t.Errorf("expected the note for %s to name %q, got %q", id, want, note)
+		}
+	}
+}
+
+// requireNoNote asserts no note is offered for an id held nowhere.
+func requireNoNote(t *testing.T, id string, releasedExclusive bool) {
+	t.Helper()
+	note, err := EnvironmentActivityLeaseHeldElsewhereNote("erun", "ux", id, releasedExclusive)
+	if err != nil {
+		t.Fatalf("note for %s: %v", id, err)
+	}
+	if note != "" {
+		t.Errorf("expected no note for an id held nowhere, got %q", note)
 	}
 }

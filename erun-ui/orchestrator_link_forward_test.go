@@ -171,7 +171,7 @@ func TestLinkingAStoppedEnvironmentDoesNotForceStartIt(t *testing.T) {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
-	waitForEnvStatus(t, emits, envStatusRuntimeStopped, 2*time.Second)
+	waitForEnvStatus(t, emits, envStatusRuntimeStopped)
 	for _, status := range envStatuses(emits) {
 		if status.Status == envStatusFailed {
 			t.Fatalf("a stopped environment must never surface as failed, got %+v", status)
@@ -198,12 +198,11 @@ func TestLinkingAnEnvironmentSurfacesAForwardOpenFailure(t *testing.T) {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 
-	waitForEnvStatus(t, emits, envStatusFailed, 2*time.Second)
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(emits.events(appNotificationEvent)) == 0 {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if got := len(emits.events(appNotificationEvent)); got == 0 {
+	waitForEnvStatus(t, emits, envStatusFailed)
+	posted := emits.waitFor(envStatusWaitBound, func(byName map[string][]any) bool {
+		return len(byName[appNotificationEvent]) > 0
+	})
+	if !posted {
 		t.Fatal("a forward-open failure must post a visible notification, got none")
 	}
 }

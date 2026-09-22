@@ -12,6 +12,7 @@ import {
   seedBaseline,
   setWorkerRoot,
 } from './seedRoot.js';
+import { reapStubProcesses } from './stubProcesses.js';
 
 const isWindows = process.platform === 'win32';
 
@@ -168,6 +169,11 @@ export const test = base.extend<object, WorkerFixtures>({
       await use(baseURL);
 
       await stopBackend(child);
+      // Backstop for the stub processes the last spec in this worker opened:
+      // they are not children of the backend, so stopping it leaves them parked.
+      // After stopBackend, never before — a stub killed under a live backend can
+      // be respawned by the reconnect path and end up outside this sweep.
+      reapStubProcesses();
       removeWorkerRoot(root);
     },
     { scope: 'worker' },

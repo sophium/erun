@@ -22,27 +22,30 @@ func injectedRuntimePodIdentity(env func(string) string) (tenant string, environ
 	return tenant, environment, true
 }
 
-// guardInPodLocalAgentRuntimeDeploy refuses to deploy a local-agent env's runtime
-// chart from inside that env's own runtime pod.
+// guardInPodRuntimeDeploy refuses to deploy an env's runtime chart from inside
+// that env's own runtime pod, whatever the env's type.
 //
-// A local-agent env is defined by host-side state the pod does not have: the
-// operator's checkout is hostPath-mounted, and the env's ports, runtime pod
-// shape, and chart registry live in the host config store plus the project's
-// .erun/config.yaml. The in-pod store is only the projection the chart injects
-// (see doctor --sync-config), so an in-pod resolve silently falls back to
-// defaults — port-range base 17000, the in-pod mount path as worktreeHostPath,
-// default pod resources, the project's deploy registry for the chart — and the
-// resulting rollout reshapes the environment and cuts the very channel that
-// asked for it. Until the authoritative env config is threaded into the pod, the
-// host CLI is the only place this deploy can be resolved correctly.
+// What makes such a resolve untrustworthy is not the environment's type but
+// where the configuration came from: the in-pod store is only the projection
+// the chart injects (see doctor --sync-config), holding a thin subset of the
+// env's real shape. A field the host owns and the projection never received
+// silently falls back to a default or to an in-pod observation — an
+// unprojected port block derives from the 17000 base, an unconfigured runtime
+// pod reads this pod's own cgroup limit, and sshd and the chart registry take
+// whatever the projection happens to carry — and the resulting rollout
+// reshapes the environment and can cut the very channel that asked for it (an
+// in-pod deploy that resolves sshdEnabled=false turns off the sshd serving
+// workspace-sync). None of those fields depend on where the worktree lives, so
+// none of them are made safe by a remote-agent env owning its worktree in the
+// pod. Nothing on the read side can repair this either: the projection is
+// deliberately not reconciled with the host's runtime pod sizing, so until the
+// authoritative env config is threaded into the pod, the host CLI is the only
+// place this deploy can be resolved correctly.
 //
-// Deliberately narrow: only the runtime chart, only local-agent, only in that
-// env's own pod. A remote-agent env owns its worktree in the pod and keeps
-// deploying itself; component-only deploys carry no environment shape.
-func guardInPodLocalAgentRuntimeDeploy(env func(string) string, resolvedTarget OpenResult, specs []DeploySpec) error {
-	if resolvedTarget.EnvConfig.ResolvedType() != EnvironmentTypeLocalAgent {
-		return nil
-	}
+// Deliberately narrow in what it blocks: only the runtime chart, and only in
+// that env's own pod. A component-only deploy carries no environment shape and
+// is untouched, so an env's pod keeps deploying its own components.
+func guardInPodRuntimeDeploy(env func(string) string, resolvedTarget OpenResult, specs []DeploySpec) error {
 	podTenant, podEnvironment, inPod := injectedRuntimePodIdentity(env)
 	if !inPod {
 		return nil
@@ -54,8 +57,8 @@ func guardInPodLocalAgentRuntimeDeploy(env func(string) string, resolvedTarget O
 	if !ok {
 		return nil
 	}
-	return fmt.Errorf("deploy %s/%s: refusing to deploy the runtime chart from inside this environment's own pod — %s/%s is a local-agent environment, whose ports, worktree host path, runtime resources, and chart registry are defined by the host config store, not by the in-pod projection this process reads. Run `erun deploy --tenant %s --environment %s --version %s` from the host CLI instead",
-		podTenant, podEnvironment, podTenant, podEnvironment, podTenant, podEnvironment, inPodGuardVersionHint(spec.Deploy.Version))
+	return fmt.Errorf("deploy %s/%s: refusing to deploy the runtime chart from inside this environment's own pod — its ports, sshd state, worktree host path, runtime resources, and chart registry are defined by the host config store, not by the in-pod projection this process reads. Run `erun deploy --tenant %s --environment %s --version %s` from the host CLI instead",
+		podTenant, podEnvironment, podTenant, podEnvironment, inPodGuardVersionHint(spec.Deploy.Version))
 }
 
 func firstRuntimeChartSpec(specs []DeploySpec) (DeploySpec, bool) {

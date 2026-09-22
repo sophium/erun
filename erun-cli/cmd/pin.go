@@ -30,7 +30,7 @@ func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen f
 			"an erun image reference set directly in Terraform variables (e.g. the cluster-edge " +
 			"module's dns01_webhook_image), each umbrella chart's erun dependencies, the build-env " +
 			"image tag, a stated runtime chart or runtime image naming erun's own stock release, " +
-			"and the environment's own runtime version.\n\n" +
+			"and the environment's own runtime version when that environment runs erun's own runtime image.\n\n" +
 			"Idempotent, and a no-op once aligned. It rewrites the source of truth only — realizing " +
 			"the new version (terraform apply, deploy) stays a separate explicit step.",
 		Example: "  erun pin --list\n  erun pin acme dev --dry-run\n  erun pin acme dev --version 1.0.175\n  erun pin acme dev --revert",
@@ -49,7 +49,7 @@ func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen f
 			if list {
 				return runPinListCommand(cmd.Context(), ctx)
 			}
-			params, err := resolveOpenParams(args, target)
+			params, err := resolveOpenParams(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
 			}

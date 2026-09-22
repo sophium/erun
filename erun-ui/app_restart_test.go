@@ -32,9 +32,87 @@ func restartTestApp(t *testing.T) (*App, string) {
 		orchestratorOpenPath:   filepath.Join(home, orchestratorOpenFileName),
 		relaunchApp:            func() error { return nil },
 		quitApp:                func() {},
+		// beforeClose reads the window's maximised state on its way out, and
+		// the real probe needs a Wails context a test does not have.
+		windowMaximised: func(context.Context) bool { return false },
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app, restoreDir
+}
+
+// TestRestartAppIsNotCancelledByTheCloseGate is the reported failure at its
+// cause. RestartApp spawns the successor and then asks Wails to quit, and
+// Wails abandons that quit outright when OnBeforeClose returns true --
+// beforeClose does, for as long as any activity is running, which is exactly
+// when an operator restarts to pick up a rebuild. The predecessor then never
+// exits: it keeps the control record and the control port, the successor waits
+// on a process that is not going away, and the operator is left with two
+// desktops, the one in front of them still the old binary.
+//
+// The quit is driven the way Wails drives it, through beforeClose, so what is
+// asserted is the real decision rather than a stub's.
+func TestRestartAppIsNotCancelledByTheCloseGate(t *testing.T) {
+	app, _ := restartTestApp(t)
+	app.activityQueue.start(activityQueueEntry{
+		ID:      "deploy-1",
+		Command: "deploy",
+		Status:  activityQueueStatusRunning,
+	})
+
+	quitLanded := false
+	app.deps.quitApp = func() {
+		if app.beforeClose(context.Background()) {
+			return
+		}
+		quitLanded = true
+	}
+
+	if err := app.RestartApp("agent-1"); err != nil {
+		t.Fatalf("RestartApp failed: %v", err)
+	}
+	if !quitLanded {
+		t.Fatal("the restart's own quit was cancelled by the close gate: the predecessor keeps running while the successor waits on it, which is the two-desktop state a restart must not reach")
+	}
+}
+
+// TestRestartQuitStallWatch_EndsAQuitThatNeverLanded pins the escalation the
+// two-desktop state depends on being bounded and legible. A restart has already
+// relaunched its successor and written its hand-off before it asks to quit, so a
+// predecessor still running its whole grace later is a real second desktop
+// holding the control record — and one that only logs is the reported state,
+// where the operator's window is still the old binary. The wait is handed to the
+// watch rather than slept through, and the exit is substituted rather than
+// taken, so the escalation is witnessed without ending the test process.
+func TestRestartQuitStallWatch_EndsAQuitThatNeverLanded(t *testing.T) {
+	var waited time.Duration
+	exits := 0
+	var reason string
+	restartQuitStallWatch(restartQuitStallGrace, func(d time.Duration) { waited += d }, func(r string) {
+		exits++
+		reason = r
+	}, "test reason")
+
+	if waited != restartQuitStallGrace {
+		t.Fatalf("waited %s, want the quit given exactly the bounded grace %s", waited, restartQuitStallGrace)
+	}
+	if exits != 1 {
+		t.Fatalf("exited %d times, want the stalled quit to end the process exactly once", exits)
+	}
+	if reason != "test reason" {
+		t.Fatalf("exit reason = %q, want the reason it was handed, so the escalation is recorded rather than a desktop that vanished", reason)
+	}
+}
+
+// TestQuitDesktopApp_ReportsWhenThereWasNoWindowToAsk pins the gate the stall
+// watch is armed behind. A headless or not-yet-started app has no Wails context
+// to quit, so no quit was ever asked of it and "still running" means nothing:
+// arming the escalation there would end a healthy process that was never asked
+// to go anywhere.
+func TestQuitDesktopApp_ReportsWhenThereWasNoWindowToAsk(t *testing.T) {
+	app := &App{}
+	if app.quitDesktopApp() {
+		t.Fatal("quitDesktopApp reported a quit for an app with no Wails context to ask")
+	}
 }
 
 // stageOrchestratorConversation writes the transcript the AI harness leaves for a
@@ -562,4 +640,147 @@ func TestConsumeOrchestratorRestoreTargetCarriesTheHandOff(t *testing.T) {
 	if !equalOrchestratorScope(got.Environments, written.Environments) {
 		t.Fatalf("expected the scope to round-trip, got %+v", got.Environments)
 	}
+}
+
+// A restart taken for an orchestrator this desktop holds no session for -- one
+// it did not launch, or one whose session object is gone -- used to record no
+// conversation and no task, so the next launch fell through to the conversation
+// derived from the orchestrator id and the conversation that was actually live
+// was stranded, silently. Both halves the hand-off needs are already durable:
+// the open-set entry names the launch and the scope, and the live-conversation
+// record names the conversation, once its echoed nonce matches that launch.
+func TestRestartAppResumesTheLiveConversationWithoutASession(t *testing.T) {
+	app, restoreDir := restartTestApp(t)
+	id, live := stageUnmanagedLiveConversation(t, app, "launch-1", "launch-1")
+
+	// The precondition, not a detail: this desktop has no session for it, so
+	// everything below is answered from what is durable.
+	if conversationID, _, _ := app.runningOrchestratorConversation(id); conversationID != "" {
+		t.Fatalf("expected no in-memory session for %s, got %q", id, conversationID)
+	}
+
+	if err := app.RestartApp(id); err != nil {
+		t.Fatalf("RestartApp failed: %v", err)
+	}
+
+	state := readRestoreState(t, restoreDir, id)
+	if state.ConversationID != live {
+		t.Fatalf("expected the live conversation %q to be recorded, got %+v", live, state)
+	}
+	if !equalOrchestratorScope(state.Environments, []string{"frs/dev"}) {
+		t.Fatalf("expected the recorded scope to be frs/dev, got %v", state.Environments)
+	}
+	if state.ResumePrompt != orchestratorRestartResumePrompt(id) {
+		t.Fatalf("expected the restart to carry a task, got %q", state.ResumePrompt)
+	}
+
+	// And the launch that follows delivers that task to that conversation
+	// rather than re-deriving the anchor.
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id || target.ConversationID != live {
+		t.Fatalf("expected the live conversation %q to be resumed, got %+v", live, target)
+	}
+	if target.ResumePrompt != orchestratorRestartResumePrompt(id) || noticeText(target.Notices) != "" {
+		t.Fatalf("expected the task to be delivered with no notice, got %+v", target)
+	}
+}
+
+// stageUnmanagedLiveConversation stages what a restart can still read when this
+// desktop holds no session for the orchestrator: the open-set entry a launch
+// wrote (its nonce, and the scope that session was wired to) plus the
+// live-conversation record that session's own hooks left behind. The entry's
+// launch and the record's are separate arguments so a fixture can stage a
+// record from a launch that is not the entry's -- the case the confirmation
+// exists to refuse.
+func stageUnmanagedLiveConversation(t *testing.T, app *App, entryLaunch, recordLaunch string) (string, string) {
+	t.Helper()
+	id := createStoppedOrchestrator(t, app)
+	live := "a-conversation-that-is-not-the-anchor"
+	stageOrchestratorConversation(t, live)
+	if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id, entryLaunch, []string{"frs/dev"}); err != nil {
+		t.Fatalf("record open orchestrator: %v", err)
+	}
+	writeLiveConversationRecord(t, id, orchestratorLiveConversation{ConversationID: live, LaunchID: recordLaunch})
+	return id, live
+}
+
+// The confirmation is unchanged, and it is the whole safety of the fallback: a
+// record only counts while it echoes the nonce of the launch the entry names.
+// A record from an earlier launch -- or from a writer that no longer exists --
+// must not decide what this restart hands a task to, so the hand-off stays
+// empty exactly as it did before the fallback existed.
+func TestRestartHandoffIgnoresALiveRecordFromAnotherLaunch(t *testing.T) {
+	app, restoreDir := restartTestApp(t)
+	id, _ := stageUnmanagedLiveConversation(t, app, "the-current-launch", "an-earlier-launch")
+
+	if err := app.RestartApp(id); err != nil {
+		t.Fatalf("RestartApp failed: %v", err)
+	}
+
+	state := readRestoreState(t, restoreDir, id)
+	if state.ConversationID != "" || state.ResumePrompt != "" {
+		t.Fatalf("expected an unconfirmed record not to be adopted, got %+v", state)
+	}
+
+	// The orchestrator still comes back -- on the anchor, idle, with no task.
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != id || target.ConversationID != orchestratorSessionID(id) {
+		t.Fatalf("expected the derived conversation for the next launch, got %+v", target)
+	}
+	if target.ResumePrompt != "" {
+		t.Fatalf("expected no task for an unconfirmed conversation, got %q", target.ResumePrompt)
+	}
+}
+
+// Nothing durable naming the launch means nothing can vouch for what was
+// running, and a restart must never hand a task to a conversation nothing can
+// vouch for: today's empty hand-off is the correct answer, both when there is
+// no open-set entry at all and when the entry predates launch recording.
+func TestRestartHandoffStaysEmptyWhenNoLaunchIsNamed(t *testing.T) {
+	cases := []struct {
+		name  string
+		stage func(t *testing.T, app *App, id string)
+	}{
+		{"no open entry at all", func(*testing.T, *App, string) {}},
+		{"an entry that names no launch", func(t *testing.T, app *App, id string) {
+			if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id, "", []string{"frs/dev"}); err != nil {
+				t.Fatalf("record open orchestrator: %v", err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app, restoreDir := restartTestApp(t)
+			id := createStoppedOrchestrator(t, app)
+			stageOrchestratorConversation(t, "a-conversation-nothing-can-confirm")
+			tc.stage(t, app, id)
+			// A record exists either way, so the empty hand-off is the launch
+			// check refusing it rather than the record being absent.
+			writeLiveConversationRecord(t, id, orchestratorLiveConversation{
+				ConversationID: "a-conversation-nothing-can-confirm",
+				LaunchID:       "some-launch",
+			})
+
+			if err := app.RestartApp(id); err != nil {
+				t.Fatalf("RestartApp failed: %v", err)
+			}
+
+			state := readRestoreState(t, restoreDir, id)
+			if state.ConversationID != "" || state.ResumePrompt != "" {
+				t.Fatalf("expected today's empty hand-off, got %+v", state)
+			}
+		})
+	}
+}
+
+// createStoppedOrchestrator persists a configured orchestrator without starting
+// it, which is the shape every case above begins from: a definition with no
+// session object anywhere in this desktop.
+func createStoppedOrchestrator(t *testing.T, app *App) string {
+	t.Helper()
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	if err != nil {
+		t.Fatalf("CreateOrchestrator failed: %v", err)
+	}
+	return created.ID
 }
