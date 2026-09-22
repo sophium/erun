@@ -55,6 +55,20 @@ func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httpt
 	if len(consoleURL) > 0 {
 		console = consoleURL[0]
 	}
+	return controlPlaneStubWithDocs(t, version, console, "")
+}
+
+// controlPlaneStubWithDocs is controlPlaneStub plus the documentation site the
+// plane advertises. It is the same discovery mechanism one field over: the
+// plane's own GET /v1/platform names where its docs site is, exactly as it
+// names where its console is, so the docs version check finds its target in
+// the same call that reports the plane's own version.
+//
+// An empty docsURL models a plane that advertises none -- an older platform,
+// or one deployed with no docs URL -- which must read as no docs site rather
+// than as one that is up to date.
+func controlPlaneStubWithDocs(t testing.TB, version, consoleURL, docsURL string) *httptest.Server {
+	t.Helper()
 	var server *httptest.Server
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
@@ -63,7 +77,7 @@ func controlPlaneStub(t testing.TB, version string, consoleURL ...string) *httpt
 		if server != nil {
 			apiURL = server.URL
 		}
-		_, _ = fmt.Fprintf(w, `{"version":"%s","apiUrl":"%s","consoleUrl":"%s"}`, version, apiURL, console)
+		_, _ = fmt.Fprintf(w, `{"version":"%s","apiUrl":"%s","consoleUrl":"%s","docsUrl":"%s"}`, version, apiURL, consoleURL, docsURL)
 	})
 	server = httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -92,10 +106,11 @@ func controlPlaneStubAt(t testing.TB, identityAPIURL, version string, consoleURL
 	return server
 }
 
-// consoleStub serves GET /version.json reporting version, standing in for a
-// deployed console (erun-devops/docker/erun-console's own static file,
-// stamped from ERUN_VERSION at image build time).
-func consoleStub(t testing.TB, version string) *httptest.Server {
+// versionJSONStub serves GET /version.json reporting version, standing in for
+// a deployed version surface -- a console (erun-devops/docker/erun-console's
+// own static file) or a documentation site publishing the same file, both
+// stamped from ERUN_VERSION at image build time.
+func versionJSONStub(t testing.TB, version string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /version.json", func(w http.ResponseWriter, _ *http.Request) {
@@ -107,11 +122,11 @@ func consoleStub(t testing.TB, version string) *httptest.Server {
 	return server
 }
 
-// consoleHTMLFallbackStub serves GET /version.json with a 200 text/html SPA
+// versionJSONHTMLFallbackStub serves GET /version.json with a 200 text/html SPA
 // index page instead of the expected JSON document -- the deployed nginx
 // `try_files $uri $uri/ /index.html` fallback for a route it doesn't yet
 // exact-match, reproduced here rather than assumed from reading the code.
-func consoleHTMLFallbackStub(t testing.TB) *httptest.Server {
+func versionJSONHTMLFallbackStub(t testing.TB) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /version.json", func(w http.ResponseWriter, _ *http.Request) {
@@ -363,7 +378,7 @@ func TestListControlPlanes(t *testing.T) {
 	t.Run("real_run_reports_a_console_behind_published", func(t *testing.T) {
 		t.Parallel()
 		setup := env.New(t)
-		console := consoleStub(t, "1.0.245")
+		console := versionJSONStub(t, "1.0.245")
 		plane := controlPlaneStub(t, "1.0.247", console.URL)
 		registry := controlPlaneRegistryStub(t, "1.0.247")
 		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
@@ -379,7 +394,7 @@ func TestListControlPlanes(t *testing.T) {
 	t.Run("real_run_reports_a_console_ahead_of_published", func(t *testing.T) {
 		t.Parallel()
 		setup := env.New(t)
-		console := consoleStub(t, "1.0.999")
+		console := versionJSONStub(t, "1.0.999")
 		plane := controlPlaneStub(t, "1.0.247", console.URL)
 		registry := controlPlaneRegistryStub(t, "1.0.247")
 		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
@@ -419,7 +434,7 @@ func TestListControlPlanes(t *testing.T) {
 		// and content type, never reachable=no.
 		t.Parallel()
 		setup := env.New(t)
-		console := consoleHTMLFallbackStub(t)
+		console := versionJSONHTMLFallbackStub(t)
 		plane := controlPlaneStub(t, "1.0.247", console.URL)
 		registry := controlPlaneRegistryStub(t, "1.0.247")
 		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
@@ -449,6 +464,83 @@ func TestListControlPlanes(t *testing.T) {
 			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
 	})
 
+	// The docs site is its own surface, not a second view of the console: it
+	// is published by its own deploy, so a docs site left behind by that
+	// deploy is invisible unless it is compared on its own. Here the plane and
+	// its console are both current and only the docs site lags.
+	t.Run("real_run_reports_a_docs_site_behind_published", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		console := versionJSONStub(t, "1.0.247")
+		docs := versionJSONStub(t, "1.0.245")
+		plane := controlPlaneStubWithDocs(t, "1.0.247", console.URL, docs.URL)
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		docsLine := lineContaining(result.Combined, "docs site: url=")
+		if docsLine == "" {
+			t.Fatalf("expected a docs-site entry:\n%s", result.Combined)
+		}
+		// Read the docs entry's own line: the console's line carries the same
+		// verdict text, so matching the whole document would pass on it.
+		if !strings.Contains(docsLine, "[behind published -- roll it]") {
+			t.Fatalf("expected the docs site to be flagged behind while the plane and console are current:\n%s", docsLine)
+		}
+		golden.Equal(t, "list/control_planes_real_run_reports_a_docs_site_behind_published",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(docs, "<DOCS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	// A plane that advertises no docsUrl has no docs site to check, and that
+	// has to read as absent rather than as current: reporting a surface erun
+	// never reached as up to date is the same fail-open shape as reporting an
+	// unreachable console as current.
+	t.Run("real_run_reports_no_docs_site_when_the_plane_has_none", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		plane := controlPlaneStub(t, "1.0.247")
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "docs site") {
+			t.Fatalf("expected no docs entry for a plane that advertises none, not a current-looking one:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_real_run_reports_no_docs_site_when_the_plane_has_none",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("real_run_json_output_reports_the_docs_site", func(t *testing.T) {
+		t.Parallel()
+		setup := env.New(t)
+		docs := versionJSONStub(t, "1.0.245")
+		plane := controlPlaneStubWithDocs(t, "1.0.247", "", docs.URL)
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The console was advertised as empty here, so a "console" key in this
+		// document would be the same absence-reported-as-current mistake one
+		// field over.
+		if strings.Contains(result.Combined, `"console"`) {
+			t.Fatalf("expected no console entry for a plane that advertises none:\n%s", result.Combined)
+		}
+		for _, want := range []string{`"docs"`, `"url": "` + docs.URL + `"`, `"behind": true`} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in JSON output:\n%s", want, result.Combined)
+			}
+		}
+	})
+
 	t.Run("real_run_with_no_configured_planes", func(t *testing.T) {
 		t.Parallel()
 		setup := env.New(t)
@@ -466,7 +558,7 @@ func TestListControlPlanes(t *testing.T) {
 	t.Run("real_run_json_output", func(t *testing.T) {
 		t.Parallel()
 		setup := env.New(t)
-		console := consoleStub(t, "1.0.245")
+		console := versionJSONStub(t, "1.0.245")
 		plane := controlPlaneStub(t, "1.0.245", console.URL)
 		registry := controlPlaneRegistryStub(t, "1.0.247")
 		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
@@ -525,7 +617,7 @@ func TestListControlPlanes(t *testing.T) {
 		// own to notice this without the check.
 		t.Parallel()
 		setup := env.New(t)
-		console := consoleStub(t, "1.0.245")
+		console := versionJSONStub(t, "1.0.245")
 		plane := controlPlaneStub(t, "1.0.247", console.URL)
 		registry := controlPlaneRegistryStub(t, "1.0.247")
 		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
@@ -536,6 +628,30 @@ func TestListControlPlanes(t *testing.T) {
 		}
 		golden.Equal(t, "list/control_planes_fail_on_drift_console_behind_published_exits_non_zero",
 			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(registry, "<REGISTRY_API>")))
+	})
+
+	t.Run("fail_on_drift_docs_site_behind_published_exits_non_zero", func(t *testing.T) {
+		// The same one surface over: the plane and its console are both at the
+		// published version and the docs site a deploy left behind is the only
+		// thing stale. Nothing else in erun reads the docs site's version, so
+		// without this leg the drift is invisible.
+		t.Parallel()
+		setup := env.New(t)
+		console := versionJSONStub(t, "1.0.247")
+		docs := versionJSONStub(t, "1.0.245")
+		plane := controlPlaneStubWithDocs(t, "1.0.247", console.URL, docs.URL)
+		registry := controlPlaneRegistryStub(t, "1.0.247")
+		seedControlPlaneConfig(t, setup, map[string]string{"erun+test@erun": plane.URL}, registry.URL)
+
+		result := erun.Run(t, []string{"list", "--control-planes", "--fail-on-drift"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a docs site behind published, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "(docs site)") {
+			t.Fatalf("expected the summary to name the docs site as the drifting surface:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/control_planes_fail_on_drift_docs_site_behind_published_exits_non_zero",
+			normalize.Apply(result.Combined, stubServerRule(plane, "<PLANE_API>"), stubServerRule(console, "<CONSOLE_API>"), stubServerRule(docs, "<DOCS_API>"), stubServerRule(registry, "<REGISTRY_API>")))
 	})
 
 	t.Run("fail_on_drift_unreachable_plane_exits_non_zero", func(t *testing.T) {

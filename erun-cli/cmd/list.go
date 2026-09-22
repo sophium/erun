@@ -19,7 +19,7 @@ func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc
 		Short: "List configured tenants and environments",
 		Long: "List every configured tenant and environment, including each environment's erun version, and flag any erun ssh alias ~/.ssh/config declares that no configured environment claims any more -- a stale block whose local port was reissued resolves into whichever environment inherited it, so `ssh <alias>` reaches an environment you did not name.\n\n" +
 			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. When an environment's version is not recorded locally, its deployed release is read live to tell a confirmed absence (\"none\") apart from a version that could not be determined at all (\"undetermined\", excluded from the max/behind computation with the reason stated); --dry-run traces that check instead of running it. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
-			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. A plane whose own discovery document advertises an apiUrl resolving to a genuinely different address is flagged distinctly, since that is not a benign alias. Add --erun-alias to narrow the check to one configured erun-hosted alias instead of probing every configured one. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
+			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names the URL of its console and of its documentation site, so both are checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- each is published by its own deploy, so any of the three can drift from the others, and neither surface has a version report of its own to notice that without this. A surface the plane advertises no URL for is reported as absent, never as up to date. A plane whose own discovery document advertises an apiUrl resolving to a genuinely different address is flagged distinctly, since that is not a benign alias. Add --erun-alias to narrow the check to one configured erun-hosted alias instead of probing every configured one. Requires network access to each configured plane and the surfaces it advertises, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
 			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
@@ -206,17 +206,18 @@ func controlPlaneAPIURLMismatches(planes []common.ControlPlaneVersionStatus) []s
 	return mismatched
 }
 
-// classifyControlPlaneVersionDrift buckets every plane, and its linked
-// console when one was checked, into unreachable/behind/ahead -- a console's
-// own label gets a " (console)" suffix so the two stay distinguishable in the
-// --fail-on-drift summary.
+// classifyControlPlaneVersionDrift buckets every plane, and each surface it
+// links to when one was checked, into unreachable/behind/ahead -- a surface's
+// own label gets a " (<surface>)" suffix so the plane and its console and docs
+// site stay distinguishable in the --fail-on-drift summary. A surface the
+// plane never advertised contributes nothing: an absent docs site is not a
+// drift finding, it is an absence.
 func classifyControlPlaneVersionDrift(planes []common.ControlPlaneVersionStatus) (unreachable, behind, ahead []string) {
 	for _, plane := range planes {
 		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias, plane.Reachable, plane.Behind, plane.Ahead)
-		if plane.Console == nil {
-			continue
+		for _, surface := range linkedVersionSurfaces(plane) {
+			unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias+" ("+surface.label+")", surface.status.Reachable, surface.status.Behind, surface.status.Ahead)
 		}
-		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias+" (console)", plane.Console.Reachable, plane.Console.Behind, plane.Console.Ahead)
 	}
 	return unreachable, behind, ahead
 }
@@ -392,17 +393,52 @@ func writeControlPlaneVersionEntry(ctx common.Context, plane common.ControlPlane
 	if err := writeControlPlaneAdditionalAliases(ctx, plane.AdditionalAliases); err != nil {
 		return err
 	}
-	// Above the nested console: this is a property of the plane itself, so it
-	// reads with the plane's own line rather than under its console.
+	return writeControlPlaneLinkedSurfaces(ctx, plane)
+}
+
+// writeControlPlaneLinkedSurfaces renders the plane's own advertised-apiUrl
+// note and every surface it named, nested beneath the plane they were
+// discovered from.
+func writeControlPlaneLinkedSurfaces(ctx common.Context, plane common.ControlPlaneVersionStatus) error {
+	// Above the nested surfaces: this is a property of the plane itself, so it
+	// reads with the plane's own line rather than under one of them.
 	if plane.AdvertisedAPIURLMismatch != "" {
 		if _, err := fmt.Fprintln(ctx.Stdout, "    [advertised apiUrl mismatch: "+plane.AdvertisedAPIURLMismatch+"]"); err != nil {
 			return err
 		}
 	}
-	if plane.Console == nil {
-		return nil
+	for _, surface := range linkedVersionSurfaces(plane) {
+		if err := writeControlPlaneVersionSurfaceEntry(ctx, surface.label, *surface.status); err != nil {
+			return err
+		}
 	}
-	return writeControlPlaneConsoleEntry(ctx, *plane.Console)
+	return nil
+}
+
+// linkedVersionSurface is one surface a plane's own discovery document names,
+// paired with the label it is reported and classified under.
+type linkedVersionSurface struct {
+	label  string
+	status *common.VersionSurfaceStatus
+}
+
+// linkedVersionSurfaces lists the surfaces a plane advertises, in the order
+// its discovery document names them, skipping the ones it never named at all.
+// One list serves both the report and the --fail-on-drift classifier, so the
+// two cannot disagree about which surfaces a plane has or what they are
+// called -- an absent surface is absent from both, never defaulted into
+// either.
+func linkedVersionSurfaces(plane common.ControlPlaneVersionStatus) []linkedVersionSurface {
+	surfaces := make([]linkedVersionSurface, 0, 2)
+	for _, candidate := range []linkedVersionSurface{
+		{"console", plane.Console},
+		{"docs site", plane.Docs},
+	} {
+		if candidate.status != nil {
+			surfaces = append(surfaces, candidate)
+		}
+	}
+	return surfaces
 }
 
 // writeControlPlaneAdditionalAliases names every other configured alias that
@@ -417,21 +453,25 @@ func writeControlPlaneAdditionalAliases(ctx common.Context, aliases []common.Con
 	return nil
 }
 
-func writeControlPlaneConsoleEntry(ctx common.Context, console common.ConsoleVersionStatus) error {
-	line := "    console: url=" + quotedValueOrNone(console.URL)
-	if !console.Reachable {
-		line += " reachable=no reason=" + quotedValueOrNone(console.UnreachableReason)
+// writeControlPlaneVersionSurfaceEntry renders one linked surface -- a plane's
+// console or its docs site -- under the plane that advertised it. The two are
+// the same shape deliberately: they answer the same question the same way, and
+// an operator reading the report should not have to learn two of them.
+func writeControlPlaneVersionSurfaceEntry(ctx common.Context, label string, surface common.VersionSurfaceStatus) error {
+	line := "    " + label + ": url=" + quotedValueOrNone(surface.URL)
+	if !surface.Reachable {
+		line += " reachable=no reason=" + quotedValueOrNone(surface.UnreachableReason)
 		_, err := fmt.Fprintln(ctx.Stdout, line)
 		return err
 	}
-	line += " reachable=yes version=" + quotedValueOrNone(console.Version)
-	if console.Reason != "" {
-		line += " reason=" + quotedValueOrNone(console.Reason)
+	line += " reachable=yes version=" + quotedValueOrNone(surface.Version)
+	if surface.Reason != "" {
+		line += " reason=" + quotedValueOrNone(surface.Reason)
 	}
 	switch {
-	case console.Behind:
+	case surface.Behind:
 		line += " [behind published -- roll it]"
-	case console.Ahead:
+	case surface.Ahead:
 		line += " [ahead of published -- running an unpublished version]"
 	}
 	_, err := fmt.Fprintln(ctx.Stdout, line)

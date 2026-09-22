@@ -28,21 +28,23 @@ type ListInput struct {
 	// erun-hosted control plane's deployed version (GET /v1/platform)
 	// against the newest version erun's own registry has actually
 	// published -- deployed-vs-published, not deployed-vs-main -- and each
-	// plane's linked console the same way (GET /version.json, discovered
-	// from the plane's own reported consoleUrl), nested under it. Requires
-	// network access to each plane and console, and to erun's registry;
-	// Preview traces what would be checked instead of making either call.
-	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version, and its linked console's deployed version, against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
+	// surface the plane links to the same way (GET /version.json, discovered
+	// from the plane's own reported consoleUrl and docsUrl), nested under it.
+	// A surface the plane advertises no URL for is reported as absent, never
+	// as up to date. Requires network access to each plane and its linked
+	// surfaces, and to erun's registry; Preview traces what would be checked
+	// instead of making either call.
+	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version, and the deployed version of each surface it links to (its console and its docs site), against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
 	// Alias, only meaningful alongside ControlPlanes, narrows the control
 	// plane check to one configured erun-hosted alias instead of every
 	// configured one -- the same --erun-alias every other
 	// platform-touching command already accepts.
 	Alias string `json:"erunAlias,omitempty" jsonschema:"only meaningful alongside controlPlanes -- narrow the check to this one configured erun-hosted alias instead of every configured one"`
 	// Preview traces every live check this call would make -- controlPlanes'
-	// plane/console/registry probes, and versionDriftTenant's per-environment
-	// helm read for any environment with no version recorded locally --
-	// without making any of them.
-	Preview bool `json:"preview,omitempty" jsonschema:"trace every live check this call would make (controlPlanes' plane/console/registry probes, versionDriftTenant's per-environment helm read for an environment with no version recorded locally) without making any of them"`
+	// plane/linked-surface/registry probes, and versionDriftTenant's
+	// per-environment helm read for any environment with no version recorded
+	// locally -- without making any of them.
+	Preview bool `json:"preview,omitempty" jsonschema:"trace every live check this call would make (controlPlanes' plane and linked-surface probes and its registry lookup, versionDriftTenant's per-environment helm read for an environment with no version recorded locally) without making any of them"`
 }
 
 // ListToolResult is eruncommon.ListResult plus the optional version-drift
