@@ -492,6 +492,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
 	deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
+	deployInput.PlatformAliasSecretName = strings.TrimSpace(target.EnvConfig.PlatformAliasSecretName)
 	deployInput.RuntimeChartRegistry = chart.registry
 	image, persistImage := resolveDeployRuntimeImage(ctx, target, registry, version, chart.name, chart.version, runtimeChartOverride, runtimeImageExplicit)
 	if image != "" {

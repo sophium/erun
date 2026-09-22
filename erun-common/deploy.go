@@ -198,9 +198,16 @@ type HelmDeploySpec struct {
 	// provisioned one for is byte-for-byte unchanged. Mirrors
 	// EnvConfig.RegistryCredentialSecretName; only the runtime chart consumes it.
 	RegistryCredentialSecretName string
-	ResetDatabase                bool
-	Idle                         EnvironmentIdleConfig
-	Claude                       EnvironmentClaudeConfig
+	// PlatformAliasSecretName names the Secret `erun init` minted from the
+	// invoking host's own signed-in erun platform cloud provider alias, threaded
+	// to the runtime chart as platformAliasSecretName so it can mount it where
+	// the pod's `erun` reads its cloud config. Empty renders nothing, so an env
+	// init found no host alias for is byte-for-byte unchanged. Mirrors
+	// EnvConfig.PlatformAliasSecretName; only the runtime chart consumes it.
+	PlatformAliasSecretName string
+	ResetDatabase           bool
+	Idle                    EnvironmentIdleConfig
+	Claude                  EnvironmentClaudeConfig
 	// OpenRouter is the erun-level gateway catalog stamped from root config (see
 	// openrouter.go). It is deliberately not read from EnvConfig: the catalog is
 	// one list the operator maintains and every environment selects from it. Nil
@@ -1683,6 +1690,7 @@ func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, tar
 	// nothing, since newHelmDeploySpecWithValues never sets it.
 	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
 		deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
+		deployInput.PlatformAliasSecretName = strings.TrimSpace(target.EnvConfig.PlatformAliasSecretName)
 	}
 	// The version alone governs the reset decision, same as a fresh build's
 	// deploy below: a released, non-snapshot version must never wipe.
@@ -2687,6 +2695,7 @@ func (d HelmDeploySpec) command() commandSpec {
 	}
 	args = append(args, helmImagePullSecretSetArgs(d.ImagePullSecrets)...)
 	args = append(args, helmRegistryCredentialSecretSetArgs(d.RegistryCredentialSecretName)...)
+	args = append(args, helmPlatformAliasSecretSetArgs(d.PlatformAliasSecretName)...)
 	args = append(args, helmPlatformSetArgs(d.Platform)...)
 	args = append(args,
 		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
@@ -3029,6 +3038,16 @@ func helmRegistryCredentialSecretSetArgs(name string) []string {
 		return nil
 	}
 	return []string{"--set-string", "registryCredentialSecretName=" + name}
+}
+
+// helmPlatformAliasSecretSetArgs renders platformAliasSecretName as a single
+// helm --set key, empty input yielding no args so an env init found no host
+// alias for is byte-for-byte unchanged.
+func helmPlatformAliasSecretSetArgs(name string) []string {
+	if name = strings.TrimSpace(name); name == "" {
+		return nil
+	}
+	return []string{"--set-string", "platformAliasSecretName=" + name}
 }
 
 func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) []string {
