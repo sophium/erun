@@ -21,6 +21,7 @@ const (
 )
 
 type DoctorInspectionResult struct {
+	Daemon DoctorDockerDaemon
 	Stdout string
 	Stderr string
 }
@@ -64,23 +65,55 @@ func DoctorActionDescription(action DoctorAction) string {
 	}
 }
 
+// RunDoctorInspection reads the environment's docker storage: disk and inode
+// usage at the daemon's root, and what the daemon's own stores reclaim. The
+// daemon is resolved from the environment (ResolveDoctorDockerDaemon) and is
+// named in the result, so the caller can say which daemon every figure below it
+// came from; an environment with no daemon holding build images refuses with
+// DoctorDockerDaemonUnavailableError rather than reading whatever daemon
+// happens to be reachable.
 func RunDoctorInspection(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams) (DoctorInspectionResult, error) {
-	if err := traceAndWaitForRuntime(ctx, req); err != nil {
-		return DoctorInspectionResult{}, err
+	daemon := ResolveDoctorDockerDaemon(req)
+	if daemon.Unavailable() {
+		return DoctorInspectionResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
 	}
-	result, err := RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeDindContainerName, "doctor-inspect", doctorInspectionScript())
-	return DoctorInspectionResult(result), err
+	if err := waitForDoctorDaemon(ctx, req, daemon); err != nil {
+		return DoctorInspectionResult{Daemon: daemon}, err
+	}
+	result, err := runDoctorDockerSteps(ctx, runner, req, daemon, "doctor-inspect", doctorInspectionSteps())
+	return DoctorInspectionResult{Daemon: daemon, Stdout: result.Stdout, Stderr: result.Stderr}, err
 }
 
-func RunDoctorAction(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, action DoctorAction) (RemoteCommandResult, error) {
-	if err := traceAndWaitForRuntime(ctx, req); err != nil {
-		return RemoteCommandResult{}, err
+// RunDoctorAction prunes the daemon that actually holds this environment's
+// build images, through the transport that daemon is reachable by. It returns
+// the daemon beside the output so the caller can name it, and the store
+// readings taken around the prune so a prune that freed nothing can be reported
+// as that instead of as a success.
+func RunDoctorAction(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
+	daemon := ResolveDoctorDockerDaemon(req)
+	if daemon.Unavailable() {
+		return DoctorDockerResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
 	}
-	script, err := doctorActionScript(action)
+	steps, err := doctorActionSteps(action)
 	if err != nil {
-		return RemoteCommandResult{}, err
+		return DoctorDockerResult{Daemon: daemon}, err
 	}
-	return RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeDindContainerName, "doctor-"+string(action), script)
+	if err := waitForDoctorDaemon(ctx, req, daemon); err != nil {
+		return DoctorDockerResult{Daemon: daemon}, err
+	}
+	return runDoctorDockerSteps(ctx, runner, req, daemon, "doctor-"+string(action), steps)
+}
+
+// waitForDoctorDaemon waits for the pod a pod-hosted daemon lives in to be
+// available before exec'ing into it. A daemon this process reaches directly
+// (the host kind) needs no wait and no cluster: waiting on a deployment a host
+// environment does not have would fail the read for a reason that is not about
+// the daemon at all.
+func waitForDoctorDaemon(ctx Context, req ShellLaunchParams, daemon DoctorDockerDaemon) error {
+	if daemon.Kind == DoctorDockerDaemonHost {
+		return nil
+	}
+	return traceAndWaitForRuntime(ctx, req)
 }
 
 func traceAndWaitForRuntime(ctx Context, req ShellLaunchParams) error {
@@ -219,41 +252,4 @@ func kubectlContainerExecArgs(req ShellLaunchParams, container, script string) [
 	args = append(args, "exec", "-c", strings.TrimSpace(container))
 	args = append(args, "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
-}
-
-func doctorInspectionScript() string {
-	return strings.Join([]string{
-		"set -eu",
-		"printf '== Disk usage (/var/lib/docker) ==\\n'",
-		"df -h /var/lib/docker",
-		"printf '\\n== Inode usage (/var/lib/docker) ==\\n'",
-		"df -i /var/lib/docker",
-		"printf '\\n== Docker system df ==\\n'",
-		"docker system df",
-	}, "\n")
-}
-
-func doctorActionScript(action DoctorAction) (string, error) {
-	switch action {
-	case DoctorActionPruneImages:
-		return strings.Join([]string{
-			"set -eu",
-			"docker image prune -a -f",
-			"docker system df",
-		}, "\n"), nil
-	case DoctorActionPruneBuildCache:
-		return strings.Join([]string{
-			"set -eu",
-			"docker builder prune -a -f",
-			"docker system df",
-		}, "\n"), nil
-	case DoctorActionPruneContainers:
-		return strings.Join([]string{
-			"set -eu",
-			"docker container prune -f",
-			"docker system df",
-		}, "\n"), nil
-	default:
-		return "", fmt.Errorf("unsupported doctor action %q", action)
-	}
 }

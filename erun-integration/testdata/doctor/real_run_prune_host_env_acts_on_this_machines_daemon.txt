@@ -1,0 +1,49 @@
+Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+
+== Helm release status ==
+NAME: team-devops
+STATUS: deployed
+
+== Pods ==
+skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+docker storage: this machine's docker daemon — the docker daemon on this machine, where a host environment's builds run (it is a worktree here with no pod)
+== Disk usage (/var/lib/docker) ==
+Filesystem  Size  Used  Avail  Use%  Mounted on
+/dev/vda1   200G  180G  11G    95%   /var/lib/docker
+
+== Inode usage (/var/lib/docker) ==
+Filesystem  Inodes  IUsed  IFree  IUse%  Mounted on
+/dev/vda1   13M    1.2M   11.8M  9%     /var/lib/docker
+
+== Docker system df ==
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          21        0         11.32GB   11.32GB (100%)
+Build Cache     0         0         0B        0B
+Running: Remove unused Docker images (this machine's docker daemon)
+Deleted Images:
+Total reclaimed space: 11.32GB
+
+== Docker system df ==
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          0         0         0B        0B
+Build Cache     0         0         0B        0B
+this machine's docker daemon: reclaimed 11.32GB of the 11.32GB the daemon reported reclaimable before the prune (now 0B: images 0B, build cache 0B).
+audit: erun doctor --prune-images team dev
+trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

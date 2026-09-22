@@ -111,7 +111,7 @@ Assign or remove reviewers on a review, and list who's currently assigned. `revi
 
 ### `review queue list` / `review queue advance` {#review-queue-list--review-queue-advance}
 
-Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build with [`review requeue`](#review-requeue) (see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
+Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), if another review already holds that target branch's single `MERGE` slot (`409 Conflict`, naming that review — wait for it, or [`review requeue`](#review-requeue) it back to `READY`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build with [`review requeue`](#review-requeue) (see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
 
 ### `review queue override-advance` {#review-queue-override-advance}
 
@@ -172,11 +172,12 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `report-merged` on a review at `MERGE` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
 | `report-merged` on any other review whose source branch's changes are not already in the target branch's history. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review's status is unchanged. |
 | `report-merged` on a `CLOSED` review. | `400 Bad Request` (`INVALID_TRANSITION`); `CLOSED` is terminal. |
-| `requeue` on a review that is not currently at `MERGE`. | Aborts before the status change, naming the review's actual status. |
+| `requeue` on a review that is not currently at `MERGE`. | Aborts before the status change, naming the review's actual status; the platform's own refusal does too (`409 Conflict`, `REVIEW_NOT_MERGING`). |
 | `reviewers add --user-id` not enrolled in your own tenant. | Aborts before any network call, naming `erun platform user list`/`erun platform user enroll`. |
 | `reviewers add --user-id` already assigned to the review. | `409 Conflict`. |
 | `reviewers remove --user-id` not currently assigned. | `404 Not Found`. |
 | `queue advance` on an empty queue, or whose head is not `READY`. | `404 Not Found`. |
+| `queue advance` while another review already holds that target branch's `MERGE` slot. | `409 Conflict` (`MERGE_QUEUE_OCCUPIED`), naming that review and its source branch. Wait for it, or [`requeue`](#review-requeue) it back to `READY`. |
 | `queue advance` whose head still has unresolved comment threads. | `409 Conflict`, naming the count and the review. Resolve them or use `queue override-advance`. |
 | `queue override-advance` with `--reason` omitted or blank. | Aborts before any network call. |
 

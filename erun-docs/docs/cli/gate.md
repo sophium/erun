@@ -42,6 +42,7 @@ erun gate show abc123
 | No erun-type alias configured. | Aborts naming `erun cloud init erun --api-url <url>` as the fix. |
 | More than one erun-type alias configured, `--erun-alias` omitted. | Aborts asking for an explicit `--erun-alias`. |
 | GATE_RUN_ID does not exist, or belongs to another tenant (`show`). | `404 Not Found`. |
+| GATE_RUN_ID is not a UUID at all (`show`). | `400 Bad Request` with code `INVALID_PATH_ID`, naming the parameter and the value received — a mistyped or truncated id is the caller's to fix, so it is not reported as a platform fault. See [API protocol · Request-level validation errors](/agent-reference/api-protocol#request-level-validation-errors). |
 
 ## See also
 

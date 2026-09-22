@@ -47,7 +47,10 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 			"read-only). When the release looks unhealthy it recommends the one recovery that fits — " +
 			"clear a stuck pending helm release, or roll back to the last successful revision — and " +
 			"prompts before running it. It also prunes Docker images, build cache, or stopped " +
-			"containers; restores or fixes the root erun config; and finishes an interrupted remote " +
+			"containers against the daemon that holds the environment's build images (the erun-dind " +
+			"sidecar in its runtime pod, or this machine's docker for a host environment), naming the " +
+			"daemon it pruned and what the prune freed; restores or fixes the root erun config; and " +
+			"finishes an interrupted remote " +
 			"init. The recovery actions mutate the live release; run one directly with --clear-pending-helm " +
 			"or --rollback (the two are alternatives — pass only one). Run inside a runtime pod, " +
 			"--sync-config reconciles the on-disk env config with the helm-injected ERUN_* env vars " +
@@ -285,28 +288,54 @@ func validateDoctorRecoveryFlags(options doctorOptions) error {
 
 // runDoctorCleanupActions runs the mutating helm-level recovery (if the
 // diagnosis recommends one and the operator confirms it), then the
-// docker-storage inspection and any requested prune actions. The inspection
-// and the prune actions all exec into the runtime pod's dind container, so a
-// pod that cannot be reached degrades this whole tail to a single "could not
-// read" report rather than one of them aborting with a raw exec error —
-// there is nothing left to run here that does not need the same pod.
+// docker-storage inspection and any requested prune actions against the daemon
+// that holds this environment's build images. An unreachable cluster degrades
+// this whole tail to a single "could not read" report rather than one of them
+// aborting with a raw exec error — unless the daemon is this machine's own,
+// which a host environment's is: that one needs neither the pod nor the
+// cluster, so an unreachable cluster says nothing about it.
 func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, req common.ShellLaunchParams, diagnosis common.DeployDiagnosisResult, options doctorOptions) error {
+	daemon := common.ResolveDoctorDockerDaemon(req)
 	if err := runDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis); err != nil {
 		return err
 	}
-	if diagnosis.ClusterUnreachable {
+	if diagnosis.ClusterUnreachable && daemon.Kind != common.DoctorDockerDaemonHost {
 		return reportDoctorCleanupSkippedUnreachable(ctx, options)
 	}
+	cont, err := reportDoctorDockerStorage(ctx, req, options)
+	if err != nil || !cont {
+		return err
+	}
+	return runDoctorSelectedPrunes(ctx, promptRunner, result, req, options)
+}
+
+// reportDoctorDockerStorage reads the environment's docker storage and reports
+// it, opening with the line that names the daemon every figure below it came
+// from — without it a table from an empty daemon reads exactly like one from
+// the daemon the build just measured.
+//
+// It reports whether the run continues to the prune actions. A read that could
+// not happen is already reported in full and stops this tail: the prunes act on
+// the same daemon, so attempting them would fail for the cause just named (see
+// reportDoctorInspectionUnreachable). Only the refusal of a prune that was
+// explicitly requested is an error there.
+func reportDoctorDockerStorage(ctx common.Context, req common.ShellLaunchParams, options doctorOptions) (bool, error) {
 	inspection, err := common.RunDoctorInspection(ctx, nil, req)
 	if err != nil {
-		return reportDoctorInspectionUnreachable(ctx, options, err)
+		return false, reportDoctorInspectionUnreachable(ctx, options, err)
 	}
-	if !ctx.DryRun {
-		if err := writeDoctorCommandOutput(ctx, inspection.Stdout, inspection.Stderr); err != nil {
-			return err
-		}
+	if _, err := fmt.Fprintln(ctx.Stdout, common.DoctorDockerDaemonLine(inspection.Daemon)); err != nil {
+		return false, err
 	}
+	if ctx.DryRun {
+		return true, nil
+	}
+	return true, writeDoctorCommandOutput(ctx, inspection.Stdout, inspection.Stderr)
+}
 
+// runDoctorSelectedPrunes runs the prune actions the run selected, and reports
+// plainly when it selected none.
+func runDoctorSelectedPrunes(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, req common.ShellLaunchParams, options doctorOptions) error {
 	actions, err := selectedDoctorActions(ctx, promptRunner, result, options, ctx.DryRun)
 	if err != nil {
 		return err
@@ -314,7 +343,6 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 	if len(actions) == 0 {
 		return writeNoDoctorActionsSelected(ctx)
 	}
-
 	for _, action := range actions {
 		if err := runSelectedDoctorAction(ctx, req, action); err != nil {
 			return err
@@ -324,10 +352,26 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 }
 
 // reportDoctorInspectionUnreachable degrades the docker-storage inspection
-// failure to a report and, when the operator requested a prune action that
-// execs into the same unreachable dind container, says plainly that it was
-// skipped rather than attempting it and failing with the same cause again.
+// failure to a report and, when the operator requested a prune action that acts
+// on the same daemon, says plainly that it was skipped rather than attempting
+// it and failing with the same cause again.
+//
+// An environment with no daemon holding build images is the one case that does
+// not degrade: nothing is unreachable and nothing is transient there, so a
+// requested prune cannot be skipped as maintenance left undone — it was asked
+// for and cannot be done, and the run fails naming why instead of printing a
+// success that implies space was reclaimed somewhere.
 func reportDoctorInspectionUnreachable(ctx common.Context, options doctorOptions, err error) error {
+	var unavailable common.DoctorDockerDaemonUnavailableError
+	if errors.As(err, &unavailable) {
+		if repErr := reportDoctorDockerDaemonUnavailable(ctx, err); repErr != nil {
+			return repErr
+		}
+		if anyDoctorActionRequested(options.pruneImages, options.pruneBuildCache, options.pruneContainers) {
+			return err
+		}
+		return nil
+	}
 	if repErr := reportPodUnreachable(ctx, "Docker storage", err); repErr != nil {
 		return repErr
 	}
@@ -335,6 +379,22 @@ func reportDoctorInspectionUnreachable(ctx common.Context, options doctorOptions
 		return nil
 	}
 	_, ferr := fmt.Fprintln(ctx.Stdout, "Skipping the requested prune action(s) for the same reason.")
+	return ferr
+}
+
+// reportDoctorDockerDaemonUnavailable reports a docker-storage section this
+// environment cannot host at all. It deliberately does not borrow the
+// pod-unreachable wording: nothing here is unreachable or transient, and
+// telling an operator to retry once the pod is running would send them back to
+// a check that fails identically every time. The reason itself carries the next
+// step.
+func reportDoctorDockerDaemonUnavailable(ctx common.Context, err error) error {
+	detail := strings.TrimSpace(err.Error())
+	var unavailable common.DoctorDockerDaemonUnavailableError
+	if errors.As(err, &unavailable) {
+		detail = unavailable.Daemon.Report()
+	}
+	_, ferr := fmt.Fprintf(ctx.Stdout, "== Docker storage ==\n%s\n\n", detail)
 	return ferr
 }
 
@@ -453,7 +513,10 @@ func writeDeployDiagnosis(ctx common.Context, diagnosis common.DeployDiagnosisRe
 }
 
 func runSelectedDoctorAction(ctx common.Context, req common.ShellLaunchParams, action common.DoctorAction) error {
-	if _, err := fmt.Fprintf(ctx.Stdout, "Running: %s\n", common.DoctorActionDescription(action)); err != nil {
+	// The line names the daemon this action will act on: the same action
+	// against a daemon that does not hold this environment's build images
+	// reclaims nothing, and the reader has to be able to tell which one ran.
+	if _, err := fmt.Fprintf(ctx.Stdout, "Running: %s\n", common.DoctorActionDescriptionOn(action, common.ResolveDoctorDockerDaemon(req))); err != nil {
 		return err
 	}
 	output, err := common.RunDoctorAction(ctx, nil, req, action)
@@ -463,7 +526,15 @@ func runSelectedDoctorAction(ctx common.Context, req common.ShellLaunchParams, a
 	if ctx.DryRun {
 		return nil
 	}
-	return writeDoctorCommandOutput(ctx, output.Stdout, output.Stderr)
+	if err := writeDoctorCommandOutput(ctx, output.Stdout, output.Stderr); err != nil {
+		return err
+	}
+	if summary := common.DoctorPruneSummary(output); summary != "" {
+		if _, err := fmt.Fprintln(ctx.Stdout, summary); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runSelectedJetBrainsGatewayRepair(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) (bool, error) {

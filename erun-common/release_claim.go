@@ -27,8 +27,11 @@ const (
 	// releaseVersionClaimTTL is generous relative to a real release's build
 	// time (multi-arch image builds routinely run past ten minutes) so a
 	// live release is never mistaken for an abandoned one. Renewal keeps a
-	// running release well inside it; a release that stops renewing —
-	// crashed, or its pod was replaced — is reclaimed once it lapses.
+	// running release well inside it. A claim whose holder stops renewing —
+	// crashed, cancelled, or its pod replaced — is reclaimed by the
+	// environment that recorded it as soon as that environment can see the
+	// holder is gone; this TTL is the slower path, and the only one left for
+	// a holder in another environment (see releaseRepoClaimHeld).
 	releaseVersionClaimTTL = 20 * time.Minute
 	// releaseVersionClaimRenewalInterval keeps the renewal comfortably
 	// inside the TTL, the same margin the job-lease heartbeat uses.
@@ -111,7 +114,21 @@ func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string)
 	holder := EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env(OrchestratorIDEnvVar)), Tenant: tenant}
 	pid := os.Getpid()
 
-	repoSHA, err := takeReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now())
+	// The liveness a repository-global claim cannot carry: this environment's
+	// own record of the release, which is reclaimed as soon as the process
+	// holding it is gone. Read before this attempt takes its own local claim
+	// below, so a live local holder it finds is necessarily somebody else's.
+	localHolderAlive := func() bool {
+		held, err := environmentHasLiveReleaseHolder(tenant, environment, spec.Version, time.Now())
+		if err != nil {
+			// A store that cannot be read is not evidence that the holder is
+			// gone: it cannot clear the claim, so the claim stands.
+			return true
+		}
+		return held
+	}
+
+	repoSHA, err := takeReleaseRepoClaim(ctx, spec.ProjectRoot, environment, spec.Version, holder, time.Now(), localHolderAlive)
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +164,31 @@ func claimReleaseVersion(ctx Context, spec ReleaseSpec, env func(string) string)
 		_, _ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
 		releaseRepoClaimIfHeld(ctx, spec, repo)
 	}, nil
+}
+
+// environmentHasLiveReleaseHolder reports whether the environment still holds a
+// live local exclusive claim on version's release scope — by any holder, so the
+// caller must ask before taking its own.
+//
+// This is the one liveness signal a release has that is both local to one
+// environment and real: reading the leases reclaims the ones whose holder
+// process is gone, so a release that was cancelled, that crashed, or whose pod
+// was replaced — none of which run the deferred release that drops their
+// claim — reads as absent rather than as held. A holder this cannot disprove
+// (an unreadable store) is reported as present, so a claim is only ever
+// reclaimed on evidence and never on the absence of an answer.
+func environmentHasLiveReleaseHolder(tenant, environment, version string, now time.Time) (bool, error) {
+	held, err := LoadEnvironmentActivityLeases(tenant, environment, now)
+	if err != nil {
+		return false, err
+	}
+	scope := releaseVersionClaimScope(version)
+	for _, lease := range held {
+		if lease.Exclusive && lease.Scope == scope {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // releaseRepoClaimHandle tracks the repository-global claim's current sha

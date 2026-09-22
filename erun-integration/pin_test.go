@@ -132,8 +132,12 @@ func TestPin(t *testing.T) {
 		for _, want := range []string{
 			"terraform-ref",
 			"helm-dependency",
-			"runtime-version",
 			"1.0.175",
+			// The environment's own runtime coordinate is not erun's to move
+			// here: team/dev records no runtimeimage, so a deploy of it installs
+			// the tenant's own team-devops image, and the plan says so rather
+			// than listing a runtime-version site the caller did not ask about.
+			"skipped: runtimeversion team/dev rides team-devops",
 		} {
 			if !strings.Contains(result.Combined, want) {
 				t.Fatalf("the plan must name %q:\n%s", want, result.Combined)
@@ -395,8 +399,11 @@ func TestPin(t *testing.T) {
 
 	// A tenant's own runtimechart line is a real, deliberate configuration —
 	// --runtime-chart exists precisely so the chart can be versioned
-	// separately from the image and the erun release. A re-pin must leave it
-	// exactly as stated, even while the rest of the coordinate moves.
+	// separately from the image and the erun release. A re-pin must leave the
+	// whole coordinate exactly as stated: the env running that umbrella runs
+	// the image the umbrella publishes, so its runtimeversion is that line's
+	// number too, and writing the erun target into it hands the environment a
+	// version its own release line never publishes.
 	t.Run("real_run_leaves_a_tenant_own_runtimechart_line_unchanged", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -421,9 +428,34 @@ func TestPin(t *testing.T) {
 		if !strings.Contains(string(after), "runtimechart: oci://ghcr.io/sophium/charts/team-devops:1.0.76") {
 			t.Fatalf("a tenant's own runtimechart line must be left alone, got:\n%s", after)
 		}
-		if !strings.Contains(string(after), "runtimeversion: 1.0.175") {
-			t.Fatalf("runtimeversion should still move, got:\n%s", after)
+		if !strings.Contains(string(after), "runtimeversion: 1.0.0") {
+			t.Fatalf("an own-umbrella env's runtimeversion must be left alone too, got:\n%s", after)
 		}
+	})
+
+	// The reported case, binary-reachable: the environment states no
+	// runtimeimage, so only its own umbrella names the line its runtime pod
+	// runs. The plan must skip runtimeversion with a note saying what it read,
+	// rather than adding the erun target to an environment whose own release
+	// line never publishes it.
+	t.Run("skips_an_own_umbrella_envs_runtimeversion_and_says_so", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "frs", "build")
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "frs", "build", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("runtimechart: oci://ghcr.io/sophium/charts/frs-devops:1.0.134\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+
+		result := erun.Run(t, []string{"pin", "frs", "build", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "pin/skips_an_own_umbrella_envs_runtimeversion_and_says_so", normalize.Apply(result.Combined))
 	})
 
 	// Discovery answers "what can I pin to" from the registry, so choosing a

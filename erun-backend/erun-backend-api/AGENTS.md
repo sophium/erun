@@ -57,6 +57,29 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 
 - Own path/query/body adaptation, registration, status, and JSON. Protected routes
   rely on middleware auth; do not repeat user-auth checks in every handler.
+- **A path parameter that names an externally visible id is validated once, at
+  registration, never per handler.** `routes.WithUUIDPathIDs`
+  (`internal/routes/path_ids.go`) wraps every route registered through
+  `ProtectedRouteRegistrar`, so a segment that cannot be a UUID is answered
+  `400 INVALID_PATH_ID` — naming the parameter and the value — before the
+  handler runs. Without it a malformed id travelled to the database, which
+  rejected it at parse time, and the route layer's generic fallback reported a
+  typo as a server fault: it tells the caller the platform is broken when their
+  own id is mistyped, and it puts every such typo into the platform's 5xx rate.
+  The classification is an **exception list, not an allow-list**, matching the
+  "all externally visible IDs are UUIDv7" rule below: every `{...}` segment is
+  treated as an id unless it is named in `nonUUIDPathParams` (today only
+  `{alias}`, a credential's own chosen name, and `{external_id}`, the IdP's
+  subject identifier), so a route added later is covered without its author
+  opting in. Only the spelling is judged, not the version or existence — a
+  well-formed id that names nothing is still a `404`. The guard sits inside the
+  auth wrapper, so an unauthenticated caller gets `401` for every id shape and
+  parsing is not observable before authorization. `normalizeNoRows`' own
+  `invalid_text_representation` mapping stays as the second line of defence for
+  a non-route caller. Rotation: `internal/routes/path_ids_test.go` covers the
+  guard, `malformed_path_id_e2e_test.go` the real handler against a real
+  migrated PostgreSQL (opt-in, `ERUN_E2E_MERGE_DATABASE_URL`). Registering a
+  route directly on the mux instead of through the registrar bypasses it.
 - Keep request structs local unless a real shared transport contract owns them.
 - Classify every route in `routeroles.Routes` and the operator-surface audit.
   A genuinely internal route needs an explicit reason; missing UI is not itself

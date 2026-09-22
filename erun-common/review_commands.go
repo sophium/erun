@@ -386,10 +386,11 @@ func RunReviewReportMerged(ctx Context, store CloudReadStore, alias, reviewID, b
 // this command could invoke it (erun#2241), even though the server has
 // always allowed it.
 //
-// The review is fetched first so a caller that is not at MERGE gets a clear
-// refusal naming its actual status, rather than the server's ambiguous 404
-// for that case (requeueMergingReview reports the same not-found error
-// whether the review doesn't exist or is simply not at MERGE).
+// The review is fetched first so a caller that is not at MERGE is refused
+// before the write, naming the status the review actually holds. The server
+// refuses that case just as clearly now — requeueMergingReview's own refusal
+// names the status rather than reporting a review the caller can see as
+// missing — so this is a fail-fast on the same rule, not a substitute for it.
 //
 // Unlike RunReviewMergeQueueOverrideAdvance, this bypasses no safety gate —
 // the server already treats MERGE -> READY as unconditionally valid for any
