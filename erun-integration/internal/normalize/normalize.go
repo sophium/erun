@@ -284,39 +284,128 @@ var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\](?: .*)?$
 // trees, so sorting only a recognized root's descendants would leave exactly
 // the closest-run steps — the ones most likely to cross the noise floor and
 // swap — in wall-clock order.
+//
+// The tree to sort is the one the block's header and footer delimit, not the
+// one a contiguous run of rows describes: stderr from a step's own child
+// lands inside the table at a position the scheduler chooses, so a run
+// boundary drawn at the first such line makes the forest a function of that
+// position and splits one tree into fragments that are each sorted on their
+// own. TestGoldenTimingBlocksIgnoreForeignLinePlacement asserts that
+// invariance directly.
 func canonicalizeStepTimingOrder(s string) string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); {
-		if _, ok := timingLineDepth(lines[i]); !ok {
-			out = append(out, lines[i])
-			i++
-			continue
-		}
-		// A maximal contiguous run of timing rows (plus the indented
-		// continuation lines belonging to them) is one forest. The rows of a
-		// step-timing tree are emitted as the tree is walked, and a multi-line
-		// step failure interleaves its own message between two rows of the same
-		// tree, so a run ends at a line that is neither — not at a shallower
-		// one, which is a sibling or a parent.
-		end := i
-		for end < len(lines) {
-			if _, ok := timingLineDepth(lines[end]); ok {
-				end++
+		// A block is delimited by the header reportStepTiming prints above the
+		// table and the footer it prints below it, so the whole table is one
+		// forest no matter what lands between its rows. Bounding a run by the
+		// first line that is not a row instead -- the rule this replaces --
+		// made the forest a function of where a concurrent child's stderr
+		// happened to interleave: every landing split the same tree into
+		// different fragments, each sorted on its own, and the concatenation
+		// differed between two runs of the same scenario. That is invisible on
+		// an idle machine, where the recorded order already is name order.
+		if strings.TrimSpace(lines[i]) == timingBlockHeader {
+			if body := timingBlockBodyEnd(lines, i+1); body >= 0 {
+				rows, foreign := splitTimingBlockBody(lines[i+1 : body])
+				out = append(out, lines[i])
+				out = append(out, sortedTimingForest(rows)...)
+				// Foreign lines are emitted verbatim, together, after the
+				// table: their own position among the rows is the scheduling
+				// artifact this canonicalizer exists to remove, so pinning
+				// them anywhere the capture chose would leave the block
+				// capture-dependent. Their relative order is preserved, which
+				// for the single writer that produces them is their real
+				// order.
+				out = append(out, foreign...)
+				out = append(out, lines[body])
+				i = body + 1
 				continue
 			}
-			// An indented non-timing line is a row's own wrapped error message,
-			// part of this run; anything else (the "timing record written to ..."
-			// footer, an unindented interleaved message) ends it.
-			if !timingContinuationLine(lines[end]) {
-				break
-			}
-			end++
+			// No footer: the block's extent is genuinely unknown (the footer
+			// write failed), so fall through to the per-run rule rather than
+			// running to EOF and claiming whatever follows as part of the
+			// table.
 		}
-		out = append(out, sortedTimingForest(lines[i:end])...)
-		i = end
+		if _, ok := timingLineDepth(lines[i]); ok {
+			end := timingRunEnd(lines, i)
+			out = append(out, sortedTimingForest(lines[i:end])...)
+			i = end
+			continue
+		}
+		out = append(out, lines[i])
+		i++
 	}
 	return strings.Join(out, "\n")
+}
+
+// timingBlockHeader is the line reportStepTiming prints above the ordered
+// table, and the only anchor that says a table follows.
+const timingBlockHeader = "step timing (ordered by duration):"
+
+// timingBlockFooter prefixes the line reportStepTiming prints once the
+// machine-readable record is written, closing the table.
+const timingBlockFooter = "timing record written to "
+
+// timingBlockBodyEnd returns the index of the footer line closing the block
+// whose body starts at bodyStart, or -1 when no footer follows. The footer is
+// written by erun itself immediately after the table, so it is the block's own
+// declared end -- unlike "the first line that is not indented", which is
+// wherever unrelated concurrent output happened to land.
+func timingBlockBodyEnd(lines []string, bodyStart int) int {
+	for i := bodyStart; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], timingBlockFooter) {
+			return i
+		}
+	}
+	return -1
+}
+
+// timingRunEnd returns the end of the maximal run of timing rows starting at
+// start, plus the indented continuation lines belonging to them. It is the
+// fallback boundary for a table with no footer, and the only boundary for
+// timing rows that appear with no header above them at all.
+func timingRunEnd(lines []string, start int) int {
+	end := start
+	for end < len(lines) {
+		if _, ok := timingLineDepth(lines[end]); ok {
+			end++
+			continue
+		}
+		// An indented non-timing line is a row's own wrapped error message,
+		// part of this run; anything else (the footer, an unindented
+		// interleaved message) ends it.
+		if !timingContinuationLine(lines[end]) {
+			break
+		}
+		end++
+	}
+	return end
+}
+
+// splitTimingBlockBody separates a block body into the lines that belong to
+// the table's rows (the rows themselves, plus the indented continuation lines
+// carrying a row's own multi-line message) and the foreign lines that do not.
+//
+// reportStepTiming indents every line of a row, so an unindented line inside a
+// delimited block cannot be part of the table: it is output from somewhere
+// else that landed there. That is what makes this separable at all -- while a
+// row's own message was emitted at column zero the two were genuinely
+// indistinguishable, and no rule could both keep a row's message with its row
+// and be invariant to where unrelated output landed.
+func splitTimingBlockBody(body []string) (rows, foreign []string) {
+	for _, line := range body {
+		if _, ok := timingLineDepth(line); ok {
+			rows = append(rows, line)
+			continue
+		}
+		if timingContinuationLine(line) {
+			rows = append(rows, line)
+			continue
+		}
+		foreign = append(foreign, line)
+	}
+	return rows, foreign
 }
 
 // timingLineDepth reports a timing row's nesting depth (an offset from the

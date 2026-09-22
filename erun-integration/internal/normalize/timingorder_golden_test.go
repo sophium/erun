@@ -21,9 +21,6 @@ import (
 // timingLinePattern, so this stays a check ON the pattern instead of a
 // restatement of it.
 
-// timingBlockHeader is the line reportStepTiming prints above the table.
-const timingBlockHeader = "step timing (ordered by duration):"
-
 func TestGoldenTimingBlocksAreOrderInvariant(t *testing.T) {
 	goldens := goldensWithTimingBlocks(t)
 	if len(goldens) == 0 {
@@ -47,6 +44,76 @@ func TestGoldenTimingBlocksAreOrderInvariant(t *testing.T) {
 				t.Fatalf("canonicalization did not undo a sibling reorder, so this golden still depends on the order the run measured:\nwant:\n%s\ngot:\n%s", golden, got)
 			}
 		})
+	}
+}
+
+// TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput pins the property
+// the canonicalizer exists to provide for a table that has unrelated output
+// inside it: the canonical form must not depend on where that output landed.
+//
+// The block is the release scenario's own table, whose five rows are
+// build -> publish -> api plus release and sync-remote beside publish. Two
+// captures of exactly that table are built below, differing only in the order
+// the run measured its children in and in which boundaries an unrelated
+// writer's line landed on -- which is the difference a loaded machine
+// produced against the recorded golden, and every landing used to split the
+// table into fragments that were each sorted on their own.
+//
+// Unlike the golden-driven test above, this needs no golden to carry an
+// interleaved line today: after a row's own multi-line message is rendered
+// indented (erun-common/timing.go), no recorded table has one left, so a
+// probe driven by the committed goldens would assert nothing at all while
+// still reporting green.
+func TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput(t *testing.T) {
+	// The recorded capture: children measured in name order, the writer's
+	// lines landing after three of them.
+	recorded := strings.Join([]string{
+		timingBlockHeader,
+		"  build (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"concurrent output",
+		"    publish (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"concurrent output",
+		"      api (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"concurrent output",
+		"    release [<ELAPSED>]",
+		"    sync-remote [<ELAPSED>]",
+		"timing record written to <TMP>",
+	}, "\n")
+
+	// The same table off a loaded machine: build's children measured in the
+	// other order, so the writer's lines land on different boundaries.
+	loaded := strings.Join([]string{
+		timingBlockHeader,
+		"  build (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"concurrent output",
+		"    sync-remote [<ELAPSED>]",
+		"concurrent output",
+		"    release [<ELAPSED>]",
+		"    publish (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"concurrent output",
+		"      api (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"timing record written to <TMP>",
+	}, "\n")
+
+	// The block the canonical form names: rows in name order at every level,
+	// the unrelated lines together after them, before the footer.
+	want := strings.Join([]string{
+		timingBlockHeader,
+		"  build (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"    publish (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"      api (failed) [<ELAPSED>] — docker buildx inspect: exit status 1",
+		"    release [<ELAPSED>]",
+		"    sync-remote [<ELAPSED>]",
+		"concurrent output",
+		"concurrent output",
+		"concurrent output",
+		"timing record written to <TMP>",
+	}, "\n")
+
+	for name, capture := range map[string]string{"recorded": recorded, "loaded": loaded} {
+		if got := canonicalizeStepTimingOrder(capture); got != want {
+			t.Errorf("canonicalizing the %s capture must produce the block's canonical form, so that two runs of one scenario cannot disagree:\nwant:\n%s\ngot:\n%s", name, want, got)
+		}
 	}
 }
 
@@ -91,14 +158,33 @@ func reverseTimingSiblings(s string) string {
 			continue
 		}
 		out = append(out, lines[i])
-		end := i + 1
-		for end < len(lines) && indentWidth(lines[end]) >= 2 {
-			end++
-		}
+		end := timingBlockEndIndentAware(lines, i+1)
 		out = append(out, reverseIndentTree(lines[i+1:end])...)
 		i = end
 	}
 	return strings.Join(out, "\n")
+}
+
+// timingBlockEndIndentAware returns the end of the table the header at
+// headerIdx opens. It prefers the block's own footer -- the line
+// reportStepTiming writes after the table -- and falls back to the
+// indentation rule when there is none, matching where the canonicalizer stops
+// reordering. Using indentation alone here would cut the probe off at the
+// first interleaved stderr line, which is precisely the boundary the
+// canonicalizer no longer draws, so the probe would skip asserting the
+// property on exactly the golden shapes this file exists to check.
+func timingBlockEndIndentAware(lines []string, bodyStart int) int {
+	const footer = "timing record written to "
+	for i := bodyStart; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], footer) {
+			return i
+		}
+	}
+	end := bodyStart
+	for end < len(lines) && indentWidth(lines[end]) >= 2 {
+		end++
+	}
+	return end
 }
 
 func indentWidth(line string) int {
@@ -140,7 +226,11 @@ func reverseIndentTree(lines []string) []string {
 		stack = append(stack, node)
 		depths = append(depths, depth)
 	}
-	var out []string
+	// Lines the root accumulated sit before the first row, so they belong to
+	// no node: emitting them first keeps them in the block rather than
+	// dropping them, which would make every comparison below fail for a reason
+	// that has nothing to do with the property under test.
+	out := append([]string(nil), root.lines...)
 	var walk func(*indentNode)
 	walk = func(n *indentNode) {
 		for i := len(n.children) - 1; i >= 0; i-- {
