@@ -1450,6 +1450,16 @@ Every `401` the auth layer produces carries a JSON `{code, message}` envelope (t
 
 The audit trail records every authorized request with `issuer`, `sub`, org, and timestamp. Rejected requests (missing/invalid token, unknown issuer, unresolved tenant, unenrolled subject, denied permission) are **not** audited — see [the audit log spec](/agent-reference/audit-log).
 
+#### Request-level validation errors
+
+Past authentication, a request whose own inputs cannot be used is answered as a client error, never as a `500`. Every route carrying an id in its path shares one code:
+
+| Status | `code` | Example `message` | Condition | Recovery |
+|---|---|---|---|---|
+| `400` | `INVALID_PATH_ID` | `path parameter "review_id" must be a UUID such as 01a01b39-0000-7000-8000-000000000000; got "not-a-uuid"` | A path parameter naming an externally visible id — every `/v1/<resource>/{…_id}` segment — is not a UUID. Both the parameter's name and the value received are in the message. The two path parameters that are deliberately not ids are excluded: `{alias}` (a cloud-provider credential's own name) and `{external_id}` (the identity provider's subject identifier). | Re-send the request with the id as it was returned to you. A typo or a truncated paste is the cause; this code never reports anything about the platform's own state. |
+
+Only the **spelling** is judged, not the version or existence: a well-formed id that names nothing is a `404`, not a `400`, so the two answers a caller acts on differently stay distinct. `00000000-0000-0000-0000-000000000000` is well-formed and is the ordinary absent-id probe; brace-, `urn:`- and unhyphenated UUID spellings are not accepted. The guard runs *after* authentication, so an unauthenticated caller gets `401` for every id shape and whether a given id parses is never observable before authorization.
+
 #### Structured error codes `(Planned.)`
 
 The resolution-level codes above (`UNAUTHENTICATED`/`TENANT_UNRESOLVED`/`NOT_ENROLLED`/`RESOLUTION_FAILED`/`UNAUTHORIZED`) are shipped. This deeper, JWT-verification-specific catalogue — plus the codes the still-unimplemented self-service trust-management API would return — is **not implemented yet**; a client must not branch on these:

@@ -59,6 +59,12 @@ type Context struct {
 	// layer cache as the replay it is instead of as a live gate run — see
 	// build_gate_test_stage_evidence.go.
 	gateTestStage *gateTestStageProvenance
+	// progress is the live heartbeat for the command's active build run, set by
+	// RunDockerBuilds (or RunDockerBuild for a lone image) and nil everywhere
+	// else. Every image the run builds registers with it, so one ticker names
+	// whatever is still building however the run is scheduled — see
+	// build_heartbeat.go.
+	progress *buildHeartbeat
 	// MCPTool names the MCP tool that initiated this call, set only by
 	// erun-mcp's tool handlers before they call into shared execution.
 	// newPlatformClientForAlias forwards it to erun-backend-api as an audit

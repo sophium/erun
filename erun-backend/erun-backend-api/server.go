@@ -603,7 +603,12 @@ func registerHealthRoute(mux *http.ServeMux) {
 }
 
 func registerProtectedRoute(mux *http.ServeMux, auth *AuthMiddleware, method string, apiPath string, handler http.Handler) {
-	mux.Handle(method+" "+apiPath, withAPIPath(apiPath, auth.Wrap(handler)))
+	// Every authenticated route is registered through here, so binding the
+	// path-id guard at this one seam covers all of them — present and future —
+	// rather than leaving each handler to remember it. It sits inside the auth
+	// wrapper: an unauthorized caller must see 401 whatever shape of id it
+	// sent, so parsing is not observable before authentication.
+	mux.Handle(method+" "+apiPath, withAPIPath(apiPath, auth.Wrap(routes.WithUUIDPathIDs(apiPath, handler))))
 }
 
 func protectedRouteRegistrar(mux *http.ServeMux, auth *AuthMiddleware, catalog *routeCatalog) routes.ProtectedRouteRegistrar {
