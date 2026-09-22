@@ -113,7 +113,10 @@ Retained *inside* the environment: the history is written to the runtime contain
 monitor running in that container. So the `sizing:` lines above appear when `erun list` runs in the
 environment they describe, and not from a host, which holds no history to derive a verdict from. The
 [`usage` MCP tool](/mcp/overview#usage) runs in the environment and carries the same verdict as a
-`sizing` field; [`erun usage`](/cli/usage) does not carry it, and says so in its help.
+`sizing` field; [`erun usage`](/cli/usage) and [`erun doctor`](/cli/doctor) print a `sizing` block too,
+and reach the same verdict from the same evidence — a reading taken from a host has the live counters
+behind it, so the raise direction still fires there while the shrink direction reads as insufficient
+evidence.
 
 ### What each signal says
 
