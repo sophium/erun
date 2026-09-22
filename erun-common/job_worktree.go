@@ -143,7 +143,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 	if err != nil || strings.TrimSpace(other.Dir) != dir {
 		return "", false
 	}
-	other = reconcileEnvironmentJob(jobsDir, other, now, processAlive, hostname)
+	other = reconcileEnvironmentJob(jobsDir, other, now, ProcessAlive, hostname)
 	if other.Finished() {
 		return "", false
 	}

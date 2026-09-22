@@ -446,7 +446,7 @@ func releaseUnsupervisedEnvironmentJobExclusivityClaim(params StartEnvironmentJo
 	if !params.Exclusive {
 		return
 	}
-	if supervisorPID > 0 && processAlive(supervisorPID) {
+	if supervisorPID > 0 && ProcessAlive(supervisorPID) {
 		return
 	}
 	_ = releaseEnvironmentJobExclusivityClaim(params.Tenant, params.Environment, params.ID)
@@ -462,7 +462,7 @@ func reserveEnvironmentJobID(ctx Context, dir, id string) error {
 	if err != nil {
 		return nil
 	}
-	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), processAlive, currentJobHostname())
+	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), ProcessAlive, currentJobHostname())
 	if !resolved.Finished() {
 		return fmt.Errorf("job %q is already running (pid %d); pass a different id or cancel it first", id, resolved.PID)
 	}
@@ -497,7 +497,7 @@ func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (EnvironmentJo
 			}
 			return EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
 		}
-		if !processAlive(supervisorPID) {
+		if !ProcessAlive(supervisorPID) {
 			return EnvironmentJob{}, fmt.Errorf("job supervisor %d exited without registering job %q", supervisorPID, id)
 		}
 		time.Sleep(20 * time.Millisecond)
