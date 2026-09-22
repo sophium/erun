@@ -49,7 +49,7 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 		cache = &cacheDecision{hit: hit, missReason: reason}
 		stepCtx.recordTimingCache(hit, reason)
 	}
-	buildInput.PlatformObserver = stepCtx.timingPlatformObserver(cache)
+	buildInput.PlatformObserver = ctx.gateTestStage.withGateStageEvidence(buildInput, stepCtx.timingPlatformObserver(cache))
 	err := build(buildInput, stdout, stderr)
 	finish(err)
 	return err
@@ -263,15 +263,60 @@ func ensureGateBuildActuallyBuilt(execution BuildExecutionSpec) error {
 	return newGateBuildNotRunError(promoted)
 }
 
-// gateTestStageProvenanceLines names, for each build whose Dockerfile runs
-// the project's own gate (make check, see dockerfileHasGateTestStage), whether
-// this run's docker build actually invokes that test stage or — the state
-// applyIncrementalPromotion and DockerImageBuilder should together make
-// unreachable — reused a promoted image instead. Deliberately
-// separate from the per-image incremental trace, which can carry dozens of
-// look-alike cache-hit lines: an orchestrator deciding whether to trust this
-// build's exit code should not have to find this fact buried among them.
-func gateTestStageProvenanceLines(builds []DockerBuildSpec) []string {
+// gateTestStagePlanLines announces, before the run, which builds will run the
+// project's own gate (make check, see dockerfileHasGateTestStage). It is
+// deliberately separate from gateTestStageProvenanceLines, which reports what
+// each one actually did afterwards, and it deliberately avoids that function's
+// outcome vocabulary.
+//
+// The split is the fix, not a tidy-up: whether the gate *executed* is a fact
+// only the builder can report, so a plan line claiming LIVE would put the very
+// word a real gate run prints into the trace of a run BuildKit replayed from
+// its layer cache — leaving the two indistinguishable in the log, which is the
+// state this pair exists to end.
+//
+// An image promoted from a cached fingerprint image is left out: it never
+// reaches a docker build, so its outcome is the whole story and the outcome
+// line reports it.
+func gateTestStagePlanLines(builds []DockerBuildSpec) []string {
+	var lines []string
+	for _, buildInput := range builds {
+		if !buildInput.GateTestStage || buildInput.Promote {
+			continue
+		}
+		tag := strings.TrimSpace(buildInput.Image.Tag)
+		lines = append(lines, "test stage ("+tag+"): planned (this build's Dockerfile runs make check in its test stage)")
+	}
+	return lines
+}
+
+// gateTestStageProvenanceLines reports, for each build whose Dockerfile runs the
+// project's own gate, what this run's docker build actually did with that test
+// stage. Deliberately separate from the per-image incremental trace, which can
+// carry dozens of look-alike cache-hit lines: an orchestrator deciding whether
+// to trust this build's exit code should not have to find this fact buried
+// among them.
+//
+// There are three outcomes, and keeping all three distinct in the trace is the
+// point:
+//
+//	LIVE     this run's docker build executed the stage, so make check ran.
+//	CACHED   the image was promoted from a cached fingerprint image, so no
+//	         docker build ran at all. applyIncrementalPromotion and
+//	         DockerImageBuilder together make this unreachable.
+//	REPLAYED BuildKit was asked to build, but served the whole test stage from
+//	         its own layer cache: the cache-hit state *underneath* the
+//	         fingerprint one, which no plan-level guard can see and which this
+//	         line used to describe as a live run.
+//
+// A REPLAYED build is a memoized verdict on byte-identical content, not an
+// unverified one — the layer cache cannot hit on anything else — but it is a
+// different claim from "this run invoked make check", and it must not print as
+// one. evidence is the run's own record of what its builds reported (see
+// build_gate_test_stage_evidence.go); a run that produced no evidence at all
+// leaves the stage's outcome unknowable here, so the existing LIVE wording
+// stands rather than being guessed at.
+func gateTestStageProvenanceLines(builds []DockerBuildSpec, evidence *gateTestStageProvenance) []string {
 	var lines []string
 	for _, buildInput := range builds {
 		if !buildInput.GateTestStage {
@@ -280,6 +325,10 @@ func gateTestStageProvenanceLines(builds []DockerBuildSpec) []string {
 		tag := strings.TrimSpace(buildInput.Image.Tag)
 		if buildInput.Promote {
 			lines = append(lines, "test stage ("+tag+"): CACHED (skipped, previous result reused) — refusing to treat this as a passing gate")
+			continue
+		}
+		if execution, ok := evidence.execution(tag); ok && execution.replayedWholeStage() {
+			lines = append(lines, "test stage ("+tag+"): REPLAYED (BuildKit served every step of this Dockerfile's test stage from its layer cache — make check did not execute in this run)")
 			continue
 		}
 		lines = append(lines, "test stage ("+tag+"): LIVE (this build invokes make check)")
@@ -298,11 +347,12 @@ func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*e
 	}
 	started := time.Now()
 	ctx.Info("==> Building")
-	for _, line := range gateTestStageProvenanceLines(builds) {
+	for _, line := range gateTestStagePlanLines(builds) {
 		ctx.Info(line)
 	}
 	root := newStepTiming("build", nil)
 	ctx.timing = root
+	ctx.gateTestStage = newGateTestStageProvenance()
 	return ctx, func(errp *error) {
 		var err error
 		if errp != nil {
@@ -310,7 +360,9 @@ func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*e
 		}
 		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
-		for _, line := range gateTestStageProvenanceLines(builds) {
+		// The closing lines are the outcome, now that every build has reported
+		// whether it executed its test stage or had BuildKit replay it.
+		for _, line := range gateTestStageProvenanceLines(builds, ctx.gateTestStage) {
 			ctx.Info(line)
 		}
 		if err != nil {

@@ -52,6 +52,13 @@ type Context struct {
 	// push, deploy), set by that command's umbrella and nil everywhere else —
 	// see timing.go. Unexported: only erun-common's own umbrellas start one.
 	timing *stepTiming
+	// gateTestStage is the run's record of what each gate image's real `docker
+	// build` did with its Dockerfile's test stage, set by the build and release
+	// umbrellas alongside the timing root and nil everywhere else. It is what
+	// lets gateTestStageProvenanceLines report a run BuildKit served from its
+	// layer cache as the replay it is instead of as a live gate run — see
+	// build_gate_test_stage_evidence.go.
+	gateTestStage *gateTestStageProvenance
 	// MCPTool names the MCP tool that initiated this call, set only by
 	// erun-mcp's tool handlers before they call into shared execution.
 	// newPlatformClientForAlias forwards it to erun-backend-api as an audit
