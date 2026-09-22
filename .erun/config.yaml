@@ -14,10 +14,11 @@
 # default instead of silently falling back to the multi-arch build. Environments
 # that must not inherit it opt out with `platforms: []` -- see `local` below.
 #
-# This narrows non-release builds only -- `erun build --release` resolves both
-# architectures unconditionally and never consults this config, so published
-# images are unaffected. Do not widen it back without re-confirming this node
-# can schedule arm64 workloads; it cannot today.
+# This narrows local builds only -- `erun build --release` and `erun push` both
+# resolve every architecture erun supports and never consult this config, so
+# published images are unaffected: a released version always carries both amd64
+# and arm64. Do not widen it back without re-confirming this node can schedule
+# arm64 workloads; it cannot today.
 docker:
     platforms:
         - linux/amd64

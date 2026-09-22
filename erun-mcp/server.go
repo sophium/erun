@@ -828,7 +828,7 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, buildProfileTool())
 	addTool(reg, &mcp.Tool{
 		Name:        "release",
-		Description: "Cut a project release from the runtime repo root using .erun/config.yaml branch policy. Stamps the release version into the charts and packaging metadata and commits and tags it locally, then builds and publishes that version's images and helm charts and reads each one back from the registry, and only then pushes the tag, prepares the next patch version, and pushes the branches. A release that completes means deploy can resolve the image and the chart at that version; a release that cannot publish fails while nothing is public. Set preview to resolve and return the plan without executing it.",
+		Description: "Cut a project release from the runtime repo root using .erun/config.yaml branch policy. Stamps the release version into the charts and packaging metadata, commits and tags it locally, then pushes the tag, syncs packaging checksums, prepares the next patch version, and pushes the branches. It marks source control and nothing else: it never builds, publishes, or verifies an artifact, so it completes having published nothing and says so. Build and publish belong to `erun build --release`, which composes this same stamp/tag work with the build and the publish, and to `erun push --version <version>`. Set preview to resolve and return the plan without executing it.",
 	}, releaseTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "contribute_clone",
