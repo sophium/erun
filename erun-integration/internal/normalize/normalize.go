@@ -290,7 +290,7 @@ var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\](?: .*)?$
 // lands inside the table at a position the scheduler chooses, so a run
 // boundary drawn at the first such line makes the forest a function of that
 // position and splits one tree into fragments that are each sorted on their
-// own. TestGoldenTimingBlocksIgnoreForeignLinePlacement asserts that
+// own. TestCanonicalizeStepTimingOrderIgnoresInterleavedOutput asserts that
 // invariance directly.
 func canonicalizeStepTimingOrder(s string) string {
 	lines := strings.Split(s, "\n")
