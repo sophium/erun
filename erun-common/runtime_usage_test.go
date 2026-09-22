@@ -717,6 +717,7 @@ func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
 func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
 	const throttleWarning = "the build was throttled in 20000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
 	const partialThrottleWarning = "the build was throttled in 2000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
+	const youngSidecarThrottleWarning = "the build was throttled in 9999 of 9999 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
 
 	cases := []struct {
 		name        string
@@ -730,6 +731,18 @@ func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
 			name:        "a build throttled in every period",
 			dindReading: runtimeUsageDindReading("400000 100000", 20000, 20000),
 			wantWarning: throttleWarning,
+		},
+		{
+			// The same pinned build read one period short of sizing's bar.
+			// The ratio is total, not marginal: the sidecar has been throttled
+			// in every period it has ever had, which is what a rebuild pinned
+			// at its cap looks like for its first ~17 minutes -- the whole
+			// window that build occupies. A floor sized for a 24-hour
+			// recommendation must not hold this reading silent, or the warning
+			// arrives only once the build it describes is over.
+			name:        "a build throttled in every period under the sizing floor",
+			dindReading: runtimeUsageDindReading("400000 100000", 9999, 9999),
+			wantWarning: youngSidecarThrottleWarning,
 		},
 		{
 			// Materially throttled without being pinned at the cap: a tenth
@@ -797,6 +810,15 @@ func TestRunRuntimeUsageStaysSilentWhenTheSidecarsThrottlingIsImmaterial(t *test
 			// Bracketing the materiality bar from below: 4.99% of the periods.
 			name:        "a build throttled just under the material ratio",
 			dindReading: runtimeUsageDindReading("400000 100000", 20000, 998),
+		},
+		{
+			// Bracketing the build path's own period floor from below, the
+			// same way the case above brackets the ratio: 599 of 599 is a
+			// total ratio carried by too few periods to read. The sibling
+			// test's 9,999-of-9,999 case is the same ratio past that floor,
+			// and must warn.
+			name:        "a total ratio one period under the build floor",
+			dindReading: runtimeUsageDindReading("400000 100000", 599, 599),
 		},
 		{
 			// The other half of the bar. A ratio this extreme carried by too
