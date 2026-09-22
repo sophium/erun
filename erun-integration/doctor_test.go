@@ -1669,6 +1669,50 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_prune_images_and_build_cache_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_prune_refuses_an_environment_with_no_build_daemon", func(t *testing.T) {
+		// A runtime env installs published versions and never builds, so it has
+		// no erun-dind sidecar and no daemon holding build images. A prune asked
+		// for there must fail naming that -- not run against whatever container
+		// the doctor's own context happens to reach and print docker's success
+		// for it. The kubectl stub fails loudly on any dind exec, so a prune
+		// that still dispatched one surfaces as that failure.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlFailsOnDindExec(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("a prune that cannot run must not exit 0: %s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "dispatched a dind exec anyway") {
+			t.Fatalf("doctor pruned a daemon that does not hold this environment's build images:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_prune_refuses_an_environment_with_no_build_daemon", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_prune_reports_a_prune_that_freed_nothing", func(t *testing.T) {
+		// The reported failure: the operator follows the build's own
+		// remedy, the prune prints docker's success, and the disk does not move.
+		// The stub answers with the report's own numbers -- 11.32GB reclaimable
+		// before and after, docker claiming 4.105MB reclaimed -- so the run must
+		// name the daemon it pruned and say plainly that the reclaim it printed
+		// did not free the space the build needs, instead of leaving docker's
+		// "Total reclaimed space" as the only verdict.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlPruneReclaimsNothing(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--prune-images"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_prune_reports_a_prune_that_freed_nothing", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_without_tty_skips_optional_prune_prompts", func(t *testing.T) {
 		// Regression coverage for the no-TTY run: doctor is the command reached
 		// for when a deploy has already failed, so its caller is often an
@@ -2284,6 +2328,57 @@ func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 		`  *"docker image prune"*) printf '%s\n' 'Total reclaimed space: 2GB' ;;`,
 		`  *"docker builder prune"*) printf '%s\n' 'Total: 3GB' ;;`,
 		`  *"docker container prune"*) printf '%s\n' 'Total reclaimed space: 1GB' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorKubectlFailsOnDindExec answers every read-only doctor surface
+// normally and fails loudly on a dind exec, so a prune that dispatches one is
+// visible as itself rather than as a quiet success.
+func stubDoctorKubectlFailsOnDindExec(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"docker system df"*|*"df -h /var/lib/docker"*|*"docker image prune"*|*"docker builder prune"*|*"docker container prune"*) printf '%s\n' 'dispatched a dind exec anyway' >&2; exit 1 ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *" exec "*) printf '%s\n' 'git push access: no credential found' ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorKubectlPruneReclaimsNothing answers a prune's dind exec with the
+// reported shape: docker prints a reclaim (4.105MB) while the store
+// it pruned still reports the same 11.32GB reclaimable, which is a prune that
+// freed none of the space the build needs. Every other doctor surface keeps the
+// default stub's answers.
+func stubDoctorKubectlPruneReclaimsNothing(t *testing.T, stubsDir string) {
+	t.Helper()
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *" wait "*) : ;;`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *"erun-doctor-read:before"*)`,
+		`    printf '%s\n' \`,
+		`      'erun-doctor-read:before' \`,
+		`      'Images|11.32GB|11.32GB (100%)' \`,
+		`      'Build Cache|0B|0B' \`,
+		`      'erun-doctor-read:before:end' \`,
+		`      'Total reclaimed space: 4.105MB' \`,
+		`      'erun-doctor-read:after' \`,
+		`      'Images|11.32GB|11.32GB (100%)' \`,
+		`      'Build Cache|0B|0B' \`,
+		`      'erun-doctor-read:after:end' \`,
+		`      '== Docker system df ==' \`,
+		`      'Images          21        0         11.32GB   11.32GB (100%)' \`,
+		`      'Build Cache     0         0         0B        0B'`,
+		`    ;;`,
 		`esac`,
 		`exit 0`,
 	}, "\n")
