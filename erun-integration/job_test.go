@@ -132,20 +132,147 @@ func awaitJobSupervisorExit(t *testing.T, setup env.Setup, envVars []string, id 
 	awaitJobSupervisorExitVia(t, setup, envVars, id, timeout, inEnvironmentJobStatus)
 }
 
+// channelUnreachableExitCode is the CLI's own contract for a host-side command
+// whose environment channel stayed unreachable even after one transparent
+// reattach (erun-cli/cmd/mcp_call.go's mcpChannelUnreachableExitCode). It
+// exists for exactly one purpose, quoted from that constant: "distinct from a
+// normal error so a caller looping on this command cannot misread 'the channel
+// is down' as 'the job finished' or 'the tool failed'". Reading the code
+// rather than matching on the transport error's prose is the point -- the
+// words are ours to change and the code is not.
+const channelUnreachableExitCode = 126
+
+// jobSupervisorState is what one status read established about a job's
+// supervisor. Three answers, not two: the wait must never act on the third as
+// though it were either of the others.
+type jobSupervisorState int
+
+const (
+	// jobSupervisorRecorded: the record was read, and it names a supervisor
+	// pid whose liveness decides the wait.
+	jobSupervisorRecorded jobSupervisorState = iota
+	// jobSupervisorAbsent: there is no supervisor to wait out. The record was
+	// read and names no pid, or the environment answered that it has no such
+	// job -- either way the wait is over.
+	jobSupervisorAbsent
+	// jobSupervisorUnreadable: the read could not be performed at all, so what
+	// the record says is unknown. This is not evidence of absence.
+	jobSupervisorUnreadable
+)
+
+// jobSupervisorReading is one status read's answer: the pid the record carries
+// and which of the three states the read established.
+type jobSupervisorReading struct {
+	pid   int
+	state jobSupervisorState
+}
+
+// readJobSupervisor classifies one `job status` result; see
+// awaitJobSupervisorExitVia for why the third state exists and what the
+// absent/error boundary below deliberately still is.
+func readJobSupervisor(result erun.Result) jobSupervisorReading {
+	if result.ExitCode == channelUnreachableExitCode {
+		return jobSupervisorReading{state: jobSupervisorUnreadable}
+	}
+	var payload struct {
+		PID int `json:"pid"`
+	}
+	if json.Unmarshal([]byte(result.Stdout), &payload) != nil || payload.PID <= 0 {
+		return jobSupervisorReading{state: jobSupervisorAbsent}
+	}
+	return jobSupervisorReading{pid: payload.PID, state: jobSupervisorRecorded}
+}
+
 // awaitJobSupervisorExitVia is awaitJobSupervisorExit over an explicit status
 // command, so the same wait covers jobs read through either namespace.
+//
+// The two namespaces do not fail the same way, which is why a failed read is
+// not simply read as "no supervisor" here (readJobSupervisor above). An
+// in-environment status touches a file; an off-environment one goes over the
+// target's MCP edge, so it can come back having read nothing at all. Folding
+// that in with "the record names no supervisor" returned immediately --
+// reporting a teardown that had waited for nothing -- whenever the edge was
+// down, which is main's behaviour rather than this wait's. Measured, by
+// registering the emcp teardown ahead of the job teardowns in
+// TestJobOffEnvironmentExclusiveClaimIsEnforced so LIFO killed the edge first:
+// both status reads then exited 126 with empty stdout, and the scenario still
+// passed. It fails now, naming the channel.
+//
+// What this deliberately does not do: a non-zero read that is not the
+// unreachable contract above still reads as absence, and that is load-bearing
+// rather than an oversight. `erun job status --id <id>` answers a job that was
+// never started with exit 1 and empty stdout -- measured for the in-environment
+// `baddir` and the off-environment `intruder`, and identical in shape to a
+// transport failure by every field the harness sees. Two callers depend on
+// that answer meaning "nothing to wait out": startJob registers its teardown
+// before it knows whether the start succeeded (a failed start is not proof
+// that nothing started, which is the leak window this wait exists to close),
+// and the exclusive scenario above tears down a job whose start it has just
+// asserted was refused. Telling "no such record" from "the read failed" needs
+// a distinct answer the CLI does not yet give, so it stays a documented gap
+// instead of a guessed one; TestReadJobSupervisor pins both sides of the line
+// as they are.
 func awaitJobSupervisorExitVia(t *testing.T, setup env.Setup, envVars []string, id string, timeout time.Duration, status func(string) []string) {
 	t.Helper()
 	awaitJobSupervisorGone(t, id, timeout, func() (int, bool) {
 		result := erun.Run(t, status(id), erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		var payload struct {
-			PID int `json:"pid"`
+		reading := readJobSupervisor(result)
+		if reading.state == jobSupervisorUnreadable {
+			t.Fatalf("job %q: `erun %s` could not reach the environment's MCP channel, so whether the supervisor is still alive is unknown. A teardown that never got its read must not report success; the transport error below names the remedy:\n%s",
+				id, strings.Join(status(id), " "), result.Combined)
 		}
-		if json.Unmarshal([]byte(result.Stdout), &payload) != nil || payload.PID <= 0 {
-			return 0, false
-		}
-		return payload.PID, true
+		return reading.pid, reading.state == jobSupervisorRecorded
 	})
+}
+
+// TestReadJobSupervisor pins how one status read is classified, including the
+// two answers that must not be confused for each other.
+//
+// The case with teeth is the unreachable channel: reading a failed status as
+// "no supervisor recorded" is what made the off-environment teardown return
+// without waiting whenever the edge was down. Every result shape below is the
+// one the real binary produces, measured rather than invented -- a job the
+// environment never started answers exit 1 with empty stdout and `no job ...`
+// on stderr, and a channel that stayed unreachable answers 126 with empty
+// stdout and the transport error on stderr. Removing the unreachable branch
+// from readJobSupervisor makes the last case fail, which is the regression
+// this test exists to catch.
+func TestReadJobSupervisor(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		result erun.Result
+		want   jobSupervisorReading
+	}{
+		{
+			name:   "a_recorded_supervisor_reports_its_pid",
+			result: erun.Result{ExitCode: 0, Stdout: "{\n  \"id\": \"gate\",\n  \"state\": \"exited\",\n  \"pid\": 2035\n}\n"},
+			want:   jobSupervisorReading{pid: 2035, state: jobSupervisorRecorded},
+		},
+		{
+			name:   "a_record_that_names_no_pid_is_absent",
+			result: erun.Result{ExitCode: 0, Stdout: "{\n  \"id\": \"gate\",\n  \"state\": \"exited\"\n}\n"},
+			want:   jobSupervisorReading{state: jobSupervisorAbsent},
+		},
+		{
+			name:   "a_job_the_environment_never_started_is_absent",
+			result: erun.Result{ExitCode: 1, Stdout: "", Stderr: "no job \"intruder\" in team/dev\n"},
+			want:   jobSupervisorReading{state: jobSupervisorAbsent},
+		},
+		{
+			name:   "an_unreachable_channel_is_not_an_absent_record",
+			result: erun.Result{ExitCode: channelUnreachableExitCode, Stdout: "", Stderr: "MCP endpoint is not reachable: http://127.0.0.1:26700/mcp (connect: connection refused)\n"},
+			want:   jobSupervisorReading{state: jobSupervisorUnreadable},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := readJobSupervisor(tc.result); got != tc.want {
+				t.Fatalf("readJobSupervisor(exit %d, stdout %q) = %+v, want %+v", tc.result.ExitCode, tc.result.Stdout, got, tc.want)
+			}
+		})
+	}
 }
 
 // awaitJobSupervisorGone is the wait itself, over an observer that reports the

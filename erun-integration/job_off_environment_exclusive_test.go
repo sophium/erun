@@ -55,6 +55,13 @@ func TestJobOffEnvironmentExclusiveClaimIsEnforced(t *testing.T) {
 	if err := emcpCmd.Start(); err != nil {
 		t.Fatalf("start emcp: %v", err)
 	}
+	// Registered before every job teardown below, so t.Cleanup's LIFO order
+	// runs it after them: stopOffEnvironmentJob reads each job's supervisor
+	// back through this edge, and an edge killed first would leave that wait
+	// unable to read anything. That ordering is a requirement of this
+	// registration, not a convenience -- moving this cleanup below a job
+	// teardown turns the teardown into a loud failure naming the channel
+	// rather than a silent pass (awaitJobSupervisorExitVia).
 	t.Cleanup(func() {
 		_ = emcpCmd.Process.Kill()
 		_ = emcpCmd.Wait()
