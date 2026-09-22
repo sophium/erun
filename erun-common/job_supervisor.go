@@ -845,7 +845,15 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 		} else {
 			childPID = cmd.Process.Pid
 			recorder.update(func(job *EnvironmentJob) { job.ChildPID = childPID })
+			// Reap the descendants this child orphans onto the supervisor while
+			// it runs (see startEnvironmentJobChildReaper). Scoped to exactly
+			// this window, in which the job's own command is the only os/exec
+			// child this process has: cmd.Wait below is the one thing that can
+			// report that child's exit status, and the supervisor's own helper
+			// commands -- git, ps -- run outside it, under their own Waits.
+			stopReaper := startEnvironmentJobChildReaper(childPID)
 			waitErr = cmd.Wait()
+			stopReaper()
 			procState = cmd.ProcessState
 		}
 
