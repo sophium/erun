@@ -169,12 +169,16 @@ func settlePromoteFailure(buildInput DockerBuildSpec, platform, platformTag, fpT
 	case promoteErr == nil:
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s would publish a multi-platform image under a per-arch tag; rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, platform)
 	case promoteSourceMissing(fpTag):
+		// Every branch below ends in buildPlatformImageFromSource, so the run did
+		// real build work for this image and is no longer the cache hit the
+		// timing row recorded before the promote ran.
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); that cached image is no longer in the local image store, so rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, promoteErr, platform)
 	case IsDockerUnknownBlobError(promoteErr.Error()):
 		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, promoteErr)
 	default:
 		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, promoteErr)
 	}
+	buildInput.cache.notePromoteFallback()
 	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 }
 
