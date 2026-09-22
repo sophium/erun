@@ -19,6 +19,15 @@ ARG ATLAS_VERSION=v1.2.0
 # build or inside a deployed runtime pod.
 ARG PLAYWRIGHT_VERSION=1.60.0
 
+# Declared once at the top for the same reason as HELM_VERSION above: the test
+# stage's own `terraform` (for `make check`'s terraform-module-tests target,
+# which runs the erun-devops/terraform-erun modules' own `terraform test`
+# suites) and the final image's `terraform` stay pinned to the same version.
+# The test stage also bakes these modules' provider mirror from it, so the
+# terraform that mirrored the providers and the terraform that initializes
+# against them are one binary.
+ARG TERRAFORM_VERSION=1.12.2
+
 # Pulled into the test stage purely to copy a pinned Node/Yarn toolchain out
 # of — see the node COPY below. No RUN of its own, so it needs no emulation
 # even though the test stage is pinned to BUILDPLATFORM (matches the `goroot`
@@ -57,6 +66,10 @@ WORKDIR /src
 # resulting build succeeds and runs `--headless` with zero display (see root
 # AGENTS.md's Integration Test Gate section).
 #
+# `unzip` is for the terraform install below: hashicorp ships terraform only as
+# a .zip, and the final image's own install gets unzip from erun-ubuntu, which
+# this stage's base does not.
+#
 # Cache-mounted (rather than deduplicated into a shared base image the way
 # the final stage's copy was) because this stage's base is golang:1.26.0
 # (Debian), not erun-ubuntu (Ubuntu) -- the two images don't share a base to
@@ -69,7 +82,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
     apt-get update && apt-get install -y --no-install-recommends \
-        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev unzip
 
 # GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
 # builder stage below install from, so the repo-root pin and the image's
@@ -109,6 +122,21 @@ RUN curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-lin
 ARG ATLAS_VERSION
 RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${BUILDARCH}-${ATLAS_VERSION}" && \
     chmod 0755 /usr/local/bin/atlas
+
+# `terraform` for `make check`'s terraform-module-tests target: the published
+# modules under erun-devops/terraform-erun carry their own `terraform test`
+# behaviour suites (mocked providers, no cluster), and until that target
+# existed nothing in this repository ran them, so a module edit that dropped an
+# invariant they pin landed green. Same pinned version and install shape as the
+# final image's own terraform -- the global ARG at the top of this file is what
+# keeps the two from drifting -- and BUILDARCH comes from the helm install
+# above, since this stage is pinned to BUILDPLATFORM and the two installs share
+# one host arch.
+ARG TERRAFORM_VERSION
+RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${BUILDARCH}.zip" && \
+    unzip -q /tmp/terraform.zip -d /tmp && \
+    install -m 0755 /tmp/terraform /usr/local/bin/terraform && \
+    rm -rf /tmp/terraform.zip /tmp/terraform
 
 # Node/Yarn for `make test-frontend` (erun-kit + erun-console). Copied out of
 # the pinned `node` stage above rather than apt/curl-installed, same pattern
@@ -285,6 +313,35 @@ COPY erun-docs/docs/cli/pin.md /src/erun-docs/docs/cli/pin.md
 # reads one. Omitting it fails the gate with "no such file or directory" while
 # a full checkout passes -- same reasoning as every COPY above.
 COPY erun-skills/skills/erun-merge/SKILL.md /src/erun-skills/skills/erun-merge/SKILL.md
+
+# terraform-module-tests runs the published modules' own `terraform test`
+# suites from inside this stage, so the module tree is part of the gate's
+# inputs -- the COPY-or-`cd`-fails rule the LINT_MODULES note above states,
+# applied to a directory rather than a module. Copied wholesale rather than an
+# enumerated module list: the Makefile target discovers the tested modules from
+# scripts/terraform-test-modules.sh, so a new module has to be present here to
+# be runnable at all, and an enumerated COPY would go stale exactly when the
+# directory scan picked the module up. `.dockerignore` excludes a locally
+# initialized `.terraform/` so a host that ran `terraform init` cannot ship its
+# own provider binaries in.
+COPY erun-devops/terraform-erun /src/erun-devops/terraform-erun
+
+# The providers those tests plan against, mirrored at image build so the gate
+# itself makes no registry call: `terraform init` against registry.terraform.io
+# is a ~40MB network dependency inside `make check-gate`, and a suite that goes
+# red because a registry was slow is a false-red gate -- the failure mode
+# the lint timeout change removed. The bake reads each
+# module's committed .terraform.lock.hcl (providers mirror honours the lock), so
+# the mirror and the pin the gate initializes against cannot disagree. The
+# cache mount keeps the download off rebuilds that only edit module source;
+# TF_CLI_CONFIG_FILE below sends every registry.terraform.io provider to the
+# mirror and excludes `direct` for them, so a provider the mirror lacks fails
+# loudly instead of silently falling back to a fetch. BUILDARCH is the arg the
+# helm install above already declared for this stage.
+RUN --mount=type=cache,target=/root/.cache/terraform-providers \
+    TERRAFORM_PROVIDER_CACHE_DIR=/root/.cache/terraform-providers \
+    ./scripts/terraform-providers-mirror.sh /opt/terraform-providers "${BUILDARCH}"
+ENV TF_CLI_CONFIG_FILE=/opt/terraform-providers/terraform.tfrc
 
 # `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
 # the frontend kit + console gates, the erun-devops/k8s chart tests, then the
@@ -563,7 +620,9 @@ ARG KUBECTL_VERSION=v1.33.1
 # HELM_VERSION's default lives in the global ARG at the top of this file,
 # shared with the test stage's own helm install.
 ARG HELM_VERSION
-ARG TERRAFORM_VERSION=1.12.2
+# TERRAFORM_VERSION's default lives in the global ARG at the top of this file,
+# shared with the test stage's own terraform install.
+ARG TERRAFORM_VERSION
 ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1
 ARG BUILDX_VERSION=v0.18.0

@@ -48,6 +48,15 @@ __debug_bin*
 # COPYd into a build context, mirrored here only for hygiene
 /.cache/
 
+# Terraform provider binaries a local `terraform init` unpacks into the module
+# directory. The erun-devops test stage COPYs erun-devops/terraform-erun
+# wholesale (terraform-module-tests runs the modules' own behaviour tests
+# there), so a host that initialized a module would otherwise ship its
+# platform's provider binary into the build context. `.terraform.lock.hcl` is
+# deliberately NOT excluded here: it is committed source now (see .gitignore),
+# it is small, and the image bakes its provider mirror from exactly those pins.
+**/.terraform/
+
 # Local packaging / release artifacts
 /packaging/apt/dist
 /erun-devops/linux/*/dist

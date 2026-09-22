@@ -247,6 +247,22 @@ with synthetic inputs independently of the repository wiring.
   Console's real-stack suites remain explicit,
   separate runs. Windows cross-compilation does not prove native desktop behavior.
 
+## Terraform-module gate
+
+- The published modules under `erun-devops/terraform-erun/modules` carry their own
+  `terraform test` behaviour suites; `terraform-module-tests` runs them and
+  `TestTerraformModuleTestsAreReachedByTheGate` keeps that wiring from being
+  dropped by omission -- a target missing from `check-gate`'s prerequisites, or a
+  tested module with no committed `.terraform.lock.hcl`.
+- The gate's real coverage claim is the runner's own self-test
+  (`scripts/terraform-module-tests_test.sh`), which drives it over a module copy
+  whose pinned invariant has been removed and requires a non-zero verdict. A
+  runner that swallowed terraform's exit status passes every other check here.
+- Do not add a second discovery rule for "which modules have tests": the Makefile,
+  the image's mirror bake and this test all read
+  `scripts/terraform-test-modules.sh`, which exits non-zero rather than printing
+  an empty list.
+
 ## Doc-drift gate
 
 - Cross-check a high-risk, mechanically comparable claim against its owning code
