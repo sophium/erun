@@ -80,34 +80,79 @@ func usageToolDescriptionForTest(t *testing.T) string {
 	return ""
 }
 
-// TestUsageDescriptionNamesASurfaceThatCarriesTheVerdict covers the dead end
-// this fixes: the description cross-referenced `erun list` as reporting the
-// same raise/lower/hold verdict the `sizing` block carries, so a caller who
-// took it there instead of making a separate resize call found nothing. `list`
-// does read the same retained history, but the history lives in the
-// environment's own pod monitor, so a host that has never monitored the
-// environment has none and prints no verdict at all. The description has to
-// send a caller to a surface that actually carries it, and own that the
-// host-side ones are not it -- in the tool description and in the overview
-// page's sibling prose alike, since a caller reads whichever they reached.
-func TestUsageDescriptionNamesASurfaceThatCarriesTheVerdict(t *testing.T) {
-	const falseClaim = "the same raise/lower/hold verdict and evidence window `erun list` reports"
-	description := usageToolDescriptionForTest(t)
-	if strings.Contains(description, falseClaim) {
-		t.Errorf("usage tool description still sends callers to `erun list` for the sizing verdict:\n%s", description)
+// TestUsageDescriptionAgreesWithTheSizingTheToolReturns is the behaviour-
+// anchored guard the description needs, and the one its predecessor was not.
+//
+// The predecessor pinned the absence of one specific stale sentence ("the
+// verdict `erun list` reports"), which is a claim about prose and not about
+// behaviour. When `ddecc03a` gave `erun usage` a `sizing` block, the sentence
+// that replaced it -- "`erun usage` carries no sizing block at all" -- was
+// false the day it was written and nothing in the suite could tell, because
+// no test ever compared a claim in the description against what the tool
+// returns. This one does: it drives the tool and reads the description, and
+// requires the two to agree.
+//
+// What it decides, exactly: that the description embeds the claim generated
+// from usageSizingSurfaces (so prose and enumeration cannot drift apart), and
+// that the tool's own entry in that enumeration is earned -- driving the tool
+// over retained history really must return a `sizing` block. It cannot judge
+// whether the sibling surfaces named in the enumeration are described well,
+// only that this tool's own claim is true and that the text was not typed by
+// hand.
+func TestUsageDescriptionAgreesWithTheSizingTheToolReturns(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	xdg.Reload()
+	t.Cleanup(xdg.Reload)
+	seedUsageHistoryForTest(t, "tenant-a", "dev")
+
+	runtime := RuntimeConfig{
+		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
+		Store:   usageTestStore("tenant-a", "dev"),
 	}
-	if !strings.Contains(description, "pod monitor") {
-		t.Errorf("usage tool description carries `sizing` without saying the history behind it is retained by the environment's own pod monitor, which is what makes a host-side read unable to derive one:\n%s", description)
+	_, output, err := usageTool(runtime)(context.Background(), nil, UsageInput{Preview: true})
+	if err != nil {
+		t.Fatalf("usageTool returned err: %v", err)
 	}
 
+	// The behaviour half of the biconditional. usageSizingSurfaces opens with
+	// this tool, so if the tool ever stops returning the block the claim
+	// generated from that list is a lie and this is what says so.
+	carried := output.Sizing != nil
+	if !carried {
+		t.Fatalf("usageSizingSurfaces claims %q carries the standing sizing recommendation, but driving the tool over retained history returned none; remove it from that list and say so in the description",
+			usageSizingSurfaces[0])
+	}
+
+	// The prose half: the description is built from that list, not typed
+	// beside it, so the claim cannot be restated wrongly in one place and
+	// correctly in the other.
+	description := usageToolDescriptionForTest(t)
+	claim := UsageSizingClaim()
+	if !strings.Contains(description, claim) {
+		t.Errorf("usage tool description does not carry the claim generated from usageSizingSurfaces, so its text and the surfaces it names can drift apart.\nwant substring:\n%s\ngot:\n%s", claim, description)
+	}
+	if !strings.Contains(description, "pod monitor") {
+		t.Errorf("usage tool description carries `sizing` without saying the history behind it is retained by the environment's own pod monitor, which is what makes a read that cannot see that history unable to derive one:\n%s", description)
+	}
+
+	// The overview page restates the same relationship by hand, so it is
+	// checked for the one class of claim this issue was about: denying the
+	// block on a surface that reports usage. A page that names where the
+	// verdict lives is fine; one that says a usage surface has none is not.
 	docPath := filepath.Join(repoRootForOverviewDocTest(t), "erun-docs", "docs", "mcp", "overview.md")
 	data, err := os.ReadFile(docPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", docPath, err)
 	}
 	page := string(data)
-	if strings.Contains(page, "the same verdicts and evidence window `erun list` reports under `runtime-pod:`") {
-		t.Errorf("%s still sends callers to `erun list` for the sizing verdict", docPath)
+	for _, denial := range []string{
+		"carries no sizing block at all",
+		"carries no sizing block",
+		"does not carry a `sizing` block",
+	} {
+		if strings.Contains(page, denial) {
+			t.Errorf("%s denies the sizing block on a usage surface (%q) while `erun usage` prints it and this tool returns it; the page has to state where the verdict lives, not that it is absent:\n%s", docPath, denial, page)
+		}
 	}
 	if !strings.Contains(page, "pod monitor") {
 		t.Errorf("%s describes the `sizing` field without saying the history behind it is retained by the environment's own pod monitor", docPath)

@@ -5,6 +5,7 @@ import { describeServicePorts, exposeFormPatchForService } from '@/app/exposeSer
 import { useAppDispatch } from '@/app/hooks';
 import { updateExposeForm } from '@/app/manageEnvironmentThunks';
 import type { AppState } from '@/app/state';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 type ManageDialog = AppState['manageDialog'];
 
@@ -36,11 +37,16 @@ export function ExposeServicePicker({
     );
   }
   if (listing.error) {
+    // A failed read, through the primitive rather than a hand-rolled alert:
+    // the message interpolates the upstream error, so it needs the icon (not
+    // colour alone) and the wrapping. The remedy — type the name below — stays
+    // in the message, since the field it names is already on screen rather
+    // than behind an action.
     return (
-      <div role="alert" className="text-[13px] leading-[1.35] text-muted-foreground">
+      <InlineAlert>
         Could not read this environment&apos;s services ({listing.error}). Type the service name
         below instead.
-      </div>
+      </InlineAlert>
     );
   }
   if (services.length === 0) {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -44,6 +45,119 @@ func DefaultSSHConfigHasAlias(alias string) (bool, error) {
 		return false, err
 	}
 	return SSHConfigHasAlias(path, alias)
+}
+
+// ParseSSHHostEntries reads every Host block in content, in file order. A
+// block's directives are the ones between its Host line and the next Host
+// line; directives erun does not write are ignored rather than guessed at, so
+// an entry never claims a value the file does not state.
+//
+// A "Host a b" line yields one entry per alias. erun's own writer emits one
+// alias per block, but a hand-edited shared line would otherwise hide one of
+// its names from a caller scanning for aliases nothing claims.
+func ParseSSHHostEntries(content string) []SSHHostEntry {
+	lines := splitConfigLines(content)
+	entries := make([]SSHHostEntry, 0, 4)
+	// Every alias on one Host line shares that block's directives, so the
+	// block is a slice rather than the one entry the common case produces.
+	var block []*SSHHostEntry
+	for _, line := range lines {
+		if isHostDirective(line) {
+			block = block[:0]
+			for _, alias := range hostDirectiveAliases(line) {
+				entries = append(entries, SSHHostEntry{Alias: alias})
+				block = append(block, &entries[len(entries)-1])
+			}
+			continue
+		}
+		if len(block) == 0 {
+			continue
+		}
+		key, value, ok := splitDirective(line)
+		if !ok {
+			continue
+		}
+		for _, entry := range block {
+			applySSHHostDirective(entry, key, value)
+		}
+	}
+	return entries
+}
+
+// applySSHHostDirective sets the one directive erun reads off a Host block. A
+// line erun does not write is ignored rather than stored: an entry carries what
+// the file says, never a guess about what an unknown keyword meant.
+func applySSHHostDirective(entry *SSHHostEntry, key, value string) {
+	switch strings.ToLower(key) {
+	case "hostname":
+		entry.HostName = value
+	case "hostkeyalias":
+		entry.HostKeyAlias = value
+	case "user":
+		entry.User = value
+	case "identityfile":
+		entry.IdentityFile = value
+	case "port":
+		if port, err := strconv.Atoi(value); err == nil {
+			entry.Port = port
+		}
+	}
+}
+
+// hostDirectiveAliases returns the aliases a Host line declares. A NegatedName
+// ("!alias") excludes a name rather than declaring one, so it is not an entry
+// of its own.
+func hostDirectiveAliases(line string) []string {
+	fields := strings.Fields(strings.TrimSpace(line))
+	if len(fields) < 2 {
+		return nil
+	}
+	aliases := make([]string, 0, len(fields)-1)
+	for _, field := range fields[1:] {
+		if strings.HasPrefix(field, "!") {
+			continue
+		}
+		aliases = append(aliases, field)
+	}
+	return aliases
+}
+
+// splitDirective splits one "Key value" config line. Blank lines, comments and
+// a bare "Key" with no value are not directives.
+func splitDirective(line string) (key, value string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return "", "", false
+	}
+	if index := strings.IndexAny(trimmed, " \t="); index >= 0 {
+		key = strings.TrimSpace(trimmed[:index])
+		value = strings.TrimSpace(strings.TrimPrefix(trimmed[index+1:], "="))
+		value = strings.TrimSpace(value)
+	} else {
+		key = trimmed
+	}
+	if key == "" || value == "" {
+		return "", "", false
+	}
+	return key, value, true
+}
+
+// ReadDefaultSSHHostEntries parses the default ssh config. A config that does
+// not exist yields no entries and no error -- "nothing is configured" and "the
+// file is empty" are the same statement to every caller.
+func ReadDefaultSSHHostEntries() ([]SSHHostEntry, error) {
+	path, err := DefaultSSHConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return ParseSSHHostEntries(string(data)), nil
 }
 
 func SSHConfigHasAlias(path, alias string) (bool, error) {

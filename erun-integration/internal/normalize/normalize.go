@@ -31,6 +31,14 @@ var defaultRules = []Replacement{
 	// The leading-'v' alternation is required: a bare \b refuses to match when
 	// a git tag's 'v' is the word char immediately before the digits.
 	{regexp.MustCompile(`(?:\bv|\b)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?`), "<VERSION>"},
+	// Go's zero instant gets its own token, before the general timestamp rule
+	// below would swallow it. A field that was never set is not a field set at
+	// some time, and collapsing the two into one <TS> is what let the suite
+	// keep passing while `--output json` rendered every never-set timestamp as
+	// `0001-01-01T00:00:00Z`: the payload was wrong and the golden agreed with
+	// it. With a distinct token, a payload that starts (or stops) emitting the
+	// zero instant shows up as a visible golden change instead of nothing.
+	{regexp.MustCompile(`\b0001-01-01T00:00:00(?:\.0+)?Z\b`), "<ZERO-TS>"},
 	{regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`), "<TS>"},
 	// An activity lease's remaining seconds are measured against the wall clock
 	// at print time, so they land a second either side of the ttl depending on

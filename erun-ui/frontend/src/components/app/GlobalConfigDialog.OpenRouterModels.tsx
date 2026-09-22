@@ -17,6 +17,7 @@ import { Check, ChevronsUpDown, LoaderCircle, Plus, RefreshCw, Trash2 } from 'lu
 import * as React from 'react';
 
 import { isClaudeModelToken } from '@/components/app/claudeModels.helpers';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import type { UIGatewayModel, UIOpenRouterModel } from '@/uiOpenRouterTypes';
 
 // The catalog's model rows, split from the section that owns the catalog's
@@ -84,9 +85,7 @@ export function OpenRouterModelsField({
           ? `Offering ${String(candidates.length)} models from the gateway. A window the gateway reports is filled in for you.`
           : 'Load the gateway’s own model list to pick ids, or type one and set its window.'}
       </div>
-      {candidatesError === '' ? null : (
-        <div className="text-[12px] leading-[1.4] text-destructive">{candidatesError}</div>
-      )}
+      {candidatesError === '' ? null : <InlineAlert>{candidatesError}</InlineAlert>}
       {models.length === 0 ? (
         <div className="text-[12px] leading-[1.4] text-muted-foreground">
           No models yet. Add the gateway model ids an environment may select.

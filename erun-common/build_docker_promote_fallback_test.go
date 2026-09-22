@@ -229,3 +229,71 @@ func TestPromoteDockerImageNamesTheTagOnANonBlobPushFailure(t *testing.T) {
 		t.Errorf("a non-blob failure must not trigger the rebuild fallback, got: %s", stderr.String())
 	}
 }
+
+// TestAPromoteThatRebuiltIsNotReportedAsACacheHit covers the other half of the
+// reported symptom: the timing report called the run a cache hit, because the
+// build's Promote flag was set, even though the promote found nothing to
+// promote and the platform was rebuilt from source. The one artifact an
+// operator reads to diagnose the run asserted the opposite of what it did.
+//
+// This is not an edge case. The decision is made before any image in the run
+// builds and the promote runs minutes later, so a prune under disk pressure
+// mid-release is enough to produce it -- and the run then rebuilds the whole
+// image set while reporting that it rebuilt nothing.
+func TestAPromoteThatRebuiltIsNotReportedAsACacheHit(t *testing.T) {
+	newFakeDockerImageStore(t)
+
+	clock := newFakeClock()
+	root := newStepTiming("build", clock.now)
+	var stdout, stderr bytes.Buffer
+	ctx := Context{Stdout: &stdout, Stderr: &stderr, timing: root}
+
+	buildInput := testPromoteBuildInput()
+	buildInput.Platforms = []string{"linux/amd64", "linux/arm64"}
+	if err := executeDockerBuild(ctx, buildInput, nil, &stdout, &stderr); err != nil {
+		t.Fatalf("expected the missing cached image to rebuild instead of failing, got: %v", err)
+	}
+	root.finish(nil)
+
+	// The correction has to reach every row the decision was attached to -- the
+	// image's own step and one child per platform -- because a row that still
+	// read "cache hit" is the same defect one level down. One image step plus
+	// its two platform children.
+	assertCorrectedTimingTable(t, renderStepTimingRows(root, 0), 3)
+	assertCorrectedTimingRecord(t, root.toRecord("build"))
+}
+
+// assertCorrectedTimingTable requires every row carrying the promoted image's
+// cache decision to report the corrected miss, and no row to still claim a hit.
+func assertCorrectedTimingTable(t *testing.T, rows []string, wantRows int) {
+	t.Helper()
+	joined := strings.Join(rows, "\n")
+	if strings.Contains(joined, "(cache hit)") {
+		t.Fatalf("a promote that rebuilt from source must not be reported as a cache hit, got:\n%s", joined)
+	}
+	if got := strings.Count(joined, "cache miss: "+promoteFallbackMissReason); got != wantRows {
+		t.Fatalf("expected the correction on the image row and both platform rows (%d), got %d:\n%s", wantRows, got, joined)
+	}
+}
+
+// assertCorrectedTimingRecord requires the machine-readable record -- the
+// surface tooling diffs between runs -- to carry the same correction rather
+// than the decision taken before the promote ran.
+func assertCorrectedTimingRecord(t *testing.T, record TimingRecord) {
+	t.Helper()
+	if len(record.Steps) != 1 {
+		t.Fatalf("expected one image step in the record, got %d", len(record.Steps))
+	}
+	image := record.Steps[0]
+	if image.CacheHit == nil || *image.CacheHit {
+		t.Fatalf("expected the image step's cacheHit to be false, got %v", image.CacheHit)
+	}
+	if image.CacheMissReason != promoteFallbackMissReason {
+		t.Fatalf("expected the record to carry the corrected miss reason, got %q", image.CacheMissReason)
+	}
+	for _, platform := range image.Steps {
+		if platform.CacheHit == nil || *platform.CacheHit {
+			t.Fatalf("expected platform step %s to report a cache miss, got %v", platform.Name, platform.CacheHit)
+		}
+	}
+}

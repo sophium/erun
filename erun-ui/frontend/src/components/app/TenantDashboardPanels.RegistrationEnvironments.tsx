@@ -225,11 +225,28 @@ function EnvironmentsTable({
               tone={registrationStatusTone(environment.status)}
               label={environment.status}
             />
+            {/* Both reasons arrive after the fact: the operator provisions or
+                deletes, the badge flips, and the text materialises beside it.
+                Without a live region nothing is announced, so a screen-reader
+                user learns the row failed only by re-reading the table — and
+                this text is the whole payload of a failed or blocked row, not
+                decoration.
+
+                The two take different roles, the split the console's
+                `deployFeedbackRole` already draws: `failed` is a fault, so it
+                is announced as it appears (alert); `deletion-blocked` is a
+                standing state the badge beside it already shows, so it does
+                not interrupt (status). Each guard names its own state, so the
+                role and the guard cannot disagree. */}
             {environment.status === 'deletion-blocked' && environment.deleteError && (
-              <p className="mt-1 text-xs text-destructive">{environment.deleteError}</p>
+              <p className="mt-1 text-xs text-destructive" role="status" aria-live="polite">
+                {environment.deleteError}
+              </p>
             )}
             {environment.status === 'failed' && environment.provisionError && (
-              <p className="mt-1 text-xs text-destructive">{environment.provisionError}</p>
+              <p className="mt-1 text-xs text-destructive" role="alert" aria-live="polite">
+                {environment.provisionError}
+              </p>
             )}
           </DataCell>
           <DataCell>{environment.deployedVersion ?? environment.runtimeVersion}</DataCell>

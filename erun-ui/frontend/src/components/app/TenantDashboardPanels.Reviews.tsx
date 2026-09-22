@@ -17,9 +17,11 @@ import { resolveTenantPlatformAlias } from '@/app/platformSignIn';
 import {
   defaultReviewStatuses,
   reviewCountLabel,
+  type ReviewFilterState,
+  reviewsFilteredEmptyBody,
+  reviewsFilterIsNarrowing,
   reviewsMatchingStatuses,
   reviewStatusCounts,
-  reviewStatusFilterIsDefault,
   toggleReviewStatus,
 } from '@/app/reviewDetailState';
 import { openReviewDetail } from '@/app/reviewDetailThunks';
@@ -57,10 +59,6 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
   const reviewFilter = useAppSelector((state) => state.tenantDashboard.reviewFilter);
   const reviews = data?.reviews ?? [];
   const visibleReviews = reviewsMatchingStatuses(reviews, reviewFilter.statuses);
-  const filterActive =
-    reviewFilter.mine ||
-    reviewFilter.waitingOnMe ||
-    !reviewStatusFilterIsDefault(reviewFilter.statuses);
   return (
     <TabsContent value="reviews" className="min-h-0 overflow-auto">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -77,7 +75,7 @@ export function ReviewsPanel({ data }: { data: TenantDashboardData }): React.Rea
         tab="reviews"
         empty={
           <ReviewsEmptyState
-            filterActive={filterActive}
+            filter={reviewFilter}
             canCreateReview={data?.canCreateReview === true}
           />
         }
@@ -147,18 +145,18 @@ function ReviewsFilterControls({
 // refused there too. A caller without the write is pointed at the notice
 // beside this empty state instead of at either route.
 function ReviewsEmptyState({
-  filterActive,
+  filter,
   canCreateReview,
 }: {
-  filterActive: boolean;
+  filter: ReviewFilterState;
   canCreateReview: boolean;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  if (filterActive) {
+  if (reviewsFilterIsNarrowing(filter)) {
     return (
       <EmptyState
         heading="No reviews match this filter"
-        body="Nothing matches the status and authorship filters you've turned on. Clear them to see every review this tenant has."
+        body={`${reviewsFilteredEmptyBody(filter)} Clear the filter to see every review this tenant has.`}
         action={
           <Button
             type="button"

@@ -28,8 +28,8 @@ type RuntimeUsageHistory struct {
 	// FirstObservedAt anchors the evidence window. A recommendation that cannot
 	// say how long it watched is not evidence, and the shrink direction is
 	// gated on this span.
-	FirstObservedAt time.Time `json:"firstObservedAt,omitempty"`
-	LastObservedAt  time.Time `json:"lastObservedAt,omitempty"`
+	FirstObservedAt time.Time `json:"firstObservedAt,omitzero"`
+	LastObservedAt  time.Time `json:"lastObservedAt,omitzero"`
 
 	// ObservedPeakMemoryBytes is the highest memory reading across every
 	// container lifetime observed, which is the figure a shrink must keep clear

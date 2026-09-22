@@ -132,25 +132,25 @@ func stopStaleSSHDPortForward(ctx common.Context, matches bool, state sshdPortFo
 
 func startSSHDPortForward(ctx common.Context, statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
 	logPath := sshdPortForwardLogPath(statePath)
-	var process *os.Process
-	if err := retryTransientPortForwardStart(func() error {
-		p, err := launchSSHDPortForwardProcess(logPath, args)
-		if err != nil {
-			return err
-		}
-		process = p
-		return nil
-	}); err != nil {
-		return common.SSHConnectionInfo{}, err
-	}
-
 	expectedState.LogPath = logPath
-	expectedState.ProcessID = process.Pid
-	if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
-		return common.SSHConnectionInfo{}, err
-	}
-
-	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
+	process, err := startPortForwardWithBindRetry(ctx, "sshd", info.Port, func() (*os.Process, error) {
+		logStart := portForwardLogSize(logPath)
+		p, err := launchPortForwardProcessRetrying(func() (*os.Process, error) {
+			return launchSSHDPortForwardProcess(logPath, args)
+		})
+		if err != nil {
+			return nil, err
+		}
+		expectedState.ProcessID = p.Pid
+		if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
+			return p, err
+		}
+		if err := waitForSSHDPortForward(info.Port, logPath, logStart); err != nil {
+			return p, err
+		}
+		return p, nil
+	})
+	if err != nil {
 		releaseUnreachablePortForward(ctx, "sshd", process, info.Port, err)
 		return common.SSHConnectionInfo{}, err
 	}
@@ -176,11 +176,20 @@ func launchSSHDPortForwardProcess(logPath string, args []string) (*os.Process, e
 	return cmd.Process, nil
 }
 
-func waitForSSHDPortForward(port int, logPath string) error {
+// logStart is where this attempt's own output begins in logPath; see
+// portForwardLogReportsListenConflict for why the caller takes it before
+// launching rather than here.
+func waitForSSHDPortForward(port int, logPath string, logStart int64) error {
 	deadline := time.Now().Add(sshdPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalSSHEndpoint(port) {
 			return nil
+		}
+		// See waitForMCPPortForward: kubectl exits on a failed listen, so the
+		// conflict is readable from the log long before the startup timeout,
+		// and the bind retry depends on being told promptly.
+		if portForwardLogReportsListenConflict(logPath, logStart) {
+			return listenConflictError(port, logPath)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

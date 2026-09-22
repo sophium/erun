@@ -30,6 +30,22 @@ function placeholder(value: string | undefined): string {
   return value && value.length > 0 ? value : '—';
 }
 
+// ProvisionFailure is the reason a failed provision gives, rendered beside the
+// status badge and announced as it appears. Both call sites are guarded on
+// `status === 'failed'`, so the role is `alert` rather than the split
+// EnvironmentsPanel's deployFeedbackRole draws — nothing rendered here is a
+// standing blocked state. Without it the reason materialises silently next to
+// a badge that has already changed, and a screen-reader user learns the
+// resource failed only by re-reading the list; the string is the whole payload
+// of the row, not decoration.
+function ProvisionFailure({ message }: { message: string }): React.ReactElement {
+  return (
+    <span className="text-xs text-destructive" role="alert" aria-live="polite">
+      {message}
+    </span>
+  );
+}
+
 function TenantHeader({ tenant }: { tenant: Tenant }): React.ReactElement {
   return (
     <header>
@@ -63,7 +79,7 @@ function EnvironmentRow({ env }: { env: Environment }): React.ReactElement {
         <div className="flex flex-col items-start gap-1">
           {renderStatusBadge(env.status, ENV_STATUS_TONES, ENV_STATUS_LABELS)}
           {env.status === 'failed' && env.provisionError !== undefined && (
-            <span className="text-xs text-destructive">{env.provisionError}</span>
+            <ProvisionFailure message={env.provisionError} />
           )}
         </div>
       </TableCell>
@@ -165,7 +181,7 @@ function ContextItem({ context }: { context: CloudContext }): React.ReactElement
       <span className="flex flex-col items-end gap-1">
         {renderStatusBadge(context.status, STATUS_TONES, STATUS_LABELS)}
         {context.status === 'failed' && context.provisionError !== undefined && (
-          <span className="text-xs text-destructive">{context.provisionError}</span>
+          <ProvisionFailure message={context.provisionError} />
         )}
       </span>
     </li>

@@ -1508,6 +1508,39 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_reports_stale_desktop_app_bundle", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_the_desktop_app_erun_app_launches", func(t *testing.T) {
+		// The dev wrapper writes the CLI and the desktop app into the same
+		// BIN_DIR -- erun-cli/bin, or $ERUN_DEV_BIN_DIR -- and that is where a
+		// running desktop actually came from, because `erun app`'s own sibling
+		// lookup resolves it there. Doctor inspected only ~/Applications and
+		// /Applications, so it reported on a bundle nothing was running and
+		// stayed silent about the live one. Seeding a drifted bundle where the
+		// CLI itself sits must surface it, and must say that this is the copy a
+		// launch reaches. The executable-dir seam stands in for the shared
+		// instrumented binary's own directory, which a scenario cannot write
+		// beside without leaking a bundle into every other scenario in the run.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		binDir := filepath.Join(setup.Home, "erun-cli", "bin")
+		writeDesktopAppBundle(t, filepath.Join(binDir, "ERun.app"), "1.0.51")
+		envVars := append(setup.Env(),
+			"ERUN_HOST_OS_OVERRIDE=darwin",
+			"ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE="+filepath.Join(setup.Home, "no-system-applications"),
+			"ERUN_DESKTOP_APP_EXECUTABLE_DIR_OVERRIDE="+binDir,
+		)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "erun app launches") {
+			t.Fatalf("doctor inspected a copy beside the CLI but never said whether a launch reaches it:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "Multiple ERun.app bundles") {
+			t.Fatalf("expected no multiple-bundle warning for a single bundle, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_the_desktop_app_erun_app_launches", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_reports_shadowed_desktop_app_bundle", func(t *testing.T) {
 		// The operator-reported shape: a current bundle at
 		// ~/Applications/ERun.app sits alongside a stale one at
@@ -1854,6 +1887,35 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_reports_memory_pressure", func(t *testing.T) {
+		// The reported gap: an environment at 100% of its memory limit with
+		// OOM kills recorded, which `erun usage` had already measured and
+		// warned about while `erun doctor` -- the command an operator reaches
+		// for when an environment misbehaves -- said nothing at all. The stubs
+		// answer the usage read with exactly that cgroup: memory.peak at the
+		// container's limit and a real oom_kill count, with the erun-dind
+		// sidecar healthy, so a section that read the wrong container's
+		// counters would be visible here rather than passing quietly.
+		//
+		// A real run, not a dry run: doctor's dry run performs no subprocess,
+		// so it traces this read rather than taking it (see
+		// reportEnvironmentResources).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorHelmStatus(t, stubs, "deployed")
+		stubDoctorKubectlWithResourcePressure(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "== Resources ==") {
+			t.Fatalf("doctor reported nothing about an environment whose memory peak is at its limit with OOM kills recorded:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_memory_pressure", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_storage_unhealthy_diagnostic_error", func(t *testing.T) {
@@ -2337,6 +2399,67 @@ func stubDoctorHelmStatusUnreachable(t *testing.T, stubsDir string) {
 // failures), the pending-helm lock delete, the namespace probe the
 // failure diagnostic runs, and the dind exec scripts for inspection and
 // the three prune actions (matched on their distinctive docker lines).
+// stubDoctorKubectlWithResourcePressure answers every doctor surface as
+// stubDoctorKubectl does, and answers the usage read with a cgroup under real
+// memory pressure: memory.peak at the container's limit with OOM kills
+// recorded -- the state doctor used to report nothing about while `erun usage`
+// had already measured it and produced a resize verdict.
+//
+// The usage read is two execs on a build-capable environment (the runtime
+// container and the erun-dind sidecar), told apart by the `-c erun-dind` argv
+// the sidecar exec always carries. Only the runtime container is under
+// pressure; the sidecar is healthy, so a section that reported the wrong
+// container's numbers would be visible in the golden.
+func stubDoctorKubectlWithResourcePressure(t *testing.T, stubsDir string) {
+	t.Helper()
+	runtimeLines := []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=4294000000",
+		"memory_max=4294967296",
+		"memory_peak=4294967296",
+		"memory_oom_kill=3",
+		"cpu_max=600000 100000",
+		"cpu_usage_before=1000000",
+		"cpu_usage_after=3985000",
+		"cpu_periods=100000",
+		"cpu_throttled_periods=9850",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	}
+	dindLines := []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=100000000",
+		"memory_max=4294967296",
+		"memory_peak=120000000",
+		"memory_oom_kill=0",
+		"cpu_max=600000 100000",
+		"cpu_usage_before=1000",
+		"cpu_usage_after=2000",
+		"cpu_periods=100000",
+		"cpu_throttled_periods=0",
+	}
+	printLines := func(lines []string) string {
+		quoted := make([]string, 0, len(lines))
+		for _, line := range lines {
+			quoted = append(quoted, "'"+line+"'")
+		}
+		return "printf '%s\\n' " + strings.Join(quoted, " ")
+	}
+	script := strings.Join([]string{
+		`case "$*" in`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`  *" wait "*) : ;;`,
+		`  *" -c erun-dind "*"memory_current"*) ` + printLines(dindLines) + ` ;;`,
+		`  *"memory_current"*) ` + printLines(runtimeLines) + ` ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
 func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 	t.Helper()
 	if waitArm == "" {

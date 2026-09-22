@@ -375,6 +375,53 @@ test('the selection surface is operable end to end without a mouse', async ({ ap
   await expect(app.titlebar.whipReportBody()).toBeVisible();
 });
 
+// Each group shortcut is an icon with no visible text, so its
+// IconTooltip label is the only label an operator can see and read out. The
+// button's accessible name was written separately from that label, by hand,
+// one line away -- two of the three agreed and the third had drifted to
+// "Select all". An icon-only control is named by its aria-label, and the
+// tooltip is only a *description* (aria-describedby), so the name that drifted
+// was the one in force: an operator using voice control reading "Select all
+// orchestrators and environments" off the screen matched nothing, while the
+// two shortcuts beside it worked (WCAG 2.5.3 "Label in Name").
+//
+// This asserts the invariant the fix establishes rather than the fix's own
+// literals: the label the tooltip shows is *in* the button's accessible name.
+// It read the diverged name before the change, because the tooltip already
+// said "Select all orchestrators and environments" while the name said
+// "Select all" -- which contains it not at all.
+test('every group shortcut’s accessible name contains the label its tooltip shows', async ({
+  app,
+}) => {
+  await app.titlebar.openWhipPanel();
+  for (const label of [
+    'Select all orchestrators',
+    'Select all environments',
+    'Select all orchestrators and environments',
+  ]) {
+    const button = app.titlebar.whipPanel().getByRole('button', { name: label, exact: true });
+    await expect(button).toBeVisible();
+
+    // A tooltip exists only while the pointer rests on its trigger, and the
+    // three shortcuts sit side by side: moving straight from one to the next
+    // leaves the first one's tooltip up and the next one's unraised, because
+    // the switch happens inside the trigger's own close delay. Parking the
+    // pointer off the picker first makes each shortcut a fresh open, and the
+    // hover+read is one re-drivable unit -- the same convergence the sidebar's
+    // hover-card specs use, and deterministic without a wall-clock wait.
+    const tooltip = app.page.getByRole('tooltip', { name: label, exact: true });
+    await expect(async () => {
+      await app.page.mouse.move(0, 0);
+      await button.hover();
+      await expect(tooltip).toBeVisible();
+    }).toPass();
+
+    const visibleLabel = ((await tooltip.textContent()) ?? '').trim();
+    const accessibleName = (await button.getAttribute('aria-label')) ?? '';
+    expect(accessibleName).toContain(visibleLabel);
+  }
+});
+
 test('renders correctly in both light and dark theme', async ({ app }) => {
   await app.titlebar.openWhipPanel();
   await expect(app.titlebar.whipRunButton()).toBeVisible();
