@@ -35,7 +35,10 @@ func takeLeaseInEnvironment(ctx context.Context, commandCtx common.Context, reso
 	putEnvironmentToolArgument(arguments, "orchestrator", params.Holder.Orchestrator)
 	result, resolved, err := callEnvironmentTool[environmentActivityLeaseResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "activity_lease_take", arguments, false)
 	if err != nil {
-		return common.EnvironmentActivityLease{}, resolved, common.DescribeExclusiveActivityLeaseVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
+		return common.EnvironmentActivityLease{}, resolved, describeExclusiveVersionSkew(ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, params.Exclusive, err,
+			func(version string, err error) error {
+				return common.DescribeExclusiveActivityLeaseVersionSkew(params.Tenant, params.Environment, version, params.Exclusive, err)
+			})
 	}
 	if !resolved {
 		return common.EnvironmentActivityLease{}, resolved, nil
@@ -54,8 +57,14 @@ func releaseLeaseInEnvironment(ctx context.Context, commandCtx common.Context, r
 	}
 	putEnvironmentToolArgument(arguments, "scope", scope)
 	result, resolved, err := callEnvironmentTool[environmentActivityLeaseResult](ctx, commandCtx, resolveOpen, tenant, environment, "activity_lease_release", arguments, false)
-	if err != nil || !resolved {
-		return common.EnvironmentActivityLeaseNotHeld, resolved, err
+	if err != nil {
+		return common.EnvironmentActivityLeaseNotHeld, resolved, describeExclusiveVersionSkew(ctx, commandCtx, resolveOpen, tenant, environment, exclusive, err,
+			func(version string, err error) error {
+				return common.DescribeExclusiveActivityLeaseVersionSkew(tenant, environment, version, exclusive, err)
+			})
+	}
+	if !resolved {
+		return common.EnvironmentActivityLeaseNotHeld, resolved, nil
 	}
 	if result.Released != nil && *result.Released {
 		return common.EnvironmentActivityLeaseReleased, resolved, nil

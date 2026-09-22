@@ -51,6 +51,18 @@ var exclusiveClaimVersionSkewArguments = map[string]bool{
 	"orchestrator": true,
 }
 
+// ExclusiveClaimIntroducedVersion is the first erun release whose environment
+// side implements the exclusive-claim mechanism, and so the oldest version an
+// environment may run and still honour --exclusive. It is the version a skew
+// refusal has to name: "your environment is too old" without saying how old is
+// a dead end, because the operator cannot tell whether a pin move is
+// proportionate or whether they are one release behind.
+//
+// Derived from the release history rather than chosen: the commit that added
+// the claim to exec_raw/exec_agent and activity_lease_take is an ancestor of
+// this tag and of every later one, and of no earlier tag.
+const ExclusiveClaimIntroducedVersion = "1.0.248"
+
 // describeExclusiveClaimVersionSkew recognises the one raw failure shape an
 // edge older than the release that added --exclusive produces for an
 // exclusive claim -- its compiled-in schema rejecting "exclusive"/
@@ -59,35 +71,58 @@ var exclusiveClaimVersionSkewArguments = map[string]bool{
 // call) and the remedy. Any other failure passes through unchanged: an
 // unreachable edge, an auth failure, or a genuinely malformed call must not
 // be reframed as a version mismatch it is not.
-func describeExclusiveClaimVersionSkew(tenant, environment, tool, remedy string, exclusive bool, err error) error {
-	if err == nil || !exclusive {
+//
+// environmentVersion is what the environment's own edge reports it runs, and
+// may be empty when that could not be read -- the refusal is about a claim
+// that was not taken, so a missing version degrades the sentence and must
+// never suppress it. Both versions are named because the pair is what makes
+// the remedy decidable: the requirement says what to pin to, the reported one
+// says how far behind this environment is.
+func describeExclusiveClaimVersionSkew(tenant, environment, tool, remedy, environmentVersion string, exclusive bool, err error) error {
+	if !IsExclusiveClaimVersionSkew(exclusive, err) {
 		return err
+	}
+	reported := strings.TrimSpace(environmentVersion)
+	if reported == "" {
+		reported = "no version"
+	}
+	return fmt.Errorf(
+		"%s/%s's edge runs an erun release older than the one that added --exclusive to %s: --exclusive needs erun >= %s in the environment and %s/%s reports %s; %s\n"+
+			"edge error: %w",
+		tenant, environment, tool, ExclusiveClaimIntroducedVersion, tenant, environment, reported, remedy, err,
+	)
+}
+
+// IsExclusiveClaimVersionSkew reports whether err is the raw schema rejection
+// an edge older than the exclusive-claim release produces for `exclusive`
+// alone, with no other failure reframed as one: an unreachable edge, an auth
+// failure, or a genuinely malformed call is never a version mismatch.
+//
+// It is exported so a caller can decide whether describing the failure is
+// worth a diagnostic read first. Reading the environment's version costs a
+// round-trip, so a caller that cannot take one cheaply must still be able to
+// refuse -- the refusal describes a claim that was not taken and must never
+// depend on that read succeeding.
+func IsExclusiveClaimVersionSkew(exclusive bool, err error) bool {
+	if err == nil || !exclusive {
+		return false
 	}
 	names, ok := mcpUnexpectedAdditionalProperties(err)
 	if !ok {
-		return err
+		return false
 	}
-	matched := false
 	for _, name := range names {
 		if exclusiveClaimVersionSkewArguments[name] {
-			matched = true
-			break
+			return true
 		}
 	}
-	if !matched {
-		return err
-	}
-	return fmt.Errorf(
-		"%s/%s's edge runs an erun release older than the one that added --exclusive to %s; %s\n"+
-			"edge error: %w",
-		tenant, environment, tool, remedy, err,
-	)
+	return false
 }
 
 // DescribeExclusiveActivityLeaseVersionSkew is describeExclusiveClaimVersionSkew
 // for activity_lease_take.
-func DescribeExclusiveActivityLeaseVersionSkew(tenant, environment string, exclusive bool, err error) error {
+func DescribeExclusiveActivityLeaseVersionSkew(tenant, environment, environmentVersion string, exclusive bool, err error) error {
 	return describeExclusiveClaimVersionSkew(tenant, environment, "activity_lease_take",
 		"upgrade the environment (erun pin / erun deploy) to take an exclusive claim there, or omit --exclusive to take a plain presence lease",
-		exclusive, err)
+		environmentVersion, exclusive, err)
 }

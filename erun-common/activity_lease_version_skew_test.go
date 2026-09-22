@@ -15,12 +15,12 @@ const rawExclusiveLeaseSchemaError = `MCP tools/call failed: invalid params: val
 
 func TestDescribeExclusiveActivityLeaseVersionSkewNamesTheVersionMismatch(t *testing.T) {
 	err := errors.New(rawExclusiveLeaseSchemaError)
-	described := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", true, err)
+	described := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", "1.0.201", true, err)
 	if described == nil {
 		t.Fatal("described error is nil")
 	}
 	message := described.Error()
-	for _, want := range []string{"petios/rihards-develop", "older than the one that added --exclusive", "activity_lease_take"} {
+	for _, want := range []string{"petios/rihards-develop", "older than the one that added --exclusive", "activity_lease_take", "erun >= 1.0.248", "reports 1.0.201"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("described error %q does not mention %q", message, want)
 		}
@@ -32,16 +32,16 @@ func TestDescribeExclusiveActivityLeaseVersionSkewNamesTheVersionMismatch(t *tes
 
 func TestDescribeExclusiveActivityLeaseVersionSkewLeavesOtherFailuresAlone(t *testing.T) {
 	notExclusive := errors.New(rawExclusiveLeaseSchemaError)
-	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", false, notExclusive); got != notExclusive {
+	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", "1.0.201", false, notExclusive); got != notExclusive {
 		t.Fatalf("a non-exclusive call must pass its error through unchanged, got %v", got)
 	}
 
 	unrelated := errors.New(`MCP tools/call failed: invalid params: validating "arguments": validating "name": value is required (code -32602)`)
-	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", true, unrelated); got != unrelated {
+	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", "1.0.201", true, unrelated); got != unrelated {
 		t.Fatalf("a genuinely malformed call must pass its error through unchanged, got %v", got)
 	}
 
-	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", true, nil); got != nil {
+	if got := DescribeExclusiveActivityLeaseVersionSkew("petios", "rihards-develop", "1.0.201", true, nil); got != nil {
 		t.Fatalf("a nil error must stay nil, got %v", got)
 	}
 }

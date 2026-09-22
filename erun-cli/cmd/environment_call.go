@@ -67,6 +67,58 @@ func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, 
 	return decoded, true, nil
 }
 
+// environmentVersionResult mirrors the edge's own version tool.
+type environmentVersionResult struct {
+	Version string `json:"version"`
+}
+
+// environmentReportedVersion asks the environment's own edge which erun it
+// runs, so a version-skew refusal can name the version actually deployed
+// there instead of only the version required. It is read-only, so it is
+// marked as an idle probe: diagnosing a refused call must not itself read as
+// driving the environment.
+//
+// Empty means "could not read it", never "no version": this runs while
+// reporting a failure that has already happened, and the refusal is about a
+// claim that was not taken. Any failure here degrades the sentence -- it must
+// never replace or suppress the refusal, which is the one thing the caller
+// has to see.
+//
+// This deliberately does not go through callEnvironmentTool: that helper
+// always stamps the target's tenant/environment onto the arguments, and the
+// version tool takes only verbosity, so an edge of any vintage rejects the
+// injected pair as unknown properties and the read would answer nothing. The
+// edge's own scope is what the read is about, so it needs no addressing.
+func environmentReportedVersion(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment string) string {
+	if commandCtx.DryRun {
+		return ""
+	}
+	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, scopedOpenParams(commandCtx.Command, tenant, environment))
+	if err != nil {
+		return ""
+	}
+	result, err := callMCPToolWithReattach(ctx, commandCtx, target, "version", map[string]any{}, true)
+	if err != nil || len(result.Structured) == 0 {
+		return ""
+	}
+	var decoded environmentVersionResult
+	if err := json.Unmarshal(result.Structured, &decoded); err != nil {
+		return ""
+	}
+	return decoded.Version
+}
+
+// describeExclusiveVersionSkew completes an exclusive-claim refusal with the
+// environment's own reported version, reading it only when the failure really
+// is a version skew -- every other failure passes through untouched and pays
+// no extra round-trip.
+func describeExclusiveVersionSkew(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment string, exclusive bool, err error, describe func(version string, err error) error) error {
+	if !common.IsExclusiveClaimVersionSkew(exclusive, err) {
+		return err
+	}
+	return describe(environmentReportedVersion(ctx, commandCtx, resolveOpen, tenant, environment), err)
+}
+
 // putEnvironmentToolArgument keeps an unset flag out of the call so the
 // environment applies its own default rather than receiving a zero that means
 // something else.

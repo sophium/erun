@@ -448,8 +448,8 @@ func environmentJobExclusivityTakeError(params StartEnvironmentJobParams, err er
 // are not required to agree without this. Without this translation the edge's
 // raw schema rejection reads like a malformed call rather than the version
 // mismatch it is.
-func DescribeExclusiveJobStartVersionSkew(tenant, environment string, exclusive bool, err error) error {
+func DescribeExclusiveJobStartVersionSkew(tenant, environment, environmentVersion string, exclusive bool, err error) error {
 	return describeExclusiveClaimVersionSkew(tenant, environment, "job start",
 		"upgrade the environment (erun pin / erun deploy) to run this job exclusively there, or drop --exclusive to accept concurrent jobs",
-		exclusive, err)
+		environmentVersion, exclusive, err)
 }

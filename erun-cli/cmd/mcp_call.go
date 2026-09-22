@@ -194,7 +194,10 @@ func runMCPCallCommand(ctx context.Context, commandCtx common.Context, resolveOp
 	if err != nil {
 		if tool == "activity_lease_take" {
 			exclusive, _ := toolArguments["exclusive"].(bool)
-			err = common.DescribeExclusiveActivityLeaseVersionSkew(target.tenant, target.environment, exclusive, err)
+			err = describeExclusiveVersionSkew(ctx, commandCtx, resolveOpen, target.tenant, target.environment, exclusive, err,
+				func(version string, err error) error {
+					return common.DescribeExclusiveActivityLeaseVersionSkew(target.tenant, target.environment, version, exclusive, err)
+				})
 		}
 		return mcpEdgeErrorWithExitCode(target, err)
 	}

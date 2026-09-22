@@ -76,9 +76,19 @@ func startAgentJobInEnvironment(ctx context.Context, commandCtx common.Context, 
 	putEnvironmentToolArgument(arguments, "startedByJobId", startedByJobIDForOffEnvironmentStart(params))
 	result, resolved, err := callEnvironmentTool[environmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_agent", arguments, false)
 	if err != nil {
-		return common.EnvironmentJob{}, resolved, common.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
+		return common.EnvironmentJob{}, resolved, describeJobStartExclusiveVersionSkew(ctx, commandCtx, resolveOpen, params, err)
 	}
 	return result.Job, resolved, nil
+}
+
+// describeJobStartExclusiveVersionSkew turns a remote start's refusal into the
+// version-skew refusal when --exclusive is what the edge could not honour,
+// naming the version the environment actually reports.
+func describeJobStartExclusiveVersionSkew(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.StartEnvironmentJobParams, err error) error {
+	return describeExclusiveVersionSkew(ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, params.Exclusive, err,
+		func(version string, err error) error {
+			return common.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, version, params.Exclusive, err)
+		})
 }
 
 // startedByJobIDForOffEnvironmentStart is what an off-environment start (this
@@ -110,7 +120,7 @@ func startCommandJobInEnvironment(ctx context.Context, commandCtx common.Context
 	arguments["wait"] = false
 	started, resolved, err := callEnvironmentTool[environmentJobEnvelopeResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_raw", arguments, false)
 	if err != nil {
-		return common.EnvironmentJob{}, resolved, common.DescribeExclusiveJobStartVersionSkew(params.Tenant, params.Environment, params.Exclusive, err)
+		return common.EnvironmentJob{}, resolved, describeJobStartExclusiveVersionSkew(ctx, commandCtx, resolveOpen, params, err)
 	}
 	if !resolved {
 		return common.EnvironmentJob{}, resolved, nil
