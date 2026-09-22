@@ -252,30 +252,44 @@ Ruleset identity migration and its approval/verification sequence belong in
 ruleset changes remain explicit operations work. Gate-run records provide
 evidence, not a substitute for GitHub-side enforcement.
 
-### An agent environment cannot provision a platform cloud alias (#1969, design recorded; not yet implemented)
+### An agent environment cannot sign itself in to a platform alias (#1969)
 
-- A fresh agent needs unattended outbound platform auth; device/PKCE login needs
-  a human. Proposed: a tenant Zitadel machine user with client_credentials through
-  existing issuer-generic OIDC verification, not a new signing trust anchor.
-- Provision the identity/role idempotently server-side with the first agent-capable
-  environment. Deliver client ID/secret via the existing Kubernetes Secret channel;
-  do not require the pod to authenticate interactively to create its own access.
-- Use a purpose-built role, not broad TenantUser: review read, nested build report,
-  gate-run create/update, and review status update only. Extend scopes only after
-  identifying a real additional caller.
-- Pod startup/config reconciliation must establish the alias automatically;
-  common's login/token resolution must mint refreshable short-lived tokens through
-  the new grant. Until both exist this is design, not a fix.
+- **Delegated provisioning is implemented.** A fresh agent needs unattended
+  outbound platform auth, and device/PKCE login needs a human, so the session
+  arrives the way the registry credential does: `erun init` runs on a host that
+  *is* signed in, resolves that host's own erun alias, and mints
+  `<tenant>-devops-platform-alias` for the environment it creates
+  (`platform_alias_secret.go`, `provisionPlatformAliasSecret`). The runtime chart
+  mounts it read-only and the entrypoint's `sync_platform_alias` seeds the pod's
+  cloud config from it at boot, so it survives pod recreation. Provisioning is a
+  no-op — never an error — when the host has no erun alias, several ambiguous
+  ones, or no stored session, since most installs never attach the hosted platform.
+- **The alias is the operator's own identity, not a machine identity.** That is a
+  deliberate limitation, not an oversight: it means an environment's platform calls
+  are attributed to whoever ran `init`, and two environments provisioned from one
+  host are indistinguishable in the audit trail. Say so rather than letting it read
+  as a per-environment credential.
+- **Still design, not implemented: a tenant Zitadel machine user with
+  client_credentials** through existing issuer-generic OIDC verification (no new
+  signing trust anchor), provisioned idempotently server-side with the first
+  agent-capable environment, delivered through the existing Kubernetes Secret
+  channel, and scoped by a purpose-built role rather than broad TenantUser —
+  review read, nested build report, gate-run create/update, review status update
+  only, extended only after identifying a real additional caller. Common's
+  login/token resolution must mint refreshable short-lived tokens through the new
+  grant. That is what makes queue participation attributable to the queue rather
+  than to an operator, and it is the thing to build next here.
 - GitHub queue identity and platform machine identity are two trust domains.
   Name them coherently for attribution but never share the literal secret.
   Release participation and hosted-orchestrator attribution remain separate decisions.
-- **Until this lands, the working split is: an environment builds, a credentialed
-  host records.** `erun build` needs no platform alias (with none configured it
-  skips reporting its outcome); every `erun review` call aborts before any network
-  call and exits `127`. The merge skills check for a usable alias and stop there
-  rather than walking into a call that cannot succeed — see
+- **An environment with no provisioned alias keeps the split: it builds, a
+  credentialed host records.** `erun build` needs no platform alias (with none
+  configured it skips reporting its outcome); every `erun review` call aborts
+  before any network call and exits `127`. The merge skills check for a usable
+  alias and stop there rather than walking into a call that cannot succeed — see
   `erun-docs/docs/collaboration/merge-queue.md` § "What runs where: the
-  build/platform split".
+  build/platform split". An environment `erun init` provisioned from a signed-in
+  host clears that check and drives the queue itself.
 
 ## Cloud-Provider-Alias Storage: A Nil-Cipher Route Must Refuse, Not Vanish (erun#2042 follow-up)
 

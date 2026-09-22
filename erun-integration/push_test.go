@@ -203,11 +203,14 @@ func TestPush(t *testing.T) {
 		golden.Equal(t, "push/dry_run_insecure_cluster_registry_passes_insecure_to_manifest_commands", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_configured_platforms_narrows_push", func(t *testing.T) {
-		// environments.<env>.docker.platforms in .erun/config.yaml applies to
-		// push exactly like build: an environment pinned to one architecture
-		// stops paying to promote or rebuild the other's fingerprint tag when
-		// publishing to its own cluster's registry.
+	t.Run("dry_run_configured_platforms_do_not_narrow_push", func(t *testing.T) {
+		// environments.<env>.docker.platforms in .erun/config.yaml narrows
+		// what a local build mints and never what a push publishes: push
+		// resolves every platform erun supports, the same override a release
+		// build applies, so a project whose machines all build amd64 alone
+		// still publishes a manifest that carries arm64. The pin reaching the
+		// registry is what shipped an amd64-only release manifest and left
+		// every aarch64 environment with no image to pull.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
@@ -235,10 +238,12 @@ func TestPush(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if strings.Contains(result.Combined, "linux/arm64") {
-			t.Fatalf("expected configured docker.platforms to exclude arm64 from the push plan:\n%s", result.Combined)
+		// Stated separately from the snapshot so a blanket golden regeneration
+		// cannot quietly narrow a published version back to one architecture.
+		if !strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected configured docker.platforms to leave arm64 in the push plan:\n%s", result.Combined)
 		}
-		golden.Equal(t, "push/dry_run_configured_platforms_narrows_push", normalize.Apply(result.Combined))
+		golden.Equal(t, "push/dry_run_configured_platforms_do_not_narrow_push", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_build_shortcut_builds_then_pushes_minted_version", func(t *testing.T) {

@@ -62,7 +62,7 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 	if !strings.Contains(err.Error(), "work's process") {
 		t.Fatalf("cancel error = %q, want one naming the missing work pid so a caller knows to retry", err)
 	}
-	if !processAlive(supervisor.Pid) {
+	if !ProcessAlive(supervisor.Pid) {
 		t.Fatalf("cancel killed the job's supervisor (pid %d): nothing is left to record the outcome, which is the unknown-outcome failure this guards", supervisor.Pid)
 	}
 }

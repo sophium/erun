@@ -370,8 +370,16 @@ type EnvConfig struct {
 	// credential to provision; an existing in-pod credential, if any, is
 	// unaffected. Only init mints or rotates this value -- a plain `erun deploy`
 	// only carries the persisted name forward.
-	RegistryCredentialSecretName string              `yaml:"registrycredentialsecretname,omitempty" json:"registryCredentialSecretName,omitempty"`
-	RuntimePod                   RuntimePodResources `yaml:"runtimepod,omitempty"`
+	RegistryCredentialSecretName string `yaml:"registrycredentialsecretname,omitempty" json:"registryCredentialSecretName,omitempty"`
+	// PlatformAliasSecretName names a Kubernetes Secret that `erun init` minted
+	// from the host's own signed-in erun platform cloud provider alias, so the
+	// pod it deploys can call the platform API (the merge queue's read and
+	// self-report routes among them) without a human completing an interactive
+	// OIDC login inside it. Empty means init found no signed-in host alias to
+	// provision. Only init mints or rotates this value -- a plain `erun deploy`
+	// only carries the persisted name forward.
+	PlatformAliasSecretName string              `yaml:"platformaliassecretname,omitempty" json:"platformAliasSecretName,omitempty"`
+	RuntimePod              RuntimePodResources `yaml:"runtimepod,omitempty"`
 	// RuntimeDindPod sizes the erun-dind sidecar's own CPU/memory limits,
 	// independent of RuntimePod which only sizes the runtime container itself.
 	// Zero falls back to DefaultRuntimeDindCPU/Memory (NormalizeRuntimeDindPodResources).

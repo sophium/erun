@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -55,8 +56,33 @@ func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing
 	req := ShellLaunchParams{Namespace: "team-dev"}
 	release := &ObservedHelmRelease{Name: "team-devops", Error: "observe: helm is not installed or not on PATH"}
 
-	if got := computeObserveDrift(req, release, nil); got != nil {
-		t.Fatalf("drift = %v, want nil when the env config never recorded a runtimeversion", got)
+	got := computeObserveDrift(req, release, nil)
+	if len(got) != 0 {
+		t.Fatalf("drift = %v, want no findings when the env config never recorded a runtimeversion", got)
+	}
+	// The run read, so it still reports the verdict the read produced: an
+	// empty list, never nil. nil is reserved for a dry run, where nothing was
+	// read and the serialized field says so.
+	if got == nil {
+		t.Fatal("drift is nil on a run that read; want a non-nil empty list so the JSON carries the verdict")
+	}
+}
+
+// TestComputeObserveDriftCleanRunSerializesAnEmptyDriftList is the reported
+// symptom at its source: `erun observe --output json` ended with no drift key
+// at all on a clean environment, so an orchestrator could not check the
+// verdict without recomputing the diff the command had already done. The
+// field must marshal, and marshal as [].
+func TestComputeObserveDriftCleanRunSerializesAnEmptyDriftList(t *testing.T) {
+	req := ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
+	release := &ObservedHelmRelease{Name: "team-devops", Found: true, AppVersion: "1.0.0"}
+
+	encoded, err := json.Marshal(ObserveResult{Drift: computeObserveDrift(req, release, nil)})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"drift":[]`) {
+		t.Fatalf("a clean run's result = %s, want a drift key carrying an empty list", encoded)
 	}
 }
 

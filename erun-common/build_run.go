@@ -278,6 +278,45 @@ func ensureGateBuildActuallyBuilt(execution BuildExecutionSpec) error {
 	return newGateBuildNotRunError(promoted)
 }
 
+// ensureGateTestStageExecuted refuses a gate build that BuildKit replayed.
+//
+// ensureGateBuildActuallyBuilt answers the plan-level question -- did this run
+// have real work to do -- and it is the whole answer only for the fingerprint
+// cache. It cannot see the second cache: a Dockerfile's test stage reached
+// BuildKit with every input byte-identical to a previous build, so the builder
+// served the stage from its own layer cache, `make check` never executed, and the
+// run exited zero. The plan looked right, the exit code looked right, and the
+// gate's entire claim -- that this tree was tested -- is false.
+//
+// This is the only seam that can tell those apart, because it is the only one
+// that reads what the builder said it did rather than what the plan intended.
+// It is judged from the run's recorded provenance (see
+// build_gate_test_stage_evidence.go), so it is silent when the builder reported
+// nothing: a build that never reached its test stage, output this parser cannot
+// read, or a run with no gate image at all. An absence of evidence stays an
+// absence -- only a stage this run watched the builder replay is refused.
+//
+// A promoted image is skipped rather than judged: it never reaches a docker
+// build, so it has no provenance to read, and applyIncrementalPromotion already
+// refuses to promote a gate image at all (errGateTestStagePromoted). Its outcome
+// is the plan-level guard's case, not this one's.
+func ensureGateTestStageExecuted(builds []DockerBuildSpec, evidence *gateTestStageProvenance) error {
+	var replayed []string
+	for _, buildInput := range builds {
+		if !buildInput.GateTestStage || buildInput.Promote {
+			continue
+		}
+		tag := strings.TrimSpace(buildInput.Image.Tag)
+		if execution, ok := evidence.execution(tag); ok && execution.replayedWholeStage() {
+			replayed = append(replayed, tag)
+		}
+	}
+	if len(replayed) == 0 {
+		return nil
+	}
+	return newGateTestStageReplayedError(replayed)
+}
+
 // gateTestStagePlanLines announces, before the run, which builds will run the
 // project's own gate (make check, see dockerfileHasGateTestStage). It is
 // deliberately separate from gateTestStageProvenanceLines, which reports what
@@ -356,7 +395,13 @@ func gateTestStageProvenanceLines(builds []DockerBuildSpec, evidence *gateTestSt
 // and starts the step-timing root reported (as a duration-ordered table plus
 // a JSON record) when the bracket closes. Skipped in dry-run, which does no
 // work and must keep the integration goldens stable.
-func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*error)) {
+//
+// gate is the execution's own flag (`erun build --gate`), and it is what decides
+// whether a replayed test stage is refused rather than merely reported: an
+// ordinary incremental build replaying a cached stage is a cache working as
+// designed, while the same replay under --gate is a green checkmark over work
+// that did not happen (see ensureGateTestStageExecuted).
+func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec, gate bool) (Context, func(*error)) {
 	if ctx.DryRun {
 		return ctx, func(*error) {}
 	}
@@ -372,6 +417,18 @@ func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*e
 		var err error
 		if errp != nil {
 			err = *errp
+		}
+		// A run that already failed keeps its own reason: the builder's failure is
+		// the actionable one, and a second, weaker story attached to it would only
+		// be noise.
+		if err == nil && gate {
+			err = ensureGateTestStageExecuted(builds, ctx.gateTestStage)
+			if err != nil && errp != nil {
+				// The named return is what RunBuildExecution reports and what the
+				// platform self-report reads, so the refusal has to travel back
+				// through it rather than only into this closure's local.
+				*errp = err
+			}
 		}
 		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
@@ -396,7 +453,7 @@ func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*e
 // changes its own output because reporting is unavailable).
 func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
-	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds)
+	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds, execution.gate)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, nil, runScript, build, push, nil)
 }
@@ -405,7 +462,7 @@ func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript Buil
 // see its doc comment for store/deps.
 func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
-	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds)
+	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds, execution.gate)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, deploySpecs, nil, runScript, build, push, deploy)
 }

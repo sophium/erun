@@ -423,9 +423,18 @@ func DefaultCloudSecretStore() (CloudSecretStore, error) {
 	return NewFileCloudSecretStore(filepath.Join(dir, cloudSecretStoreDirName)), nil
 }
 
-func (s fileCloudSecretStore) path(ref string) string {
+// cloudSecretFileName is the basename the file store saves a ref's value under.
+// It is split out from path so the one caller that has to *name* the file
+// without writing it -- provisioning a signed-in alias into a fresh pod, which
+// has to tell the pod's entrypoint which file to create -- derives the same
+// name the store itself will later look for.
+func cloudSecretFileName(ref string) string {
 	sum := sha256.Sum256([]byte(ref))
-	return filepath.Join(s.dir, hex.EncodeToString(sum[:])+".token")
+	return hex.EncodeToString(sum[:]) + ".token"
+}
+
+func (s fileCloudSecretStore) path(ref string) string {
+	return filepath.Join(s.dir, cloudSecretFileName(ref))
 }
 
 func (s fileCloudSecretStore) SaveCloudSecret(ref, value string) error {

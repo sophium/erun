@@ -18,6 +18,7 @@ mkdir -p <TMP>
 write-yaml <TMP>
 ==> Initializing team/dev
 init: --erun-registry resolves to registry.erunpaas.com/team; the real run probes registry.erunpaas.com and refuses the choice if it is not reachable
+platform alias: no signed-in erun cloud provider alias on this host; leaving the pod's own alias state untouched
 deploy: runtime chart team-devops <VERSION> not found in registry.erunpaas.com/team (the tenant's own umbrella)
 deploy: runtime chart erun-devops <VERSION> found in registry.erunpaas.com/team (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.erunpaas.com/team/charts/erun-devops version <VERSION>

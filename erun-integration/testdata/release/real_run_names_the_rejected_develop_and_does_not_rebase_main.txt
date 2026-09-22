@@ -24,6 +24,7 @@ stage: release
 [main <SHORTSHA>] [skip ci] release <VERSION>
  2 files changed, 4 insertions(+), 4 deletions(-)
 release version: <VERSION> (source control only; no artifacts were built or published)
+next: `erun build --release` publishes this version's images and charts before tagging, or `erun push --version <VERSION>` publishes them for the tag already pushed
 stage: post-release-version-bump
 [main <SHORTSHA>] [skip ci] prepare <VERSION>
  1 file changed, 1 insertion(+), 1 deletion(-)

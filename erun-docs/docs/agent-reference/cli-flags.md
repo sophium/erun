@@ -715,11 +715,30 @@ Resolves tenant/environment/namespace the same way every other typed command doe
     "tls": [ { "hosts": ["prod.example.com"], "secretName": "web-tls" } ] } ],
   "certificates": [ { "name": "wildcard", "ready": false, "reason": "Issuing", "message": "…",
     "secretName": "wildcard-tls", "dnsNames": ["*.prod.example.com"], "orders": [ /* see below */ ] } ],
-  "secrets": [ { "name": "db-credentials", "key": "password", "exists": true, "hasKey": true, "error": "" } ]
+  "secrets": [ { "name": "db-credentials", "key": "password", "exists": true, "hasKey": true, "error": "" } ],
+  "helmRelease": { "name": "myapp-devops", "found": true, "revision": 42, "status": "deployed",
+    "chart": "erun-devops", "chartVersion": "1.0.247", "appVersion": "1.0.247",
+    "imageOverrides": { "erun-devops": "ghcr.io/…/erun-devops:1.0.247" },
+    "runtimePod": { "cpu": "4", "memory": "8192Mi" } },
+  "drift": []
 }
 ```
 
-`reason` on a pod is the container's `waiting`/`terminated` reason if present, else the `PodScheduled=False` reason (a pod never admitted to a node has no container status to read a reason from), else the `Ready=False` condition's reason. `secrets` is omitted entirely when no `--secret` was given.
+`reason` on a pod is the container's `waiting`/`terminated` reason if present, else the `PodScheduled=False` reason (a pod never admitted to a node has no container status to read a reason from), else the `Ready=False` condition's reason.
+
+`secrets` is omitted entirely when no `--secret` was given. `helmRelease` is present on every run that read the cluster — `found: false` when no release is deployed, with `error` naming the cause when the read itself failed rather than the release being genuinely absent. Both are omitted only in a preview that read nothing, where every list above is `null` for that same reason.
+
+### The drift verdict
+
+`drift` carries the same verdict the text stream prints as its last line, computed on every run — the orchestrator contract's "read the live release and diff it against the plan", already done. Each entry is one finding, worded exactly as the text stream prints it: the env config's recorded `runtimeversion`/`runtimeimage`/`runtimepod` against the release's own record, the release's `imageOverrides` against the containers actually running, and a release that is absent or unreadable when the env config expected one.
+
+| Value | Means |
+|---|---|
+| `["<finding>", …]` | The comparison ran and named something that disagrees. |
+| `[]` | The comparison ran and nothing disagreed. |
+| `null` | Nothing was read — a preview. `--dry-run` prints no JSON at all; this is the MCP `observe` tool's `preview: true` payload, where every list is unread for the same reason. |
+
+The key is always present on a real run, so a consumer checks `drift` alone and never has to distinguish "no drift this run" from "this field is never populated".
 
 ### The Certificate → CertificateRequest → Order → Challenge walk {#certificate-failure-chain}
 

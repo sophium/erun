@@ -10,14 +10,19 @@ import (
 // what the env config records, so a caller sees a named disagreement instead
 // of two dumps it must compare by eye. This is the read the orchestrator
 // contract requires before any env-shaping deploy: "read the live release and
-// diff it against the plan". release is nil in dry-run, where nothing was
-// read yet; the drift list is empty in that case.
+// diff it against the plan".
+//
+// The two empty answers are deliberately different values: a run that read
+// (release non-nil) returns a non-nil, possibly empty slice, which serializes
+// as `[]` and can only mean "compared, nothing disagreed", while a dry run
+// returns nil, which serializes as `null` and means "not determined". See
+// ObserveResult.Drift for why a consumer cannot be left to guess between them.
 func computeObserveDrift(req ShellLaunchParams, release *ObservedHelmRelease, pods []ObservedPod) []string {
 	if release == nil {
 		return nil
 	}
 
-	var findings []string
+	findings := []string{}
 	recordedVersion := strings.TrimSpace(req.RuntimeVersion)
 
 	// release.Found is only false when the helm read itself failed (see

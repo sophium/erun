@@ -16,6 +16,7 @@ Adding new environment
 mkdir -p <TMP>
 write-yaml <TMP>
 ==> Initializing team/dev
+platform alias: no signed-in erun cloud provider alias on this host; leaving the pod's own alias state untouched
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
 deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>

@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type GateRunRepository interface {
@@ -34,12 +35,31 @@ func RegisterGateRunRoutes(register ProtectedRouteRegistrar, gateRuns GateRunRep
 	register(http.MethodPatch, "/v1/gate-runs/{gate_run_id}", http.HandlerFunc(routes.reportGateRunOutcome))
 }
 
+// listGateRuns answers GET /v1/gate-runs. The `?status=` filter is normalized
+// and then validated before it reaches the repository: an unrecognised value
+// matches no row, so passing one through answered `200` with an empty list
+// that a caller reads as "no gate runs" -- indistinguishable from a real
+// empty result on the merge queue's audit trail. The membership check is the
+// shared eruncommon.NormalizeGateRunStatus, the same refusal `erun gate list`
+// makes before it ever calls the platform, so both surfaces accept the same
+// spellings and name the same accepted values.
+//
+// The order is deliberate: the filter is resolved to its stored spelling here
+// first, so all three status entry points -- list, start, report -- normalize
+// their own input and the resolved value is what reaches the repository.
+// Handing the raw value to the shared helper and taking its resolved return
+// instead would drop the entry-point normalization from this route.
 func (r GateRunRoutes) listGateRuns(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
+	status := model.GateRunStatus(strings.ToUpper(strings.TrimSpace(query.Get("status"))))
+	if _, err := eruncommon.NormalizeGateRunStatus(string(status)); err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
+		return
+	}
 	filter := apirepository.GateRunFilter{
 		TargetBranch: query.Get("targetBranch"),
 		SourceBranch: query.Get("sourceBranch"),
-		Status:       model.GateRunStatus(strings.ToUpper(strings.TrimSpace(query.Get("status")))),
+		Status:       status,
 	}
 	runs, err := r.gateRuns.List(req.Context(), filter)
 	if err != nil {
