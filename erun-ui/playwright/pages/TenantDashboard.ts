@@ -469,6 +469,15 @@ export class TenantDashboard {
     return this.environmentsTable().locator('tbody tr').filter({ hasText: name });
   }
 
+  // environmentRowAlert is the element announcing why a row failed. It is the
+  // surface the whole row's payload hangs on: a bare destructive line states
+  // the failure only in colour, and a name, ARN or upstream error long enough
+  // to matter is ellipsised out by the cell it sits in unless the alert
+  // itself wraps it.
+  environmentRowAlert(name: string): Locator {
+    return this.environmentRow(name).getByRole('alert');
+  }
+
   deployButtonFor(name: string): Locator {
     return this.environmentRow(name).getByRole('button', { name: 'Deploy' });
   }

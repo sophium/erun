@@ -1,5 +1,5 @@
 import { Button, EmptyState, Input, StatusBadge } from 'erun-kit';
-import { LoaderCircle, Rocket, Server, Square, Trash2 } from 'lucide-react';
+import { AlertCircle, LoaderCircle, Rocket, Server, Square, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -237,15 +237,34 @@ function EnvironmentsTable({
                 is announced as it appears (alert); `deletion-blocked` is a
                 standing state the badge beside it already shows, so it does
                 not interrupt (status). Each guard names its own state, so the
-                role and the guard cannot disagree. */}
+                role and the guard cannot disagree.
+
+                The role is the announcement; it is not the whole contract.
+                Destructive colour alone states the failure to nobody who
+                cannot see it (WCAG 1.4.1), so each line carries a glyph. And
+                the cell is a `DataCell`, whose `truncate` sets the nowrap the
+                reason would otherwise inherit: without a wrapping override a
+                long reason -- a URL, an ARN, a wrapped upstream error, the
+                part naming the way out -- is ellipsised out of the row, which
+                is the one part of it the operator needs. */}
             {environment.status === 'deletion-blocked' && environment.deleteError && (
-              <p className="mt-1 text-xs text-destructive" role="status" aria-live="polite">
-                {environment.deleteError}
+              <p
+                className="mt-1 flex items-start gap-1.5 whitespace-normal text-xs leading-[1.35] text-destructive [overflow-wrap:anywhere]"
+                role="status"
+                aria-live="polite"
+              >
+                <AlertCircle aria-hidden="true" className="mt-px size-3 shrink-0" />
+                <span className="min-w-0">{environment.deleteError}</span>
               </p>
             )}
             {environment.status === 'failed' && environment.provisionError && (
-              <p className="mt-1 text-xs text-destructive" role="alert" aria-live="polite">
-                {environment.provisionError}
+              <p
+                className="mt-1 flex items-start gap-1.5 whitespace-normal text-xs leading-[1.35] text-destructive [overflow-wrap:anywhere]"
+                role="alert"
+                aria-live="polite"
+              >
+                <AlertCircle aria-hidden="true" className="mt-px size-3 shrink-0" />
+                <span className="min-w-0">{environment.provisionError}</span>
               </p>
             )}
           </DataCell>

@@ -141,7 +141,11 @@ function ExposuresBody({
   }
   if (exposures.error) {
     return (
-      <div role="alert" className="grid gap-2">
+      // The EmptyState already carries the glyph, so this is the other half of
+      // the contract: `overflow-wrap` is inherited, so naming it here reaches
+      // the body that holds the upstream error rather than letting a long one
+      // widen the surface it sits in.
+      <div role="alert" className="grid gap-2 [overflow-wrap:anywhere]">
         <EmptyState
           icon={<AlertTriangle aria-hidden="true" />}
           heading="Couldn't load public addresses"
