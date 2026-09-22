@@ -426,23 +426,35 @@ ARG ERUN_PLAYWRIGHT_ARTIFACTS_DIR="/tmp/erun-playwright-artifacts"
 # regardless of what the cache holds, so a cache hit only skips re-downloading
 # bytes already pinned by the lockfile; it can't change what gets installed.
 #
-# /src/.cache/frontend-vite and /src/.cache/frontend-tsbuildinfo are erun-ui's
-# own incrementality: erun-ui/frontend/vite.config.ts and tsconfig.json point
-# vite's transform cache and tsc's build-info file at repo-relative paths
-# under these two dirs (`../../.cache/frontend-vite/erun-ui-frontend`,
-# `../../.cache/frontend-tsbuildinfo/erun-ui-frontend.tsbuildinfo`), which
-# resolve here since this stage's WORKDIR is /src -- no env var needed, the
-# Dockerfile only has to mount the target the source config already names.
+# /src/.cache/frontend-tsbuildinfo is erun-ui/frontend/tsconfig.json's
+# tsBuildInfoFile, at a repo-relative path
+# (`../../.cache/frontend-tsbuildinfo/erun-ui-frontend.tsbuildinfo`) that
+# resolves here since this stage's WORKDIR is /src -- no env var needed, the
+# Dockerfile only has to mount the target the source config already names. It
+# is what makes `yarn typecheck` (tsc --noEmit with incremental) re-check only
+# what moved instead of the whole program, and tsc creates the directory
+# itself when the mount is empty.
+#
+# /src/.cache/frontend-vite is mounted for the same reason, but it is not a
+# saving on the build step. vite.config.ts's `cacheDir` is where Vite keeps
+# its dependency pre-bundling cache, and `vite build` -- what this stage's
+# `yarn build` runs -- does not produce one: measured with a real
+# pre-bundleable dependency (react/react-dom), the build succeeds and the
+# directory is never created. What does write there is vitest, which
+# test-frontend's `yarn test` runs and which caches under `<cacheDir>/vitest`,
+# plus the dev server (and the deprecated `vite optimize`). So read this mount
+# as vitest's cache and the in-pod dev loop, not as an acceleration of the
+# 180s vite build.
 #
 # ERUN_WAILSJS_CACHE_DIR is erun-ui/generate-wailsjs.sh's skip-when-unchanged
-# cache (see that script's own comment): it hashes the Go source that defines
-# the bound Wails API and, on a match, restores the last-generated
-# frontend/wailsjs/ instead of re-running `wails generate module`. This is
-# what makes the second of this build's two generations a no-op -- test-frontend
-# (below) generates it once, and build.sh generates it again inside
-# test-playwright's headless erun-app build -- and what survives a COPY-layer
-# cache invalidation (e.g. an unrelated frontend source edit) that has
-# nothing to do with the bound Go API. Unset outside this Dockerfile, so a
+# cache (see that script's own comment): it keys the generated bindings on the
+# Go source that defines the bound Wails API and, on a match, restores the
+# last-generated frontend/wailsjs/ instead of re-running `wails generate
+# module`. This is what makes the second of this build's two generations a
+# no-op -- test-frontend (below) generates it once, and build.sh generates it
+# again inside test-playwright's headless erun-app build -- and what survives a
+# COPY-layer cache invalidation (e.g. an unrelated frontend source edit) that
+# has nothing to do with the bound Go API. Unset outside this Dockerfile, so a
 # bare `./generate-wailsjs.sh` still regenerates unconditionally.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
