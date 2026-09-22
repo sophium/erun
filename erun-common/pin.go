@@ -214,19 +214,147 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env EnvConfig, targ
 	return plan, nil
 }
 
+// runtimeImageStatement is one thing the environment's own config says about
+// the image its runtime pod runs. Origin names the field it was read from, so a
+// plan's skip note can show the operator what the decision rested on; it is
+// empty for the operative runtimeimage, whose own value is already the claim.
+type runtimeImageStatement struct {
+	Reference string
+	Origin    string
+}
+
+// ownLineImageStatements reports every statement the environment's config makes
+// about a runtime image on a release line other than erun's, in the order a
+// deploy resolves them. A runtimeversion is that line's coordinate, so any one
+// of these is enough to make rewriting it to the erun target wrong.
+//
+// The evidence is deliberately wider than the operative runtimeimage alone.
+// That field is the one a deploy records and heals, and it can be stale or
+// absent while the environment's pod runs something else entirely — the
+// reported frs/build case, whose config carried no runtime image statement at
+// all while its pod ran ghcr.io/sophium/frs-devops:1.0.134. Its runtimechart and
+// its last confirmed deploy survive that drift, and either one names the line
+// the environment actually runs.
+//
+// An environment that states nothing is not left unknown either: the line it
+// runs is decided rather than guessed, by the same rule the deploy resolves its
+// image with (defaultDeployRuntimeImageBareName) — with no runtimeimage and no
+// confirmed running image, a deploy installs the tenant's own <tenant>-devops
+// image, and records the version it deployed as runtimeversion. Only a tenant
+// on erun's own line (RuntimeReleaseName == erun-devops) defaults to the stock
+// image, and only there is the erun target runtimeversion's to hold.
+//
+// Classified by the reference's own name, never by version number: a tenant's
+// line and erun's line can each publish the same number. A reference that does
+// not classify (empty, or naming no component) is skipped rather than guessed,
+// the same "never guess a line from the tenant name" rule RuntimeVersionLine
+// follows.
+func ownLineImageStatements(tenant string, env EnvConfig) []runtimeImageStatement {
+	var statements []runtimeImageStatement
+	for _, candidate := range []runtimeImageStatement{
+		{Reference: strings.TrimSpace(env.RuntimeImage)},
+		{
+			Reference: strings.TrimSpace(env.RuntimeRunningImage),
+			Origin:    "from runtimerunningimage, the image this environment's last deploy confirmed running",
+		},
+	} {
+		if referenceIsOnOwnLine(candidate.Reference) {
+			statements = append(statements, candidate)
+		}
+	}
+	if chart := ownLineChartStatement(env.RuntimeChart); chart != nil {
+		statements = append(statements, *chart)
+	}
+	if len(statements) == 0 {
+		if resolved := defaultDeployImageStatement(tenant, env); resolved != nil {
+			statements = append(statements, *resolved)
+		}
+	}
+	return statements
+}
+
+// referenceIsOnOwnLine reports whether a stated reference names a release line
+// other than erun's. A reference that does not classify (empty, or naming no
+// component) is false: unknown is not a claim about which line it is on.
+func referenceIsOnOwnLine(reference string) bool {
+	line, ok := runtimeImageReleaseLine(reference)
+	return ok && line != "erun"
+}
+
+// ownLineChartStatement answers the chart half of the same question. A stated
+// chart that is not erun's own stock one has its own image on its own line: a
+// deploy runs the umbrella's own image rather than erun's stock one
+// (defaultDeployRuntimeImageBareName), which is what --runtime-chart exists to
+// let an environment do.
+func ownLineChartStatement(chart string) *runtimeImageStatement {
+	chart = strings.TrimSpace(chart)
+	if chart == "" {
+		return nil
+	}
+	reference, _ := splitChartReferenceVersion(chart)
+	name := chartNameFromReference(reference)
+	if name == "" || name == DevopsComponentName {
+		return nil
+	}
+	return &runtimeImageStatement{
+		Reference: chart,
+		Origin:    "from runtimechart, the " + name + " chart publishes its own runtime image, not erun's stock " + DevopsComponentName,
+	}
+}
+
+// defaultDeployImageStatement answers the same question for an environment that
+// records no image of its own: what a deploy of it installs. nil when it states
+// a runtimeimage or a confirmed running image, and nil when that default is the
+// stock erun-devops image — the one case where the erun target is this
+// environment's runtimeversion to hold.
+func defaultDeployImageStatement(tenant string, env EnvConfig) *runtimeImageStatement {
+	if strings.TrimSpace(env.RuntimeImage) != "" || strings.TrimSpace(env.RuntimeRunningImage) != "" {
+		return nil
+	}
+	chartReference, _ := splitChartReferenceVersion(strings.TrimSpace(env.RuntimeChart))
+	name := defaultDeployRuntimeImageBareName(tenant, chartNameFromReference(chartReference))
+	if name == "" || name == DevopsComponentName {
+		return nil
+	}
+	return &runtimeImageStatement{
+		Reference: name,
+		Origin:    "the image a deploy of this environment resolves by default, neither runtimeimage nor runtimerunningimage being recorded",
+	}
+}
+
+// ownLineRuntimeVersionSkipNote explains, in the operator's terms, why a
+// re-pin left the environment's runtimeversion alone: the environment's own
+// config says its runtime image is on another release line, so the erun target
+// is not this environment's number to hold.
+func ownLineRuntimeVersionSkipNote(tenant, environment string, statements []runtimeImageStatement) string {
+	reasons := make([]string, 0, len(statements))
+	for _, statement := range statements {
+		reason := statement.Reference + "'s own release line"
+		if statement.Origin != "" {
+			reason += " (" + statement.Origin + ")"
+		}
+		reasons = append(reasons, reason)
+	}
+	return "runtimeversion " + tenant + "/" + environment + " rides " + strings.Join(reasons, ", and ") +
+		", not erun's, so pin leaves it alone; it moves on the tenant's own next build/release"
+}
+
 // resolveRuntimeVersionAndImagePinSites answers the two env-config sites that
-// ride erun's own release line only when the environment's runtimeimage does:
-// runtimeversion, and a stated-stock runtimeimage's own tag. A tenant-imaged
-// env (frs/prod on ghcr.io/sophium/frs-devops:1.0.76 is the reported case) has
-// its runtimeversion skipped instead — rewriting it to the erun target names
-// a tag that line never publishes, guaranteeing an ImagePullBackOff on the
-// next deploy.
+// ride erun's own release line only when the environment's runtime image does:
+// runtimeversion, and a stated-stock runtimeimage's own tag. An env whose
+// runtime image belongs to another line (frs/prod on
+// ghcr.io/sophium/frs-devops:1.0.76 is the reported case) has its
+// runtimeversion skipped instead — rewriting it to the erun target names a tag
+// that line never publishes, guaranteeing an ImagePullBackOff on the next
+// deploy. See ownLineImageStatements for what counts as evidence of that line:
+// the operative runtimeimage is not the only field that carries it, and an
+// environment that states nothing still has the image a deploy resolves for it.
 func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, env EnvConfig) ([]PinSite, []string) {
 	var sites []PinSite
 	var skipped []string
 	image := strings.TrimSpace(env.RuntimeImage)
-	if image != "" && !runtimeImageIsStockDevops(image) {
-		skipped = append(skipped, "runtimeversion "+tenant+"/"+environment+" rides "+image+"'s own release line, not erun's, so pin leaves it alone; it moves on the tenant's own next build/release")
+	if ownLine := ownLineImageStatements(tenant, env); len(ownLine) > 0 {
+		skipped = append(skipped, ownLineRuntimeVersionSkipNote(tenant, environment, ownLine))
 	} else {
 		sites = append(sites, PinSite{
 			Kind:    PinSiteRuntimeVersion,
