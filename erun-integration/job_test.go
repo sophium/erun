@@ -320,6 +320,22 @@ const parkedProcessEnv = "ERUN_TEST_PARKED_SUPERVISOR"
 // reports a pid, so it runs out the loop's deadline instead, which is why the
 // deadline here is far below the scenario waits' own: that failure stays
 // bounded and names the loop rather than reading as a hung suite.
+//
+// Known and left open, not worked around: this cannot pass on Windows, because
+// the liveness answer it drives is inert there. ProcessAlive's only Windows
+// probe is os.FindProcess, which succeeds for a process that has exited while
+// any handle to it is open, and Signal(0) answers "not supported by windows"
+// (os/exec_windows.go) -- an error that is neither nil nor EPERM, so it falls
+// through to ProcessAlive's own `return runtime.GOOS == "windows"`. That makes
+// the function constant-true on that platform, so the loop here never observes
+// the transition it asserts and fails on its deadline rather than on a wrong
+// answer. No skip, deliberately: the same answer arms the 30s wait in stopJob
+// and stopOffEnvironmentJob, so Windows needs a real liveness answer
+// (erun-common/process_state_windows.go) rather than a skipped test -- and a
+// skip here would hide the signal while leaving every scenario teardown beside
+// it red for the same reason. Not measured on Windows: no Windows host was
+// available, so this is read from Go's own os package and erun-common's, and a
+// Windows run should treat it as a claim to verify rather than an observation.
 func TestAwaitJobSupervisorGoneWaitsOutALivePid(t *testing.T) {
 	t.Parallel()
 	if os.Getenv(parkedProcessEnv) == "1" {
