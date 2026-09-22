@@ -375,6 +375,16 @@ export class TenantDashboard {
     return this.page.getByText('Platform:', { exact: false });
   }
 
+  // platformTenantLine is the header line naming whose rows the panels below
+  // render: the platform's own name for the tenant behind the credential, from
+  // whoami. The heading above it names the local tenant the dashboard was
+  // opened from, and the two are joined only by whichever alias the credential
+  // reaches -- so this line is the only place the surface says whether they
+  // are the same tenant. Absent when the platform reports no name.
+  platformTenantLine(): Locator {
+    return this.page.getByText('Platform tenant:', { exact: false });
+  }
+
   // Registration tab: the tenant/environment registration path
   // `erun platform` gives the CLI, surfaced in the desktop.
   twoRegistriesNotice(): Locator {

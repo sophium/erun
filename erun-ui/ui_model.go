@@ -585,14 +585,21 @@ type uiTenantDashboardPanel struct {
 }
 
 type uiTenantDashboardUser struct {
-	TenantID  string   `json:"tenantId"`
-	UserID    string   `json:"userId"`
-	Username  string   `json:"username,omitempty"`
-	Roles     []string `json:"roles,omitempty"`
-	Issuer    string   `json:"issuer,omitempty"`
-	Subject   string   `json:"subject,omitempty"`
-	CreatedAt string   `json:"createdAt,omitempty"`
-	UpdatedAt string   `json:"updatedAt,omitempty"`
+	TenantID string `json:"tenantId"`
+	// TenantName is the name the platform itself gives the tenant these rows
+	// belong to, from whoami. It is set on the caller's own row only, where
+	// the identity read resolved it, and is the one value that names whose
+	// reviews, queue, users and audit a dashboard is rendering when the local
+	// tenant it was opened from is not the platform tenant its credential
+	// reaches. Empty on a platform that reports no name.
+	TenantName string   `json:"tenantName,omitempty"`
+	UserID     string   `json:"userId"`
+	Username   string   `json:"username,omitempty"`
+	Roles      []string `json:"roles,omitempty"`
+	Issuer     string   `json:"issuer,omitempty"`
+	Subject    string   `json:"subject,omitempty"`
+	CreatedAt  string   `json:"createdAt,omitempty"`
+	UpdatedAt  string   `json:"updatedAt,omitempty"`
 }
 
 type uiTenantDashboardReview struct {

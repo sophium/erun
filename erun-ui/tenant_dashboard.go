@@ -129,11 +129,16 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	}
 	dashboard.User = &uiTenantDashboardUser{
 		TenantID: whoami.TenantID,
-		UserID:   whoami.UserID,
-		Username: whoami.Username,
-		Roles:    whoami.Roles,
-		Issuer:   whoami.Issuer,
-		Subject:  whoami.Subject,
+		// The platform's own name for the tenant behind this bearer. The local
+		// tenant this dashboard was opened from is a different namespace, joined
+		// to this one only by whichever alias the credential belongs to, so this
+		// is the only value that can say whose rows the panels below are.
+		TenantName: whoami.TenantName,
+		UserID:     whoami.UserID,
+		Username:   whoami.Username,
+		Roles:      whoami.Roles,
+		Issuer:     whoami.Issuer,
+		Subject:    whoami.Subject,
 	}
 	capabilities := whoami.Capabilities
 	// The Users tab shows the tenant's roster, not the caller's own identity:

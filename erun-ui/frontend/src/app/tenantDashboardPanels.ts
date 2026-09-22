@@ -30,6 +30,22 @@ export function tenantDashboardEnvironmentName(
   return environment?.name.trim() ?? '';
 }
 
+// tenantDashboardPlatformTenantName is the platform's own name for the tenant
+// whose reviews, queue, users and audit the dashboard is rendering, from
+// whoami on the caller's own row. A local tenant is bound to a platform tenant
+// only by whichever alias its credential happens to reach, so this is the one
+// value that can say whose rows these are when the two are not the same.
+//
+// It is rendered whenever the platform reported one, not only when it differs
+// from the local tenant's own name: an absent line then means "this platform
+// reported no name", never "the two agreed", which is the reading that let the
+// mismatch go unnoticed in the first place. Empty for a nameless platform.
+export function tenantDashboardPlatformTenantName(
+  data: UITenantDashboard | null | undefined,
+): string {
+  return data?.user?.tenantName?.trim() ?? '';
+}
+
 export interface TenantDashboardTabDescriptor {
   tab: TenantDashboardTab;
   label: string;
