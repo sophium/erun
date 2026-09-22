@@ -50,21 +50,28 @@ The gate's steps do not all need the same credentials, and that difference decid
 
 **Every `erun review` call does.** `erun review list`, `create`, `record-build`, `report-merged`, and the [`erun exec gate-run`](/cli/exec#exec-gate-run-start) family all resolve a configured erun platform cloud alias first, and abort **before any network call** when there is none. They exit with code **127**, not `1` — a distinct code precisely so a script reading only the exit status can tell "this machine cannot reach the platform" apart from "it tried and failed". See [`erun review` § Error behaviour](/cli/review#error-behaviour).
 
-That distinction matters because an **agent environment has no erun platform cloud alias, and cannot get one**:
+That distinction matters because an **agent environment can hold a platform alias, but cannot sign itself in to get one**:
 
-- `erun cloud init erun --api-url <url>` succeeds unattended — it reads the platform's public `GET /v1/platform` and writes the alias.
-- `erun cloud login` does not. It completes through an OIDC **Device Authorization Grant** or **Authorization Code + PKCE**, and both need a human at a browser: the device grant requires someone to open the verification URL and approve it, and the PKCE flow's loopback redirect reuses an already-authenticated browser session. No retry, timeout, or piped answer substitutes for that person, so an unattended environment cannot provision itself one no matter how long it tries.
+- `erun cloud init erun --api-url <url>` succeeds unattended — it reads the platform's public `GET /v1/platform` and writes the alias. It performs no sign-in, so the alias it writes has no session behind it.
+- `erun cloud login` does not. It completes through an OIDC **Device Authorization Grant** or **Authorization Code + PKCE**, and both need a human at a browser: the device grant requires someone to open the verification URL and approve it, and the PKCE flow's loopback redirect reuses an already-authenticated browser session. No retry, timeout, or piped answer substitutes for that person, so an unattended environment cannot sign *itself* in no matter how long it tries.
 
-So a gate drive is a **credentialed-host operation**, run by an orchestrator or operator machine that has `erun cloud login` done and can reach the environment's worktree. The environment contributes the workspace, the daemon, and the warm caches the build runs in — not the record of what it built. Concretely:
+The session therefore has to arrive from outside, and it does — by the same route the environment's registry credential takes. **`erun init` resolves the invoking machine's own signed-in erun alias and provisions it into the environment it creates.** The runtime pod mounts it read-only and seeds its cloud config from it at boot, so the environment's `erun` resolves the alias with no interactive step of its own, and it survives pod recreation. An environment created this way can drive the whole queue itself.
+
+Two consequences are worth stating plainly:
+
+- **The environment acts as the operator whose machine ran `init`.** This is that operator's own identity, not a distinct machine identity, so every call an environment makes is attributed to them, and two environments provisioned from one host are indistinguishable in the platform's audit trail. A dedicated non-human identity for queue participation remains the better long-term answer; it is a separate, still-open design.
+- **It covers only what `erun init` provisioned, from a host that had an alias.** An environment created before this existed, or by a host with no alias configured, still has none — and nothing inside the pod repairs that. Re-running `erun init` from a signed-in host is the fix.
+
+Where an environment holds no alias, a gate drive is a **credentialed-host operation**, run by an orchestrator or operator machine that has `erun cloud login` done and can reach the environment's worktree. The environment contributes the workspace, the daemon, and the warm caches the build runs in — not the record of what it built. Concretely:
 
 | Step | Runs on |
 |---|---|
 | `erun-merge`: resolve the target, `erun exec merge`, commit, push | The environment |
-| `erun-merge`: the already-merged review check, `erun review create`, `erun review record-build` | A credentialed host |
+| `erun-merge`: the already-merged review check, `erun review create`, `erun review record-build` | Either — wherever a usable alias is |
 | `erun-merge`: the build whose version that `record-build` carries | Either — the environment has the warm caches, and the build itself needs no alias |
-| `erun-merge-queue-drive`: every rung, including resolving each review and reporting `MERGED` | A credentialed host |
+| `erun-merge-queue-drive`: every rung, including resolving each review and reporting `MERGED` | Either — a provisioned environment drives its own queue; otherwise a credentialed host |
 
-Both skills on this side now say so instead of discovering it mid-run. `erun-merge` and `erun-merge-queue-drive` probe for a usable alias before they touch git or take the environment claim, and stop there with this split named rather than proceeding into a call that cannot succeed. `erun-merge-queue-drive` stops **before** its exclusive environment claim in particular, so a drive that could never record anything does not reserve the environment and refuse the gate job a credentialed host could actually run.
+Both skills say so instead of discovering it mid-run. `erun-merge` and `erun-merge-queue-drive` probe for a usable alias before they touch git or take the environment claim, and stop there with this split named rather than proceeding into a call that cannot succeed. `erun-merge-queue-drive` stops **before** its exclusive environment claim in particular, so a drive that could never record anything does not reserve the environment and refuse the gate job that could actually run.
 
 One exception on the build side: a project whose configured container registry is the platform-hosted `registry.erunpaas.com` authenticates that push with the operator's own platform bearer token, so the image *push* needs the alias. A registry the tenant runs itself does not.
 

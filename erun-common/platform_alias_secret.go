@@ -8,23 +8,23 @@ import (
 )
 
 // platform_alias_secret.go provisions a *platform* credential into a freshly
-// created environment's pod, the counterpart of registry_credential_secret.go's
-// registry credential: `erun init` runs on a host that is already signed in to
-// erun's hosted platform, and mints a Secret carrying that alias and its stored
-// refresh token, so the pod it deploys can read and write the platform API from
-// its first boot.
+// created environment's pod -- the counterpart of registry_credential_secret.go's
+// registry credential, over the same channel and at the same point in init.
 //
-// The gap this closes: every platform command (`erun review show`,
-// `erun exec gate-merge`, `erun review record-build --gate`, `erun exec
-// gate-run start/report`, `erun review report-merged`, `erun gate list`)
-// resolves through newPlatformClientForAlias, which needs a configured
-// erun-type cloud provider alias. The only way to create one used to be
-// `erun cloud init erun --api-url <url>` followed by `erun cloud login erun`,
-// and login offers only OIDC device-authorization or authorization-code+PKCE --
-// both needing a human at a browser, and neither completable from an unattended
-// pod. So an environment promoted to drive the merge queue could not make a
-// single call, and had no way to acquire the ability. Hand-carrying the alias
-// between pods was the workaround; this makes provisioning do it.
+// The invariant: every platform command (`erun review show`, `erun exec
+// gate-merge`, `erun review record-build --gate`, `erun exec gate-run
+// start/report`, `erun review report-merged`, `erun gate list`) resolves through
+// newPlatformClientForAlias, which needs a configured erun-type cloud provider
+// alias; and the only way to create one the CLI offers requires an interactive
+// OIDC login, which no unattended pod can complete. So the session has to be
+// provisioned from outside, by the one process that is already signed in --
+// `erun init` on the invoking host.
+//
+// The credential this delegates is that host's own operator identity, not a
+// distinct machine identity: an environment's platform calls are attributed to
+// whoever ran init. See erun-backend-api/AGENTS.md § "An agent environment
+// cannot sign itself in to a platform alias" for what that costs and the
+// machine-user design that would replace it.
 
 // platformAliasSecretName derives the per-environment Secret `erun init` mints
 // from the operator's own signed-in erun platform alias.

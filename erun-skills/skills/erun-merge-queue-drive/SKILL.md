@@ -1,6 +1,6 @@
 ---
 name: erun-merge-queue-drive
-description: Drive one or more reviews already promoted to MERGE through the merge-queue gate — batch their sources into one prospective merge with `erun exec gate-merge` (skipping, per branch, any that conflict), gate the landed stack with one real `erun build`, and push and report MERGED only for branches that actually landed and passed. Reports each actual outcome, including reviews left at MERGE after an inconclusive gate, and never advances, overrides, or promotes the queue itself. Requires a machine with a configured erun platform cloud alias, since every rung is a platform call; an agent environment has none and cannot obtain one, so it stops before claiming the environment and hands the drive to a credentialed host. Use when the user says "drive the merge queue", "batch these reviews through the gate", "run the merge gate", "gate this promoted review", "build and push the merge queue head", or any similar request to execute the gate for one or more reviews that are already at MERGE.
+description: Drive one or more reviews already promoted to MERGE through the merge-queue gate — batch their sources into one prospective merge with `erun exec gate-merge` (skipping, per branch, any that conflict), gate the landed stack with one real `erun build`, and push and report MERGED only for branches that actually landed and passed. Reports each actual outcome, including reviews left at MERGE after an inconclusive gate, and never advances, overrides, or promotes the queue itself. Requires a machine with a configured erun platform cloud alias, since every rung is a platform call; an agent environment can hold one only if `erun init` provisioned it from a signed-in host, so where it has none it stops before claiming the environment and hands the drive to a credentialed host. Use when the user says "drive the merge queue", "batch these reviews through the gate", "run the merge gate", "gate this promoted review", "build and push the merge queue head", or any similar request to execute the gate for one or more reviews that are already at MERGE.
 ---
 
 # Drive already-promoted reviews through the gate
@@ -36,12 +36,14 @@ for exact flags, and read the target repository's applicable AGENTS.md.
 Every rung of this drive needs the platform: rung 1 resolves each review's
 status, source, target, and remote source SHA, rung 2 starts and reports the
 gate run, rung 3 records the GATE build, and rung 4 calls
-`erun review report-merged`. An agent environment has no erun
-platform cloud alias and **cannot obtain one** — `erun cloud init` succeeds
-unattended, but `erun cloud login` needs a human at a browser for either of its
-flows (Device Authorization Grant, Authorization Code + PKCE). So the drive is
-a **credentialed-host operation**, not a pod operation, and it must stop here
-rather than spending a run discovering that.
+`erun review report-merged`. An agent environment **cannot sign itself in** to
+an erun platform alias — `erun cloud init` succeeds unattended, but
+`erun cloud login` needs a human at a browser for either of its flows (Device
+Authorization Grant, Authorization Code + PKCE). An environment `erun init`
+provisioned from an already-signed-in host carries one anyway and can drive
+this itself; one that does not has no way to acquire it. So where there is no
+alias the drive is a **credentialed-host operation**, not a pod operation, and
+it must stop here rather than spending a run discovering that.
 
 ```sh
 probe=0
@@ -57,7 +59,9 @@ refuse the gate job that a credentialed host could actually run.
 
 Do not try to acquire a platform alias here. `erun cloud init` succeeds
 unattended, but `erun cloud login` does not — both of its flows need a human at
-a browser, so no retry, timeout, or piped answer completes one.
+a browser, so no retry, timeout, or piped answer completes one. The only way
+this environment gets one is `erun init` re-run from a host that is signed in,
+which is not something this run can arrange.
 
 The split: an environment builds (`erun build` needs no platform alias — with
 none configured it skips reporting its outcome), and a credentialed host makes

@@ -1,6 +1,6 @@
 ---
 name: erun-merge
-description: Take the current branch from "the work is done" to a review sitting at READY on the erun platform — resolve or accept a target branch, merge it in, commit and push, open or reuse the review, build and record the result. Stops at READY/FAILED and never advances the merge queue. Needs a machine with a configured erun platform cloud alias; an agent environment has none and cannot obtain one, so there it stops after the push and hands the review rungs to a credentialed host. Use when the user says "merge this branch", "land this change", "merge onto main", "advance the merge queue for this branch", "run erun-merge", or any similar request to take a finished change to review.
+description: Take the current branch from "the work is done" to a review sitting at READY on the erun platform — resolve or accept a target branch, merge it in, commit and push, open or reuse the review, build and record the result. Stops at READY/FAILED and never advances the merge queue. Needs a machine with a configured erun platform cloud alias; an agent environment can hold one only if `erun init` provisioned it from a signed-in host, so where it has none it stops after the push and hands the review rungs to a credentialed host. Use when the user says "merge this branch", "land this change", "merge onto main", "advance the merge queue for this branch", "run erun-merge", or any similar request to take a finished change to review.
 ---
 
 # Land the current branch: /erun-merge \<targetBranch\>
