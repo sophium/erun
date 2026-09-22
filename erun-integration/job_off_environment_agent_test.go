@@ -108,6 +108,13 @@ esac
 	if err := emcpCmd.Start(); err != nil {
 		t.Fatalf("start emcp: %v", err)
 	}
+	// Registered before the job teardown below, so t.Cleanup's LIFO order runs
+	// it after that teardown: stopOffEnvironmentJob reads each job's supervisor
+	// back through this edge, so an edge killed first would leave the wait
+	// unable to read anything. That ordering is a requirement of this
+	// registration, not a convenience -- moving this cleanup below the job
+	// teardown turns that teardown into a loud failure naming the channel
+	// rather than a silent pass (awaitJobSupervisorExitVia).
 	t.Cleanup(func() {
 		_ = emcpCmd.Process.Kill()
 		_ = emcpCmd.Wait()
@@ -126,8 +133,7 @@ esac
 	}
 	t.Cleanup(func() {
 		for _, id := range []string{"gate", "gate-2"} {
-			erun.Run(t, []string{"exec", "job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
-				erun.RunOptions{Cwd: setup.Cwd, Env: hostEnv})
+			stopOffEnvironmentJob(t, setup, hostEnv, id)
 		}
 	})
 
