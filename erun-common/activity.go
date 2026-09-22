@@ -62,6 +62,12 @@ type EnvironmentIdleStore interface {
 	LoadEnvConfig(tenant, environment string) (EnvConfig, string, error)
 }
 
+// Every timestamp below carries omitzero rather than omitempty: a value
+// time.Time is never "empty" to encoding/json, so omitempty silently renders a
+// never-set field as the zero instant — a fabricated timestamp a consumer
+// cannot tell from a real one. A marker that has never seen activity must
+// carry no timestamp at all.
+
 // EnvironmentActivitySnapshot is the on-disk record for one activity kind.
 // Clients is bounded so a long-lived runtime cannot grow the file without
 // bound under churn (e.g. ephemeral source ports on a NAT'd peer).
