@@ -233,6 +233,74 @@ demonstrated:
 - Keep resource lifetimes and concurrency ownership explicit. Root boundary-data
   and applied-state rules also apply to shared plans and persisted results.
 
+## Diagnostic Decision Record
+
+The surfaces that report state to an operator -- CLI output, log lines, error
+messages, and the panels that render them -- follow these decisions. Every one is
+already honoured somewhere in this codebase; the value of writing them down is the
+one the UI record in `erun-kit/AGENTS.md` already demonstrates. A reviewer cites a
+decision instead of re-deriving it, and a departure becomes a note rather than a
+drift. `erun-cli/AGENTS.md` and `erun-ui/AGENTS.md` apply this record to their own
+surfaces.
+
+- **A failed read states what could not be read, in the operator's terms, before
+  the underlying error.** `erun-ui/runtime_usage.go` and
+  `erun-ui/environment_usage.go` both lead with `Cannot read this environment's
+  resource usage: ` and let the cause follow; `erun-ui/runtime_sizing.go` does the
+  same for a sizing recommendation. A bare `exit status 1: kubectl ...` with no
+  headline is the departure this names.
+- **A message names the command actually invoked, or names none.**
+  `erun-common/open.go`'s shared tenant resolver hardcodes its own caller --
+  `open could not infer one` -- so `erun usage` and `erun observe` both report that
+  `open` failed (#2363). A command that names itself must be the one the operator
+  ran; where a shared helper genuinely cannot know its caller, it names no command.
+  `erun-cli/cmd/pin.go`'s `` see `erun pin --list` `` is the honoured form.
+- **A failure that occurred once is reported once, at the level it occurred.**
+  `erun-common/cloud_context.go`'s `setCloudContextStatusFailure` builds one
+  `status refresh failed: ...` string outside the loop and stamps it on every
+  index, so a single batched `describe-instances` failure is repeated verbatim per
+  context (#2365). The error belongs once, on the call that failed.
+- **A no-op does not spend a line from a bounded budget.**
+  `erun-common/workspace_sync.go` already suppresses both halves of this: a missing
+  or empty outputs dir is a no-op, and a pass whose content is unchanged transfers
+  nothing. A periodic pass that emits a fixed line per iteration whether or not
+  anything changed spends a bounded retention window on no-op content (#2346).
+- **A state that can be entered can be exited, and both transitions are recorded.**
+  An outage written on entry and never on exit leaves a resolved outage
+  indistinguishable from an ongoing one after the fact (#2348).
+- **An error state offers the recovery action where the app owns it.** The UI
+  record already requires this; the rule is not confined to the UI. The honoured
+  form names the next command (`pin.go`), the flag that disambiguates, or the setup
+  step (`open.go`'s `` run `erun init --tenant <name> --set-default-tenant` ``).
+  Offering no recovery is correct only where the operator has none.
+
+### Recorded inconsistencies
+
+These are live disagreements between surfaces, not decisions. They are recorded
+rather than resolved so that the next change picks a direction deliberately
+instead of adding a fourth treatment.
+
+- **Three read-failure treatments in one tab.** The Runtime tab's three panels
+  render amber-plus-icon, plain grey, and amber-without-icon, with a `role=alert` /
+  `role=status` split (#2310). The alert/status split is a real distinction --
+  attempted failure versus expected block -- and the icon and tone do not follow
+  it.
+- **One panel, two states, opposite care.** The API log's empty state is written
+  for an operator; its error state is a bare tool error with no headline (#2355).
+  The first decision above already covers the error state; the panel has not been
+  brought across.
+- **Four read-failure surfaces, four treatments** -- headline+retry,
+  headline+refresh, headline only, neither (#2355). Retry versus refresh is a
+  property of the read, not of the panel, and is not decided anywhere today.
+
+### What this record still owes
+
+The record has no citation habit yet: no decision here is named in a code comment,
+because none existed until now. Whether a diagnostic departure is caught in review
+is therefore untested. The UI record earned its enforcement from three issues filed
+against violations of it (#1418, #1419, #1420); this one has not been through that
+yet, and should not be assumed to hold until it has.
+
 ## Validation
 
 - After Go changes run `go test -count=1 -race ./...`. The root
