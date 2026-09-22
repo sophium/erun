@@ -124,6 +124,7 @@ func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.Ope
 	if viaCwdFallback {
 		plan.ProjectRootNote = common.DescribeCwdFallbackProjectRoot(cmdCtx, plan)
 	}
+	common.AnnotatePinPlanBaseFreshness(cmdCtx, &plan)
 	tracePinPlan(cmdCtx, plan)
 
 	if plan.Aligned() {
@@ -282,6 +283,9 @@ func tracePinPlan(cmdCtx common.Context, plan common.PinPlan) {
 	cmdCtx.Trace(fmt.Sprintf("pin %s/%s -> %s (project root %s)", plan.Tenant, plan.Environment, plan.Target, plan.ProjectRoot))
 	if plan.ProjectRootNote != "" {
 		cmdCtx.Trace("  " + plan.ProjectRootNote)
+	}
+	if note := plan.BaseFreshnessNote(); note != "" {
+		cmdCtx.Trace("  " + note)
 	}
 	for _, site := range plan.Sites {
 		state := "change"

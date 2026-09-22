@@ -85,6 +85,10 @@ func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx eruncommon.
 	if err != nil {
 		return nil, err
 	}
+	eruncommon.AnnotatePinPlanBaseFreshness(runCtx, &plan)
+	if note := plan.BaseFreshnessNote(); note != "" {
+		runCtx.Trace("pin " + note)
+	}
 	for _, site := range plan.Sites {
 		runCtx.Trace(fmt.Sprintf("pin %s %s: %s -> %s", site.Kind, site.Path+site.Detail, site.Current, site.Target))
 	}

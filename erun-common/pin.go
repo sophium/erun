@@ -105,6 +105,14 @@ type PinPlan struct {
 	// deployed, warns that the plan may not describe the environment's real
 	// drift. Empty whenever ProjectRoot came from a known checkout.
 	ProjectRootNote string `json:"projectRootNote,omitempty"`
+	// BaseFreshness is how the resolved checkout stands against the ref it
+	// tracks — how far behind that ref it is, and whether the remote was
+	// actually reached to establish it. A plan read from a checkout behind its
+	// remote is internally consistent while describing an older base than the
+	// remote holds, so this is the one fact that separates a good plan from a
+	// stale one; see PinBaseFreshness. Nil only when no tracked ref could be
+	// read.
+	BaseFreshness *PinBaseFreshness `json:"baseFreshness,omitempty"`
 }
 
 // Changes is the sites that would actually move. A plan whose changes are empty

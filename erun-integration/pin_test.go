@@ -296,6 +296,38 @@ func TestPin(t *testing.T) {
 		}
 	})
 
+	// The reported defect: pin resolved a checkout sitting behind its remote and
+	// printed a plan that was internally consistent -- every site reading the
+	// old version, the counts right, no warning anywhere -- so a plan computed
+	// from a stale base was indistinguishable from a current one, and applying
+	// it would have moved the listed sites while silently reverting anything the
+	// missing commits changed elsewhere in the tree. The plan must name both the
+	// divergence and the ref it is measured against.
+	t.Run("names_a_base_that_is_behind_its_remote", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "frs", "prod")
+		fixture.SeedGitRepoBehindItsRemote(t, setup.Cwd)
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+
+		result := erun.Run(t, []string{"pin", "frs", "prod", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"1 commit(s) behind origin/main",
+			"the plan describes that older base",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the plan:\n%s", want, result.Combined)
+			}
+		}
+		// The warning annotates the plan; it must not replace it. The sites a
+		// stale tree still lists are exactly the ones an operator needs to see.
+		if !strings.Contains(result.Combined, "change terraform-ref terraform-team/dev/main.tf") {
+			t.Fatalf("expected the plan's sites to survive the warning:\n%s", result.Combined)
+		}
+	})
+
 	// The reported gap: dns01_webhook_image, set directly in a tenant's own
 	// terraform variables, is an erun-published image reference just like the
 	// module ref above it, and pin's dry-run must name it as a site to move
