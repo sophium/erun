@@ -39,11 +39,13 @@ function blockedReviewName(mergeQueue: UITenantDashboardReview[], reviewId: stri
 export function MergeQueueBlockedAlert({
   canOverride,
   mergeQueue,
+  repository,
   targetBranch,
   action,
 }: {
   canOverride: boolean;
   mergeQueue: UITenantDashboardReview[];
+  repository: string;
   targetBranch: string;
   action: MergeQueueActionState;
 }): React.ReactElement {
@@ -81,7 +83,13 @@ export function MergeQueueBlockedAlert({
           </Button>
         )}
       </div>
-      {action.overriding && <MergeQueueOverrideForm targetBranch={targetBranch} action={action} />}
+      {action.overriding && (
+        <MergeQueueOverrideForm
+          repository={repository}
+          targetBranch={targetBranch}
+          action={action}
+        />
+      )}
     </div>
   );
 }
@@ -91,9 +99,11 @@ export function MergeQueueBlockedAlert({
 // control asks for that reason explicitly rather than treating the override
 // as a plain confirm click. See erun-backend-api AGENTS.md "Merge Queue".
 function MergeQueueOverrideForm({
+  repository,
   targetBranch,
   action,
 }: {
+  repository: string;
   targetBranch: string;
   action: MergeQueueActionState;
 }): React.ReactElement {
@@ -142,7 +152,7 @@ function MergeQueueOverrideForm({
           size="sm"
           disabled={action.overrideBusy || !action.overrideReason.trim()}
           onClick={() => {
-            void dispatch(submitMergeQueueOverride(targetBranch));
+            void dispatch(submitMergeQueueOverride(repository, targetBranch));
           }}
         >
           {action.overrideBusy && <LoaderCircle className="animate-spin" aria-hidden="true" />}

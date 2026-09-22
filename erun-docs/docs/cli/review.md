@@ -15,7 +15,7 @@ The [desktop app](/desktop/reviews)'s tenant dashboard has a **Reviews** tab tha
 ```
 erun review list [flags]
 erun review show REVIEW_ID [flags]
-erun review create --name <name> --source-branch <branch> --target-branch <branch> [flags]
+erun review create --name <name> --repository <remote> --source-branch <branch> --target-branch <branch> [flags]
 erun review comment REVIEW_ID --commit <hash> --file <path> --line <n> [flags]
 erun review resolve REVIEW_ID COMMENT_ID [flags]
 erun review unresolve REVIEW_ID COMMENT_ID [flags]
@@ -26,9 +26,9 @@ erun review requeue REVIEW_ID [flags]
 erun review reviewers list REVIEW_ID [flags]
 erun review reviewers add REVIEW_ID --user-id <id> [flags]
 erun review reviewers remove REVIEW_ID --user-id <id> [flags]
-erun review queue list --target-branch <branch> [flags]
-erun review queue advance --target-branch <branch> [flags]
-erun review queue override-advance --target-branch <branch> --reason <text> [flags]
+erun review queue list --repository <remote> --target-branch <branch> [flags]
+erun review queue advance --repository <remote> --target-branch <branch> [flags]
+erun review queue override-advance --repository <remote> --target-branch <branch> --reason <text> [flags]
 ```
 
 Every subcommand accepts `--erun-alias` (defaults to the sole configured erun-type alias when only one is set up), `--dry-run` (trace the resolved HTTP call without sending it), and the global `--output json` for structured results.
@@ -41,6 +41,7 @@ Lists reviews visible to the caller's tenant. Every filter is optional and compo
 
 | Flag | Description |
 |---|---|
+| `--repository` | Filter by repository. Any form git accepts (`git remote get-url origin`); an SSH remote and its HTTPS form name one repository. Not defaulted from the checkout — a listing is how you find work across every repository your tenant serves. |
 | `--target-branch` / `--source-branch` | Filter by branch name. |
 | `--status` | `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED`; any casing. Anything else is refused rather than listed — see [Error behaviour](#error-behaviour). |
 | `--author-user-id` / `--reviewer-user-id` | Filter by an explicit user id. |
@@ -53,7 +54,9 @@ Fetches one review together with its comment threads and recorded builds.
 
 ### `review create`
 
-Opens a review. `--name` is the eventual squash-merge message and must be unique per tenant — a colliding name fails with a conflict. `--source-branch` must already be pushed (see [`exec push`](/cli/exec#exec-push)); the review references it by name and the platform can only ever fetch what has actually landed on the remote. A real, immediate write, not a preview, unless `--dry-run` is set.
+Opens a review. `--name` is the eventual squash-merge message and is unique within a repository among reviews that can still land — a colliding name fails with a conflict, while a `CLOSED` review's name is free to reuse. `--source-branch` must already be pushed (see [`exec push`](/cli/exec#exec-push)); the review references it by name and the platform can only ever fetch what has actually landed on the remote.
+
+`--repository` names the repository the branches belong to, defaulting to your checkout's `origin`. It is what keeps two repositories a tenant serves from sharing one merge queue or colliding on the same branch pair, so a review opened without one is invisible to every repository's queue. A real, immediate write, not a preview, unless `--dry-run` is set.
 
 ### `review comment`
 
@@ -111,7 +114,9 @@ Assign or remove reviewers on a review, and list who's currently assigned. `revi
 
 ### `review queue list` / `review queue advance` {#review-queue-list--review-queue-advance}
 
-Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), if another review already holds that target branch's single `MERGE` slot (`409 Conflict`, naming that review — wait for it, or [`review requeue`](#review-requeue) it back to `READY`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build with [`review requeue`](#review-requeue) (see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
+Lists or advances one repository's merge queue for a target branch. A queue belongs to a repository: two repositories a tenant serves both have a `main`, so `--repository` names which — defaulting to your checkout's `origin`, which is the repository this caller would gate. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands.
+
+It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), if the queue holds reviews from more than one repository and none was named (`409 Conflict`, `MERGE_QUEUE_AMBIGUOUS`, naming them — see [error behaviour](#error-behaviour)), if another review already holds that target branch's single `MERGE` slot (`409 Conflict`, naming that review — wait for it, or [`review requeue`](#review-requeue) it back to `READY`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build with [`review requeue`](#review-requeue) (see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
 
 ### `review queue override-advance` {#review-queue-override-advance}
 
@@ -125,8 +130,10 @@ erun cloud login --alias erun+api.erunpaas.com@erun
 
 erun exec push feature/add-widget
 erun review create --name "Add widget" --source-branch feature/add-widget --target-branch main
+erun review create --name "Add widget" --repository git@github.com:org/repo.git --source-branch feature/add-widget --target-branch main
 
 erun review list --mine
+erun review list --repository git@github.com:org/repo.git --status READY
 erun review list --waiting-on-me --status OPEN
 
 echo 'nit: rename this' | erun review comment 018f... --commit abc123 --file main.go --line 42
@@ -148,9 +155,9 @@ erun review reviewers add 018f... --user-id 018i...
 erun review reviewers list 018f...
 erun review reviewers remove 018f... --user-id 018i...
 
-erun review queue list --target-branch main
-erun review queue advance --target-branch main
-erun review queue override-advance --target-branch main --reason "hotfix, reviewers unavailable"
+erun review queue list --repository https://github.com/org/repo.git --target-branch main
+erun review queue advance --repository https://github.com/org/repo.git --target-branch main
+erun review queue override-advance --repository https://github.com/org/repo.git --target-branch main --reason "hotfix, reviewers unavailable"
 ```
 
 ## Error behaviour
@@ -161,7 +168,12 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | More than one erun-type alias configured, `--erun-alias` omitted. | Aborts asking for an explicit `--erun-alias`. |
 | `--mine`/`--waiting-on-me` combined with the equivalent explicit `--author-user-id`/`--reviewer-user-id` (`list`). | Aborts before any network call. |
 | `--status` names something other than `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED` (`list`; any casing). | Refused as a bad argument, naming the accepted values, before the alias lookup — a mistyped filter would otherwise return an empty listing, indistinguishable from a review queue that genuinely has nothing in that state. The API refuses the same value with `400 Bad Request` and code `INVALID_QUERY`. |
-| `create` with a `--name` that collides with an existing review. | `409 Conflict`. |
+| `create` with a `--name` that collides with a review in the same repository that can still land or did land. | `409 Conflict`. A `CLOSED` review reserves nothing, so re-opening work on a rebased branch reuses the name. |
+| `create` with no `--repository` and no `origin` remote in the current checkout. | Aborts before any network call: a review whose repository cannot be recorded cannot be placed in any repository's merge queue. |
+| `create` with a `--repository` the platform cannot canonicalize (a bare forge, an empty value). | `400 Bad Request` (`INVALID_REPOSITORY`). |
+| `list`/`queue` with a `--repository` the platform cannot canonicalize. | Refused as a bad argument before the alias lookup, like a mistyped `--status`. |
+| `queue advance` on a queue holding reviews from more than one repository, with no `--repository`. | `409 Conflict` (`MERGE_QUEUE_AMBIGUOUS`), naming the repositories: a target branch alone names one queue only in a tenant that serves one repository, and promoting across the others would gate a branch that need not exist in the checkout driving it. |
+| `report-merged` with a `--remote-url` naming a repository other than the review's own. | `409 Conflict` (`MERGE_NOT_VERIFIED`); an SSH remote and the HTTPS identity the review recorded are the same repository, so an SSH checkout verifies normally. A review that recorded none adopts the one the report names. |
 | `create` with a `--source-branch` that already has a live (non-`MERGED`/`CLOSED`) review proposing it onto the same `--target-branch`. | `409 Conflict` — see [branch uniqueness](/collaboration/reviews#author-reviewers-and-discovery). |
 | `show`/`comment`/`close` on an unknown review id. | `404 Not Found`. |
 | `resolve`/`unresolve` addressed to a reply rather than its thread's root comment. | Aborts before the status change, naming the root comment id to retry against. |

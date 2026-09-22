@@ -24,6 +24,8 @@ import {
 } from '@/app/reviewDetailState';
 import { openReviewDetail } from '@/app/reviewDetailThunks';
 import {
+  mergeQueueAddress,
+  mergeQueueHeadLabel,
   reviewAuthorInitials,
   reviewRowUnresolvedThreads,
   reviewStatusTone,
@@ -245,16 +247,6 @@ export function MergeQueuePanel({ data }: { data: TenantDashboardData }): React.
   );
 }
 
-// mergeQueueTargetBranch reports the target branch to advance only when the
-// whole visible queue shares one — advancing is a single-queue-head write, so
-// a mixed-branch queue has no single unambiguous head to name from here.
-function mergeQueueTargetBranch(mergeQueue: UITenantDashboardReview[]): string {
-  const branches = [...new Set(mergeQueue.map((review) => review.targetBranch.trim()))].filter(
-    Boolean,
-  );
-  return branches.length === 1 ? (branches[0] ?? '') : '';
-}
-
 function AdvanceMergeQueueAction({
   data,
   mergeQueue,
@@ -280,11 +272,12 @@ function AdvanceMergeQueueAction({
   if (mergeQueue.length === 0) {
     return null;
   }
-  const targetBranch = mergeQueueTargetBranch(mergeQueue);
-  if (!targetBranch) {
+  const queue = mergeQueueAddress(mergeQueue);
+  if (!queue) {
     return (
       <span className="max-w-xs text-right text-[13px] text-muted-foreground">
-        These reviews target more than one branch, so there is no single queue head to advance.
+        These reviews do not all name one branch and repository, so there is no single queue head to
+        advance.
       </span>
     );
   }
@@ -293,7 +286,8 @@ function AdvanceMergeQueueAction({
       <MergeQueueBlockedAlert
         canOverride={data.canOverrideMergeQueue}
         mergeQueue={mergeQueue}
-        targetBranch={targetBranch}
+        repository={queue.repository}
+        targetBranch={queue.targetBranch}
         action={action}
       />
     );
@@ -301,11 +295,7 @@ function AdvanceMergeQueueAction({
   return (
     <div className="flex min-w-0 flex-col items-end gap-2">
       {action.confirming ? (
-        <AdvanceMergeQueueConfirm
-          tenant={data.tenant}
-          targetBranch={targetBranch}
-          busy={action.busy}
-        />
+        <AdvanceMergeQueueConfirm tenant={data.tenant} queue={queue} busy={action.busy} />
       ) : (
         <Button
           type="button"
@@ -338,18 +328,18 @@ function AdvanceMergeQueueAction({
 // into the middle of the sentence.
 function AdvanceMergeQueueConfirm({
   tenant,
-  targetBranch,
+  queue,
   busy,
 }: {
   tenant: string;
-  targetBranch: string;
+  queue: { repository: string; targetBranch: string };
   busy: boolean;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <span className="text-[13px] text-foreground">
-        Merge the queue head into <span className="font-mono">{targetBranch}</span>?
+        Merge <span className="font-mono">{mergeQueueHeadLabel(queue)}</span>?
       </span>
       <Button
         type="button"
@@ -367,7 +357,7 @@ function AdvanceMergeQueueConfirm({
         size="sm"
         disabled={busy}
         onClick={() => {
-          void dispatch(submitAdvanceMergeQueue(tenant, targetBranch));
+          void dispatch(submitAdvanceMergeQueue(tenant, queue.repository, queue.targetBranch));
         }}
       >
         {busy && <LoaderCircle className="animate-spin" aria-hidden="true" />}

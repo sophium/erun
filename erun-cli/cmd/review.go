@@ -46,12 +46,17 @@ func newReviewListCmd(store common.CloudReadStore, alias *string, deps common.Cl
 		Long: "List reviews on the erun platform, narrowed by any combination of the filters below.\n\n" +
 			"--mine resolves to reviews you authored; --waiting-on-me resolves to reviews you are a " +
 			"reviewer on. Both resolve your user id via a whoami call first and cannot be combined " +
-			"with the equivalent explicit --author-user-id/--reviewer-user-id flag.",
+			"with the equivalent explicit --author-user-id/--reviewer-user-id flag.\n\n" +
+			"--repository narrows the listing to one repository, which is what separates two " +
+			"repositories your tenant serves that propose the same branch pair. It is not defaulted " +
+			"from your checkout: a listing is how you find work across every repository. Every line " +
+			"names the review's own repository so a mixed listing is legible.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		Example: "  erun review list --mine\n" +
 			"  erun review list --waiting-on-me --status OPEN\n" +
-			"  erun review list --target-branch main",
+			"  erun review list --target-branch main\n" +
+			"  erun review list --repository git@github.com:org/repo.git --status READY",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
 			reviews, err := common.RunReviewList(ctx, store, *alias, params, deps)
@@ -70,6 +75,7 @@ func newReviewListCmd(store common.CloudReadStore, alias *string, deps common.Cl
 			return ctx.WriteResult(reviews)
 		},
 	}
+	cmd.Flags().StringVar(&params.Repository, "repository", "", "Filter by repository (any form git accepts, e.g. the output of `git remote get-url origin`)")
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Filter by target branch")
 	cmd.Flags().StringVar(&params.SourceBranch, "source-branch", "", "Filter by source branch")
 	cmd.Flags().StringVar(&params.Status, "status", "", "Filter by status: OPEN, CLOSED, FAILED, READY, MERGE, or MERGED")
@@ -94,9 +100,20 @@ func writeReviewList(ctx common.Context, reviews []common.PlatformReview) error 
 	return nil
 }
 
+// writeReviewLine renders one review. The repository is named on every line
+// because a review's source/target pair does not tell two repositories a
+// tenant serves apart, and a listing that renders them identically is how
+// another tenant's -- or another repository's -- queue read as this one's.
+// A review created before the platform recorded a repository says so rather
+// than printing nothing, which would read as an empty value rather than an
+// absent identity.
 func writeReviewLine(ctx common.Context, review common.PlatformReview) error {
-	_, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) %s -> %s status=%s\n",
-		review.Name, review.ReviewID, review.SourceBranch, review.TargetBranch, review.Status)
+	repository := review.Repository
+	if strings.TrimSpace(repository) == "" {
+		repository = "(no repository recorded)"
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) %s %s -> %s status=%s\n",
+		review.Name, review.ReviewID, repository, review.SourceBranch, review.TargetBranch, review.Status)
 	return err
 }
 
@@ -161,13 +178,20 @@ func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.
 		Use:   "create",
 		Short: "Open a review on the erun platform",
 		Long: "Open a review on the erun platform.\n\n" +
-			"--name is the eventual squash-merge message and must be unique per tenant; a colliding " +
-			"name fails with a conflict. --source-branch must already exist on the remote — push it " +
+			"--name is the eventual squash-merge message and must be unique per tenant and repository; " +
+			"a colliding name on a review that can still land fails with a conflict, while a CLOSED " +
+			"review's name is free to reuse. --source-branch must already exist on the remote — push it " +
 			"first with `erun exec push` — since the review references it by name and the platform " +
-			"can only ever fetch what has actually landed there. A real, immediate write, not a preview.",
+			"can only ever fetch what has actually landed there.\n\n" +
+			"The review records the repository its branches belong to: --repository if given, otherwise " +
+			"your checkout's origin. That identity is what keeps two repositories your tenant serves " +
+			"from sharing one merge queue or colliding on a branch pair.\n\n" +
+			"A real, immediate write, not a preview.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		Example:      "  erun exec push feature/add-widget\n  erun review create --name \"Add widget\" --source-branch feature/add-widget --target-branch main",
+		Example: "  erun exec push feature/add-widget\n" +
+			"  erun review create --name \"Add widget\" --source-branch feature/add-widget --target-branch main\n" +
+			"  erun review create --name \"Add widget\" --repository https://github.com/org/repo.git --source-branch feature/add-widget --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
 			review, err := common.RunReviewCreate(ctx, store, *alias, params, deps)
@@ -186,7 +210,8 @@ func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.
 			return ctx.WriteResult(review)
 		},
 	}
-	cmd.Flags().StringVar(&params.Name, "name", "", "Review name (unique per tenant; the eventual squash-merge message)")
+	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository the branches belong to (defaults to the current checkout's origin; any form git accepts)")
+	cmd.Flags().StringVar(&params.Name, "name", "", "Review name (unique per tenant and repository; the eventual squash-merge message)")
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Branch this review proposes merging into")
 	cmd.Flags().StringVar(&params.SourceBranch, "source-branch", "", "Branch this review proposes merging (must already be pushed)")
 	addDryRunFlag(cmd)
@@ -438,6 +463,10 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 			"branch adds is already present in the target branch's history, and moves the review only if it is. " +
 			"A branch that did not land is refused just as firmly, with the same MERGE_NOT_VERIFIED. This is " +
 			"what keeps a squash-landed review from sitting OPEN forever and inflating the open count.\n\n" +
+			"--remote-url must name the review's own repository, in any form git accepts: the platform " +
+			"canonicalizes it, so an SSH remote verifies against the HTTPS identity the review recorded, and " +
+			"a remote for a different repository is refused rather than used to verify. A review created " +
+			"before the platform recorded a repository adopts the one named here.\n\n" +
 			"A real, immediate write. --dry-run traces the call without making it.",
 		Example: "  erun review report-merged 018f... --build-id 018e... --remote-url https://github.com/org/repo.git\n" +
 			"  erun review report-merged 018f... --remote-url https://github.com/org/repo.git",
@@ -638,16 +667,23 @@ func newReviewMergeQueueCmd(store common.CloudReadStore, alias *string, deps com
 }
 
 func newReviewMergeQueueListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var targetBranch string
+	var params common.PlatformMergeQueueParams
 	cmd := &cobra.Command{
-		Use:          "list",
-		Short:        "List a target branch's merge queue, in queue order",
+		Use:   "list",
+		Short: "List a repository's merge queue for a target branch, in queue order",
+		Long: "List the reviews waiting to merge into a target branch, in queue order.\n\n" +
+			"A queue belongs to a repository, not to a target branch alone: two repositories your " +
+			"tenant serves both have a main. --repository names it, defaulting to the current " +
+			"checkout's origin — the same repository the merge-queue environment would promote " +
+			"from. Every line names the review's own repository, so a queue that came back mixed " +
+			"is visible rather than read as one repository's.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		Example:      "  erun review queue list --target-branch main",
+		Example: "  erun review queue list --target-branch main\n" +
+			"  erun review queue list --repository https://github.com/org/repo.git --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			reviews, err := common.RunReviewMergeQueueList(ctx, store, *alias, targetBranch, deps)
+			reviews, err := common.RunReviewMergeQueueList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -663,27 +699,33 @@ func newReviewMergeQueueListCmd(store common.CloudReadStore, alias *string, deps
 			return ctx.WriteResult(reviews)
 		},
 	}
-	cmd.Flags().StringVar(&targetBranch, "target-branch", "", "Target branch to list the merge queue for")
+	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to list (defaults to the current checkout's origin)")
+	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch to list the merge queue for")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
 func newReviewMergeQueueAdvanceCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var targetBranch string
+	var params common.PlatformMergeQueueParams
 	cmd := &cobra.Command{
 		Use:   "advance",
-		Short: "Advance a target branch's merge queue head to MERGE",
-		Long: "Advance a target branch's merge queue head to MERGE, which starts that review's merge-gate build.\n\n" +
+		Short: "Advance a repository's merge queue head to MERGE",
+		Long: "Advance the next review waiting to merge into a target branch to MERGE, which starts " +
+			"that review's merge-gate build.\n\n" +
+			"A queue belongs to a repository, not to a target branch alone: --repository names it, " +
+			"defaulting to the current checkout's origin, which is the repository this caller would " +
+			"gate. Advancing without one promotes across every repository your tenant serves.\n\n" +
 			"A real, immediate mutation of shared control-plane state: it fails if the queue is " +
 			"empty or its head is not READY, and refuses with the unresolved comment thread count " +
 			"when the head still has open threads — resolve them first, or use " +
 			"`erun review queue override-advance`.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		Example:      "  erun review queue advance --target-branch main",
+		Example: "  erun review queue advance --target-branch main\n" +
+			"  erun review queue advance --repository https://github.com/org/repo.git --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			review, err := common.RunReviewMergeQueueAdvance(ctx, store, *alias, targetBranch, deps)
+			review, err := common.RunReviewMergeQueueAdvance(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -699,27 +741,31 @@ func newReviewMergeQueueAdvanceCmd(store common.CloudReadStore, alias *string, d
 			return ctx.WriteResult(review)
 		},
 	}
-	cmd.Flags().StringVar(&targetBranch, "target-branch", "", "Target branch whose merge queue to advance")
+	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to advance (defaults to the current checkout's origin)")
+	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch whose merge queue to advance")
 	addDryRunFlag(cmd)
 	return cmd
 }
 
 func newReviewMergeQueueOverrideAdvanceCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var targetBranch, reason string
+	var params common.PlatformMergeQueueParams
+	var reason string
 	cmd := &cobra.Command{
 		Use:   "override-advance",
 		Short: "Bypass the unresolved-thread gate and advance the merge queue anyway",
-		Long: "Bypass `erun review queue advance`'s unresolved-thread gate and advance a target " +
-			"branch's merge queue head to MERGE anyway.\n\n" +
-			"--reason is required and is recorded in the platform's audit trail alongside the " +
-			"caller's identity — this is a deliberate, accountable escape hatch, not a routine " +
-			"way to advance the queue. A real, immediate mutation of shared control-plane state.",
+		Long: "Bypass `erun review queue advance`'s unresolved-thread gate and advance a repository's " +
+			"merge queue head to MERGE anyway.\n\n" +
+			"--repository names the repository's queue, defaulting to the current checkout's origin, " +
+			"exactly as `erun review queue advance` does. --reason is required and is recorded in the " +
+			"platform's audit trail alongside the caller's identity — this is a deliberate, accountable " +
+			"escape hatch, not a routine way to advance the queue. A real, immediate mutation of shared " +
+			"control-plane state.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		Example:      "  erun review queue override-advance --target-branch main --reason \"hotfix, reviewers unavailable\"",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			review, err := common.RunReviewMergeQueueOverrideAdvance(ctx, store, *alias, targetBranch, reason, deps)
+			review, err := common.RunReviewMergeQueueOverrideAdvance(ctx, store, *alias, params, reason, deps)
 			if err != nil {
 				return err
 			}
@@ -735,7 +781,8 @@ func newReviewMergeQueueOverrideAdvanceCmd(store common.CloudReadStore, alias *s
 			return ctx.WriteResult(review)
 		},
 	}
-	cmd.Flags().StringVar(&targetBranch, "target-branch", "", "Target branch whose merge queue to advance")
+	cmd.Flags().StringVar(&params.Repository, "repository", "", "Repository whose queue to advance (defaults to the current checkout's origin)")
+	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Target branch whose merge queue to advance")
 	cmd.Flags().StringVar(&reason, "reason", "", "Why the unresolved-thread gate is being bypassed (required)")
 	addDryRunFlag(cmd)
 	return cmd

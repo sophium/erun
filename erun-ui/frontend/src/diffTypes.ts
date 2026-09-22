@@ -88,6 +88,10 @@ export interface UIDiffReviewStatus {
   platformState?: string;
   reviewId?: string;
   name?: string;
+  // repository is the review's own repository identity, carried to the "Advance
+  // queue" action so it advances that review's queue rather than whichever
+  // repository's queue happens to share its target branch.
+  repository?: string;
   queuePosition?: number;
   unresolvedThreads?: number;
   lastFailedBuildId?: string;

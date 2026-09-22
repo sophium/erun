@@ -15,8 +15,12 @@ import (
 
 // ReviewListParams is the `erun review list` input. Mine and WaitingOnMe are
 // convenience filters that resolve to the caller's own user id via a whoami
-// call rather than requiring the caller to already know it.
+// call rather than requiring the caller to already know it. Repository
+// narrows the listing to one repository; it is deliberately not defaulted
+// from the checkout, because a listing is how a caller discovers work across
+// every repository their tenant serves.
 type ReviewListParams struct {
+	Repository     string
 	TargetBranch   string
 	SourceBranch   string
 	Status         string
@@ -79,6 +83,17 @@ func RunReviewList(ctx Context, store CloudReadStore, alias string, params Revie
 		return nil, err
 	}
 	params.Status = status
+	// Canonicalized before the call so an SSH spelling of a repository finds
+	// the reviews recorded from its HTTPS one. A remote given but unusable is
+	// a bad argument, and reporting it must not depend on the platform being
+	// reachable — the same reason the status is checked here.
+	if strings.TrimSpace(params.Repository) != "" {
+		repository, err := RepositoryIdentity(params.Repository)
+		if err != nil {
+			return nil, err
+		}
+		params.Repository = repository
+	}
 	if err := validateReviewListParams(params); err != nil {
 		return nil, err
 	}
@@ -109,6 +124,7 @@ func validateReviewListParams(params ReviewListParams) error {
 
 func reviewListFilter(params ReviewListParams) PlatformReviewFilter {
 	return PlatformReviewFilter{
+		Repository:     params.Repository,
 		TargetBranch:   params.TargetBranch,
 		SourceBranch:   params.SourceBranch,
 		Status:         params.Status,
@@ -261,14 +277,22 @@ func RunReviewUnresolve(ctx Context, store CloudReadStore, alias, reviewID, comm
 	return runReviewCommentStatus(ctx, store, alias, reviewID, commentID, "OPEN", deps)
 }
 
-// RunReviewCreate opens a review.
+// RunReviewCreate opens a review. The review records the repository its
+// branches belong to, resolved from the caller's own remote or the checkout
+// they are standing in, so a tenant serving more than one repository can tell
+// whose review this is.
 func RunReviewCreate(ctx Context, store CloudReadStore, alias string, params PlatformCreateReviewParams, deps CloudDependencies) (PlatformReview, error) {
+	repository, err := ResolveReviewRepository(ctx, params.Repository, "review create")
+	if err != nil {
+		return PlatformReview{}, err
+	}
+	params.Repository = repository
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformReview{}, err
 	}
 	tracePlatformCall(ctx, provider, "POST", "/v1/reviews",
-		"name="+params.Name, "targetBranch="+params.TargetBranch, "sourceBranch="+params.SourceBranch)
+		"repository="+params.Repository, "name="+params.Name, "targetBranch="+params.TargetBranch, "sourceBranch="+params.SourceBranch)
 	if ctx.DryRun {
 		return PlatformReview{}, nil
 	}
@@ -540,49 +564,104 @@ func RunReviewReviewerRemove(ctx Context, store CloudReadStore, alias, reviewID,
 	return client.RemoveReviewer(context.Background(), reviewID, userID)
 }
 
-// RunReviewMergeQueueList lists targetBranch's merge queue.
-func RunReviewMergeQueueList(ctx Context, store CloudReadStore, alias, targetBranch string, deps CloudDependencies) ([]PlatformReview, error) {
+// resolveMergeQueueRepository answers which repository's queue the caller
+// means. The queue belongs to a repository — a target branch alone names one
+// only in a tenant that serves exactly one — so it is resolved from the
+// caller's named remote or the checkout they are standing in, and the trace
+// states which. An empty Repository is only reachable when neither is
+// available, and lists or advances across every repository's queue, which the
+// caller sees in the trace rather than discovering by promotion.
+func resolveMergeQueueRepository(ctx Context, params PlatformMergeQueueParams, traceLabel string) (PlatformMergeQueueParams, error) {
+	remote := strings.TrimSpace(params.Repository)
+	if remote == "" {
+		ctx.Trace(traceLabel + ": no repository given; reading origin from the current checkout")
+		origin, err := originRemoteURL()
+		if err != nil {
+			// Not fatal here, unlike opening a review: the platform still
+			// answers, and refuses a promotion the repository cannot be
+			// settled for rather than guessing at one.
+			ctx.Trace(traceLabel + ": this checkout has no origin remote; the queue every repository shares is the one addressed")
+			return params, nil
+		}
+		remote = origin
+	}
+	repository, err := RepositoryIdentity(remote)
+	if err != nil {
+		return PlatformMergeQueueParams{}, err
+	}
+	params.Repository = repository
+	ctx.Trace(traceLabel + ": repository = " + repository)
+	return params, nil
+}
+
+// RunReviewMergeQueueList lists one repository's merge queue for a target
+// branch.
+func RunReviewMergeQueueList(ctx Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, deps CloudDependencies) ([]PlatformReview, error) {
+	params, err := resolveMergeQueueRepository(ctx, params, "review queue list")
+	if err != nil {
+		return nil, err
+	}
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err
 	}
-	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/merge-queue", "targetBranch="+targetBranch)
+	tracePlatformCall(ctx, provider, "GET", "/v1/reviews/merge-queue", mergeQueueTraceDetails(params)...)
 	if ctx.DryRun {
 		return nil, nil
 	}
-	return client.ListMergeQueue(context.Background(), targetBranch)
+	return client.ListMergeQueue(context.Background(), params)
 }
 
-// RunReviewMergeQueueAdvance advances targetBranch's merge queue head to
+// RunReviewMergeQueueAdvance advances one repository's merge queue head to
 // MERGE, refusing with a *PlatformMergeQueueBlockedError when that review
 // still has unresolved comment threads. RunReviewMergeQueueOverrideAdvance is
 // the deliberate, audited way past that refusal.
-func RunReviewMergeQueueAdvance(ctx Context, store CloudReadStore, alias, targetBranch string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewMergeQueueAdvance(ctx Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, deps CloudDependencies) (PlatformReview, error) {
+	params, err := resolveMergeQueueRepository(ctx, params, "review queue advance")
+	if err != nil {
+		return PlatformReview{}, err
+	}
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformReview{}, err
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/advance", "targetBranch="+targetBranch)
+	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/advance", mergeQueueTraceDetails(params)...)
 	if ctx.DryRun {
 		return PlatformReview{}, nil
 	}
-	return client.AdvanceMergeQueue(context.Background(), targetBranch)
+	return client.AdvanceMergeQueue(context.Background(), params)
 }
 
 // RunReviewMergeQueueOverrideAdvance bypasses RunReviewMergeQueueAdvance's
 // unresolved-thread gate. reason is required and is recorded in the
 // platform's audit trail; a blank one is refused before the network call.
-func RunReviewMergeQueueOverrideAdvance(ctx Context, store CloudReadStore, alias, targetBranch, reason string, deps CloudDependencies) (PlatformReview, error) {
+func RunReviewMergeQueueOverrideAdvance(ctx Context, store CloudReadStore, alias string, params PlatformMergeQueueParams, reason string, deps CloudDependencies) (PlatformReview, error) {
 	if strings.TrimSpace(reason) == "" {
 		return PlatformReview{}, fmt.Errorf("a reason is required to override the merge queue's unresolved-thread gate")
+	}
+	params, err := resolveMergeQueueRepository(ctx, params, "review queue override-advance")
+	if err != nil {
+		return PlatformReview{}, err
 	}
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformReview{}, err
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/override-advance", "targetBranch="+targetBranch, "reason="+reason)
+	details := append(mergeQueueTraceDetails(params), "reason="+reason)
+	tracePlatformCall(ctx, provider, "POST", "/v1/reviews/merge-queue/override-advance", details...)
 	if ctx.DryRun {
 		return PlatformReview{}, nil
 	}
-	return client.OverrideAdvanceMergeQueue(context.Background(), targetBranch, reason)
+	return client.OverrideAdvanceMergeQueue(context.Background(), params, reason)
+}
+
+// mergeQueueTraceDetails renders a merge-queue address for a dry-run trace, in
+// a fixed order so the trace is deterministic.
+func mergeQueueTraceDetails(params PlatformMergeQueueParams) []string {
+	var details []string
+	if strings.TrimSpace(params.Repository) != "" {
+		details = append(details, "repository="+params.Repository)
+	}
+	details = append(details, "targetBranch="+params.TargetBranch)
+	return details
 }

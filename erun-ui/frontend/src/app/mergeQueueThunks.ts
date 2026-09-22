@@ -6,8 +6,8 @@ import type { AppThunk } from './store';
 
 // mergeQueueThunks drives the Merge Queue panel's "Advance queue" action: an
 // inline confirm step (cancel-before-commitment), then the write itself. The
-// target branch is derived from the queue's own rows rather than typed by the
-// operator — see mergeQueueTargetBranch in TenantDashboardPanels.tsx.
+// repository and target branch are derived from the queue's own rows rather
+// than typed by the operator — see mergeQueueAddress in tenantDashboardPanels.ts.
 //
 // A refusal because the queue head still has unresolved comment threads is
 // not treated as an error: AdvanceMergeQueue reports it as a distinct
@@ -36,9 +36,14 @@ export const clearAdvanceMergeQueueError = (): AppThunk => (dispatch) => {
 // dashboard ever having been opened, the same reason openReviewDetail
 // (reviewDetailThunks.ts) takes an explicit callerTenant.
 export const submitAdvanceMergeQueue =
-  (tenant: string, targetBranch: string): AppThunk<Promise<void>> =>
+  (tenant: string, repository: string, targetBranch: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
     tenant = tenant.trim();
+    // The repository is sent when the caller knows it — it is what settles
+    // which of several same-branch queues this is — but it is not required
+    // here: a review created before the platform recorded one has none, and
+    // the platform refuses the resulting ambiguous queue itself rather than
+    // this layer guessing at one.
     if (!tenant || !targetBranch) {
       dispatch(patchMergeQueueAction({ error: 'No tenant is open.' }));
       return;
@@ -46,7 +51,7 @@ export const submitAdvanceMergeQueue =
     dispatch(patchMergeQueueAction({ busy: true, error: '' }));
     try {
       const review = await dispatch(
-        tenantApi.endpoints.advanceMergeQueue.initiate({ tenant, targetBranch }),
+        tenantApi.endpoints.advanceMergeQueue.initiate({ tenant, repository, targetBranch }),
       ).unwrap();
       if (review.blocked) {
         dispatch(
@@ -112,7 +117,7 @@ const defaultMergeQueueActionPatch = {
 // this checks first so the operator sees that immediately rather than after a
 // round trip.
 export const submitMergeQueueOverride =
-  (targetBranch: string): AppThunk<Promise<void>> =>
+  (repository: string, targetBranch: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     const { tenant } = getState().tenantDashboard;
     const reason = getState().mergeQueueAction.overrideReason.trim();
@@ -129,7 +134,12 @@ export const submitMergeQueueOverride =
     dispatch(patchMergeQueueAction({ overrideBusy: true, overrideError: '' }));
     try {
       const review = await dispatch(
-        tenantApi.endpoints.overrideAdvanceMergeQueue.initiate({ tenant, targetBranch, reason }),
+        tenantApi.endpoints.overrideAdvanceMergeQueue.initiate({
+          tenant,
+          repository,
+          targetBranch,
+          reason,
+        }),
       ).unwrap();
       dispatch(patchMergeQueueAction({ overrideBusy: false, ...defaultMergeQueueActionPatch }));
       dispatch(

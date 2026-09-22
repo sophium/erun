@@ -330,9 +330,12 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.Platf
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return
 	}
-	// The merge queue is per target branch; the dashboard shows the default one
-	// the API picks for an unspecified branch, as it always has.
-	reviews, err := client.ListMergeQueue(ctx, "")
+	// The merge queue belongs to a repository; the dashboard shows every
+	// repository's queue for the default target branch the API picks, and
+	// each row names its own repository so a mixed panel is legible rather
+	// than read as one queue. Advancing from here asks for one specifically —
+	// see the merge-queue panel's own advance action.
+	reviews, err := client.ListMergeQueue(ctx, eruncommon.PlatformMergeQueueParams{})
 	if err != nil {
 		panel.Error = tenantDashboardReadError(tenantDashboardReadMergeQueue, err)
 	} else {
@@ -631,6 +634,7 @@ func tenantDashboardReview(review eruncommon.PlatformReview) uiTenantDashboardRe
 		TenantID:          review.TenantID,
 		AuthorUserID:      review.AuthorUserID,
 		Name:              review.Name,
+		Repository:        review.Repository,
 		TargetBranch:      review.TargetBranch,
 		SourceBranch:      review.SourceBranch,
 		Status:            review.Status,
