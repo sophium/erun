@@ -59,4 +59,6 @@ The conventional flow on a release:
 
 `release.mainbranch` does not have to stand still for the duration of a release. A release re-reads it just before the build and refuses if it moved, and its final push rebases onto a branch that moved while the build was running — so a pull request merging mid-release costs seconds or nothing, never a published version the repository has no commits for. See [Release version policy · Lifecycle algorithm](/agent-reference/release-policy#lifecycle-algorithm).
 
+A release reaches a protected branch under whichever credential is in use, and every push it makes — the `--follow-tags` push that makes its generated commits public, and the tag push that publishes the version — reports a ruleset bypass the same way [`erun exec push`](/cli/exec) does: naming the ref and the rules GitHub stepped over, and never failing the push, because the push landed. `erun exec reconcile-bypass` is what resolves such a push afterwards against the gate run that accounts for it.
+
 For projects that use a single-branch trunk model, set both fields to the same branch.

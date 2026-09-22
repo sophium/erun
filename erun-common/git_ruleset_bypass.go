@@ -97,3 +97,30 @@ func reportRulesetBypass(ctx Context, remote string, notice rulesetBypassNotice)
 	ctx.Info(fmt.Sprintf("push: %s admitted this push by bypassing %s -- the credential in use holds a bypass grant, so these were not satisfied: %s", remote, target, rules))
 	ctx.Info("push: run `erun exec reconcile-bypass` to check a bypassed push against the gate run that accounts for it.")
 }
+
+// reportRulesetBypassFromPushArgs reports a bypass GitHub wrote on a `git push`
+// invocation's own stderr, naming the remote those arguments pushed to. It is
+// the entry point for callers that hold a push's arguments rather than the
+// resolved remote, so every push erun makes can report a bypass from the one
+// parse instead of each site growing its own.
+func reportRulesetBypassFromPushArgs(ctx Context, args []string, stderr string) {
+	notice, ok := parseRulesetBypassNotice(stderr)
+	if !ok {
+		return
+	}
+	reportRulesetBypass(ctx, pushRemoteFromArgs(args), notice)
+}
+
+// pushRemoteFromArgs reads the repository a push targets out of its arguments.
+// git's grammar is `push [options] <repository> [<refspec>...]`, so it is the
+// first argument after `push` that is not an option; an option that takes a
+// separate value would be read as the remote, which is why every push erun
+// makes passes options in `--flag=value` form.
+func pushRemoteFromArgs(args []string) string {
+	for _, arg := range args[min(1, len(args)):] {
+		if !strings.HasPrefix(arg, "-") {
+			return arg
+		}
+	}
+	return "origin"
+}
