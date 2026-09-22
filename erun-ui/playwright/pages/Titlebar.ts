@@ -132,16 +132,29 @@ export class Titlebar {
     return this.whipPanel().getByRole('checkbox', { name });
   }
 
+  // The three group shortcuts are icon-only, so each one's accessible name is
+  // its tooltip label -- the only label an operator can see. The
+  // third one's name contains the first one's as a prefix ("Select all
+  // orchestrators" / "Select all orchestrators and environments"), and
+  // getByRole's `name` is a substring match by default, so an unanchored
+  // selector for the first would match both buttons and fail Playwright's
+  // strict mode. Each is therefore pinned with `exact`, which is also the
+  // assertion that the name carries the whole visible label: a shortcut whose
+  // name drifted from its tooltip stops resolving here instead of silently
+  // matching something else.
   selectAllOrchestratorsButton(): Locator {
-    return this.whipPanel().getByRole('button', { name: 'Select all orchestrators' });
+    return this.whipPanel().getByRole('button', { name: 'Select all orchestrators', exact: true });
   }
 
   selectAllEnvironmentsButton(): Locator {
-    return this.whipPanel().getByRole('button', { name: 'Select all environments' });
+    return this.whipPanel().getByRole('button', { name: 'Select all environments', exact: true });
   }
 
   selectAllButton(): Locator {
-    return this.whipPanel().getByRole('button', { name: 'Select all', exact: true });
+    return this.whipPanel().getByRole('button', {
+      name: 'Select all orchestrators and environments',
+      exact: true,
+    });
   }
 
   // The primary action's own label states the resolved count before it acts

@@ -182,9 +182,8 @@ func TestStepTimingCacheDecisionAppearsOnStepAndPlatformChildren(t *testing.T) {
 	clock := newFakeClock()
 	root := newStepTiming("build", clock.now)
 	image := root.child("erun-console")
-	image.setCache(false, "fingerprint image is missing for platform linux/amd64")
-
 	cache := &cacheDecision{hit: false, missReason: "fingerprint image is missing for platform linux/amd64"}
+	image.setCache(cache)
 	clock.advance(2 * time.Second)
 	image.addFinishedChild("linux/amd64", 2*time.Second, nil, cache, nil)
 	clock.advance(1 * time.Second)

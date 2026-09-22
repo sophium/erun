@@ -15,6 +15,8 @@ import { downloadOutput, runOutputOnHost } from '@/app/outputsThunks';
 import { closeOutputsDialog } from '@/app/slices/outputsDialogSlice';
 import type { AgentOutputEntry } from '@/types';
 
+import { InlineAlert } from './InlineAlert';
+
 // OutputsDialog is the deliverables counterpart to the activity queue (which
 // tracks operations): the surface for the output files an agent left behind.
 export function OutputsDialog(): React.ReactElement {
@@ -117,10 +119,15 @@ function OutputsDialogBody({
     );
   }
   if (error) {
+    // Through the shared primitive rather than a hand-rolled red line: the
+    // message carries an upstream error, so it needs the icon (WCAG 1.4.1, not
+    // signalled by colour alone) and the wrapping that stops a long value
+    // widening the dialog. The wrapper keeps the body's own vertical rhythm,
+    // which the primitive's padding does not reproduce.
     return (
-      <p role="alert" className="py-4 text-sm break-words text-destructive">
-        {error}
-      </p>
+      <div className="py-4">
+        <InlineAlert>{error}</InlineAlert>
+      </div>
     );
   }
   if (entries.length === 0) {

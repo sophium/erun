@@ -2070,6 +2070,14 @@ type KubectlDeployedStubSpec struct {
 	// subprocess fallback -- e.g. "get deployment team-api -o name" for the
 	// kubectl-deployment-get switch.
 	FailingArgvSubstring string
+	// ListenConflictAttempts, when non-zero, makes the port-forward
+	// simulator fail the first N attempts to bind each local port the way
+	// kubectl does when the port is still held by the process it replaced:
+	// the two "Unable to listen" lines on stderr, exit 1. Later attempts run
+	// the simulator normally, so a forward that retries its bind comes up. A
+	// real-run scenario uses it to force the reattach race deterministically
+	// instead of waiting for the host to produce it.
+	ListenConflictAttempts int
 }
 
 // StubKubectlDeployed writes a kubectl stub that reports the named deployment as
@@ -2113,6 +2121,7 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 		`  esac`,
 		`done`,
 		`if [ "$is_port_forward" = "1" ] && [ -n "$local_port" ]; then`,
+		kubectlListenConflictArm(spec, stubsDir),
 		// Production-side reachability checks differ by service:
 		//   SSH expects the server to greet with a "SSH-" prefix
 		//   MCP expects a successful HTTP response on GET /mcp
@@ -2192,6 +2201,36 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 // most-specific-first: the interactive exec -it arm leads so the bootstrap
 // script passed as its last argv can never fall through into the
 // pods/events/wait arms by substring accident.
+// kubectlListenConflictArm is the port-forward simulator's opening arm: when
+// spec.ListenConflictAttempts is set, the first N attempts to bind each local
+// port fail exactly the way kubectl does when the port is still held —
+// "Unable to listen on port ..." and exit 1 — before the simulator proper
+// takes over. It is the deterministic stand-in for a race the host cannot be
+// asked to reproduce on demand: a replacement forward whose kubectl starts
+// while the listener it replaced is still closing.
+//
+// The counter is per local port, so one scenario can drive all three forwards
+// (MCP, sshd, API) through the same forced race without them racing each other
+// for a single budget. Empty (the default) leaves the generated script
+// byte-identical to what it was before this existed.
+func kubectlListenConflictArm(spec KubectlDeployedStubSpec, stubsDir string) string {
+	if spec.ListenConflictAttempts <= 0 {
+		return ""
+	}
+	counterFor := filepath.ToSlash(filepath.Join(stubsDir, "listen-conflict-attempts-"))
+	return strings.Join([]string{
+		`  conflict_counter='` + counterFor + `'"$local_port"`,
+		`  conflict_attempts=0`,
+		`  if [ -f "$conflict_counter" ]; then conflict_attempts=$(wc -l < "$conflict_counter" | tr -d '[:space:]'); fi`,
+		`  printf 'attempt\n' >> "$conflict_counter"`,
+		`  if [ "$conflict_attempts" -lt ` + strconv.Itoa(spec.ListenConflictAttempts) + ` ]; then`,
+		`    printf 'Unable to listen on port %s: Listeners failed to create with the following errors: [unable to create listener: Error listen tcp4 127.0.0.1:%s: bind: address already in use]\n' "$local_port" "$local_port" >&2`,
+		`    printf 'error: unable to listen on any of the requested ports: [{%s %s}]\n' "$local_port" "$local_port" >&2`,
+		`    exit 1`,
+		`  fi`,
+	}, "\n")
+}
+
 func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDeployedStubSpec) string {
 	t.Helper()
 	var arms strings.Builder

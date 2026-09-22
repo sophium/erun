@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithStore } from '../test/renderWithStore';
@@ -22,7 +22,7 @@ function requestUrl(input: string | URL): string {
   return input instanceof URL ? input.href : input;
 }
 
-function mockFetch(handler: (req: MockReq) => Response): MockReq[] {
+function mockFetch(handler: (req: MockReq) => Response | Promise<Response>): MockReq[] {
   const calls: MockReq[] = [];
   vi.stubGlobal(
     'fetch',
@@ -278,7 +278,7 @@ describe('TenantsPanel', () => {
 
   it('sets a tenant quota through the per-row dialog, prefilled from the target tenant’s current caps', async () => {
     let putBody: unknown;
-    mockFetch((req) => {
+    mockFetch(async (req) => {
       if (req.url === '/v1/tenants' && req.method === 'GET') {
         return jsonResponse([
           {
@@ -291,6 +291,12 @@ describe('TenantsPanel', () => {
         ]);
       }
       if (req.url === '/v1/quota?tenantId=tn-1' && req.method === 'GET') {
+        // Deliberately resolved on a later task. The dialog mounts its fields
+        // empty and seeds them from this read, so serving it synchronously
+        // would let the assertions below pass without ever exercising the
+        // order a real network produces -- the order that let a racy
+        // assertion on the mounted input's value go unnoticed.
+        await new Promise((r) => setTimeout(r, 100));
         return jsonResponse({
           tenantId: 'tn-1',
           maxEnvironments: 3,
@@ -313,7 +319,15 @@ describe('TenantsPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Set quota' }));
     expect(screen.getByText('Set quota for acme')).toBeInTheDocument();
-    expect(await screen.findByLabelText(/^Environments/)).toHaveValue(3);
+    // The dialog renders its fields empty and seeds them from the target
+    // tenant's caps once that read lands (TenantQuotaDialog's resync effect),
+    // so the input's mere existence is not the condition under test: an empty
+    // `type="number"` input reads as null, and asserting on it as soon as it
+    // mounts races the seed. Wait for the value the assertion is actually
+    // about instead.
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^Environments/)).toHaveValue(3);
+    });
 
     fireEvent.change(screen.getByLabelText(/^Environments/), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText(/^Per-environment CPU/), { target: { value: '500' } });

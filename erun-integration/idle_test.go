@@ -203,6 +203,57 @@ func TestIdle(t *testing.T) {
 	})
 }
 
+// TestIdleJSONOmitsNeverSetTimestamps is a top-level scenario rather than a
+// TestIdle subtest because the branch's regression declaration names it.
+func TestIdleJSONOmitsNeverSetTimestamps(t *testing.T) {
+	t.Parallel()
+	// A marker that has never seen activity has no timestamp to report.
+	// Encoding Go's zero time instead fabricates an instant a consumer cannot
+	// tell from a real one, and normalize.Apply's <TS> rule rewrites every
+	// RFC3339 value — including 0001-01-01T00:00:00Z — so no golden could catch
+	// it. This asserts the raw stream for that reason.
+	//
+	// The states the report crossed are crossed here too: ssh carries a recorded
+	// activity time while api, cli and codex have never recorded one, so the
+	// same field on sibling markers must render both ways.
+	setup := env.New(t)
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	seedIdleActivitySnapshot(t, setup, "ssh", `{"lastActivity":"2026-01-02T03:04:05Z","lastSeen":"2026-01-02T03:04:05Z"}`)
+	result := erun.Run(t, []string{"idle", "team", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+	if result.ExitCode != 0 {
+		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+	}
+	if strings.Contains(result.Stdout, "0001-01-01T00:00:00Z") {
+		t.Errorf("never-set timestamp rendered as the Go zero instant, want the field absent:\n%s", result.Stdout)
+	}
+	// The real time still renders, and the never-set markers still report
+	// themselves: the fix drops the fabricated instant, not the marker.
+	for _, want := range []string{
+		`"name": "ssh"`,
+		`"lastActivity": "2026-01-02T03:04:05Z"`,
+		`"name": "api"`,
+		`"reason": "no activity recorded"`,
+	} {
+		if !strings.Contains(result.Stdout, want) {
+			t.Errorf("expected JSON status to contain %s, got:\n%s", want, result.Stdout)
+		}
+	}
+}
+
+// seedIdleActivitySnapshot writes one activity kind's on-disk snapshot, which
+// is what separates a marker with a real last-activity time from one that has
+// never recorded anything.
+func seedIdleActivitySnapshot(t *testing.T, setup env.Setup, kind, body string) {
+	t.Helper()
+	dir := filepath.Join(setup.CacheHome, "erun", "activity", "team", "dev")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, kind+".json"), []byte(body+"\n"), 0o644); err != nil {
+		t.Fatalf("write %s snapshot: %v", kind, err)
+	}
+}
+
 func seedIdleEnvWithIdleBlock(t *testing.T, setup env.Setup, idleBlock string) {
 	t.Helper()
 	fixture.SeedTenantEnv(t, setup, "team", "dev")

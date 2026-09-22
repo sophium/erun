@@ -56,6 +56,28 @@ kubectl-context-configure: subprocess
 
 See [Configuration reference · Execution modes](/reference/configuration#execution-modes) for the config key that controls it.
 
+`doctor` also reports the environment's own **resource pressure**, under `== Resources ==`, together with the standing sizing verdict it implies:
+
+```
+== Resources ==
+  CPU: 49.8% of a 6.00-core quota (sampled over 1.0s)
+  Memory: 4.0GiB / 4.0GiB (100.0%), peak 4.0GiB, OOM kills 3
+Warnings (3):
+  memory is at 100% of its 4096Mi limit (warns at 85%)
+  memory.peak reached 100% of the limit (warns at 95%) -- this environment came close to an OOM kill
+  the cgroup recorded 3 OOM kill(s)
+Sizing recommendation:
+  sizing: memory raise to 6144Mi from 4096Mi (3 oom kill(s) at 4096Mi, high confidence); cpu raise to 9 from 6 (9.85% of scheduling periods throttled (9850 of 100000), high confidence)
+  sizing-evidence: 0m observed, 1 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
+  doctor does not resize: it rolls the pod and kills whatever is running. Apply the recommendation with `erun resize --apply-recommendation` once this environment is clear.
+```
+
+This is the same reading, the same thresholds and the same recommendation [`erun usage`](/cli/usage) reports — doctor renders it through that command's own writers, so the two cannot report different numbers or a different verdict for one environment. It exists because an environment at 100% of its memory limit with OOM kills recorded is exactly the state an operator reaches for `doctor` to explain, and it used to say nothing about it: the signal was on a command nobody runs unless they already suspect sizing.
+
+The section prints only when there is something to say — a warning fired, or a verdict other than a hold — so a healthy environment keeps the diagnosis it had before. `doctor` **never resizes**: a resize rolls the pod and kills whatever is running, so it names the remedy (`erun resize --apply-recommendation`) instead of applying it. Under `--dry-run` the read is traced but not taken, like every other subprocess doctor would run, so a dry run shows no resources section.
+
+`doctor`'s desktop-app check inspects every copy of the `ERun.app` bundle this host could hold, **including the ones `erun app` itself launches from** — beside the `erun` executable, which is where a packaged install and the dev wrapper's `BIN_DIR` (`erun-cli/bin`, or `$ERUN_DEV_BIN_DIR`) both put it, and the checkout's `erun-ui/bin`. It names which copy a launch would actually reach, so a bundle that matches this CLI no longer reads as "nothing to report" while the running app is a different build at a path the check never looked at. Copies that share the bundle id `com.sophium.erun` are all listed, because macOS (Finder, Spotlight, the Dock) can launch any of them regardless of which is current.
+
 ## What it can repair
 
 Beyond reporting, `doctor` offers these fixes (each prompts first, or runs non-interactively with its flag). Without a TTY on stdin — an MCP client, an orchestrator, a CI step, or `erun doctor … </dev/null` — `doctor` skips the optional prune prompts instead of blocking on them, names each skipped step in the report, and still exits on the health of what it examined. Nothing is pruned without either an explicit `--prune-*` flag or an answer to the prompt, and a skipped optional step is never reported as a failed check: `doctor` is the command you reach for when a deploy has already failed, which is exactly when nobody is at a terminal to answer it.

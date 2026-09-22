@@ -168,6 +168,14 @@ type DockerBuildSpec struct {
 	// the same buildInput value it hands to the builder — exactly how it already
 	// threads Verbosity through. Never marshaled: a func value has no JSON form.
 	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) `json:"-"`
+	// cache is the same fingerprint cache decision the timing tree recorded for
+	// this image (see cacheDecision), threaded through by value so the builder
+	// can correct it: a promote whose cached image cannot be published falls back
+	// to a real build, and a row that still said "cache hit" would report the
+	// opposite of what the run did. Unexported because it is erun-common's own
+	// timing bookkeeping, not an input a caller sets; nil whenever no timing root
+	// is active, which is most callers.
+	cache *cacheDecision
 }
 
 type DockerPushSpec struct {

@@ -1,8 +1,13 @@
 package eruncommon
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -245,4 +250,178 @@ func TestExecutionModeReportListsKubectlPodWatchOperation(t *testing.T) {
 		}
 	}
 	t.Fatalf("kubectl-pod-watch not found in report: %+v", report)
+}
+
+// pullingPod builds a pod whose container is still fetching its image, the way
+// a cold node reports a large one: kubelet alternates between ErrImagePull and
+// ImagePullBackOff while it retries.
+func pullingPod(name, container, reason, message string) podStatusItem {
+	pod := podStatusItem{}
+	pod.Metadata.Name = name
+	pod.Status.Phase = "Pending"
+	pod.Status.Conditions = []podConditionEntry{{Type: "PodScheduled", Status: "True"}}
+	pod.Status.ContainerStatuses = []containerStatusEntry{
+		{Name: container, State: containerState{Waiting: &containerStateWaiting{Reason: reason, Message: message}}},
+	}
+	return pod
+}
+
+// TestPullingContainersNamesTheContainersStillFetchingTheirImage covers the one
+// observation helm cannot make: its rollout deadline is a fixed duration and
+// expires identically whether the image finished downloading or not, so a
+// deploy that ran out its wait mid-pull reports "Progress deadline exceeded"
+// for a rollout that was working exactly as intended.
+//
+// The terminal image-pull rejection is the case that must NOT be reported as
+// progress: the watcher aborts on it and carries the registry's own message,
+// and describing a refused image as a slow one would misstate the failure.
+func TestPullingContainersNamesTheContainersStillFetchingTheirImage(t *testing.T) {
+	rejected := pullingPod("team-devops-ghi", "erun-devops", "ErrImagePull", "manifest unknown: manifest unknown")
+	pods := []podStatusItem{
+		pullingPod("team-devops-abc", "erun-devops", "ImagePullBackOff", `Back-off pulling image "ghcr.io/sophium/erun-devops:1.0.296"`),
+		pullingPod("team-devops-def", "erun-dind", "ErrImagePull", "rpc error: code = DeadlineExceeded"),
+		rejected,
+		scheduledPod("team-devops-jkl"),
+	}
+
+	got := strings.Join(pullingContainers(pods), ",")
+	want := "team-devops-abc/erun-devops,team-devops-def/erun-dind"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+// TestClassifyHelmDeployResultReportsAWaitThatExpiredMidPull is the second half
+// of the same contract: the observation has to reach the deploy's error, or the
+// operator still reads only helm's words for a rollout that was progressing.
+func TestClassifyHelmDeployResultReportsAWaitThatExpiredMidPull(t *testing.T) {
+	stderr := new(strings.Builder)
+	stderr.WriteString("Error: UPGRADE FAILED: resource Deployment/team-dev/team-devops not ready. status: InProgress, message: Available: 0/1\n")
+
+	err := classifyHelmDeployResult(HelmDeployParams{}, podWatchOutcome{Pulling: []string{"team-devops-abc/erun-devops"}},
+		errors.New("exit status 1"), &helmOutputCapture{stdout: new(bytes.Buffer), stderr: new(bytes.Buffer)}, stderr)
+
+	if err == nil {
+		t.Fatal("expected the failed rollout to report an error")
+	}
+	for _, want := range []string{
+		"team-devops-abc/erun-devops was still pulling its image",
+		"this is the deploy's own timeout ending the rollout, not a container failure",
+		"the previous pod was already torn down and this environment is running no pod",
+		"exit status 1",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in the deploy error, got:\n%s", want, err.Error())
+		}
+	}
+}
+
+// TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone is the
+// negative case: a rollout that failed with nothing in flight keeps reporting
+// exactly what helm said, with no pull narrative attached to it.
+func TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone(t *testing.T) {
+	stderr := new(strings.Builder)
+	stderr.WriteString("Error: UPGRADE FAILED: values don't meet the specifications\n")
+
+	err := classifyHelmDeployResult(HelmDeployParams{}, podWatchOutcome{},
+		errors.New("exit status 1"), &helmOutputCapture{stdout: new(bytes.Buffer), stderr: new(bytes.Buffer)}, stderr)
+
+	if err == nil {
+		t.Fatal("expected the failed rollout to report an error")
+	}
+	if strings.Contains(err.Error(), "still pulling") {
+		t.Fatalf("a failure with nothing pulling must not be described as a slow image, got:\n%s", err.Error())
+	}
+}
+
+// pullingPodListJSON is a PodList with one release-owned pod whose container is
+// still fetching its image -- the observation a rollout that ran out its wait
+// mid-pull has to carry back to the deploy.
+const pullingPodListJSON = `{
+  "apiVersion": "v1",
+  "kind": "PodList",
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-abc",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Pending",
+        "conditions": [{"type": "PodScheduled", "status": "True"}],
+        "containerStatuses": [
+          {"name": "erun-devops", "ready": false, "restartCount": 0,
+           "state": {"waiting": {"reason": "ImagePullBackOff", "message": "Back-off pulling image \"ghcr.io/sophium/erun-devops:1.0.296\""}}}
+        ]
+      }
+    }
+  ]
+}`
+
+// TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase reproduces
+// the intermittent half of the mid-pull report: the poll that would have
+// reported a download still in flight is the one the watcher's own cancellation
+// interrupts, because cancelling the context aborts the `get pods` in flight
+// and the loop returns on the next iteration. An unread poll reads nothing, so
+// letting it replace the previous poll's state blanks the observation at the
+// exact moment it is handed to the deploy -- which then falls back to helm's
+// "not ready", the outcome the whole watcher exists to prevent. It surfaced as
+// the deploy integration scenario failing only under the gate's load, where the
+// window between the last readable poll and the cancellation is wide enough to
+// land in.
+//
+// The overlap is forced rather than waited for: the first poll answers with a
+// pod still pulling, the second is held inside the fake API server until this
+// test cancels the context underneath it, so the unread final poll happens
+// every run instead of whenever the scheduler allows it.
+func TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase(t *testing.T) {
+	redirectConfigHomeForTest(t)
+	if err := SaveERunConfig(ERunConfig{Execution: ExecutionConfig{Modes: map[string]string{
+		kubectlPodWatchExecutionOperation: ExecutionModeLibrary,
+	}}}); err != nil {
+		t.Fatalf("SaveERunConfig: %v", err)
+	}
+	t.Setenv("ERUN_DEPLOY_POD_WATCH_INTERVAL", "100ms")
+
+	var polls int32
+	secondPoll := make(chan struct{})
+	var secondOnce sync.Once
+	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/team-dev/pods" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if atomic.AddInt32(&polls, 1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(pullingPodListJSON))
+			return
+		}
+		// Held until the watcher's cancellation aborts this request, so the
+		// poll that fails to read is the one in flight when the context ends.
+		secondOnce.Do(func() { close(secondPoll) })
+		select {
+		case <-r.Context().Done():
+		case <-time.After(30 * time.Second):
+			t.Errorf("the watcher never cancelled the poll in flight")
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan podWatchOutcome, 1)
+	go func() {
+		done <- watchReleasePods(ctx, podWatchParams{ReleaseName: "team-devops", Namespace: "team-dev"})
+	}()
+
+	<-secondPoll
+	cancel()
+
+	select {
+	case outcome := <-done:
+		if got := strings.Join(outcome.Pulling, ","); got != "team-devops-abc/erun-devops" {
+			t.Fatalf("the pull state the last readable poll saw must survive the unread poll that cancelled it, got Pulling=%q", got)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("watchReleasePods did not return after its context was cancelled")
+	}
 }

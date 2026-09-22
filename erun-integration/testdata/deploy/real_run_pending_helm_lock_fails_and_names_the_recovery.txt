@@ -1,0 +1,19 @@
+clear pending Helm metadata for release team-devops from namespace team-dev in context test-context and retry deploy? [Y/n] audit: erun deploy --version <VERSION> team dev
+trace-log: appending the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
+deploy: resolved 1 spec(s)
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
+==> Deploying team/dev <VERSION>
+    namespace team-dev on context test-context
+    waiting for helm rollout (timeout 15m0s)...
+helm release recovery not run: stdin reached EOF before the prompt could be answered. `erun doctor --clear-pending-helm team dev`
+==> Deploy of team-devops failed after <ELAPSED>
+step timing (ordered by duration):
+  deploy (failed) [<ELAPSED>] — helm release "team-devops" is locked by an unfinished install/upgrade/rollback, so this deploy cannot proceed in namespace team-dev; clear the lock with `erun doctor --clear-pending-helm team dev`, or with `kubectl --context test-context --namespace team-dev delete 'secrets,configmaps' -l 'owner=helm,name=team-devops,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found`: Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress
+    team/dev <VERSION> (failed) [<ELAPSED>] — helm release "team-devops" is locked by an unfinished install/upgrade/rollback, so this deploy cannot proceed in namespace team-dev; clear the lock with `erun doctor --clear-pending-helm team dev`, or with `kubectl --context test-context --namespace team-dev delete 'secrets,configmaps' -l 'owner=helm,name=team-devops,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found`: Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress
+timing record written to <TMP>
+==> Deploy failed team/dev: helm release "team-devops" is locked by an unfinished install/upgrade/rollback, so this deploy cannot proceed in namespace team-dev; clear the lock with `erun doctor --clear-pending-helm team dev`, or with `kubectl --context test-context --namespace team-dev delete 'secrets,configmaps' -l 'owner=helm,name=team-devops,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found`: Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress
+helm release "team-devops" is locked by an unfinished install/upgrade/rollback, so this deploy cannot proceed in namespace team-dev; clear the lock with `erun doctor --clear-pending-helm team dev`, or with `kubectl --context test-context --namespace team-dev delete 'secrets,configmaps' -l 'owner=helm,name=team-devops,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found`: Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress

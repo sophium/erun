@@ -935,7 +935,7 @@ func TestJob(t *testing.T) {
 		if await.ExitCode != 0 {
 			t.Fatalf("await: exit %d: %s", await.ExitCode, await.Combined)
 		}
-		released := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		released := waitForJobActivityLeaseRelease(t, setup.Cwd, envVars)
 		golden.Equal(t, "job/a_running_job_holds_an_activity_lease", normalize.Apply(held.Combined+released.Combined))
 	})
 
@@ -2299,4 +2299,32 @@ printf '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"res
 			t.Fatalf("expected the closing result folded despite the cap, got %+v", finishedPayload.Progress)
 		}
 	})
+}
+
+// waitForJobActivityLeaseRelease polls `activity lease list` until the job's
+// claim is gone, and returns that listing.
+//
+// A job's terminal record and its lease release are not ordered against each
+// other: finishEnvironmentJob writes the record, and the lease is dropped by
+// the supervisor's own deferred cleanup, which runs after it. `job await`
+// returns on the record, so reading the lease straight afterwards races that
+// cleanup -- under a loaded full-suite run the listing still showed the claim
+// and the scenario failed on a happens-before the production code never
+// promised. Waiting for the condition the scenario is actually about (the
+// claim being released) is what makes it deterministic; the deadline keeps it
+// a real assertion rather than an assumption.
+func waitForJobActivityLeaseRelease(t *testing.T, cwd string, envVars []string) erun.Result {
+	t.Helper()
+	const timeout = 30 * time.Second
+	deadline := time.Now().Add(timeout)
+	for {
+		result := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: cwd, Env: envVars})
+		if result.ExitCode == 0 && strings.Contains(result.Combined, "no leases held") {
+			return result
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a finished job still held its activity lease %s after it reported a terminal state; finishing work must release the claim:\n%s", timeout, result.Combined)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

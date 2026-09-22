@@ -14,7 +14,7 @@ erun list [flags]
 
 ## Output
 
-Sections print in order — configuration location, defaults, the effective target for the current directory, configured cloud providers, every tenant and its environments, then any orchestrators:
+Sections print in order — configuration location, defaults, the effective target for the current directory, configured cloud providers, every tenant and its environments, any [stale ssh aliases](#stale-ssh-aliases), then orchestrators. The ssh section is absent unless there is something to report:
 
 ```
 Configuration:
@@ -43,6 +43,28 @@ Orchestrators:
 The full per-env field set (local port allocations, API URL, SSH details, …) prints under each tenant; the example abbreviates. See [Configuration](/reference/configuration) for what each value means.
 
 Each orchestrator lists its linked environments beside what that orchestrator uses each one for: `role=code`, `role=build`, `role=runtime`, or `role=undeclared` when nothing has been set. `role` and an environment's own `type` are independent fields shown in different places — a runtime-*type* environment linked with the runtime *role* shows `type: runtime` under its tenant entry and `role=runtime` under the orchestrator entry, and the two mean different things even though they share a spelling.
+
+## Stale ssh aliases {#stale-ssh-aliases}
+
+[`erun sshd init`](/cli/sshd) writes a `Host erun-<tenant>-<env>` block into `~/.ssh/config`, and `erun delete` removes the one it wrote. Nothing covers the other ways a block goes stale: an environment renamed rather than deleted, or its `sshd` turned off. The block survives, still pointing at `127.0.0.1:<its old local port>` — and local ports are reissued, so the stale alias starts resolving into whichever environment inherited that port:
+
+```
+SSH config (~/.ssh/config):
+  erun-erun-proxmox1: no environment claims it, and its port 17122 now belongs to erun/petios — `ssh erun-erun-proxmox1` reaches erun/petios, not the environment the alias names
+  erun-erun-local: no environment claims it, and its port 17099 belongs to no environment
+  remove each block above by hand; erun cannot tell its own blocks from hand-maintained ones
+```
+
+That first line is the one worth acting on. An alias that fails is legible — that is what the `not in ~/.ssh/config` annotation under each environment already tells you. An alias that *succeeds against the wrong environment* is not: `ssh`, `scp`, VS Code Remote-SSH and workspace sync all connect, authenticate and operate on a pod you did not name. Workspace sync is the sharpest case, because it writes. The block's `HostKeyAlias` is stale with it, so the `known_hosts` entry consulted is the dead environment's.
+
+Two properties keep the report trustworthy:
+
+- **Only aliases erun derives are reported.** A `Host` block that is not `erun-…` is yours, and `erun list` never mentions it.
+- **An environment claims its alias only while its `sshd` is enabled.** With `sshd` off nothing on the host answers for that name, so a block still naming it is reported rather than treated as accounted for.
+
+Removal is manual and deliberately so: erun cannot distinguish a block it wrote from one you hand-maintained under the same naming convention, and a prune that guessed would delete an alias you rely on. Delete the `Host` block from `~/.ssh/config` yourself.
+
+The same list is carried as an `orphanedSSHAliases` array on the [MCP `list` tool](/mcp/overview)'s structured result, so an agent sees it too.
 
 ## Release lines {#release-lines}
 

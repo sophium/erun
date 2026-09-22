@@ -1,0 +1,23 @@
+audit: erun deploy --version <VERSION> team dev
+trace-log: appending the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
+deploy: resolved 1 spec(s)
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
+==> Deploying team/dev <VERSION>
+    namespace team-dev on context test-context
+    waiting for helm rollout (timeout 15m0s)...
+    pod team-devops-7d4b4c: erun-dind Pulling image (ImagePullBackOff)
+==> Deploy of team-devops failed after <ELAPSED>
+step timing (ordered by duration):
+  deploy (failed) [<ELAPSED>] — exit status 1
+the rollout wait expired while team-devops-7d4b4c/erun-dind was still pulling its image: this is the deploy's own timeout ending the rollout, not a container failure. Every runtime chart replaces its pod with the Recreate strategy, so the previous pod was already torn down and this environment is running no pod until the image finishes and the replacement starts. Raise `deploy.timeout` (or pass --rollout-timeout) if a cold pull of this image legitimately needs longer than the current bound.
+    team/dev <VERSION> (failed) [<ELAPSED>] — exit status 1
+the rollout wait expired while team-devops-7d4b4c/erun-dind was still pulling its image: this is the deploy's own timeout ending the rollout, not a container failure. Every runtime chart replaces its pod with the Recreate strategy, so the previous pod was already torn down and this environment is running no pod until the image finishes and the replacement starts. Raise `deploy.timeout` (or pass --rollout-timeout) if a cold pull of this image legitimately needs longer than the current bound.
+timing record written to <TMP>
+==> Deploy failed team/dev: exit status 1
+the rollout wait expired while team-devops-7d4b4c/erun-dind was still pulling its image: this is the deploy's own timeout ending the rollout, not a container failure. Every runtime chart replaces its pod with the Recreate strategy, so the previous pod was already torn down and this environment is running no pod until the image finishes and the replacement starts. Raise `deploy.timeout` (or pass --rollout-timeout) if a cold pull of this image legitimately needs longer than the current bound.
+exit status 1
+the rollout wait expired while team-devops-7d4b4c/erun-dind was still pulling its image: this is the deploy's own timeout ending the rollout, not a container failure. Every runtime chart replaces its pod with the Recreate strategy, so the previous pod was already torn down and this environment is running no pod until the image finishes and the replacement starts. Raise `deploy.timeout` (or pass --rollout-timeout) if a cold pull of this image legitimately needs longer than the current bound.
