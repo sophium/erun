@@ -53,8 +53,11 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 	var cache *cacheDecision
 	if hit, applicable, reason := incrementalCacheDecision(buildInput); applicable {
 		cache = &cacheDecision{hit: hit, missReason: reason}
-		stepCtx.recordTimingCache(hit, reason)
+		stepCtx.recordTimingCache(cache)
 	}
+	// The same decision reaches the builder, which is the only place that learns
+	// a promote was unusable and rebuilt instead -- see settlePromoteFailure.
+	buildInput.cache = cache
 	buildInput.PlatformObserver = ctx.gateTestStage.withGateStageEvidence(buildInput, stepCtx.timingPlatformObserver(cache))
 	// The heartbeat goes to the run's own log stream, not to stdout/stderr: those
 	// are per-image buffers under a concurrent wave, and a liveness line flushed
