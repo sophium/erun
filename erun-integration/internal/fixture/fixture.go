@@ -1821,6 +1821,41 @@ func SeedGitRepo(t testing.TB, dir string) {
 	}
 }
 
+// SeedGitRepoBehindItsRemote makes dir a git checkout that is one commit
+// behind the bare origin it tracks -- the state a machine that has not pulled
+// since the last release is in, and the state a reported pin ran on: it read
+// such a checkout and printed a plan that was internally consistent, with every
+// site reading the old version and nothing anywhere saying the base was old.
+func SeedGitRepoBehindItsRemote(t testing.TB, dir string) {
+	t.Helper()
+	SeedGitRepo(t, dir)
+	origin := dir + "-origin.git"
+	if err := exec("git", []string{"init", "-q", "--bare", "-b", "main", origin}, ""); err != nil {
+		t.Fatalf("git init bare origin: %v", err)
+	}
+	for _, args := range [][]string{
+		{"remote", "add", "origin", origin},
+		{"push", "-q", "-u", "origin", "main"},
+	} {
+		if err := exec("git", args, dir); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	// The advance lands on the remote only: the checkout is rewound to what it
+	// held before it, so the remote carries a commit this tree does not.
+	mustWrite(t, filepath.Join(dir, "README.md"), "# test\n\nlanded after this checkout\n")
+	for _, args := range [][]string{
+		{"add", "."},
+		{"commit", "-q", "-m", "advance the remote"},
+		{"push", "-q", "origin", "main"},
+		{"reset", "-q", "--hard", "HEAD~1"},
+	} {
+		if err := exec("git", args, dir); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+}
+
 func exec(name string, args []string, dir string) error {
 	cmd := harnessexec.Command(name, args...)
 	cmd.Dir = dir

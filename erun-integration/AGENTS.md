@@ -112,6 +112,14 @@ cross-repository structural gates, not production helpers.
   starved producer. Keep their current parallel execution, but investigate real
   failures through resource evidence and width/heartbeat calibration, not retries
   until green or reflexive whole-suite serialization.
+- The suite's `go test -timeout` is a budget, not a constant: the gate derives
+  it from the resolved CPU quota and clamps it below `harnessexec.HangNet`, and
+  the gate script's fallback is that same clamp. Never let a deadline the gate
+  can resolve reach `HangNet` — the backstop is sized to outlast the deadline so
+  it cannot fail a healthy child, and an uncapped budget reorders the two. Go's
+  ten-minute default is what failed a correct tree on a contended node
+  (erun#2631); a slow run that is progressing is not a failed run, so restore a
+  budget by fixing the derivation rather than by loosening an assertion.
 
 ## Goldens and normalization
 
