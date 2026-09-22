@@ -216,4 +216,54 @@ test.describe('change erun version (#744)', () => {
     await expect(dialog).toContainText('already on');
     await expect(dialog.getByRole('button', { name: 'Apply', exact: true })).toBeDisabled();
   });
+
+  test('says what the plan left alone when the environment runs its own runtime image', async ({
+    app,
+    page,
+  }) => {
+    // The row an operator would otherwise find missing: an environment whose
+    // runtime image is not erun's own keeps its runtimeversion, so the plan
+    // carries no site for it. Absent-with-a-reason and absent-because-aligned
+    // look identical in a table, so the dialog has to say which one this is.
+    const skipped = [
+      "runtimeversion pw/alpha rides ghcr.io/sophium/pw-devops:1.0.134's own release line, not erun's, so pin leaves it alone; it moves on the tenant's own next build/release",
+      'runtimechart oci://ghcr.io/sophium/charts/pw-devops:1.0.134 names pw-devops, not the stock erun-devops chart, so it rides its own release line; pin leaves it alone',
+    ];
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
+      if (body.method === 'ListPinnableVersions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: AVAILABLE }),
+        });
+      }
+      if (body.method === 'PreviewPinVersion') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { ...PLAN, skipped } }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.page.getByRole('tab', { name: 'Runtime' }).click();
+    await app.page
+      .getByRole('button', { name: `Change erun version for ${SEED_TENANT} / ${SEED_ENV_ALPHA}` })
+      .click();
+
+    const dialog = app.page.getByTestId('pin-version-dialog');
+    await dialog.getByRole('button', { name: 'Preview changes' }).click();
+
+    const leftAlone = dialog.getByTestId('pin-skipped');
+    await expect(leftAlone).toBeVisible();
+    await expect(leftAlone).toContainText('Left alone:');
+    await expect(leftAlone).toContainText('runtimeversion pw/alpha rides');
+    await expect(leftAlone).toContainText('runtimechart');
+    // The erun-owned references still move, so this is a reason and not a
+    // blocked plan.
+    await expect(dialog.getByRole('table', { name: 'Pending pin changes' })).toContainText(
+      'terraform-team/dev/main.tf',
+    );
+  });
 });
