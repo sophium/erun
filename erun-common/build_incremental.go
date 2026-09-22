@@ -104,6 +104,20 @@ func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool)
 // (.dockerignore/.gitignore) are excluded so generated artifacts and untracked
 // state do not churn the result, and the digest is truncated to 16 chars to fit
 // in a Docker tag.
+//
+// This identity — and the fp-<fingerprint> tag a promotion resolves — is
+// deliberately a function of the build's *inputs* alone: the context the
+// Dockerfile copies, its chart, and the version it consumes. It must never
+// become a function of the container it is computed in, because the container
+// is the one thing an environment does not keep: a deploy or a resize replaces
+// the pod (new hostname, new cgroup namespace, new per-pod paths) while the
+// repository, the local Docker store and the cache volume all survive, so an
+// input taken from the pod would move the identity on every roll and make a
+// warm environment rebuild from cold. The one pod-scoped value a build carries
+// is CgroupParent, derived from the pod's own hostname; it is a runtime
+// placement for the RUN containers and nothing else, so it stays out of this
+// set (see buildContainerCPUCapCgroupParent). TestBuildFingerprintSurvivesAPodRoll
+// pins that, including for a content change that must still move the identity.
 func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	contextDir := strings.TrimSpace(buildInput.ContextDir)
 	if contextDir == "" {

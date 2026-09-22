@@ -23,15 +23,20 @@ import (
 // sites so the dialog can show current → target per reference, which is what
 // makes the motion something an operator can agree to rather than trust.
 type uiPinPlan struct {
-	Tenant      string           `json:"tenant"`
-	Environment string           `json:"environment"`
-	Target      string           `json:"target"`
-	Previous    string           `json:"previous,omitempty"`
-	Sites       []uiPinSite      `json:"sites"`
-	Changed     int              `json:"changed"`
-	Aligned     bool             `json:"aligned"`
-	Available   []string         `json:"available,omitempty"`
-	Notice      *uiVersionNotice `json:"notice,omitempty"`
+	Tenant      string      `json:"tenant"`
+	Environment string      `json:"environment"`
+	Target      string      `json:"target"`
+	Previous    string      `json:"previous,omitempty"`
+	Sites       []uiPinSite `json:"sites"`
+	// Skipped explains, in order, what the plan deliberately left out and why —
+	// a reference the environment's own config says is on another release line.
+	// Without it the dialog would drop a row the operator expected (an env whose
+	// runtime image is its own keeps its runtimeversion) with nothing said.
+	Skipped   []string         `json:"skipped,omitempty"`
+	Changed   int              `json:"changed"`
+	Aligned   bool             `json:"aligned"`
+	Available []string         `json:"available,omitempty"`
+	Notice    *uiVersionNotice `json:"notice,omitempty"`
 }
 
 type uiPinSite struct {
@@ -135,6 +140,7 @@ func toUIPinPlan(plan eruncommon.PinPlan) uiPinPlan {
 		Target:      plan.Target,
 		Previous:    plan.Previous,
 		Sites:       make([]uiPinSite, 0, len(plan.Sites)),
+		Skipped:     plan.Skipped,
 	}
 	for _, site := range plan.Sites {
 		out.Sites = append(out.Sites, uiPinSite{

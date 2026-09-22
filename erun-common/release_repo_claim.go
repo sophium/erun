@@ -72,9 +72,21 @@ type ReleaseRepoClaimConflictError struct {
 	Now         time.Time
 }
 
+// Error names both remedies, and neither promises more than the reclaim rule
+// delivers. A holder in the refusing environment is reclaimed by that
+// environment's own liveness probe as soon as its process is gone (see
+// releaseRepoClaimHeld); a holder in another environment can only be waited
+// out to the claim's lapse, since nothing here can see whether its process is
+// still there. The ref itself is named as the deliberate escape hatch: it is
+// the only handle a claim has, and an operator who has established that the
+// holder is gone needs it to clear a version rather than abandon it.
 func (e *ReleaseRepoClaimConflictError) Error() string {
-	return fmt.Sprintf("%s is already being released by %s (running for %s) — wait for it to finish; a holder that crashes or whose pod is replaced is reclaimed automatically on the next attempt",
-		strings.TrimSpace(e.Version), releaseClaimHolderDescription(e.Holder, e.Environment), releaseClaimRunningFor(e.StartedAt, e.Now))
+	return fmt.Sprintf("%s is already being released by %s (running for %s) — a holder in this environment is reclaimed automatically on the next attempt once its process is gone, and a holder in another environment once its claim lapses. If you have established that holder is gone, clear it with: git push %s --delete %s",
+		strings.TrimSpace(e.Version),
+		releaseClaimHolderDescription(e.Holder, e.Environment),
+		releaseClaimRunningFor(e.StartedAt, e.Now),
+		releaseRepoClaimRemote,
+		releaseRepoClaimRef(e.Version))
 }
 
 // releaseClaimRunningFor reports how long the holder has been running,
@@ -116,14 +128,27 @@ func releaseRepoClaimProbeRef(version string) string {
 	return releaseRepoClaimProbeRefPrefix + sanitizeForFilename(strings.TrimSpace(version))
 }
 
+// releaseRepoClaimLocalHolder answers whether the caller's own environment
+// still has a live holder of the version being claimed. Only a caller in that
+// same environment can answer it at all — which is why it is a probe rather
+// than a field on the claim record, whose subject may live in an environment
+// nothing here can see. nil means the caller cannot tell, and the record's own
+// expiry is then the only rule.
+type releaseRepoClaimLocalHolder func() bool
+
 // takeReleaseRepoClaim resolves the remote claim ref's current state and
-// either creates it, reclaims it from an expired holder, or refuses in favor
-// of a still-live one. An empty sha with a nil error means the remote could
-// not be read at all (no network, no origin, no push access) — indistinguishable
-// from a solo caller with nothing to contend against, so it is treated the
-// same way: proceed without the repository-global claim rather than invent a
-// refusal nothing confirms.
-func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time) (string, error) {
+// either creates it, reclaims it from a dead or expired holder, or refuses in
+// favor of a still-live one. An empty sha with a nil error means the remote
+// could not be read at all (no network, no origin, no push access) —
+// indistinguishable from a solo caller with nothing to contend against, so it
+// is treated the same way: proceed without the repository-global claim rather
+// than invent a refusal nothing confirms.
+//
+// localHolderAlive is consulted only for a claim the caller's own environment
+// recorded, and must be read before the caller takes its own local claim: what
+// it reports is whether somebody else in this environment is still holding the
+// version.
+func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, localHolderAlive releaseRepoClaimLocalHolder) (string, error) {
 	ref := releaseRepoClaimRef(version)
 
 	for attempt := 0; attempt < releaseRepoClaimMaxAttempts; attempt++ {
@@ -150,12 +175,13 @@ func takeReleaseRepoClaim(ctx Context, projectRoot, environment, version string,
 		if err != nil {
 			return "", fmt.Errorf("release: %s exists on %s but its content could not be read: %w", ref, releaseRepoClaimRemote, err)
 		}
-		if releaseRepoClaimHeld(record, now) {
+		if releaseRepoClaimHeld(record, now, environment, localHolderAlive) {
 			return "", &ReleaseRepoClaimConflictError{Version: version, Holder: record.Holder, Environment: record.Environment, StartedAt: record.StartedAt, ExpiresAt: record.ExpiresAt, Now: now}
 		}
 
-		// A reclaim of an expired holder: this is a new holder, so it gets
-		// its own StartedAt rather than inheriting the dead holder's.
+		// A reclaim — of a holder whose claim lapsed, or one this environment
+		// can no longer see: this is a new holder, so it gets its own
+		// StartedAt rather than inheriting the dead holder's.
 		newSHA, err := writeReleaseRepoClaimBlob(ctx, projectRoot, environment, holder, now, now)
 		if err != nil {
 			return "", err
@@ -209,8 +235,35 @@ func deleteReleaseRepoClaim(ctx Context, projectRoot, version, currentSHA string
 	return Command("git", "-C", projectRoot, "push", lease, releaseRepoClaimRemote, "--delete", ref).Run()
 }
 
-func releaseRepoClaimHeld(record releaseRepoClaimRecord, now time.Time) bool {
-	return !record.ExpiresAt.IsZero() && now.Before(record.ExpiresAt)
+// releaseRepoClaimHeld reports whether record still stands in the way of a
+// caller releasing version from environment.
+//
+// Its expiry is not the whole answer for a claim this same environment
+// recorded. A holder that is cancelled, crashes, or loses its pod never runs
+// the deferred release that deletes the claim, so the claim outlived the
+// holder it names and refused every retry for the rest of its twenty-minute
+// TTL — while the refusal itself promised to reclaim exactly those holders on
+// the next attempt. A pid cannot fix that: it names a process in one pod of
+// one environment, and the claim is deliberately readable from every
+// environment that can push to the release's origin.
+//
+// The liveness that is observable is the environment's own: every release also
+// takes a local exclusive lease for the same version, keyed to the process
+// holding it and reclaimed the moment that process is gone. So for a claim
+// recorded against the caller's own environment, that local store answers "is
+// the holder still there", and the claim is reclaimable as soon as it is not.
+// A claim recorded against any other environment keeps the expiry-only rule,
+// because nothing here can see whether that holder is alive. A record with no
+// environment at all (one written before that field existed) keeps it too,
+// rather than being treated as the caller's own.
+func releaseRepoClaimHeld(record releaseRepoClaimRecord, now time.Time, environment string, localHolderAlive releaseRepoClaimLocalHolder) bool {
+	if record.ExpiresAt.IsZero() || !now.Before(record.ExpiresAt) {
+		return false
+	}
+	if environment == "" || record.Environment != environment || localHolderAlive == nil {
+		return true
+	}
+	return localHolderAlive()
 }
 
 func writeReleaseRepoClaimBlob(ctx Context, projectRoot, environment string, holder EnvironmentActivityLeaseHolder, startedAt, now time.Time) (string, error) {

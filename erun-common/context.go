@@ -52,6 +52,12 @@ type Context struct {
 	// push, deploy), set by that command's umbrella and nil everywhere else —
 	// see timing.go. Unexported: only erun-common's own umbrellas start one.
 	timing *stepTiming
+	// progress is the live heartbeat for the command's active build run, set by
+	// RunDockerBuilds (or RunDockerBuild for a lone image) and nil everywhere
+	// else. Every image the run builds registers with it, so one ticker names
+	// whatever is still building however the run is scheduled — see
+	// build_heartbeat.go.
+	progress *buildHeartbeat
 	// MCPTool names the MCP tool that initiated this call, set only by
 	// erun-mcp's tool handlers before they call into shared execution.
 	// newPlatformClientForAlias forwards it to erun-backend-api as an audit

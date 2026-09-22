@@ -34,6 +34,10 @@ export interface PinPlanView {
   target: string;
   previous?: string;
   sites: PinSiteView[];
+  // skipped explains, in order, what the plan deliberately left out and why —
+  // a reference the environment's own config puts on another release line, which
+  // is not erun's version to move.
+  skipped?: string[];
   changed: number;
   aligned: boolean;
 }

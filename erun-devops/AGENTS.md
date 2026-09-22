@@ -124,6 +124,14 @@ composition and release invariants belong to root/shared logic, not chart policy
   buildkitd configuration is not read by dockerd's embedded builder; daemon-wide
   cgroup-parent changes broke exec/readiness. Per-leaf caps do not prove aggregate
   isolation. Keep this memory-enforcement gap explicit.
+- BuildKit attributes its cache records and cache mounts to the daemon's own
+  engine id (moby's builder passes `ID: opt.EngineID`), which dockerd persists
+  at `<data-root>/engine-id` on the docker-state volume and reuses on every
+  later start — so a rolled pod keeps serving the cache that volume already
+  holds, `<engine-id>::<ref>` keys and all. Do not anchor a worker id in
+  `dind-entrypoint.sh`: `<buildkit>/workerid` is read only by standalone
+  buildkitd's runc/containerd workers, so writing one changes no key.
+  `dind-entrypoint.sh` carries the measured detail beside the wrapper.
 - Thread resolved environment CPU/memory limits through
   `applyDindResourceBuildArgs` into the test-stage parallel-gate overrides;
   unbounded cgroup readings must not size fan-out for the entire host.
