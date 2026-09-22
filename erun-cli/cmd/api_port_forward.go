@@ -188,12 +188,16 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	args = append(args,
 		"port-forward",
 		fmt.Sprintf("service/%s", common.APIDeploymentName(result.Tenant)),
-		// The API service is a standalone component chart, published on the
-		// canonical APIServicePort in every namespace; only the local side is
-		// per-env, so concurrent forwards for different environments don't collide
-		// on the laptop. (MCP/SSH forward to the runtime pod, which is deployed on
-		// per-env ports, so those map per-env on both sides.)
-		fmt.Sprintf("%d:%d", localPort, common.APIServicePort),
+		// Both sides are per-env. The API service is a standalone component chart
+		// whose Service is published on the environment's own apiPort (the
+		// `{{ default 17033 .Values.apiPort }}` the deploy passes), so the remote
+		// side has to be resolved the same way the local one is; pinning it to the
+		// canonical APIServicePort asks kubectl for a port the Service does not
+		// expose on every environment outside the 17000 block. Different
+		// environments keep different local ports, so concurrent forwards still
+		// don't collide on the laptop. (MCP/SSH forward to the runtime pod, which
+		// is deployed on per-env ports, and likewise map per-env on both sides.)
+		fmt.Sprintf("%d:%d", localPort, common.APIServicePortForResult(result)),
 		"--address", "127.0.0.1",
 	)
 	return args
