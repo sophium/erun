@@ -331,24 +331,58 @@ func TestRemoteVerifierContainsChangesRefusesABranchThatNeverLanded(t *testing.T
 	}
 }
 
-// TestRemoteVerifierContainsChangesRefusesABranchThatAddsNothing: a branch
-// sitting exactly where it forked names no landing, so it is refused rather
-// than reported as contained on the strength of an empty change set.
-func TestRemoteVerifierContainsChangesRefusesABranchThatAddsNothing(t *testing.T) {
+// TestRemoteVerifierContainsChangesFindsAFastForwardedLanding: the branch's
+// commit landed by fast-forwarding the target onto the branch tip, leaving
+// both refs on the same commit. That is the strongest form of the landing this
+// check confirms — the branch is contained in the target by identity — and it
+// leaves no change set to compare, so a guard that skips the ancestry question
+// whenever the tips are equal refuses exactly the landing it should confirm,
+// stranding a review whose work is demonstrably on the target.
+func TestRemoteVerifierContainsChangesFindsAFastForwardedLanding(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--initial-branch=main")
 	commitFile(t, dir, "base.txt", "base\n", "base")
 	runGit(t, dir, "checkout", "-b", "feature")
-	commitFile(t, dir, "other.txt", "other\n", "something else lands on main")
+	branchTip := commitFile(t, dir, "other.txt", "other\n", "the branch's own work")
 	runGit(t, dir, "checkout", "main")
 	runGit(t, dir, "merge", "--ff-only", "feature")
 
-	contained, _, err := NewRemoteVerifier().ContainsChanges(context.Background(), "file://"+dir, "main", "feature")
+	contained, landed, err := NewRemoteVerifier().ContainsChanges(context.Background(), "file://"+dir, "main", "feature")
 	if err != nil {
 		t.Fatalf("ContainsChanges: %v", err)
 	}
-	if contained {
-		t.Fatalf("expected a branch whose tip is the target's own history to be refused, not read as a landing")
+	if !contained {
+		t.Fatalf("expected a fast-forwarded branch to be reported as contained")
+	}
+	if landed != branchTip {
+		t.Fatalf("landed = %q, want the branch tip %q", landed, branchTip)
+	}
+}
+
+// TestRemoteVerifierContainsChangesTreatsAnEmptyBranchAsContained pins the
+// decision the equal-tip case forces rather than leaving it to be rediscovered.
+// A branch cut from the target and never committed to, with the target
+// unmoved, is indistinguishable from a fast-forward landing on the two refs
+// alone — and a branch that genuinely adds nothing is already reported as
+// contained the moment it trails the target instead of sitting exactly on it.
+// So there is no refusal left for the guard to buy, and the answer is the one
+// that does not strand landed work.
+func TestRemoteVerifierContainsChangesTreatsAnEmptyBranchAsContained(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init", "--initial-branch=main")
+	base := commitFile(t, dir, "base.txt", "base\n", "base")
+	runGit(t, dir, "checkout", "-b", "feature")
+	runGit(t, dir, "checkout", "main")
+
+	contained, landed, err := NewRemoteVerifier().ContainsChanges(context.Background(), "file://"+dir, "main", "feature")
+	if err != nil {
+		t.Fatalf("ContainsChanges: %v", err)
+	}
+	if !contained {
+		t.Fatalf("expected a branch sitting on the target's own tip to be reported as contained")
+	}
+	if landed != base {
+		t.Fatalf("landed = %q, want the target tip %q", landed, base)
 	}
 }
 
