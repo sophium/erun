@@ -14,6 +14,7 @@ import {
 import { showTerminalError } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { selectionKey } from '@/app/versionSuggestions';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import { CheckboxField, ReadonlyField } from '@/components/app/ManageDialog.fields';
 import {
   relativeTimeFromNow,
@@ -169,14 +170,13 @@ function LocalSyncFolderField({
           <FolderOpen aria-hidden="true" />
         </Button>
       </div>
+      {/* Through the primitive so the field error carries an icon as well as
+          the destructive colour, and wraps rather than widening the row. The
+          id stays on the primitive's own element, which is what the input's
+          aria-describedby points at, and it is derived from the same variable
+          so the two cannot drift apart. */}
       {error && (
-        <div
-          id="environment-config-sshd-sync-localpath-error"
-          className="text-[13px] leading-[1.35] text-destructive"
-          role="alert"
-        >
-          {error}
-        </div>
+        <InlineAlert id="environment-config-sshd-sync-localpath-error">{error}</InlineAlert>
       )}
     </div>
   );

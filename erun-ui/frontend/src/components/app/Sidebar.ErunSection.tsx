@@ -28,6 +28,7 @@ import { selectSidebarFocus } from '@/app/selectors';
 import type { OrchestratorShellActivity } from '@/app/slices/orchestratorShellActivitySlice';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { OrchestratorHoverCard } from '@/components/app/Sidebar.OrchestratorHoverCard';
 import { OrchestratorNoticeList } from '@/components/app/Sidebar.OrchestratorNotice';
@@ -187,9 +188,14 @@ function OrchestratorsArea(): React.ReactElement {
       )}
       <OrchestratorNoticeList notices={restoreNotices} />
       {error ? (
-        <p role="alert" className="px-3.5 pb-1 text-[11px] break-words text-destructive">
-          {error}
-        </p>
+        // The same primitive the panel this list opens uses, so the sidebar
+        // and the pane behind it report one failure one way: icon as well as
+        // colour, wrapping for a long upstream error, and the alert role.
+        // Inset to the sidebar's own 3.5 gutter, which the primitive's padding
+        // does not carry.
+        <div className="px-3.5 pb-1">
+          <InlineAlert>{error}</InlineAlert>
+        </div>
       ) : null}
     </div>
   );
