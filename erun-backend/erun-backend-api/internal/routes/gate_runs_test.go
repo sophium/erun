@@ -3,8 +3,10 @@ package routes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -79,6 +81,63 @@ func TestReportGateRunOutcomeNormalizesLowercaseStatus(t *testing.T) {
 	}
 	if svc.reportedStatus != model.GateRunStatusInconclusive {
 		t.Fatalf("service received status = %q, want %q", svc.reportedStatus, model.GateRunStatusInconclusive)
+	}
+}
+
+// TestListGateRunsRefusesAnUnknownStatusFilter: the read route normalized any
+// `?status=` value and handed it straight to the repository, so an
+// unrecognised one matched no row and answered 200 with an empty list -- a
+// mistyped filter was indistinguishable from a real "no gate runs", while the
+// write route refused the same value as a named field. The refusal must name
+// the accepted values, and it must happen before the query, or the caller
+// still receives the empty listing this route is being fixed to stop
+// producing.
+func TestListGateRunsRefusesAnUnknownStatusFilter(t *testing.T) {
+	repo := &stubGateRunRepository{}
+	routes := GateRunRoutes{gateRuns: repo}
+	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=bogus-not-a-status", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listGateRuns(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var body errorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response body is not JSON: %v", err)
+	}
+	if body.Code != "INVALID_QUERY" {
+		t.Fatalf("code = %q, want %q", body.Code, "INVALID_QUERY")
+	}
+	for _, want := range []string{"RUNNING", "PASSED", "FAILED", "INCONCLUSIVE"} {
+		if !strings.Contains(body.Message, want) {
+			t.Fatalf("message %q does not name the accepted value %s", body.Message, want)
+		}
+	}
+	if repo.listFilter.Status != "" {
+		t.Fatal("the repository was queried anyway; the refusal must precede it")
+	}
+}
+
+// TestListGateRunsAcceptsRunningAsAStatusFilter: the write side's vocabulary
+// is terminal-only (RUNNING is what Start assigns, never what ReportOutcome
+// may report), but the read side filters the queue's own current work -- a
+// RUNNING filter is the question "what is being gated right now". Validating
+// the filter against the write side's three terminal statuses would refuse it.
+func TestListGateRunsAcceptsRunningAsAStatusFilter(t *testing.T) {
+	repo := &stubGateRunRepository{}
+	routes := GateRunRoutes{gateRuns: repo}
+	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=running", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listGateRuns(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if repo.listFilter.Status != model.GateRunStatusRunning {
+		t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusRunning)
 	}
 }
 
