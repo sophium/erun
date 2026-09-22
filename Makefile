@@ -775,9 +775,9 @@ integration-test-gate:
 # small, bounded number of calls. See scripts/agent-gate.sh for why this is
 # the fix and not just documentation.
 #
-# check-gate's own ten prerequisites (below) used to run back-to-back: on a
+# check-gate's own twelve prerequisites (below) used to run back-to-back: on a
 # real release, the first seven alone (everything before test-playwright)
-# cost ~14.5 minutes, and test-playwright is the single largest of the ten by
+# cost ~14.5 minutes, and test-playwright is the single largest of the twelve by
 # itself (measured standalone at ~16.4 minutes -- more than every other
 # target combined). `-j` is what actually parallelizes them: check-gate's own
 # prerequisite line has to keep every target listed in plain, literal text
@@ -794,27 +794,36 @@ integration-test-gate:
 # bookkeeping system -- and `make`'s own job server is a true event-driven
 # scheduler (a slot is reused the instant any job frees it), which is a
 # strictly better fit here than replaying scripts/parallel-gate.sh's
-# fixed-batch model would be for ten wildly uneven-duration jobs.
+# fixed-batch model would be for twelve wildly uneven-duration jobs.
 # CHECK_GATE_PARALLELISM deliberately passes no mem-per-job-mib: unlike
 # lint/test-frontend/helm-chart-tests (each a uniform fan-out of near-
-# identical jobs with a real measured per-job cost), these ten targets are
+# identical jobs with a real measured per-job cost), these twelve targets are
 # wildly heterogeneous -- some are flat single processes, three are
 # themselves internally parallel fan-outs, and none has a comparable
 # measured per-job memory figure, so a number here would be fabricated
 # rather than measured (the same "measure, don't fabricate a slope" standard
 # HELM_CHART_TEST_JOB_MEMORY_MIB's own comment holds to). CPU/job-count alone
 # deciding the width matches that target's own precedent for the identical
-# reason. What this width does NOT bound: three of these ten
+# reason. What this width does NOT bound: three of these twelve
 # (lint/test-frontend/helm-chart-tests) each already run their own internal
 # fan-out sized against the full memory ceiling -- CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
 # (see lint's own comment above) is what stops those three from
 # double-booking memory against *each other* when `-j` runs them side by
-# side. It does not bound the other seven (in particular test-erun-ui's
+# side. It does not bound the other nine (in particular test-erun-ui's
 # race-enabled test process) against any of the
-# ten running concurrently -- verify actual peak memory on a real
+# twelve running concurrently -- verify actual peak memory on a real
 # `make check-gate` run before trusting this width in a memory-constrained
 # environment, and narrow it with real numbers if that run shows a problem.
-CHECK_GATE_TARGET_COUNT := 10
+#
+# This is the count of check-gate's own prerequisite targets above, and it is
+# kept equal to it by erun-integration/check_gate_target_count_test.go rather
+# than by hand: it is the term that keeps `-j` from opening more slots than
+# there are jobs to fill them, so a target added without bumping it queues
+# behind a free slot instead of taking one. It went stale exactly that way --
+# two targets joined the list while this still read 10, which resolved -j10
+# for twelve targets because the CPU term (the in-pod DIND_CPU_LIMIT of 12)
+# was the larger one. Derive it, do not re-count it by eye.
+CHECK_GATE_TARGET_COUNT := 12
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
 check:
@@ -841,12 +850,12 @@ check:
 # it to bypass failures; diagnose against comparable state and fix them under
 # root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
-# These eleven run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# These twelve run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
 # rather than scripts/parallel-gate.sh is what drives it here, and where the
 # two real ordering dependencies -- test-playwright and
 # test-erun-ui-windows-build each needing test-frontend -- are declared).
-# Do not drop any of the eleven from this line to move the fan-out elsewhere:
+# Do not drop any of the twelve from this line to move the fan-out elsewhere:
 # erun-integration/build_check_coverage_test.go and
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
@@ -863,7 +872,7 @@ check:
 # 4-CPU build container those are the longest jobs in the gate. Listing the
 # critical-path targets first lets the chain head take a slot in the first
 # dispatch batch. This is a no-op when the width already covers every target
-# (the in-pod gate resolves -j10 and dispatches all eleven within 0.32s), which is
+# (the in-pod gate resolves -j12 and dispatches all twelve within 0.32s), which is
 # why it is a scheduling fix and not on its own a wall-time reduction.
 # Reordering this line is safe (nothing keys on the order); DROPPING a name is
 # not -- see the coverage-test note directly above.
