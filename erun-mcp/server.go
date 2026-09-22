@@ -677,7 +677,7 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, pushTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "deploy",
-		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, mirror them from the FROM to the TO registry when both roles are marked, then run the rollout with the cluster pulling from the DEPLOY registry. The deploy step of the build → release → push → deploy flow. Waits for the rollout to become ready (default 5m, the env's deploy.timeout, or the timeout input) and watches the new pods, keeping the wait while an image is still pulling and aborting early on a real container failure.",
+		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, mirror them from the FROM to the TO registry when both roles are marked, then run the rollout with the cluster pulling from the DEPLOY registry. The deploy step of the build → release → push → deploy flow. Waits for the rollout to become ready (default 15m, the env's deploy.timeout, or the timeout input; the default is sized for a cold pull of the runtime image, which the rollout waits out with its previous pod already torn down by the chart's Recreate strategy) and watches the new pods, keeping the wait while an image is still pulling and aborting early on a real container failure.",
 	}, deployTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "publish",

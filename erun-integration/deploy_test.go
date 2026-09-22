@@ -3606,6 +3606,50 @@ esac
 		}
 	})
 
+	t.Run("real_run_reports_a_deadline_that_expired_while_the_image_was_still_pulling", func(t *testing.T) {
+		// The reported outage: a cold pull of the runtime image outlasted the
+		// rollout wait, so the rollout was declared failed mid-download -- and
+		// because every runtime chart replaces its pod with the Recreate
+		// strategy, the previous pod was already gone and the environment was
+		// left running nothing at all. helm's own words are the same whether
+		// the rollout failed or was still working, so the fact that has to
+		// reach the operator is the pod watcher's: at the moment the wait
+		// expired, the new pod's image was still downloading.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: imagePullBackOffPodJSON})
+		// helm outlasts enough polls for the watcher to observe the pull, then
+		// fails the way a rollout whose deadline expired does.
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`sleep 1`,
+			`printf '%s\n' 'Error: UPGRADE FAILED: resource Deployment/team-dev/team-devops not ready. status: InProgress, message: Available: 0/1' >&2`,
+			`exit 1`,
+		}, "\n"))
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the failed rollout to fail the deploy, got 0:\n%s", result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		for _, want := range []string{
+			"team-devops-7d4b4c/erun-dind was still pulling its image",
+			"this is the deploy's own timeout ending the rollout, not a container failure",
+			"the previous pod was already torn down and this environment is running no pod",
+		} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("expected %q in the failed deploy's output, got:\n%s", want, out)
+			}
+		}
+		if strings.Contains(out, "deploy failed early") {
+			t.Fatalf("a pull in progress is not an early failure:\n%s", out)
+		}
+		golden.Equal(t, "deploy/real_run_reports_a_deadline_that_expired_while_the_image_was_still_pulling", out)
+	})
+
 	t.Run("real_run_pod_watch_aborts_on_permanent_image_pull_failure", func(t *testing.T) {
 		// kubectl stub reports a container in ErrImagePull whose message is a
 		// permanent registry rejection ("manifest unknown") — retrying will

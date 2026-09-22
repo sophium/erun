@@ -24,11 +24,26 @@ import (
 )
 
 // DefaultHelmDeploymentTimeout is the fallback helm rollout timeout when an
-// environment sets no deploy.timeout. It is 5m so the first deploy of a large
-// image against a cold node cache is not failed mid-pull: a ~1GB runtime image
-// can take minutes to pull, and the pod watcher waits out an in-progress pull up
-// to this bound, aborting early only on a real, non-pull failure.
-const DefaultHelmDeploymentTimeout = "5m0s"
+// environment sets no deploy.timeout.
+//
+// It is the bound on a cold pull, and the pull is the whole of its job: every
+// runtime chart renders `strategy: Recreate` (required by the RWO home and
+// docker-state claims every chart mounts), so helm tears the previous pod down
+// before the replacement is even scheduled, and until the new image is on the
+// node the environment runs nothing at all. The pod watcher keeps waiting while
+// a pull is in progress and aborts early on a real, non-pull failure, so this
+// value is not a patience setting for a broken rollout -- it is the only bound
+// on a legitimate one.
+//
+// The former 5m was sized for a ~1GB runtime image. Measured on the real
+// artifact: ghcr.io/sophium/erun-devops is 4.78 GB on disk / 1.14 GB compressed
+// and a cold, uncapped `docker pull` of 1.0.295 took 386s (6m26s) on a fast
+// link -- longer than the whole deadline, before any container starts. A fleet
+// rollout makes that worse, not better: four environments pulling the same
+// image at once were what surfaced it. 15m covers a cold pull of that image
+// with room for a contended link and a slower one, and stays well inside the
+// env's own idle/stop timings.
+const DefaultHelmDeploymentTimeout = "15m0s"
 
 // EnvironmentDeployConfig carries per-environment deploy tuning persisted on
 // EnvConfig's `deploy:` block.
@@ -3618,6 +3633,14 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 	if helmErr == nil {
 		return nil
 	}
+	// A rollout the deadline ended while the image was still downloading is
+	// reported as that, not as helm's own words for it: "Progress deadline
+	// exceeded" reads as a rollout that failed, and was in fact a rollout that
+	// was still working. The pod watcher is the only component that saw which
+	// one it was.
+	if pulling := watchOutcome.Pulling; len(pulling) > 0 {
+		return fmt.Errorf("%w\n%s", helmErr, rolloutRanOutOfWaitWhilePulling(pulling))
+	}
 	// The string matches below read the dedicated stderr capture, not
 	// helmOutput: helm errors land on stderr, and the classification patterns
 	// below are stderr-specific messages that helmOutput's combined stdout
@@ -3651,6 +3674,21 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 		}
 	}
 	return helmErr
+}
+
+// rolloutRanOutOfWaitWhilePulling explains a rollout the wait ended mid-pull.
+// It states the container, that the wait and not the workload is what ended the
+// deploy, and what that costs here: every runtime chart renders
+// `strategy: Recreate` (the RWO home and docker-state claims leave no choice),
+// so the previous pod was torn down before the replacement was scheduled and
+// the environment has nothing running until the pull finishes. It deliberately
+// does not prescribe the remedy -- a longer `deploy.timeout`, a retry against a
+// now-warm node, or a rollback are all real answers, and which one applies
+// depends on whether the registry or the link was the slow part.
+func rolloutRanOutOfWaitWhilePulling(pulling []string) string {
+	return fmt.Sprintf(
+		"the rollout wait expired while %s was still pulling its image: this is the deploy's own timeout ending the rollout, not a container failure. Every runtime chart replaces its pod with the Recreate strategy, so the previous pod was already torn down and this environment is running no pod until the image finishes and the replacement starts. Raise `deploy.timeout` (or pass --rollout-timeout) if a cold pull of this image legitimately needs longer than the current bound.",
+		strings.Join(pulling, ", "))
 }
 
 // searchedTenantRuntimeChart names the tenant's own runtime umbrella when the

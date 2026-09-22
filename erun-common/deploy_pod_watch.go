@@ -95,6 +95,15 @@ func (p podWatchParams) now() time.Time {
 // operator intervention (image pull failures, config errors, repeated crashes).
 type podWatchOutcome struct {
 	Failure *HelmReleaseContainerFailureError
+	// Pulling names the containers the last poll observed still waiting on
+	// their image, as "<pod>/<container>". It is the one thing the watcher
+	// knows that helm does not: helm's rollout deadline is a fixed duration
+	// and expires the same way whether the image finished downloading or not,
+	// so a deploy that ran out its wait mid-pull reports "Progress deadline
+	// exceeded" for a rollout that was working exactly as intended. Empty when
+	// the last poll saw every container past its pull, including on a clean
+	// rollout.
+	Pulling []string
 }
 
 // podStatusList is a deliberately partial parse of `kubectl get pods -o json`:
@@ -298,36 +307,69 @@ func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcom
 	defer ticker.Stop()
 
 	lastSummary := map[string]string{}
+	// lastPulling is the pull state of the most recent poll, replaced rather
+	// than merged: a container that finished pulling and started must stop
+	// being reported as still pulling, or a later deadline would blame a pull
+	// that had already completed.
+	var lastPulling []string
 	// unscheduledSince tracks, per pod name, the first poll that observed
 	// PodScheduled=False so classifyTerminalFailure can apply the grace period
 	// across polls rather than deciding on a single snapshot.
 	unscheduledSince := map[string]time.Time{}
 	for {
-		failure, summaries := pollOnce(ctx, params, unscheduledSince)
+		failure, summaries, pulling := pollOnce(ctx, params, unscheduledSince)
+		lastPulling = pulling
 		renderPodSummaries(params.StatusOut, summaries, lastSummary)
 		if failure != nil {
-			return podWatchOutcome{Failure: failure}
+			return podWatchOutcome{Failure: failure, Pulling: lastPulling}
 		}
 		select {
 		case <-ctx.Done():
-			return podWatchOutcome{}
+			return podWatchOutcome{Pulling: lastPulling}
 		case <-ticker.C:
 		}
 	}
 }
 
-func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[string]time.Time) (*HelmReleaseContainerFailureError, []podSummary) {
+func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[string]time.Time) (*HelmReleaseContainerFailureError, []podSummary, []string) {
 	output, err := runKubectlGetPods(ctx, params)
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	pods, ok := parsePodStatusList(output)
 	if !ok {
-		return nil, nil
+		return nil, nil, nil
 	}
 	releasePods := filterReleasePods(pods, params.ReleaseName)
 	failure := classifyTerminalFailure(releasePods, params, unscheduledSince)
-	return failure, summarizePods(releasePods)
+	return failure, summarizePods(releasePods), pullingContainers(releasePods)
+}
+
+// pullingContainers names every container of the release currently waiting on
+// its image, as "<pod>/<container>". A container whose pull has permanently
+// failed is excluded: that is a terminal failure the watcher aborts on, not a
+// rollout still working through its download, and reporting it as progress
+// would misdescribe the failure the abort already carries.
+func pullingContainers(pods []podStatusItem) []string {
+	var pulling []string
+	for _, pod := range pods {
+		all := append([]containerStatusEntry{}, pod.Status.InitContainerStatuses...)
+		all = append(all, pod.Status.ContainerStatuses...)
+		for _, container := range all {
+			if container.State.Waiting == nil {
+				continue
+			}
+			if _, isPull := imagePullWaitingReasons[container.State.Waiting.Reason]; !isPull {
+				continue
+			}
+			if permanentImagePullFailure(container.State.Waiting.Message) {
+				continue
+			}
+			pulling = append(pulling, pod.Metadata.Name+"/"+container.Name)
+		}
+	}
+	sort.Strings(pulling)
+	return pulling
 }
 
 // runKubectlGetPods dispatches to the subprocess or library path per the
