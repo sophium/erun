@@ -289,7 +289,7 @@ func registerReadModelTools(reg toolRegistrar, info eruncommon.BuildInfo, runtim
 	}, versionTool(info))
 	addTool(reg, &mcp.Tool{
 		Name: "list",
-		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory. " +
+		Description: "List configured tenants and environments, defaults, the effective target for the current runtime directory, and any erun ssh alias ~/.ssh/config declares that no configured environment claims any more. " +
 			"Pass versionDriftTenant to additionally report erun-version drift across that tenant's environments, and gateEnvironment to flag whether the environment driving that tenant's merge-queue gate is running an older erun version than any environment it gates.",
 	}, listTool(runtime))
 	addTool(reg, &mcp.Tool{

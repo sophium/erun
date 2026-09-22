@@ -9,6 +9,14 @@ import (
 
 const DefaultSSHUser = "erun"
 
+// SSHHostAliasRoot and SSHHostAliasPrefix are how erun's own derived aliases
+// are told apart from a hand-maintained Host block: every alias SSHHostAlias
+// builds begins with the prefix.
+const (
+	SSHHostAliasRoot   = "erun"
+	SSHHostAliasPrefix = SSHHostAliasRoot + "-"
+)
+
 type SSHConnectionInfo struct {
 	User           string
 	Host           string
@@ -33,7 +41,7 @@ func SSHConnectionInfoForResult(result OpenResult) SSHConnectionInfo {
 var sshHostAliasSanitizer = regexp.MustCompile(`[^a-z0-9]+`)
 
 func SSHHostAlias(tenant, environment string) string {
-	parts := []string{"erun", sanitizeSSHHostAliasToken(tenant), sanitizeSSHHostAliasToken(environment)}
+	parts := []string{SSHHostAliasRoot, sanitizeSSHHostAliasToken(tenant), sanitizeSSHHostAliasToken(environment)}
 	filtered := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if strings.TrimSpace(part) == "" {

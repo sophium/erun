@@ -1,4 +1,4 @@
-List every configured tenant and environment, including each environment's erun version.
+List every configured tenant and environment, including each environment's erun version, and flag any erun ssh alias ~/.ssh/config declares that no configured environment claims any more -- a stale block whose local port was reissued resolves into whichever environment inherited it, so `ssh <alias>` reaches an environment you did not name.
 
 Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. When an environment's version is not recorded locally, its deployed release is read live to tell a confirmed absence ("none") apart from a version that could not be determined at all ("undetermined", excluded from the max/behind computation with the reason stated); --dry-run traces that check instead of running it. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.
 

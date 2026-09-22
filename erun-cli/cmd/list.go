@@ -17,7 +17,7 @@ func newListCmd(store common.ListStore, findProjectRoot common.ProjectFinderFunc
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List configured tenants and environments",
-		Long: "List every configured tenant and environment, including each environment's erun version.\n\n" +
+		Long: "List every configured tenant and environment, including each environment's erun version, and flag any erun ssh alias ~/.ssh/config declares that no configured environment claims any more -- a stale block whose local port was reissued resolves into whichever environment inherited it, so `ssh <alias>` reaches an environment you did not name.\n\n" +
 			"Pass --tenant to instead report erun-version drift within one tenant: every environment's version, and the newest version observed among them. When an environment's version is not recorded locally, its deployed release is read live to tell a confirmed absence (\"none\") apart from a version that could not be determined at all (\"undetermined\", excluded from the max/behind computation with the reason stated); --dry-run traces that check instead of running it. Add --gate-environment to name the environment driving that tenant's merge-queue gate, and flag whether it is running an older erun version than any environment it gates -- a gate older than the code it gates can pass a change that would fail on current code.\n\n" +
 			"Pass --control-planes to instead report every configured erun-hosted control plane's deployed version (GET /v1/platform, unauthenticated) against the newest version erun's own registry has actually published -- deployed-vs-published, not deployed-vs-main. A route or feature can merge, close its issue, and still be unreachable for months because the plane serving it was simply never rolled onto an already-published release; --tenant's drift has no registry baseline to catch that. Each reachable plane's own GET /v1/platform also names its console's URL, so its console is checked the same way (GET /version.json, unauthenticated) against the same published baseline and reported nested under the plane -- a plane and its console can drift from each other, and a console has no version surface of its own to notice that without this. A plane whose own discovery document advertises an apiUrl resolving to a genuinely different address is flagged distinctly, since that is not a benign alias. Add --erun-alias to narrow the check to one configured erun-hosted alias instead of probing every configured one. Requires network access to each configured plane and console, and to erun's registry; --dry-run traces what would be checked instead.\n\n" +
 			"Like the rest of `list`, both reports always exit 0 on their own -- this is a reporting command, not a gate. Add --fail-on-drift with --tenant or --control-planes to make that one invocation exit non-zero when the report finds drift, so it can be wired into a script or a schedule.",
@@ -454,7 +454,54 @@ func writeListResult(ctx common.Context, result common.ListResult) error {
 	if err := writeListTenants(ctx, result.Tenants); err != nil {
 		return err
 	}
+	if err := writeOrphanedSSHAliases(ctx, result.OrphanedSSHAliases); err != nil {
+		return err
+	}
 	return writeOrchestrators(ctx, result.Orchestrators)
+}
+
+// writeOrphanedSSHAliases reports Host blocks in the host's own ssh config that
+// name an erun environment alias nothing claims. The section is absent when
+// there is nothing to report: an operator with no stale blocks should not have
+// to read a heading telling them so on every listing.
+//
+// The remedy is deliberately manual. erun wrote these blocks, but it cannot
+// tell one it wrote from one an operator hand-maintained under the same naming
+// convention, and a prune that guessed would delete an alias someone relies on.
+func writeOrphanedSSHAliases(ctx common.Context, orphans []common.SSHOrphanedAlias) error {
+	if len(orphans) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "SSH config ("+sshConfigLocationLabel()+"):"); err != nil {
+		return err
+	}
+	for _, orphan := range orphans {
+		if _, err := fmt.Fprintln(ctx.Stdout, "  "+orphanedSSHAliasLine(orphan)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, "  remove each block above by hand; erun cannot tell its own blocks from hand-maintained ones")
+	return err
+}
+
+// sshConfigLocationLabel names the file these blocks live in the same way the
+// missing-alias annotation above does. The alias it matters to is an ssh
+// client's own, and `~/.ssh/config` is what an operator types.
+func sshConfigLocationLabel() string {
+	return "~/.ssh/config"
+}
+
+func orphanedSSHAliasLine(orphan common.SSHOrphanedAlias) string {
+	line := orphan.Alias + ": no environment claims it"
+	if orphan.ReachesEnvironment != "" {
+		target := orphan.ReachesTenant + "/" + orphan.ReachesEnvironment
+		return fmt.Sprintf("%s, and its port %d now belongs to %s — `ssh %s` reaches %s, not the environment the alias names",
+			line, orphan.Port, target, orphan.Alias, target)
+	}
+	if orphan.Port > 0 {
+		return fmt.Sprintf("%s, and its port %d belongs to no environment", line, orphan.Port)
+	}
+	return line + ", and it names no port"
 }
 
 func writeListHeaderSections(ctx common.Context, result common.ListResult) error {
