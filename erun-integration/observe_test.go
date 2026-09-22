@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -252,6 +253,14 @@ func TestObserve(t *testing.T) {
 	// DefaultRuntimePodCPU/Memory (4 / 16384Mi) must report no runtimepod drift —
 	// comparing the release against a manufactured default nobody configured is
 	// exactly the bug, not the fix.
+	//
+	// It is also the drift-verdict report's reproduction: the empty verdict is
+	// the one case `omitempty` dropped, so `--output json` on a clean
+	// environment carried no drift key at all while the text stream printed
+	// "Drift: none detected" and the MCP outputSchema declared one — three
+	// surfaces, three answers. The assertion below is on the payload rather
+	// than the golden alone, because "the key is present" is the exact
+	// contract the report found broken.
 	t.Run("real_run_runtime_pod_silent_config_reports_no_drift", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -267,6 +276,21 @@ func TestObserve(t *testing.T) {
 		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(result.Stdout), &payload); err != nil {
+			t.Fatalf("observe --output json did not emit one JSON object: %v\n%s", err, result.Stdout)
+		}
+		raw, ok := payload["drift"]
+		if !ok {
+			t.Fatalf("structured result carries no drift verdict, so a consumer cannot read the one the text stream prints: %s", result.Stdout)
+		}
+		var drift []string
+		if err := json.Unmarshal(raw, &drift); err != nil {
+			t.Fatalf("drift = %s, want the list of findings: %v", raw, err)
+		}
+		if len(drift) != 0 {
+			t.Fatalf("drift = %v, want no findings for a release that agrees with the env config and the running pod", drift)
 		}
 		golden.Equal(t, "observe/real_run_runtime_pod_silent_config_reports_no_drift", normalize.Apply(result.Combined))
 	})

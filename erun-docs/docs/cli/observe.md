@@ -20,6 +20,8 @@ The Service list is what makes "what is this environment running, and on what po
 
 When a `Certificate` is not Ready, `observe` walks its `CertificateRequest` → `Order` → `Challenge` chain automatically and reports the `Challenge`'s reason — the field that actually explains a stuck issuance (for example a webhook solver's RBAC denial) — instead of leaving you to run three more `kubectl` commands to find it.
 
+It also reads the environment's runtime Helm release and diffs it against both the running containers and the env config's recorded `runtimeversion`/`runtimeimage`/`runtimepod`, so a drifted deploy — a hand-patched image, a resized pod the release never recorded — is named rather than left for you to spot by comparing two dumps. That verdict is the report's last line, and `--output json` carries it as the `drift` list, empty when nothing disagreed, so a script reads the same answer the terminal prints.
+
 ```bash
 erun observe --tenant my-tenant --environment prod
 erun observe --tenant my-tenant --environment prod --output json
