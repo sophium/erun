@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,6 +100,85 @@ func TestRenderPlatformAliasEntryResolvesToTheSecretStorePath(t *testing.T) {
 	written := filepath.Base(store.(fileCloudSecretStore).path(ref))
 	if got := cloudSecretFileName(ref); got != written {
 		t.Fatalf("cloudSecretFileName = %q, but the store wrote %q", got, written)
+	}
+}
+
+// TestProvisionedAliasResolvesInThePod is the reproduction of the reported
+// failure. Before this change an agent pod's root config carried no erun alias
+// and nothing could give it one, so every platform call resolved through
+// newPlatformClientForAlias and aborted with "no erun platform cloud provider
+// alias is configured" before its first network call -- `erun gate list` among
+// them, exiting 127, with no remedy reachable from inside the pod.
+//
+// This composes on the pod's side exactly what the entrypoint composes in
+// shell: the entry init rendered, placed in the root config initialize_erun_config
+// writes, and the token written at the filename init shipped. It then asserts
+// the pod's own alias resolution gets past the point that used to fail. It is
+// the seam between the two halves -- init's render and the entrypoint's seed --
+// which neither half's own test can cover.
+func TestProvisionedAliasResolvesInThePod(t *testing.T) {
+	provider := testPlatformAliasProvider()
+	entry, err := renderPlatformAliasEntry(provider)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The root config as initialize_erun_config writes it for an env whose
+	// chart injected an infrastructure provider -- with the entry, and without
+	// it, so the reported state is asserted rather than assumed.
+	unprovisioned := "defaulttenant: team\n" +
+		"cloudproviders:\n" +
+		"  - alias: dev-aws\n" +
+		"    provider: aws\n"
+	document := unprovisioned + entry
+
+	assertUnprovisionedAliasIsUnusable(t, unprovisioned)
+
+	var podConfig ERunConfig
+	if err := yaml.Unmarshal([]byte(document), &podConfig); err != nil {
+		t.Fatalf("the pod's provisioned config does not parse: %v\n%s", err, document)
+	}
+
+	// The token, at the basename init shipped rather than a name this test
+	// picks -- that basename is the whole reason init computes it.
+	dir := t.TempDir()
+	store := NewFileCloudSecretStore(dir)
+	if err := os.WriteFile(filepath.Join(dir, cloudSecretFileName(provider.ERun.RefreshTokenRef)), []byte("refresh-token-value"), 0o600); err != nil {
+		t.Fatalf("write token at the shipped basename: %v", err)
+	}
+
+	resolved, err := ResolveERunPlatformAlias(staticCloudStore{config: podConfig}, "")
+	if err != nil {
+		t.Fatalf("the pod still cannot resolve a platform alias after provisioning: %v", err)
+	}
+	if resolved.Alias != provider.Alias {
+		t.Fatalf("got alias %q, want %q", resolved.Alias, provider.Alias)
+	}
+	token, err := store.LoadCloudSecret(resolved.ERun.RefreshTokenRef)
+	if err != nil {
+		t.Fatalf("the pod's secret store cannot read the token at the ref the resolved alias names: %v", err)
+	}
+	if token != "refresh-token-value" {
+		t.Fatalf("got token %q, want the provisioned refresh token", token)
+	}
+}
+
+// assertUnprovisionedAliasIsUnusable asserts the reported state rather than
+// assuming it: a pod config carrying an infrastructure provider but no platform
+// alias aborts at alias resolution, with the message and sentinel the report
+// quoted, before any network call.
+func assertUnprovisionedAliasIsUnusable(t *testing.T, document string) {
+	t.Helper()
+	var before ERunConfig
+	if err := yaml.Unmarshal([]byte(document), &before); err != nil {
+		t.Fatalf("the unprovisioned config does not parse: %v", err)
+	}
+	_, err := ResolveERunPlatformAlias(staticCloudStore{config: before}, "")
+	if !errors.Is(err, ErrPlatformAliasUnusable) {
+		t.Fatalf("expected the reported unusable-alias failure before provisioning, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "no erun platform cloud provider alias is configured") {
+		t.Fatalf("the pre-provisioning failure should be the reported one, got: %v", err)
 	}
 }
 
