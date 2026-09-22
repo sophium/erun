@@ -203,6 +203,17 @@ emitted; type is the single source of truth.
 {{- $registryCredentialSecretName := default "" .Values.registryCredentialSecretName -}}
 {{- $registryCredentialMountDir := "/etc/erun/registry-credential" -}}
 {{- $registryCredentialKeyFile := ".dockerconfigjson" -}}
+{{- /* Platform alias: `erun init` mints this Secret from the invoking host's
+       own signed-in erun platform cloud provider alias, so a fresh agent
+       environment can call the platform API (the merge queue's read and
+       self-report routes) the moment it is promoted to drive the gate, with no
+       human completing an interactive OIDC login inside the pod. Mounted
+       read-only; the entrypoint seeds the pod's own erun cloud config from it,
+       writing only what the pod does not already carry. Absent (no secret
+       minted) renders byte-for-byte unchanged. `optional: true` so a deploy
+       that races ahead of the secret's own apply still starts. */ -}}
+{{- $platformAliasSecretName := default "" .Values.platformAliasSecretName -}}
+{{- $platformAliasMountDir := "/etc/erun/platform-alias" -}}
 {{- $claude := default dict .Values.claude -}}
 {{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
 {{- $claudeUseMantle := default "0" $claude.useMantle -}}
@@ -904,6 +915,11 @@ spec:
               mountPath: {{ $registryCredentialMountDir | quote }}
               readOnly: true
             {{- end }}
+            {{- if $platformAliasSecretName }}
+            - name: platform-alias
+              mountPath: {{ $platformAliasMountDir | quote }}
+              readOnly: true
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -1036,6 +1052,16 @@ spec:
             items:
               - key: {{ $registryCredentialKeyFile | quote }}
                 path: {{ $registryCredentialKeyFile | quote }}
+        {{- end }}
+        {{- /* Every key mounts (no `items`): the entrypoint needs the alias
+               entry, the hashed secret filename, and the token together, and
+               those key names are a fixed contract with
+               platform_alias_secret.go. */ -}}
+        {{- if $platformAliasSecretName }}
+        - name: platform-alias
+          secret:
+            secretName: {{ $platformAliasSecretName | quote }}
+            optional: true
         {{- end }}
         {{- if $dindEnabled }}
         - name: docker-state

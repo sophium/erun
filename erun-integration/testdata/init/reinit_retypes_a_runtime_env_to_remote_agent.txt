@@ -9,6 +9,7 @@ init: runtime version not given; keeping <VERSION>
 init: runtime pod resources not given; keeping cpu=4 memory=16384Mi
 init: erun-dind sidecar resources not given; keeping cpu=12 memory=20Gi
 init: env type "runtime" -> "remote-agent"
+platform alias: no signed-in erun cloud provider alias on this host; leaving the pod's own alias state untouched
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
 deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
 deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>

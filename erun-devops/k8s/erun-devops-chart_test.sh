@@ -620,6 +620,35 @@ grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q '^ 
 grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q 'key: ".dockerconfigjson"' ||
     fail "the registry credential volume should project the .dockerconfigjson key"
 
+# --- 25b. platformAliasSecretName mounts the Secret `erun init` mints from the
+# invoking host's signed-in erun platform alias, so a fresh agent environment
+# can call the platform API without an interactive OIDC login inside the pod.
+# Renders nothing without a name, so an env init found no host alias for stays
+# byte-for-byte unchanged. ---
+rendered=$(render)
+grep -q 'name: platform-alias' "${rendered}" &&
+    fail "no platform-alias volume or mount should render without a secret name"
+
+rendered=$(render --set-string platformAliasSecretName=team-devops-platform-alias)
+runtime_block="${work_root}/platform-alias-runtime.yaml"
+runtime_container "${rendered}" >"${runtime_block}"
+grep -A2 '^            - name: platform-alias$' "${runtime_block}" | grep -q 'mountPath: "/etc/erun/platform-alias"' ||
+    fail "the platform alias mount belongs on the runtime container at /etc/erun/platform-alias"
+grep -A2 '^            - name: platform-alias$' "${runtime_block}" | grep -q 'readOnly: true' ||
+    fail "the platform alias mount should be read-only"
+
+volume_block="${work_root}/platform-alias-volume.yaml"
+awk '/^      volumes:/{f=1} f{print}' "${rendered}" >"${volume_block}"
+grep -A4 '^        - name: platform-alias$' "${volume_block}" | grep -q 'secretName: "team-devops-platform-alias"' ||
+    fail "the platform alias volume should name the secret erun init minted"
+grep -A4 '^        - name: platform-alias$' "${volume_block}" | grep -q '^            optional: true$' ||
+    fail "the platform alias volume should be optional, so a deploy that races ahead of the secret's own apply still starts"
+# Every key must mount: the entrypoint needs the alias entry, the hashed secret
+# filename, and the token together, and those key names are a fixed contract
+# with platform_alias_secret.go. An `items:` projection would drop some.
+grep -A4 '^        - name: platform-alias$' "${volume_block}" | grep -q 'items:' &&
+    fail "the platform alias volume must mount every key, not a projection"
+
 # --- The dind sidecar starts through the MTU-deriving wrapper, and the
 # chart's own dockerd args still ride behind it. The wrapper's resolution
 # logic is covered directly in erun-devops-dind-entrypoint_test.sh; what is

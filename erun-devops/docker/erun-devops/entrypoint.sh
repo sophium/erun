@@ -145,6 +145,58 @@ if (changed) {
 NODE
 }
 
+# sync_platform_alias seeds the pod's own erun cloud config from the Secret
+# `erun init` minted on the invoking host's signed-in erun platform alias, so
+# a fresh agent environment can call the platform API -- including the merge
+# queue's read and self-report routes -- without a human completing an
+# interactive OIDC login inside the pod, which no unattended environment can do.
+# Seeds only what the pod does not already carry, the same "never overwrite"
+# rule sync_registry_credential follows: a pod that somehow holds its own alias
+# keeps it. A no-op when the chart mounted nothing (older chart, or init found
+# no signed-in host alias to give).
+# ERUN_PLATFORM_ALIAS_SRC_OVERRIDE is a test seam only -- the mount path is a
+# fixed contract with the chart's platform-alias volume, never an
+# operator-facing knob.
+sync_platform_alias() {
+    src_dir="${ERUN_PLATFORM_ALIAS_SRC_OVERRIDE:-/etc/erun/platform-alias}"
+    entry="${src_dir}/cloud-provider-entry.yaml"
+    [ -r "${entry}" ] || return 0
+
+    config_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/erun"
+    mkdir -p "${config_dir}"
+    config_file="${config_dir}/config.yaml"
+
+    # The alias travels as its own rendered entry rather than being re-rendered
+    # from env vars: the pod has none for a platform alias (ERUN_CLOUD_PROVIDER
+    # is the *infrastructure* provider), so the entry is the config the host was
+    # actually signed in with. It carries no `cloudproviders:` key of its own --
+    # when initialize_erun_config already emitted that key for an infrastructure
+    # provider, a second one would be a duplicate mapping key, and the config
+    # reader refuses the whole file rather than merging them.
+    if grep -q '^cloudproviders:' "${config_file}" 2>/dev/null; then
+        cat "${entry}" >>"${config_file}"
+    else
+        printf 'cloudproviders:\n' >>"${config_file}"
+        cat "${entry}" >>"${config_file}"
+    fi
+
+    # The token file is named after a hash of its ref, which init computed with
+    # the store's own function and shipped as a filename; hashing in shell here
+    # would be a second implementation free to drift from the first.
+    secret_file="${src_dir}/cloud-secret-file"
+    secret_token="${src_dir}/cloud-secret-token"
+    if [ -r "${secret_file}" ] && [ -r "${secret_token}" ]; then
+        dest_dir="${config_dir}/cloud-secrets"
+        dest="${dest_dir}/$(cat "${secret_file}")"
+        if [ ! -f "${dest}" ]; then
+            mkdir -p "${dest_dir}"
+            chmod 700 "${dest_dir}" 2>/dev/null || true
+            cat "${secret_token}" >"${dest}"
+            chmod 600 "${dest}" 2>/dev/null || true
+        fi
+    fi
+}
+
 # ensure_git_safe_directory lets git operate on the worktree even when it is a
 # host mount owned by a foreign uid. A local-agent env on Windows shares the repo
 # into the WSL2 node, where the files surface as root:root; git's dubious-owner
@@ -517,6 +569,10 @@ idle:
   timezone: ${ERUN_IDLE_TIMEZONE:-}
   idletrafficbytes: ${ERUN_IDLE_TRAFFIC_BYTES:-0}
 EOF
+
+    # Last, because the root config.yaml above is rewritten wholesale each boot:
+    # seeding before it would be discarded on every restart.
+    sync_platform_alias
 }
 
 # Reconciling the agent MCP configuration is pod-lifecycle work, not per-shell

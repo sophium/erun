@@ -29,7 +29,7 @@ var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.ama
 // The env it takes is the one this run just reconciled, so init's own deploy sees
 // the settings this invocation supplied rather than the params they arrived in —
 // the two diverge whenever a flag was omitted and the stored value stands.
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env EnvConfig) (ShellLaunchParams, remoteRepositorySpec, string, error) {
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, projectRoot string, env EnvConfig) (ShellLaunchParams, remoteRepositorySpec, remoteProvisionedSecrets, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, env.KubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(env.RuntimePod)
 	// The runtime registry is the one field that redirects chart resolution, so
@@ -55,35 +55,57 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	// missing. Resolves to "" when the host has nothing to give.
 	registryCredentialSecretName, err := s.resolveRegistryCredentialSecret(target)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	target.EnvConfig.RegistryCredentialSecretName = registryCredentialSecretName
+
+	// Provision the platform alias the same way and at the same point: the pod
+	// this deploy creates must mount it from first boot, so a fresh environment
+	// can call the platform API the moment an operator promotes it to drive the
+	// merge queue, without a human signing in inside it. Resolves to "" when the
+	// invoking host is not signed in to a platform alias to give.
+	platformAliasSecret, err := s.resolvePlatformAliasSecret(target)
+	if err != nil {
+		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
+	}
+	target.EnvConfig.PlatformAliasSecretName = platformAliasSecret
+	provisioned := remoteProvisionedSecrets{registryCredential: registryCredentialSecretName, platformAlias: platformAliasSecret}
 
 	req := ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, env.RuntimeVersion, env.RuntimeImage, params.MCPAuthPublicKeyPath); err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	if err := s.ensureRemoteRegistryCredentials(target, req); err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	if params.NoGit {
-		return req, remoteRepositorySpec{}, registryCredentialSecretName, s.ensureRemoteWorktree(req, projectRoot)
+		return req, remoteRepositorySpec{}, provisioned, s.ensureRemoteWorktree(req, projectRoot)
 	}
 
 	state, err := s.remoteRepositoryState(req, projectRoot)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
 	if state.Exists {
-		return req, remoteRepositorySpec{}, registryCredentialSecretName, s.pullRemoteRepository(req, projectRoot)
+		return req, remoteRepositorySpec{}, provisioned, s.pullRemoteRepository(req, projectRoot)
 	}
 
 	repository, err := s.remoteRepositorySpecForClone(params, tenant, envName, req, state)
 	if err != nil {
-		return ShellLaunchParams{}, remoteRepositorySpec{}, "", err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, remoteProvisionedSecrets{}, err
 	}
-	return req, repository, registryCredentialSecretName, s.cloneRemoteRepository(req, projectRoot, repository)
+	return req, repository, provisioned, s.cloneRemoteRepository(req, projectRoot, repository)
+}
+
+// remoteProvisionedSecrets names the credentials init resolved on the invoking
+// host and minted into the environment's namespace. Both are returned together
+// rather than as adjacent strings: the caller persists each onto its own
+// EnvConfig field, and two bare strings at one call site is a swap waiting to
+// happen.
+type remoteProvisionedSecrets struct {
+	registryCredential string
+	platformAlias      string
 }
 
 // resolveRegistryCredentialSecret resolves the ghcr.io registries this env's
@@ -95,6 +117,16 @@ func (s bootstrapRunner) resolveRegistryCredentialSecret(target OpenResult) (str
 	registries := ghcrRegistriesRequiringCredential(EffectiveEnvironmentContainerRegistries(target.EnvConfig))
 	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
 	return provisionRegistryCredentialSecret(s.Context, target.Tenant, namespace, target.EnvConfig.KubernetesContext, registries)
+}
+
+// resolvePlatformAliasSecret mints the Secret carrying this host's own signed-in
+// erun platform alias, which the runtime chart mounts for the pod's `erun` to
+// read. Unlike the registry credential it is not gated on anything the
+// environment declared -- any agent environment may be promoted to drive the
+// merge queue, so the question is only whether the host has an alias to give.
+func (s bootstrapRunner) resolvePlatformAliasSecret(target OpenResult) (string, error) {
+	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
+	return provisionPlatformAliasSecret(s.Context, ConfigStore{}, target.Tenant, namespace, target.EnvConfig.KubernetesContext, DefaultCloudDependencies())
 }
 
 func (s bootstrapRunner) writeRemoteInitMarker(req ShellLaunchParams, marker RemoteInitMarker) error {
