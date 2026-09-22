@@ -649,6 +649,12 @@ func stubProcessesStillAlive(t *testing.T, stubPath string) []int {
 // abandoned rather than passed -- the signal that exists to catch a job that
 // really did leave work running, spent on every clean run, which is what makes
 // it ignorable when it is true.
+//
+// It outlives the gate a second way, measured on a gate run of this package:
+// the orphan inherits make's jobserver file descriptors, and `make -jN` then
+// blocks in a read on that pipe with every recipe already finished. There the
+// gate does not merely record itself as abandoned -- it stops finishing at all
+// until someone kills the stray by hand.
 func TestDiskHeadroomPruneBoundLeavesNothingRunningBehind(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("only Linux exposes a process's own environment under /proc, which is what identifies a survivor as this run's leftover")
