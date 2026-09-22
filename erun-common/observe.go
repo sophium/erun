@@ -103,11 +103,15 @@ func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (O
 	if result.LimitRanges, err = fetchObservedLimitRanges(limitArgs); err != nil {
 		return ObserveResult{}, err
 	}
+	// The read names itself and observe names the operation on top of it: these
+	// two fetchers are shared with the services listing and expose's own reads,
+	// so neither can carry "observe:" as its own prefix. The message is
+	// unchanged -- "observe: " then "get ingress: ...", exactly as before.
 	if result.Ingresses, err = fetchObservedIngresses(ingressArgs); err != nil {
-		return ObserveResult{}, err
+		return ObserveResult{}, fmt.Errorf("observe: %w", err)
 	}
 	if result.Services, err = fetchObservedServices(serviceArgs); err != nil {
-		return ObserveResult{}, err
+		return ObserveResult{}, fmt.Errorf("observe: %w", err)
 	}
 	if result.Certificates, err = fetchObservedCertificates(ctx, req, certArgs); err != nil {
 		return ObserveResult{}, err

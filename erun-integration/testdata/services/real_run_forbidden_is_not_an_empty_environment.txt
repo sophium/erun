@@ -1,0 +1,3 @@
+audit: erun services
+services: each Service is matched to an erun-expose Ingress by the Ingress's own backend, not by re-deriving the <tenant>-<service> naming convention
+cannot list this environment's Services: list environment services: forbidden: get service: exit status 1: Error from server (Forbidden): services is forbidden: User "system:serviceaccount:team-dev:default" cannot list resource "services" in API group "" in the namespace "team-dev"

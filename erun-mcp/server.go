@@ -709,8 +709,12 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 		Description: "Delete an environment from ERun configuration and remove its remote runtime namespace after explicit tenant-environment confirmation",
 	}, deleteTool(runtime))
 	addTool(reg, &mcp.Tool{
+		Name:        "services",
+		Description: "Report the resolved environment's Services, read-only: each Service's name, type, ports, and the public address it already has when an erun-expose Ingress fronts it. The exposure is read from the Ingress's own backend rather than re-derived from the <tenant>-<service> naming convention, so a repo-native chart that names its Service something else still reports the Service its Ingress really routes to. This is the read that answers \"what can I expose here, and under what name\" before `expose`, which otherwise takes a name nothing on the wire can supply. Both reads are plain kubectl gets; nothing here can mutate the cluster. Supports preview.",
+	}, servicesTool(runtime))
+	addTool(reg, &mcp.Tool{
 		Name:        "expose",
-		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. The Ingress references a per-env wildcard TLS Secret by default; nothing populates it unless dns01TokenFile, dns01BrokerUrl, and acmeEmail are also set, in which case it also provisions a namespaced cert-manager Issuer + Certificate through erun's DNS-01 broker. Supports preview.",
+		Description: "Expose an in-namespace Service at a stable public hostname under the platform's services zone (requires a platform block in .erun/config.yaml): ensure the per-environment wildcard DNS record points at the env's ingress IP and apply a Host-routing Ingress. The Ingress routes to <tenant>-<service> unless backendService names the in-namespace Service explicitly, which any repo with its own chart needs -- a derived name no Service holds yields a hostname that resolves and an ingress that 503s; the `services` tool lists the candidates. The Ingress references a per-env wildcard TLS Secret by default; nothing populates it unless dns01TokenFile, dns01BrokerUrl, and acmeEmail are also set, in which case it also provisions a namespaced cert-manager Issuer + Certificate through erun's DNS-01 broker. Supports preview.",
 	}, exposeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "e2e",

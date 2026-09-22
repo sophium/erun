@@ -10,6 +10,7 @@ import (
 
 func newExposeCmd(store common.ExposeStore, cloudStore common.CloudReadStore, deps common.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var targetIP string
+	var backendService string
 	var servicePort int
 	var noTLS bool
 	var ingressClass string
@@ -30,7 +31,10 @@ func newExposeCmd(store common.ExposeStore, cloudStore common.CloudReadStore, de
 			"SERVICE is the logical service name: it becomes the hostname label and routes to the tenant-scoped " +
 			"in-namespace Service <tenant>-<service> (the name its component chart renders, e.g. `api` -> `frs-api`), " +
 			"so the public host stays a clean label (api.frs-prod.services.erunpaas.com) while the Ingress targets the " +
-			"real Service. Ensures the per-environment wildcard DNS record points at the env's ingress IP and applies a " +
+			"real Service. Pass --backend-service when the chart names that Service something else, which is the case " +
+			"for any repo that brought its own chart: without it the derived name is the only target, and a Service that " +
+			"does not exist under it yields a hostname that resolves and an Ingress that 503s. `erun services` lists the " +
+			"Services the namespace actually runs, and which of them are already exposed. Ensures the per-environment wildcard DNS record points at the env's ingress IP and applies a " +
 			"Host-routing Ingress for the Service. TLS is requested by default, but only takes effect when " +
 			"--dns01-token-file, --dns01-broker-url, and --acme-email are all set: expose then also provisions a " +
 			"namespaced cert-manager Issuer + Certificate through erun's DNS-01 broker so the Ingress's TLS Secret " +
@@ -44,6 +48,7 @@ func newExposeCmd(store common.ExposeStore, cloudStore common.CloudReadStore, de
 			"preview the actions.",
 		Example: "  erun expose team dev api --ip 127.0.0.1\n" +
 			"  erun expose team prod api --ip 203.0.113.10 --port 8080\n" +
+			"  erun expose team dev api --ip 127.0.0.1 --backend-service pw-api\n" +
 			"  erun expose team dev api --ip 127.0.0.1 --no-tls\n" +
 			"  erun expose team dev api --ip 127.0.0.1 --services-zone services.example.com --platform-namespace frs-prod\n" +
 			"  erun expose team dev api --ip 127.0.0.1 --dns01-token-file token.txt --dns01-broker-url https://api.example.com/v1/dns01 --acme-email admin@example.com\n" +
@@ -53,7 +58,7 @@ func newExposeCmd(store common.ExposeStore, cloudStore common.CloudReadStore, de
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runExposeCommand(withCloudContextPreflight(commandContext(cmd), store), store, cloudStore, deps, findProjectRoot, exposeCommandArgs{
 				tenant: args[0], environment: args[1], service: args[2],
-				targetIP: targetIP, servicePort: servicePort, noTLS: noTLS, ingressClass: ingressClass, tlsSecret: tlsSecret,
+				targetIP: targetIP, backendService: backendService, servicePort: servicePort, noTLS: noTLS, ingressClass: ingressClass, tlsSecret: tlsSecret,
 				skipIfUnconfigured: skipIfUnconfigured, servicesZone: servicesZone, platformNamespace: platformNamespace,
 				dns01TokenFile: dns01TokenFile, dns01BrokerURL: dns01BrokerURL, acmeEmail: acmeEmail, acmeServer: acmeServer,
 				dns01WebhookGroupName: dns01WebhookGroupName, erunAlias: erunAlias,
@@ -62,6 +67,7 @@ func newExposeCmd(store common.ExposeStore, cloudStore common.CloudReadStore, de
 	}
 	addDryRunFlag(cmd)
 	cmd.Flags().StringVar(&targetIP, "ip", "", "Ingress IP the per-env wildcard record points at (e.g. 127.0.0.1 for a local cluster, the public LB IP for remote)")
+	cmd.Flags().StringVar(&backendService, "backend-service", "", "In-namespace Service the Ingress routes to when it is not <tenant>-<service>, e.g. a repo-native chart that names its own Service; erun services lists the candidates")
 	cmd.Flags().IntVar(&servicePort, "port", 0, "Service port to route to (default 80)")
 	cmd.Flags().BoolVar(&noTLS, "no-tls", false, "Serve http instead of https (skip the tls block on the Ingress)")
 	cmd.Flags().StringVar(&ingressClass, "ingress-class", "", "Ingress controller class (default traefik)")
@@ -84,6 +90,7 @@ func newExposeCmd(store common.ExposeStore, cloudStore common.CloudReadStore, de
 type exposeCommandArgs struct {
 	tenant, environment, service                                                 string
 	targetIP                                                                     string
+	backendService                                                               string
 	servicePort                                                                  int
 	noTLS                                                                        bool
 	ingressClass, tlsSecret                                                      string
@@ -127,6 +134,7 @@ func runExposeCommand(ctx common.Context, store common.ExposeStore, cloudStore c
 		Service:            strings.TrimSpace(a.service),
 		ProjectRoot:        projectRoot,
 		TargetIP:           strings.TrimSpace(a.targetIP),
+		BackendService:     strings.TrimSpace(a.backendService),
 		ServicePort:        a.servicePort,
 		NoTLS:              a.noTLS,
 		IngressClass:       strings.TrimSpace(a.ingressClass),

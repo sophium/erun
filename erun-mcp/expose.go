@@ -9,17 +9,24 @@ import (
 )
 
 type ExposeInput struct {
-	Tenant       string `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
-	Environment  string `json:"environment,omitempty" jsonschema:"environment name; defaults to the server environment context, and must match it: this server only acts on its own environment"`
-	Service      string `json:"service" jsonschema:"required logical service name; becomes the hostname label and routes to the tenant-scoped in-namespace Service <tenant>-<service> (e.g. api -> frs-api)"`
-	ProjectRoot  string `json:"projectRoot,omitempty" jsonschema:"project root holding the platform config (.erun/config.yaml); defaults to the runtime repo path"`
-	IP           string `json:"ip" jsonschema:"required ingress IP the per-env wildcard record points at (e.g. 127.0.0.1 for a local cluster, the public LB IP for remote)"`
-	Port         int    `json:"port,omitempty" jsonschema:"Service port to route to (default 80)"`
-	NoTLS        bool   `json:"noTls,omitempty" jsonschema:"serve http instead of https; https is requested by default but only takes effect when dns01TokenFile/dns01BrokerUrl/acmeEmail are all set, since nothing else provisions the env's per-env wildcard cert Secret"`
-	IngressClass string `json:"ingressClass,omitempty" jsonschema:"ingress controller class (default traefik)"`
-	TLSSecret    string `json:"tlsSecret,omitempty" jsonschema:"override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)"`
-	Preview      bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
-	Verbosity    int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant name; defaults to the server tenant context, and must match it: this server only acts on its own environment"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment name; defaults to the server environment context, and must match it: this server only acts on its own environment"`
+	Service     string `json:"service" jsonschema:"required logical service name; becomes the hostname label and routes to the tenant-scoped in-namespace Service <tenant>-<service> (e.g. api -> frs-api), unless backendService names the Service explicitly"`
+	// BackendService is the in-namespace Service the Ingress actually routes
+	// to. Empty keeps the <tenant>-<service> derivation, which is what a chart
+	// erun scaffolded renders; a repo that brought its own chart names its own
+	// Service, and routing to a derived name that does not exist produces a
+	// hostname that resolves and an ingress that 503s. The `services` tool
+	// lists the candidates.
+	BackendService string `json:"backendService,omitempty" jsonschema:"in-namespace Service the Ingress routes to, when it is not <tenant>-<service>; the services tool lists the candidates"`
+	ProjectRoot    string `json:"projectRoot,omitempty" jsonschema:"project root holding the platform config (.erun/config.yaml); defaults to the runtime repo path"`
+	IP             string `json:"ip" jsonschema:"required ingress IP the per-env wildcard record points at (e.g. 127.0.0.1 for a local cluster, the public LB IP for remote)"`
+	Port           int    `json:"port,omitempty" jsonschema:"Service port to route to (default 80)"`
+	NoTLS          bool   `json:"noTls,omitempty" jsonschema:"serve http instead of https; https is requested by default but only takes effect when dns01TokenFile/dns01BrokerUrl/acmeEmail are all set, since nothing else provisions the env's per-env wildcard cert Secret"`
+	IngressClass   string `json:"ingressClass,omitempty" jsonschema:"ingress controller class (default traefik)"`
+	TLSSecret      string `json:"tlsSecret,omitempty" jsonschema:"override the per-env wildcard cert Secret name (default <tenant>-<env>-wildcard-tls)"`
+	Preview        bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Verbosity      int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 	// SkipIfUnconfigured mirrors the CLI's --skip-if-unconfigured: succeed as a
 	// no-op instead of failing when the project declares no platform block, for
 	// an Agent composing expose after deploy without knowing whether the target
@@ -72,6 +79,7 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				Service:            strings.TrimSpace(input.Service),
 				ProjectRoot:        projectRoot,
 				TargetIP:           strings.TrimSpace(input.IP),
+				BackendService:     strings.TrimSpace(input.BackendService),
 				ServicePort:        input.Port,
 				NoTLS:              input.NoTLS,
 				IngressClass:       strings.TrimSpace(input.IngressClass),

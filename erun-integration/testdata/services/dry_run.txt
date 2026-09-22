@@ -1,0 +1,4 @@
+audit: erun services --dry-run
+kubectl --context test-context --namespace team-dev get service -o json
+kubectl --context test-context --namespace team-dev get ingress -o json
+services: each Service is matched to an erun-expose Ingress by the Ingress's own backend, not by re-deriving the <tenant>-<service> naming convention
