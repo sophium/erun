@@ -10,6 +10,7 @@ import {
   requestsTabLabel,
   restrictedTenantDashboardReads,
   tenantDashboardEnvironmentName,
+  tenantDashboardPlatformTenantName,
   visibleTenantDashboardTabs,
 } from '@/app/tenantDashboardPanels';
 import {
@@ -48,6 +49,7 @@ export function TenantDashboardView(): React.ReactElement | null {
   }
   const tenant = tenants.find((candidate) => candidate.name === dashboard.tenant);
   const environmentName = tenantDashboardEnvironmentName(tenant, dashboard.data?.environment);
+  const platformTenantName = tenantDashboardPlatformTenantName(dashboard.data);
   const blocked = tenantDashboardIsBlocked(dashboard);
   return (
     <section className="grid h-full min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] bg-background text-foreground">
@@ -60,6 +62,15 @@ export function TenantDashboardView(): React.ReactElement | null {
             <p className="truncate text-sm text-muted-foreground">
               {tenantDashboardSubtitle(tenant, environmentName)}
             </p>
+            {/* Whose rows these are. The heading above names the local tenant
+                this dashboard was opened from; every panel below renders the
+                platform tenant its credential reaches, and nothing else on the
+                surface can say whether those are the same tenant. */}
+            {platformTenantName && (
+              <p className="truncate text-[12px] text-muted-foreground">
+                Platform tenant: <span className="font-mono">{platformTenantName}</span>
+              </p>
+            )}
           </div>
           {/* Refresh is a manual-choice convenience for an already-loaded
               dashboard, never the repair path for a blocked one — every

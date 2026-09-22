@@ -10,6 +10,7 @@ import {
   relativeDashboardDate,
   restrictedTenantDashboardReads,
   reviewAuthorInitials,
+  tenantDashboardPlatformTenantName,
   visibleTenantDashboardTabs,
 } from './tenantDashboardPanels';
 
@@ -112,6 +113,23 @@ test('reviewAuthorInitials derives up to two letters from a display name', () =>
   assert.equal(reviewAuthorInitials('reviewer-1'), 'R1');
   assert.equal(reviewAuthorInitials('operator'), 'OP');
   assert.equal(reviewAuthorInitials(''), '?');
+});
+
+// The dashboard's heading names the local tenant it was opened from; every
+// panel below renders whichever platform tenant the credential reaches. This
+// is the one value that says whether those are the same tenant, so it has to
+// survive on the caller's own row and read as "not reported" (absent) rather
+// than as a name when the platform names none.
+test('the platform tenant name is read off the caller row and trimmed', () => {
+  assert.equal(tenantDashboardPlatformTenantName(undefined), '');
+  assert.equal(tenantDashboardPlatformTenantName(dashboard([])), '');
+  assert.equal(
+    tenantDashboardPlatformTenantName({
+      ...dashboard([]),
+      user: { tenantId: 'tenant-1', userId: 'user-1', tenantName: '  erun  ' },
+    }),
+    'erun',
+  );
 });
 
 test('middleEllipsis keeps both ends of a long identifier visible', () => {

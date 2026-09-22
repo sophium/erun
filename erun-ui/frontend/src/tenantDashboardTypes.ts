@@ -348,6 +348,12 @@ export interface UITenantDashboardPanel {
 
 export interface UITenantDashboardUser {
   tenantId: string;
+  // tenantName is the platform's own name for the tenant these rows belong
+  // to, from whoami. Set on the caller's own row only. It is what the
+  // dashboard header names so an operator can tell whose reviews, queue,
+  // users and audit they are looking at when the local tenant the dashboard
+  // was opened from is not the platform tenant its credential reaches.
+  tenantName?: string;
   userId: string;
   username?: string;
   roles?: string[];
