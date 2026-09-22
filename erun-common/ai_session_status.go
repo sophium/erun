@@ -86,7 +86,7 @@ type AISessionStatus struct {
 	Tool         string         `json:"tool,omitempty"`
 	State        AISessionState `json:"state"`
 	Reason       string         `json:"reason"`
-	LastActivity time.Time      `json:"lastActivity,omitempty"`
+	LastActivity time.Time      `json:"lastActivity,omitzero"`
 	ExitCode     *int           `json:"exitCode,omitempty"`
 }
 
