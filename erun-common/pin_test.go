@@ -80,7 +80,11 @@ dependencies:
 
 func TestResolvePinPlanFindsEveryErunReferenceAndLeavesTheTenantsOwnAlone(t *testing.T) {
 	root := seedPinnedTenantRepo(t)
-	env := EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"}
+	// An environment on erun's own release line says so by stating the stock
+	// image it runs; one that states nothing on a tenant of its own runs that
+	// tenant's devops image instead, and its runtimeversion is not a pin site
+	// (TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenNothingIsStated).
+	env := EnvConfig{Name: "dev", RuntimeVersion: "1.0.115", RuntimeImage: "ghcr.io/sophium/erun-devops:1.0.115"}
 
 	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
 	if err != nil {
@@ -314,6 +318,166 @@ func resolveTenantImagedRepoPlan(t *testing.T) PinPlan {
 		t.Fatalf("resolve: %v", err)
 	}
 	return plan
+}
+
+// The reported case, exactly as it reproduced: frs/build has no runtimeimage
+// recorded at all, so the operative-pin guard cannot see which release line the
+// environment's runtime pod is on. Its own umbrella is the statement it does
+// make: an env with no runtimeimage runs the chart's own image
+// (defaultDeployRuntimeImageBareName), and the frs-devops umbrella is frs's
+// line, not erun's. Re-pinning must leave runtimeversion alone — the erun target
+// is not this environment's number to hold — and say which statement it read.
+func TestResolvePinPlanLeavesAnOwnUmbrellaEnvsRuntimeVersionAlone(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{Name: "build", RuntimeChart: "oci://ghcr.io/sophium/charts/frs-devops:1.0.134"}
+
+	plan, err := ResolvePinPlan(root, "frs", "build", env, "1.0.287")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeVersion {
+			t.Fatalf("an env riding its own umbrella's release line must not have runtimeversion re-pinned: %+v", site)
+		}
+	}
+	note := skipNoteNaming(t, plan, "runtimeversion", "frs-devops")
+	if !strings.Contains(note, "runtimechart") {
+		t.Fatalf("the skipped note must name runtimechart as what it read, got %q", note)
+	}
+}
+
+// The same environment after a deploy that healed only half of the coordinate:
+// a persisted runtimeimage still naming erun's stock image while the pod
+// actually runs the tenant's own. The last image a deploy confirmed running is
+// the observed truth, so runtimeversion must follow it rather than the stale
+// pin — and the note must say where it read it.
+func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenItsPodRanItsOwnImage(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{
+		Name:                "build",
+		RuntimeVersion:      "1.0.134",
+		RuntimeImage:        "ghcr.io/sophium/erun-devops:1.0.284",
+		RuntimeRunningImage: "ghcr.io/sophium/frs-devops:1.0.134",
+	}
+
+	plan, err := ResolvePinPlan(root, "frs", "build", env, "1.0.287")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeVersion {
+			t.Fatalf("runtimeversion must follow the image the pod actually ran, not the stale pin: %+v", site)
+		}
+	}
+	note := skipNoteNaming(t, plan, "runtimeversion", "ghcr.io/sophium/frs-devops:1.0.134")
+	if !strings.Contains(note, "runtimerunningimage") {
+		t.Fatalf("the skipped note must name runtimerunningimage as what it read, got %q", note)
+	}
+}
+
+// The reported case at its narrowest: the config says nothing at all about the
+// environment's runtime image, which is how frs/build was configured. Silence is
+// not undetermined here — a deploy of this environment installs
+// ghcr.io/sophium/frs-devops (the tenant's own line's image, the default
+// resolveDeployRuntimeImage falls back to), and records that deploy's version as
+// runtimeversion. Re-pinning must leave the field alone and name the statement
+// the decision rested on.
+func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenNothingIsStated(t *testing.T) {
+	root := seedPinnedTenantRepo(t)
+	env := EnvConfig{Name: "build"}
+
+	plan, err := ResolvePinPlan(root, "frs", "build", env, "1.0.287")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	for _, site := range plan.Sites {
+		if site.Kind == PinSiteRuntimeVersion {
+			t.Fatalf("an env whose deploy installs its tenant's own image must not have runtimeversion re-pinned: %+v", site)
+		}
+	}
+	note := skipNoteNaming(t, plan, "runtimeversion", "frs-devops")
+	if !strings.Contains(note, "by default") {
+		t.Fatalf("the skipped note must say where that image came from, got %q", note)
+	}
+}
+
+// The other half of the pair: an environment whose runtime image is erun's own is
+// still re-pinned, runtimeversion included — either because it states the stock
+// image, or because it is an environment of erun's own tenant, whose deploys
+// install the stock image with nothing stated at all. Skipping those would leave
+// a real drift behind while the plan read as complete.
+func TestResolvePinPlanStillPinsAStockEnvsRuntimeVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		tenant      string
+		environment string
+		env         EnvConfig
+	}{
+		{
+			name:        "erun's own tenant, nothing stated",
+			tenant:      "erun",
+			environment: "dev",
+			env:         EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"},
+		},
+		{
+			name:        "stock image and stock chart stated",
+			tenant:      "acme",
+			environment: "dev",
+			env: EnvConfig{
+				Name:                "dev",
+				RuntimeVersion:      "1.0.115",
+				RuntimeImage:        "ghcr.io/sophium/erun-devops:1.0.115",
+				RuntimeRunningImage: "ghcr.io/sophium/erun-devops:1.0.115",
+				RuntimeChart:        "oci://ghcr.io/sophium/charts/erun-devops:1.0.115",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := seedPinnedTenantRepo(t)
+			plan, err := ResolvePinPlan(root, tc.tenant, tc.environment, tc.env, "1.0.175")
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if len(plan.Changes()) == 0 {
+				t.Fatal("expected the repo's drifted erun references to move")
+			}
+			for _, site := range plan.Sites {
+				if site.Kind == PinSiteRuntimeVersion {
+					if site.Target != "1.0.175" {
+						t.Fatalf("runtimeversion site = %+v", site)
+					}
+					return
+				}
+			}
+			t.Fatalf("a stock env's runtimeversion must still be a pin site, skipped notes: %+v", plan.Skipped)
+		})
+	}
+}
+
+// skipNoteNaming returns the one skipped note mentioning every fragment, so a
+// test asserting on a note's wording does not silently pass on a different one.
+func skipNoteNaming(t *testing.T, plan PinPlan, fragments ...string) string {
+	t.Helper()
+	matched := ""
+	for _, note := range plan.Skipped {
+		hit := true
+		for _, fragment := range fragments {
+			if !strings.Contains(note, fragment) {
+				hit = false
+			}
+		}
+		if !hit {
+			continue
+		}
+		if matched != "" {
+			t.Fatalf("more than one skipped note names %v:\n%s\n%s", fragments, matched, note)
+		}
+		matched = note
+	}
+	if matched == "" {
+		t.Fatalf("expected a skipped note naming %v, got %+v", fragments, plan.Skipped)
+	}
+	return matched
 }
 
 // Idempotent: re-running finds nothing left to do, which is what makes a re-pin
@@ -659,24 +823,30 @@ func TestApplyPinnedEnvConfigMovesRuntimeVersionImageAndChartTogether(t *testing
 	}
 }
 
-// A deliberately-separate chart line (the tenant's own umbrella) must survive
-// a re-pin unchanged, even while the rest of the coordinate moves.
-func TestApplyPinnedEnvConfigLeavesADeliberatelySeparateChartLineUnchanged(t *testing.T) {
+// A deliberately-separate chart line (the tenant's own umbrella) is the whole
+// coordinate, not just the chart half: an env running that umbrella runs the
+// image it publishes, so its runtimeversion belongs to that line and must
+// survive a re-pin too. Writing the erun target into runtimeversion here is what
+// left an environment holding a number its own release line never publishes.
+func TestApplyPinnedEnvConfigLeavesAnOwnUmbrellaEnvsWholeCoordinateUnchanged(t *testing.T) {
 	env := EnvConfig{
 		Name:           "dev",
-		RuntimeVersion: "1.0.201",
+		RuntimeVersion: "1.0.76",
 		RuntimeChart:   "oci://ghcr.io/sophium/charts/acme-devops:1.0.76",
 	}
 	plan, err := ResolvePinPlan(t.TempDir(), "acme", "dev", env, "1.0.228")
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	updated, _ := ApplyPinnedEnvConfig(env, plan)
+	updated, changed := ApplyPinnedEnvConfig(env, plan)
 	if updated.RuntimeChart != "oci://ghcr.io/sophium/charts/acme-devops:1.0.76" {
 		t.Fatalf("a tenant's own chart line must survive unchanged, got %q", updated.RuntimeChart)
 	}
-	if updated.RuntimeVersion != "1.0.228" {
-		t.Fatalf("runtimeversion should still move, got %q", updated.RuntimeVersion)
+	if updated.RuntimeVersion != "1.0.76" {
+		t.Fatalf("an own-umbrella env's runtimeversion must survive unchanged, got %q", updated.RuntimeVersion)
+	}
+	if changed {
+		t.Fatalf("nothing in this env's own config is erun's to move, yet a change was reported: %+v", updated)
 	}
 }
 

@@ -22,11 +22,17 @@ around it: resolve a target, verify it is real, show the plan, apply, report.
 | Build-env image | `FROM …/erun-devops:<version>` in a custom runtime image |
 | Terraform variable image reference | an erun image reference a tenant's own Terraform sets directly, e.g. the cluster-edge module's `dns01_webhook_image` |
 | Environment runtime image | the env's `runtimeimage`, when it names erun's own stock `erun-devops` image |
-| Environment runtime version | the env's `runtimeversion` |
+| Environment runtime version | the env's `runtimeversion`, when the environment's own runtime image is erun's |
 
 Only erun's own references. A tenant's own Terraform sources, their own chart
 dependencies, and an umbrella's own `version:` are versioned independently and
-are never touched.
+are never touched. An environment's own runtime coordinate is erun's to move
+only while that environment runs erun's own runtime image: when its
+`runtimeimage`, the image its last deploy confirmed running, or its own
+`runtimechart` says otherwise — or when it records none of those and a deploy
+would therefore install the tenant's own `<tenant>-devops` image — the plan
+leaves its `runtimeversion` where it is and names the statement it read, rather
+than handing the environment a version its own release line never publishes.
 
 ## The motion
 
