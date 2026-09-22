@@ -132,16 +132,28 @@ export class Titlebar {
     return this.whipPanel().getByRole('checkbox', { name });
   }
 
+  // The three group shortcuts carry their full label as their accessible name
+  // -- IconTooltip's label is only a description, so the aria-label is the
+  // name, and "Select all orchestrators" is a substring of the third
+  // shortcut's own label. `exact` is therefore load-bearing, not tidiness: a
+  // substring match would resolve two buttons at once and fail Playwright's
+  // strict mode.
   selectAllOrchestratorsButton(): Locator {
-    return this.whipPanel().getByRole('button', { name: 'Select all orchestrators' });
+    return this.whipPanel().getByRole('button', {
+      name: 'Select all orchestrators',
+      exact: true,
+    });
   }
 
   selectAllEnvironmentsButton(): Locator {
-    return this.whipPanel().getByRole('button', { name: 'Select all environments' });
+    return this.whipPanel().getByRole('button', { name: 'Select all environments', exact: true });
   }
 
   selectAllButton(): Locator {
-    return this.whipPanel().getByRole('button', { name: 'Select all', exact: true });
+    return this.whipPanel().getByRole('button', {
+      name: 'Select all orchestrators and environments',
+      exact: true,
+    });
   }
 
   // The primary action's own label states the resolved count before it acts

@@ -12,6 +12,23 @@ interface TargetRow {
   checked: boolean;
 }
 
+// The three group shortcuts, each carrying its one human-readable name. The
+// buttons are icon-only, so IconTooltip's label is the only text an operator
+// can see -- and a tooltip is associated with its trigger as a *description*,
+// not as a name, so the accessible name has to be set separately. Writing that
+// same string out twice by hand is how the third shortcut came to announce
+// "Select all" while its tooltip read "Select all orchestrators and
+// environments": WCAG 2.5.3 "Label in Name" requires the accessible name to
+// contain the visible label, and voice control ("click Select all
+// orchestrators and environments") had nothing in the name to match. One
+// constant per shortcut, consumed by both, makes that divergence
+// unrepresentable rather than fixing one instance of it.
+const GROUP_SHORTCUTS = [
+  { key: 'orchestrators', label: 'Select all orchestrators', icon: Bot },
+  { key: 'environments', label: 'Select all environments', icon: Server },
+  { key: 'all', label: 'Select all orchestrators and environments', icon: ListChecks },
+] as const;
+
 // isWhipSelectionEmpty is true only for the untouched default: nothing
 // focused, nothing manually checked either. Pulled out of the component body
 // to keep its own branching out of the render function's complexity budget.
@@ -78,6 +95,11 @@ export function TitlebarWhipTargetPicker({
   onSelectAllOrchestrators: () => void;
   onSelectAll: () => void;
 }): React.ReactElement {
+  const groupShortcutHandlers: Record<(typeof GROUP_SHORTCUTS)[number]['key'], () => void> = {
+    orchestrators: onSelectAllOrchestrators,
+    environments: onSelectAllEnvironments,
+    all: onSelectAll,
+  };
   return (
     <div className="flex flex-col gap-3">
       {isWhipSelectionEmpty(selection) && (
@@ -86,39 +108,19 @@ export function TitlebarWhipTargetPicker({
         </p>
       )}
       <div className="flex items-center gap-1.5">
-        <IconTooltip label="Select all orchestrators">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label="Select all orchestrators"
-            onClick={onSelectAllOrchestrators}
-          >
-            <Bot aria-hidden="true" className="size-4" />
-          </Button>
-        </IconTooltip>
-        <IconTooltip label="Select all environments">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label="Select all environments"
-            onClick={onSelectAllEnvironments}
-          >
-            <Server aria-hidden="true" className="size-4" />
-          </Button>
-        </IconTooltip>
-        <IconTooltip label="Select all orchestrators and environments">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label="Select all"
-            onClick={onSelectAll}
-          >
-            <ListChecks aria-hidden="true" className="size-4" />
-          </Button>
-        </IconTooltip>
+        {GROUP_SHORTCUTS.map(({ key, label, icon: Icon }) => (
+          <IconTooltip key={key} label={label}>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label={label}
+              onClick={groupShortcutHandlers[key]}
+            >
+              <Icon aria-hidden="true" className="size-4" />
+            </Button>
+          </IconTooltip>
+        ))}
       </div>
       {targetsLoading || !targets ? (
         <p className="text-xs text-muted-foreground">Loading targets…</p>

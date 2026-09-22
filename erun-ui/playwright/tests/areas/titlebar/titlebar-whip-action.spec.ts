@@ -272,6 +272,33 @@ test('the nothing-focused case starts from an empty selection, not everything', 
   await expect(app.titlebar.whipRunButton()).toBeDisabled();
 });
 
+test('each group shortcut announces the label an operator can see', async ({ app }) => {
+  // The reported failure: the third shortcut's accessible name read "Select
+  // all" while the tooltip the operator actually sees read "Select all
+  // orchestrators and environments". IconTooltip associates its label as a
+  // *description*, so the hand-written aria-label is the name -- and voice
+  // control matches the name, so "click Select all orchestrators and
+  // environments" had nothing to match (WCAG 2.5.3 "Label in Name").
+  //
+  // Located through the icon each button renders, not through a name-based
+  // locator: a name-based one would resolve only for the very name it is
+  // about to assert, so the check could never fail. The icons are the
+  // buttons' own structural identity.
+  await app.titlebar.openWhipPanel();
+
+  const shortcuts: Array<[string, string]> = [
+    ['lucide-bot', 'Select all orchestrators'],
+    ['lucide-server', 'Select all environments'],
+    ['lucide-list-checks', 'Select all orchestrators and environments'],
+  ];
+  for (const [icon, label] of shortcuts) {
+    await expect(app.titlebar.whipPanel().locator(`button:has(.${icon})`)).toHaveAttribute(
+      'aria-label',
+      label,
+    );
+  }
+});
+
 test('select all orchestrators whips only the orchestrator population', async ({ app }) => {
   await app.sidebar.openTenantDashboard(SEED_TENANT);
   await app.titlebar.openWhipPanel();
