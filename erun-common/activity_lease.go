@@ -117,7 +117,9 @@ type EnvironmentActivityLease struct {
 	// longer exists reclaims the lease immediately.
 	PID       int       `json:"pid,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
-	RenewedAt time.Time `json:"renewedAt,omitempty"`
+	// RenewedAt is set only once the lease is renewed, so an omitzero here keeps
+	// a never-renewed claim from carrying a fabricated zero instant.
+	RenewedAt time.Time `json:"renewedAt,omitzero"`
 	ExpiresAt time.Time `json:"expiresAt"`
 	// Scope and Exclusive are set only on an exclusive claim. Scope names the
 	// resource being protected ("worktree" by default); Exclusive is true so a

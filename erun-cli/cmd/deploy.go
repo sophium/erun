@@ -27,10 +27,12 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			"Pass --runtime-image to install the canonical ERun base image (or any image) via the " +
 			"published runtime chart — useful to bootstrap an environment before its own image is built. " +
 			"Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.\n\n" +
-			"deploy waits for the rollout to become ready — default 5m, or the env's `deploy.timeout`, " +
+			"deploy waits for the rollout to become ready — default 15m, or the env's `deploy.timeout`, " +
 			"or --rollout-timeout — and watches the new pods: it keeps waiting while an image is still " +
 			"pulling and aborts early on a real container failure (crash, config error, or a permanent " +
-			"image-pull rejection) instead of waiting out the timeout. " +
+			"image-pull rejection) instead of waiting out the timeout. The default is sized for a cold " +
+			"pull of the runtime image, which the rollout has to wait out with the previous pod already " +
+			"torn down; raise it if a genuinely cold pull of a bigger image needs longer. " +
 			"Pass --max-cpu/--max-memory/--max-storage together to cap the environment's namespace with a " +
 			"Kubernetes ResourceQuota+LimitRange for this deploy; omit to use the env's saved namespace quota, if any.",
 		Example:       "  erun deploy team prod --version 1.2.3\n  erun deploy team dev --current\n  erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops\n  erun deploy team prod --version 1.2.3 --rollout-timeout 10m\n  erun deploy team prod --version 1.2.3 --max-cpu 4 --max-memory 8Gi --max-storage 80Gi",
@@ -136,7 +138,7 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Re-run the helm upgrade even when the deployed release already matches the requested version")
-	cmd.Flags().StringVar(&target.RolloutTimeout, "rollout-timeout", "", "Override the helm rollout wait for this deploy (Go duration, e.g. 8m); empty uses the env's deploy.timeout or the 5m default")
+	cmd.Flags().StringVar(&target.RolloutTimeout, "rollout-timeout", "", "Override the helm rollout wait for this deploy (Go duration, e.g. 20m); empty uses the env's deploy.timeout or the 15m default")
 	cmd.Flags().StringVar(&target.NamespaceQuotaOverride.CPU, "max-cpu", "", "Cap the environment's namespace to this much CPU (Kubernetes quantity, e.g. 4) via a ResourceQuota+LimitRange; requires --max-memory and --max-storage too, and overrides the env's saved namespace quota for this deploy only")
 	cmd.Flags().StringVar(&target.NamespaceQuotaOverride.Memory, "max-memory", "", "Cap the environment's namespace to this much memory (Kubernetes quantity, e.g. 8Gi); requires --max-cpu and --max-storage too")
 	cmd.Flags().StringVar(&target.NamespaceQuotaOverride.Storage, "max-storage", "", "Cap the environment's namespace to this much storage (Kubernetes quantity, e.g. 80Gi); requires --max-cpu and --max-memory too")

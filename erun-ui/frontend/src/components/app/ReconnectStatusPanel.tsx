@@ -6,6 +6,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
 import { confirmReconnect, dismissReconnect } from '@/app/reviewThunks';
 import { setSelected } from '@/app/slices/selectionSlice';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 // Fudge factor so a layout that settles a pixel or two short of perfect
 // alignment still counts as "at the bottom" for auto-scroll.
@@ -161,7 +162,7 @@ function ReconnectStatusErrorFooter({
   };
   return (
     <div className="border-t px-3 py-2">
-      {error && <div className="text-xs text-destructive [overflow-wrap:anywhere]">{error}</div>}
+      {error && <InlineAlert>{error}</InlineAlert>}
       <div className="mt-2 flex justify-end gap-2">
         <Button
           type="button"

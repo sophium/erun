@@ -12,6 +12,20 @@ interface TargetRow {
   checked: boolean;
 }
 
+// The three group shortcuts, each declared once. The icon-only button has no
+// visible text of its own, so its IconTooltip label is the label an operator
+// can see and read out; the button's accessible name is the same string, read
+// from the same place. Written twice by hand, the third one had already
+// drifted to "Select all" — a name that does not contain its own visible
+// label (WCAG 2.5.3 "Label in Name") and so matches neither voice control read
+// aloud nor the two shortcuts beside it. One field makes that
+// unrepresentable rather than fixing the one instance.
+const WHIP_GROUP_SHORTCUTS = [
+  { key: 'orchestrators', label: 'Select all orchestrators', Icon: Bot },
+  { key: 'environments', label: 'Select all environments', Icon: Server },
+  { key: 'all', label: 'Select all orchestrators and environments', Icon: ListChecks },
+] as const;
+
 // isWhipSelectionEmpty is true only for the untouched default: nothing
 // focused, nothing manually checked either. Pulled out of the component body
 // to keep its own branching out of the render function's complexity budget.
@@ -78,6 +92,11 @@ export function TitlebarWhipTargetPicker({
   onSelectAllOrchestrators: () => void;
   onSelectAll: () => void;
 }): React.ReactElement {
+  const groupShortcutHandlers: Record<(typeof WHIP_GROUP_SHORTCUTS)[number]['key'], () => void> = {
+    orchestrators: onSelectAllOrchestrators,
+    environments: onSelectAllEnvironments,
+    all: onSelectAll,
+  };
   return (
     <div className="flex flex-col gap-3">
       {isWhipSelectionEmpty(selection) && (
@@ -86,39 +105,19 @@ export function TitlebarWhipTargetPicker({
         </p>
       )}
       <div className="flex items-center gap-1.5">
-        <IconTooltip label="Select all orchestrators">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label="Select all orchestrators"
-            onClick={onSelectAllOrchestrators}
-          >
-            <Bot aria-hidden="true" className="size-4" />
-          </Button>
-        </IconTooltip>
-        <IconTooltip label="Select all environments">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label="Select all environments"
-            onClick={onSelectAllEnvironments}
-          >
-            <Server aria-hidden="true" className="size-4" />
-          </Button>
-        </IconTooltip>
-        <IconTooltip label="Select all orchestrators and environments">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            aria-label="Select all"
-            onClick={onSelectAll}
-          >
-            <ListChecks aria-hidden="true" className="size-4" />
-          </Button>
-        </IconTooltip>
+        {WHIP_GROUP_SHORTCUTS.map(({ key, label, Icon }) => (
+          <IconTooltip key={key} label={label}>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              aria-label={label}
+              onClick={groupShortcutHandlers[key]}
+            >
+              <Icon aria-hidden="true" className="size-4" />
+            </Button>
+          </IconTooltip>
+        ))}
       </div>
       {targetsLoading || !targets ? (
         <p className="text-xs text-muted-foreground">Loading targets…</p>

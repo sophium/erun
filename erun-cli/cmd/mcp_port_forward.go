@@ -134,25 +134,25 @@ func reusableRecordedPortForward(ctx common.Context, kind, logPath string, state
 
 func startMCPPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
-	var process *os.Process
-	if err := retryTransientPortForwardStart(func() error {
-		p, err := launchMCPPortForwardProcess(logPath, args)
-		if err != nil {
-			return err
-		}
-		process = p
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-
 	expectedState.LogPath = logPath
-	expectedState.ProcessID = process.Pid
-	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
-		return 0, err
-	}
-
-	if err := waitForMCPPortForward(localPort, logPath); err != nil {
+	process, err := startPortForwardWithBindRetry(ctx, "mcp", localPort, func() (*os.Process, error) {
+		logStart := portForwardLogSize(logPath)
+		p, err := launchPortForwardProcessRetrying(func() (*os.Process, error) {
+			return launchMCPPortForwardProcess(logPath, args)
+		})
+		if err != nil {
+			return nil, err
+		}
+		expectedState.ProcessID = p.Pid
+		if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
+			return p, err
+		}
+		if err := waitForMCPPortForward(localPort, logPath, logStart); err != nil {
+			return p, err
+		}
+		return p, nil
+	})
+	if err != nil {
 		releaseUnreachablePortForward(ctx, "mcp", process, localPort, err)
 		return 0, err
 	}
@@ -192,11 +192,22 @@ func releaseUnreachablePortForward(ctx common.Context, kind string, process *os.
 	waitForLocalPortToClose(localPort)
 }
 
-func waitForMCPPortForward(localPort int, logPath string) error {
+// logStart is where this attempt's own output begins in logPath; see
+// portForwardLogReportsListenConflict for why the caller takes it before
+// launching rather than here.
+func waitForMCPPortForward(localPort int, logPath string, logStart int64) error {
 	deadline := time.Now().Add(mcpPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalMCPEndpoint(localPort) {
 			return nil
+		}
+		// kubectl exits the moment its listen fails, so waiting out the rest of
+		// the startup timeout would spend it to learn what the log already
+		// says — and the bind retry cannot afford that per attempt. Only what
+		// this attempt appended counts, so a conflict an earlier attempt wrote
+		// cannot be read as this one's.
+		if portForwardLogReportsListenConflict(logPath, logStart) {
+			return listenConflictError(localPort, logPath)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -292,6 +303,11 @@ func mcpPortForwardTimeoutDetail(logPath string) string {
 		return "runtime pod connection was lost, likely because the pod restarted"
 	case strings.Contains(value, "connection refused"):
 		return "runtime pod exists but MCP is not accepting connections yet"
+	case isListenConflictText(value):
+		// The bind retry reads this same shape out of the log and waits the
+		// socket out. Reaching here means it did not come free within the
+		// retry window, so the port really is held by something else.
+		return "the local port is held by a listener that is not releasing it; find and stop the process holding it, or free the port"
 	default:
 		return ""
 	}

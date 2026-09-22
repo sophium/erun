@@ -98,6 +98,63 @@ export function toggleReviewStatus(statuses: string[], status: string): string[]
   return reviewStatuses.filter((candidate) => next.includes(candidate));
 }
 
+// ReviewsFilterNarrowing is the Reviews tab's filter state with the axes
+// separated, so a consumer can name the filters that are on instead of
+// describing all of them and hedging.
+//
+// authorship is the phrase for the authorship chips — the pair is kept whole,
+// because "Mine and Waiting on me" is a different state from either one alone
+// and collapsing it to a boolean is what made the empty state unable to say
+// which it was looking at.
+//
+// statuses excludes the two selections that narrow nothing: an empty selection
+// (how the unfiltered list is reached) and the opening default.
+export interface ReviewsFilterNarrowing {
+  authorship: '' | 'Mine' | 'Waiting on me' | 'both Mine and Waiting on me';
+  statuses: string[];
+}
+
+export function reviewsFilterNarrowing(filter: ReviewFilterState): ReviewsFilterNarrowing {
+  return {
+    authorship: authorshipFilterPhrase(filter),
+    statuses: reviewStatusFilterIsDefault(filter.statuses) ? [] : filter.statuses,
+  };
+}
+
+function authorshipFilterPhrase(filter: ReviewFilterState): ReviewsFilterNarrowing['authorship'] {
+  if (filter.mine && filter.waitingOnMe) {
+    return 'both Mine and Waiting on me';
+  }
+  if (filter.mine) {
+    return 'Mine';
+  }
+  return filter.waitingOnMe ? 'Waiting on me' : '';
+}
+
+// reviewsFilterIsNarrowing reports whether anything is actually hiding rows,
+// which is what decides between the tab's two empty states. Derived from the
+// same axes the copy names, so the heading and the body can never disagree —
+// and an empty status selection, which shows everything, is not a filter.
+export function reviewsFilterIsNarrowing(filter: ReviewFilterState): boolean {
+  const narrowing = reviewsFilterNarrowing(filter);
+  return narrowing.authorship !== '' || narrowing.statuses.length > 0;
+}
+
+// reviewsFilteredEmptyBody names the filters that came up empty. The operator
+// turned these on and got nothing; saying "the filters you've turned on" makes
+// them re-read the toolbar to find out which one, and describing a conjunction
+// when only one is active states something false about their own query.
+export function reviewsFilteredEmptyBody(filter: ReviewFilterState): string {
+  const { authorship, statuses } = reviewsFilterNarrowing(filter);
+  if (authorship !== '' && statuses.length > 0) {
+    return `Nothing is ${authorship} right now, with status ${statuses.join(' or ')}.`;
+  }
+  if (authorship !== '') {
+    return `Nothing is ${authorship} right now.`;
+  }
+  return `Nothing has status ${statuses.join(' or ')} right now.`;
+}
+
 // reviewCountLabel renders the list's own count, naming both numbers whenever
 // a status filter is hiding rows. "3 of 155" is the honest reading; "3" alone
 // would claim the tenant has three reviews.

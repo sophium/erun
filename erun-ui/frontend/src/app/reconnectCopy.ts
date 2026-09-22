@@ -40,8 +40,16 @@ const STALE_FORWARD_COPY: ReachabilityCopy = {
   errorBody: 'The connection to your environment is down.',
   action: 'Reconnect…',
   dialogTitle: 'Reconnect to environment?',
+  // Describes what the action attempts, not what it will achieve. The dialog
+  // is reached *from* the unreachable state, so it is shown precisely when the
+  // environment may be unreachable for a reason `erun open` cannot address --
+  // a linked env whose cluster API is itself unreachable from this host cannot
+  // be redeployed however many times Reconnect is pressed, and this is the
+  // moment an operator is most likely to press it repeatedly. Naming the
+  // condition the redeploy needs keeps the promise inside what has actually
+  // been checked, which is all this copy can know from here.
   dialogBody:
-    'This runs `erun open` to restore the connection. If the environment runtime is not currently running, it will be redeployed.',
+    'This runs `erun open` to restore the connection, redeploying the runtime if it is not running and its cluster is reachable.',
   dialogConfirm: 'Reconnect',
   runningStatus: 'Reconnecting…',
   errorStatusTitle: 'Reconnect failed',

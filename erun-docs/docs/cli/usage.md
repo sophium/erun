@@ -37,7 +37,7 @@ erun usage --tenant my-tenant --environment dev
 
 On an agent env, this reading cannot see the environment's own builds: `erun build`/`erun release` run in a separate sidecar container (`erun-dind`), not the one this reads. The output says so directly on every environment that carries the sidecar — see [Runtime pods · Reading the resource figures](/concepts/runtime-pods#reading-the-resource-figures) for why, and `erun observe` for the sidecar's own limits.
 
-The environment's standing [sizing recommendation](/cli/list#the-sizing-recommendation) is not part of this output. It is derived from usage history the environment's own pod monitor retained, and this reading does not carry that history back to the caller, so there is nothing here to derive a verdict from. Read it from inside the environment instead — the `usage` and `resize` tools over its MCP endpoint, or the desktop Runtime tab.
+The environment's standing [sizing recommendation](/cli/list#the-sizing-recommendation) rides along with the reading whenever the usage history behind it can be read. It is derived from history the environment's own pod monitor retained, which lives with the environment, so which surfaces show it follows from what can see that history rather than from which command was run — the `usage` and `resize` tools over the environment's MCP endpoint and [`erun list`](/cli/list)'s `runtime-pod:` block resolve the same recommendation from the same evidence, so no two of them can disagree. A host that has never monitored the environment has no history to resolve, and reports the reading with no sizing verdict at all rather than a zero-value one.
 
 ## Flags
 

@@ -57,3 +57,10 @@ This is the shared quality bar for CLI help and MCP descriptions.
 - After Go changes run `go test ./...` here and relevant integration scenarios.
 - CLI behavior is gated through the compiled binary, including help and each
   plan-changing flag combination. Remove unit tests duplicating those scenarios.
+
+## Diagnostic Message Conventions
+
+Operator-facing messages -- command output, log lines, and error text -- follow
+the Diagnostic Decision Record in `erun-common/AGENTS.md`. That record is the
+shared one; this module applies it rather than restating it, and a message that
+departs from a decision says why in the same note.

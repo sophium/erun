@@ -1,0 +1,49 @@
+Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+
+== Helm release status ==
+NAME: team-devops
+STATUS: deployed
+
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+== Resources ==
+  CPU: 49.8% of a 6.00-core quota (sampled over 1.0s)
+  Memory: 4.0GiB / 4.0GiB (100.0%), peak 4.0GiB, OOM kills 3
+Warnings (3):
+  memory is at 100% of its 4096Mi limit (warns at 85%)
+  memory.peak reached 100% of the limit (warns at 95%) -- this environment came close to an OOM kill
+  the cgroup recorded 3 OOM kill(s)
+Sizing recommendation:
+  sizing: memory raise to 6144Mi from 4096Mi (3 oom kill(s) at 4096Mi, high confidence); cpu raise to 9 from 6 (9.85% of scheduling periods throttled (9850 of 100000), high confidence)
+  sizing-evidence: 0m observed, 1 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
+  doctor does not resize: it rolls the pod and kills whatever is running. Apply the recommendation with `erun resize --apply-recommendation` once this environment is clear.
+
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
+Filesystem  Size  Used  Avail  Mounted on
+overlay     100G  20G   80G    /var/lib/docker
+Optional cleanup steps in team/dev not checked: stdin is not a terminal, so there was nobody to answer the prompt. These are optional maintenance, not failed checks.
+  skipped: prune_images (Remove unused Docker images)
+  skipped: prune_build_cache (Remove unused BuildKit cache)
+  skipped: prune_containers (Remove stopped Docker containers)
+Pass --prune-images, --prune-build-cache, or --prune-containers to run one explicitly.
+No cleanup actions selected.
+audit: erun doctor team dev
+trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

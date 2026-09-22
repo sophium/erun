@@ -21,6 +21,13 @@ type ListResult struct {
 	CloudProviders   []CloudProviderStatus      `json:"cloudProviders,omitempty"`
 	Tenants          []ListTenantResult         `json:"tenants,omitempty"`
 	Orchestrators    []ListOrchestratorResult   `json:"orchestrators,omitempty"`
+	// OrphanedSSHAliases are the host's own ~/.ssh/config Host blocks naming an
+	// erun environment alias no configured environment claims. Nothing else in
+	// erun looks at these: `sshd init` writes blocks and env deletion removes
+	// the one it wrote, so a block left by a rename, a deleted environment or a
+	// turned-off sshd survives indefinitely and can start resolving into
+	// whichever environment inherits its local port.
+	OrphanedSSHAliases []SSHOrphanedAlias `json:"orphanedSSHAliases,omitempty"`
 }
 
 // ListOrchestratorResult is the read-model view of one persisted
@@ -195,7 +202,35 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 		result.Tenants = append(result.Tenants, tenantResult)
 	}
 
+	result.OrphanedSSHAliases = listOrphanedSSHAliases(result.Tenants)
+
 	return result, nil
+}
+
+// listOrphanedSSHAliases reports the host's stale erun ssh aliases against the
+// environments just resolved. A config that cannot be read is silence, not a
+// failure: the aliases say something about a file the operator may never have
+// had, and nothing about the environments this command exists to print.
+func listOrphanedSSHAliases(tenants []ListTenantResult) []SSHOrphanedAlias {
+	entries, err := ReadDefaultSSHHostEntries()
+	if err != nil {
+		return nil
+	}
+	environments := make([]SSHEnvironmentAlias, 0, 4)
+	for _, tenant := range tenants {
+		for _, env := range tenant.Environments {
+			if !env.SSH.Enabled {
+				continue
+			}
+			environments = append(environments, SSHEnvironmentAlias{
+				Tenant:      tenant.Name,
+				Environment: env.Name,
+				Alias:       env.SSH.HostAlias,
+				LocalPort:   env.SSH.LocalPort,
+			})
+		}
+	}
+	return FindOrphanedSSHAliases(entries, environments)
 }
 
 func newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName, currentRepoPath string, tenants []TenantConfig) ListResult {

@@ -320,7 +320,9 @@ type EnvironmentJob struct {
 	// bookkeeping that has to survive to report the outcome.
 	ChildPID  int       `json:"childPid,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
-	EndedAt   time.Time `json:"endedAt,omitempty"`
+	// EndedAt is zero until the job ends, so omitzero keeps a running job from
+	// reading as one that ended at the zero instant.
+	EndedAt time.Time `json:"endedAt,omitzero"`
 	// ExitCode is set for every job that reached exited or abandoned, and is -1
 	// when the work was terminated by a signal. It is nil in every other state,
 	// so a missing outcome can never be read as a zero one.
@@ -398,7 +400,7 @@ type EnvironmentJob struct {
 	// a caller's own clock — the two clocks are not the same clock — which is
 	// why every reader derives AliveAgeMs from it instead of exposing it raw
 	// for a caller to subtract against.
-	LastAliveAt time.Time `json:"lastAliveAt,omitempty"`
+	LastAliveAt time.Time `json:"lastAliveAt,omitzero"`
 	// AliveSeq is a monotonic counter bumped on every beat, so a caller can
 	// tell "still beating" from "the same timestamp read twice".
 	AliveSeq int64 `json:"aliveSeq,omitempty"`

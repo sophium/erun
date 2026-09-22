@@ -44,7 +44,11 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 		Short: "Diagnose and repair an environment's runtime and config",
 		Long: "Diagnose and repair an environment's runtime and config.\n\n" +
 			"Reports why a deploy may have failed (helm release status and the runtime pods, " +
-			"read-only). When the release looks unhealthy it recommends the one recovery that fits — " +
+			"read-only), and the environment's own resource pressure — memory against its " +
+			"limit with the OOM kills behind it, CPU against its quota — beside the standing " +
+			"sizing verdict `erun usage` computes, when either has something to report. It " +
+			"never resizes: a resize rolls the pod, so it names the remedy instead. " +
+			"When the release looks unhealthy it recommends the one recovery that fits — " +
 			"clear a stuck pending helm release, or roll back to the last successful revision — and " +
 			"prompts before running it. It also prunes Docker images, build cache, or stopped " +
 			"containers against the daemon that holds the environment's build images (the erun-dind " +
@@ -158,6 +162,9 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 		return err
 	}
 	if err := reportDeployDiagnosisSections(ctx, configStore, result, diagnosis); err != nil {
+		return err
+	}
+	if err := reportEnvironmentResources(ctx, req, result); err != nil {
 		return err
 	}
 	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {
