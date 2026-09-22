@@ -28,9 +28,6 @@
       "ownUsageObserved": true
     }
   ],
-  "warnings": [
-    "the build was throttled in 425 of 376556 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
-  ],
   "excludesBuilds": true,
   "dind": {
     "cpu": {
