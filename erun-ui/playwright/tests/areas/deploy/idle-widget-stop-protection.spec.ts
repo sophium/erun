@@ -293,7 +293,18 @@ test.describe('idle widget stop protection', () => {
       secondsUntilForcedStop: 137,
       gracePeriodSeconds: 600,
     };
+    // The route handler is a second clock here: it owns cancelCalls and runs
+    // when the click's fetch reaches it, not synchronously with the click.
+    // Holding it until the test releases it makes that overlap deliberate --
+    // the increment lands on a microtask queued by the release, so a read taken
+    // in the same synchronous block is ordered before it by construction rather
+    // than by luck, which is what a bare read of this counter gets wrong.
+    let cancelArrived = 0;
     let cancelCalls = 0;
+    let releaseCancel!: () => void;
+    const cancelHeld = new Promise<void>((resolve) => {
+      releaseCancel = resolve;
+    });
 
     await page.route('**/__erun_invoke', async (route, request) => {
       const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
@@ -304,6 +315,8 @@ test.describe('idle widget stop protection', () => {
         return route.fulfill(envelope(apiStopStatus(ctxName, false)));
       }
       if (body.method === 'CancelPendingIdleStop') {
+        cancelArrived++;
+        await cancelHeld;
         cancelCalls++;
         // Simulate the backend clearing the pending stop so the next poll —
         // and thus the warning banner — reflects the cleared state.
@@ -328,7 +341,17 @@ test.describe('idle widget stop protection', () => {
     const cancelBtn = page.getByTestId('titlebar-idle-stop-cancel');
     await expect(cancelBtn).toBeVisible();
     await cancelBtn.click();
-    expect(cancelCalls).toBe(1);
+    // Wait for the cancel to be in flight and parked, then release it. The
+    // finally keeps a cancel that never arrives from leaving the handler
+    // parked for the rest of the worker's life.
+    try {
+      await expect.poll(() => cancelArrived).toBe(1);
+    } finally {
+      releaseCancel();
+    }
+    // Polled rather than read once: the increment belongs to the route handler
+    // above and lands after this statement's synchronous block yields.
+    await expect.poll(() => cancelCalls).toBe(1);
     await expect(warning).toBeHidden();
   });
 
