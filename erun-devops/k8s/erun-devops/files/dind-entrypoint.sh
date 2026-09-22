@@ -132,4 +132,24 @@ cap_build_container_cpu() {
 # be capped still runs exactly as it did before this existed -- but it says so.
 cap_build_container_cpu || true
 
+# Where BuildKit's cache identity lives, and why nothing here has to anchor it.
+#
+# Every cache record and every cache mount on this volume is attributed to the
+# BuildKit worker the daemon starts, and on the docker driver that worker takes
+# its id from the daemon's own engine id (moby's builder passes
+# `ID: opt.EngineID`). The daemon writes that id to <data-root>/engine-id and
+# reuses it on every later start, so the identity is a property of this volume,
+# not of the pod: measured on a rolled environment, the file was created with
+# the volume and every record in buildkit/cache.db is still keyed
+# "<engine-id>::<ref>" across repeated rolls. That is what makes a roll keep
+# serving the cache the volume holds.
+#
+# So do not anchor a worker id here. buildkit's <buildkit-root>/workerid is
+# read only by standalone buildkitd's runc and containerd workers (base.ID);
+# the docker driver never consults it, and writing one changes no key. An id
+# that *is* lost while this volume keeps its records is the shape worth
+# recovering, and the records themselves are the only place the lost id
+# survives -- but reading it back means scanning cache.db, which grows far
+# past what a container start may spend.
+
 exec dockerd-entrypoint.sh "$@"
