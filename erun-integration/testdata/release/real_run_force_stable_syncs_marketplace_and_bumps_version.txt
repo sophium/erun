@@ -19,6 +19,7 @@ release: worktree clean = true
 stage: sync-remote
 stage: release
 release version: <VERSION> (source control only; no artifacts were built or published)
+next: `erun build --release` publishes this version's images and charts before tagging, or `erun push --version <VERSION>` publishes them for the tag already pushed
 stage: push-release-tag
 stage: sync-packaging-checksums
 stage: post-release-version-bump

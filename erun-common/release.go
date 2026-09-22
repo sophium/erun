@@ -311,6 +311,7 @@ func publishClaimedRelease(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	if publisher == nil {
 		if spec.Version != "" {
 			ctx.Info("release version: " + spec.Version + " (source control only; no artifacts were built or published)")
+			ctx.Info("next: `erun build --release` publishes this version's images and charts before tagging, or `erun push --version " + spec.Version + "` publishes them for the tag already pushed")
 		}
 		return nil
 	}
