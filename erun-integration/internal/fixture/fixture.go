@@ -1823,9 +1823,9 @@ func SeedGitRepo(t testing.TB, dir string) {
 
 // SeedGitRepoBehindItsRemote makes dir a git checkout that is one commit
 // behind the bare origin it tracks -- the state a machine that has not pulled
-// since the last release is in, and the state erun#2629 reported: pin read such
-// a checkout and printed a plan that was internally consistent, with every site
-// reading the old version and nothing anywhere saying the base was old.
+// since the last release is in, and the state a reported pin ran on: it read
+// such a checkout and printed a plan that was internally consistent, with every
+// site reading the old version and nothing anywhere saying the base was old.
 func SeedGitRepoBehindItsRemote(t testing.TB, dir string) {
 	t.Helper()
 	SeedGitRepo(t, dir)
