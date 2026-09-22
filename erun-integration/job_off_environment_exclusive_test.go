@@ -74,8 +74,7 @@ func TestJobOffEnvironmentExclusiveClaimIsEnforced(t *testing.T) {
 	t.Cleanup(func() {
 		_ = os.WriteFile(release, []byte("go\n"), 0o644)
 		for _, id := range []string{"gate", "intruder"} {
-			erun.Run(t, []string{"exec", "job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
-				erun.RunOptions{Cwd: setup.Cwd, Env: hostEnv})
+			stopOffEnvironmentJob(t, setup, hostEnv, id)
 		}
 	})
 

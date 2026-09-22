@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
@@ -77,6 +79,33 @@ func stopJob(t *testing.T, setup env.Setup, envVars []string, id string) {
 	awaitJobSupervisorExit(t, setup, envVars, id, 30*time.Second)
 }
 
+// stopOffEnvironmentJob is stopJob for a job a host caller started through
+// erun's exec namespace (job_off_environment_*_test.go). It exists because
+// the race stopJob guards against is a property of the job supervisor, not of
+// which namespace started it: CancelEnvironmentJob signals only the job's
+// work (job_supervisor.go), so an off-environment job's supervisor outlives
+// its own cancel exactly as an in-environment one does, keeps renewing its
+// activity lease under the scenario's TempDir, and races t.TempDir()'s
+// RemoveAll the same way. The two differ only in how the record is read back:
+// an off-environment job's record lives on the far side of the MCP edge, so
+// its status is read with "exec job status" rather than "job status".
+func stopOffEnvironmentJob(t *testing.T, setup env.Setup, envVars []string, id string) {
+	t.Helper()
+	erun.Run(t, []string{"exec", "job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
+		erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	awaitJobSupervisorExitVia(t, setup, envVars, id, 30*time.Second, offEnvironmentJobStatus)
+}
+
+// inEnvironmentJobStatus and offEnvironmentJobStatus are the argv prefixes
+// that read a job record back through the namespace it was started in.
+func inEnvironmentJobStatus(id string) []string {
+	return []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", id, "--output", "json"}
+}
+
+func offEnvironmentJobStatus(id string) []string {
+	return []string{"exec", "job", "status", "--tenant", "team", "--environment", "dev", "--id", id, "--output", "json"}
+}
+
 // awaitJobSupervisorExit blocks until the job's own supervisor process is no
 // longer alive, rather than trusting the instant its record first reads as
 // finished. finishEnvironmentJob (job_supervisor.go) settles a job's terminal
@@ -100,24 +129,126 @@ func stopJob(t *testing.T, setup env.Setup, envVars []string, id string) {
 // whichever change was being gated.
 func awaitJobSupervisorExit(t *testing.T, setup env.Setup, envVars []string, id string, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		result := erun.Run(t, []string{"job", "status", "--tenant", "team", "--environment", "dev", "--id", id, "--output", "json"},
-			erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+	awaitJobSupervisorExitVia(t, setup, envVars, id, timeout, inEnvironmentJobStatus)
+}
+
+// awaitJobSupervisorExitVia is awaitJobSupervisorExit over an explicit status
+// command, so the same wait covers jobs read through either namespace.
+func awaitJobSupervisorExitVia(t *testing.T, setup env.Setup, envVars []string, id string, timeout time.Duration, status func(string) []string) {
+	t.Helper()
+	awaitJobSupervisorGone(t, id, timeout, func() (int, bool) {
+		result := erun.Run(t, status(id), erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		var payload struct {
 			PID int `json:"pid"`
 		}
-		pid := 0
-		if json.Unmarshal([]byte(result.Stdout), &payload) == nil {
-			pid = payload.PID
+		if json.Unmarshal([]byte(result.Stdout), &payload) != nil || payload.PID <= 0 {
+			return 0, false
 		}
-		if pid <= 0 || !eruncommon.ProcessAlive(pid) {
+		return payload.PID, true
+	})
+}
+
+// awaitJobSupervisorGone is the wait itself, over an observer that reports the
+// supervisor pid the job currently records. It is split out from the CLI read
+// that feeds it so the loop the whole teardown discipline rests on can be
+// driven against a pid a test controls rather than one it has to wait for --
+// see TestAwaitJobSupervisorGoneWaitsOutALivePid.
+func awaitJobSupervisorGone(t *testing.T, id string, timeout time.Duration, observe func() (int, bool)) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		pid, recorded := observe()
+		if !recorded || !eruncommon.ProcessAlive(pid) {
 			return
 		}
 		if !time.Now().Before(deadline) {
 			t.Fatalf("job %q supervisor (pid %d) is still alive %s after being cancelled", id, pid, timeout)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// parkedProcessEnv re-executes this test binary as a plain parked process; see
+// TestAwaitJobSupervisorGoneWaitsOutALivePid.
+const parkedProcessEnv = "ERUN_TEST_PARKED_SUPERVISOR"
+
+// TestAwaitJobSupervisorGoneWaitsOutALivePid pins the invariant every
+// real-job teardown in this package depends on: the wait returns only once
+// the pid the job records is no longer alive.
+//
+// The reported failure -- a teardown that returned on the cancel and left a
+// supervisor still writing into t.TempDir()'s RemoveAll -- is not reproducible
+// as a scenario here: it needs a lease renewal to lose a race by luck, and
+// both off-environment call sites were measured already gone by the time their
+// cancel returned. So the state is forced instead. The supervisor is a real
+// process this test starts and kills itself, and the observer feeding the loop
+// is the same shape as production's (awaitJobSupervisorExitVia): it reports
+// the pid the record carries and makes no liveness judgement of its own, so
+// the loop's own ProcessAlive is the only thing that can end the wait.
+//
+// That is what gives this test its teeth against the shapes that would let a
+// teardown return early. A wait that reads the record once and returns
+// observes exactly once, which the assertion below rejects. A wait that drops
+// the liveness check altogether never returns at all -- its observer always
+// reports a pid, so it runs out the loop's deadline instead, which is why the
+// deadline here is far below the scenario waits' own: that failure stays
+// bounded and names the loop rather than reading as a hung suite.
+func TestAwaitJobSupervisorGoneWaitsOutALivePid(t *testing.T) {
+	t.Parallel()
+	if os.Getenv(parkedProcessEnv) == "1" {
+		// The re-executed copy: the stand-in supervisor, alive until the test
+		// below kills it. It exits on its own eventually only so a test that
+		// dies before its killer runs cannot strand it.
+		time.Sleep(60 * time.Second)
+		os.Exit(0)
+	}
+
+	parked := harnessexec.Command(os.Args[0], "-test.run=TestAwaitJobSupervisorGoneWaitsOutALivePid")
+	parked.Env = append(os.Environ(), parkedProcessEnv+"=1")
+	if err := parked.Start(); err != nil {
+		t.Fatalf("start the parked stand-in for a job supervisor: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = parked.Process.Kill()
+		_ = parked.Wait()
+	})
+	pid := parked.Process.Pid
+
+	var mu sync.Mutex
+	observations := 0
+	// The killer is released once the observer has reported the pid twice.
+	// Gating it on the count, rather than letting observe judge liveness as an
+	// earlier version of this test did, is what puts the loop's own check under
+	// test: the first read is then guaranteed to be of a live process -- the
+	// killer cannot have run yet -- so a wait that returned on that read failed
+	// to look, rather than catching a corpse.
+	var release sync.Once
+	released := make(chan struct{})
+	observe := func() (int, bool) {
+		mu.Lock()
+		observations++
+		seen := observations
+		mu.Unlock()
+		if seen >= 2 {
+			release.Do(func() { close(released) })
+		}
+		return pid, true
+	}
+
+	go func() {
+		<-released
+		_ = parked.Process.Kill()
+	}()
+
+	// The deadline bounds a wait that never checks liveness, not the kill: the
+	// wait driven here concludes as soon as the killer's signal is observable,
+	// a few tens of milliseconds after the second read.
+	awaitJobSupervisorGone(t, "parked", 10*time.Second, observe)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if observations < 2 {
+		t.Fatalf("the wait observed the supervisor %d time(s) before returning; a teardown that returns while the recorded pid is still alive hands a live heartbeat back to t.TempDir()'s cleanup", observations)
 	}
 }
 

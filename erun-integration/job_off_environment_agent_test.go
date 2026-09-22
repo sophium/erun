@@ -126,8 +126,7 @@ esac
 	}
 	t.Cleanup(func() {
 		for _, id := range []string{"gate", "gate-2"} {
-			erun.Run(t, []string{"exec", "job", "cancel", "--tenant", "team", "--environment", "dev", "--id", id, "--signal", "KILL"},
-				erun.RunOptions{Cwd: setup.Cwd, Env: hostEnv})
+			stopOffEnvironmentJob(t, setup, hostEnv, id)
 		}
 	})
 
