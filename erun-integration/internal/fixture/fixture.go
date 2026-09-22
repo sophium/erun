@@ -2330,3 +2330,37 @@ func sanitizeFilename(s string) string {
 	}
 	return b.String()
 }
+
+// SeedTenantEnvWithSignedInERunPlatformAlias seeds a tenant/environment exactly
+// as SeedTenantEnv does, plus the invoking host's own signed-in erun platform
+// alias: the root config naming it (with the stored-session ref the alias
+// carries) and the refresh token that ref resolves to. That pair is what makes
+// a host a credential source -- an alias with no stored session is deliberately
+// "nothing to give" -- so it is the shape any scenario about provisioning a
+// platform alias into an environment has to start from.
+//
+// The store itself writes the token, so the basename it lands under is the one
+// production will later look for rather than a second copy of that hash.
+func SeedTenantEnvWithSignedInERunPlatformAlias(t testing.TB, setup env.Setup, tenant, environment, alias string) {
+	t.Helper()
+	SeedTenantEnv(t, setup, tenant, environment)
+	root := filepath.Join(setup.ConfigHome, "erun")
+	// The stored-session reference travels with the alias, exactly as it does in
+	// a real signed-in config: the alias is inert without it.
+	ref := "erun/refresh/" + alias
+	mustWrite(t, filepath.Join(root, "config.yaml"),
+		"defaulttenant: "+tenant+"\n"+
+			"cloudproviders:\n"+
+			"  - alias: "+alias+"\n"+
+			"    provider: erun\n"+
+			"    oidcissuerurl: https://api.example.test\n"+
+			"    erun:\n"+
+			"      apiurl: https://api.example.test\n"+
+			"      clientid: cli-test-client\n"+
+			"      refreshtokenref: "+ref+"\n",
+	)
+	store := eruncommon.NewFileCloudSecretStore(filepath.Join(root, "cloud-secrets"))
+	if err := store.SaveCloudSecret(ref, "refresh-token-value"); err != nil {
+		t.Fatalf("save host refresh token: %v", err)
+	}
+}
