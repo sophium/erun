@@ -676,6 +676,77 @@ func TestReviewRepositoryScopesNameUniquenessToTheRepository(t *testing.T) {
 	}
 }
 
+// TestReviewClosedReviewReleasesItsName is the reported failure against real
+// Postgres: a review's name is the squash-merge message it will land under, so
+// names are unique per repository only among reviews that can still reach
+// MERGED or did reach it. A CLOSED review never landed, so its name was never
+// used as a merge message and must reserve nothing — re-reviewing a rebased
+// branch under the subject its own commit already carries is an ordinary
+// workflow, and refusing it forced a reworded message for no reason a reader
+// could see.
+//
+// Repository, source branch, and target branch are all held constant across the
+// two creates on purpose: that is the reported reproduction (`erun review
+// close`, then `erun review create` for the same branch with the same name), and
+// the one-live-review-per-branch index has to release the pair for exactly the
+// same reason the name index has to release the name. The first create is kept
+// as an in-test control — it proves the name really was taken while the review
+// was live, so the create after the close is exercising the release rather than
+// a name that was never reserved.
+func TestReviewClosedReviewReleasesItsName(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	ctx := reviewsContext(tenantID, author)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+
+	const repository = "https://github.com/sophium/erun"
+	const message = "Fix step-timing canonicalization silently disabling on a failed row"
+	const branch = "bug/2076-auth-retry-gate-venue"
+
+	abandoned, err := reviews.Create(ctx, model.Review{
+		Repository: repository, Name: message,
+		TargetBranch: "main", SourceBranch: branch, Status: model.ReviewStatusOpen,
+	})
+	mustNoErr(t, err, "create the review that is about to be closed")
+
+	create := func() (model.Review, error) {
+		return reviews.Create(ctx, model.Review{
+			Repository: repository, Name: message,
+			TargetBranch: "main", SourceBranch: branch, Status: model.ReviewStatusOpen,
+		})
+	}
+
+	if _, err := create(); !errors.Is(err, ErrConflict) {
+		t.Fatalf("re-using a live review's name: err = %v, want ErrConflict", err)
+	}
+
+	abandoned.Status = model.ReviewStatusClosed
+	if _, err := reviews.Update(ctx, abandoned); err != nil {
+		t.Fatalf("close the review: %v", err)
+	}
+
+	reopened, err := create()
+	mustNoErr(t, err, "re-review the branch under the name its closed review held")
+
+	if reopened.Name != message || reopened.Repository != repository || reopened.SourceBranch != branch {
+		t.Fatalf("reopened review = %+v, want the same message and branch pair in %s", reopened, repository)
+	}
+	if reopened.ReviewID == abandoned.ReviewID {
+		t.Fatalf("reopened review reuses the closed review's id %s", abandoned.ReviewID)
+	}
+	if reopened.Status != model.ReviewStatusOpen {
+		t.Fatalf("reopened review status = %q, want %q", reopened.Status, model.ReviewStatusOpen)
+	}
+
+	// The closed review is still there, still CLOSED: releasing the name is not
+	// a delete, and the history a reader finds under it must survive.
+	stored, err := reviews.Get(ctx, abandoned.ReviewID)
+	mustNoErr(t, err, "read the closed review back")
+	if stored.Status != model.ReviewStatusClosed || stored.Name != message {
+		t.Fatalf("closed review = %+v, want it retained as CLOSED under its own name", stored)
+	}
+}
+
 // TestReviewMergeQueueIsPerRepository is the queue half of the same failure:
 // a target branch is not what names a queue, so a repository's own queued
 // reviews are only ever found by naming its identity too.
