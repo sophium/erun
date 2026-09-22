@@ -137,6 +137,7 @@ MCP groups every tool into a family, carried on the wire as `_meta.family` so a 
 |---|---|
 | `idle` | Resolved idle policy, managed-cloud flag, stop eligibility, current activity snapshot, and the activity leases currently holding the env busy. |
 | `observe` | The env's Kubernetes state: pods, `ResourceQuota`/`LimitRange` usage, `Ingress` hosts + TLS secret names, and `Certificate` readiness — walking `CertificateRequest` → `Order` → `Challenge` for the failure reason when a certificate isn't Ready. Optionally checks named Secrets for a key's presence without reading their values. Every call is a `kubectl get`; nothing here can mutate the cluster. |
+| `services` | The Services the env's namespace runs — name, type, ports, and the public address each one already has when an `erun expose` Ingress fronts it. The exposure is read from the Ingress's own backend, not re-derived from the `<tenant>-<service>` convention, so a repo-native chart reports the Service its Ingress really routes to. Both reads are `kubectl get`; nothing here can mutate the cluster. |
 | `usage` | The env's live CPU, memory, and disk usage, read from the runtime container's own cgroup v2 accounting and a statfs of its workspace mount — no metrics-server required, so it works on clusters where `kubectl top` reports unavailable. Memory is reported against the container's own limit with a real OOM-kill count; CPU against its quota over a sample window. A named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. |
 | `doctor` | In-pod health checks (config files, git checkout, SSH keys, docker daemon, workspace PVC). |
 | `list` | Same data as the CLI `erun list`, structured. |
@@ -454,6 +455,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `upgrade` | `erun upgrade` | Work |
 | *(top-level)* | `release` | `erun release` | Work |
 | *(top-level)* | `pin` | `erun pin` | Work |
+| *(top-level)* | `services` | `erun services` | Read |
 | *(top-level)* | `expose` | `erun expose` | Work |
 | *(top-level)* | `unexpose` | `erun unexpose` | Work |
 | *(top-level)* | `terraform` | `erun terraform` | Work |

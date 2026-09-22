@@ -690,6 +690,48 @@ A console serving the wrong document instead prints:
 
 ---
 
+## `erun services` {#erun-services}
+
+Lists the Services an environment's namespace runs, with each one's exposure. Read-only: two `kubectl [--context <ctx>] --namespace <ns> get <resource> -o json` calls, never anything that mutates. Same operation as the MCP `services` tool (see [MCP overview § `services`](/mcp/overview#inspection--read-only)) and the same read model the desktop's Ports tab renders as its Service picker (`eruncommon.ListEnvironmentServices`).
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+
+### Resolution and output shape
+
+Resolves tenant/environment/namespace the same way every other typed command does (`ResolveOpen`), then issues `get service` and `get ingress`, in that order. `--output json` emits:
+
+```jsonc
+{
+  "tenant": "team", "environment": "dev", "namespace": "team-dev",
+  "services": [
+    { "name": "team-api", "type": "ClusterIP", "ports": [ { "name": "http", "port": 80, "protocol": "TCP" } ],
+      "exposure": { "label": "api", "hostname": "api.team-dev.services.example.com", "scheme": "https" } },
+    { "name": "pw-api", "type": "ClusterIP", "ports": [ { "name": "http", "port": 80, "protocol": "TCP" } ] }
+  ]
+}
+```
+
+`services` is sorted by name; a Service with no `erun expose` Ingress omits `exposure` entirely.
+
+Each Service is matched to an Ingress by the Ingress's own backend (`spec.rules[].http.paths[].backend.service.name`), never by re-deriving `<tenant>-<service>` — a repo-native chart names its own Service, and the derivation would report the wrong one. Only Ingresses named with the `expose-` prefix and carrying at least one host are considered; a Service reached by several is attributed to the first, and its `label` is the Ingress name's suffix, which is a public label and not necessarily the Service's own name. `scheme` is `https` when the Ingress carries a `tls:` block for that host, else `http`.
+
+In a preview, `services` is `null` and the two `kubectl` calls are traced rather than run.
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant/environment can't be resolved. | Errors before any `kubectl` call. |
+| The namespace or cluster is unreachable. | Errors naming the failed call. |
+| The credentials cannot list Services or Ingresses (`forbidden`). | Errors, distinguishable from a namespace that is genuinely empty. |
+
+---
+
 ## `erun observe` {#erun-observe}
 
 Reports an environment's Kubernetes state, read-only: every underlying call is `kubectl [--context <ctx>] --namespace <ns> get <resource> [name] -o json`, never anything that mutates. Same operation as the MCP `observe` tool (see [MCP overview § `observe`](/mcp/overview#observe)).

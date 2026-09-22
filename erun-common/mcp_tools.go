@@ -264,9 +264,15 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"upgrade":     {Family: "", CLIPath: []string{"upgrade"}, Title: "Upgrade opted-in environments to the latest version", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"release":     {Family: "", CLIPath: []string{"release"}, Title: "Cut a release and publish its artefacts", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"pin":         {Family: "", CLIPath: []string{"pin"}, Title: "Pin an environment to a version", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: false},
-	"expose":      {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
-	"unexpose":    {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
-	"terraform":   {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
+	// services is the read expose depends on: the desktop's Ports tab renders
+	// the same call as its Service picker, so this entry declares no
+	// AgentFacing -- erun-ui/frontend holds a real way in, and the name it
+	// calls by (ListEnvironmentServices) is the match the desktop-surface gate
+	// looks for.
+	"services":  {Family: "", CLIPath: []string{"services"}, Title: "List the Services an environment runs, and which are already exposed", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: false},
+	"expose":    {Family: "", CLIPath: []string{"expose"}, Title: "Publish a service through the platform edge", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true},
+	"unexpose":  {Family: "", CLIPath: []string{"unexpose"}, Title: "Withdraw a published service", ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true},
+	"terraform": {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
 	// e2e has no desktop surface to reference yet -- AgentFacing here is a
 	// deliberate, temporary scope decision for this feature's CLI/MCP-first
 	// delivery, not a claim that no human ever runs it, mirroring gate_list

@@ -58,6 +58,7 @@ const sidebars: SidebarsConfig = {
         'cli/idle',
         'cli/whip',
         'cli/observe',
+        'cli/services',
         'cli/orchestrator',
         'cli/usage',
         'cli/resize',

@@ -1,0 +1,5 @@
+Namespace: team-dev
+Services (0):
+  none -- this environment is running no Services yet
+audit: erun services
+services: each Service is matched to an erun-expose Ingress by the Ingress's own backend, not by re-deriving the <tenant>-<service> naming convention

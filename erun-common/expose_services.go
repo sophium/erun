@@ -30,10 +30,44 @@ type ServiceExposure struct {
 	Scheme   string `json:"scheme"`
 }
 
+// EnvironmentServiceList is the shared result of a services read: the
+// environment it describes and the Services its namespace runs, each carrying
+// the exposure erun-expose already gave it. It mirrors ObserveResult's shape
+// so the CLI's --output json and the MCP tool return one contract rather than
+// two renderings of the same read.
+type EnvironmentServiceList struct {
+	Tenant      string               `json:"tenant"`
+	Environment string               `json:"environment"`
+	Namespace   string               `json:"namespace"`
+	Services    []EnvironmentService `json:"services"`
+}
+
 // ErrListEnvironmentServicesForbidden reports that the caller's Kubernetes
 // credentials cannot list the namespace's Services, so a caller can render a
 // permission-restricted state rather than an empty environment.
 var ErrListEnvironmentServicesForbidden = errors.New("list environment services: forbidden")
+
+// RunListEnvironmentServices is the CLI's and MCP's entry point to the same
+// read the desktop's Ports tab picker makes: it traces the two `kubectl get`s
+// before running them, so `--dry-run` reports exactly the calls a real run
+// would make, in the same order. Traced and returned up front rather than
+// discovered during execution because ListEnvironmentServices itself holds no
+// Context -- it is the desktop's call, and the desktop has no trace to emit.
+func RunListEnvironmentServices(ctx Context, req ShellLaunchParams) (EnvironmentServiceList, error) {
+	result := EnvironmentServiceList{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
+	ctx.TraceCommand("", "kubectl", observeGetArgs(req, "service")...)
+	ctx.TraceCommand("", "kubectl", observeGetArgs(req, "ingress")...)
+	ctx.Trace("services: each Service is matched to an erun-expose Ingress by the Ingress's own backend, not by re-deriving the <tenant>-<service> naming convention")
+	if ctx.DryRun {
+		return result, nil
+	}
+	services, err := ListEnvironmentServices(req)
+	if err != nil {
+		return EnvironmentServiceList{}, err
+	}
+	result.Services = services
+	return result, nil
+}
 
 // ListEnvironmentServices reports the environment's Services and, for each,
 // the exposure erun-expose already gave it. Both reads are plain `kubectl
