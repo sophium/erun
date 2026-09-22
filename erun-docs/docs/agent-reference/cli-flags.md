@@ -720,7 +720,7 @@ Resolves tenant/environment/namespace the same way every other typed command doe
 
 Each Service is matched to an Ingress by the Ingress's own backend (`spec.rules[].http.paths[].backend.service.name`), never by re-deriving `<tenant>-<service>` — a repo-native chart names its own Service, and the derivation would report the wrong one. Only Ingresses named with the `expose-` prefix and carrying at least one host are considered; a Service reached by several is attributed to the first, and its `label` is the Ingress name's suffix, which is a public label and not necessarily the Service's own name. `scheme` is `https` when the Ingress carries a `tls:` block for that host, else `http`.
 
-In a preview, `services` is `null` and the two `kubectl` calls are traced rather than run.
+In a preview the two `kubectl` calls are traced rather than run and nothing is read from the cluster, but the two surfaces report that differently: the MCP tool returns `services: null` alongside the `tenant`/`environment`/`namespace` it resolved, while `erun services --dry-run` writes nothing to stdout at all — including with `--output json`, which emits no JSON document rather than an empty listing, because the command returns before it renders one.
 
 ### Error behaviour
 
