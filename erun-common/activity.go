@@ -65,16 +65,21 @@ type EnvironmentIdleStore interface {
 // EnvironmentActivitySnapshot is the on-disk record for one activity kind.
 // Clients is bounded so a long-lived runtime cannot grow the file without
 // bound under churn (e.g. ephemeral source ports on a NAT'd peer).
+//
+// The timestamp tags are `omitzero`, not `omitempty`: `omitempty` has no empty
+// case for a time.Time, so a marker that had never been touched serialized as
+// Go's zero instant and a consumer could not tell it from one seen at the zero
+// instant. `omitzero` is what delivers the omission the tag names.
 type EnvironmentActivitySnapshot struct {
-	LastActivity time.Time                            `json:"lastActivity,omitempty"`
-	LastSeen     time.Time                            `json:"lastSeen,omitempty"`
+	LastActivity time.Time                            `json:"lastActivity,omitzero"`
+	LastSeen     time.Time                            `json:"lastSeen,omitzero"`
 	Bytes        int64                                `json:"bytes,omitempty"`
 	Clients      map[string]EnvironmentActivityClient `json:"clients,omitempty"`
 }
 
 type EnvironmentActivityClient struct {
 	Bytes        int64     `json:"bytes,omitempty"`
-	LastActivity time.Time `json:"lastActivity,omitempty"`
+	LastActivity time.Time `json:"lastActivity,omitzero"`
 }
 
 type EnvironmentIdleMarker struct {
@@ -82,8 +87,8 @@ type EnvironmentIdleMarker struct {
 	Idle             bool                          `json:"idle"`
 	Reason           string                        `json:"reason,omitempty"`
 	SecondsRemaining int64                         `json:"secondsRemaining,omitempty"`
-	LastActivity     time.Time                     `json:"lastActivity,omitempty"`
-	LastSeen         time.Time                     `json:"lastSeen,omitempty"`
+	LastActivity     time.Time                     `json:"lastActivity,omitzero"`
+	LastSeen         time.Time                     `json:"lastSeen,omitzero"`
 	Clients          []EnvironmentIdleMarkerClient `json:"clients,omitempty"`
 }
 
@@ -93,7 +98,7 @@ type EnvironmentIdleMarker struct {
 type EnvironmentIdleMarkerClient struct {
 	Address      string    `json:"address"`
 	Bytes        int64     `json:"bytes,omitempty"`
-	LastActivity time.Time `json:"lastActivity,omitempty"`
+	LastActivity time.Time `json:"lastActivity,omitzero"`
 	SecondsAgo   int64     `json:"secondsAgo,omitempty"`
 }
 

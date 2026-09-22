@@ -3,6 +3,7 @@ package erunmcp
 import (
 	"context"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -30,6 +31,30 @@ type UsageInput struct {
 // computed recommendation named a different one would be worse than either
 // alone, and two structs is exactly how that starts.
 type UsageOutput = eruncommon.RuntimeUsageReport
+
+// usageSizingSurfaces names the surfaces that render the standing sizing
+// recommendation from the same retained history this tool reads. The `usage`
+// tool's description embeds the enumeration rather than restating it, because
+// a hand-written one is how the description came to deny a `sizing` block that
+// `erun usage` had already started printing: prose that enumerates surfaces
+// drifts from the surfaces, and a guard that pins one absent sentence cannot
+// see the next wrong one arrive.
+var usageSizingSurfaces = []string{
+	"this tool",
+	"`erun usage`",
+	"`erun list`'s `runtime-pod:` block",
+}
+
+// UsageSizingClaim is the sentence the `usage` tool's description uses to say
+// where the recommendation can be read. Exported so the guard that checks the
+// description against the tool's actual behaviour compares against the same
+// text the description was built from, rather than against a copy of it.
+func UsageSizingClaim() string {
+	joined := strings.Join(usageSizingSurfaces[:len(usageSizingSurfaces)-1], ", ")
+	joined += ", and " + usageSizingSurfaces[len(usageSizingSurfaces)-1]
+	return "the block rides on every reading that can see it: " + joined +
+		" all render the one recommendation resolved from the one body of evidence"
+}
 
 // usageTool reads CPU quota utilisation, memory against the container's own
 // cgroup limit, and disk usage for the workspace mount, straight from the
