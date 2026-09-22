@@ -114,7 +114,14 @@ describe('ConfigView via App', () => {
 
     // The provision error is visible text, not hidden behind a bare title tooltip.
     expect(contexts.getByText('Failed')).toBeInTheDocument();
-    expect(contexts.getByText('run-instances: InsufficientInstanceCapacity')).toBeInTheDocument();
+    // And it is announced, not merely present. The reason
+    // materialises asynchronously beside a badge that has already flipped, so
+    // without a role nothing is read out and the enclosing Card — a
+    // navigational landmark — does not announce on its own. Queried by role,
+    // so a bare <span class="text-destructive"> fails here.
+    const contextsFailure = contexts.getByRole('alert');
+    expect(contextsFailure).toHaveTextContent('run-instances: InsufficientInstanceCapacity');
+    expect(contextsFailure).toHaveAttribute('aria-live', 'polite');
   });
 
   it('renders environment provisioning status badges, scoped to the environments table', async () => {
@@ -124,8 +131,11 @@ describe('ConfigView via App', () => {
     const envs = within(await screen.findByRole('region', { name: 'Environments' }));
     expect(envs.getByText('Running')).toBeInTheDocument();
     expect(envs.getByText('Failed')).toBeInTheDocument();
-    // A failed env surfaces its provision error inline, like a failed context.
-    expect(envs.getByText('deploy job did not succeed')).toBeInTheDocument();
+    // A failed env surfaces its provision error inline, like a failed context,
+    // and announces it the same way.
+    const envFailure = envs.getByRole('alert');
+    expect(envFailure).toHaveTextContent('deploy job did not succeed');
+    expect(envFailure).toHaveAttribute('aria-live', 'polite');
   });
 
   it('renders empty states for an empty payload', async () => {

@@ -35,6 +35,7 @@ import {
   shellSessionIdFromEntry,
   shouldShowHelmRecovery,
 } from '@/components/app/ActivityQueueDrawer.helpers';
+import { InlineAlert } from '@/components/app/InlineAlert';
 
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
@@ -125,9 +126,9 @@ export const ActivityCard = React.memo(function ActivityCard({
         </div>
       </header>
       {entry.error && (
-        <p className="mt-2 break-words rounded-sm border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-          {entry.error}
-        </p>
+        <div className="mt-2">
+          <InlineAlert>{entry.error}</InlineAlert>
+        </div>
       )}
       {entry.status === 'failed' && <FailureDetails entry={entry} />}
       {entry.status === 'failed' && (
