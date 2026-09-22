@@ -146,6 +146,32 @@ test.describe('review panel reachability framing (#1230)', () => {
     await expect(dialog.getByText('This runs `erun open` to start the environment.')).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Open' })).toBeVisible();
   });
+
+  test('clicking Reconnect… surfaces honest copy for the fault case, not a redeployment the reconnect cannot perform', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    await stubLoadDiffError(page, STALE_MESSAGE);
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+    const review = app.reviewPanel;
+
+    await review.errorAlerts().getByRole('button', { name: 'Reconnect…' }).click();
+
+    // The dialog is reached *from* the unreachable state, so it is shown
+    // exactly when the environment may be down for a reason the reconnect
+    // cannot address. It used to promise the runtime "will be redeployed";
+    // the action is `erun open --reconnect`, which refuses a stopped
+    // environment and never deploys, so that was a recovery it could not
+    // perform at all.
+    const dialog = page.getByRole('dialog', { name: 'Reconnect to environment?' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).not.toContainText('it will be redeployed');
+    await expect(dialog).toContainText('It reattaches to the environment runtime');
+    await expect(dialog.getByRole('button', { name: 'Reconnect', exact: true })).toBeVisible();
+  });
 });
 
 test.describe('review panel reconnect targeting in an orchestrator session (#1230)', () => {

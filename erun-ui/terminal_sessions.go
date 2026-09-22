@@ -901,11 +901,17 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResu
 	return nil
 }
 
-// ReconnectMCP runs `erun open --no-shell` to re-establish the env's MCP
-// port-forward (and the runtime pod itself if it is gone). This is the only
-// desktop path that opens implicitly on the user's behalf, and it is gated on
-// an explicit click in the review panel's unreachable state. Output is streamed
-// to the frontend so a long-running deploy does not look frozen.
+// ReconnectMCP runs `erun open --no-shell --reconnect` to re-establish the
+// env's MCP port-forward against the runtime that is already there. This is the
+// only desktop path that opens implicitly on the user's behalf, and it is gated
+// on an explicit click in the review panel's unreachable state. Output is
+// streamed to the frontend so a slow open does not look frozen.
+//
+// It does not deploy. `--reconnect` marks the call machine-initiated, so a
+// stopped environment is refused rather than started (a stop is what dropped
+// the session being reattached) and `open` without `--deploy` verifies the
+// runtime is already deployed instead of bringing one up. The reconnect
+// dialog's copy is what has to keep saying so.
 func (a *App) ReconnectMCP(selection uiSelection) error {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("reconnect MCP", selection.Tenant, selection.Environment); err != nil {

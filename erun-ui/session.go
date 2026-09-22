@@ -325,9 +325,11 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 }
 
 // runOpenForReconnect streams the `erun open` child's output through onLine so
-// the desktop shows progress while a possibly-slow open (which may trigger a
-// runtime deploy) is in flight, and folds the trailing stderr into the returned
-// error so the user still sees the actionable detail on failure.
+// the desktop shows progress while a possibly-slow open is in flight, and folds
+// the trailing stderr into the returned error so the user still sees the
+// actionable detail on failure. It passes --reconnect, so the child reattaches
+// to the runtime that is already there: it neither deploys one nor starts a
+// stopped environment.
 func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.OpenResult, onLine func(string)) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)

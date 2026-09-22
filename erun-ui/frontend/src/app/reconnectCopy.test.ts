@@ -48,3 +48,28 @@ test('the two reachability kinds carry distinct action labels and titles', () =>
   assert.equal(reachabilityCopy['not-open'].action, 'Open');
   assert.equal(reachabilityCopy['stale-forward'].action, 'Reconnect…');
 });
+
+// The stale-forward confirmation is reached *from* the unreachable state, so
+// it is shown exactly when the environment may be unreachable for a reason the
+// action cannot address -- and it is the moment an operator is most likely to
+// press it repeatedly. Its body used to promise that a runtime which is not
+// currently running "will be redeployed". That promise is not merely
+// unchecked: the action behind the button is `erun open --reconnect`, which
+// verifies the runtime is already deployed, refuses outright when it is
+// stopped, and never deploys anything -- so an operator pressing it again
+// because the copy said a redeploy was coming had nothing to wait for.
+test('the stale-forward dialog does not promise a redeployment the reconnect cannot perform', () => {
+  const body = reachabilityCopy['stale-forward'].dialogBody;
+
+  assert.ok(
+    !body.includes('it will be redeployed'),
+    `the dialog still promises a redeployment the reconnect cannot perform: ${body}`,
+  );
+  // And it states the limit rather than leaving the operator to infer it, so
+  // a repeated press reads as an action that cannot help rather than one that
+  // has not worked yet.
+  assert.match(body, /does not start a stopped environment or redeploy one/);
+  // It still names the command it runs: the dialog describes an action, not
+  // an outcome.
+  assert.match(body, /`erun open`/);
+});
