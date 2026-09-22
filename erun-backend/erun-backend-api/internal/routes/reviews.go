@@ -135,7 +135,7 @@ func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, reviews)
+	writeJSON(w, http.StatusOK, withReviewsIssueRef(reviews))
 }
 
 func (r ReviewRoutes) listReviewers(w http.ResponseWriter, req *http.Request) {
@@ -189,7 +189,7 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, review)
+	writeJSON(w, http.StatusCreated, withReviewIssueRef(review))
 }
 
 func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
@@ -198,7 +198,7 @@ func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, reviews)
+	writeJSON(w, http.StatusOK, withReviewsIssueRef(reviews))
 }
 
 func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request) {
@@ -212,7 +212,7 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 		writeAdvanceMergeQueueError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
 func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http.Request) {
@@ -226,7 +226,7 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 		writeAdvanceMergeQueueError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
 // writeAdvanceMergeQueueError reports an unresolved-thread block as a 409 with
@@ -284,7 +284,7 @@ func (r ReviewRoutes) getReview(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
 func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Request) {
@@ -298,7 +298,7 @@ func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Reques
 		writeUpdateStatusError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
 // writeUpdateStatusError gives PATCH .../status's documented business codes

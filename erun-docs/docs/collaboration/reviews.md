@@ -22,6 +22,8 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
   "lastFailedBuildId": "bld_...",
   "lastReadyBuildId": "bld_...",
   "lastMergedBuildId": "bld_...",
+  "issueRef": "2212",                     // derived on read, never stored; absent when the branch names no issue
+  "issueRefSource": "INFERRED",           // DECLARED | INFERRED; present exactly when issueRef is
   "createdAt": "2026-05-24T10:42:00Z",
   "updatedAt": "2026-05-24T11:13:00Z"
 }
@@ -74,6 +76,20 @@ A review records the repository its branches belong to, as a canonicalized remot
 Every review-scoped uniqueness rule and the merge queue are keyed by it. A tenant may serve more than one repository, and two of them will share branch names — both a `main` and a `feature/x` — so a target branch alone names a queue only in a tenant that serves exactly one repository. `MERGE_QUEUE_AMBIGUOUS` is what a promotion over a genuinely mixed queue gets instead of a guess.
 
 A review created before the platform recorded a repository carries none, and appears only in an unfiltered listing or queue. It adopts an identity from the `remoteUrl` of the first `MERGED` report about it, which is the only moment the remote is in hand.
+
+## Issue links
+
+A review answers which issue its work belongs to through `issueRef`, and where that answer came from through `issueRefSource`. Neither is stored: the link is resolved every time a review is read, so a review is never bound to a stale guess.
+
+A review carries no issue of its own yet, so the source branch is the only link there is. Branches are named `feature/<issue-number>-<description>` or `bug/<issue-number>-<description>`, and `issueRef` is the number that name carries:
+
+```jsonc
+{ "sourceBranch": "bug/2212-issue-ref-from-branch", "issueRef": "2212", "issueRefSource": "INFERRED" }
+```
+
+The derivation is **best-effort and clearly marked as such**. `issueRefSource` is `INFERRED` for a reference parsed out of a branch name — a guess that the branch was named honestly — and `DECLARED` for one a caller stated. A client that renders an inferred link as though the author had declared it claims a provenance erun does not have, which is why the two fields always travel together.
+
+A branch that follows no convention leaves the review unlinked rather than guessed at: `feature/widget` — or any branch that merely contains a number — produces a review with no `issueRef` and no `issueRefSource` at all. An empty link is an answer; a wrong link sends someone to an issue nobody named.
 
 ## Name uniqueness
 
