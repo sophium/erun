@@ -40,6 +40,7 @@ locals {
   arg_manage_coredns_custom_configmap  = var.manage_coredns_custom_configmap == null ? true : var.manage_coredns_custom_configmap
   arg_base_domain_name                 = var.base_domain_name == null ? "" : var.base_domain_name
   arg_coredns_forward_upstreams        = var.coredns_forward_upstreams == null ? ["1.1.1.1", "1.0.0.1", "8.8.8.8"] : var.coredns_forward_upstreams
+  arg_manage_transport_policy          = var.manage_transport_policy == null ? true : var.manage_transport_policy
   arg_http_redirect_enabled            = var.http_redirect_enabled == null ? true : var.http_redirect_enabled
   arg_hsts_enabled                     = var.hsts_enabled == null ? true : var.hsts_enabled
   arg_hsts_max_age_seconds             = var.hsts_max_age_seconds == null ? 86400 : var.hsts_max_age_seconds
@@ -104,7 +105,11 @@ locals {
     }
   }
 
-  traefik_args = concat(local.traefik_redirect_args, local.traefik_hsts_args)
+  # What rides on the controller this module installs. Empty when it manages no
+  # policy: the switches above still describe the policy -- edge_transport_policy
+  # hands it to whatever controller is already there -- but the module claims
+  # none of it, so it neither configures a controller nor reports a failure.
+  traefik_args = local.arg_manage_transport_policy ? concat(local.traefik_redirect_args, local.traefik_hsts_args) : []
 }
 
 locals {
@@ -271,7 +276,13 @@ resource "kubernetes_namespace" "cert_manager" {
   }
 }
 
-# Ingress controller. Optional: skip on a cluster that already has one.
+# Ingress controller. Optional: skip on a cluster that already has one -- but
+# then this module has nowhere to put its transport policy, which is a
+# configuration the caller has to name rather than one that applies cleanly and
+# does nothing (edge_transport_policy, outputs.tf). The refusal rides on an
+# output because that is the only address here that always exists: a resource
+# with count = 0 is never evaluated, so this release cannot carry the refusal
+# that explains its own absence.
 resource "helm_release" "traefik" {
   count = local.arg_install_ingress_controller ? 1 : 0
 
@@ -290,7 +301,7 @@ resource "helm_release" "traefik" {
     }
   }
 
-  values = local.arg_hsts_enabled ? [yamlencode({ extraObjects = [local.hsts_middleware] })] : []
+  values = local.arg_manage_transport_policy && local.arg_hsts_enabled ? [yamlencode({ extraObjects = [local.hsts_middleware] })] : []
 }
 
 # cert-manager (with its CRDs). Optional: skip when the cluster already runs it.
