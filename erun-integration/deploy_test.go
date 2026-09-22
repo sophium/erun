@@ -3465,6 +3465,46 @@ esac
 		golden.Equal(t, "deploy/real_run_helm_pending_recovery_via_auto_recover_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_pending_helm_lock_fails_and_names_the_recovery", func(t *testing.T) {
+		// The reported silent no-op: a deploy against a release an earlier
+		// failed rollout left locked in pending-upgrade exited without
+		// complaint and replaced no pods. helm does fail on that state, but the
+		// recovery prompt is the only thing the deploy did with the failure,
+		// and a caller with no terminal -- the harness's own stdin, an
+		// orchestrator, a CI job, the desktop's piped shell -- reads EOF, so
+		// the prompt's own EOF error replaced the diagnosis. The deploy must
+		// fail with what is actually wrong and the command that clears it.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`if [ "$1" = "upgrade" ]; then`,
+			`  printf '%s\n' "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress" >&2`,
+			`  exit 1`,
+			`fi`,
+			`exit 0`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("a deploy that cannot proceed must fail, got 0: %s", result.Combined)
+		}
+		for _, want := range []string{
+			"helm release recovery not run: stdin reached EOF before the prompt could be answered",
+			`helm release "team-devops" is locked by an unfinished install/upgrade/rollback`,
+			"erun doctor --clear-pending-helm team dev",
+			"another operation (install/upgrade/rollback) is in progress",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the failed deploy's output, got:\n%s", want, result.Combined)
+			}
+		}
+		golden.Equal(t, "deploy/real_run_pending_helm_lock_fails_and_names_the_recovery", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_kubectl_pod_watch_library_execution_mode_reaches_the_api_server_directly", func(t *testing.T) {
 		// Proves the library path produces the same observable result as the
 		// subprocess path (a clean rollout logs the same summary line and lets
