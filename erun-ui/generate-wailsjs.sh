@@ -21,11 +21,17 @@
 # (test-frontend's own generation, then build.sh's inside test-playwright) a
 # no-op, and what survives a COPY-layer cache invalidation that has nothing
 # to do with the bound Go API (e.g. an unrelated frontend source edit).
+#
+# A hit reaches for no toolchain at all. That includes the `go env GOPATH` that
+# resolves WAILS_BIN's default, which is why that default is resolved on the
+# generation path rather than up front: a hit whose decision depends on the
+# toolchain is not reliable, and one that dies when the toolchain cannot answer
+# is worse than no cache.
 
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
-WAILS_BIN="${WAILS_BIN:-$(go env GOPATH)/bin/wails}"
+WAILS_BIN="${WAILS_BIN:-}"
 CACHE_DIR="${ERUN_WAILSJS_CACHE_DIR:-}"
 STARTED_AT=$(date +%s)
 
@@ -138,6 +144,15 @@ if [ -n "$CACHE_DIR" ]; then
 		printf 'generate-wailsjs.sh: bound Go API unchanged, reusing cached bindings (%ss)\n' "$(($(date +%s) - STARTED_AT))" >&2
 		exit 0
 	fi
+fi
+
+# Resolved here, not at the top, because `go env GOPATH` is a toolchain
+# invocation like any other: run above the cache check it put the toolchain on
+# the hit path, so an unanswerable `go env` killed the script instead of
+# hitting or regenerating. The Dockerfile sets no WAILS_BIN, so this is the
+# path the gate actually takes, not a corner case.
+if [ -z "$WAILS_BIN" ]; then
+	WAILS_BIN="$(go env GOPATH)/bin/wails"
 fi
 
 if [ -x "$WAILS_BIN" ]; then

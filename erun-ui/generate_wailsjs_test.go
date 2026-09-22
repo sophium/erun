@@ -20,6 +20,10 @@ type wailsjsHarness struct {
 	cacheDir string
 	binDir   string
 	goStub   string
+	// omitWailsBin runs the script the way the Dockerfile does: WAILS_BIN
+	// absent from the environment, so the script must fall back to the
+	// toolchain-derived default.
+	omitWailsBin bool
 }
 
 // wailsjsRun is one invocation: what it told the operator, and whether it
@@ -112,6 +116,37 @@ func (h *wailsjsHarness) stubGoInterpreter(t *testing.T) {
 	}
 }
 
+// writeGopathGoStub stands in for the host the Dockerfile builds on: no
+// WAILS_BIN in the environment, a `go` that is present, and `wails` already
+// installed at $(go env GOPATH)/bin/wails. It answers `env GOPATH` and fails
+// every other subcommand, logging each call, so a run that finds its generator
+// through the default is distinguishable from one that generates some other way.
+func (h *wailsjsHarness) writeGopathGoStub(t *testing.T) {
+	t.Helper()
+	h.goStub = t.TempDir()
+	gopath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(gopath, "bin"), 0o755); err != nil {
+		t.Fatalf("stage the installed wails: %v", err)
+	}
+	wailsBody, err := os.ReadFile(filepath.Join(h.binDir, "wails"))
+	if err != nil {
+		t.Fatalf("read the wails stub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(gopath, "bin", "wails"), wailsBody, 0o755); err != nil {
+		t.Fatalf("install the wails stub: %v", err)
+	}
+	stub := "#!/bin/sh\n" +
+		"printf 'go %s\\n' \"$*\" >> \"" + h.logPath("go-calls.log") + "\"\n" +
+		"if [ \"$1\" = env ] && [ \"$2\" = GOPATH ]; then\n" +
+		"\tprintf '%s\\n' \"" + gopath + "\"\n" +
+		"\texit 0\n" +
+		"fi\n" +
+		"exit 1\n"
+	if err := os.WriteFile(filepath.Join(h.goStub, "go"), []byte(stub), 0o755); err != nil {
+		t.Fatalf("write go stub: %v", err)
+	}
+}
+
 func (h *wailsjsHarness) run(t *testing.T) wailsjsRun {
 	t.Helper()
 	wailsLog, goLog := h.logPath("wails-calls.log"), h.logPath("go-calls.log")
@@ -122,8 +157,14 @@ func (h *wailsjsHarness) run(t *testing.T) wailsjsRun {
 			t.Fatalf("clear %s: %v", log, err)
 		}
 	}
+	wailsBin := "WAILS_BIN=" + filepath.Join(h.binDir, "wails")
+	if h.omitWailsBin {
+		// Empty rather than unset: build.sh passes WAILS_BIN through from an
+		// unset variable, and the script reads that as the default.
+		wailsBin = "WAILS_BIN="
+	}
 	env := append(os.Environ(),
-		"WAILS_BIN="+filepath.Join(h.binDir, "wails"),
+		wailsBin,
 		"ERUN_WAILSJS_CACHE_DIR="+h.cacheDir,
 		"ERUN_TEST_WAILS_LOG="+wailsLog,
 	)
@@ -289,4 +330,30 @@ func TestWailsjsCacheHitDoesNotInvokeTheGoToolchain(t *testing.T) {
 
 	harness.stubGoInterpreter(t)
 	harness.run(t).assertSkipped(t)
+}
+
+// The configuration above still exports WAILS_BIN. The gate never does: the
+// Dockerfile sets no WAILS_BIN, and build.sh passes an unset one straight
+// through, so the script finds its generator at $(go env GOPATH)/bin/wails --
+// and resolving that default used to happen before the cache check. That put
+// the toolchain on the hit path, so a `go env` that could not answer killed the
+// script instead of either hitting or regenerating: a cache that dies on an
+// unchanged tree is not a cache, and the same tree that hit a moment ago stops
+// hitting for a reason nothing in the inputs changed.
+func TestWailsjsCacheHitsWithoutAWailsBinInTheEnvironment(t *testing.T) {
+	harness := newWailsjsHarness(t)
+	harness.omitWailsBin = true
+	harness.writeGopathGoStub(t)
+
+	// The default is still how the generator is found: an absent WAILS_BIN
+	// must not turn a miss into a silent no-op.
+	harness.run(t).assertRegenerated(t)
+	generated := harness.bindings(t)
+
+	// The tree is untouched; only the toolchain stopped answering.
+	harness.stubGoInterpreter(t)
+	harness.run(t).assertSkipped(t)
+	if got := harness.bindings(t); got != generated {
+		t.Errorf("a reused cache shipped %q, want the bindings it was generated as, %q", got, generated)
+	}
 }
