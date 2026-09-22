@@ -232,7 +232,7 @@ func deleteReleaseRepoClaim(ctx Context, projectRoot, version, currentSHA string
 	ref := releaseRepoClaimRef(version)
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, currentSHA)
 	ctx.TraceCommand(projectRoot, "git", "push", lease, releaseRepoClaimRemote, "--delete", ref)
-	return Command("git", "-C", projectRoot, "push", lease, releaseRepoClaimRemote, "--delete", ref).Run()
+	return runReleaseClaimPush(ctx, projectRoot, "push", lease, releaseRepoClaimRemote, "--delete", ref)
 }
 
 // releaseRepoClaimHeld reports whether record still stands in the way of a
@@ -361,11 +361,26 @@ func loadReleaseRepoClaimRecord(ctx Context, projectRoot, remote, ref, version s
 
 func gitPushCreateRef(ctx Context, projectRoot, remote, sha, ref string) error {
 	ctx.TraceCommand(projectRoot, "git", "push", remote, sha+":"+ref)
-	return Command("git", "-C", projectRoot, "push", remote, sha+":"+ref).Run()
+	return runReleaseClaimPush(ctx, projectRoot, "push", remote, sha+":"+ref)
 }
 
 func gitPushUpdateRefWithLease(ctx Context, projectRoot, remote, sha, ref, expectedSHA string) error {
 	lease := fmt.Sprintf("--force-with-lease=%s:%s", ref, expectedSHA)
 	ctx.TraceCommand(projectRoot, "git", "push", lease, remote, sha+":"+ref)
-	return Command("git", "-C", projectRoot, "push", lease, remote, sha+":"+ref).Run()
+	return runReleaseClaimPush(ctx, projectRoot, "push", lease, remote, sha+":"+ref)
+}
+
+// runReleaseClaimPush runs one push of the repository-global claim ref,
+// reporting a ruleset bypass GitHub wrote on its stderr. The claim ref lands on
+// the same origin as the release's own refs, so it is held to the same report
+// rather than staying the one push erun makes that could be admitted by a
+// bypass in silence. These pushes deliberately do not go through the injected
+// git seam, so the capture is wired onto the command here.
+func runReleaseClaimPush(ctx Context, projectRoot string, args ...string) error {
+	var pushOutput strings.Builder
+	cmd := Command("git", append([]string{"-C", projectRoot}, args...)...)
+	cmd.Stderr = releasePushStderrWriter(ctx, &pushOutput)
+	err := cmd.Run()
+	reportRulesetBypassFromPushArgs(ctx, args, pushOutput.String())
+	return err
 }

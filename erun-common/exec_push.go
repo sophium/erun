@@ -87,8 +87,21 @@ func PushWorkingTreeBranch(ctx Context, root string, params PushWorkingTreeBranc
 	}
 
 	var stderr bytes.Buffer
-	if err := deps.RunGit(root, io.Discard, &stderr, "push", remote, refspec); err != nil {
-		return PushWorkingTreeBranchResult{}, fmt.Errorf("git push: %w: %s", err, strings.TrimSpace(stderr.String()))
+	pushErr := deps.RunGit(root, io.Discard, &stderr, "push", remote, refspec)
+	// GitHub reports a ruleset bypass on stderr whether or not it let the push
+	// through, and this buffer is the only place erun ever sees it: git relays
+	// the remote's line, erun captures the stream rather than streaming it,
+	// and the success path used to drop the buffer on the floor. A push that
+	// bypassed branch protection therefore produced no erun-side signal at
+	// all, which is indistinguishable from one that satisfied it -- the exact
+	// blind spot a protected target branch exists to close. Reported before
+	// the error is returned so a failed push that carried one is not silent
+	// either.
+	if notice, ok := parseRulesetBypassNotice(stderr.String()); ok {
+		reportRulesetBypass(ctx, remote, notice)
+	}
+	if pushErr != nil {
+		return PushWorkingTreeBranchResult{}, fmt.Errorf("git push: %w: %s", pushErr, strings.TrimSpace(stderr.String()))
 	}
 
 	// Read back the commit and branch actually pushed rather than trusting the

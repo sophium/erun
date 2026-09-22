@@ -114,8 +114,15 @@ func movedReleaseBaseBranchError(spec ReleaseSpec, branch string, ahead int) err
 func isReleaseBranchPush(stage ReleaseStage, command ReleaseCommandSpec) bool {
 	return stage.Name == releasePushStageName &&
 		command.Name == "git" &&
-		len(command.Args) > 0 &&
-		command.Args[0] == "push"
+		isGitPushArgs(command.Args)
+}
+
+// isGitPushArgs reports whether a release stage's git command is a push. A
+// push's stderr is the only stream GitHub's bypass notice appears on and the
+// only one the push's own error is built from, so both are read from one
+// capture; every other stage command stays on the plain runner.
+func isGitPushArgs(args []string) bool {
+	return len(args) > 0 && args[0] == "push"
 }
 
 // runReleaseBranchPush pushes the release's generated commits, absorbing a base
@@ -134,7 +141,7 @@ func isReleaseBranchPush(stage ReleaseStage, command ReleaseCommandSpec) bool {
 func runReleaseBranchPush(ctx Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	var pushOutput strings.Builder
-	err := runGit(command.Dir, ctx.Stdout, releasePushStderrWriter(ctx, &pushOutput), command.Args...)
+	err := runReleasePush(ctx, command.Dir, runGit, &pushOutput, command.Args...)
 	for attempt := 1; err != nil && branch != "" && attempt <= releasePushRebaseAttempts; attempt++ {
 		rejections := parseReleasePushRejections(pushOutput.String())
 		if !releasePushRejectedTheMovedBaseBranch(rejections, branch) {
@@ -150,7 +157,7 @@ func runReleaseBranchPush(ctx Context, spec ReleaseSpec, command ReleaseCommandS
 				err, branch, repointErr, releaseRepointFailedRecovery(spec))
 		}
 		pushOutput.Reset()
-		err = runGit(command.Dir, ctx.Stdout, releasePushStderrWriter(ctx, &pushOutput), releaseBranchPushArgs(spec, command)...)
+		err = runReleasePush(ctx, command.Dir, runGit, &pushOutput, releaseBranchPushArgs(spec, command)...)
 	}
 	return err
 }
@@ -164,6 +171,23 @@ func releasePushStderrWriter(ctx Context, capture *strings.Builder) io.Writer {
 		return capture
 	}
 	return io.MultiWriter(ctx.Stderr, capture)
+}
+
+// runReleasePush runs one of the release's own pushes. git's output still
+// streams to the operator, and the copy kept for the rejection parse is read
+// for GitHub's bypass notice as well. These are the pushes that write a branch
+// or a tag a ruleset can protect — the tag that publishes the version, the
+// `--follow-tags` push that makes the generated commits public, and the force
+// re-point of a tag the release's own rebase moved — so none of them may be the
+// one path where a bypass goes unreported.
+//
+// The caller owns output so that a push which is retried reports the notice
+// from the attempt that carried it, and so the rejection parse reads the same
+// bytes.
+func runReleasePush(ctx Context, dir string, runGit GitCommandRunnerFunc, output *strings.Builder, args ...string) error {
+	err := runGit(dir, ctx.Stdout, releasePushStderrWriter(ctx, output), args...)
+	reportRulesetBypassFromPushArgs(ctx, args, output.String())
+	return err
 }
 
 // releasePushRejection is one ref git refused to update, as git reported it on
@@ -382,7 +406,8 @@ func moveReleaseTagOnto(ctx Context, projectRoot string, runGit GitCommandRunner
 		return err
 	}
 	ctx.TraceCommand(projectRoot, "git", "push", "--force", "origin", "refs/tags/"+tag)
-	return runGit(projectRoot, ctx.Stdout, ctx.Stderr, "push", "--force", "origin", "refs/tags/"+tag)
+	var pushOutput strings.Builder
+	return runReleasePush(ctx, projectRoot, runGit, &pushOutput, "push", "--force", "origin", "refs/tags/"+tag)
 }
 
 // gitIsAncestorOfHead reports whether commit is already part of HEAD's own
