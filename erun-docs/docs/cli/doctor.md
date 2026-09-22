@@ -60,8 +60,8 @@ See [Configuration reference · Execution modes](/reference/configuration#execut
 
 ```
 == Resources ==
-  CPU: 49.8% of a 6.00-core quota (sampled over 1.0s)
-  Memory: 4.0GiB / 4.0GiB (100.0%), peak 4.0GiB, OOM kills 3
+CPU: 49.8% of a 6.00-core quota (sampled over 1.0s)
+Memory: 4.0GiB / 4.0GiB (100.0%), peak 4.0GiB, OOM kills 3
 Warnings (3):
   memory is at 100% of its 4096Mi limit (warns at 85%)
   memory.peak reached 100% of the limit (warns at 95%) -- this environment came close to an OOM kill
@@ -69,12 +69,14 @@ Warnings (3):
 Sizing recommendation:
   sizing: memory raise to 6144Mi from 4096Mi (3 oom kill(s) at 4096Mi, high confidence); cpu raise to 9 from 6 (9.85% of scheduling periods throttled (9850 of 100000), high confidence)
   sizing-evidence: 0m observed, 1 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
-  doctor does not resize: it rolls the pod and kills whatever is running. Apply the recommendation with `erun resize --apply-recommendation` once this environment is clear.
+Apply with `erun resize --tenant team --environment dev --memory 6144Mi --cpu 9` (rolls the runtime pod and kills any live session in it), or `--apply-recommendation` from inside the environment, where the retained usage history lives. Doctor reports this and never resizes.
 ```
 
-This is the same reading, the same thresholds and the same recommendation [`erun usage`](/cli/usage) reports — doctor renders it through that command's own writers, so the two cannot report different numbers or a different verdict for one environment. It exists because an environment at 100% of its memory limit with OOM kills recorded is exactly the state an operator reaches for `doctor` to explain, and it used to say nothing about it: the signal was on a command nobody runs unless they already suspect sizing.
+This is the same reading, the same thresholds and the same recommendation [`erun usage`](/cli/usage) reports — doctor renders it through that command's own writers, so the two cannot report different numbers or a different verdict for one environment. It exists because an environment at 100% of its memory limit with OOM kills recorded is exactly the state an operator reaches for `doctor` to explain, and it used to say nothing about it: the signal was on a command nobody runs unless they already suspect sizing. On a build-capable environment the sidecar's own reading, and the disk figures beneath it, come along for the same reason they do in `erun usage` — every image build runs in `erun-dind`, a separate cgroup this reading would otherwise report as idle.
 
-The section prints only when there is something to say — a warning fired, or a verdict other than a hold — so a healthy environment keeps the diagnosis it had before. `doctor` **never resizes**: a resize rolls the pod and kills whatever is running, so it names the remedy (`erun resize --apply-recommendation`) instead of applying it. Under `--dry-run` the read is traced but not taken, like every other subprocess doctor would run, so a dry run shows no resources section.
+`doctor` **never resizes**: a resize rolls the pod and kills whatever is running, so the section names the remedy instead of applying it, with the `--memory`/`--cpu` values spelled out rather than a bare `--apply-recommendation`. That matters from a host: `--apply-recommendation` re-derives the verdict from the environment's retained usage history, which is readable only from inside the environment's own pod, so the explicit values are the form that works where `doctor` was run. A verdict that suggests nothing — a hold, or insufficient evidence — gets no next action, because there is nothing to apply.
+
+The section always prints, because "nothing was observed" is not "nothing is wrong": a reading whose counters could not be read says so and names the reason, rather than staying silent and reading as a clean bill of health for the one environment least able to say otherwise. Under `--dry-run` the read is traced but not taken, like every other subprocess doctor would run, so a dry run shows the traced read and no resources section.
 
 `doctor`'s desktop-app check inspects every copy of the `ERun.app` bundle this host could hold, **including the ones `erun app` itself launches from** — beside the `erun` executable, which is where a packaged install and the dev wrapper's `BIN_DIR` (`erun-cli/bin`, or `$ERUN_DEV_BIN_DIR`) both put it, and the checkout's `erun-ui/bin`. It names which copy a launch would actually reach, so a bundle that matches this CLI no longer reads as "nothing to report" while the running app is a different build at a path the check never looked at. Copies that share the bundle id `com.sophium.erun` are all listed, because macOS (Finder, Spotlight, the Dock) can launch any of them regardless of which is current.
 

@@ -289,7 +289,7 @@ func registerReadModelTools(reg toolRegistrar, info eruncommon.BuildInfo, runtim
 	}, versionTool(info))
 	addTool(reg, &mcp.Tool{
 		Name: "list",
-		Description: "List configured tenants and environments, defaults, the effective target for the current runtime directory, and any erun ssh alias ~/.ssh/config declares that no configured environment claims any more. " +
+		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory. " +
 			"Pass versionDriftTenant to additionally report erun-version drift across that tenant's environments, and gateEnvironment to flag whether the environment driving that tenant's merge-queue gate is running an older erun version than any environment it gates.",
 	}, listTool(runtime))
 	addTool(reg, &mcp.Tool{
@@ -677,7 +677,7 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, pushTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "deploy",
-		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, mirror them from the FROM to the TO registry when both roles are marked, then run the rollout with the cluster pulling from the DEPLOY registry. The deploy step of the build → release → push → deploy flow. Waits for the rollout to become ready (default 15m, the env's deploy.timeout, or the timeout input; the default is sized for a cold pull of the runtime image, which the rollout waits out with its previous pod already torn down by the chart's Recreate strategy) and watches the new pods, keeping the wait while an image is still pulling and aborting early on a real container failure.",
+		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, mirror them from the FROM to the TO registry when both roles are marked, then run the rollout with the cluster pulling from the DEPLOY registry. The deploy step of the build → release → push → deploy flow. Waits for the rollout to become ready (default 5m, the env's deploy.timeout, or the timeout input) and watches the new pods, keeping the wait while an image is still pulling and aborting early on a real container failure.",
 	}, deployTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "publish",
@@ -698,7 +698,7 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 	addTool(reg, &mcp.Tool{
 		Name: "usage",
 		Description: "Report the resolved environment's live CPU, memory, and disk usage, read straight from the runtime container's cgroup v2 accounting and a statfs of the workspace mount -- no metrics-server required, so it works on clusters where `kubectl top` reports \"Metrics API not available\". Memory is reported against the container's own limit (current, peak high-water mark, and a real OOM-kill count) and CPU utilisation against its quota over a sample window; a named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. Every field reports its own unavailability (cgroup v1, an unlimited limit, an unreadable file) rather than failing the call. `disk[].totalBytes`/`usedBytes`/`percentUsed` describe the whole mount (`nodeShared: true`): every environment scheduled on the same node reports the identical figures, so cleaning up one environment may barely move them. `disk[].ownUsedBytes` (a `du` of the mount, scoped to this environment's own directory) is the figure this environment can actually reduce.On a build-capable environment (local-agent, remote-agent), `excludesBuilds` is true because every image build actually runs in the erun-dind sidecar, a separate cgroup from the runtime container above -- so this call also reads the sidecar's own CPU and memory against its own limit and returns it as `dind`, with the same named warnings if the sidecar itself nears its memory limit or records an OOM kill; `dind` is absent only when the sidecar's own cgroup could not be read, and `observe` reports its resource limits either way. Also carries this environment's standing sizing recommendation (`sizing`), when retained usage history has accumulated one -- the same raise/lower/hold verdict and evidence window `resize` reasons from, so a caller does not need a separate resize call just to see it. That history is retained by this environment's own pod monitor and lives with the environment, so " +
-			UsageSizingClaim() + ". What varies is whether that history is there to read -- a caller running a command on a host that has never monitored this environment gets the reading with no `sizing` field rather than a zero-value verdict it might mistake for a hold. ",
+			UsageSizingClaim() + ". What varies is whether that history is there to read -- a reading taken from a host has the live counters to reason from and no observed window: the advice the counters prove (a raise, after a peak at the limit or a recorded OOM kill) fires there too, while the shrink direction, which needs a day of quiet evidence, reads as insufficient-evidence. ",
 	}, usageTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "resize",

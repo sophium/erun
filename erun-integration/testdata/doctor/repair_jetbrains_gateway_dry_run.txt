@@ -13,6 +13,10 @@ kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
 kubectl-context-configure: subprocess
 
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 Running: Clear cached JetBrains Gateway backend metadata
 Cached backend path: <TMP>

@@ -41,15 +41,17 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"A busy build no longer reads as an idle environment. If the sidecar's own\n" +
 			"cgroup could not be read, the output says so instead; `erun observe` reports\n" +
 			"its resource limits either way.\n\n" +
-			"The environment's standing sizing recommendation rides along with the reading\n" +
-			"whenever the usage history behind it can be read: it is derived from history\n" +
-			"the environment's own pod monitor retained, which lives with the environment.\n" +
-			"Which surfaces show it follows from that, not from which command was run:\n" +
-			"the `usage` and `resize` tools over the environment's MCP endpoint and\n" +
-			"`erun list`'s `runtime-pod:` block all resolve the same recommendation from\n" +
-			"the same evidence, so no two of them can disagree. A host that has never\n" +
-			"monitored the environment has no history to resolve, and reports the reading\n" +
-			"with no sizing verdict at all rather than a zero-value one.",
+			"The standing sizing recommendation printed beneath the reading is derived\n" +
+			"from this reading together with the environment's retained usage history --\n" +
+			"the same evidence, and the same verdict, the `usage`/`resize` tools over the\n" +
+			"environment's MCP endpoint and the desktop Runtime tab report. That history\n" +
+			"is retained by the environment's own pod, so a reading taken from a host has\n" +
+			"the live counters to reason from and no observed window: the advice the\n" +
+			"counters prove (a raise, after a peak at the limit or a recorded OOM kill) is\n" +
+			"reported there too, while the shrink direction, which needs a day of quiet\n" +
+			"evidence, reads as insufficient-evidence. `erun list` prints the window-only\n" +
+			"view under `runtime-pod:`, and only when run inside the environment, where\n" +
+			"that history lives.",
 		Example: "  erun usage --tenant team --environment dev\n" +
 			"  erun usage --tenant team --environment dev --interval 3 --output json",
 		Args:          cobra.NoArgs,

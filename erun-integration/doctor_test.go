@@ -201,6 +201,51 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_rollback_failure_reports_helm_stderr", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_reports_memory_pressure_and_the_sizing_verdict", func(t *testing.T) {
+		// The signal `erun usage` computes and doctor used to omit entirely: an
+		// environment pinned at 100% of its memory limit with real OOM kills and
+		// sustained CPU throttling. Doctor reported disk and nothing else, so the
+		// environment that most needed attention read as a disk question. The
+		// verdict is reported and never applied -- resizing rolls the runtime pod
+		// -- so the run must name the explicit `erun resize` values and must not
+		// run a resize.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`case "$1" in`,
+			`  status) printf '%s\n' 'NAME: team-devops' 'STATUS: deployed' ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n"))
+		stubDoctorKubectlWithUsage(t, stubs)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
+		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The warning, the verdict and the next action are asserted by their own
+		// wording as well as by the snapshot: a golden refresh that dropped the
+		// section would still have to be reviewed against these.
+		for _, want := range []string{
+			"== Resources ==",
+			"memory is at 100% of its 6144Mi limit (warns at 85%)",
+			"memory.peak reached 100% of the limit (warns at 95%)",
+			"the cgroup recorded 3 OOM kill(s)",
+			"memory raise to 9216Mi from 6144Mi (3 oom kill(s) at 6144Mi, high confidence)",
+			"cpu raise to 9 from 6 (9.85% of scheduling periods throttled (573996 of 5829923), high confidence)",
+			"erun resize --tenant team --environment dev --memory 9216Mi --cpu 9",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in doctor's output, got:\n%s", want, result.Combined)
+			}
+		}
+		if strings.Contains(result.Combined, "Running: ") {
+			t.Fatalf("doctor must report the sizing verdict without applying it, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/real_run_reports_memory_pressure_and_the_sizing_verdict", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_clear_pending_helm_traces_kubectl_delete", func(t *testing.T) {
 		// Exercises the deploy-recovery action: --clear-pending-helm
 		// --dry-run must trace the `kubectl delete secrets,configmaps -l
@@ -1275,7 +1320,14 @@ func TestDoctor(t *testing.T) {
 		projectPath := "/home/erun/git/" + filepath.Base(setup.Cwd)
 		idePath := filepath.Join(setup.Home, "jetbrains-backends", "ideaIU-243.22562.222")
 		xmlPath := seedJetBrainsRecentProject(t, setup, configID, projectPath, idePath)
+		// The real pass execs kubectl for the read-only pod sections (the
+		// resources reading among them); the scrubbed PATH means an undeclared
+		// binary would otherwise be answered by whatever the host has
+		// installed.
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorKubectl(t, stubs, "")
 		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl")...)
 
 		dryRun := erun.Run(t, []string{"doctor", "team", "dev", "--repair-jetbrains-gateway", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if dryRun.ExitCode != 0 {
@@ -1306,9 +1358,19 @@ func TestDoctor(t *testing.T) {
 		// clear, and doctor must say so and stop (covering the not-found
 		// arm of runSelectedJetBrainsGatewayRepair) instead of falling
 		// through to the kubectl-driven cleanup actions.
+		//
+		// Only kubectl is declared: every read-only pod section before the
+		// repair (the resources reading among them) reaches for it, and this
+		// suite's scrubbed PATH refuses to let a scenario depend on whatever
+		// the host happens to have installed. helm stays undeclared on purpose
+		// -- its own diagnosis already degrades to an unreadable release
+		// without this scenario's golden having to carry a stubbed one.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := filepath.Join(setup.Cwd, "stubs")
+		stubDoctorKubectl(t, stubs, "")
 		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl")...)
 		result := erun.Run(t, []string{"doctor", "team", "dev", "--repair-jetbrains-gateway"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -1889,35 +1951,6 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/real_run_cluster_unreachable_skips_pod_dependent_sections_once_established", normalize.Apply(result.Combined))
 	})
 
-	t.Run("real_run_reports_memory_pressure", func(t *testing.T) {
-		// The reported gap: an environment at 100% of its memory limit with
-		// OOM kills recorded, which `erun usage` had already measured and
-		// warned about while `erun doctor` -- the command an operator reaches
-		// for when an environment misbehaves -- said nothing at all. The stubs
-		// answer the usage read with exactly that cgroup: memory.peak at the
-		// container's limit and a real oom_kill count, with the erun-dind
-		// sidecar healthy, so a section that read the wrong container's
-		// counters would be visible here rather than passing quietly.
-		//
-		// A real run, not a dry run: doctor's dry run performs no subprocess,
-		// so it traces this read rather than taking it (see
-		// reportEnvironmentResources).
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		stubs := filepath.Join(setup.Cwd, "stubs")
-		stubDoctorHelmStatus(t, stubs, "deployed")
-		stubDoctorKubectlWithResourcePressure(t, stubs)
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "helm", "kubectl")...)
-		result := erun.Run(t, []string{"doctor", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "== Resources ==") {
-			t.Fatalf("doctor reported nothing about an environment whose memory peak is at its limit with OOM kills recorded:\n%s", result.Combined)
-		}
-		golden.Equal(t, "doctor/real_run_reports_memory_pressure", normalize.Apply(result.Combined))
-	})
-
 	t.Run("real_run_storage_unhealthy_diagnostic_error", func(t *testing.T) {
 		// kubectl wait fails with a disk i/o error: doctor must fold the
 		// stderr into the storage-unhealthy diagnostic
@@ -2399,67 +2432,6 @@ func stubDoctorHelmStatusUnreachable(t *testing.T, stubsDir string) {
 // failures), the pending-helm lock delete, the namespace probe the
 // failure diagnostic runs, and the dind exec scripts for inspection and
 // the three prune actions (matched on their distinctive docker lines).
-// stubDoctorKubectlWithResourcePressure answers every doctor surface as
-// stubDoctorKubectl does, and answers the usage read with a cgroup under real
-// memory pressure: memory.peak at the container's limit with OOM kills
-// recorded -- the state doctor used to report nothing about while `erun usage`
-// had already measured it and produced a resize verdict.
-//
-// The usage read is two execs on a build-capable environment (the runtime
-// container and the erun-dind sidecar), told apart by the `-c erun-dind` argv
-// the sidecar exec always carries. Only the runtime container is under
-// pressure; the sidecar is healthy, so a section that reported the wrong
-// container's numbers would be visible in the golden.
-func stubDoctorKubectlWithResourcePressure(t *testing.T, stubsDir string) {
-	t.Helper()
-	runtimeLines := []string{
-		"cgroup_type=cgroup2fs",
-		"memory_current=4294000000",
-		"memory_max=4294967296",
-		"memory_peak=4294967296",
-		"memory_oom_kill=3",
-		"cpu_max=600000 100000",
-		"cpu_usage_before=1000000",
-		"cpu_usage_after=3985000",
-		"cpu_periods=100000",
-		"cpu_throttled_periods=9850",
-		"cpu_time_before_ns=1000000000",
-		"cpu_time_after_ns=2000000000",
-		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-	}
-	dindLines := []string{
-		"cgroup_type=cgroup2fs",
-		"memory_current=100000000",
-		"memory_max=4294967296",
-		"memory_peak=120000000",
-		"memory_oom_kill=0",
-		"cpu_max=600000 100000",
-		"cpu_usage_before=1000",
-		"cpu_usage_after=2000",
-		"cpu_periods=100000",
-		"cpu_throttled_periods=0",
-	}
-	printLines := func(lines []string) string {
-		quoted := make([]string, 0, len(lines))
-		for _, line := range lines {
-			quoted = append(quoted, "'"+line+"'")
-		}
-		return "printf '%s\\n' " + strings.Join(quoted, " ")
-	}
-	script := strings.Join([]string{
-		`case "$*" in`,
-		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
-		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
-		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
-		`  *" wait "*) : ;;`,
-		`  *" -c erun-dind "*"memory_current"*) ` + printLines(dindLines) + ` ;;`,
-		`  *"memory_current"*) ` + printLines(runtimeLines) + ` ;;`,
-		`esac`,
-		`exit 0`,
-	}, "\n")
-	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
-}
-
 func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 	t.Helper()
 	if waitArm == "" {
@@ -2479,6 +2451,75 @@ func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 		`exit 0`,
 	}, "\n")
 	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", script)
+}
+
+// stubDoctorKubectlWithUsage answers doctor's read-only surfaces and both of
+// the resources section's cgroup reads with the figures four erun fleet
+// environments actually reported: memory pinned at 100% of a 6144Mi limit with
+// three recorded OOM kills, and 9.8% of scheduling periods throttled at a
+// 6-core quota.
+//
+// The exec arms are ordered because doctor dispatches more than one exec: the
+// dind one first (the sidecar's own reading and doctor's docker-storage probe
+// both use -c erun-dind), then the runtime container's. The usage reads are
+// told apart from the docker-storage probe by the reading script in the exec
+// argv -- memory_oom_kill for the one, df -h /var/lib/docker for the other.
+func stubDoctorKubectlWithUsage(t *testing.T, stubsDir string) {
+	t.Helper()
+	runtimeLines := []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=6442450944",
+		"memory_max=6442450944",
+		"memory_peak=6442459136",
+		"memory_oom_kill=3",
+		"cpu_max=600000 100000",
+		"cpu_usage_before=581511501",
+		"cpu_usage_after=581611501",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		"cpu_periods=5829923",
+		"cpu_throttled_periods=573996",
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+		"disk_own_used_kb=44040192",
+	}
+	// The sidecar reads healthy: it is a separate cgroup, and the section must
+	// report its own pressure rather than mirroring the runtime container's.
+	dindLines := []string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=1073741824",
+		"memory_max=17179869184",
+		"memory_peak=2147483648",
+		"memory_oom_kill=0",
+		"cpu_max=800000 100000",
+		"cpu_usage_before=581511501",
+		"cpu_usage_after=581611501",
+		"cpu_periods=5829923",
+		"cpu_throttled_periods=0",
+	}
+	script := []string{
+		`case "$*" in`,
+		`  *" -c erun-dind "*"memory_oom_kill"*)`,
+	}
+	for _, line := range dindLines {
+		script = append(script, `    printf '%s\n' '`+line+`'`)
+	}
+	script = append(script, `    ;;`, `  *"memory_oom_kill"*)`)
+	for _, line := range runtimeLines {
+		script = append(script, `    printf '%s\n' '`+line+`'`)
+	}
+	script = append(script, `    ;;`, `  *"memory_oom_kill"*)`)
+	for _, line := range runtimeLines {
+		script = append(script, `    printf '%s\n' '`+line+`'`)
+	}
+	script = append(script,
+		`    ;;`,
+		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
+		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
+		`esac`,
+		`exit 0`,
+	)
+	fixture.StubBinaryWithScript(t, stubsDir, "kubectl", strings.Join(script, "\n"))
 }
 
 // stubDoctorKubectlFailsOnDindExec answers every read-only doctor surface
