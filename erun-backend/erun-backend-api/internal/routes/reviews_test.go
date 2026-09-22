@@ -299,9 +299,9 @@ func TestListReviewsRefusesAnUnknownStatusFilter(t *testing.T) {
 	}
 }
 
-// Case-insensitivity is the documented behavior on this route (erun#2015), so
-// a lower-case spelling resolves to the stored one rather than being refused
-// alongside the values that are genuinely outside the vocabulary.
+// Case-insensitivity is the documented behavior on this route, so a lower-case
+// spelling resolves to the stored one rather than being refused alongside the
+// values that are genuinely outside the vocabulary.
 func TestListReviewsResolvesALowerCaseStatusFilter(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews}

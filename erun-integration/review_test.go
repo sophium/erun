@@ -434,11 +434,11 @@ func TestReview(t *testing.T) {
 		golden.Equal(t, "review/list_rejects_mine_combined_with_author_user_id", normalize.Apply(result.Combined))
 	})
 
-	// The reported failure (erun#2621): a mistyped --status reached the platform
-	// verbatim, came back as a clean empty listing, and printed "no reviews" at
-	// exit 0 -- indistinguishable from a review queue that genuinely has nothing
-	// in that state. Both halves are asserted together below, because the defect
-	// is precisely that the two were the same output.
+	// The reported failure: a mistyped --status reached the platform verbatim,
+	// came back as a clean empty listing, and printed "no reviews" at exit 0 --
+	// indistinguishable from a review queue that genuinely has nothing in that
+	// state. Both halves are asserted together below, because the defect is
+	// precisely that the two were the same output.
 	t.Run("list_mistyped_status_is_refused_rather_than_listed_as_empty", func(t *testing.T) {
 		setup := env.New(t)
 		server := reviewAPIStubServer(t)
@@ -477,9 +477,9 @@ func TestReview(t *testing.T) {
 		}
 	})
 
-	// Case-insensitivity is the documented behavior here (erun#2015), so a
-	// lower-case spelling must resolve to the stored one rather than be refused
-	// with it: the rejection is only for values outside the six in any casing.
+	// Case-insensitivity is the documented behavior here, so a lower-case
+	// spelling must resolve to the stored one rather than be refused with it:
+	// the rejection is only for values outside the six in any casing.
 	t.Run("list_lowercase_status_resolves_to_the_stored_spelling", func(t *testing.T) {
 		setup := env.New(t)
 		server := reviewAPIStubServer(t)
