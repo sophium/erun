@@ -1,8 +1,10 @@
 package eruncommon
 
 import (
+	"bytes"
 	"errors"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -540,6 +542,36 @@ func TestDiskHeadroomPreflightEndsWhenTheDaemonStopsAnswering(t *testing.T) {
 	}
 }
 
+// diskHeadroomPruneStubDocker writes the docker stand-in the two tests below
+// drive: every read answers, and the prune itself never returns, so only the
+// bound can end it.
+//
+// The prune branch is `exec`ed so that the sleeping process *is* the one the
+// bound fires on. Bounded execution kills the direct child alone --
+// os/exec.CommandContext, which diskHeadroomRun builds on -- so a shell holding
+// the sleep as a child is killed while the sleep itself is orphaned and runs on
+// for the rest of the hour. That leftover is not a private nuisance: a job's
+// record is built from what the job left running, so it makes the run that
+// spawned it read as abandoned work.
+func diskHeadroomPruneStubDocker(t *testing.T, root string) string {
+	t.Helper()
+	return writeExecutableScript(t, `case "$1" in
+  info) echo "`+root+`" ;;
+  system) echo "Build Cache|40GB" ;;
+  buildx) exec sleep 3600 ;;
+esac`)
+}
+
+// setDiskHeadroomOneGiBFree installs the df stand-in that puts the disk below
+// the floor, which is what makes the read-first check reach the prune at all:
+// 1 GiB free of ~435 GiB.
+func setDiskHeadroomOneGiBFree(t *testing.T, root string) {
+	t.Helper()
+	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
+echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
+	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+}
+
 // TestDiskHeadroomPruneBoundStillReportsAVerdict covers the other half of the
 // prune path: the daemon answers every read and goes silent on the prune
 // itself. The prune is not what the build depends on, so the build must still
@@ -549,15 +581,9 @@ func TestDiskHeadroomPreflightEndsWhenTheDaemonStopsAnswering(t *testing.T) {
 // the shape where the mechanism goes inert without anyone able to tell.
 func TestDiskHeadroomPruneBoundStillReportsAVerdict(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, `case "$1" in
-  info) echo "`+root+`" ;;
-  system) echo "Build Cache|40GB" ;;
-  buildx) sleep 3600 ;;
-esac`))
+	t.Setenv("ERUN_DOCKER_BIN", diskHeadroomPruneStubDocker(t, root))
 	// 1 GiB free of ~435 GiB: below the floor, so the prune is reached.
-	t.Setenv("ERUN_DF_BIN", writeExecutableScript(t, `echo "Filesystem     1024-blocks     Used Available Capacity Mounted on"
-echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
-	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(diskHeadroomTestFloor, 10))
+	setDiskHeadroomOneGiBFree(t, root)
 
 	logs := &strings.Builder{}
 	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
@@ -577,6 +603,71 @@ echo "/dev/fake       456340275 455291699  1048576     100% `+root+`"`))
 	}
 	if !strings.Contains(message, "below the") {
 		t.Fatalf("expected the shortfall to still be reported against the disk that is actually free, got %q", message)
+	}
+}
+
+// stubProcessesStillAlive returns the pids of every process on this host whose
+// own environment still names stubPath: the stand-in a bounded run started, or
+// a descendant it left holding the same inherited environment. The stub path is
+// a per-test temp file, so a match is this run's own leftover rather than
+// whatever else the host happens to be running.
+func stubProcessesStillAlive(t *testing.T, stubPath string) []int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		t.Fatalf("read the process table from /proc: %v", err)
+	}
+	needle := []byte(stubPath)
+	var alive []int
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		// This test's own process carries the same ERUN_DOCKER_BIN.
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		environ, err := os.ReadFile("/proc/" + entry.Name() + "/environ")
+		if err != nil {
+			// Exited between the listing and the read, or not visible under a
+			// hidepid mount. Either way there is nothing to compare.
+			continue
+		}
+		if bytes.Contains(environ, needle) {
+			alive = append(alive, pid)
+		}
+	}
+	return alive
+}
+
+// TestDiskHeadroomPruneBoundLeavesNothingRunningBehind is the gate-hygiene half
+// of the verdict test beside it, and the reproduction of the leak it was
+// reported with: the prune's stand-in used to be a shell holding `sleep 3600`
+// as a child, and the bound kills the direct child alone. The shell died, the
+// sleep was orphaned, and every run left one behind for the rest of the hour.
+//
+// The leftover reached past its own test. A job's record is built from what the
+// job left running, so a gate whose targets all passed still recorded itself as
+// abandoned rather than passed -- the signal that exists to catch a job that
+// really did leave work running, spent on every clean run, which is what makes
+// it ignorable when it is true.
+func TestDiskHeadroomPruneBoundLeavesNothingRunningBehind(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only Linux exposes a process's own environment under /proc, which is what identifies a survivor as this run's leftover")
+	}
+	root := t.TempDir()
+	stub := diskHeadroomPruneStubDocker(t, root)
+	t.Setenv("ERUN_DOCKER_BIN", stub)
+	setDiskHeadroomOneGiBFree(t, root)
+
+	logs := &strings.Builder{}
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	policy := buildDiskHeadroomPolicy
+	policy.limits = diskHeadroomShortLimits()
+
+	if err := awaitHeadroomPreflight(t, ctx, policy); err != nil {
+		t.Fatalf("a build must still proceed when its prune does not finish, got %v", err)
+	}
+	if alive := stubProcessesStillAlive(t, stub); len(alive) > 0 {
+		t.Fatalf("the prune's stand-in is still running as pid(s) %v after the bound ended it: what the bound kills is not the process that was running, so the leftover outlives the run that started it and is recorded as abandoned work", alive)
 	}
 }
 
