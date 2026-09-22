@@ -44,10 +44,10 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 		Short: "Diagnose and repair an environment's runtime and config",
 		Long: "Diagnose and repair an environment's runtime and config.\n\n" +
 			"Reports why a deploy may have failed (helm release status and the runtime pods, " +
-			"read-only), and the environment's own resource pressure — memory against its " +
-			"limit with the OOM kills behind it, CPU against its quota — beside the standing " +
-			"sizing verdict `erun usage` computes, when either has something to report. It " +
-			"never resizes: a resize rolls the pod, so it names the remedy instead. " +
+			"read-only), and the runtime container's own CPU and memory pressure with the sizing " +
+			"recommendation that answers it (the same reading and verdict `erun usage` reports, " +
+			"rendered identically). A recommendation is only ever reported: the `erun resize` command " +
+			"that would apply it is named, never run, because resizing rolls the runtime pod. " +
 			"When the release looks unhealthy it recommends the one recovery that fits — " +
 			"clear a stuck pending helm release, or roll back to the last successful revision — and " +
 			"prompts before running it. It also prunes Docker images, build cache, or stopped " +
@@ -138,9 +138,12 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 // helm release and pod state first, because nothing about reading them
 // requires the runtime pod to be up, and that is exactly the state most worth
 // diagnosing when it is not. Every check after it that does need the pod
-// (host credentials, the docker-storage inspection) degrades to a "could not
-// read" report instead of aborting, so a down pod stops none of the checks
-// that do not need it.
+// (host credentials, the resource-pressure reading, the docker-storage
+// inspection) degrades to a "could not read" report instead of aborting, so a
+// down pod stops none of the checks that do not need it. The
+// resource-pressure section sits with those read-only pod checks rather than
+// with the cleanup tail, because it is a diagnosis: nothing about it mutates
+// the environment, and the resize it recommends is left for the operator.
 func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
@@ -164,7 +167,7 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if err := reportDeployDiagnosisSections(ctx, configStore, result, diagnosis); err != nil {
 		return err
 	}
-	if err := reportEnvironmentResources(ctx, req, result); err != nil {
+	if err := reportDoctorResources(ctx, req, result, diagnosis); err != nil {
 		return err
 	}
 	if err := runWorkspaceSyncDoctor(ctx, promptRunner, configStore, result, options); err != nil {

@@ -63,6 +63,7 @@ run "null_for_every_optional_input_resolves_the_documented_defaults" {
     env_namespace                    = null
     per_env_certificate_enabled      = null
     install_ingress_controller       = null
+    manage_transport_policy          = null
     install_cert_manager             = null
     wildcard_certificate_enabled     = null
     coredns_configmap_name           = null
@@ -134,6 +135,10 @@ run "an_explicit_false_is_honored_against_a_true_default" {
 
   variables {
     install_ingress_controller = false
+    # install_ingress_controller = false alone is refused outright (see
+    # edge_transport_policy.tftest.hcl): with the policy still managed here
+    # there is no controller to carry it.
+    manage_transport_policy = false
   }
 
   assert {

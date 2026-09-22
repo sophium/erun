@@ -53,7 +53,8 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 	defer cancel()
 
 	review, err := client.CreateReview(requestCtx, eruncommon.PlatformCreateReviewParams{
-		Name: name, TargetBranch: targetBranch, SourceBranch: sourceBranch,
+		Repository: strings.TrimSpace(input.Repository),
+		Name:       name, TargetBranch: targetBranch, SourceBranch: sourceBranch,
 	})
 	if err != nil {
 		return uiTenantDashboardReview{}, operatorPlatformError(actionCreateReview, err)
@@ -91,7 +92,27 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 	return tenantDashboardReview(review), nil
 }
 
-// AdvanceMergeQueue advances targetBranch's merge queue head to MERGE. When
+// mergeQueueAddress names the queue an advance acts on. The repository is
+// what settles which of several same-branch queues it is, so it is sent
+// whenever the caller knows it — the Reviews panel derives it from the rows it
+// is showing. Empty is passed through as "every repository's queue" rather
+// than refused here, the same shape the CLI has when it is not standing in a
+// checkout: the platform refuses that when it is genuinely ambiguous
+// (MERGE_QUEUE_AMBIGUOUS) and promotes normally when the branch's queue is one
+// repository's, which is what a review created before repositories were
+// recorded leaves behind.
+func mergeQueueAddress(repository, targetBranch string) (eruncommon.PlatformMergeQueueParams, error) {
+	queue := eruncommon.PlatformMergeQueueParams{
+		Repository:   strings.TrimSpace(repository),
+		TargetBranch: strings.TrimSpace(targetBranch),
+	}
+	if queue.TargetBranch == "" {
+		return eruncommon.PlatformMergeQueueParams{}, fmt.Errorf("target branch is required")
+	}
+	return queue, nil
+}
+
+// AdvanceMergeQueue advances one repository's merge queue head to MERGE. When
 // the queue head still has unresolved comment threads, the platform refuses
 // and this reports the block (which review, how many threads) on the same
 // review shape rather than a bare error string — Blocked/UnresolvedThreads
@@ -108,9 +129,9 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
-	targetBranch := strings.TrimSpace(input.TargetBranch)
-	if targetBranch == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("target branch is required")
+	queue, err := mergeQueueAddress(input.Repository, input.TargetBranch)
+	if err != nil {
+		return uiTenantDashboardReview{}, err
 	}
 
 	ctx := a.ctx
@@ -123,7 +144,7 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 	}
 	defer cancel()
 
-	review, err := client.AdvanceMergeQueue(requestCtx, targetBranch)
+	review, err := client.AdvanceMergeQueue(requestCtx, queue)
 	if err != nil {
 		var blocked *eruncommon.PlatformMergeQueueBlockedError
 		if errors.As(err, &blocked) {
@@ -147,9 +168,9 @@ func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) 
 	if err != nil {
 		return uiTenantDashboardReview{}, err
 	}
-	targetBranch := strings.TrimSpace(input.TargetBranch)
-	if targetBranch == "" {
-		return uiTenantDashboardReview{}, fmt.Errorf("target branch is required")
+	queue, err := mergeQueueAddress(input.Repository, input.TargetBranch)
+	if err != nil {
+		return uiTenantDashboardReview{}, err
 	}
 	reason := strings.TrimSpace(input.Reason)
 	if reason == "" {
@@ -166,7 +187,7 @@ func (a *App) OverrideAdvanceMergeQueue(input uiOverrideAdvanceMergeQueueInput) 
 	}
 	defer cancel()
 
-	review, err := client.OverrideAdvanceMergeQueue(requestCtx, targetBranch, reason)
+	review, err := client.OverrideAdvanceMergeQueue(requestCtx, queue, reason)
 	if err != nil {
 		return uiTenantDashboardReview{}, operatorPlatformError(actionOverrideAdvanceQueue, err)
 	}

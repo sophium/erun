@@ -151,7 +151,9 @@ func loadReviewDetailQueuePosition(ctx context.Context, client *eruncommon.Platf
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) != "" {
 		return 0
 	}
-	queue, err := client.ListMergeQueue(ctx, review.TargetBranch)
+	queue, err := client.ListMergeQueue(ctx, eruncommon.PlatformMergeQueueParams{
+		Repository: review.Repository, TargetBranch: review.TargetBranch,
+	})
 	if err != nil {
 		return 0
 	}

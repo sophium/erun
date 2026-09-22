@@ -13,7 +13,15 @@ kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
 kubectl-context-configure: subprocess
 
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+== Resources ==
+not observed: cgroup v2 not detected under /sys/fs/cgroup; memory usage needs memory.current/memory.max.
+This is not a healthy reading -- nothing here says this environment is sized correctly, only that its own CPU and memory counters could not be read. `erun usage` reports each field's own unavailability in the same words.
+
 No cached JetBrains Gateway backend metadata found for this environment.
 audit: erun doctor --repair-jetbrains-gateway team dev
 trace-log: appending the full trace to <TMP>

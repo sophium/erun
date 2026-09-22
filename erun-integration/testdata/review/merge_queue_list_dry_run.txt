@@ -1,3 +1,4 @@
 Dry run: erun review queue list planned.
-audit: erun review queue list --dry-run --target-branch main
-platform: GET https://api.example.test/v1/reviews/merge-queue (targetBranch=main)
+audit: erun review queue list --dry-run --repository https://github.com/sophium/erun --target-branch main
+review queue list: repository = https://github.com/sophium/erun
+platform: GET https://api.example.test/v1/reviews/merge-queue (repository=https://github.com/sophium/erun, targetBranch=main)

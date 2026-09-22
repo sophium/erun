@@ -18,6 +18,34 @@ output "ingress_class" {
   value       = local.arg_install_ingress_controller ? "traefik" : null
 }
 
+# The transport policy this module declares, as configured -- not as carried.
+# A cluster that brings its own ingress controller sets
+# manage_transport_policy=false and applies this to that controller, instead of
+# re-deriving the redirect and the HSTS commitment in an overlay that then
+# drifts from the module's own defaults.
+output "edge_transport_policy" {
+  description = "The edge's transport policy as configured: the redirect and HSTS entrypoint arguments (Traefik flag syntax), and the HSTS Middleware object when hsts_enabled resolves true. Empty when the corresponding switch is off, and never null, so a caller can always read the shape it applies to its own controller."
+  value = {
+    manager                      = local.arg_manage_transport_policy ? "module" : "caller"
+    http_redirect_enabled        = local.arg_http_redirect_enabled
+    hsts_enabled                 = local.arg_hsts_enabled
+    traefik_additional_arguments = concat(local.traefik_redirect_args, local.traefik_hsts_args)
+    hsts_middleware              = local.arg_hsts_enabled ? local.hsts_middleware : null
+  }
+
+  # The configuration this refuses: install_ingress_controller = false with the
+  # policy still managed here. Nothing consumes the policy in that plan — no
+  # controller is installed and no controller is told to apply it — so the
+  # redirect and the HSTS header simply do not exist, while the plan applies
+  # cleanly and every public host answers cleartext. The caller either installs
+  # the controller or says, once, that the policy belongs to the one already
+  # there.
+  precondition {
+    condition     = local.arg_install_ingress_controller || !local.arg_manage_transport_policy
+    error_message = "install_ingress_controller = false leaves this module with no controller to carry its transport policy, so http_redirect_enabled / hsts_enabled and the HSTS settings would be accepted and dropped: every public host would serve cleartext with no redirect and no Strict-Transport-Security, and this plan would report success. Either set install_ingress_controller = true, or set manage_transport_policy = false and apply the policy this module exposes at edge_transport_policy to the controller your cluster already runs."
+  }
+}
+
 output "namespace" {
   description = "Namespace holding cert-manager, the Cloudflare token Secret, and the wildcard Certificate."
   value       = kubernetes_namespace.cert_manager.metadata[0].name

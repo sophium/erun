@@ -18,7 +18,7 @@ kubectl port-forward -n <tenant>-<env> svc/<service> <localPort>:<port>
 
 Lifetime: bound to the calling process. No reconnection on cluster-side restart.
 
-`<localPort>` is per-env (from `EnvConfig.localportrangestart`) so concurrent forwards for different envs don't collide on the laptop. `<port>` is the **in-cluster** port, which differs by channel: the tenant's `<tenant>-api` service (`erun-api` for the `erun` tenant) is a standalone component chart published on the canonical `APIServicePort` (`17033`) in **every** namespace, so its forward maps `<perEnvLocalApi>:17033`; MCP and SSH forward to the runtime pod, which is deployed on the env's per-env ports, so those map the same per-env number on both sides. Using the per-env number for the API's remote side would target a port the service never exposes.
+`<localPort>` is per-env (from `EnvConfig.localportrangestart`) so concurrent forwards for different envs don't collide on the laptop. `<port>` is the **in-cluster** port, which is per-env on every channel: the tenant's `<tenant>-api` service (`erun-api` for the `erun` tenant) is a standalone component chart published on the environment's own `apiPort` (`{{ default 17033 .Values.apiPort }}`, which the deploy sets from the same port block), and MCP and SSH forward to the runtime pod, which is deployed on the env's per-env ports. So every forward maps the same per-env number on both sides, and it is the canonical `APIServicePort` (`17033`) only for the environment whose block is the 17000 one. Pinning the API's remote side to `17033` for every env asks kubectl for a service port the Service does not expose.
 
 ## Pattern 2 — `hostPort` (local clusters only)
 

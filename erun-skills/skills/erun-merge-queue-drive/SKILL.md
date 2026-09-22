@@ -20,10 +20,14 @@ for exact flags, and read the target repository's applicable AGENTS.md.
   Platform authentication is checked first and as a real check — see below —
   because this drive is built entirely out of platform calls. Report any other
   missing setup from the actual command's refusal; do not invent credentials.
-- Resolve each review fresh: status, source, target, name, and remote source SHA.
-  Drop non-MERGE reviews without changing their state. Refuse mixed target branches
-  and missing source refs.
-- The normal API allows one MERGE review per tenant/target. Multi-source
+- Resolve each review fresh: status, source, target, name, repository, and remote
+  source SHA. Drop non-MERGE reviews without changing their state. Refuse mixed
+  target branches, mixed repositories, and missing source refs: a queue belongs to
+  one repository, and gating a review from another one runs `gate-merge` against a
+  branch that need not exist in this checkout. `erun` derives the queue's repository
+  from this checkout's origin; name it with `--repository` if this drive is not
+  running in the repository the promotion targeted.
+- The normal API allows one MERGE review per tenant/repository/target. Multi-source
   `gate-merge` support does **not** prove arbitrary multi-review acceptance.
   Do not promote extra reviews or fabricate successful per-review builds to
   bypass this boundary; API batch-verification design remains unresolved.

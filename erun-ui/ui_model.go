@@ -605,9 +605,14 @@ type uiTenantDashboardReview struct {
 	// frontend falls back to the raw id rather than showing nothing (#1378).
 	AuthorUsername string `json:"authorUsername,omitempty"`
 	Name           string `json:"name"`
-	TargetBranch   string `json:"targetBranch"`
-	SourceBranch   string `json:"sourceBranch"`
-	Status         string `json:"status"`
+	// Repository is the repository the review's branches belong to, as the
+	// platform records it. Empty for a review created before the platform
+	// recorded one; the merge-queue panel names it so a queue spanning more
+	// than one repository is visibly not one queue.
+	Repository   string `json:"repository,omitempty"`
+	TargetBranch string `json:"targetBranch"`
+	SourceBranch string `json:"sourceBranch"`
+	Status       string `json:"status"`
 	// UnresolvedThreads is the review's "still being discussed" signal at a
 	// glance, from the row rather than only inside the detail dialog. Left
 	// unset (rather than 0) when it was not computed for this listing (see
@@ -786,9 +791,13 @@ type uiCreateReviewReplyInput struct {
 
 // uiCreateReviewInput opens a review on the platform. sourceBranch must
 // already be pushed to the remote — see ExecPush — since the review
-// references it by name.
+// references it by name. Repository is the repository those branches belong
+// to, in any form git accepts; the platform canonicalizes it. Without one the
+// review cannot be placed in any repository's merge queue, so it is worth
+// naming whenever the caller knows which checkout the work came from.
 type uiCreateReviewInput struct {
 	Tenant       string `json:"tenant"`
+	Repository   string `json:"repository"`
 	Name         string `json:"name"`
 	TargetBranch string `json:"targetBranch"`
 	SourceBranch string `json:"sourceBranch"`
@@ -800,12 +809,18 @@ type uiCloseReviewInput struct {
 }
 
 type uiAdvanceMergeQueueInput struct {
-	Tenant       string `json:"tenant"`
+	Tenant string `json:"tenant"`
+	// Repository and TargetBranch name the queue to advance. Both are
+	// required: advancing is a single-queue-head write, and the two together
+	// are what name one queue — a target branch alone names one only in a
+	// tenant that serves exactly one repository.
+	Repository   string `json:"repository"`
 	TargetBranch string `json:"targetBranch"`
 }
 
 type uiOverrideAdvanceMergeQueueInput struct {
 	Tenant       string `json:"tenant"`
+	Repository   string `json:"repository"`
 	TargetBranch string `json:"targetBranch"`
 	// Reason is required by the platform and is recorded in its audit trail
 	// alongside the caller's identity.

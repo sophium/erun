@@ -1,3 +1,4 @@
 Dry run: erun review creation planned.
-audit: erun review create --dry-run --name Add widget --source-branch feature/widget --target-branch main
-platform: POST https://api.example.test/v1/reviews (name=Add widget, targetBranch=main, sourceBranch=feature/widget)
+audit: erun review create --dry-run --name Add widget --repository https://github.com/sophium/erun --source-branch feature/widget --target-branch main
+review create: repository = https://github.com/sophium/erun
+platform: POST https://api.example.test/v1/reviews (repository=https://github.com/sophium/erun, name=Add widget, targetBranch=main, sourceBranch=feature/widget)

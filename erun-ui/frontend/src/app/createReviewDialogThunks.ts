@@ -266,6 +266,11 @@ export const submitCreateReview = (): AppThunk<Promise<void>> => async (dispatch
         name,
         targetBranch,
         sourceBranch,
+        // The dialog names no repository: the environment it opened against may
+        // be a remote worktree whose checkout this host cannot read, so there
+        // is no origin to derive one from here. `erun review create` in the
+        // repository's own checkout does name one.
+        repository: '',
       }),
     ).unwrap();
     dispatch(resetCreateReviewDialog());

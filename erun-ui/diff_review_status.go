@@ -45,10 +45,14 @@ type uiDiffReviewStatusInput struct {
 // the Reviews tab's does, instead of rendering an enabled control that fails
 // with a 403 after the click.
 type uiDiffReviewStatus struct {
-	State                string `json:"state"`
-	PlatformState        string `json:"platformState,omitempty"`
-	ReviewID             string `json:"reviewId,omitempty"`
-	Name                 string `json:"name,omitempty"`
+	State         string `json:"state"`
+	PlatformState string `json:"platformState,omitempty"`
+	ReviewID      string `json:"reviewId,omitempty"`
+	Name          string `json:"name,omitempty"`
+	// Repository is the review's own repository identity, carried to the
+	// panel's "Advance queue" action so it advances that review's queue rather
+	// than whichever repository's queue happens to share its target branch.
+	Repository           string `json:"repository,omitempty"`
 	QueuePosition        int    `json:"queuePosition,omitempty"`
 	UnresolvedThreads    *int   `json:"unresolvedThreads,omitempty"`
 	LastFailedBuildID    string `json:"lastFailedBuildId,omitempty"`
@@ -98,6 +102,7 @@ func (a *App) DiffReviewStatus(input uiDiffReviewStatusInput) (uiDiffReviewStatu
 	status := uiDiffReviewStatus{
 		ReviewID:             review.ReviewID,
 		Name:                 review.Name,
+		Repository:           review.Repository,
 		LastFailedBuildID:    review.LastFailedBuildID,
 		LastMergedBuildID:    review.LastMergedBuildID,
 		CanAdvanceMergeQueue: platform.canAdvance,
@@ -179,7 +184,12 @@ func applyDiffReviewReadyState(ctx context.Context, client *eruncommon.PlatformC
 	}
 	status.State = diffReviewStateReady
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) == "" {
-		if queue, err := client.ListMergeQueue(ctx, review.TargetBranch); err == nil {
+		// The review's own repository's queue: a review's queue position is
+		// meaningless against another repository's queue that happens to share
+		// the target branch.
+		if queue, err := client.ListMergeQueue(ctx, eruncommon.PlatformMergeQueueParams{
+			Repository: review.Repository, TargetBranch: review.TargetBranch,
+		}); err == nil {
 			status.QueuePosition = reviewQueuePosition(queue, review.ReviewID)
 		}
 	}

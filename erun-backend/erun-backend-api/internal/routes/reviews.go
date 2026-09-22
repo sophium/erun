@@ -16,7 +16,7 @@ type ReviewRepository interface {
 	Create(ctx context.Context, review model.Review) (model.Review, error)
 	Get(ctx context.Context, reviewID string) (model.Review, error)
 	List(ctx context.Context, filter apirepository.ReviewFilter) ([]model.Review, error)
-	ListMergeQueue(ctx context.Context, targetBranch string) ([]model.Review, error)
+	ListMergeQueue(ctx context.Context, repository, targetBranch string) ([]model.Review, error)
 }
 
 type ReviewReviewerRepository interface {
@@ -26,13 +26,18 @@ type ReviewReviewerRepository interface {
 }
 
 type ReviewService interface {
-	PrepareCreate(review model.Review) model.Review
-	AdvanceMergeQueue(ctx context.Context, targetBranch string) (model.Review, error)
+	// PrepareCreate normalizes a new review's status and repository identity,
+	// refusing a repository it cannot canonicalize.
+	PrepareCreate(review model.Review) (model.Review, error)
+	// AdvanceMergeQueue and OverrideAdvanceMergeQueue act on one repository's
+	// queue. An empty repository is one queue spanning every repository the
+	// tenant serves, which is what a target branch alone has always meant.
+	AdvanceMergeQueue(ctx context.Context, repository, targetBranch string) (model.Review, error)
 	// OverrideAdvanceMergeQueue is the one deliberate, audited escape from
 	// AdvanceMergeQueue's unresolved-thread gate: it refuses a blank reason and
 	// fails closed if audit logging is not configured, rather than promoting
 	// anyway.
-	OverrideAdvanceMergeQueue(ctx context.Context, targetBranch, reason string) (model.Review, error)
+	OverrideAdvanceMergeQueue(ctx context.Context, repository, targetBranch, reason string) (model.Review, error)
 	// UpdateStatus applies a caller-reported status transition. remoteURL is
 	// used only when status is MERGED: the remote the caller pushed the merge
 	// to, fetched to verify the reported build's commit against the real
@@ -73,11 +78,17 @@ type updateReviewStatusRequest struct {
 	RemoteURL string `json:"remoteUrl"`
 }
 
+// advanceMergeQueueRequest addresses one repository's queue. An empty
+// repository is a queue spanning every repository the tenant serves, which is
+// the pre-repository-identity meaning of a target branch alone; erun's own
+// clients always name the repository they are standing in.
 type advanceMergeQueueRequest struct {
+	Repository   string `json:"repository"`
 	TargetBranch string `json:"targetBranch"`
 }
 
 type overrideAdvanceMergeQueueRequest struct {
+	Repository   string `json:"repository"`
 	TargetBranch string `json:"targetBranch"`
 	Reason       string `json:"reason"`
 }
@@ -112,6 +123,7 @@ func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	filter := apirepository.ReviewFilter{
+		Repository:     query.Get("repository"),
 		TargetBranch:   query.Get("targetBranch"),
 		SourceBranch:   query.Get("sourceBranch"),
 		Status:         status,
@@ -166,8 +178,13 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	review = r.service.PrepareCreate(review)
-	review, err := r.reviews.Create(req.Context(), review)
+	prepared, err := r.service.PrepareCreate(review)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
+	review = prepared
+	review, err = r.reviews.Create(req.Context(), review)
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -176,7 +193,7 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
-	reviews, err := r.reviews.ListMergeQueue(req.Context(), req.URL.Query().Get("targetBranch"))
+	reviews, err := r.reviews.ListMergeQueue(req.Context(), req.URL.Query().Get("repository"), req.URL.Query().Get("targetBranch"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -190,7 +207,7 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	review, err := r.service.AdvanceMergeQueue(req.Context(), input.TargetBranch)
+	review, err := r.service.AdvanceMergeQueue(req.Context(), input.Repository, input.TargetBranch)
 	if err != nil {
 		writeAdvanceMergeQueueError(w, req, err)
 		return
@@ -204,7 +221,7 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), input.TargetBranch, input.Reason)
+	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), input.Repository, input.TargetBranch, input.Reason)
 	if err != nil {
 		writeAdvanceMergeQueueError(w, req, err)
 		return
@@ -243,6 +260,14 @@ func writeAdvanceMergeQueueError(w http.ResponseWriter, req *http.Request, err e
 	}
 	if errors.Is(err, service.ErrInvalidTargetBranch) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_TARGET_BRANCH", err.Error())
+		return
+	}
+	var ambiguous *service.AmbiguousMergeQueueError
+	if errors.As(err, &ambiguous) {
+		writeErrorDetails(w, http.StatusConflict, "MERGE_QUEUE_AMBIGUOUS", ambiguous.Error(), map[string]any{
+			"targetBranch": ambiguous.TargetBranch,
+			"repositories": ambiguous.Repositories,
+		})
 		return
 	}
 	var empty *service.EmptyMergeQueueError

@@ -42,6 +42,7 @@ type UsageOutput = eruncommon.RuntimeUsageReport
 var usageSizingSurfaces = []string{
 	"this tool",
 	"`erun usage`",
+	"`erun doctor`",
 	"`erun list`'s `runtime-pod:` block",
 }
 

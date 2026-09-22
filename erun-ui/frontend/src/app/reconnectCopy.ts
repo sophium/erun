@@ -35,21 +35,24 @@ interface ReachabilityCopy {
 // staleForward is the genuine fault case: the port is held but the edge
 // never answers. "Cannot reach the environment runtime" / "Reconnect…" holds
 // regardless of which surface (diff, jobs) triggered the read.
+//
+// The dialog asks for confirmation and states what the action attempts, not
+// what it will achieve. This dialog is reached *from* the unreachable state,
+// so it is shown exactly when the environment may be down for a reason the
+// reconnect cannot address -- and it is the moment an operator is most likely
+// to press it repeatedly. It used to promise that a runtime which is not
+// running "will be redeployed", which is not an unchecked recovery but one the
+// action cannot perform at all: the reconnect runs `erun open --reconnect`,
+// which verifies the runtime is already deployed, refuses outright when it is
+// stopped, and never deploys. Saying so is what keeps the operator from
+// reading a failed attempt as a "it just needs another try".
 const STALE_FORWARD_COPY: ReachabilityCopy = {
   errorTitle: 'Cannot reach the environment runtime',
   errorBody: 'The connection to your environment is down.',
   action: 'Reconnect…',
   dialogTitle: 'Reconnect to environment?',
-  // Describes what the action attempts, not what it will achieve. The dialog
-  // is reached *from* the unreachable state, so it is shown precisely when the
-  // environment may be unreachable for a reason `erun open` cannot address --
-  // a linked env whose cluster API is itself unreachable from this host cannot
-  // be redeployed however many times Reconnect is pressed, and this is the
-  // moment an operator is most likely to press it repeatedly. Naming the
-  // condition the redeploy needs keeps the promise inside what has actually
-  // been checked, which is all this copy can know from here.
   dialogBody:
-    'This runs `erun open` to restore the connection, redeploying the runtime if it is not running and its cluster is reachable.',
+    'This runs `erun open` to restore the connection. It reattaches to the environment runtime; it does not start a stopped environment or redeploy one.',
   dialogConfirm: 'Reconnect',
   runningStatus: 'Reconnecting…',
   errorStatusTitle: 'Reconnect failed',

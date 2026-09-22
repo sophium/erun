@@ -111,6 +111,13 @@ export interface UICreateReviewReplyInput {
 // the remote (see UIExecPushInput) before the platform can reference it.
 export interface UICreateReviewInput {
   tenant: string;
+  // repository is the repository the branches belong to, in any form git
+  // accepts; the platform canonicalizes it. Without one the review cannot be
+  // placed in any repository's merge queue, so it is worth naming whenever the
+  // caller knows which checkout the work came from. Empty is "none recorded",
+  // which is what this dialog sends: its environment may be a remote worktree
+  // whose checkout this host cannot read, so it does not guess at one.
+  repository: string;
   name: string;
   targetBranch: string;
   sourceBranch: string;
@@ -132,6 +139,11 @@ export interface UIUpdateReviewCommentStatusInput {
 
 export interface UIAdvanceMergeQueueInput {
   tenant: string;
+  // repository and targetBranch name the queue to advance. Both are required:
+  // advancing is a single-queue-head write, and the two together are what name
+  // one queue — a target branch alone names one only in a tenant that serves
+  // exactly one repository.
+  repository: string;
   targetBranch: string;
 }
 
@@ -140,6 +152,7 @@ export interface UIAdvanceMergeQueueInput {
 // in its audit trail alongside the caller's identity.
 export interface UIOverrideAdvanceMergeQueueInput {
   tenant: string;
+  repository: string;
   targetBranch: string;
   reason: string;
 }

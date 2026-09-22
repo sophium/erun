@@ -18,6 +18,11 @@ type stubReviewRepository struct {
 	reviews   []model.Review
 	err       error
 	gotFilter apirepository.ReviewFilter
+	// gotMergeQueue* record what ListMergeQueue was addressed with, so a test
+	// can prove the repository query parameter reaches the repository rather
+	// than being dropped on the way through the route.
+	gotMergeQueueRepository   string
+	gotMergeQueueTargetBranch string
 }
 
 func (s *stubReviewRepository) Create(context.Context, model.Review) (model.Review, error) {
@@ -33,7 +38,9 @@ func (s *stubReviewRepository) List(_ context.Context, filter apirepository.Revi
 	return s.reviews, s.err
 }
 
-func (s *stubReviewRepository) ListMergeQueue(context.Context, string) ([]model.Review, error) {
+func (s *stubReviewRepository) ListMergeQueue(_ context.Context, repository, targetBranch string) ([]model.Review, error) {
+	s.gotMergeQueueRepository = repository
+	s.gotMergeQueueTargetBranch = targetBranch
 	return s.reviews, s.err
 }
 
@@ -66,19 +73,33 @@ func (s *stubReviewReviewerRepository) Delete(_ context.Context, reviewID, userI
 type stubReviewService struct {
 	review model.Review
 	err    error
-	// overrideReason/overrideTargetBranch record OverrideAdvanceMergeQueue's
-	// call so a test can assert the request body actually reached the service.
+	// override* and advance* record the service's call so a test can assert
+	// the request body actually reached it, repository included.
 	overrideReason       string
 	overrideTargetBranch string
+	overrideRepository   string
+	advanceRepository    string
+	advanceTargetBranch  string
+	preparedReview       model.Review
+	prepareErr           error
 }
 
-func (s *stubReviewService) PrepareCreate(review model.Review) model.Review { return review }
+func (s *stubReviewService) PrepareCreate(review model.Review) (model.Review, error) {
+	s.preparedReview = review
+	if s.prepareErr != nil {
+		return model.Review{}, s.prepareErr
+	}
+	return review, nil
+}
 
-func (s *stubReviewService) AdvanceMergeQueue(context.Context, string) (model.Review, error) {
+func (s *stubReviewService) AdvanceMergeQueue(_ context.Context, repository, targetBranch string) (model.Review, error) {
+	s.advanceRepository = repository
+	s.advanceTargetBranch = targetBranch
 	return s.review, s.err
 }
 
-func (s *stubReviewService) OverrideAdvanceMergeQueue(_ context.Context, targetBranch, reason string) (model.Review, error) {
+func (s *stubReviewService) OverrideAdvanceMergeQueue(_ context.Context, repository, targetBranch, reason string) (model.Review, error) {
+	s.overrideRepository = repository
 	s.overrideTargetBranch = targetBranch
 	s.overrideReason = reason
 	return s.review, s.err
@@ -488,5 +509,111 @@ func TestUpdateReviewStatusMalformedJSONReportsInvalidBody(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"code":"INVALID_BODY"`) {
 		t.Fatalf("body = %q, want code INVALID_BODY", rec.Body.String())
+	}
+}
+
+// TestListMergeQueuePassesTheRepositoryFilter: two repositories a tenant
+// serves both have a main, so the repository is half of what names a queue.
+// A query parameter dropped on the way through would answer the union of
+// both, which is the defect the filter exists to remove.
+func TestListMergeQueuePassesTheRepositoryFilter(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/merge-queue?repository=https%3A%2F%2Fgithub.com%2Fsophium%2Ferun&targetBranch=main", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listMergeQueue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if reviews.gotMergeQueueRepository != "https://github.com/sophium/erun" || reviews.gotMergeQueueTargetBranch != "main" {
+		t.Fatalf("ListMergeQueue got repository=%q targetBranch=%q, want the query's own values",
+			reviews.gotMergeQueueRepository, reviews.gotMergeQueueTargetBranch)
+	}
+}
+
+// TestListReviewsPassesTheRepositoryFilter pins the same half for discovery:
+// --repository narrows a listing to one repository rather than being accepted
+// and ignored.
+func TestListReviewsPassesTheRepositoryFilter(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews?repository=https%3A%2F%2Fgithub.com%2Fsophium%2Ferun", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listReviews(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if reviews.gotFilter.Repository != "https://github.com/sophium/erun" {
+		t.Fatalf("filter.Repository = %q, want the query's own value", reviews.gotFilter.Repository)
+	}
+}
+
+// TestAdvanceMergeQueuePassesTheRepository: the body's repository is what
+// settles which of several same-branch queues is advanced, so it has to reach
+// the service rather than be read and discarded.
+func TestAdvanceMergeQueuePassesTheRepository(t *testing.T) {
+	svc := &stubReviewService{review: model.Review{ReviewID: "review-1", Status: model.ReviewStatusMerge}}
+	routes := ReviewRoutes{service: svc}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance",
+		bytes.NewBufferString(`{"repository":"https://github.com/sophium/erun","targetBranch":"main"}`))
+	rec := httptest.NewRecorder()
+
+	routes.advanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if svc.advanceRepository != "https://github.com/sophium/erun" || svc.advanceTargetBranch != "main" {
+		t.Fatalf("AdvanceMergeQueue got repository=%q targetBranch=%q, want the body's own values",
+			svc.advanceRepository, svc.advanceTargetBranch)
+	}
+}
+
+// TestAdvanceMergeQueueAmbiguousQueueReportsItsCode: a refusal whose whole job
+// is to get the caller to name a repository has to say so in a code a client
+// can act on, not fall through to the generic conflict sentence.
+func TestAdvanceMergeQueueAmbiguousQueueReportsItsCode(t *testing.T) {
+	svc := &stubReviewService{err: &service.AmbiguousMergeQueueError{
+		TargetBranch: "main",
+		Repositories: []string{"https://github.com/sophium/erun", "https://github.com/sophium/other"},
+	}}
+	routes := ReviewRoutes{service: svc}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
+	rec := httptest.NewRecorder()
+
+	routes.advanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"code":"MERGE_QUEUE_AMBIGUOUS"`, `"targetBranch":"main"`, "https://github.com/sophium/other"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body = %q, want it to carry %s", body, want)
+		}
+	}
+}
+
+// TestCreateReviewRefusesAnUnusableRepository: a repository the platform
+// cannot canonicalize names no repository at all, so storing it would key the
+// review to an identity no other caller could ever match.
+func TestCreateReviewRefusesAnUnusableRepository(t *testing.T) {
+	svc := &stubReviewService{prepareErr: &service.InvalidRepositoryError{Reason: "repository remote \"https://github.com/\" names no repository"}}
+	routes := ReviewRoutes{service: svc}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews",
+		bytes.NewBufferString(`{"name":"Add widget","repository":"https://github.com/","targetBranch":"main","sourceBranch":"feature/widget"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"INVALID_REPOSITORY"`) {
+		t.Fatalf("body = %q, want the INVALID_REPOSITORY code", rec.Body.String())
 	}
 }

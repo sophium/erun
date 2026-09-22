@@ -202,6 +202,7 @@ rung is always safe to re-run.
 
 ```sh
 branch=$(git rev-parse --abbrev-ref HEAD)
+repository=$(git remote get-url origin)   # which repository this review belongs to
 existing=$(erun review list --source-branch "${branch}" --target-branch "${target}" --output json \
   | jq -r '[.[] | select(.status != "CLOSED" and .status != "MERGED")][0].reviewId // empty')
 
@@ -211,6 +212,8 @@ if [ -n "${existing}" ]; then
 else
   name=$(git log -1 --pretty=%s)
   review_id=$(erun review create --name "${name}" --source-branch "${branch}" --target-branch "${target}" --output json | jq -r .reviewId)
+  # --repository defaults to this checkout's origin, so it is only needed when
+  # the review belongs to a different repository than the one you are in.
   echo "Opened review ${review_id}: ${name}"
 fi
 ```

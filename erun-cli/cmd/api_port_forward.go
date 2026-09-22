@@ -207,7 +207,12 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	// environments from colliding on the laptop, and it is why the two sides
 	// carry the same number here rather than one being rewritten to a
 	// constant: MCP and SSH forward the same way.
-	servicePort := common.APIPortForResult(result)
+	//
+	// APIServicePortForResult carries deploy's own fallback with it: an
+	// environment that resolves no port block at all deploys the chart's
+	// `default 17033`, so that is the port its Service answers on and the one
+	// to ask kubectl for.
+	servicePort := common.APIServicePortForResult(result)
 	args = append(args,
 		"port-forward",
 		fmt.Sprintf("service/%s", common.APIDeploymentName(result.Tenant)),

@@ -96,6 +96,42 @@ export function activeTenantDashboardTab(
   return visible[0]?.tab ?? selected;
 }
 
+// mergeQueueAddress reports the one queue a panel's "Advance queue" action
+// may act on, only when the whole visible queue names one. Advancing is a
+// single-queue-head write, so a panel spanning branches, or repositories, has
+// no single unambiguous head to name.
+//
+// A queue whose reviews all record no repository — what a tenant whose reviews
+// all predate repository identity looks like — still has one address, with an
+// empty repository: every one of those reviews is in the same one queue, and
+// the platform promotes it exactly as it always did. Only a genuine mixture is
+// refused here, and the platform refuses the same mixture again if this ever
+// let one through.
+export function mergeQueueAddress(
+  mergeQueue: readonly { repository?: string; targetBranch: string }[],
+): { repository: string; targetBranch: string } | null {
+  const repositories = [...new Set(mergeQueue.map((review) => (review.repository ?? '').trim()))];
+  const branches = [...new Set(mergeQueue.map((review) => review.targetBranch.trim()))];
+  if (repositories.length !== 1 || branches.length !== 1) {
+    return null;
+  }
+  const repository = repositories[0] ?? '';
+  const targetBranch = branches[0] ?? '';
+  if (!targetBranch) {
+    return null;
+  }
+  return { repository, targetBranch };
+}
+
+// mergeQueueHeadLabel names the head an "Advance queue" confirm is about. A
+// queue whose reviews record no repository is named by its branch alone rather
+// than by an empty string, which would read as a missing value.
+export function mergeQueueHeadLabel(queue: { repository: string; targetBranch: string }): string {
+  return queue.repository
+    ? `${queue.repository}'s head into ${queue.targetBranch}`
+    : queue.targetBranch;
+}
+
 // reviewStatusTones maps the collaboration API's review status vocabulary to
 // a StatusBadge tone. WCAG 1.4.1 requires status not be conveyed by colour
 // alone, so every tone still carries the status word as its label.
