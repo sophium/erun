@@ -1,0 +1,47 @@
+# Copy to <tenant>-devops/docker/<component>/Dockerfile.dockerignore.
+#
+# BuildKit reads an ignore file named after the Dockerfile and sitting beside
+# it, which is what lets each component under erun's shared repo-root build
+# context carry its own minimal context instead of one root file trying to
+# serve every component at once.
+#
+# Two things are at stake: how much the daemon has to ship on every build, and
+# how stable the cache keys are. A file that is in the context but unused still
+# perturbs the cache when it changes, so churny directories belong here even
+# when they are small.
+
+# Version control and hooks — large, and changes on every commit.
+**/.git
+**/.githooks
+**/.github
+
+# IDE, editor, and agent state.
+**/.idea
+**/.vscode
+**/.claude
+
+# Dependency trees: reinstalled inside the image, never copied into it.
+**/node_modules
+**/.venv
+**/__pycache__
+**/vendor/bundle
+
+# Build outputs and caches — rebuilt in the image, and churn constantly.
+**/dist
+**/build
+**/target
+**/*.tsbuildinfo
+**/.gradle
+**/.pytest_cache
+
+# Logs, local env, and OS noise.
+**/*.log
+**/.env.local
+**/.DS_Store
+
+# On a large monorepo, prefer the stronger inverse form over this denylist:
+# exclude everything, then re-include only what this image builds from, so a
+# new sibling directory cannot silently enlarge the context.
+#
+#   **
+#   !__SOURCE_DIR__/**

@@ -1,0 +1,37 @@
+Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+
+== Helm release status ==
+NAME: team-devops
+STATUS: deployed
+
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
+Filesystem  Size  Used  Avail  Mounted on
+overlay     100G  20G   80G    /var/lib/docker
+Running: Remove unused Docker images (the erun-dind sidecar)
+Total reclaimed space: 4.105MB
+== Docker system df ==
+Images          21        0         11.32GB   11.32GB (100%)
+Build Cache     0         0         0B        0B
+the erun-dind sidecar: the prune freed nothing — the daemon still reports 11.32GB reclaimable after it (images 11.32GB, build cache 0B). The space this environment's builds need was not reclaimed here.
+audit: erun doctor --prune-images team dev
+trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

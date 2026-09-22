@@ -13,12 +13,16 @@ type ListInput struct {
 	Verbosity int `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 	// VersionDriftTenant, when set, additionally reports erun-version drift
 	// across this tenant's environments -- which environments run which
-	// erun version, and the newest version observed among them.
-	VersionDriftTenant string `json:"versionDriftTenant,omitempty" jsonschema:"when set, additionally report erun-version drift across this tenant's environments: which erun version each environment runs, and the newest version observed among them"`
+	// erun version, and the newest version observed among them. An
+	// environment with no version recorded locally is read live (its own
+	// deployed helm release) to tell a confirmed absence apart from a
+	// version that could not be determined at all; Preview traces that check
+	// instead of running it.
+	VersionDriftTenant string `json:"versionDriftTenant,omitempty" jsonschema:"when set, additionally report erun-version drift across this tenant's environments: which erun version each environment runs, and the newest version observed among them -- an environment with no version recorded locally is read live to tell a confirmed absence ('version' omitted, versionUnresolved false) apart from a version that could not be determined at all (versionUnresolved true, versionUnresolvedReason set, excluded from maxVersion/behindMax)"`
 	// GateEnvironment, only meaningful alongside VersionDriftTenant, names
 	// the environment driving that tenant's merge-queue gate. erun has no
-	// stored concept of which environment gates a tenant's merges (see root
-	// AGENTS.md's release-cadence policy), so the caller states it.
+	// stored concept of which environment gates a tenant's merges (see the
+	// backend API guide's Release cadence policy), so the caller states it.
 	GateEnvironment string `json:"gateEnvironment,omitempty" jsonschema:"requires versionDriftTenant; the environment driving that tenant's merge-queue gate -- flags whether it runs an older erun version than any environment it gates, since a stale gate can pass a change that would fail on current code"`
 	// ControlPlanes, when set, additionally reports every configured
 	// erun-hosted control plane's deployed version (GET /v1/platform)
@@ -29,7 +33,16 @@ type ListInput struct {
 	// network access to each plane and console, and to erun's registry;
 	// Preview traces what would be checked instead of making either call.
 	ControlPlanes bool `json:"controlPlanes,omitempty" jsonschema:"when set, additionally report every configured erun-hosted control plane's deployed version, and its linked console's deployed version, against the newest version erun's own registry has published -- deployed-vs-published, not deployed-vs-main"`
-	Preview       bool `json:"preview,omitempty" jsonschema:"only meaningful alongside controlPlanes -- trace which planes and registry lookup would be checked without making either network call"`
+	// Alias, only meaningful alongside ControlPlanes, narrows the control
+	// plane check to one configured erun-hosted alias instead of every
+	// configured one -- the same --erun-alias every other
+	// platform-touching command already accepts.
+	Alias string `json:"erunAlias,omitempty" jsonschema:"only meaningful alongside controlPlanes -- narrow the check to this one configured erun-hosted alias instead of every configured one"`
+	// Preview traces every live check this call would make -- controlPlanes'
+	// plane/console/registry probes, and versionDriftTenant's per-environment
+	// helm read for any environment with no version recorded locally --
+	// without making any of them.
+	Preview bool `json:"preview,omitempty" jsonschema:"trace every live check this call would make (controlPlanes' plane/console/registry probes, versionDriftTenant's per-environment helm read for an environment with no version recorded locally) without making any of them"`
 }
 
 // ListToolResult is eruncommon.ListResult plus the optional version-drift
@@ -49,7 +62,8 @@ func listTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 
 		tenant := strings.TrimSpace(input.VersionDriftTenant)
 		gateEnvironment := strings.TrimSpace(input.GateEnvironment)
-		if err := validateListInput(input.ControlPlanes, tenant, gateEnvironment); err != nil {
+		alias := strings.TrimSpace(input.Alias)
+		if err := validateListInput(input.ControlPlanes, tenant, gateEnvironment, alias); err != nil {
 			return nil, ListToolResult{}, err
 		}
 
@@ -65,28 +79,34 @@ func listTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			return nil, ListToolResult{}, err
 		}
 
-		return buildListToolResult(ctx, result, input.ControlPlanes, tenant, gateEnvironment)
+		return buildListToolResult(ctx, result, input.ControlPlanes, tenant, gateEnvironment, alias)
 	}
 }
 
-func validateListInput(controlPlanes bool, tenant, gateEnvironment string) error {
+func validateListInput(controlPlanes bool, tenant, gateEnvironment, alias string) error {
 	if gateEnvironment != "" && tenant == "" {
 		return fmt.Errorf("gateEnvironment requires versionDriftTenant")
 	}
 	if controlPlanes && (tenant != "" || gateEnvironment != "") {
 		return fmt.Errorf("controlPlanes cannot be combined with versionDriftTenant/gateEnvironment")
 	}
+	if alias != "" && !controlPlanes {
+		return fmt.Errorf("erunAlias requires controlPlanes")
+	}
 	return nil
 }
 
-func buildListToolResult(ctx eruncommon.Context, result eruncommon.ListResult, controlPlanes bool, tenant, gateEnvironment string) (*mcp.CallToolResult, ListToolResult, error) {
+func buildListToolResult(ctx eruncommon.Context, result eruncommon.ListResult, controlPlanes bool, tenant, gateEnvironment, alias string) (*mcp.CallToolResult, ListToolResult, error) {
 	toolResult := ListToolResult{ListResult: result}
 	if controlPlanes {
-		drift := eruncommon.ResolveControlPlaneVersionDrift(ctx, result, cloudDependencies(), eruncommon.ResolveDefaultRuntimeRegistryVersions)
+		drift, err := eruncommon.ResolveControlPlaneVersionDrift(ctx, result, alias, cloudDependencies(), eruncommon.ResolveDefaultRuntimeRegistryVersions)
+		if err != nil {
+			return nil, ListToolResult{}, err
+		}
 		toolResult.ControlPlaneVersionDrift = &drift
 	}
 	if tenant != "" {
-		drift, err := eruncommon.ResolveTenantVersionDrift(result, tenant, gateEnvironment)
+		drift, err := eruncommon.ResolveTenantVersionDrift(ctx, result, tenant, gateEnvironment)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}

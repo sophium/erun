@@ -22,6 +22,7 @@ import {
   useUpdateSmtpSettingsMutation,
 } from '../app/api/identityApi';
 import { queryErrorMessage } from '../app/queryError';
+import type { OrgTarget } from './enrollOrgTargetController';
 
 function useActiveRef(): React.RefObject<boolean> {
   const activeRef = React.useRef(true);
@@ -54,11 +55,48 @@ export interface UsersController {
   dismissTemporaryPassword: () => void;
 }
 
+// UsersScope names the tenant this controller is administering: undefined
+// (or omitted) means the caller's own tenant/org, today's unchanged default.
+// orgId/tenantId travel together deliberately -- see identityApi.ts's
+// listIdentityUsers doc for why picking one without the other renders a
+// confidently wrong page.
+export interface UsersScope {
+  orgId: string;
+  tenantId: string;
+}
+
+// resolveUsersScope turns the org-target lookup (enrollOrgTargetController's
+// useEnrollOrgTarget) into the two things useUsersController needs: `scope`
+// (only once an org id is actually known) and `ready` (whether the list read
+// may run at all -- 'default' needs no lookup, 'resolved' has one;
+// 'loading'/'error'/'unmapped' must not query with a missing orgId, which
+// would silently list the caller's own org under the scoped tenant's name).
+export function resolveUsersScope(
+  orgTarget: OrgTarget,
+  targetTenantId: string,
+): { scope: UsersScope | undefined; ready: boolean } {
+  if (orgTarget.status === 'resolved') {
+    return { scope: { orgId: orgTarget.orgId, tenantId: targetTenantId }, ready: true };
+  }
+  return { scope: undefined, ready: orgTarget.status === 'default' };
+}
+
 // useUsersController lists, enrolls, deactivates and reactivates identities.
 // Enrolling or changing activation invalidates the list query's tag, so the
-// operator sees the effect without a manual reload.
-export function useUsersController(token: string): UsersController {
-  const listQuery = useListIdentityUsersQuery(token);
+// operator sees the effect without a manual reload. `scope` targets another
+// tenant's org and membership join (shell/ScopeSelector.tsx); `skip` is set
+// by the caller while a scoped tenant's org mapping hasn't
+// resolved yet -- querying with no orgId in that window would silently list
+// the caller's own org instead of failing loudly.
+export function useUsersController(
+  token: string,
+  scope?: UsersScope,
+  skip = false,
+): UsersController {
+  const listQuery = useListIdentityUsersQuery(
+    { token, orgId: scope?.orgId, tenantId: scope?.tenantId },
+    { skip },
+  );
   const { refetch } = listQuery;
   const [enrollState, setEnrollState] = React.useState<EnrollState>({ status: 'idle' });
   // setActive has no state slot of its own in this controller's public shape;
@@ -68,6 +106,7 @@ export function useUsersController(token: string): UsersController {
   const [createIdentityUser] = useCreateIdentityUserMutation();
   const [setIdentityUserActive] = useSetIdentityUserActiveMutation();
   const activeRef = useActiveRef();
+  const scopeOrgId = scope?.orgId;
 
   const usersState: UsersState =
     actionError !== undefined
@@ -109,7 +148,7 @@ export function useUsersController(token: string): UsersController {
   const setActive = React.useCallback(
     (externalId: string, active: boolean): Promise<void> => {
       setActionError(undefined);
-      return setIdentityUserActive({ token, externalId, active })
+      return setIdentityUserActive({ token, externalId, active, orgId: scopeOrgId })
         .unwrap()
         .then(() => undefined)
         .catch((error: unknown) => {
@@ -118,7 +157,7 @@ export function useUsersController(token: string): UsersController {
           }
         });
     },
-    [token, activeRef, setIdentityUserActive],
+    [token, activeRef, setIdentityUserActive, scopeOrgId],
   );
 
   // dismissTemporaryPassword strips the one-time credential out of the held

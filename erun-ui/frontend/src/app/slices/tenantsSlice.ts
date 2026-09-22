@@ -9,6 +9,12 @@ import type {
 
 export interface TenantsState {
   tenants: UITenant[];
+  // Distinguishes "the initial list has not come back yet" from "it came
+  // back and is genuinely empty" — the two render identically as
+  // tenants: [] otherwise, and a consumer (the sidebar) needs to tell them
+  // apart to avoid asserting "no environments" before boot's first read
+  // resolves.
+  tenantsLoaded: boolean;
   cloudProviders: UICloudProviderStatus[];
   versionSuggestions: UIVersionSuggestion[];
   versionSuggestionNotices: UIVersionSuggestionNotice[];
@@ -16,6 +22,7 @@ export interface TenantsState {
 
 const initialState: TenantsState = {
   tenants: [],
+  tenantsLoaded: false,
   cloudProviders: [],
   versionSuggestions: [],
   versionSuggestionNotices: [],
@@ -27,6 +34,7 @@ export const tenantsSlice = createSlice({
   reducers: {
     setTenants(state, action: PayloadAction<UITenant[]>) {
       state.tenants = action.payload;
+      state.tenantsLoaded = true;
     },
     setCloudProviders(state, action: PayloadAction<UICloudProviderStatus[]>) {
       state.cloudProviders = action.payload;

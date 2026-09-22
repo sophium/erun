@@ -1,0 +1,17 @@
+{
+  "tenant": "erun",
+  "environments": [
+    {
+      "environment": "build",
+      "version": "<VERSION>"
+    },
+    {
+      "environment": "petios",
+      "versionUnresolved": true,
+      "versionUnresolvedReason": "could not read the deployed release: observe: could not read helm release \"erun-devops\" in namespace \"erun-petios\": Error: Kubernetes cluster unreachable: dial tcp <VERSION>.5:6443: i/o timeout"
+    }
+  ],
+  "maxVersion": "<VERSION>"
+}
+audit: erun list --output json --tenant erun
+list: erun/petios's runtime version is not recorded locally -- checking its deployed release live

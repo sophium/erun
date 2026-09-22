@@ -95,12 +95,26 @@ func writeControl(t *testing.T, conn *websocket.Conn, msg attachControlMessage) 
 	}
 }
 
+// attachReadDeadline bounds each read from the attach WebSocket. Every one of
+// these reads waits for a real dtach + shell process to produce something, so
+// the bound has to tolerate a busy host rather than measure it: at 10s the
+// golden-path test failed inside the in-build gate, where six packages
+// including this one run their own shells side by side, while the same test
+// passes standalone in seconds. The same suite forks a real shell under a real
+// PTY (dtach, pgrep, several /proc reads) per scenario, and each fork queues
+// behind whatever else the node runs -- measured on a contended pod (~2x CPU
+// oversubscription), the slowest scenario still completed within 23s, so a
+// tighter bound turns ordinary scheduler contention into a spurious failure
+// indistinguishable from a real hang. It stays finite so a genuinely wedged
+// attach still fails its own test instead of hanging the suite.
+const attachReadDeadline = 60 * time.Second
+
 // waitForAnyBinary blocks until the first binary frame arrives, proving the
 // PTY has actually produced output (so the owner file -- written before dtach
 // ever runs -- is guaranteed to already be in place).
 func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	for {
 		kind, _, err := conn.ReadMessage()
 		if err != nil {
@@ -116,7 +130,7 @@ func waitForAnyBinary(t *testing.T, conn *websocket.Conn) {
 // want appears or the deadline lapses.
 func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	var accumulated strings.Builder
 	for {
 		kind, data, err := conn.ReadMessage()
@@ -134,7 +148,7 @@ func waitForBinaryContaining(t *testing.T, conn *websocket.Conn, want string) {
 
 func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(attachReadDeadline))
 	for {
 		kind, data, err := conn.ReadMessage()
 		if err != nil {
@@ -149,6 +163,52 @@ func readOutcomeMessage(t *testing.T, conn *websocket.Conn) attachOutcomeMessage
 		}
 		return msg
 	}
+}
+
+// TestAttachReadHelpersToleratePastThePriorDeadline is the regression test
+// for the specific failure mode this suite hit under a contended host: every
+// subprocess-spawning scenario missed the outcome message by roughly 100ms
+// past a hardcoded 10s deadline -- the signature of a deadline too tight for
+// the host, not of a broken bridge (confirmed separately: the same scenarios
+// passed reliably once given a longer deadline under the same load). This
+// test proves the fix without depending on inducing real host contention: a
+// minimal websocket server with no PTY, no dtach, and no shell delays its one
+// binary frame past that old boundary, and the read helper these tests
+// actually use must still see it.
+func TestAttachReadHelpersToleratePastThePriorDeadline(t *testing.T) {
+	const priorDeadline = 10 * time.Second
+	const delay = priorDeadline + 2*time.Second
+	if delay >= attachReadDeadline {
+		t.Fatalf("test setup: delay %s must stay below attachReadDeadline %s", delay, attachReadDeadline)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		time.Sleep(delay)
+		_ = conn.WriteMessage(websocket.BinaryMessage, []byte("SLOW_MARKER"))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	u.Scheme = "ws"
+	u.Path = "/slow"
+
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	waitForBinaryContaining(t, conn, "SLOW_MARKER")
 }
 
 // TestAttachRefusesWithoutAttachCapabilityBeforeUpgrade is the mandatory proof
@@ -320,6 +380,18 @@ func TestAttachAuthenticatesViaSubprotocolForBrowserCallers(t *testing.T) {
 // disconnect indistinguishable from a network stall), and the session itself
 // survives for the new attach to keep driving.
 func TestAttachEvictionReportsTakenOverAndPreservesTheSession(t *testing.T) {
+	// Eviction is the /proc half of the attach script: it finds the session's
+	// master by grepping /proc/<pid>/cmdline, then kills the other viewer's
+	// dtach client so that viewer's own `dtach -A` returns and its wrapper reads
+	// the foreign owner id and exits 76 -- the taken-over outcome this test
+	// asserts. The runtime image is Linux and ships no ss/lsof, so /proc is the
+	// intended mechanism there; where /proc is absent (macOS) the scan
+	// deliberately finds nothing and, by design, kicks no one, so the first
+	// viewer is never evicted and its socket never sees an outcome. That is the
+	// platform behaving as documented, so this runs where the behaviour exists.
+	if _, err := os.Stat("/proc"); err != nil {
+		t.Skip("takeover resolves the session master through /proc, which this platform does not have")
+	}
 	runtime := newAttachTestRuntime(t)
 	issuer, token := identityWithScopedToken(t, string(eruncommon.MCPCapabilityAttach))
 	server := newAuthedAttachServer(t, runtime, issuer, "acme")

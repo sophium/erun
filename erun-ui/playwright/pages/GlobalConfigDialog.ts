@@ -1,10 +1,24 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 export class GlobalConfigDialog {
   constructor(public readonly page: Page) {}
 
+  // The dialog is matched even while it is hidden from the accessibility tree.
+  //
+  // Radix's modal Select hides the rest of the document with aria-hidden for as
+  // long as its content is mounted, and that content stays mounted through its
+  // close transition — so for a moment after every gateway-select interaction
+  // every element in this dialog, including the dialog itself, is aria-hidden
+  // while sitting plainly in the DOM. A role query skips those elements, so
+  // anything derived from this locator resolves to a clean, wrong zero: the
+  // catalog's clear loop reads "no rows to remove" and exits without removing
+  // any, a `toHaveCount(0)` guard passes vacuously, and the pre-click index is
+  // taken as 0 against a catalog that already holds a row — one Add then makes
+  // two. Every one of those reads follows a select interaction, which is why the
+  // window lands on all of them. Matching the element rather than what a screen
+  // reader would currently see keeps a count a count.
   locator(): Locator {
-    return this.page.getByRole('dialog', { name: 'ERun settings' });
+    return this.page.getByRole('dialog', { name: 'ERun settings', includeHidden: true });
   }
 
   async waitForOpen(): Promise<void> {
@@ -128,6 +142,156 @@ export class GlobalConfigDialog {
 
   async refreshCloudContexts(): Promise<void> {
     await this.page.getByRole('button', { name: 'Refresh cloud contexts' }).click();
+  }
+
+  // --- Gateway catalog ---
+  //
+  // The erun-level OpenRouter catalog: one list every environment selects from.
+  // Rows carry a data-openrouter-model index so a spec addresses the row it
+  // added rather than whichever one happens to be first.
+
+  openRouterBaseURLInput(): Locator {
+    return this.page.locator('#global-config-openrouter-baseurl');
+  }
+
+  // The gateway credential is reported, not typed into a field: erun delivers
+  // one erun-level value, so what an operator picks from is which key is in play.
+  // The summary carries its source so a spec asserts on the state rather than on
+  // a sentence that may be reworded.
+  openRouterCredentialSummary(): Locator {
+    return this.locator().locator('[data-gateway-credential-source]');
+  }
+
+  openRouterSetKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: /Set a key|Use a different key/ });
+  }
+
+  openRouterClearKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: "Use this machine's key" });
+  }
+
+  openRouterTokenInput(): Locator {
+    return this.page.locator('#global-config-openrouter-token');
+  }
+
+  openRouterSaveKeyButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Save key', exact: true });
+  }
+
+  async setOpenRouterCredential(token: string): Promise<void> {
+    await this.openRouterSetKeyButton().click();
+    await this.openRouterTokenInput().fill(token);
+    await this.openRouterSaveKeyButton().click();
+  }
+
+  openRouterDefaultModelTrigger(): Locator {
+    return this.page.locator('#global-config-openrouter-default-model');
+  }
+
+  openRouterAddModelButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Add model', exact: true });
+  }
+
+  openRouterModelRows(): Locator {
+    return this.locator().locator('[data-openrouter-model]');
+  }
+
+  openRouterModelRow(index: number): Locator {
+    return this.locator().locator(`[data-openrouter-model="${String(index)}"]`);
+  }
+
+  openRouterModelIdInput(index: number): Locator {
+    return this.openRouterModelRow(index).getByLabel(`Model id ${String(index + 1)}`);
+  }
+
+  openRouterModelContextInput(index: number): Locator {
+    return this.openRouterModelRow(index).getByLabel(
+      `Context window for model ${String(index + 1)}`,
+    );
+  }
+
+  openRouterReasoningEchoCheckbox(index: number): Locator {
+    return this.openRouterModelRow(index).getByLabel(
+      `Requires reasoning echo for model ${String(index + 1)}`,
+    );
+  }
+
+  openRouterRemoveModelButton(index: number): Locator {
+    return this.openRouterModelRow(index).getByRole('button', {
+      name: `Remove model ${String(index + 1)}`,
+    });
+  }
+
+  openRouterGatewayTrigger(): Locator {
+    return this.page.locator('#global-config-openrouter-gateway');
+  }
+
+  // A known gateway is chosen from the list; anything else is a self-hosted
+  // address, so the field is revealed before it is typed into.
+  async setOpenRouterBaseURL(value: string): Promise<void> {
+    await this.openRouterGatewayTrigger().click();
+    if (value === '') {
+      await this.page.getByRole('option', { name: 'Not configured' }).click();
+      return;
+    }
+    if (value === 'https://openrouter.ai/api') {
+      await this.page.getByRole('option', { name: /OpenRouter/ }).click();
+      return;
+    }
+    await this.page.getByRole('option', { name: 'Self-hosted (enter a URL)' }).click();
+    await this.openRouterBaseURLInput().fill(value);
+  }
+
+  openRouterLoadModelsButton(): Locator {
+    return this.locator().getByRole('button', { name: /Load from gateway|Reload from gateway/ });
+  }
+
+  openRouterModelChoicesButton(index: number): Locator {
+    return this.locator().getByRole('button', {
+      name: `Show gateway models for model ${String(index + 1)}`,
+    });
+  }
+
+  openRouterModelSearchInput(): Locator {
+    return this.page.getByPlaceholder('Search models...');
+  }
+
+  async loadGatewayModels(): Promise<void> {
+    await this.openRouterLoadModelsButton().click();
+  }
+
+  // The choice is searched, not scrolled: a gateway can serve hundreds of
+  // models. The option's accessible name carries the display name and the id,
+  // so the id identifies it without depending on a name a gateway may omit.
+  async selectOpenRouterModel(index: number, id: string, search = id): Promise<void> {
+    await this.openRouterModelChoicesButton(index).click();
+    await this.openRouterModelSearchInput().fill(search);
+    await this.page.getByRole('option', { name: id }).click();
+  }
+
+  // addOpenRouterModel appends a row and fills it.
+  //
+  // The index comes from the count taken BEFORE the click, and the click is then
+  // waited on by expecting that count to rise. Reading the count after the click
+  // instead would be a non-retrying query: it can return the pre-click length
+  // while the new row is still mounting, which points the fills at the wrong row
+  // (or at none) and shows up later as the wrong value on reopen. Deriving the
+  // index from a count that is then waited on cannot skew.
+  //
+  // Both fields are asserted before returning, so a fill that did not stick
+  // fails here — where the row is visible — rather than after a save, where it
+  // would be indistinguishable from a persistence bug.
+  async addOpenRouterModel({ id, context }: { id: string; context?: number }): Promise<void> {
+    const rows = this.openRouterModelRows();
+    const index = await rows.count();
+    await this.openRouterAddModelButton().click();
+    await expect(rows).toHaveCount(index + 1);
+    await this.openRouterModelIdInput(index).fill(id);
+    await expect(this.openRouterModelIdInput(index)).toHaveValue(id);
+    if (context !== undefined) {
+      await this.openRouterModelContextInput(index).fill(String(context));
+      await expect(this.openRouterModelContextInput(index)).toHaveValue(String(context));
+    }
   }
 
   async cancel(): Promise<void> {

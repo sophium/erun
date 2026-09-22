@@ -76,6 +76,23 @@ func resolveCurrentDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir string
 	return resolveConventionDevopsDockerDir(findProjectRoot, dir, projectRoot)
 }
 
+// resolveProjectDockerModuleDir resolves the docker build module the project
+// itself declares, independently of the current directory: the configured
+// paths.docker / selected components entry when there is one, otherwise the
+// project root's <tenant>-devops/docker convention. A caller uses it to ask
+// whether the project has images at all, which is a different question from
+// whether the current directory resolves any.
+func resolveProjectDockerModuleDir(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (string, bool, error) {
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil || strings.TrimSpace(projectRoot) == "" {
+		return "", false, err
+	}
+	if dockerDir, ok, err := resolveComponentAwareDockerDir(projectRoot, target.Component); err != nil || ok {
+		return dockerDir, ok, err
+	}
+	return resolveProjectRootDevopsDockerDir(findProjectRoot, filepath.Clean(projectRoot))
+}
+
 // resolveConventionDevopsDockerDir is the convention discovery used when no
 // paths.docker override applies: the cwd -devops shortcut, then the project-root
 // <tenant>-devops/docker scan (only when cwd is the project root).

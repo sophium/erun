@@ -234,6 +234,14 @@ spec:
               value: {{ $apiServicePort | quote }}
             - name: NGINX_PORT
               value: {{ $nginxPort | quote }}
+            # This instance's brand, at the one value that already defines it:
+            # erun-backend-api serves platform.brand as GET /v1/platform's
+            # "brand", and the console image's entrypoint stamps the same value
+            # into the served page, so the first paint before discovery
+            # resolves carries the instance's own name rather than the bundled
+            # product default that then changes underneath the user.
+            - name: ERUN_PLATFORM_BRAND
+              value: {{ default "" $platform.brand | quote }}
           ports:
             - name: http
               containerPort: {{ $nginxPort }}

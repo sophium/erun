@@ -51,10 +51,14 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 			"read, so a crashed job cannot keep an environment awake.\n\n" +
 			"Pass --exclusive before any mutating work in a target environment (erun#1245):\n" +
 			"at most one exclusive holder is allowed per --scope (default \"worktree\"), so a\n" +
-			"second agent job or orchestrator already working the same worktree is refused\n" +
-			"and named in the error, while a job in a different scope - a separate clone in\n" +
-			"the same pod - is unaffected. An exclusive take is also refused while an\n" +
-			"operator's own SSH session is active in the environment.",
+			"second exclusive take in that scope is refused and named in the error, while a\n" +
+			"holder in a different scope - a separate clone in the same pod - is\n" +
+			"unaffected. An exclusive take is also refused while an operator's own SSH\n" +
+			"session is active in the environment.\n\n" +
+			"Which work a claim refuses once it is held depends on its scope: only an\n" +
+			"\"environment\" claim refuses other job starts here, while a \"worktree\" claim\n" +
+			"- the default - is refused by erun exec gate-merge, which rewrites that one\n" +
+			"shared worktree. A claim at another scope refuses neither.",
 		Example: "  # From inside the environment, wrap a long build so it stays busy for the build.\n" +
 			"  erun activity lease take --tenant team --environment dev --name gradle-build --pid $$\n" +
 			"  trap 'erun activity lease release --tenant team --environment dev --id gradle-build' EXIT\n\n" +
@@ -88,7 +92,7 @@ func newActivityLeaseTakeCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd.Flags().BoolVar(&exclusive, "exclusive", false, "Claim exclusivity over --scope instead of plain presence; a second exclusive take in the same scope is refused and told who holds it")
 	cmd.Flags().StringVar(&scope, "scope", "", "The resource this exclusive claim protects (default \"worktree\"); only meaningful with --exclusive")
 	cmd.Flags().StringVar(&orchestrator, "orchestrator", "", "The calling orchestrator's own id, recorded on the lease so a refusal can name who to go ask")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the lease as JSON")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the lease as JSON (alias for --output json)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -105,7 +109,7 @@ func runActivityLeaseTake(cmd *cobra.Command, resolveOpen OpenResolver, params c
 	if !resolved {
 		return nil
 	}
-	if jsonOutput {
+	if commandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(lease)
@@ -143,7 +147,14 @@ func newActivityLeaseReleaseCmd(resolveOpen OpenResolver) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "release",
 		Short: "Release a held lease so the environment can go idle again",
-		Long:  "Releasing a lease that was never taken, or has already expired, succeeds — so a\nwrapper's exit trap never fails a job that finished cleanly.\n\nPass --exclusive and the same --scope used at take time to release an\nexclusive claim; only the id that took it can release it.",
+		Long: "Releasing a lease that was never taken, or has already expired, succeeds — so a\n" +
+			"wrapper's exit trap never fails a job that finished cleanly — but the report\n" +
+			"says whether anything was actually held, so a caller can tell the two apart\n" +
+			"instead of reading the same success either way.\n\n" +
+			"Pass --exclusive and the same --scope used at take time to release an\n" +
+			"exclusive claim. Only the id that took it can release it: if the scope is held\n" +
+			"by a different id, the release fails and names the actual holder rather than\n" +
+			"silently leaving it in place.",
 		Example: "  erun activity lease release --tenant team --environment dev --id gradle-build\n" +
 			"  erun activity lease release --tenant team --environment dev --id job-fix-1245 --exclusive",
 		Args: cobra.NoArgs,
@@ -167,18 +178,47 @@ func runActivityLeaseRelease(cmd *cobra.Command, resolveOpen OpenResolver, tenan
 		return fmt.Errorf("lease id is required")
 	}
 	ctx := commandContext(cmd)
-	resolved, err := releaseLease(cmd.Context(), ctx, resolveOpen, tenant, environment, id, scope, exclusive)
+	outcome, resolved, err := releaseLease(cmd.Context(), ctx, resolveOpen, tenant, environment, id, scope, exclusive)
 	if err != nil {
 		return err
 	}
 	if !resolved {
 		return nil
 	}
-	_, err = fmt.Fprintf(ctx.Stdout, "lease released: %s\n", strings.TrimSpace(id))
+	// The note is resolved only for the wrong-store outcome, and only by
+	// asking the store that does hold the id. A note that cannot be read falls
+	// back to the plain summary rather than failing a release that already
+	// did the right thing.
+	note := ""
+	if outcome == common.EnvironmentActivityLeaseHeldElsewhere {
+		note, _ = common.EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id, exclusive)
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "%s\n", releaseLeaseSummary(outcome, id, note))
 	return err
 }
 
-func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (bool, error) {
+// releaseLeaseSummary reports what the release actually did. A caller that
+// cannot tell "removed" apart from "there was nothing there" has no way to
+// notice a release aimed at the wrong store -- an exclusive claim released
+// without --exclusive reported the same "lease released" line as a real
+// release, while the exclusive claim it never touched stayed held for its
+// full TTL. A no-match that the id turns out to be holding under the other
+// shape says so, and names the release that would match, rather than leaving
+// the operator to conclude the claim is already gone.
+func releaseLeaseSummary(outcome common.EnvironmentActivityLeaseReleaseOutcome, id, note string) string {
+	trimmed := strings.TrimSpace(id)
+	switch outcome {
+	case common.EnvironmentActivityLeaseReleased:
+		return fmt.Sprintf("lease released: %s", trimmed)
+	case common.EnvironmentActivityLeaseHeldElsewhere:
+		if note != "" {
+			return fmt.Sprintf("lease not released: %s is %s", trimmed, note)
+		}
+	}
+	return fmt.Sprintf("lease not held: %s", trimmed)
+}
+
+func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (common.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
 	if !environmentTargetsItself() {
 		return releaseLeaseInEnvironment(ctx, commandCtx, resolveOpen, tenant, environment, id, scope, exclusive)
 	}
@@ -189,18 +229,20 @@ func releaseLease(ctx context.Context, commandCtx common.Context, resolveOpen Op
 		} else {
 			commandCtx.TraceCommand("", "activity", "lease-release", tenant, environment, id)
 		}
-		return false, nil
+		return common.EnvironmentActivityLeaseNotHeld, false, nil
 	}
 	if exclusive {
-		if err := common.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id); err != nil {
-			return false, err
+		outcome, err := common.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
+		if err != nil {
+			return common.EnvironmentActivityLeaseNotHeld, false, err
 		}
-		return true, nil
+		return outcome, true, nil
 	}
-	if err := common.ReleaseEnvironmentActivityLease(tenant, environment, id); err != nil {
-		return false, err
+	outcome, err := common.ReleaseEnvironmentActivityLease(tenant, environment, id)
+	if err != nil {
+		return common.EnvironmentActivityLeaseNotHeld, false, err
 	}
-	return true, nil
+	return outcome, true, nil
 }
 
 func newActivityLeaseListCmd(resolveOpen OpenResolver) *cobra.Command {
@@ -218,7 +260,7 @@ func newActivityLeaseListCmd(resolveOpen OpenResolver) *cobra.Command {
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the leases as JSON")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the leases as JSON (alias for --output json)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -254,7 +296,7 @@ func listLeases(ctx context.Context, commandCtx common.Context, resolveOpen Open
 }
 
 func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivityLease, now time.Time, jsonOutput bool) error {
-	if jsonOutput {
+	if commandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)
 		encoder.SetIndent("", "  ")
 		if leases == nil {
@@ -267,15 +309,32 @@ func writeActivityLeases(ctx common.Context, leases []common.EnvironmentActivity
 		return err
 	}
 	for _, lease := range leases {
-		value := fmt.Sprintf("%s, expires in %s", lease.Name, formatLeaseRemaining(lease, now))
-		if lease.PID > 0 {
-			value += fmt.Sprintf(", pid %d", lease.PID)
-		}
-		if err := writeLabeledValue(ctx, lease.ID, value); err != nil {
+		if err := writeLabeledValue(ctx, lease.ID, activityLeaseSummary(lease, now)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// activityLeaseSummary renders one held claim, and renders an exclusive one as
+// exclusive. A presence lease's "name, expires in ..." line is indistinguishable
+// from an exclusive claim's, so a caller reading the list could not tell a claim
+// that refuses everyone else in its scope from one that refuses nobody — the
+// same invisibility that let an inert concurrency guard go unnoticed, because
+// nothing on this surface said the claim was there or what it covered.
+func activityLeaseSummary(lease common.EnvironmentActivityLease, now time.Time) string {
+	value := fmt.Sprintf("%s, expires in %s", lease.Name, formatLeaseRemaining(lease, now))
+	if lease.Exclusive {
+		value = fmt.Sprintf("%s, exclusive on %s, held by %s, expires in %s",
+			lease.Name,
+			common.NormalizeExclusiveEnvironmentActivityLeaseScope(lease.Scope),
+			lease.Holder.String(),
+			formatLeaseRemaining(lease, now))
+	}
+	if lease.PID > 0 {
+		value += fmt.Sprintf(", pid %d", lease.PID)
+	}
+	return value
 }
 
 func formatLeaseRemaining(lease common.EnvironmentActivityLease, now time.Time) string {
@@ -309,7 +368,7 @@ func newActivitySampleCmd() *cobra.Command {
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&procRoot, "proc-root", common.DefaultProcRoot, "Process filesystem to sample")
 	cmd.Flags().StringVar(&cgroupRoot, "cgroup-root", common.DefaultCgroupRoot, "Cgroup filesystem to read this container's own CPU and memory counters from")
-	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the sample verdict as JSON (alias for --output json)")
 	return cmd
 }
 
@@ -358,7 +417,7 @@ func runActivitySample(cmd *cobra.Command, tenant, environment, procRoot, cgroup
 }
 
 func writeActivitySampleResult(ctx common.Context, result common.ResidentActivityResult, jsonOutput bool) error {
-	if jsonOutput {
+	if commandWantsJSON(ctx, jsonOutput) {
 		return json.NewEncoder(ctx.Stdout).Encode(result)
 	}
 	if !result.Busy {

@@ -309,6 +309,79 @@ func TestOrchestrator(t *testing.T) {
 		}
 	})
 
+	// set_role_refuses_the_runtime_role_on_a_host_environment is this gate's
+	// other refused-by-type case, and the mirror image of the runtime pair
+	// above: a host environment is a directory on this machine with no pod and
+	// no cluster at all, so the runtime role -- which means the orchestrator
+	// operates the environment directly, deploy, pin, observe -- has nothing to
+	// act on, and every one of those verbs refuses a host env outright
+	// (eruncommon.OrchestratorEnvRoleAllowed(host, runtime) is false). Offering
+	// it would promise a relationship the link cannot deliver and the mismatch
+	// would surface only later, in the orchestrator session, as an environment
+	// tool that never works. The refusal names the type and the escape hatch
+	// the same way the runtime-type refusal does, and the persisted role is
+	// left untouched.
+	t.Run("set_role_refuses_the_runtime_role_on_a_host_environment", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "frs", "workstation")
+		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
+			{
+				id:   "eng-1",
+				name: "Eng One",
+				environments: []orchestratorEnvSeed{
+					{tenant: "frs", environment: "workstation", directory: "/repo/workstation", role: "build"},
+				},
+			},
+		})
+		result := erun.Run(t, []string{"orchestrator", "set-role", "eng-1", "frs", "workstation", "--role", "runtime"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for the runtime role on a host environment, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "orchestrator/set_role_refuses_the_runtime_role_on_a_host_environment", normalize.Apply(result.Combined))
+
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		if !strings.Contains(string(raw), "role: build") || strings.Contains(string(raw), "role: runtime") {
+			t.Fatalf("expected the refused write to leave the persisted role untouched, got:\n%s", raw)
+		}
+	})
+
+	// set_role_real_run_accepts_a_non_runtime_role_on_a_host_environment proves
+	// the refusal above is specific to the runtime role rather than a blanket
+	// "host environments cannot be linked": a host env is a working link that
+	// an orchestrator reviews in place, so every other role -- including
+	// undeclared -- is legal for it, and the write actually lands. Without this
+	// paired with the refusal, a gate that refused *everything* for host would
+	// satisfy the refusal test and still be wrong.
+	t.Run("set_role_real_run_accepts_a_non_runtime_role_on_a_host_environment", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedHostTenantEnv(t, setup, "frs", "workstation")
+		seedOrchestratorsWithEnvRoles(t, setup, []orchestratorSeed{
+			{
+				id:   "eng-1",
+				name: "Eng One",
+				environments: []orchestratorEnvSeed{
+					{tenant: "frs", environment: "workstation", directory: "/repo/workstation"},
+				},
+			},
+		})
+		result := erun.Run(t, []string{"orchestrator", "set-role", "eng-1", "frs", "workstation", "--role", "code"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "orchestrator/set_role_real_run_accepts_a_non_runtime_role_on_a_host_environment", normalize.Apply(result.Combined))
+
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		if !strings.Contains(string(raw), "role: code") {
+			t.Fatalf("expected persisted role: code, got:\n%s", raw)
+		}
+	})
+
 	// set_role_recovers_a_preexisting_invalid_pairing locks the decision for
 	// a config written before this gate existed: role=code was persisted
 	// against a runtime-type environment (something the desktop's link gate

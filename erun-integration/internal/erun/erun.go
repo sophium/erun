@@ -6,6 +6,8 @@ package erun
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,9 +16,12 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
 // CoverDirEnv names where instrumented binaries write coverage counters; the
@@ -33,11 +38,22 @@ const CoverPkgs = "github.com/sophium/erun," +
 	"github.com/sophium/erun/internal/...," +
 	"github.com/sophium/erun/erun-common"
 
+// waitDelay bounds how long Run waits on a finished child's output pipes after
+// the child itself has exited (exec.Cmd.WaitDelay). The child's exit is the
+// event a scenario is about; the pipes closing is only how os/exec usually
+// learns of it, and a process the child spawned can hold them open long after
+// the child is gone. Keeping this far below the harness's own per-run timeout
+// is the point: a run that reaches it has already concluded, and a scenario
+// that leaves a descendant behind must fail as a timeout rather than wait out
+// the test binary's own deadline and panic the package.
+const waitDelay = 10 * time.Second
+
 var (
-	buildOnce  sync.Once
-	binaryPath string
-	buildErr   error
-	coverDir   string
+	buildOnce   sync.Once
+	binaryPath  string
+	buildErr    error
+	coverDir    string
+	procCounter int64
 )
 
 // BinaryPath returns the path to the coverage-instrumented erun binary,
@@ -61,6 +77,33 @@ func CoverDir(t testing.TB) string {
 	return coverDir
 }
 
+// PrivateCoverDir allocates a fresh subdirectory of the suite's shared
+// coverage root, exclusively owned by whichever process is about to be
+// spawned, and returns its path. Go's coverage runtime emits its meta-data
+// file at process init (before main even runs), naming a temp file with only
+// a nanosecond timestamp for uniqueness -- no PID. Every process running the
+// same instrumented binary computes the same final meta-data filename, so two
+// such processes racing to create-and-rename their own temp file into that
+// name in one shared directory can have the loser's rename fail outright
+// (the source temp file is gone by the time it runs, already renamed away by
+// the winner), silently dropping that process's coverage from the merged
+// profile without failing anything on its own. Giving every process its own
+// directory makes that race structurally impossible instead of merely rare.
+//
+// Run calls this for every subprocess it starts. A caller that spawns the
+// instrumented binary (or something that itself spawns it, like erun-mcp)
+// without going through Run must call this directly and set GOCOVERDIR in
+// that process's own environment.
+func PrivateCoverDir(t testing.TB) string {
+	t.Helper()
+	CoverDir(t) // ensures the shared coverage root is built and initialized
+	dir := filepath.Join(coverDir, fmt.Sprintf("p%d", atomic.AddInt64(&procCounter, 1)))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create private coverage dir: %v", err)
+	}
+	return dir
+}
+
 func buildBinary() (string, error) {
 	repoRoot, err := repoRoot()
 	if err != nil {
@@ -82,7 +125,7 @@ func buildBinary() (string, error) {
 		"-o", exe,
 		".",
 	}
-	cmd := exec.Command("go", args...)
+	cmd := harnessexec.Command("go", args...)
 	cmd.Dir = filepath.Join(repoRoot, "erun-cli")
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	var buf bytes.Buffer
@@ -189,16 +232,36 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 		// the cap well above that environmental variance so it fails only a
 		// genuine deadlock, not a slow-but-correct run. If it ever fires, the
 		// goroutine dump below names the blocked call.
+		//
+		// Firing is not proof of a deadlock, though, and this harness has to
+		// stay usable when it is wrong: under contention -- this suite runs
+		// beside a browser suite against one CPU budget -- a command can be
+		// simply slow past this cap, and the run that follows a timeout must
+		// still conclude within it. That is what waitDelay guarantees: the
+		// timeout path's own wait is bounded, so the worst case for one
+		// scenario is this cap plus waitDelay, never the test binary's whole
+		// deadline.
 		timeout = 120 * time.Second
 	}
 
-	cmd := exec.Command(bin, args...)
+	// The context is what covers the one state the harness's drain bound
+	// cannot. harnessexec arms Cmd.WaitDelay on every child it builds, which
+	// bounds a wait on a child that has *exited*; a child that does not exit --
+	// a command wedged past the timeout under the gate's CPU contention -- is
+	// never reaped, so Process.Wait never returns, the post-exit path that
+	// consults WaitDelay is never reached, and Wait blocks forever however
+	// large the delay is. Cancelling this context is what turns that timeout
+	// into a bounded run, and supervise does it below.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := harnessexec.CommandContext(ctx, bin, args...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
 	env := make([]string, 0, len(opts.Env)+2)
 	env = append(env, opts.Env...)
-	env = append(env, CoverDirEnv+"="+coverDir)
+	env = append(env, CoverDirEnv+"="+PrivateCoverDir(t))
 	// So a SIGQUIT on timeout dumps every goroutine's stack, not just the
 	// current one — turning an opaque hang into a report of where it stuck.
 	env = append(env, "GOTRACEBACK=all")
@@ -225,43 +288,100 @@ func Run(t testing.TB, args []string, opts RunOptions) Result {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	done := make(chan error, 1)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start erun: %v", err)
 	}
-	go func() { done <- cmd.Wait() }()
 
-	exitCode := 0
-	select {
-	case err := <-done:
-		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			} else {
-				t.Fatalf("erun exec error: %v", err)
-			}
-		}
-	case <-time.After(timeout):
-		// Give the signal a moment to flush the goroutine dump so the failure
-		// names the blocked call; fall back to Kill if the process ignores it.
-		_ = cmd.Process.Signal(syscall.SIGQUIT)
-		select {
-		case <-done:
-		case <-time.After(3 * time.Second):
-			_ = cmd.Process.Kill()
-			<-done
-		}
+	err := supervise(cmd, cancel, timeout, waitDelay)
+	if errors.Is(err, errTimeout) {
 		t.Fatalf("erun timed out after %s; args=%v\n--- subprocess goroutine dump (stderr) ---\n%s", timeout, args, stderr.String())
 	}
-
+	// supervise reports a run it could observe as nil or the child's own exit
+	// error, having ruled out a timeout above; anything else is a command that
+	// could not be run at all. The status lives on ProcessState either way --
+	// a run whose wait was rescued by the delay reads its exit code there
+	// rather than from an error that no longer describes the child.
+	if _, ok := err.(*exec.ExitError); err != nil && !ok {
+		t.Fatalf("erun exec error: %v", err)
+	}
 	result := Result{
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		Combined: stdout.String() + stderr.String(),
-		ExitCode: exitCode,
+		ExitCode: cmd.ProcessState.ExitCode(),
 	}
 	reportUndeclaredBinaries(t, result.Combined)
 	return result
+}
+
+// errTimeout reports a child that did not finish within its own timeout and
+// was killed. It is a sentinel rather than an *exec.ExitError because the
+// caller's message is about the harness's cap, not the signal the child died
+// of.
+var errTimeout = errors.New("erun: child exceeded its timeout")
+
+// supervise waits for an already-started child, killing it if it outlives
+// timeout. An exit it could observe comes back as the child's own result --
+// nil, or an *exec.ExitError carrying its status -- with a wait rescued by
+// delay reported as the completed run it is rather than as the trouble the
+// wait itself ran into. errTimeout means the cap was what ended the run, and
+// any other error means the child could not be run or observed at all.
+//
+// It arms delay on the child itself, rather than leaving that to its caller,
+// because that is the bound this whole function exists around: a child leaves
+// its stdout/stderr pipes open for as long as any process it started still
+// holds them, and os/exec's own documentation names exactly that case as the
+// reason WaitDelay exists. Without it, Wait -- and therefore this harness --
+// waits for the *pipe* rather than the child, and no kill rescues it: the
+// copier goroutines blocked on those pipes never look at signals at all, and a
+// kill only ends the wait if the child was still running to receive it.
+//
+// Arming the delay is not on its own enough, which is why cancel is a
+// parameter. WaitDelay bounds a wait only after the child exits or after the
+// command's context is cancelled, and os/exec runs the goroutine that enforces
+// the second clause only for a Cmd that has such a context. The cancellation
+// on the timeout path below is therefore what makes the delay apply to the
+// case that actually wedged this suite: a child that has *not* exited, so that
+// Process.Wait never returns and the post-exit path -- which consults the
+// delay independently -- is never reached. Cancelling also kills the child if
+// it survived the signal below. With the context cancelled the wait becomes a
+// deadline this harness enforces itself: the child is killed, the pipes it
+// left open are closed, and the run concludes as the timeout it is rather than
+// wedging the whole package past the test binary's own deadline.
+//
+// cancel, timeout and delay are parameters rather than the fixed values their
+// caller passes so that wait can be driven directly at test speed.
+func supervise(cmd *exec.Cmd, cancel context.CancelFunc, timeout, delay time.Duration) error {
+	cmd.WaitDelay = delay
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		// A WaitDelay expiry is not a failure to observe the child: its status
+		// was recorded on ProcessState before Wait began waiting on the pipes
+		// a descendant of the child was still holding open. The caller reads
+		// that status, so an expiry is reported as the completed run it is.
+		if errors.Is(err, exec.ErrWaitDelay) {
+			return nil
+		}
+		return err
+	case <-time.After(timeout):
+		// Give the signal a moment to flush the goroutine dump so the failure
+		// names the blocked call, then cancel: cancellation is what arms the
+		// delay, and os/exec's own watcher kills the child if it outlives the
+		// signal. Waiting on done afterwards is bounded by delay for every
+		// state the child can be in -- running, already reaped, or reaped with
+		// a descendant holding its pipes -- so a timeout always concludes.
+		_ = cmd.Process.Signal(syscall.SIGQUIT)
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			cancel()
+			<-done
+		}
+		return errTimeout
+	}
 }
 
 // missingBinary matches the exec error Go reports when a command resolves no

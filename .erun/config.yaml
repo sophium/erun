@@ -1,17 +1,70 @@
+# docker.platforms is this project's default for every environment below: an
+# environment that declares no platforms of its own inherits this list. Every
+# agent environment of the erun tenant (code1-code4) runs on erun-node1, whose
+# node is x86_64 (uname -m, docker info, `docker buildx inspect` listing arm64
+# only as an emulated target), and a gate build there publishes nothing (no
+# --release, no push), so building linux/arm64 only pays qemu emulation cost for
+# an artifact nobody consumes. Measured on one gate build: amd64 13m21s against
+# arm64 10m30s, so the discarded half is ~44% of the wall clock.
+#
+# It is stated once, here, rather than repeated per environment, because a
+# per-environment pin only covers the environments someone remembered to list:
+# the four agent environments shared one node, and three of them kept paying for
+# emulated arm64 until each was named. A new agent environment now inherits this
+# default instead of silently falling back to the multi-arch build. Environments
+# that must not inherit it opt out with `platforms: []` -- see `local` below.
+#
+# This narrows non-release builds only -- `erun build --release` resolves both
+# architectures unconditionally and never consults this config, so published
+# images are unaffected. Do not widen it back without re-confirming this node
+# can schedule arm64 workloads; it cannot today.
+docker:
+    platforms:
+        - linux/amd64
 environments:
     # code2: a persistent remote-agent env for the erun tenant, PVC-backed, whose
     # `erun build` resolves its environment key to "code2" (not "local") —
     # confirmed live by pinning a bogus platform here and checking the build
-    # trace picked it up. Its node is x86_64 (uname -m, docker info, `docker
-    # buildx inspect` listing arm64 only as an emulated target). A gate build
-    # here publishes nothing (no --release, no push), so building linux/arm64
-    # only pays qemu emulation cost for an artifact nobody consumes. Do not
-    # widen this back to multi-arch without re-confirming this node can
-    # actually schedule arm64 workloads — it cannot today.
+    # trace picked it up. Its platforms come from the project-wide pin above,
+    # which this environment inherits; its node is x86_64 and a build here
+    # publishes nothing.
     code2:
         docker:
-            platforms:
-                - linux/amd64
+            fingerprints:
+                erun-ubuntu: 43855fd29e16b9aa
+                erun-zitadel: 3cba9e2a8ff916f2
+                erun-zitadel-login: f3c59225f0f48170
+    # code1/code3/code4: the erun tenant's other persistent remote-agent envs.
+    # They carry the same fingerprint pins as code2 and local because a pin is
+    # a property of the published image, not of the environment reading it, and
+    # DockerFingerprintsForEnvironment resolves the environment key exactly --
+    # there is no shared or default scope to inherit from, so an environment
+    # with no entry here silently rebuilds every pinned base from source.
+    # Keep these in step with local's block; they must all name the fingerprint
+    # the current Dockerfile computes, or the fast path quietly does nothing.
+    #
+    # Platform pins are the opposite case: they do have a shared scope, so these
+    # three deliberately declare no platforms and inherit the amd64-only default
+    # above. That is what keeps a fourth agent environment added later from
+    # silently going back to emulated arm64.
+    code1:
+        docker:
+            fingerprints:
+                erun-ubuntu: 43855fd29e16b9aa
+                erun-zitadel: 3cba9e2a8ff916f2
+                erun-zitadel-login: f3c59225f0f48170
+    code3:
+        docker:
+            fingerprints:
+                erun-ubuntu: 43855fd29e16b9aa
+                erun-zitadel: 3cba9e2a8ff916f2
+                erun-zitadel-login: f3c59225f0f48170
+    code4:
+        docker:
+            fingerprints:
+                erun-ubuntu: 43855fd29e16b9aa
+                erun-zitadel: 3cba9e2a8ff916f2
+                erun-zitadel-login: f3c59225f0f48170
     # local: the default environment name `erun init` assigns when none is
     # given (see erun-common/init.go's DefaultEnvironment). Deliberately left
     # unpinned: unlike code2 (a specific, confirmed-amd64 pod), "local" is a
@@ -20,6 +73,11 @@ environments:
     # narrow) builds for whoever's actual "local" isn't this architecture.
     # Pin a specific contributor/environment's own platforms locally instead
     # of widening this shared entry.
+    #
+    # The explicit empty list is that refusal spelled out: it opts this
+    # environment out of the project-wide docker.platforms default above and
+    # restores erun's built-in platforms, so this shared config constrains no
+    # other machine's "local".
     local:
         containerregistries:
             - registry: ghcr.io/sophium
@@ -28,11 +86,10 @@ environments:
                 - deploy
         docker:
             fingerprints:
-                erun-backend-postgres: cb6d9b701f4ad75b
-                erun-powerdns: 28aba123cf9f7c73
-                erun-ubuntu: 6ffef71a59498123
+                erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
+            platforms: []
         k8s:
             deployments:
                 - - erun-devops

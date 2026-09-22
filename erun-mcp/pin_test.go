@@ -148,6 +148,9 @@ func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: root},
 		Store:   store,
+		ResolveRuntimeRegistryVersions: func(context.Context) (eruncommon.RuntimeRegistryVersions, error) {
+			return eruncommon.RuntimeRegistryVersions{Tags: []string{"1.0.228"}, LatestStable: "1.0.228"}, nil
+		},
 	}
 	_, output, err := pinTool(runtime)(context.Background(), nil, PinInput{Version: "1.0.228"})
 	if err != nil {

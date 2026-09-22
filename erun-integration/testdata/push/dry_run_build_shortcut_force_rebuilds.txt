@@ -1,4 +1,5 @@
 audit: erun push --build --dry-run --force
+docker info -f '{{.DockerRootDir}}'
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/cwd:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .

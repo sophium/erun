@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -68,16 +69,50 @@ func LocalMCPEndpoint(port int) string {
 // through it hangs. Any HTTP response is success — an unauthenticated request is
 // answered 401, and a 401 already proves the edge replied.
 func CanReachLocalMCPEndpoint(port int) bool {
+	return probeLocalMCPEndpoint(port) == localMCPAnswered
+}
+
+// localMCPProbe is the outcome of one round trip, kept whole because the
+// boolean throws away the half that says which fault this is.
+type localMCPProbe int
+
+const (
+	// localMCPAnswered: the port replied, so the tunnel carries traffic.
+	localMCPAnswered localMCPProbe = iota
+	// localMCPRefused: nothing holds the port — no forward is established.
+	localMCPRefused
+	// localMCPDropped: the port is held and accepted the connection, then
+	// closed it without a reply. A forward whose upstream never took the
+	// connection looks like this, which is what an environment still coming up
+	// (a pod mid-roll, a container not listening yet) does behind a forward
+	// that is working.
+	localMCPDropped
+	// localMCPSilent: the port is held, the connection stayed open, and
+	// nothing ever answered — the shape a wedged forward leaves behind.
+	localMCPSilent
+)
+
+// probeLocalMCPEndpoint makes one real round trip and reports how it ended.
+// Refused and dropped are separated by whether anything held the port, since
+// the HTTP client reports both as a failed request.
+func probeLocalMCPEndpoint(port int) localMCPProbe {
 	if port <= 0 {
-		return false
+		return localMCPRefused
 	}
 	client := http.Client{Timeout: localMCPProbeTimeout}
 	resp, err := client.Get(LocalMCPEndpoint(port))
-	if err != nil {
-		return false
+	if err == nil {
+		_ = resp.Body.Close()
+		return localMCPAnswered
 	}
-	_ = resp.Body.Close()
-	return true
+	if !LocalPortIsBound(port) {
+		return localMCPRefused
+	}
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return localMCPSilent
+	}
+	return localMCPDropped
 }
 
 // LocalPortIsBound reports whether something holds the port. Paired with
@@ -106,28 +141,44 @@ const (
 	// LocalMCPNotOpen means nothing holds the local port — the ordinary shape
 	// of an environment nobody has opened, or one that was stopped.
 	LocalMCPNotOpen LocalMCPUnreachableKind = "not-open"
-	// LocalMCPStaleForward means the local port is held but the edge behind it
-	// never answers — a forward that needs re-establishing, not starting.
+	// LocalMCPStaleForward means the local port is held, accepts a connection,
+	// and then never answers — a forward that needs re-establishing, not
+	// starting.
 	LocalMCPStaleForward LocalMCPUnreachableKind = "stale-forward"
+	// LocalMCPTargetNotAnswering means the local port is held and the
+	// connection was accepted, but it was closed without a reply: the forward
+	// is up and whatever is behind it did not take the call. An environment
+	// still coming up (a pod mid-roll, a container not listening yet) presents
+	// exactly this way, so the first move is to wait rather than to re-open —
+	// re-opening leaves the same forward in place and answers nothing.
+	LocalMCPTargetNotAnswering LocalMCPUnreachableKind = "target-not-answering"
 )
 
-// ClassifyLocalMCPUnreachable reports which of the two locally observable
-// failure shapes applies for a port that CanReachLocalMCPEndpoint has already
-// reported unreachable.
+// ClassifyLocalMCPUnreachable reports which locally observable failure shape
+// applies for a port that CanReachLocalMCPEndpoint has already reported
+// unreachable.
 func ClassifyLocalMCPUnreachable(port int) LocalMCPUnreachableKind {
-	if LocalPortIsBound(port) {
+	switch probeLocalMCPEndpoint(port) {
+	case localMCPDropped:
+		return LocalMCPTargetNotAnswering
+	case localMCPSilent:
 		return LocalMCPStaleForward
 	}
 	return LocalMCPNotOpen
 }
 
-// DescribeLocalMCPUnreachable names which of the two failures happened, so the
-// reader is not left weighing a busy pod against a dead tunnel. A stale forward
-// presents as a timeout with a live listener, which reads exactly like an
-// overloaded environment and has cost real debugging time.
+// DescribeLocalMCPUnreachable names which failure happened, so the reader is
+// not left weighing a busy pod against a dead tunnel. Both held-port shapes
+// present as a failed request with a live listener, which reads exactly like an
+// overloaded environment and has cost real debugging time; what separates them
+// is whether the forward answered at all, and the two want opposite first
+// moves.
 func DescribeLocalMCPUnreachable(tenant, environment string, port int) string {
-	if ClassifyLocalMCPUnreachable(port) == LocalMCPStaleForward {
+	switch ClassifyLocalMCPUnreachable(port) {
+	case LocalMCPStaleForward:
 		return fmt.Sprintf("the port-forward for %s/%s on 127.0.0.1:%d is not carrying traffic (the local port is held but the edge never answers) — re-establishing it", tenant, environment, port)
+	case LocalMCPTargetNotAnswering:
+		return fmt.Sprintf("the port-forward for %s/%s on 127.0.0.1:%d is up but the environment behind it did not answer (the local port took the connection and closed it without a reply) — the environment is most likely still starting, so retry shortly, and re-establish the forward only if it stays unresponsive", tenant, environment, port)
 	}
 	return fmt.Sprintf("no port-forward is listening for %s/%s on 127.0.0.1:%d", tenant, environment, port)
 }

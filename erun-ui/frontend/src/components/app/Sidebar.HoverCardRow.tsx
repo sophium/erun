@@ -10,10 +10,10 @@ import * as React from 'react';
 // TYPE: one size, one face, always. A card element is distinguished from
 // another by colour, weight and state -- never by size or face. Concretely:
 //
-//   - title (`HoverCardTitle`): 10px, `text-foreground`, weight 600 -- the
+//   - title (`HoverCardTitle`): 12px, `text-foreground`, weight 600 -- the
 //     card's only static chrome above the row grid.
-//   - label (`HOVER_CARD_CAPTION_CLASS`, every `dt`): 10px, muted, weight 400.
-//   - value (`HOVER_CARD_VALUE_CLASS`, every `dd`'s primary content): 10px,
+//   - label (`HOVER_CARD_CAPTION_CLASS`, every `dt`): 12px, muted, weight 400.
+//   - value (`HOVER_CARD_VALUE_CLASS`, every `dd`'s primary content): 12px,
 //     `text-foreground`, weight 400. Never `font-mono` -- a literal
 //     identifier (a version, a branch) still renders in the shared sans face;
 //     `tabular-nums` on the row grid (not per value) keeps digits aligned
@@ -34,13 +34,22 @@ import * as React from 'react';
 //     `StatusDotGlyph`'s own rule): reserved for a state that names something
 //     actionable -- a runtime-image line mismatch, a stopped node. Never used
 //     for "this number could not be measured", which is `degraded` instead.
-//   - badge (`HoverCardBadge`): 10px, muted, weight 500, `uppercase` +
+//   - badge (`HoverCardBadge`): 12px, muted, weight 500, `uppercase` +
 //     `tracking-wide` -- the one deliberate exception that spends two extra
 //     axes, reserved for the small bordered pill (Host/Local/Transient).
 //
+// The decile strip (`DecileStrip`, Sidebar.DecileStrip.tsx) is a fourth
+// permitted element -- a graphic, not a type treatment. It is not a sixth role
+// competing with the five above: it carries no text of its own (the figure it
+// encodes is already the value it sits under), so it spends none of the type
+// axes, and a card that adds a strip adds no new size/face/weight pairing. Its
+// own contract (segment count, the outlined empty segment, the amber
+// threshold) lives in that file.
+//
 // Removed entirely: `text-sm`, `text-xs`, `font-mono`, and any per-element
 // size or face decision. Adding a new element to either card means picking
-// one of the roles above, not inventing a new size/face pairing.
+// one of the roles above -- or the strip -- not inventing a new size/face
+// pairing.
 //
 // SPACING: three levels, each with one job. Extending a card means reusing
 // one of these three, never a fourth ad hoc gap value.
@@ -78,7 +87,7 @@ export const HOVER_CARD_GRID_CLASS =
 // own caption or warning line, read as one fact.
 export const HOVER_CARD_VALUE_STACK_CLASS = 'grid gap-0.5';
 
-export const HOVER_CARD_VALUE_CLASS = 'text-[10px] text-foreground';
+export const HOVER_CARD_VALUE_CLASS = 'text-[12px] text-foreground';
 // HOVER_CARD_TRUNCATE_CLASS is for a value that is a literal identifier
 // (a version, a branch, a node label) truncated to one line with the full
 // text in `title` (Phase 1's "truncate identifiers, don't wrap them"). Every
@@ -89,13 +98,30 @@ export const HOVER_CARD_VALUE_CLASS = 'text-[10px] text-foreground';
 // turns a "truncate to one line" identifier back into a two-line wrap.
 // `break-normal` resets that inheritance for this element specifically.
 export const HOVER_CARD_TRUNCATE_CLASS = 'block truncate break-normal';
-export const HOVER_CARD_CAPTION_SIZE_CLASS = 'text-[10px]';
+// HOVER_CARD_CLAMP_2_CLASS is the held-length form of the same disclosure
+// rule, for a value whose useful part is its opening and whose length is
+// unbounded rather than merely long: it keeps two lines and puts the full
+// text in `title`, where `truncate` keeps one. Two lines is the budget a
+// machine-authored string gets -- it holds enough of the string to recognise
+// it, while bounding a value that would otherwise set the whole card's
+// height. Same rule as HOVER_CARD_TRUNCATE_CLASS: clip the rendering, never
+// the stored or passed value, and never drop the remainder without a way back
+// to it.
+//
+// Deliberately carries no `block`, unlike HOVER_CARD_TRUNCATE_CLASS: a clamp
+// works by `display: -webkit-box`, and Tailwind emits `.block` after
+// `.line-clamp-*` in the compiled stylesheet, so pairing the two silently
+// reinstates `display: block` and the value renders at full length with the
+// class still visibly present. `line-clamp-*`'s own display is block-level,
+// so nothing is needed here -- but do not add one back.
+export const HOVER_CARD_CLAMP_2_CLASS = 'line-clamp-2 break-normal';
+export const HOVER_CARD_CAPTION_SIZE_CLASS = 'text-[12px]';
 export const HOVER_CARD_CAPTION_CLASS = `${HOVER_CARD_CAPTION_SIZE_CLASS} text-muted-foreground`;
 // HOVER_CARD_CAPTION_DEGRADED_CLASS is the caption-sized form of the degraded
 // role (see TYPE above) for a spot that does not inherit `HoverCardMuted`'s
 // ambient size -- e.g. a caption nested inside a row that already declared its
 // own size for a sibling branch. Prefer `HoverCardMuted` when the surrounding
-// element already sets the 10px size.
+// element already sets the 12px size.
 export const HOVER_CARD_CAPTION_DEGRADED_CLASS = `${HOVER_CARD_CAPTION_SIZE_CLASS} text-muted-foreground/70`;
 // HOVER_CARD_ALERT_CLASS is the shared colour half of the alert role (see TYPE
 // above) -- always paired with a `<TriangleAlert aria-hidden>` at the call
@@ -148,7 +174,7 @@ export function HoverCardBadge({
 }): React.ReactElement {
   return (
     <span
-      className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide text-muted-foreground"
+      className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[12px] font-medium uppercase leading-none tracking-wide text-muted-foreground"
       aria-label={ariaLabel}
     >
       {children}
@@ -157,14 +183,14 @@ export function HoverCardBadge({
 }
 
 export function HoverCardTitle({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <span className="min-w-0 truncate text-[10px] font-semibold">{children}</span>;
+  return <span className="min-w-0 truncate text-[12px] font-semibold">{children}</span>;
 }
 
 // HoverCardMuted is the degraded role (see TYPE above): a dynamic value or
 // caption that is missing, unmeasurable or stale. Reduced opacity on top of
 // the muted colour, at whatever size the surrounding element already set --
 // most callers nest it inside a `dd` that already declares `HOVER_CARD_VALUE_CLASS`'s
-// 10px, so this only needs to override colour.
+// 12px, so this only needs to override colour.
 export function HoverCardMuted({ children }: { children: React.ReactNode }): React.ReactElement {
   return <span className="text-muted-foreground/70">{children}</span>;
 }

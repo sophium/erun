@@ -8,9 +8,10 @@ import (
 )
 
 // TestRecommendedDeployRecovery locks the diagnosis → single-recovery mapping.
-// The classifier only runs on a real `erun doctor` (dry-run produces an empty
-// diagnosis because the helm/kubectl probes are traced, not executed), so it is
-// unreachable from the dry-run integration subprocess and is covered here.
+// `erun doctor --dry-run` never reaches this classifier -- the recovery
+// prompt itself is skipped outright under --dry-run, since recommending and
+// running a recovery are both mutating concerns -- so it is unreachable from
+// the dry-run integration subprocess and is covered here.
 func TestRecommendedDeployRecovery(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -138,6 +139,21 @@ func TestRunDeployDiagnosisMissingReleaseHasNoReadError(t *testing.T) {
 	}
 }
 
+// TestRunDeployDiagnosisPopulatesUnderDryRun is the regression test for
+// erun#2403: --dry-run scopes itself to mutations, and this diagnosis is
+// strictly read-only, so it must populate HelmStatus/Pods under --dry-run
+// exactly as it does on a real run instead of returning an empty result.
+func TestRunDeployDiagnosisPopulatesUnderDryRun(t *testing.T) {
+	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: failed\nREVISION: 5", "", 0)
+	writeKubectlStub(t, "", 0)
+
+	diagnosis := RunDeployDiagnosis(testTraceContext(true), ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+
+	if !strings.Contains(diagnosis.HelmStatus, "STATUS: failed") {
+		t.Fatalf("expected --dry-run to still populate HelmStatus, got %q", diagnosis.HelmStatus)
+	}
+}
+
 // TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback is the test that
 // stops erun#1659's fix from regressing into "never recommend anything":
 // `helm status` exits 0 for a release that exists but genuinely failed, so
@@ -154,5 +170,55 @@ func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 	action, ok := RecommendedDeployRecovery(diagnosis)
 	if !ok || action != DeployRecoveryRollback {
 		t.Fatalf("action = %q, ok = %v; want (%q, true) for a genuinely failed release", action, ok, DeployRecoveryRollback)
+	}
+}
+
+// TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable is the regression
+// for an unreachable cluster: a helm status read that fails with the cluster's
+// own unreachable-API-server signal must set ClusterUnreachable and skip the
+// second kubectl probe entirely, rather than paying its own timeout to
+// rediscover the same fact. kubectl is pointed at a stub that fails the test
+// if ever invoked, so a regression that re-adds the probe fails loudly.
+func TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable(t *testing.T) {
+	writeDoctorHelmStub(t, "", `Error: kubernetes cluster unreachable: Get "https://198.51.100.10:6443/version": dial tcp 198.51.100.10:6443: i/o timeout`, 1)
+	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
+
+	diagnosis := RunDeployDiagnosis(testTraceContext(false), ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+
+	if !diagnosis.ClusterUnreachable {
+		t.Fatalf("expected ClusterUnreachable = true for an unreachable API server, got false (HelmReadError=%q)", diagnosis.HelmReadError)
+	}
+	if diagnosis.Pods != "" {
+		t.Fatalf("expected the pods probe to be skipped once the cluster is confirmed unreachable, got Pods = %q", diagnosis.Pods)
+	}
+}
+
+// TestRunDeployDiagnosisRunsPodsProbeWhenHelmReadFailsForOtherReasons is the
+// control: an RBAC read failure is not evidence the whole cluster is
+// unreachable, so the pods probe must still run and ClusterUnreachable must
+// stay false.
+func TestRunDeployDiagnosisRunsPodsProbeWhenHelmReadFailsForOtherReasons(t *testing.T) {
+	writeDoctorHelmStub(t, "", `Error from server (Forbidden): secrets is forbidden: User "jane" cannot list resource "secrets"`, 1)
+	writeKubectlStub(t, "", 0)
+
+	diagnosis := RunDeployDiagnosis(testTraceContext(false), ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+
+	if diagnosis.ClusterUnreachable {
+		t.Fatalf("expected ClusterUnreachable = false for an RBAC read failure, got true")
+	}
+}
+
+// TestRunDeployDiagnosisDetectsUnreachableFromPodsProbe covers the other
+// direction: when the helm read itself succeeds but the pods probe is the
+// one that hits the unreachable API server, ClusterUnreachable must still be
+// set from that probe so later doctor sections skip their own reads too.
+func TestRunDeployDiagnosisDetectsUnreachableFromPodsProbe(t *testing.T) {
+	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: deployed", "", 0)
+	writeKubectlStub(t, "Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout", 1)
+
+	diagnosis := RunDeployDiagnosis(testTraceContext(false), ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
+
+	if !diagnosis.ClusterUnreachable {
+		t.Fatalf("expected ClusterUnreachable = true when the pods probe hits an unreachable API server, got false")
 	}
 }

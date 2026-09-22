@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -132,6 +133,31 @@ func TestObserve(t *testing.T) {
 		golden.Equal(t, "observe/real_run_walks_certificate_failure_chain", normalize.Apply(result.Combined))
 	})
 
+	// real_run_kubectl_unreachable_reports_one_sanitized_line is erun#2392: an
+	// unreachable cluster API server made kubectl's retries emit klog's raw
+	// "Unhandled Error" frames (severity/timestamp/goroutine-id/source-location,
+	// none of it operator-relevant) straight into observe's own error, once per
+	// retry. sanitizeKubectlFailureOutput already existed for this shape
+	// (erun#1766) but observe's own kubectl error path never called it. The
+	// stub reproduces kubectl's real retry-storm shape verbatim.
+	t.Run("real_run_kubectl_unreachable_reports_one_sanitized_line", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		klogFrame := `E0907 17:02:43.157343   81639 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://10.0.0.1:6443/api?timeout=32s\": dial tcp 10.0.0.1:6443: i/o timeout"`
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+			Stderr: klogFrame + "\n" + klogFrame + "\n" + klogFrame + "\n" + klogFrame + "\n" + klogFrame + "\n" +
+				`Unable to connect to the server: dial tcp 10.0.0.1:6443: i/o timeout`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"observe"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an unreachable cluster, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "observe/real_run_kubectl_unreachable_reports_one_sanitized_line", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_secret_presence_check", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -224,9 +250,17 @@ func TestObserve(t *testing.T) {
 	// runtimepod (the SeedTenantEnv default, and the in-pod reality per
 	// runtime_resources.go's NormalizeRuntimePodResources doc) asserts nothing
 	// about the pod's shape, so a release sized well above the package's
-	// DefaultRuntimePodCPU/Memory (4 / 8916Mi) must report no runtimepod drift —
+	// DefaultRuntimePodCPU/Memory (4 / 16384Mi) must report no runtimepod drift —
 	// comparing the release against a manufactured default nobody configured is
 	// exactly the bug, not the fix.
+	//
+	// It is also the drift-verdict report's reproduction: the empty verdict is
+	// the one case `omitempty` dropped, so `--output json` on a clean
+	// environment carried no drift key at all while the text stream printed
+	// "Drift: none detected" and the MCP outputSchema declared one — three
+	// surfaces, three answers. The assertion below is on the payload rather
+	// than the golden alone, because "the key is present" is the exact
+	// contract the report found broken.
 	t.Run("real_run_runtime_pod_silent_config_reports_no_drift", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -242,6 +276,21 @@ func TestObserve(t *testing.T) {
 		result := erun.Run(t, []string{"observe", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(result.Stdout), &payload); err != nil {
+			t.Fatalf("observe --output json did not emit one JSON object: %v\n%s", err, result.Stdout)
+		}
+		raw, ok := payload["drift"]
+		if !ok {
+			t.Fatalf("structured result carries no drift verdict, so a consumer cannot read the one the text stream prints: %s", result.Stdout)
+		}
+		var drift []string
+		if err := json.Unmarshal(raw, &drift); err != nil {
+			t.Fatalf("drift = %s, want the list of findings: %v", raw, err)
+		}
+		if len(drift) != 0 {
+			t.Fatalf("drift = %v, want no findings for a release that agrees with the env config and the running pod", drift)
 		}
 		golden.Equal(t, "observe/real_run_runtime_pod_silent_config_reports_no_drift", normalize.Apply(result.Combined))
 	})

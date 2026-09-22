@@ -6,16 +6,16 @@ import { SEED_ENV_ALPHA, SEED_TENANT, removeOrchestrator } from '../../../fixtur
 // (never one the operator cleanly quit or Stopped) into the same conversation.
 //
 // Neither half of that has a reachable surface in this harness. Both text-into-
-// the-pty and the crash-relaunch require a REAL orchestrator PTY: the pacing
+// the-pty and the crash-relaunch require a real orchestrator PTY: the pacing
 // nudge only fires against a session whose activity report has gone stale over
 // ten real minutes, and the respawn only fires when that PTY's underlying
-// process actually exits non-zero. Driving either for real means launching a
-// real `claude` process via StartOrchestrator — which this suite must not do:
-// every orchestrator the desktop starts runs on the one shared agent account
-// (erun-ui/AGENTS.md, "Spawning an AI agent is a resource decision"), and
-// unlike the headless harness's intended host, an environment that already has
-// `claude` on PATH (as this one does) would spawn a REAL nested session rather
-// than failing the LookPath preflight closed.
+// process actually exits non-zero. `claude` resolves to the harness's inert
+// stub (fixtures/seedRoot.ts), which blocks forever and never reports activity
+// — so no staleness accrues and no crash ever happens to relaunch. Driving
+// either for real would mean pointing the suite at a live AI harness, which it
+// must not do: every orchestrator the desktop starts runs on the one shared
+// agent account (erun-ui/AGENTS.md, "Spawning an AI agent is a resource
+// decision").
 //
 // So this spec only drives the safe half: creating an orchestrator (which
 // never starts a session — CreateOrchestrator "creates stopped") and asserting

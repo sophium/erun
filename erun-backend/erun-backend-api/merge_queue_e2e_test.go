@@ -389,3 +389,137 @@ func TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween(t *te
 		t.Fatalf("status = %s, want MERGED", merged.Status)
 	}
 }
+
+// isAncestorCommit reports whether ancestor is reachable from descendant in
+// the repository at dir, without failing the test on a "no" answer — the
+// question here is expected to come back false.
+func isAncestorCommit(t *testing.T, dir, ancestor, descendant string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant)
+	cmd.Dir = dir
+	cmd.Env = append([]string{}, "HOME="+dir)
+	return cmd.Run() == nil
+}
+
+// reconcileMerged reports MERGED for a review with no gate build to name —
+// the shape a squash-landed review is in. Everything else about the request
+// is the ordinary PATCH .../status call.
+func reconcileMerged(t *testing.T, baseURL, reviewID, remoteURL string) (int, mergeReviewResponse) {
+	t.Helper()
+	return e2eReportMerged(t, baseURL, reviewID, "", remoteURL)
+}
+
+// TestReconcileMergedAcceptsASquashLandedBranchEndToEnd is the defect this
+// change fixes, driven through the real HTTP route against a real migrated
+// Postgres and a real (local, file://) git remote: a review whose branch
+// landed by squash merge reaches MERGED even though it never entered the
+// merge queue, never had a build recorded, and has none of its commits as
+// ancestors of the target.
+//
+// The test asserts that last part itself — the branch tip really is not an
+// ancestor of main, so the check report-merged used to run could never have
+// held — rather than assuming the setup produced a squash.
+func TestReconcileMergedAcceptsASquashLandedBranchEndToEnd(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+	remote := newMergeQueueRemote(t)
+	sourceBranch := uniqueBranchName(t, "squashed")
+	branchTip := remote.branch(t, sourceBranch, "squashed.txt")
+
+	// The review is opened and never promoted: no build is reported, so it
+	// sits at OPEN with nothing in the merge queue — exactly what a branch
+	// that landed through GitHub rather than the platform looks like.
+	reviewID := e2eOpenReview(t, srv.URL, "reconcile-e2e", remote.main, sourceBranch)
+	if got := readMergeReview(t, srv.URL, reviewID).Status; got != model.ReviewStatusOpen {
+		t.Fatalf("review status = %s, want OPEN before anything lands", got)
+	}
+
+	squashCommit := remote.merge(t, remote.main, sourceBranch, "squashed work (#1)")
+
+	// The half of the reproduction that matters: a squash merge leaves the
+	// branch's own commits out of the target's history, which is why the
+	// gate-build path had nothing to point at.
+	checkout := t.TempDir()
+	runGit(t, checkout, "clone", remote.url, ".")
+	if isAncestorCommit(t, checkout, branchTip, squashCommit) {
+		t.Fatalf("branch tip %s is an ancestor of the squash commit %s: this test no longer reproduces a squash merge", branchTip, squashCommit)
+	}
+
+	code, merged := reconcileMerged(t, srv.URL, reviewID, remote.url)
+	if code != http.StatusOK {
+		t.Fatalf("reconcile MERGED: HTTP %d, want 200", code)
+	}
+	if merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", merged.Status)
+	}
+	if merged.LastMergedBuildID != "" {
+		t.Fatalf("lastMergedBuildId = %q, want empty: a reconciled merge has no build", merged.LastMergedBuildID)
+	}
+	if got := readMergeReview(t, srv.URL, reviewID).Status; got != model.ReviewStatusMerged {
+		t.Fatalf("persisted status = %s, want MERGED", got)
+	}
+}
+
+// TestReconcileMergedRefusesABranchThatNeverLanded is the other side of the
+// same check, through the same route: a review whose branch really is not in
+// the target is refused and left exactly where it was. Reconciliation is a
+// verified fact about the repository, not a privileged way to clear the open
+// count.
+func TestReconcileMergedRefusesABranchThatNeverLanded(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+	remote := newMergeQueueRemote(t)
+	sourceBranch := uniqueBranchName(t, "unlanded")
+	remote.branch(t, sourceBranch, "unlanded.txt")
+
+	reviewID := e2eOpenReview(t, srv.URL, "reconcile-e2e-unlanded", remote.main, sourceBranch)
+
+	code, _ := reconcileMerged(t, srv.URL, reviewID, remote.url)
+	if code != http.StatusConflict {
+		t.Fatalf("reconcile MERGED for an unlanded branch: HTTP %d, want 409 MERGE_NOT_VERIFIED", code)
+	}
+	if got := readMergeReview(t, srv.URL, reviewID).Status; got != model.ReviewStatusOpen {
+		t.Fatalf("status = %s, want the review left at OPEN", got)
+	}
+}
+
+// TestReconcileMergedLeavesTheNextQueueMergeVerifiable is why
+// FindLastMergedReview skips a build-less merge. That lookup is what
+// gatedTargetTip anchors the next queue-driven merge on, so a reconciled
+// review being returned there would resolve an empty build id and refuse
+// every subsequent report-merged on the branch. Reconcile a squash-landed
+// review first, then drive a completely ordinary queue merge to completion —
+// it has to be accepted, not merely not crash.
+func TestReconcileMergedLeavesTheNextQueueMergeVerifiable(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+	remote := newMergeQueueRemote(t)
+
+	squashedBranch := uniqueBranchName(t, "squashed")
+	remote.branch(t, squashedBranch, "squashed.txt")
+	squashedReview := e2eOpenReview(t, srv.URL, "reconcile-e2e-anchor", remote.main, squashedBranch)
+	remote.merge(t, remote.main, squashedBranch, "squashed work (#1)")
+	if code, merged := reconcileMerged(t, srv.URL, squashedReview, remote.url); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("reconcile MERGED: HTTP %d status=%s", code, merged.Status)
+	}
+
+	// Now an ordinary queue-driven merge on the same target branch — the
+	// path gatedTargetTip feeds.
+	queuedBranch := uniqueBranchName(t, "queued")
+	remote.branch(t, queuedBranch, "queued.txt")
+	queuedReview := e2eOpenReview(t, srv.URL, "reconcile-e2e-queued", remote.main, queuedBranch)
+	e2eReportGreenBuild(t, srv.URL, queuedReview)
+	if got := readMergeReview(t, srv.URL, queuedReview).Status; got != model.ReviewStatusMerge {
+		t.Fatalf("queued review status = %s, want MERGE", got)
+	}
+
+	mergeCommit := remote.merge(t, remote.main, queuedBranch, "queued work (#2)")
+	buildID := e2ePostGateBuild(t, srv.URL, queuedReview, mergeCommit, true, "")
+	code, merged := e2eReportMerged(t, srv.URL, queuedReview, buildID, remote.url)
+	if code != http.StatusOK {
+		t.Fatalf("queue-driven MERGED after a reconciled merge on the same branch: HTTP %d, want 200", code)
+	}
+	if merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", merged.Status)
+	}
+}

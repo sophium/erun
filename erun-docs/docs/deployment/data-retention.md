@@ -8,13 +8,13 @@ The `erun-backend-db` component can run a daily sweep that deletes old rows from
 
 Not to be confused with [registry image retention](/deployment/registries#hosted-registry) — a separate mechanism that expires unused container images, on its own schedule and its own configuration.
 
-## What's enforced today, and what's still just a design
+## What's enforced today, and what is not
 
 | Tables | Status |
 |---|---|
 | `reviews`, `review_reviewers`, `comments`, `releases`, `ai_sessions`, `invites`, `invite_requests` | **Enforced, opt-in** — a daily sweep deletes eligible rows in every tenant that has [turned retention on](#turning-retention-on-and-off); it's off by default |
-| `builds`, `gate_runs` | **Designed, not enforced.** Rows accumulate with no bound today ([#1956](https://github.com/sophium/erun/issues/1956)) — porting the design onto the sweep below is the remaining work, not a technical blocker. |
-| `audit_events`, `usage_events` | **Designed, not enforced — deliberately.** Whether erun has a compliance/contractual obligation on audit-log retention, and if so what window, is an unanswered business question ([#1959](https://github.com/sophium/erun/issues/1959)). Until it's answered, these two tables keep growing without limit on purpose: guessing a window and deleting an audit row that turns out to matter is worse than the storage cost of keeping it. |
+| `builds`, `gate_runs` | **Not enforced.** No policy file in the sweep covers either table, so rows accumulate with no bound today. |
+| `audit_events`, `usage_events` | **Not enforced — deliberately.** These two keep growing without limit on purpose: neither database role holds `DELETE` on them (`schema/roles.sql` grants only `SELECT, INSERT, REFERENCES`), and guessing a window that deletes an audit row which turns out to matter is worse than the storage cost of keeping it. |
 
 ## Previewing a sweep — dry run
 

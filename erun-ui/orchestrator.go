@@ -21,17 +21,24 @@ import (
 
 // An orchestrator is a host-side AI session that is NOT scoped to a single
 // environment: it runs the AI harness on the operator's machine with the erun
-// CLI on PATH, so it can drive the agent environments it links. The real work
-// happens in the pods — the orchestrator delegates edits and builds to the
-// in-pod agents, reviews each env's worktree on the host read-only, and runs
-// host-native build artifacts to verify. It may build locally to help, but never
-// writes into a review directory: the in-pod agent owns the worktree.
+// CLI on PATH, so it can drive the environments it links. For a POD-BACKED
+// environment the real work happens in the pod — the orchestrator delegates edits
+// and builds to the in-pod agent, reviews that env's worktree on the host
+// read-only, and runs host-native build artifacts to verify. It may build locally
+// to help, but never writes into a pod-backed environment's review directory: the
+// in-pod agent owns that worktree. A host environment has no pod, so there is no
+// in-pod agent to delegate to and no other owner of its directory — the
+// orchestrator authors and builds in it directly (see orchestratorClaudeMd).
 //
-// An orchestrator is a persisted definition (root config): a set of linked agent
-// environments, each with a host review directory. A remote-agent env's is the
-// one-way mirror its workspace sync fills; a local-agent env's is the worktree
-// itself, already on this machine because the pod hostPath-mounts it. The set
-// reappears across restarts; the running session is ephemeral.
+// An orchestrator is a persisted definition (root config): a set of linked
+// environments, each with a host review directory of one of three kinds (see
+// orchestratorReviewDirectory) — a remote-agent env's is the one-way mirror its
+// workspace sync fills; a local-agent env's is the worktree itself, already on
+// this machine because the pod hostPath-mounts it; a host env's is the
+// environment, the same plain directory with nothing between the two — plus the
+// directories it names for itself, which belong to no environment at all and are
+// picked by path rather than derived from one. The set reappears across restarts;
+// the running session is ephemeral.
 
 // orchestratorSession is a live orchestrator PTY. Persisted orchestrators are
 // keyed by their config ID; transient ones (Investigate) carry their own display
@@ -52,6 +59,12 @@ type orchestratorSession struct {
 	transient bool
 	name      string
 	envs      []eruncommon.OrchestratorEnvConfig
+	// dirs are the orchestrator's own directories: paths it operates in that
+	// belong to no environment. Held on the session so a running orchestrator
+	// still reports them (the Edit dialog reads its scope from this snapshot),
+	// and read from the persisted definition rather than re-derived, since
+	// nothing about a directory changes behind the operator's back.
+	dirs      []eruncommon.OrchestratorDirectoryConfig
 	startedAt time.Time
 	// aiBusy is the last turn-boundary report the poller observed. It is what
 	// orchestratorInfoFor's Busy field reads for every snapshot this session
@@ -84,7 +97,10 @@ type orchestratorSession struct {
 	pacingLastNudgeAtUnix int64
 	// pacingLastReason is the reason decideOrchestratorPacing last returned for
 	// this orchestrator, so the reconciler logs a transition rather than
-	// repeating the same line every 15s tick. See logOrchestratorPacingTransition.
+	// repeating the same line every 15s tick. A configured orchestrator this
+	// desktop holds no session for has nowhere to keep this, so it is remembered
+	// in App.unmanagedPacingReason instead.
+	// See logOrchestratorPacingTransition.
 	pacingLastReason orchestratorPacingReason
 	// pacingAutoNudgeCount / pacingLastAutoNudgeAtUnix are the cumulative
 	// record of every automatic pacer nudge ever delivered to this session,
@@ -132,20 +148,30 @@ type orchestratorEnvInput struct {
 }
 
 // orchestratorEnvCandidate is an env the operator considered linking, eligible
-// or not. Mirrored distinguishes the two kinds of review directory an eligible
-// env carries: a workspace-sync mirror the operator may place anywhere, or the
-// env's own worktree on this machine, whose path is derived and fixed. Neither
+// or not. Mirrored distinguishes the kinds of review directory an eligible env
+// carries: a workspace-sync mirror the operator may place anywhere, or the env's
+// own directory on this machine, whose path is derived and fixed (both a
+// local-agent worktree and a host environment's directory derive it this way).
+// Neither
 // applies to a runtime env: DefaultDirectory is "" and Mirrored is false, and
 // RequiredRole names the one role (eruncommon.OrchestratorEnvRoleRuntime) it
 // must be linked with — the dialog uses this to offer that role directly
 // instead of the mirror/worktree directory controls, which have nothing to
-// show for a link with no review directory. RequiredRole is "" when any role,
-// including undeclared, already works. An ineligible env carries no
-// directory — IneligibleReason explains, in operator language, why it cannot
-// be linked at all.
+// show for a link with no review directory. RequiredRole is "" when no single
+// role is required, which is every type but runtime — the picker still offers
+// only the roles that type allows, so a host env's "" excludes runtime rather
+// than meaning "any role". An ineligible env carries no directory —
+// IneligibleReason explains, in operator language, why it cannot be linked at
+// all.
 type orchestratorEnvCandidate struct {
-	Tenant           string                         `json:"tenant"`
-	Environment      string                         `json:"environment"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	// EnvironmentType is the env's resolved type, carried so the dialog can
+	// reason about the candidate the way the shared gate does instead of
+	// re-deriving it: it decides which roles the picker offers (a host env
+	// takes no runtime role) and which words describe the directory row (a
+	// host env's is its own directory, with no pod mounting it).
+	EnvironmentType  eruncommon.EnvironmentType     `json:"environmentType"`
 	Eligible         bool                           `json:"eligible"`
 	DefaultDirectory string                         `json:"defaultDirectory"`
 	Mirrored         bool                           `json:"mirrored"`
@@ -237,6 +263,12 @@ type orchestratorInfo struct {
 	LastWhipAtUnix         int64                 `json:"lastWhipAtUnix,omitempty"`
 	LastCappedAtUnix       int64                 `json:"lastCappedAtUnix,omitempty"`
 	NudgeHistoryUnreadable bool                  `json:"nudgeHistoryUnreadable,omitempty"`
+	// PacingUnreachable is true when this desktop holds no session for the
+	// orchestrator while its own hooks report one running elsewhere, so erun
+	// cannot pace it from here — see orchestratorPacingUnreachable. It is the
+	// hover card's could-not half: without it, a session this desktop cannot
+	// nudge reads exactly like one that needed no nudge.
+	PacingUnreachable bool `json:"pacingUnreachable,omitempty"`
 	// RestartRequired is true when this orchestrator's live session was spawned
 	// with an environment scope that no longer matches its persisted one. A
 	// live Claude Code session resolves --mcp-config once at launch, so nothing
@@ -307,12 +339,12 @@ func defaultOrchestratorDirectory(tenant, environment string) string {
 // gate and the CLI's SetOrchestratorEnvRole both consult so neither can drift
 // from the other on what a role is allowed to be. A local-agent or
 // remote-agent env has a worktree to review and an in-pod agent to delegate
-// to, so any role is fine; a host env has no pod, but its worktree is already
-// the operator's own checkout — the orchestrator still does not edit it, and
-// the env's own agent does, exactly as for a local-agent env (see
-// orchestratorReviewDirectory), so it links the same way. A runtime env has
-// neither, so only the runtime role — operate, not review or delegate — may
-// be declared for it.
+// to, so any role is fine; a host env has no pod and so no in-pod agent, but it
+// does carry a real directory on this machine (see
+// orchestratorReviewDirectory), so code, build and undeclared are fine for it —
+// while the runtime role is not, since "operate directly" has no referent
+// without a pod. A runtime env is the mirror image, so only the runtime role
+// may be declared for it.
 func orchestratableEnv(env eruncommon.EnvConfig, role eruncommon.OrchestratorEnvRole) bool {
 	return eruncommon.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)
 }
@@ -326,15 +358,24 @@ func orchestratorIneligibilityReason(env eruncommon.EnvConfig, role eruncommon.O
 }
 
 // orchestratorReviewDirectory resolves where an orchestrator reviews an env on
-// this machine, and whether that directory is a synced mirror. It applies the
-// same policy as hostWorkspacePath — a local-agent or host worktree is already
-// here, so it is reviewed in place (for host, the review directory and the
-// worktree are the very same path, since there is no pod to mount it into) —
-// yields the mirror path a remote-agent env would be wired to rather than ""
-// when its sync is not on yet, and answers explicitly for a runtime env: it
-// has no worktree and no mirror, so there is no review directory at all,
-// rather than falling through to the mirror default meant for an env that
-// does have a pod to sync from.
+// this machine, and whether that directory is a synced mirror. Three kinds, one
+// per the answer it gives:
+//
+//   - A remote-agent env gets the mirror its workspace sync fills — the default
+//     path below, which is what Mirrored=true reports.
+//   - A local-agent env's worktree is already here, because the pod
+//     hostPath-mounts it, so it is reviewed in place. The pod's in-pod agent
+//     owns that tree (see orchestratorClaudeMd), not the orchestrator.
+//   - A host env has no pod and no cluster at all, so there is nothing to
+//     mount, sync, or delegate to: the review directory and the environment are
+//     the very same path, and the orchestrator authors and builds in it. Same
+//     derivation as a local-agent env, entirely different relationship to it.
+//
+// It yields the mirror path a remote-agent env would be wired to rather than ""
+// when its sync is not on yet, and answers explicitly for a runtime env: it has
+// no worktree and no mirror, so there is no review directory at all, rather than
+// falling through to the mirror default meant for an env that does have a pod to
+// sync from.
 func orchestratorReviewDirectory(tenant string, env eruncommon.EnvConfig) (string, bool) {
 	switch env.ResolvedType() {
 	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeHost:
@@ -354,8 +395,10 @@ func orchestratorReviewDirectory(tenant string, env eruncommon.EnvConfig) (strin
 const orchestratorClaudeMd = `# Orchestrator working directory
 
 You are a **host-side erun orchestrator**. You coordinate work across the erun
-agent environments linked to you, from the operator's machine. The real
-work happens in the pods — you delegate, review, and verify. Follow the ` + "`erun-orchestrate`" + ` skill.
+agent environments linked to you, from the operator's machine. For a pod-backed
+environment the real work happens in its pod — you delegate, review, and verify.
+A host environment has no pod and no in-pod agent, so there you author and build
+in its directory directly. Follow the ` + "`erun-orchestrate`" + ` skill.
 
 ## Operating under this contract (read first)
 
@@ -375,11 +418,21 @@ here happen to have files — read the config every time.
 ## Rules
 
 - Your **review directory** for an environment is the ` + "`directory`" + ` on its
-  ` + "`orchestrators:`" + ` entry, and it is one of two kinds. A ` + "`<tenant>-<env>`" + `
-  subdirectory here is a one-way **mirror** of a remote-agent environment's worktree,
-  kept in sync from its pod. A path outside this root is a **local-agent
-  environment's own worktree**, which lives on this machine and is hostPath-mounted
-  into its pod. The environment's ` + "`type`" + ` tells you which kind you have.
+  ` + "`orchestrators:`" + ` entry, and it is one of three kinds. The environment's
+  ` + "`type`" + ` tells you which. A ` + "`<tenant>-<env>`" + ` subdirectory here is a one-way
+  **mirror** of a remote-agent environment's worktree, kept in sync from its pod. A
+  path outside this root is a **local-agent environment's own worktree**, which lives
+  on this machine and is hostPath-mounted into its pod. A **host environment** is a
+  plain directory on this machine with no pod and no cluster behind it at all:
+  nothing syncs it, nothing mounts it, and nothing else owns it — its review
+  directory *is* the environment.
+- A **host** environment has no pod, so nothing runs the erun MCP edge for it and it
+  has **no MCP tools at all**: no ` + "`exec_*`" + `, no ` + "`job_*`" + `, no ` + "`activity_lease_*`" + `.
+  That is the type working as designed, not a link that failed to wire, and no restart
+  will produce those tools. Reach it the way you reach any other directory on this
+  machine — your own file and shell tools, in its ` + "`directory`" + `. ` + "`erun build`" + ` and
+  ` + "`erun release`" + ` run there directly; ` + "`deploy`" + `, ` + "`pin`" + `, ` + "`open`" + `, ` + "`terraform`" + ` and
+  ` + "`upgrade`" + ` all refuse a host environment, because there is no pod for them to act on.
 - An entry whose ` + "`role`" + ` is ` + "`runtime`" + ` is a different relationship: you
   **operate** that environment — deploy, pin, observe — rather than review or
   delegate to it. It has no worktree to review and no in-pod agent to delegate to,
@@ -387,23 +440,38 @@ here happen to have files — read the config every time.
   rules below apply to it: drive it directly through ` + "`erun`" + ` (` + "`deploy`" + `,
   ` + "`pin`" + `, ` + "`platform env`" + `, and equivalent commands) or the platform API,
   never through a directory on this host.
-- **Never write into a review directory**, whichever kind it is. In a mirror the edit
-  is simply lost — the next sync overwrites it. In a local-agent worktree it is worse:
-  the edit *does* reach the pod, so it silently competes with the in-pod agent that
-  owns that tree, in what is also the operator's own checkout.
-- To change code, **ask the in-pod agent** in the relevant environment to do it
-  (drive it via ` + "`erun`" + ` / the env's MCP). Never patch the directory yourself.
-- **Review** changes on the host, read-only. A mirror is a one-way plain-directory
-  copy of the pod's working tree with no git of its own, so read the synced files and
-  take the authoritative diff of uncommitted work from the pod (the desktop app's
-  Review, or ask the in-pod agent to run ` + "`git diff`" + `). A local-agent worktree
-  *is* a real checkout, so ` + "`git -C <dir> diff`" + ` here is already authoritative.
+- **Never write into a mirror or a local-agent worktree** — the two review-directory
+  kinds a pod owns. In a mirror the edit is simply lost — the next sync overwrites it.
+  In a local-agent worktree it is worse: the edit *does* reach the pod, so it silently
+  competes with the in-pod agent that owns that tree, in what is also the operator's
+  own checkout. A **host** environment is the third kind and the one exception, for
+  exactly the reason that rule gives: it has no pod, so there is no sync to lose the
+  edit to and no in-pod agent to contend with. There you author, build, and review in
+  the directory directly — that is what the link is for. Keep it pointed at a directory
+  nothing else owns: a local-agent worktree is still that environment's, not yours.
+- Your definition may also name **directories of your own** (` + "`directories:`" + ` on your
+  ` + "`orchestrators:`" + ` entry): paths that belong to no environment at all — no tenant, no
+  pod, no cluster, no version. They are yours to author, build, and review in directly, on
+  exactly the terms the host case above describes, and they are how an operator points you
+  at a directory on this machine without registering an environment for it. Nothing syncs
+  or mounts them and nothing else owns them; there is no MCP edge for one either, so you
+  reach it with your own file and shell tools.
+- To change code in a **pod-backed** environment, **ask the in-pod agent** to do it
+  (drive it via ` + "`erun`" + ` / the env's MCP). Never patch that directory yourself. A host
+  environment has no in-pod agent to ask, so there you make the change yourself.
+- **Review** changes on the host, read-only, for a pod-backed environment. A mirror is a
+  one-way plain-directory copy of the pod's working tree with no git of its own, so read
+  the synced files and take the authoritative diff of uncommitted work from the pod (the
+  desktop app's Review, or ask the in-pod agent to run ` + "`git diff`" + `). A local-agent
+  worktree *is* a real checkout, so ` + "`git -C <dir> diff`" + ` here is already authoritative
+  — as it is in a host environment's directory, which is your own working state rather
+  than a peer's.
 - **Verify** by running host-native build artifacts (e.g. a Windows ` + "`.exe`" + ` the pod
   cross-built) — the pod can't run a foreign-OS binary. A mirror carries them under
   its read-only ` + "`.erun-outputs/`" + `; a local-agent environment has no mirror, so
   pull them with that env's ` + "`outputs_list`" + `/` + "`outputs_download`" + ` (or the
-  desktop's Outputs) first. You may build locally to help, but never edit a review
-  directory.
+  desktop's Outputs) first. You may build locally to help, but never edit a pod-backed
+  environment's review directory.
 - **This directory is shared with every other orchestrator**, so anything here that is
   yours alone carries your id in its name. The return note you leave before a
   rebuild+restart is the one that matters most: erun reads it back as
@@ -413,35 +481,54 @@ here happen to have files — read the config every time.
 
 ## Operating mode
 
-- **Never stop until the assigned task is completed.** A task given to this
-  orchestrator is authorization to carry it through to a verified, working end
-  state, uninterrupted — investigate, decide, implement, and verify end-to-end
-  without pausing between steps. Land the whole task in the **same PR**; do not
-  split it across PRs, defer part of it, or hand back a half-finished task.
-- **Do not ask questions — go with the recommended assumption.** Never stop to make
-  the operator choose. For any ambiguity or fork in the road, pick the option you
-  would recommend and proceed, resolving it from the code, tests, and sensible
-  defaults rather than a question.
-- **A standing instruction is pre-authorization, not a request to re-ask.** Filing
-  a platform bug with the ` + "`erun-file-issue`" + ` skill is authorized every time
-  it applies. When unsure whether an action needs permission, compare it against the
-  most consequential thing you have already done unaided this turn — if it is
-  smaller, it does not.
-- **Never end a turn on an offer.** "Say the word", "let me know if", "next action
-  is yours" hand the operator a decision and stall the work exactly as a question
-  would. Do the thing, or state it as a decision already taken, and finish.
-- **Test everything end-to-end.** Verification is part of the task, not a follow-up.
-  Drive the change into the real target (the in-pod agent builds/deploys it), then
-  reproduce the original flow against the running artifact and watch it succeed —
+- **Complete the authorized outcome.** Investigate, implement, and verify without
+  re-asking about routine increments. Keep related work in the same PR when
+  publication is requested; respect a request to stop before publishing or deploying.
+- **Resolve routine ambiguity from evidence and sensible defaults.** Ask only
+  when a missing decision or authority materially changes scope. Answer operator
+  questions directly; a question alone does not authorize the hinted-at work.
+- **Require a terminal outcome from delegated work.** Do not rely on automatic
+  reinvocation to finish an agent's work: recovery is bounded, not guaranteed.
+  Never accept a promise to report back after the run exits.
+- **Supervise long work in a pod-backed environment through its job lifecycle.** Start
+  it as a detached job, keep its activity lease for the job's lifetime, and use a
+  bounded await instead of a hand-written poll loop or an open stream. When delegating
+  a long gate, include this waiting contract in the task. A host environment has no
+  job lifecycle to supervise — there is no MCP edge to start a job on — so long work
+  there is a process you run and wait on yourself.
+- **Respect exclusive worktree and gate leases.** If a claim is refused, report
+  its holder and wait or use another environment; never retry-loop, clear the
+  holder, or mutate the tree anyway.
+- **Heavy gates claim the whole environment**, not just one worktree. Acquire
+  the environment-wide exclusive claim before dispatch and hold it through the
+  terminal verdict; a second clone in the same pod does not isolate resources.
+- **A wait timeout is inconclusive, not a gate failure.** Read the detached job's
+  own terminal record before reporting a verdict, and distinguish a clean pass, a
+  zero exit that left orphaned work, and a real failure.
+- **Authority comes from the request and applicable standing instructions**, not
+  from the size of an earlier action. Do not expand a task into unrequested
+  publishing, release, or cross-environment changes.
+- **Finish with evidence, not an offer to do authorized work later.** If blocked,
+  state what remains, what was checked, and the specific decision or access needed.
+- **Verify end-to-end within the authorized scope.** For a requested rollout,
+  drive the change into the real target (in a pod-backed environment the in-pod agent
+  builds and deploys it; in a host environment you build it in its own directory),
+  then reproduce the original flow against the running artifact and watch it succeed —
   never stop at "unit tests pass" or "it builds". State plainly anything you could
   not verify and why.
 - **On completion, present the assumptions you took.** End with a concise list of
   every recommended assumption you made in place of asking, so the operator can
   course-correct. This list is required, not optional.
-- The one exception to acting uninterrupted: an **irreversible or cross-env action**
-  (deploy, delete, rebuild+restart, anything that mutates shared/remote state) still
-  gets a clear heads-up before you run it — a notification issued as you proceed,
-  never a gate you stop on.
+- **Land work through the target repository's review and merge queue.** A branch
+  that arrives as a pull request may be gated and landed as one; a branch you
+  caused to exist must reach MERGE, which the platform verifies against the
+  recorded gate build and the remote's own tip. A closed pull request asserts a
+  landing rather than proving one, so it is never the finish line. Do not finish
+  delegated work by opening a pull request.
+- Make irreversible, remote, and cross-environment actions explicit beforehand.
+  A heads-up does not replace approval when the action is outside the authorized
+  scope. General engineering and direct in-pod interaction rules remain in the
+  target repository's AGENTS.md; orchestration is not required for those users.
 `
 
 // ensureOrchestratorWorkspace makes sure the shared orchestrators root exists and
@@ -462,6 +549,12 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	// passed over in silence.
 	if err := ensureOrchestratorSkills(); err != nil {
 		a.reportSkillsNotInstalled(err)
+	}
+	// Same contract for the reusable agents (erun-builder/erun-reviewer):
+	// installed into ~/.claude/agents so a host orchestrator can delegate to
+	// them, best-effort and reported the same way skills are.
+	if err := ensureOrchestratorAgents(); err != nil {
+		a.reportAgentsNotInstalled(err)
 	}
 	// Inject the operating contract on every session start and reopen via a
 	// SessionStart hook, so an orchestrator always operates under its current
@@ -729,6 +822,189 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// buildAgentsSource is the erun-skills/agents directory of the checkout this
+// binary was built from, stamped in by the desktop build scripts — the exact
+// counterpart of buildSkillsSource above, for the reusable agent definitions
+// (erun-builder/erun-reviewer) instead of skills.
+var buildAgentsSource = ""
+
+// noAgentsSourceError mirrors noSkillsSourceError for the agents source.
+type noAgentsSourceError struct {
+	stamped string
+	exeDir  string
+}
+
+func (e *noAgentsSourceError) Error() string {
+	built := "this build records no source checkout"
+	if e.stamped != "" {
+		built = "its build checkout " + e.stamped + " is not on this machine"
+	}
+	near := "the executable's own directory"
+	if e.exeDir != "" {
+		near = e.exeDir
+	}
+	return "no erun reusable agents source resolved: " + built + ", and no erun-skills/agents sits above " + near
+}
+
+// hostAgentsSource resolves the directory holding the canonical erun reusable
+// agents (erun-skills/agents/<name>.md) on the host, mirroring hostSkillsSource's
+// override → build-stamp → walk-up resolution order.
+func hostAgentsSource() (string, error) {
+	if override := strings.TrimSpace(os.Getenv("ERUN_AGENTS_DIR")); override != "" {
+		return override, nil
+	}
+	stamped := strings.TrimSpace(buildAgentsSource)
+	if isExistingDir(stamped) {
+		return stamped, nil
+	}
+	found, exeDir := agentsSourceNearExecutable()
+	if found != "" {
+		return found, nil
+	}
+	return "", &noAgentsSourceError{stamped: stamped, exeDir: exeDir}
+}
+
+// agentsSourceNearExecutable walks up from the running binary looking for an
+// erun-skills/agents directory, mirroring skillsSourceNearExecutable.
+func agentsSourceNearExecutable() (string, string) {
+	exe, err := runningExecutable()
+	if err != nil {
+		return "", ""
+	}
+	exeDir := filepath.Dir(exe)
+	dir := exeDir
+	for i := 0; i < 8; i++ {
+		if cand := filepath.Join(dir, "erun-skills", "agents"); isExistingDir(cand) {
+			return cand, exeDir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", exeDir
+}
+
+// reportAgentsNotInstalled mirrors reportSkillsNotInstalled for the agents
+// source.
+func (a *App) reportAgentsNotInstalled(cause error) {
+	log.Printf("erun-app: orchestrator agents not installed: %v", cause)
+	a.mu.Lock()
+	reported := a.agentsSourceReported
+	a.agentsSourceReported = true
+	a.mu.Unlock()
+	if !reported {
+		a.emitAppNotification("warning", orchestratorAgentsNotInstalledNotice(cause))
+	}
+}
+
+// orchestratorAgentsNotInstalledNotice mirrors orchestratorSkillsNotInstalledNotice
+// for the reusable agents (erun-builder/erun-reviewer).
+func orchestratorAgentsNotInstalledNotice(cause error) string {
+	return "Orchestrator agents were not installed or refreshed: " + cause.Error() +
+		". The orchestrator still starts, but its agents stay at whatever is already in ~/.claude/agents. " +
+		"Set ERUN_AGENTS_DIR to an erun-skills/agents directory to install from, " +
+		"or rebuild the desktop from its checkout with erun-ui/build.sh (build.ps1 on Windows)."
+}
+
+// orchestratorAgentMarker records, per installed agent, the sha256 of the
+// <name>.md erun last installed — the sidecar-file counterpart of
+// orchestratorSkillMarker, since an agent is one flat file rather than a
+// directory. Mirrors the runtime pod's agents-install.sh marker.
+const orchestratorAgentMarker = ".erun-agent-baked-sha256"
+
+// ensureOrchestratorAgents installs every erun reusable agent into
+// ~/.claude/agents so the orchestrator's Claude session can delegate to
+// erun-builder/erun-reviewer by default, with no operator install step.
+// Mirrors ensureOrchestratorSkills, adapted for flat <name>.md files instead of
+// skill directories.
+func ensureOrchestratorAgents() error {
+	root, err := hostAgentsSource()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return fmt.Errorf("read agents source %s: %w", root, err)
+	}
+	home, homeErr := os.UserHomeDir()
+	if strings.TrimSpace(home) == "" {
+		if homeErr == nil {
+			homeErr = errors.New("it resolved empty")
+		}
+		return fmt.Errorf("resolve the home directory to install agents into: %w", homeErr)
+	}
+	destRoot := filepath.Join(home, ".claude", "agents")
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		if err := installOrRefreshOrchestratorAgent(filepath.Join(root, entry.Name()), filepath.Join(destRoot, entry.Name())); err != nil {
+			return fmt.Errorf("install agent %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
+}
+
+// installOrRefreshOrchestratorAgent reconciles one installed agent file against
+// its shipped source: install when absent; refresh when the installed copy is
+// still the one erun wrote (marker matches, or a legacy copy with no marker);
+// leave a copy the operator edited in place untouched. Mirrors
+// installOrRefreshOrchestratorSkill for a single file instead of a directory.
+func installOrRefreshOrchestratorAgent(src, dst string) error {
+	if _, err := os.Stat(dst); err != nil {
+		return copyOrchestratorAgent(src, dst) // absent — install
+	}
+	bakedSHA, err := fileSHA256(src)
+	if err != nil {
+		return err
+	}
+	instSHA, err := fileSHA256(dst)
+	if err != nil {
+		return err
+	}
+	marker := dst + orchestratorAgentMarker
+	if instSHA == bakedSHA {
+		// Already the shipped version; record the marker so a future upgrade can
+		// still tell this untouched copy from an edited one (also adopts a
+		// pre-marker copy that happens to match).
+		return os.WriteFile(marker, []byte(bakedSHA+"\n"), 0o644)
+	}
+	markerSHA := ""
+	if b, readErr := os.ReadFile(marker); readErr == nil {
+		markerSHA = strings.TrimSpace(string(b))
+	}
+	if markerSHA == "" || instSHA == markerSHA {
+		// Unmodified since erun installed it, or a legacy copy with no marker —
+		// refresh to the shipped version.
+		return copyOrchestratorAgent(src, dst)
+	}
+	return nil // edited in place — preserve the operator's copy
+}
+
+// copyOrchestratorAgent replaces dst with a fresh copy of src and records the
+// shipped file's hash in its sidecar marker, so a later launch can distinguish
+// an untouched copy from an edited one. Mirrors copyOrchestratorSkill for a
+// single file instead of a directory tree.
+func copyOrchestratorAgent(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		return err
+	}
+	sha, err := fileSHA256(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst+orchestratorAgentMarker, []byte(sha+"\n"), 0o644)
+}
+
 // orchestratorContractFallback is printed when the shared CLAUDE.md is somehow
 // missing, so a session still boots knowing it is under the contract.
 const orchestratorContractFallback = "You are a host-side erun orchestrator. Read and follow the CLAUDE.md in this directory and the erun-orchestrate skill before doing anything, even a trivial-looking question."
@@ -922,6 +1198,13 @@ const orchestratorNoAskStopGuardReason = "Your closing message hands the operato
 // end again. It is also what let an operator's own question ("would you like
 // me to…") refuse the reply that answered it. Only what the turn said can
 // decide whether the turn handed back a decision.
+//
+// Within that entry, only the turn's own unquoted words count. A report that
+// quotes an earlier violation -- or the contract, or the operator -- is
+// describing an offer, not making one, and re-firing on it refuses the very
+// turn that documents the fix. Quoted, code-spanned, and blockquoted spans are
+// cut before the trigger phrases are matched, so a genuine offer still fires
+// and a citation of one does not.
 func orchestratorNoAskStopGuardCommand() string {
 	script := `/*` + orchestratorNoAskGuardMarker + `*/` +
 		`let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{try{` +
@@ -932,8 +1215,13 @@ func orchestratorNoAskStopGuardCommand() string {
 		`const tail=lines.slice(-40);` +
 		`let said="";` +
 		`for(const line of tail){if(/"type"\s*:\s*"assistant"/.test(line))said=line;}` +
+		`let spoken=said;` +
+		`try{const c=JSON.parse(said).message.content;` +
+		`if(typeof c==="string")spoken=c;` +
+		`else if(Array.isArray(c)){let own="";for(const b of c){if(b&&typeof b.text==="string")own+=b.text+"\n";}if(own)spoken=own;}}catch(e){}` +
+		`const cited=/\x60\x60\x60[\s\S]*?\x60\x60\x60|\x60[^\x60]*\x60|"[^"]*"|\u201C[^\u201D]*\u201D|(^|[\s(\[{:,])\u0027[^\u0027\n]*\u0027|^[ \t]*>.*$/gm;` +
 		`const trigger=/say the word|let me know if|let me know whether|shall i |do you want me to|would you like me to|next action is yours|if you.d like me to|your call/i;` +
-		`if(!trigger.test(said))return;` +
+		`if(!trigger.test(spoken.replace(cited," ")))return;` +
 		`process.stderr.write("` + orchestratorNoAskStopGuardReason + `");` +
 		`process.exit(2);` +
 		`}catch(e){}});`
@@ -1099,11 +1387,15 @@ func tenantsFromEnvs(envs []eruncommon.OrchestratorEnvConfig) []string {
 	return out
 }
 
-func directoriesFromEnvs(envs []eruncommon.OrchestratorEnvConfig) []string {
-	out := make([]string, 0, len(envs))
-	for _, env := range envs {
-		if strings.TrimSpace(env.Directory) != "" {
-			out = append(out, env.Directory)
+// directoryPaths lists the orchestrator's own directories for the payload the
+// desktop renders. Only the non-empty ones survive, so a definition with a blank
+// entry (hand-edited config) reports the directories it actually has rather than
+// a row the operator cannot act on.
+func directoryPaths(dirs []eruncommon.OrchestratorDirectoryConfig) []string {
+	out := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if path := strings.TrimSpace(dir.Directory); path != "" {
+			out = append(out, path)
 		}
 	}
 	return out
@@ -1153,6 +1445,12 @@ type orchestratorPacingSnapshot struct {
 	// rather than a genuine "never nudged", because the persisted record
 	// could not be read back.
 	HistoryUnreadable bool
+	// Unreachable is true for a configured orchestrator this desktop holds no
+	// session for while its own records show one running — the population the
+	// pacer can decide for but never nudge (see orchestratorPacingUnreachable).
+	// It is a property of the record, not of a session, so it is set by the
+	// caller that knows which orchestrators have no session here.
+	Unreachable bool
 }
 
 // orchestratorPacingSnapshotFromSession reads a live session's pacing state,
@@ -1189,13 +1487,13 @@ func orchestratorPacingSnapshotFromHistory(entry orchestratorNudgeHistoryEntry, 
 	}
 }
 
-func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
+func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, dirs []eruncommon.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
 	return orchestratorInfo{
 		ID:                     id,
 		Name:                   name,
 		Environments:           envInfos(envs, envActivity, envUsage),
 		Tenants:                tenantsFromEnvs(envs),
-		Directories:            directoriesFromEnvs(envs),
+		Directories:            directoryPaths(dirs),
 		SessionID:              sessionID,
 		Status:                 status,
 		Busy:                   busy.Busy,
@@ -1213,6 +1511,7 @@ func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfi
 		LastWhipAtUnix:         pacing.LastWhipAtUnix,
 		LastCappedAtUnix:       pacing.LastCappedAtUnix,
 		NudgeHistoryUnreadable: pacing.HistoryUnreadable,
+		PacingUnreachable:      pacing.Unreachable,
 		RestartRequired:        restartRequired,
 		RoleChanged:            roleChanged,
 	}
@@ -1457,8 +1756,9 @@ func (a *App) findOrchestratorConfig(id string) (eruncommon.OrchestratorConfig, 
 // silently dropped: an operator who knows an env exists must be able to see
 // that it was considered. An eligible env also carries the host directory the
 // orchestrator reviews it in: a mirror the sync fills for a remote-agent env,
-// or the worktree itself for a local-agent env, which is already on this
-// machine because the pod hostPath-mounts it.
+// or the env's own directory for a local-agent or host env, which is already on
+// this machine — because the pod hostPath-mounts it in the local-agent case, and
+// because there is no pod at all in the host one.
 func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error) {
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
@@ -1473,13 +1773,15 @@ func (a *App) ListOrchestratorEnvCandidates() ([]orchestratorEnvCandidate, error
 		for _, env := range envs {
 			requiredRole := eruncommon.OrchestratorEnvRoleRequiredFor(env.ResolvedType())
 			candidate := orchestratorEnvCandidate{
-				Tenant:      tenant.Name,
-				Environment: env.Name,
+				Tenant:          tenant.Name,
+				Environment:     env.Name,
+				EnvironmentType: env.ResolvedType(),
 				// A candidate is eligible if it can be linked under whatever
-				// role requiredRole names ("" for "any role, including
-				// undeclared" on an agent/host env; the runtime role for a
+				// role requiredRole names ("" when no single role is required,
+				// which is every type but runtime; the runtime role for a
 				// runtime env) — the role picker enforces the specific choice
-				// once the operator selects the environment.
+				// once the operator selects the environment, including the
+				// runtime role a host env is refused.
 				Eligible: orchestratableEnv(env, requiredRole),
 			}
 			if candidate.Eligible {
@@ -1522,10 +1824,57 @@ func (a *App) resolveEnvInputs(inputs []orchestratorEnvInput) ([]eruncommon.Orch
 		}
 		refs = append(refs, ref)
 	}
-	if len(refs) == 0 {
-		return nil, fmt.Errorf("an orchestrator must link at least one environment")
-	}
 	return refs, nil
+}
+
+// resolveOrchestratorDirectories validates the orchestrator's own directories.
+// Each must be an absolute path to a directory that exists on this machine: the
+// orchestrator authors and builds there directly, so a path that is not there is
+// a link that cannot work. Duplicates collapse, so adding the same path twice is
+// one row rather than two identical ones.
+func resolveOrchestratorDirectories(dirs []string) ([]eruncommon.OrchestratorDirectoryConfig, error) {
+	out := make([]eruncommon.OrchestratorDirectoryConfig, 0, len(dirs))
+	seen := make(map[string]bool, len(dirs))
+	for _, dir := range dirs {
+		path := strings.TrimSpace(dir)
+		if path == "" {
+			continue
+		}
+		if !filepath.IsAbs(path) {
+			return nil, fmt.Errorf("orchestrator directory %q must be an absolute path", path)
+		}
+		clean := filepath.Clean(path)
+		if seen[clean] {
+			continue
+		}
+		info, statErr := os.Stat(clean)
+		if statErr != nil || !info.IsDir() {
+			return nil, fmt.Errorf("orchestrator directory %s is not a directory on this machine", clean)
+		}
+		seen[clean] = true
+		out = append(out, eruncommon.OrchestratorDirectoryConfig{Directory: clean})
+	}
+	return out, nil
+}
+
+// resolveOrchestratorScope resolves both halves of what an orchestrator operates
+// on -- the environments it links and the directories of its own -- and requires
+// at least one of them. It deliberately does not require an environment: a
+// directory the orchestrator works in itself is a complete definition, which is
+// the whole point of having directories at all.
+func (a *App) resolveOrchestratorScope(envs []orchestratorEnvInput, dirs []string) ([]eruncommon.OrchestratorEnvConfig, []eruncommon.OrchestratorDirectoryConfig, error) {
+	refs, err := a.resolveEnvInputs(envs)
+	if err != nil {
+		return nil, nil, err
+	}
+	dirRefs, err := resolveOrchestratorDirectories(dirs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(refs) == 0 && len(dirRefs) == 0 {
+		return nil, nil, fmt.Errorf("an orchestrator must link at least one environment or name at least one directory")
+	}
+	return refs, dirRefs, nil
 }
 
 // resolveEnvInput resolves one candidate's role and review directory,
@@ -1607,9 +1956,29 @@ func (a *App) linkOrchestratorEnvironments(refs []eruncommon.OrchestratorEnvConf
 		if err := a.wireEnvironmentReview(ref); err != nil {
 			return err
 		}
+		// A host env has no pod and no runtime to ensure — its worktree is
+		// already this machine's own directory, so there is nothing to forward
+		// to and nothing to start. Ensuring anyway would fail on an env that was
+		// never going to have a runtime, and surface that failure as a
+		// runtime-unreachable warning about a working environment.
+		if a.orchestratorRefNamesHostEnv(ref) {
+			continue
+		}
 		a.ensureEnvRuntimeOnce(uiSelection{Tenant: ref.Tenant, Environment: ref.Environment})
 	}
 	return nil
+}
+
+// orchestratorRefNamesHostEnv reports whether a linked ref names a host
+// environment. A ref whose env config no longer loads answers false, so the
+// caller's ensure path still runs and surfaces that failure rather than this
+// silently absorbing it.
+func (a *App) orchestratorRefNamesHostEnv(ref eruncommon.OrchestratorEnvConfig) bool {
+	env, _, err := a.deps.store.LoadEnvConfig(ref.Tenant, ref.Environment)
+	if err != nil {
+		return false
+	}
+	return env.ResolvedType() == eruncommon.EnvironmentTypeHost
 }
 
 func orchestratorDisplayName(name string, envs []eruncommon.OrchestratorEnvConfig) string {
@@ -1626,8 +1995,8 @@ func orchestratorDisplayName(name string, envs []eruncommon.OrchestratorEnvConfi
 // host review directory (creating the mirror and wiring its sync where the env
 // needs one), then stores the definition. Created stopped — StartOrchestrator
 // spawns the session.
-func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orchestratorInfo, error) {
-	refs, err := a.resolveEnvInputs(envs)
+func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs []string) (orchestratorInfo, error) {
+	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
@@ -1640,18 +2009,19 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput) (orch
 	}
 	id := uniqueOrchestratorID(orchestratorDisplayName(name, refs), configs)
 	displayName := orchestratorDisplayName(name, refs)
-	def := eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs}
+	def := eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs, Directories: dirRefs}
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	return orchestratorInfoFor(id, displayName, refs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
+	return orchestratorInfoFor(id, displayName, refs, dirRefs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
 }
 
-// UpdateOrchestrator edits an existing orchestrator's linked environments and
-// name, re-wiring sync for the current set.
-func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (orchestratorInfo, error) {
+// UpdateOrchestrator edits an existing orchestrator's linked environments, the
+// directories it names for itself, and its name, re-wiring sync for the current
+// set.
+func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, dirs []string) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
-	refs, err := a.resolveEnvInputs(envs)
+	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
@@ -1673,12 +2043,12 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput) (
 		return orchestratorInfo{}, err
 	}
 	displayName := orchestratorDisplayName(name, refs)
-	configs[index] = eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs}
+	configs[index] = eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs, Directories: dirRefs}
 	if err := a.saveOrchestratorConfigs(configs); err != nil {
 		return orchestratorInfo{}, err
 	}
 	status, sessionID, busy, shell, pacing, restartRequired, roleChanged := a.updatedOrchestratorRunningSnapshot(id, refs)
-	return orchestratorInfoFor(id, displayName, refs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired, roleChanged), nil
+	return orchestratorInfoFor(id, displayName, refs, dirRefs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired, roleChanged), nil
 }
 
 // updatedOrchestratorRunningSnapshot is UpdateOrchestrator's own read of live
@@ -1751,6 +2121,7 @@ func (a *App) startPersistedOrchestrator(id, conversationID, resumePrompt string
 		id:             def.ID,
 		name:           def.Name,
 		envs:           a.refreshLinkedEnvDirectories(def.Environments),
+		dirs:           def.Directories,
 		conversationID: conversationID,
 		resumePrompt:   resumePrompt,
 		cols:           cols,
@@ -1794,6 +2165,7 @@ func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, 
 		id:   def.ID,
 		name: def.Name,
 		envs: a.refreshLinkedEnvDirectories(def.Environments),
+		dirs: def.Directories,
 		cols: cols,
 		rows: rows,
 	})
@@ -1809,7 +2181,7 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	}
 	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 	pacing := orchestratorPacingSnapshotFromSession(session)
-	return orchestratorInfoFor(session.id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
+	return orchestratorInfoFor(session.id, session.name, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
 }
 
 // orchestratorWiredEnvs returns the environment scope id's live session was
@@ -1878,6 +2250,7 @@ type orchestratorSpawn struct {
 	id             string
 	name           string
 	envs           []eruncommon.OrchestratorEnvConfig
+	dirs           []eruncommon.OrchestratorDirectoryConfig
 	initialPrompt  string
 	conversationID string
 	resumePrompt   string
@@ -1898,7 +2271,14 @@ type orchestratorSpawn struct {
 // environment that is not there, which an agent reads as "not linked" rather
 // than "failed to wire".
 func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.OrchestratorEnvConfig) string {
+	// The config written below is read once, by a client that connects through it
+	// as it launches, so an environment that is merely unopened is indistinguishable
+	// to that client from one that is broken. Open the edges that are not answering
+	// before the config naming them exists; anything still dead afterwards is
+	// reported as unreachable by the probe inside the write.
+	a.repairOrchestratorMCPEdges(envs)
 	path, skipped, unreachable, err := a.writeOrchestratorMCPConfig(id, envs)
+	hostEnvs, problems := splitOrchestratorMCPHostSkips(skipped)
 	for _, skip := range skipped {
 		log.Printf("erun-app: orchestrator %s: no MCP tools for %s: %s", id, skip.Label, skip.Reason)
 	}
@@ -1907,35 +2287,62 @@ func (a *App) wireOrchestratorMCP(id, name string, envs []eruncommon.Orchestrato
 		a.emitOrchestratorNotification("warning", id, orchestratorMCPUnwiredNotice(name, err), orchestratorMCPUnwiredAction(err))
 		return ""
 	}
-	if len(skipped) > 0 {
-		a.emitAppNotification("warning", orchestratorMCPPartialNotice(name, len(envs)-len(skipped), skipped))
+	// A host env is not a wiring problem -- it never had an MCP edge to lose --
+	// so it stays out of problems and gets the informational line below rather
+	// than a warning prescribing a restart that fixes nothing. It is still
+	// counted in the partial notice's denominator, and named there, so the count
+	// cannot describe a smaller orchestrator than the one that is linked.
+	if len(problems) > 0 {
+		a.emitAppNotification("warning", orchestratorMCPPartialNotice(name, len(envs)-len(skipped), len(envs), hostEnvs, problems))
+	}
+	if len(hostEnvs) > 0 {
+		a.emitAppNotification("info", orchestratorMCPHostEnvNotice(name, hostEnvs))
 	}
 	// An unreachable edge is wired anyway: the proxy already recovers a
 	// transient outage per call, so this is reported, never treated as a skip.
 	for _, env := range unreachable {
 		log.Printf("erun-app: orchestrator %s: wired %s but its edge is not answering", id, env.Label)
+		// Record the entry so the sweep can log the exit. Without this the log's
+		// last word on the wiring is the outage, forever.
+		a.recordOrchestratorEdgeOutage(id, env.Label)
 	}
 	if len(unreachable) > 0 {
-		notice := orchestratorMCPUnreachableNotice(name, unreachable)
-		// A combined notice naming several environments has no single env to
-		// attach a deploy action to; only the common single-env case gets one.
-		if tenant, environment, ok := singleOrchestratorMCPUnreachableEnv(unreachable); ok {
-			a.emitEnvNotification("warning", tenant, environment,
-				notificationSourceOrchestratorEdgeUnreachable, notice, notificationActionDeploy)
-		} else {
-			a.emitAppNotification("warning", notice)
-		}
+		a.reportUnreachableOrchestratorEdges(name, unreachable)
 	}
 	return path
+}
+
+// reportUnreachableOrchestratorEdges warns about every linked environment whose
+// edge did not answer, one env-scoped notice each. Reported per environment
+// rather than as a single combined notice because the remedy is per environment
+// and the notice is what carries it: a combined notice names several envs, so
+// there is no one env its deploy action could target, and dropping the action
+// there left exactly the orchestrators with the most edges down — the ones that
+// need it most — with prose and nothing to click. One notice per env gives each
+// the same action, scoping, and later lifecycle clear the single-env case gets.
+// An edge whose label is not a well-formed <tenant>/<environment> still gets its
+// warning; it just has no env for an action to target.
+func (a *App) reportUnreachableOrchestratorEdges(name string, unreachable []orchestratorMCPUnreachable) {
+	for _, edge := range unreachable {
+		notice := orchestratorMCPUnreachableNotice(name, []orchestratorMCPUnreachable{edge})
+		tenant, environment, ok := orchestratorMCPUnreachableEnv(edge.Label)
+		if !ok {
+			a.emitAppNotification("warning", notice)
+			continue
+		}
+		a.emitEnvNotification("warning", tenant, environment,
+			notificationSourceOrchestratorEdgeUnreachable, notice, notificationActionDeploy)
+	}
 }
 
 // conversationToLaunch answers which conversation a spawn attaches to. A named
 // one (a restart hand-off, an operator attaching one deliberately) is taken as
 // given: it names the conversation that asked for this launch. Otherwise the
 // launch resolves what this orchestrator is on -- attached, or the derived
-// anchor -- and reports anything surprising about that answer: today, only an
-// attachment that could not be honoured, since a resume that lands somewhere
-// unexpected in silence is the whole defect.
+// anchor -- and reports anything surprising about that answer: an attachment
+// that could not be honoured, or an anchor that diverged from the conversation
+// this orchestrator's own session last reported. A resume that lands somewhere
+// unexpected in silence is the whole defect, and both are that.
 func (a *App) conversationToLaunch(id, named string) string {
 	if conversationID := strings.TrimSpace(named); conversationID != "" {
 		return conversationID
@@ -1952,6 +2359,7 @@ func (a *App) conversationToLaunch(id, named string) string {
 // orchestrators root and tracks the live session.
 func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInfo, error) {
 	id, name, envs := spawn.id, spawn.name, spawn.envs
+	dirs := spawn.dirs
 	transient := spawn.transient
 	cols, rows := clampTerminalSize(spawn.cols, spawn.rows)
 	// Wire each linked env's erun MCP into the orchestrator session so it drives
@@ -1986,7 +2394,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		// The orchestrator's own id, so an agent driving from its shell can
 		// record itself as the return target for a rebuild+restart (see the
 		// erun-orchestrate skill). Empty for transient/Investigate sessions.
-		"ERUN_ORCHESTRATOR_ID=" + id,
+		eruncommon.OrchestratorIDEnvVar + "=" + id,
 		// This launch's nonce, which the session's own hooks stamp onto the
 		// conversation id they report. It is what makes that record this launch's
 		// rather than any session that happens to carry the orchestrator id.
@@ -2050,6 +2458,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		transient:      transient,
 		name:           name,
 		envs:           envs,
+		dirs:           dirs,
 		startedAt:      time.Now(),
 	}
 	a.restoreOrchestratorNudgeHistory(newSession)
@@ -2068,7 +2477,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
+	return orchestratorInfoFor(id, name, envs, dirs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
 }
 
 // orchestratorRespawnFunc builds the closure tryReconnect calls when this
@@ -2128,6 +2537,22 @@ func orchestratorCrashResumePrompt() string {
 		"Resume the conversation exactly where it left off and carry any in-progress task through to its verified end without waiting to be asked."
 }
 
+// unreachableOrchestratorIDs names every configured orchestrator this desktop
+// cannot pace from here: one report read each, since the question is whether the
+// orchestrator's OWN hooks are reporting a session, which no in-memory state can
+// answer. See orchestratorPacingUnreachable.
+func unreachableOrchestratorIDs(configs []eruncommon.OrchestratorConfig, now time.Time) map[string]bool {
+	out := make(map[string]bool, len(configs))
+	for _, config := range configs {
+		id := strings.TrimSpace(config.ID)
+		if id == "" || !orchestratorPacingUnreachable(id, now) {
+			continue
+		}
+		out[id] = true
+	}
+	return out
+}
+
 // ListOrchestrators merges the persisted definitions (each tagged running or
 // stopped) with any transient running sessions (Investigate), id-ordered.
 func (a *App) ListOrchestrators() []orchestratorInfo {
@@ -2140,6 +2565,10 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 	// history from, so it falls back to this persisted record instead of the
 	// zero snapshot a stopped orchestrator otherwise reported unconditionally.
 	historyEntries, historyUnreadable := readOrchestratorNudgeHistoryEntries(a.deps.orchestratorNudgeHistoryPath)
+	// Gathered before the lock for the same reason the history above is: one
+	// small report read per configured orchestrator, and the result is only
+	// consulted for the ones this desktop turns out to hold no session for.
+	unreachable := unreachableOrchestratorIDs(configs, time.Now())
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := make([]orchestratorInfo, 0, len(configs)+len(a.orchestrators))
@@ -2151,6 +2580,10 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		shell := orchestratorShellSnapshot{}
 		historyEntry, _ := orchestratorNudgeHistoryEntryIn(historyEntries, config.ID)
 		pacing := orchestratorPacingSnapshotFromHistory(historyEntry, historyUnreadable)
+		// Only the stopped branch can be unpaced-but-running: a running one is
+		// a session this desktop holds, and the branch below rebuilds the
+		// snapshot from that session, which drops this flag by construction.
+		pacing.Unreachable = unreachable[config.ID]
 		restartRequired := false
 		roleChanged := false
 		if session := a.orchestrators[config.ID]; session != nil {
@@ -2168,7 +2601,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 				roleChanged = orchestratorRolesChanged(session.envs, config.Environments)
 			}
 		}
-		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired, roleChanged))
+		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired, roleChanged))
 		seen[config.ID] = struct{}{}
 	}
 	for id, session := range a.orchestrators {
@@ -2181,7 +2614,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		}
 		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 		pacing := orchestratorPacingSnapshotFromSession(session)
-		out = append(out, orchestratorInfoFor(id, session.name, session.envs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
+		out = append(out, orchestratorInfoFor(id, session.name, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

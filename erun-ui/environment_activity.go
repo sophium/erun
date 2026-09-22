@@ -218,6 +218,12 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 		return observation
 	}
 	a.forgetForwardRepair(selection)
+	// The edge answered a real request through a bound forward, which is the
+	// strongest evidence there is that an outage recorded at wire time is over.
+	// This is the ordinary path to that observation; reconcileForwardHealth only
+	// sees the two failure shapes, so leaving the exit to it alone would mean a
+	// recovery was recorded only when something else also went wrong.
+	a.noteOrchestratorEdgeAnswering(selection)
 	observation.state.observed = true
 	observation.state.busy, observation.state.detail = environmentBusyFromIdleStatus(status)
 	observation.state.busyHolderOrchestrators = environmentLeaseHolderOrchestrators(status.Leases)

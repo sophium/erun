@@ -3,15 +3,17 @@ package eruncommon
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Workspace sync mirrors a remote-agent environment's pod worktree onto the
@@ -52,8 +54,8 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 	if err := validateWorkspaceSyncParams(&params); err != nil {
 		return WorkspaceSyncResult{}, err
 	}
-	pass := workspaceSyncPassLog{params: params, stale: "unknown"}
-	defer func() { pass.emit() }()
+	pass := workspaceSyncPassLog{params: params}
+	defer func() { workspaceSyncPasses.record(&pass) }()
 
 	if err := EnsureLocalWorkspaceSyncTarget(params.LocalPath); err != nil {
 		pass.failure = err
@@ -103,60 +105,6 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 	return result, nil
 }
 
-// workspaceSyncPassLog is the always-on record of what one sync pass saw and
-// did, emitted as a single bounded line. A mirror that kept adding files while
-// silently never removing any took two investigations to explain precisely
-// because a pass left no trace of its own inputs, so this is unconditional and
-// counts-only — never one line per file.
-type workspaceSyncPassLog struct {
-	params     WorkspaceSyncParams
-	notGitRepo bool
-	remote     int
-	stale      string
-	local      int
-	fetch      int
-	deleted    int
-	signed     int
-	signNote   string
-	fetchErr   error
-	deleteErr  error
-	failure    error
-}
-
-func (l *workspaceSyncPassLog) recordResolved(resolved workspaceSyncPaths, err error) {
-	l.notGitRepo = resolved.notGitRepo
-	l.remote = len(resolved.remote)
-	l.stale = strconv.Itoa(resolved.stale)
-	if resolved.staleUnknown {
-		l.stale = "unknown"
-	}
-	l.local = len(resolved.localMeta)
-	l.failure = err
-}
-
-func (l *workspaceSyncPassLog) emit() {
-	log.Printf("erun: workspace sync %s -> %s: notGitRepo=%t remote=%d staleIndex=%s mirror=%d fetch=%d deleted=%d signed=%d%s%s%s%s",
-		l.params.RemotePath, l.params.LocalPath, l.notGitRepo, l.remote, l.stale, l.local, l.fetch, l.deleted, l.signed,
-		workspaceSyncPassNoteSuffix(" signNote", l.signNote),
-		workspaceSyncPassErrorSuffix(" fetchError", l.fetchErr),
-		workspaceSyncPassErrorSuffix(" deleteError", l.deleteErr),
-		workspaceSyncPassErrorSuffix(" error", l.failure))
-}
-
-func workspaceSyncPassNoteSuffix(label, note string) string {
-	if strings.TrimSpace(note) == "" {
-		return ""
-	}
-	return label + "=" + strings.TrimSpace(note)
-}
-
-func workspaceSyncPassErrorSuffix(label string, err error) string {
-	if err == nil {
-		return ""
-	}
-	return label + "=" + strings.TrimSpace(err.Error())
-}
-
 // WorkspaceSyncArtifactsSubdir is the read-only subdir of the host mirror that
 // receives the pod's $ERUN_OUTPUTS_DIR deliverables — e.g. a Windows .exe an
 // agent cross-builds in the Linux pod. It sits beside the synced source but the
@@ -180,39 +128,138 @@ const workspaceSyncStagingSubdir = ".erun-sync-staging"
 // read-only host mirror. Artifacts live outside the git worktree, so they escape
 // the gitignore that hides *.exe from the source mirror — this is how a Windows
 // binary cross-built in the pod reaches the host to run/debug. Returns the number
-// of artifact files delivered plus what ad-hoc signing did to them; a missing or
-// empty outputs dir is a no-op.
+// of artifact files actually transferred this pass plus what ad-hoc signing did
+// to them; a missing or empty outputs dir is a no-op, and a pass whose content is
+// unchanged since the last one transfers nothing.
+//
+// Only the artifacts being refreshed this pass go through the
+// writable->extract->sign->read-only cycle: the cycle used to run
+// unconditionally for every remote artifact on every pass, so an artifact whose
+// content had not changed in weeks still spent most of its time at the 0644 mode
+// `makeArtifactsWritable` applies before the re-extract restores it — an operator
+// invoking it directly from a shell during that window saw "permission denied"
+// on an otherwise-correct binary.
 func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifactsLocal string) (int, hostArtifactSigningSummary, error) {
 	var signing hostArtifactSigningSummary
 	remote, err := remoteOutputsFiles(ctx, hostAlias, outputsRemote)
 	if err != nil {
 		return 0, signing, err
 	}
+	copied := 0
 	if len(remote) > 0 {
 		if err := os.MkdirAll(artifactsLocal, 0o755); err != nil {
 			return 0, signing, fmt.Errorf("create artifacts dir %s: %w", artifactsLocal, err)
 		}
-		// Clear the read-only bit set by the previous pass so the refreshed file
-		// can replace it (matters on Windows, where a read-only attribute
-		// otherwise blocks the rename onto it).
-		if err := makeArtifactsWritable(artifactsLocal); err != nil {
-			return 0, signing, err
-		}
-		if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, remote); err != nil {
-			return 0, signing, err
+		// Fetch only what actually changed by content: outputs are agent
+		// deliverables, and an agent can rewrite one byte-for-byte identical to
+		// what is already mirrored (e.g. rerunning a cross-compile) — that still
+		// bumps mtime, the same effect a Docker COPY has on a build context (see
+		// the content-addressed-vs-mtime precedent in
+		// erun-ui/playwright/run.sh's ERUN_PLAYWRIGHT_LINT_CACHE_DIR comment), so
+		// mtime cannot tell "rewritten" from "identical" the way it can for the
+		// source lane's own tar-preserved fetch.
+		remoteHashes := remoteOutputsFileHashes(ctx, hostAlias, outputsRemote, remote)
+		localHashes := localArtifactFileHashes(artifactsLocal, remote)
+		toFetch := changedOutputsPaths(remote, remoteHashes, localHashes)
+		copied = len(toFetch)
+		if len(toFetch) > 0 {
+			// Clear the read-only bit set by the previous pass so the refreshed file
+			// can replace it (matters on Windows, where a read-only attribute
+			// otherwise blocks the rename onto it). Only the paths being refreshed
+			// are touched, so an unchanged artifact never passes through this mode.
+			if err := makeArtifactsWritable(artifactsLocal, toFetch); err != nil {
+				return 0, signing, err
+			}
+			if err := extractRemoteWorkspaceFiles(ctx, hostAlias, outputsRemote, artifactsLocal, toFetch); err != nil {
+				return 0, signing, err
+			}
 		}
 		// The mirror is where a darwin artifact cross-built in the Linux pod first
 		// becomes a file the operator can run, so it is where the signature macOS
 		// demands has to come from. Sign while the files are still writable.
-		signing = signHostArtifacts(localArtifactPaths(artifactsLocal, remote))
-		if err := markArtifactsReadOnly(artifactsLocal, remote); err != nil {
+		signing = signHostArtifacts(localArtifactPaths(artifactsLocal, toFetch))
+		if err := markArtifactsReadOnly(artifactsLocal, toFetch); err != nil {
 			return 0, signing, err
 		}
 	}
 	if err := pruneLocalArtifacts(artifactsLocal, remote); err != nil {
 		return 0, signing, err
 	}
-	return len(remote), signing, nil
+	return copied, signing, nil
+}
+
+// remoteOutputsFileHashes fingerprints the given pod outputs files by content
+// (sha256) rather than size or mtime, for the reason in syncOutputsArtifacts's
+// comment above. Best-effort like remoteWorkspaceFileMeta: any failure yields no
+// fingerprints, so changedOutputsPaths degrades to treating every path as
+// changed rather than trusting a read that did not happen.
+func remoteOutputsFileHashes(ctx context.Context, hostAlias, outputsRemote string, paths []string) map[string]string {
+	if len(paths) == 0 {
+		return nil
+	}
+	script := fmt.Sprintf("cd %s && xargs -0 -r sha256sum --zero", shellQuote(outputsRemote))
+	cmd := CommandContext(ctx, "ssh", workspaceSyncSSHArgs(hostAlias, script)...)
+	HideConsoleWindow(cmd)
+	cmd.Stdin = bytes.NewReader(encodeWorkspaceSyncPathList(paths))
+	output, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return parseOutputsFileHashes(output)
+}
+
+// parseOutputsFileHashes reads `sha256sum --zero` NUL-terminated records
+// (`<64-hex-hash><space><text/binary flag><filename>`). A malformed record is
+// skipped, which folds into remoteOutputsFileHashes's best-effort contract.
+func parseOutputsFileHashes(output []byte) map[string]string {
+	const hashLen = 64
+	hashes := make(map[string]string)
+	for _, record := range bytes.Split(output, []byte{0}) {
+		if len(record) < hashLen+2 || record[hashLen] != ' ' {
+			continue
+		}
+		path := string(record[hashLen+2:])
+		if !SafeWorkspaceSyncPath(path) {
+			continue
+		}
+		hashes[path] = string(record[:hashLen])
+	}
+	return hashes
+}
+
+// localArtifactFileHashes reads and hashes only the given mirror-relative
+// paths, so a path the mirror does not have yet (a first-ever pass, or one
+// pruned since) is simply absent from the result rather than an error;
+// changedOutputsPaths then treats an absent local hash as changed.
+func localArtifactFileHashes(root string, paths []string) map[string]string {
+	hashes := make(map[string]string, len(paths))
+	for _, item := range paths {
+		if !SafeWorkspaceSyncPath(item) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(item)))
+		if err != nil {
+			continue
+		}
+		sum := sha256.Sum256(data)
+		hashes[item] = hex.EncodeToString(sum[:])
+	}
+	return hashes
+}
+
+// changedOutputsPaths returns, in remotePaths order, the paths a pass must
+// fetch: those missing locally, changed (content hash differs), or whose
+// fingerprint is unknown on either side (fetch when unsure).
+func changedOutputsPaths(remotePaths []string, remoteHashes, localHashes map[string]string) []string {
+	changed := make([]string, 0, len(remotePaths))
+	for _, path := range remotePaths {
+		remoteHash, remoteKnown := remoteHashes[path]
+		localHash, localKnown := localHashes[path]
+		if !remoteKnown || !localKnown || remoteHash != localHash {
+			changed = append(changed, path)
+		}
+	}
+	return changed
 }
 
 // localArtifactPaths resolves mirror-relative artifact paths against the mirror
@@ -304,7 +351,7 @@ func ListLocalArtifactFiles(root string) ([]string, error) {
 			return relErr
 		}
 		if info.IsDir() {
-			if filepath.ToSlash(rel) == workspaceSyncStagingSubdir {
+			if isWorkspaceSyncStagingPath(filepath.ToSlash(rel)) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -318,15 +365,15 @@ func ListLocalArtifactFiles(root string) ([]string, error) {
 	return files, nil
 }
 
-// makeArtifactsWritable restores the write bit on mirrored artifact files so the
-// next sync pass can overwrite them; markArtifactsReadOnly re-applies read-only
-// after the refresh. Directories stay writable throughout.
-func makeArtifactsWritable(artifactsLocal string) error {
-	files, err := ListLocalArtifactFiles(artifactsLocal)
-	if err != nil {
-		return err
-	}
-	for _, item := range files {
+// makeArtifactsWritable restores the write bit on the given mirrored artifact
+// files so this pass can overwrite them; markArtifactsReadOnly re-applies
+// read-only after the refresh. Only the listed paths are touched — an artifact
+// not being refreshed this pass must never spend time at this mode.
+func makeArtifactsWritable(artifactsLocal string, paths []string) error {
+	for _, item := range paths {
+		if !SafeWorkspaceSyncPath(item) {
+			continue
+		}
 		full := filepath.Join(artifactsLocal, filepath.FromSlash(item))
 		if err := os.Chmod(full, 0o644); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("prepare artifact for refresh %s: %w", full, err)
@@ -559,7 +606,7 @@ func localWorkspaceSourceFileMeta(root string) (map[string]workspaceFileMeta, er
 		}
 		relSlash := filepath.ToSlash(rel)
 		if info.IsDir() {
-			if relSlash == ".git" || relSlash == WorkspaceSyncArtifactsSubdir || relSlash == workspaceSyncStagingSubdir {
+			if relSlash == ".git" || relSlash == WorkspaceSyncArtifactsSubdir || isWorkspaceSyncStagingPath(relSlash) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -658,18 +705,55 @@ func extractRemoteWorkspaceFiles(ctx context.Context, hostAlias, remotePath, loc
 	return publishStagedWorkspaceFiles(staging, localPath)
 }
 
-// prepareWorkspaceSyncStaging gives the pass an empty staging dir beside the
-// files it will publish, clearing whatever a killed pass left behind so staged
-// bytes are only ever this pass's.
+// workspaceSyncStagingStaleAge is how old an orphaned staging directory must be
+// before a pass treats it as debris from a killed process rather than a
+// concurrent pass still extracting into it. Even a first, whole-tree populate
+// finishes in minutes, so an hour leaves a wide margin against ever mistaking a
+// slow-but-alive pass for a crash.
+const workspaceSyncStagingStaleAge = time.Hour
+
+// prepareWorkspaceSyncStaging gives this pass its own staging directory, unique
+// so a concurrent pass against the same LocalPath -- the desktop's own 2-second
+// sync poller and a manually invoked `erun sshd sync` can both reach the same
+// mirror -- never shares, and never destroys, another pass's in-flight
+// extraction. Before this, every pass wiped and recreated one fixed-name
+// staging dir at the start of its own run; a concurrent pass mid-extraction
+// into that same directory saw it vanish out from under its still-running tar,
+// which then failed to create the child directories it needed and exited
+// non-zero even though most files had already extracted cleanly.
+// Debris a killed pass leaves behind -- the one case a fixed name used to clean
+// up immediately -- is swept once it is unambiguously stale rather than on
+// every pass, since a fresh directory might belong to a pass still running.
 func prepareWorkspaceSyncStaging(localPath string) (string, error) {
-	staging := filepath.Join(localPath, workspaceSyncStagingSubdir)
-	if err := os.RemoveAll(staging); err != nil {
-		return "", fmt.Errorf("clear workspace sync staging %s: %w", staging, err)
-	}
-	if err := os.MkdirAll(staging, 0o755); err != nil {
-		return "", fmt.Errorf("create workspace sync staging %s: %w", staging, err)
+	sweepStaleWorkspaceSyncStagingDirs(localPath)
+	staging, err := os.MkdirTemp(localPath, workspaceSyncStagingSubdir+"-")
+	if err != nil {
+		return "", fmt.Errorf("create workspace sync staging in %s: %w", localPath, err)
 	}
 	return staging, nil
+}
+
+// sweepStaleWorkspaceSyncStagingDirs removes staging directories left behind by
+// a pass that was killed before its own deferred cleanup could run. It is
+// best-effort: a listing failure or a per-entry removal failure is not
+// reported, since a stale directory left in place costs disk space, not
+// correctness (workspaceSyncStagingSubdir-prefixed paths are already excluded
+// from every mirror read).
+func sweepStaleWorkspaceSyncStagingDirs(localPath string) {
+	entries, err := os.ReadDir(localPath)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), workspaceSyncStagingSubdir) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || time.Since(info.ModTime()) < workspaceSyncStagingStaleAge {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(localPath, entry.Name()))
+	}
 }
 
 // publishStagedWorkspaceFiles moves each staged entry onto its final path with
@@ -823,15 +907,35 @@ func SafeWorkspaceSyncPath(value string) bool {
 	if cleaned != value || strings.HasPrefix(cleaned, "../") || cleaned == ".." {
 		return false
 	}
-	// Three subtrees a lane must never claim: the operator's own .git, the
-	// artifact mirror the outputs lane owns, and the staging subdir, whose
-	// contents are bytes still arriving rather than mirror content.
-	for _, reserved := range []string{".git", WorkspaceSyncArtifactsSubdir, workspaceSyncStagingSubdir} {
+	return !isReservedWorkspaceSyncPath(cleaned)
+}
+
+// isReservedWorkspaceSyncPath reports whether cleaned falls under one of the
+// three subtrees a lane must never claim: the operator's own .git, the
+// artifact mirror the outputs lane owns, and any staging subdir, whose
+// contents are bytes still arriving rather than mirror content. A staging dir
+// carries a random suffix (prepareWorkspaceSyncStaging), so it is matched by
+// prefix rather than an exact name.
+func isReservedWorkspaceSyncPath(cleaned string) bool {
+	if isWorkspaceSyncStagingPath(cleaned) {
+		return true
+	}
+	for _, reserved := range []string{".git", WorkspaceSyncArtifactsSubdir} {
 		if cleaned == reserved || strings.HasPrefix(cleaned, reserved+"/") {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+// isWorkspaceSyncStagingPath reports whether cleaned's first path segment is a
+// workspace-sync staging directory.
+func isWorkspaceSyncStagingPath(cleaned string) bool {
+	first := cleaned
+	if idx := strings.IndexByte(cleaned, '/'); idx >= 0 {
+		first = cleaned[:idx]
+	}
+	return strings.HasPrefix(first, workspaceSyncStagingSubdir)
 }
 
 func pathClean(value string) string {

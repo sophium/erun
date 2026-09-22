@@ -102,6 +102,16 @@ func RegisterIdentityRoutes(register ProtectedRouteRegistrar, admin IdentityAdmi
 // different org through an already-fully-gated action is not the same kind
 // of entitlement decision as letting a caller reach a route it could not
 // reach at all before.
+//
+// listUsers additionally accepts ?tenantId=, independent of orgId: it names
+// which tenant's erun users the IdP identities are cross-referenced against
+// to decide Enrolled/ErunUserID (see identityUserView), so a caller
+// administering another tenant's identities also sees that tenant's own
+// membership rather than their own. Resolved through resolveTargetTenant
+// (users.go) -- the same operations-only, default-to-caller's-own-tenant
+// rule every other cross-tenant read in this module already uses -- rather
+// than a second ad hoc rule. Omitting it keeps today's behaviour: the
+// caller's own tenant.
 var errIdentityAdminForbidden = errors.New("identity administration is restricted to an operations tenant")
 
 // requireOperationsTenant is the shared gate every handler below applies
@@ -136,15 +146,41 @@ func (r IdentityRoutes) securityContext(w http.ResponseWriter, req *http.Request
 // here with Enrolled=false is a self-registered or otherwise unmapped IdP
 // account that cannot use erun, not a tenant member, and must not render as
 // one.
+//
+// The embedded zitadel.User's own ID is the OIDC subject: it is
+// the same value security.Context.ExternalUserID/model.User.ExternalUserID
+// carries for an enrolled row (mergeIdentityUsers below joins on exactly
+// that equality), and the same value GET /v1/whoami reports as `subject`
+// for the caller's own session. It is not renamed or duplicated onto a
+// second field here -- it is already the join key a client needs to
+// recognize "this is the same person" across the erun and IdP directories,
+// it was simply never rendered anywhere before this.
 type identityUserView struct {
 	zitadel.User
 	Enrolled   bool   `json:"enrolled"`
 	ErunUserID string `json:"erunUserId,omitempty"`
+	// ErunUsername is the enrolled erun user's own username (users.username)
+	// -- an independent string from the embedded zitadel.User.Username above,
+	// chosen at enrolment rather than mirrored from the IdP.
+	// Empty whenever Enrolled is false, since there is no erun user row to
+	// read it from.
+	ErunUsername string `json:"erunUsername,omitempty"`
 }
 
 func (r IdentityRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
 	securityContext, ok := r.securityContext(w, req)
 	if !ok {
+		return
+	}
+	// tenantId targets the membership join at the tenant being administered,
+	// independent of orgId: orgId picks which Zitadel org's identities to
+	// list, tenantId picks which tenant's erun users to cross-reference them
+	// against. Guessing tenantId from orgId is refused deliberately -- see
+	// resolveTargetTenant's own doc and identity.go's package comment above
+	// for why the org<->tenant mapping cannot be inverted.
+	targetTenantID, err := resolveTargetTenant(securityContext, req.URL.Query().Get("tenantId"))
+	if err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 	orgID := strings.TrimSpace(req.URL.Query().Get("orgId"))
@@ -153,7 +189,7 @@ func (r IdentityRoutes) listUsers(w http.ResponseWriter, req *http.Request) {
 		writeIdentityAdminError(w, err)
 		return
 	}
-	erunUsers, err := r.erunUsers.List(req.Context(), repository.UserFilter{TenantID: securityContext.TenantID})
+	erunUsers, err := r.erunUsers.List(req.Context(), repository.UserFilter{TenantID: targetTenantID})
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -180,6 +216,7 @@ func mergeIdentityUsers(idpUsers []zitadel.User, erunUsers []model.User) []ident
 		if erunUser, ok := enrolledBySubject[u.ID]; ok {
 			view.Enrolled = true
 			view.ErunUserID = erunUser.UserID
+			view.ErunUsername = erunUser.Username
 		}
 		views = append(views, view)
 	}
@@ -454,7 +491,21 @@ func (r IdentityRoutes) updateSMTPSettings(w http.ResponseWriter, req *http.Requ
 // state initial can only be deleted not deactivated" is actionable for an
 // operator), falling back to 502 for a transport-level failure that never
 // got a Zitadel response at all.
+//
+// A taken login name is the one case that is not forwarded as-is. The
+// instance reports it as a bare AlreadyExists conflict whose message names
+// the account, not the name, so the caller was told something they could not
+// act on -- while the thing they can act on, the name they chose, was the one
+// thing not said. It becomes a conflict carrying its own code and the name,
+// so the console and the CLI can render a message that tells the user what to
+// change. Checked before the generic APIError branch, whose forwarding would
+// otherwise swallow it.
 func writeIdentityAdminError(w http.ResponseWriter, err error) {
+	var usernameTaken *zitadel.UsernameTakenError
+	if errors.As(err, &usernameTaken) {
+		writeErrorCode(w, http.StatusConflict, "USERNAME_TAKEN", usernameTaken.Error())
+		return
+	}
 	var apiErr *zitadel.APIError
 	if errors.As(err, &apiErr) {
 		status := apiErr.StatusCode

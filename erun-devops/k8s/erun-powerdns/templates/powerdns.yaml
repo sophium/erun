@@ -264,10 +264,14 @@ spec:
             - name: schema
               mountPath: /schema
         {{- if $servicesZone }}
-        # Bootstrap the authoritative services zone once, with its nameservers,
-        # from the per-instance platform config that deploy threads in as
-        # platform.* values. Idempotent (skips when the zone already exists).
-        # Per-env wildcard/_acme-challenge records are added later via pdnsutil.
+        # Bootstrap the authoritative services zone with its nameservers, from
+        # the per-instance platform config that deploy threads in as
+        # platform.* values. Creating the zone is once-only (skips when it
+        # already exists); the record policies below it (SOA MNAME, CAA, TSIG)
+        # reconcile on every bootstrap, because a zone created before a policy
+        # existed is never recreated -- create-time-only hygiene reaches future
+        # zones and leaves every existing one untouched. Per-env
+        # wildcard/_acme-challenge records are added later via pdnsutil.
         - name: zone-bootstrap
           image: {{ $powerdnsImage }}
           command:
@@ -284,12 +288,40 @@ spec:
                 {{- range $ns := (rest $nameservers) }}
                 pdnsutil --config-dir={{ $configDir }} add-record {{ $servicesZone | quote }} @ NS {{ $ns | quote }}
                 {{- end }}
-                {{- with (first $nameservers) }}
-                # create-zone leaves a placeholder SOA MNAME
-                # (a.misconfigured.dns.server.invalid); set it to the primary NS.
-                pdnsutil --config-dir={{ $configDir }} replace-rrset {{ $servicesZone | quote }} @ SOA 3600 {{ printf "%s. hostmaster.%s. 1 10800 3600 604800 3600" . $servicesZone | quote }}
-                {{- end }}
               fi
+              {{- with (first $nameservers) }}
+              # Reconcile the SOA MNAME on EVERY bootstrap, not only at zone
+              # creation: create-zone leaves pdnsutil's placeholder primary NS
+              # behind, and a zone created before this reconcile existed is
+              # never recreated -- so a creation-only correction would reach
+              # future zones and leave every existing one advertising the
+              # placeholder in public DNS indefinitely. Rewrite only when the
+              # MNAME is not already the primary NS, so an already-correct SOA
+              # is left byte-identical. Reading the zone stays fatal on failure
+              # like every step here: a silent miss would leave the placeholder
+              # published, which is the defect this exists to fix.
+              soa=$(pdnsutil --config-dir={{ $configDir }} list-zone {{ $servicesZone | quote }} | awk '$4 == "SOA" { print; exit }')
+              # SOA RDATA is its trailing seven fields (mname, rname, then the
+              # serial, refresh, retry, expire and minimum), so the MNAME is
+              # NF-6 and the serial NF-4 whatever the leading name/TTL/class
+              # columns look like.
+              mname=$(printf '%s\n' "$soa" | awk '{ print $(NF-6) }')
+              # pdnsutil prints the SOA MNAME relative to the zone's $ORIGIN, so
+              # an already-correct MNAME comes back WITHOUT the trailing dot a
+              # nameserver value is written with. Compare with a trailing dot
+              # stripped from both sides: a raw comparison never matches a real
+              # zone, so every bootstrap would rewrite the SOA and bump its
+              # serial while the stub-backed test still passed.
+              want_mname={{ . | quote }}
+              if [ -n "$soa" ] && [ "${mname%.}" != "${want_mname%.}" ]; then
+                serial=$(printf '%s\n' "$soa" | awk '{ print $(NF-4) }')
+                case "$serial" in '' | *[!0-9]*) serial=1 ;; esac
+                # The record content is changing, so move the serial forward: a
+                # serial that goes backwards is worse than no bump at all.
+                serial=$((serial + 1))
+                pdnsutil --config-dir={{ $configDir }} replace-rrset {{ $servicesZone | quote }} @ SOA 3600 {{ printf "%s. hostmaster.%s. $serial 10800 3600 604800 3600" . $servicesZone | quote }}
+              fi
+              {{- end }}
               {{- if $caaIssuer }}
               # Authorize the platform's ACME CA on the services zone (idempotent).
               # Apex issue+issuewild so a per-env empty-non-terminal CAA lookup

@@ -238,22 +238,29 @@ type BootstrapInitResult struct {
 }
 
 type BootstrapInitDependencies struct {
-	Store                     BootstrapStore
-	FindProjectRoot           ProjectFinderFunc
-	GetWorkingDir             WorkDirFunc
-	SelectTenant              SelectTenantFunc
-	Confirm                   ConfirmFunc
-	PromptKubernetesContext   PromptValueFunc
-	PromptContainerRegistry   PromptValueFunc
-	PromptRemoteRepositoryURL PromptValueFunc
-	PromptCodeCommitSSHKeyID  PromptValueFunc
-	EnsureKubernetesNamespace NamespaceEnsurerFunc
-	LoadProjectConfig         ProjectConfigLoaderFunc
-	SaveProjectConfig         ProjectConfigSaverFunc
-	WaitForRemoteRuntime      RemoteRuntimeWaitFunc
-	RunRemoteCommand          RemoteCommandRunnerFunc
-	DeployHelmChart           HelmChartDeployerFunc
-	Sleep                     SleepFunc
+	Store           BootstrapStore
+	FindProjectRoot ProjectFinderFunc
+	GetWorkingDir   WorkDirFunc
+	SelectTenant    SelectTenantFunc
+	// TenantSelectionUnavailable tells the tenant-selection policy that this
+	// run's transport has no way to ask anyone which tenant to use -- stdin is
+	// not a terminal and carries no answer, an agent is running unattended. One
+	// tenant is not a choice, so it is used without asking; a real choice is
+	// refused with an error naming the flag that resolves it, instead of
+	// printing a menu nobody can answer and failing on EOF.
+	TenantSelectionUnavailable bool
+	Confirm                    ConfirmFunc
+	PromptKubernetesContext    PromptValueFunc
+	PromptContainerRegistry    PromptValueFunc
+	PromptRemoteRepositoryURL  PromptValueFunc
+	PromptCodeCommitSSHKeyID   PromptValueFunc
+	EnsureKubernetesNamespace  NamespaceEnsurerFunc
+	LoadProjectConfig          ProjectConfigLoaderFunc
+	SaveProjectConfig          ProjectConfigSaverFunc
+	WaitForRemoteRuntime       RemoteRuntimeWaitFunc
+	RunRemoteCommand           RemoteCommandRunnerFunc
+	DeployHelmChart            HelmChartDeployerFunc
+	Sleep                      SleepFunc
 	// ProbeHostedRegistry answers whether erun's hosted registry can be pushed
 	// to. Unset defaults to a real probe, so a caller that wires nothing still
 	// refuses an unreachable registry instead of writing config whose pushes
@@ -367,6 +374,13 @@ func (s tracedBootstrapStore) SaveERunConfig(config ERunConfig) error {
 }
 
 func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
+	// Validated (and normalized) exactly as the real save does before anything
+	// is traced, so a dry run never reports a mkdir and a write-yaml that the
+	// real run refuses, and the traced path is the one the real run would use.
+	config = NormalizeTenantConfig(config)
+	if err := validateStatePathSegment("tenant", config.Name); err != nil {
+		return err
+	}
 	configPath, err := resolveConfigFilePath(filepath.Join("erun", config.Name, "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -381,6 +395,14 @@ func (s tracedBootstrapStore) SaveTenantConfig(config TenantConfig) error {
 }
 
 func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config EnvConfig) error {
+	// Same shape rule and order as the real save: refuse before tracing, so a
+	// dry run's mkdir/write-yaml pair is one the real run would actually do.
+	if err := validateStatePathSegment("tenant", tenant); err != nil {
+		return err
+	}
+	if err := validateStatePathSegment("environment", config.Name); err != nil {
+		return err
+	}
 	configPath, err := resolveConfigFilePath(filepath.Join("erun", tenant, config.Name, "config.yaml"))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -893,10 +915,10 @@ func (s *bootstrapRunState) createEnvConfig() error {
 // registry. A host environment must not contact a cluster during init any
 // more than it does at any other time.
 func (s *bootstrapRunState) createHostEnvConfig(envProjectRoot string) error {
-	envProjectRoot = strings.TrimSpace(envProjectRoot)
-	if envProjectRoot == "" {
-		return fmt.Errorf("cannot create %s/%s as type %s: %s", s.tenant, s.envName, EnvironmentTypeHost, hostRepoPathRequirement(EnvironmentTypeHost))
+	if err := ValidateHostRepoPath(EnvironmentTypeHost, envProjectRoot); err != nil {
+		return fmt.Errorf("cannot create %s/%s as type %s: %w", s.tenant, s.envName, EnvironmentTypeHost, err)
 	}
+	envProjectRoot = strings.TrimSpace(envProjectRoot)
 	// Skipping the cluster/cloud/registry resolution below is what "no cluster
 	// contact" means for host, but creating a new environment still asks for
 	// the same confirmation every other type does — that step is local and
@@ -1209,9 +1231,10 @@ func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType)
 	if err != nil {
 		return err
 	}
-	if projectRoot = strings.TrimSpace(projectRoot); projectRoot == "" {
-		return fmt.Errorf("cannot change %s/%s to type %s: %s", s.tenant, s.envName, requested, hostRepoPathRequirement(requested))
+	if err := ValidateHostRepoPath(requested, projectRoot); err != nil {
+		return fmt.Errorf("cannot change %s/%s to type %s: %w", s.tenant, s.envName, requested, err)
 	}
+	projectRoot = strings.TrimSpace(projectRoot)
 	if s.envConfig.LocalRepoPath == projectRoot {
 		return nil
 	}
@@ -1219,17 +1242,6 @@ func (s *bootstrapRunState) adoptLocalRepoPathForType(requested EnvironmentType)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: local repo path set to " + projectRoot)
 	return nil
-}
-
-// hostRepoPathRequirement names why a type needs a host-machine directory,
-// worded for what that type actually does with it: local-agent hostPath-mounts
-// it into a pod, while a host env has no pod at all and simply is that
-// directory.
-func hostRepoPathRequirement(requested EnvironmentType) string {
-	if requested == EnvironmentTypeHost {
-		return "it needs a host directory to use — run init from the project directory or pass --project-root"
-	}
-	return "it needs a host repo path to mount — run init from the project directory or pass --project-root"
 }
 
 func describeEnvType(envType EnvironmentType) string {
@@ -1785,6 +1797,27 @@ func (s bootstrapRunner) ensureKubernetesNamespace(tenant, envName, currentConte
 	return s.EnsureKubernetesNamespace(nextContext, namespace)
 }
 
+// TenantSelectionUnavailableError reports that a tenant had to be chosen and the
+// run has nobody to ask. Its message names the flag that resolves it: whoever
+// hits this is by definition not a person looking at a prompt -- a script, an
+// orchestrator, or an unattended agent -- and a menu it cannot answer is a dead
+// end, not an answer.
+type TenantSelectionUnavailableError struct {
+	Tenants []string
+}
+
+func (e TenantSelectionUnavailableError) Error() string {
+	return fmt.Sprintf("a tenant has to be chosen and this run has nobody to ask; pass --tenant with one of: %s", strings.Join(e.Tenants, ", "))
+}
+
+func tenantNameList(tenants []TenantConfig) []string {
+	names := make([]string, 0, len(tenants))
+	for _, tenant := range tenants {
+		names = append(names, tenant.Name)
+	}
+	return names
+}
+
 func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []TenantConfig) (TenantSelectionResult, error) {
 	if params.InitializeCurrentProject {
 		return TenantSelectionResult{Initialize: true}, nil
@@ -1803,6 +1836,15 @@ func (s bootstrapRunner) selectTenant(params BootstrapInitParams, tenants []Tena
 			Label:   "Select tenant",
 			Options: options,
 		}}
+	}
+	if s.TenantSelectionUnavailable {
+		// Nothing can answer a prompt, so asking one would only print a menu
+		// and read EOF. A sole tenant is the option an empty line already
+		// takes, so it needs no answer; a real choice does.
+		if len(tenants) == 1 {
+			return TenantSelectionResult{Tenant: tenants[0].Name}, nil
+		}
+		return TenantSelectionResult{}, TenantSelectionUnavailableError{Tenants: tenantNameList(tenants)}
 	}
 	selection, err := s.SelectTenant(tenants)
 	if err != nil {

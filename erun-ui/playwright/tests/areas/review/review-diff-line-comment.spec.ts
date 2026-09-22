@@ -163,7 +163,10 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await dismissAIOccupancyPromptIfShown(app);
     await app.titlebar.toggleReviewPanel();
-    await expect(app.page.getByText('package main')).toBeVisible();
+    // Converge on the panel having opened, then on the diff it fetches: both are
+    // separate renders after the toggle, and expect's own budget is a fixed 10s.
+    await app.reviewPanel.waitForOpen();
+    await app.page.getByText('package main').waitFor({ state: 'visible' });
 
     // The affordance is revealed by hovering its own line rather than painted
     // on every row: the diff is the densest reading surface in the app, so a
@@ -217,7 +220,10 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       // reason is about the diff's own commit state, not the review.
       await openActiveReviewContext(app, SEED_TENANT, environment);
       await app.titlebar.toggleReviewPanel();
-      await expect(page.getByText('package main')).toBeVisible();
+      // Converge on the panel having opened, then on the diff it fetches: both
+      // are separate renders after the toggle, and expect's own budget is fixed.
+      await app.reviewPanel.waitForOpen();
+      await page.getByText('package main').waitFor({ state: 'visible' });
 
       await page.getByRole('button', { name: 'Comment on line 1 of main.go' }).click();
       await expect(page.getByText('Commit this change before commenting on it.')).toBeVisible();
@@ -256,7 +262,10 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
 
       await openActiveReviewContext(app, SEED_TENANT, environment);
       await app.titlebar.toggleReviewPanel();
-      await expect(page.getByText('package main')).toBeVisible();
+      // Converge on the panel having opened, then on the diff it fetches: both
+      // are separate renders after the toggle, and expect's own budget is fixed.
+      await app.reviewPanel.waitForOpen();
+      await page.getByText('package main').waitFor({ state: 'visible' });
 
       await page.getByRole('button', { name: 'Comment on line 1 of main.go' }).click();
       await expect(
@@ -314,7 +323,10 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       // survives the close.
       await openActiveReviewContext(app, SEED_TENANT, environment);
       await app.titlebar.toggleReviewPanel();
-      await expect(page.getByText('package main')).toBeVisible();
+      // Converge on the panel having opened, then on the diff it fetches: both
+      // are separate renders after the toggle, and expect's own budget is fixed.
+      await app.reviewPanel.waitForOpen();
+      await page.getByText('package main').waitFor({ state: 'visible' });
 
       await page.getByRole('button', { name: 'Comment on line 1 of main.go' }).click();
       await page.getByLabel('New comment').fill('what does this do?');

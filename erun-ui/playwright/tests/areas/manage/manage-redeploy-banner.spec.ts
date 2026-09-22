@@ -46,6 +46,11 @@ test.describe('manage dialog redeploy banner scoping (#460)', () => {
   test('the banner skips metadata-only saves, fires for pod-shaping ones, and sticks', async ({
     app,
   }) => {
+    // Three separate save round-trips, each with its own dot-clearing poll
+    // and (for two of them) a banner convergence -- their combined legitimate
+    // cost under contention can approach the default 30s test budget before
+    // any single step is individually slow enough to look like a bug.
+    test.setTimeout(60_000);
     await openFirstEnvManageDialog(app);
     await app.manageDialog.selectTab('Runtime');
 
@@ -60,6 +65,7 @@ test.describe('manage dialog redeploy banner scoping (#460)', () => {
     const original = await idle.inputValue();
     await idle.fill(original === '7m' ? '9m' : '7m');
     await app.manageDialog.save();
+    await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
 
     // A later metadata-only save must not clear a redeploy the user still
@@ -67,6 +73,7 @@ test.describe('manage dialog redeploy banner scoping (#460)', () => {
     await app.manageDialog.autoUpgradeCheckbox().click();
     await app.manageDialog.save();
     await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
+    await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
 
     // The stubbed saves never wrote the real config, so closing needs no

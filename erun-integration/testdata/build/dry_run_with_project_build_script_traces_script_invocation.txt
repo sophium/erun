@@ -1,2 +1,3 @@
 audit: erun build --dry-run
+docker info -f '{{.DockerRootDir}}'
 cd <TMP> && ./build.sh

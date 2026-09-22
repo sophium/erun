@@ -1,0 +1,44 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 0
+  cloud contexts: 0, tenants: 1
+  orphaned cloud contexts: 1
+    - test-context
+        cannot decode account/region from name; AWS auto-recovery unavailable
+        envs: team/dev
+Skipping context "test-context": name does not match the erun-<seq>-<account>-<region> shape, so AWS recovery cannot be auto-seeded
+Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+
+== Helm release status ==
+Error: kubernetes cluster unreachable: Get "https://<VERSION>.10:6443/version?timeout=32s": dial tcp <VERSION>.10:6443: i/o timeout
+
+== Pods ==
+skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+== Host AWS credentials ==
+skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
+== Git push access ==
+skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
+== Docker storage ==
+skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
+Skipping the requested prune action(s) for the same reason.
+audit: erun doctor --prune-images team dev
+trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

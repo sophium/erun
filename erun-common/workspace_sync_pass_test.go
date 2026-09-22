@@ -1,8 +1,13 @@
 package eruncommon
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -44,6 +49,13 @@ func TestMain(m *testing.M) {
 	if os.Getenv(jobAliveSupervisorHelperEnv) != "" {
 		os.Exit(runJobAliveSupervisorHelper())
 	}
+	// The supervisor-failure test re-enters this binary as a supervisor that
+	// ends on its own setup failure (job_supervisor_failure_test.go), for the
+	// same reason the alive-contract helper above is a real process: the record
+	// must be reconciled against a supervisor pid that genuinely ran and exited.
+	if os.Getenv(jobSupervisorSetupFailureHelperEnv) != "" {
+		os.Exit(runJobSupervisorSetupFailureHelper())
+	}
 	// This suite must never depend on the invoking shell's own environment:
 	// running `go test` from inside an actual runtime pod (as this repo's own
 	// agent environments do) otherwise leaves ERUN_TENANT/ERUN_ENVIRONMENT set,
@@ -61,7 +73,31 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "unsetenv ERUN_ENVIRONMENT: %v\n", err)
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	// Timing history is the operator's, not the suite's: this package reaches
+	// writeTimingRecord through the build/deploy paths its tests drive, so
+	// without this the binary appends microsecond records for commands that
+	// never ran to the operator's real ~/.erun/timing -- and, because retention
+	// prunes on write, evicts a genuine record to make room. Redirected for the
+	// whole binary rather than per test, so a test added later is isolated by
+	// default. A caller who set the variable explicitly keeps their value.
+	var timingTempDir string
+	if _, ok := os.LookupEnv(TimingRecordDirEnv); !ok {
+		dir, err := os.MkdirTemp("", "erun-timing-test-")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create timing temp dir: %v\n", err)
+			os.Exit(1)
+		}
+		if err := os.Setenv(TimingRecordDirEnv, dir); err != nil {
+			fmt.Fprintf(os.Stderr, "set %s: %v\n", TimingRecordDirEnv, err)
+			os.Exit(1)
+		}
+		timingTempDir = dir
+	}
+	code := m.Run()
+	if timingTempDir != "" {
+		_ = os.RemoveAll(timingTempDir)
+	}
+	os.Exit(code)
 }
 
 func runWorkspaceSyncSSHStub(args []string) int {
@@ -84,12 +120,74 @@ func runWorkspaceSyncSSHStub(args []string) int {
 		return 0
 	case strings.Contains(script, "git ls-files -sz"):
 		return 0
+	case strings.Contains(script, "sha256sum"):
+		return runWorkspaceSyncSSHStubOutputsHash()
 	case strings.Contains(script, "find . -type f"):
 		return runWorkspaceSyncSSHStubOutputsListing()
 	case strings.Contains(script, "tar --null"):
 		return streamWorkspaceSyncStubArchive()
 	}
 	return 1
+}
+
+// runWorkspaceSyncSSHStubOutputsHash answers the outputs content-hash call:
+// the requested paths arrive NUL-delimited on stdin (mirroring the real
+// `xargs -0`), and the stub hashes each path's real bytes out of the prepared
+// archive (workspaceSyncStubArchiveEnv) so a test can prove the hash is
+// content-derived, not name-derived — a path missing from the archive falls
+// back to hashing its own name, which is deterministic but never equal to a
+// real content hash, so it never spuriously reads as "unchanged".
+func runWorkspaceSyncSSHStubOutputsHash() int {
+	stdin, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return 1
+	}
+	contents := readStubArchiveContents(os.Getenv(workspaceSyncStubArchiveEnv))
+	for _, part := range bytes.Split(stdin, []byte{0}) {
+		if len(part) == 0 {
+			continue
+		}
+		path := string(part)
+		body, ok := contents[path]
+		if !ok {
+			body = []byte(path)
+		}
+		sum := sha256.Sum256(body)
+		if _, err := os.Stdout.WriteString(hex.EncodeToString(sum[:]) + "  " + path + "\x00"); err != nil {
+			return 1
+		}
+	}
+	return 0
+}
+
+// readStubArchiveContents reads the plain tar writeWorkspaceSyncArchive built
+// into a name->bytes map. An empty path (no archive configured) yields an
+// empty map.
+func readStubArchiveContents(path string) map[string][]byte {
+	contents := make(map[string][]byte)
+	if path == "" {
+		return contents
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return contents
+	}
+	reader := tar.NewReader(bytes.NewReader(data))
+	for {
+		header, err := reader.Next()
+		if err != nil {
+			break
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		body, err := io.ReadAll(reader)
+		if err != nil {
+			break
+		}
+		contents[header.Name] = body
+	}
+	return contents
 }
 
 // runWorkspaceSyncSSHStubOutputsListing answers the outputs-dir `find`

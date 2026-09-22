@@ -1,3 +1,4 @@
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test } from '../../../fixtures/erunApp.js';
 
 // RecoveryFeedback used to render its outer <section role="status"> regardless
@@ -55,7 +56,7 @@ test('a failed pending-helm recovery announces as an alert, not a status update'
   // not also claim this message -- it is an alert, not a status update.
   await expect(drawer.getByRole('status').filter({ hasText: 'Recovery failed' })).toHaveCount(0);
 
-  await page.screenshot({ path: 'test-results/recovery-feedback-alert-light.png' });
+  await page.screenshot({ path: artifactPath('test-results/recovery-feedback-alert-light.png') });
   // The theme toggle button lives in the titlebar, behind the drawer's own
   // overlay while open, and the recovery feedback is ephemeral component
   // state that a close/reopen would lose -- so the dark capture flips the
@@ -65,5 +66,5 @@ test('a failed pending-helm recovery announces as an alert, not a status update'
   await page.evaluate(() => {
     document.documentElement.classList.add('dark');
   });
-  await page.screenshot({ path: 'test-results/recovery-feedback-alert-dark.png' });
+  await page.screenshot({ path: artifactPath('test-results/recovery-feedback-alert-dark.png') });
 });

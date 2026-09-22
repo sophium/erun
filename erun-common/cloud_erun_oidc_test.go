@@ -571,6 +571,16 @@ func TestExchangeERunAuthorizationCodeAndCallbackHandler(t *testing.T) {
 // redirect URI - so the error has to name the listener and say to re-run,
 // otherwise the operator debugs the wrong thing.
 func TestAwaitERunOIDCCallbackTimesOutNamingTheListener(t *testing.T) {
+	// This drives the real wait, which opens the operator's browser at the
+	// authorize URL as its first act. Left unstubbed the suite launches the
+	// machine's actual browser at a fixture hostname on every run -- an
+	// outward side effect from a unit test, and on a laptop the operator sees a
+	// stray tab resolving nowhere. The override is the seam the opener's own
+	// doc names for exactly this, so the flow under test is unchanged and only
+	// the launch is stubbed.
+	t.Setenv("ERUN_HOST_OS_OVERRIDE", "linux")
+	t.Setenv("ERUN_XDG_OPEN_BIN", writeExecutableStub(t, 0))
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)

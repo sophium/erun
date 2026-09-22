@@ -1,16 +1,22 @@
-Re-states the pacing contract into every live session it can reach: every
-configured environment's own AI session (over that environment's MCP edge)
-and every persisted orchestrator definition. Reports each target's outcome —
-pushed, or skipped and why — rather than only reporting that it ran.
+Re-states the pacing contract into every live session it can reach. Scoped
+to one TENANT/ENVIRONMENT, it pushes only that environment's own AI session
+(over that environment's MCP edge) and targets no orchestrator. Given neither,
+it fans out over every configured environment plus every persisted
+orchestrator definition. Reports each target's outcome — pushed, or skipped
+and why — rather than only reporting that it ran.
 
 A CLI/MCP process has no channel into a desktop-held orchestrator's live PTY,
 so every orchestrator is reported skipped as unreachable from this transport;
-only the desktop's own automatic pass can push those. An environment with no
-currently open MCP edge (nobody has it open in the desktop) reports skipped as
-not alive, since there is no live session there to push.
+only the desktop's own automatic pass can push those. An environment whose MCP
+edge is not answering (nobody has it open in the desktop, or its port-forward
+dropped) is reported skipped as channel-down, with the `erun open` that brings
+the edge back, and the sweep carries on to the remaining targets.
 
-Pass TENANT and ENVIRONMENT to whip one environment; omit both to whip every
-configured environment plus every persisted orchestrator.
+A --dry-run never reattaches a channel: the reattach starts a real
+`erun open --reconnect`, and a preview does not start work that outlives it.
+
+Pass TENANT and ENVIRONMENT to whip one environment only; omit both to whip
+every configured environment plus every persisted orchestrator.
 
 Usage:
   erun whip [TENANT] [ENVIRONMENT] [flags]
@@ -24,7 +30,7 @@ Flags:
       --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Whip only this environment (requires --tenant)
   -h, --help                 help for whip
-      --json                 Write JSON output
+      --json                 Write JSON output (alias for --output json)
       --tenant string        Whip only this tenant's environment (requires --environment)
 
 Global Flags:

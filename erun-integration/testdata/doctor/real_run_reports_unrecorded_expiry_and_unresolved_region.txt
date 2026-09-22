@@ -35,9 +35,10 @@ Alias:  ops+123456789012@aws
 Region: none resolved — AWS calls in this environment have no default region until the alias carries an SSO region or the environment names an ECR registry
 Status: present in the erun-host profile, expiry unrecorded — run `erun cloud refresh team dev` if AWS calls are failing
 
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
 Filesystem  Size  Used  Avail  Mounted on
 overlay     100G  20G   80G    /var/lib/docker
-Running: Remove unused Docker images
+Running: Remove unused Docker images (the erun-dind sidecar)
 Total reclaimed space: 2GB
 audit: erun doctor --prune-images team dev
 trace-log: appending the full trace to <TMP>

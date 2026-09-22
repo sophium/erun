@@ -16,6 +16,10 @@ type environmentActivityLeaseResult struct {
 	Environment string                            `json:"environment"`
 	Lease       *common.EnvironmentActivityLease  `json:"lease,omitempty"`
 	Held        []common.EnvironmentActivityLease `json:"held"`
+	// Released mirrors erun-mcp's ActivityLeaseResult.Released: set only by a
+	// release call, and only true when a held claim actually existed and was
+	// removed.
+	Released *bool `json:"released,omitempty"`
 }
 
 func takeLeaseInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.TakeEnvironmentActivityLeaseParams) (common.EnvironmentActivityLease, bool, error) {
@@ -42,15 +46,21 @@ func takeLeaseInEnvironment(ctx context.Context, commandCtx common.Context, reso
 	return *result.Lease, resolved, nil
 }
 
-func releaseLeaseInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (bool, error) {
+func releaseLeaseInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, id, scope string, exclusive bool) (common.EnvironmentActivityLeaseReleaseOutcome, bool, error) {
 	arguments := map[string]any{}
 	putEnvironmentToolArgument(arguments, "id", id)
 	if exclusive {
 		arguments["exclusive"] = true
 	}
 	putEnvironmentToolArgument(arguments, "scope", scope)
-	_, resolved, err := callEnvironmentTool[environmentActivityLeaseResult](ctx, commandCtx, resolveOpen, tenant, environment, "activity_lease_release", arguments, false)
-	return resolved, err
+	result, resolved, err := callEnvironmentTool[environmentActivityLeaseResult](ctx, commandCtx, resolveOpen, tenant, environment, "activity_lease_release", arguments, false)
+	if err != nil || !resolved {
+		return common.EnvironmentActivityLeaseNotHeld, resolved, err
+	}
+	if result.Released != nil && *result.Released {
+		return common.EnvironmentActivityLeaseReleased, resolved, nil
+	}
+	return common.EnvironmentActivityLeaseNotHeld, resolved, nil
 }
 
 func listLeasesInEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment string) ([]common.EnvironmentActivityLease, bool, error) {

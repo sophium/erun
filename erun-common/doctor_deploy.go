@@ -20,6 +20,24 @@ type DeployDiagnosisResult struct {
 	HelmStatus    string
 	HelmReadError string
 	Pods          string
+	// ClusterUnreachable is true when a probe above already confirmed the
+	// Kubernetes API server itself could not be reached, as opposed to any
+	// other helm/kubectl failure (a missing release, RBAC, a malformed
+	// chart). Every other doctor section that needs the runtime pod
+	// (host credentials, git push access, the docker-storage inspection)
+	// reads this instead of re-probing the same unreachable cluster and
+	// paying its own multi-minute kubectl timeout to rediscover the exact
+	// fact this diagnosis already established.
+	ClusterUnreachable bool
+	// AgentCredentials answers whether the deployed pod template carries the
+	// model-provider wiring erun configured for this environment -- the one
+	// deployment fact helm status and pod readiness cannot show, because an
+	// environment whose chart predates that wiring deploys cleanly and reports
+	// healthy while being unable to start an agent at all. It is
+	// NotApplicable for an environment no gateway routes, which asserts nothing
+	// about such an environment's capability; see
+	// runtime_agent_credentials.go.
+	AgentCredentials RuntimeAgentCredentialStatus
 }
 
 func helmStatusArgs(req ShellLaunchParams) []string {
@@ -39,22 +57,51 @@ func deployDiagnosisPodArgs(req ShellLaunchParams) []string {
 }
 
 // RunDeployDiagnosis probes why a deploy may have failed. It is strictly
-// read-only, so it is safe to run on every `erun doctor`; a missing release or
+// read-only, so it is safe to run on every `erun doctor`, including under
+// `--dry-run` — that flag scopes itself to mutations (root AGENTS.md
+// "Command primitives vs orchestration"), and a missing release or
 // unreachable cluster is itself part of the diagnosis, not a hard error.
+//
+// The pods probe is skipped once the helm status read already confirms the
+// Kubernetes API server itself is unreachable: a second kubectl call against
+// the same unreachable cluster would only pay its own multi-minute timeout to
+// rediscover the exact fact the helm read just established. ClusterUnreachable
+// carries that determination forward so every later doctor section can skip
+// its own probe the same way instead of independently rediscovering it.
 func RunDeployDiagnosis(ctx Context, req ShellLaunchParams) DeployDiagnosisResult {
 	helmArgs := helmStatusArgs(req)
 	ctx.TraceCommand("", "helm", helmArgs...)
 	podArgs := deployDiagnosisPodArgs(req)
 	ctx.TraceCommand("", "kubectl", podArgs...)
-	if ctx.DryRun {
-		return DeployDiagnosisResult{}
-	}
 	helmStatus, helmErr := runDoctorDiagnosisCommand("helm", helmArgs)
-	pods, _ := runDoctorDiagnosisCommand("kubectl", podArgs)
-	result := DeployDiagnosisResult{HelmStatus: helmStatus, Pods: pods}
+	// Applicability is resolved up front, from the request alone, so every way
+	// out of this function -- including the early return for an unreachable
+	// cluster -- still distinguishes "this check does not apply here" from "it
+	// could not run". The read below only ever refines it.
+	result := DeployDiagnosisResult{
+		HelmStatus:       helmStatus,
+		AgentCredentials: runtimeAgentCredentialApplicability(req),
+	}
 	if helmErr != nil && !isHelmReleaseNotFound(helmStatus) {
 		result.HelmReadError = observeHelmReadErrorMessage(RuntimeReleaseName(req.Tenant), req.Namespace, helmStatus, helmErr)
+		result.ClusterUnreachable = kubernetesAPIServerUnreachableSignal(helmStatus)
 	}
+	if result.ClusterUnreachable {
+		return result
+	}
+	pods, podsErr := runDoctorDiagnosisCommand("kubectl", podArgs)
+	result.Pods = pods
+	if podsErr != nil {
+		result.ClusterUnreachable = kubernetesAPIServerUnreachableSignal(pods)
+	}
+	if result.ClusterUnreachable {
+		// Same reasoning as the skipped pods probe above: the agent-credential
+		// read is one more kubectl call against the cluster this diagnosis has
+		// just established is unreachable, and it would report a read failure
+		// where the honest answer is "not observed".
+		return result
+	}
+	result.AgentCredentials = inspectRuntimeAgentCredentials(ctx, req)
 	return result
 }
 
@@ -129,6 +176,21 @@ func DeployRecoveryActionPromptLabel(action DeployRecoveryAction, req ShellLaunc
 		return fmt.Sprintf("Roll back %s to its last successful revision?", target)
 	default:
 		return fmt.Sprintf("Run deploy recovery %q for %s?", action, target)
+	}
+}
+
+// DeployRecoveryActionWithoutPromptHint names the flag that runs this recovery
+// with no prompt, so a caller whose stdin reached EOF is told how to proceed
+// rather than only that the action did not run. It sits beside the prompt label
+// because it is the same question's non-interactive answer.
+func DeployRecoveryActionWithoutPromptHint(action DeployRecoveryAction) string {
+	switch action {
+	case DeployRecoveryClearPendingHelm:
+		return "Re-run with --clear-pending-helm to run it without a prompt."
+	case DeployRecoveryRollback:
+		return "Re-run with --rollback to run it without a prompt."
+	default:
+		return "Re-run with the matching flag to run it without a prompt."
 	}
 }
 

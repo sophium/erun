@@ -40,6 +40,71 @@ locals {
   arg_manage_coredns_custom_configmap  = var.manage_coredns_custom_configmap == null ? true : var.manage_coredns_custom_configmap
   arg_base_domain_name                 = var.base_domain_name == null ? "" : var.base_domain_name
   arg_coredns_forward_upstreams        = var.coredns_forward_upstreams == null ? ["1.1.1.1", "1.0.0.1", "8.8.8.8"] : var.coredns_forward_upstreams
+  arg_http_redirect_enabled            = var.http_redirect_enabled == null ? true : var.http_redirect_enabled
+  arg_hsts_enabled                     = var.hsts_enabled == null ? true : var.hsts_enabled
+  arg_hsts_max_age_seconds             = var.hsts_max_age_seconds == null ? 86400 : var.hsts_max_age_seconds
+  arg_hsts_include_subdomains          = var.hsts_include_subdomains == null ? false : var.hsts_include_subdomains
+  arg_hsts_preload                     = var.hsts_preload == null ? false : var.hsts_preload
+}
+
+# Transport policy for the public edge, declared once at the only layer that
+# sees every public host. Traefik answers :80 for every rule it routes, so a
+# host nobody remembered to annotate -- or an application behind the edge that
+# issues a *relative* redirect, which inherits whatever scheme the browser
+# started on -- serves and stays on plaintext by omission. Upgrading at the
+# entrypoint means a host added later cannot opt out of https by forgetting.
+locals {
+  # permanent=true renders 301 rather than Traefik's default 302: this is a
+  # standing policy, not a momentary move, and 301 is what an already-correct
+  # host in the same estate answers with. Every ACME challenge in this estate
+  # is solved over DNS-01 (chart-issuer), so redirecting the plaintext
+  # entrypoint starves no HTTP-01 challenge.
+  traefik_redirect_args = local.arg_http_redirect_enabled ? [
+    "--entryPoints.web.http.redirections.entryPoint.to=websecure",
+    "--entryPoints.web.http.redirections.entryPoint.scheme=https",
+    "--entryPoints.web.http.redirections.entryPoint.permanent=true",
+  ] : []
+
+  # HSTS is a commitment, not a hint: once a browser has read it, it refuses
+  # plaintext for that host for stsSeconds and the header cannot be recalled
+  # early. The default is deliberately short (one day) and excludes
+  # subdomains and preload, so a TLS gap on any name under the domain is a
+  # one-day window rather than a year-long outage for visitors who already
+  # have the header. Raise max-age -- then includeSubDomains, then preload --
+  # once every host under the domain is verified https-only; note that
+  # includeSubDomains is not just "stronger": it binds names this module does
+  # not serve, and preload bakes the commitment into browsers.
+  hsts_middleware_name = "erun-edge-hsts"
+  hsts_middleware_ref  = "${local.arg_ingress_namespace}-${local.hsts_middleware_name}@kubernetescrd"
+
+  traefik_hsts_args = local.arg_hsts_enabled ? [
+    "--entryPoints.websecure.http.middlewares=${local.hsts_middleware_ref}",
+  ] : []
+
+  # Off first, then on: an entrypoint middleware that does not exist is
+  # reported by Traefik and the response is served without the header, so the
+  # middleware has to be a real object in the release rather than an argument
+  # that promises one. extraObjects rides in the same Helm release as the
+  # controller, which installs Traefik's CRDs (crds/) before its templates, so
+  # the CR is never applied before its type exists.
+  hsts_middleware = {
+    apiVersion = "traefik.io/v1alpha1"
+    kind       = "Middleware"
+    metadata = {
+      name      = local.hsts_middleware_name
+      namespace = local.arg_ingress_namespace
+    }
+    spec = {
+      headers = {
+        stsSeconds           = local.arg_hsts_max_age_seconds
+        stsIncludeSubdomains = local.arg_hsts_include_subdomains
+        stsPreload           = local.arg_hsts_preload
+        forceSTSHeader       = true
+      }
+    }
+  }
+
+  traefik_args = concat(local.traefik_redirect_args, local.traefik_hsts_args)
 }
 
 locals {
@@ -216,6 +281,16 @@ resource "helm_release" "traefik" {
   version          = local.arg_traefik_chart_version
   namespace        = local.arg_ingress_namespace
   create_namespace = true
+
+  dynamic "set" {
+    for_each = local.traefik_args
+    content {
+      name  = "additionalArguments[${set.key}]"
+      value = set.value
+    }
+  }
+
+  values = local.arg_hsts_enabled ? [yamlencode({ extraObjects = [local.hsts_middleware] })] : []
 }
 
 # cert-manager (with its CRDs). Optional: skip when the cluster already runs it.

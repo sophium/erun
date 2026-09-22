@@ -92,6 +92,76 @@ func TestClassifyLocalMCPUnreachableNamesTheKind(t *testing.T) {
 	}
 }
 
+// startHeldOpenListener is the stale-forward shape: every connection is
+// accepted and then held open, never answered.
+func startHeldOpenListener(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+		}
+	}()
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+// startDroppingListener is the shape a forward whose target has not come up
+// yet leaves behind: the connection is accepted and then closed without a
+// reply, because the far end kubectl tried to dial was not listening yet.
+func startDroppingListener(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+// A forward whose target has not come up yet — a pod mid-roll after a deploy —
+// accepts the local connection and then closes it without answering. Naming
+// that a stale forward sends the operator to re-open an environment the
+// forward is already reaching, which replaces nothing and answers nothing.
+func TestClassifyLocalMCPUnreachableSeparatesAnUnreadyTargetFromAStaleForward(t *testing.T) {
+	unreadyPort := startDroppingListener(t)
+	stalePort := startHeldOpenListener(t)
+
+	if got := ClassifyLocalMCPUnreachable(unreadyPort); got != LocalMCPTargetNotAnswering {
+		t.Fatalf("a forward that took the connection and closed it must classify as target-not-answering, got %q", got)
+	}
+	if got := ClassifyLocalMCPUnreachable(stalePort); got != LocalMCPStaleForward {
+		t.Fatalf("a forward that accepts and never answers must still classify as stale-forward, got %q", got)
+	}
+
+	unready := DescribeLocalMCPUnreachable("acme", "dev", unreadyPort)
+	if strings.Contains(unready, "not carrying traffic") {
+		t.Fatalf("an unready target is not a forward that has stopped carrying traffic, got %q", unready)
+	}
+	if !strings.Contains(unready, "still starting") {
+		t.Fatalf("an unready target must be named as one, got %q", unready)
+	}
+	if stale := DescribeLocalMCPUnreachable("acme", "dev", stalePort); !strings.Contains(stale, "not carrying traffic") {
+		t.Fatalf("a stale forward must still be named as one, got %q", stale)
+	}
+}
+
 // Nothing listening is a different problem from a forward that has gone stale,
 // and the operator's next move differs, so the two must not share wording.
 func TestDescribeLocalMCPUnreachableSeparatesMissingFromStale(t *testing.T) {

@@ -117,6 +117,34 @@ type GateRunListParams struct {
 	Status       string
 }
 
+// The statuses a gate run can be filtered by: a run is RUNNING while it is
+// being gated and settles on exactly one terminal verdict.
+const (
+	GateRunStatusRunning      = "RUNNING"
+	GateRunStatusPassed       = "PASSED"
+	GateRunStatusFailed       = "FAILED"
+	GateRunStatusInconclusive = "INCONCLUSIVE"
+)
+
+// NormalizeGateRunStatus validates a gate-run status filter and resolves it to
+// the spelling the platform stores, accepting any casing. The empty value means
+// "no status filter". The error names the accepted values, since this is
+// operator input from a flag or a tool argument: a mistyped filter that reached
+// the platform would come back as an empty listing, indistinguishable from a
+// real "no gate runs" on the merge queue's audit trail.
+func NormalizeGateRunStatus(status string) (string, error) {
+	trimmed := strings.TrimSpace(status)
+	switch normalized := strings.ToUpper(trimmed); normalized {
+	case "":
+		return "", nil
+	case GateRunStatusRunning, GateRunStatusPassed, GateRunStatusFailed, GateRunStatusInconclusive:
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("unsupported gate run status %q: expected %q, %q, %q or %q",
+			trimmed, GateRunStatusRunning, GateRunStatusPassed, GateRunStatusFailed, GateRunStatusInconclusive)
+	}
+}
+
 // RunGateRunList lists gate runs visible to the caller's tenant, most recent
 // first, narrowed by the given filters. This is the queue view that answers
 // what is being gated right now (status=RUNNING), what is waiting
@@ -124,6 +152,11 @@ type GateRunListParams struct {
 // the complementary half this does not duplicate), and what recent gates
 // decided.
 func RunGateRunList(ctx Context, store CloudReadStore, alias string, params GateRunListParams, deps CloudDependencies) ([]PlatformGateRun, error) {
+	status, err := NormalizeGateRunStatus(params.Status)
+	if err != nil {
+		return nil, err
+	}
+	params.Status = status
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return nil, err

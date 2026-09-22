@@ -1,0 +1,37 @@
+Target: team/dev
+== Execution modes ==
+aws-sts: subprocess
+aws-sts-web-identity-token: subprocess
+aws-export-credentials: subprocess
+kubectl-namespace-get: subprocess
+kubectl-pvc-get: subprocess
+kubectl-secret-get: subprocess
+kubectl-pod-get: subprocess
+kubectl-deployment-get: subprocess
+kubectl-deployment-wait: subprocess
+kubectl-secret-apply: subprocess
+kubectl-pod-watch: subprocess
+kubectl-context-configure: subprocess
+
+== Helm release status ==
+NAME: team-devops
+STATUS: deployed
+
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
+Filesystem  Size  Used  Avail  Mounted on
+overlay     100G  20G   80G    /var/lib/docker
+Optional cleanup steps in team/dev not checked: stdin is not a terminal, so there was nobody to answer the prompt. These are optional maintenance, not failed checks.
+  skipped: prune_images (Remove unused Docker images)
+  skipped: prune_build_cache (Remove unused BuildKit cache)
+  skipped: prune_containers (Remove stopped Docker containers)
+Pass --prune-images, --prune-build-cache, or --prune-containers to run one explicitly.
+No cleanup actions selected.
+audit: erun doctor team dev
+trace-log: appending the full trace to <TMP>
+==> Doctor team/dev
+==> Doctor done team/dev

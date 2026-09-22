@@ -3,7 +3,6 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -41,6 +40,10 @@ type DeleteEnvironmentResult struct {
 	KubernetesContext    string `json:"kubernetesContext,omitempty"`
 	ConfigDir            string `json:"configDir"`
 	NamespaceDeleteError string `json:"namespaceDeleteError,omitempty"`
+	// RemovedSSHHostAlias names the ~/.ssh/config Host block this delete
+	// removed, so a caller can report the local-state cleanup instead of
+	// leaving the operator to wonder whether the alias outlived the env.
+	RemovedSSHHostAlias string `json:"removedSshHostAlias,omitempty"`
 }
 
 func DeleteEnvironmentConfirmation(tenant, environment string) string {
@@ -77,6 +80,9 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	if err := removePortForwardStateFiles(ctx, tenant, environment); err != nil {
 		return result, err
 	}
+	if err := removeEnvironmentSSHConfigAlias(ctx, store, tenant, environment, &result); err != nil {
+		return result, err
+	}
 	if ctx.DryRun {
 		return result, nil
 	}
@@ -91,30 +97,92 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	return result, nil
 }
 
-// removePortForwardStateFiles deletes every port-forward state file this
-// environment could have. Without it, the local port range the file names
-// keeps getting freed and reissued to whichever environment is created next,
-// while the deleted environment's file still claims it — so a stale record
-// resolves to a live forward that belongs to somebody else instead of reading
-// as "no forward" the way a missing file does.
+// removePortForwardStateFiles deletes every port-forward record this
+// environment could have — the state file and the log beside it. Without it,
+// the local port range the file names keeps getting freed and reissued to
+// whichever environment is created next, while the deleted environment's file
+// still claims it — so a stale record resolves to a live forward that belongs
+// to somebody else instead of reading as "no forward" the way a missing file
+// does.
+//
+// The log is removed with the record it belongs to, which is the whole of the
+// difference between a forward tree that tracks the environments it describes
+// and one that outlives them: a state file reclaimed without its log leaves a
+// file that nothing else in erun will ever open, restart, or rotate again, for
+// an environment that no longer exists to reopen it.
 func removePortForwardStateFiles(ctx Context, tenant, environment string) error {
 	for _, kind := range portForwardStateKinds {
-		path, err := PortForwardStatePath(kind, tenant, environment)
-		if err != nil {
-			return err
-		}
-		if _, statErr := os.Stat(path); statErr != nil {
-			continue
-		}
-		ctx.TraceCommand("", "rm", "-f", path)
-		if ctx.DryRun {
-			continue
-		}
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := RemovePortForwardRecord(ctx, kind, tenant, environment); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// removeEnvironmentSSHConfigAlias removes the ~/.ssh/config Host block that
+// `erun sshd init` wrote for this environment, for the same reason
+// removePortForwardStateFiles removes the state file: the block names a local
+// port that this delete frees for whichever environment is created next, so a
+// block that outlives its environment does not fail — it succeeds against a
+// live pod the operator did not name. Only the alias this environment derives
+// is touched, and only while no other configured environment derives it, so a
+// block a live environment legitimately owns survives.
+func removeEnvironmentSSHConfigAlias(ctx Context, store DeleteStore, tenant, environment string, result *DeleteEnvironmentResult) error {
+	alias := SSHHostAlias(tenant, environment)
+	if alias == "" {
+		return nil
+	}
+	claimed, err := sshAliasClaimedByOtherEnvironment(store, tenant, environment, alias)
+	if err != nil {
+		return err
+	}
+	if claimed {
+		ctx.Trace(fmt.Sprintf("delete: keeping ssh config block Host %s: another environment still derives that alias", alias))
+		return nil
+	}
+	path, err := DefaultSSHConfigPath()
+	if err != nil {
+		return err
+	}
+	hasBlock, err := SSHConfigHasAlias(path, alias)
+	if err != nil {
+		return fmt.Errorf("read ssh config %s: %w", path, err)
+	}
+	if !hasBlock {
+		return nil
+	}
+
+	ctx.Trace(fmt.Sprintf("delete: removing Host %s block from %s", alias, path))
+	result.RemovedSSHHostAlias = alias
+	if ctx.DryRun {
+		return nil
+	}
+	if _, err := RemoveSSHConfigAlias(path, alias); err != nil {
+		return fmt.Errorf("remove Host %s block from %s: %w", alias, path, err)
+	}
+	return nil
+}
+
+// sshAliasClaimedByOtherEnvironment reports whether an environment other than
+// the one being deleted still derives alias. Distinct environment names can
+// sanitize to the same alias, so the check is on the derived alias, not the
+// name, or deleting one would strip the other's block.
+func sshAliasClaimedByOtherEnvironment(store DeleteStore, tenant, environment, alias string) (bool, error) {
+	environments, err := store.ListEnvConfigs(tenant)
+	if err != nil {
+		return false, err
+	}
+	environment = strings.TrimSpace(environment)
+	for _, env := range environments {
+		name := strings.TrimSpace(env.Name)
+		if name == "" || name == environment {
+			continue
+		}
+		if SSHHostAlias(tenant, name) == alias {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func normalizeDeleteEnvironmentDependencies(store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteStore, NamespaceDeleterFunc) {

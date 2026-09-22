@@ -1,0 +1,2 @@
+audit: erun e2e --dry-run
+default tenant is not configured, and one could not be inferred from the working directory either — pass a tenant explicitly with `erun e2e --tenant <name>`, or run `erun init --tenant <name> --set-default-tenant` to set a default

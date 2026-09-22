@@ -83,8 +83,16 @@ export function isolatedHomeDir(): string {
   return path.join(isolatedRoot(), 'home');
 }
 
-function stubsDir(): string {
+export function stubsDir(): string {
   return path.join(isolatedRoot(), 'stubs');
+}
+
+// stubRegistryPath is the file every long-lived stub appends its own pid to
+// before parking itself. It lives in the isolated root (per worker, removed with
+// it) and is what makes the stub population observable and reapable —
+// fixtures/stubProcesses.ts owns reading and reaping it.
+export function stubRegistryPath(): string {
+  return path.join(isolatedRoot(), 'stub-pids');
 }
 
 // stubBinPath is the on-disk path of a stub tool. On Windows the backend
@@ -170,6 +178,10 @@ export function backendEnv(): Record<string, string> {
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_CACHE_HOME: path.join(home, '.cache'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    // Where a long-lived stub records the pid it parks under, so the harness can
+    // reap a session it opened and never closed (fixtures/stubProcesses.ts).
+    // Inherited by every child the backend spawns, the stubs included.
+    ERUN_PLAYWRIGHT_STUB_REGISTRY: stubRegistryPath(),
   };
   if (e2eK3dEnabled()) {
     // k3d mode drives a live cluster with the real docker/kubectl/helm and
@@ -265,7 +277,7 @@ export function createIsolatedLayout(): void {
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun'];
+  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude'];
   for (const name of stubs) {
     writeStubBinary(name);
   }
@@ -389,9 +401,49 @@ export function seedGitRemoteAgentForK3d(
 //   see signalSessionReadyOnLine in erun-ui/activity_queue_app.go) and then
 //   sleeps, so the tab behaves like a healthy opened session: alive, quiet,
 //   and killable on env close.
+//
+//   `--no-shell` is the non-interactive probe form (`erun open <t> <e>
+//   --no-shell --reconnect`, see buildOpenNoShellArgs in erun-ui/session.go):
+//   the real CLI sets the forwards up and EXITS, and every caller waits on
+//   that exit. Sleeping here instead hung whatever was waiting — which is
+//   why the Windows stub has always exited for it. Matching that here is not
+//   cosmetic: an orchestrator launch opens a linked env's edge before writing
+//   the MCP config naming it, so a probe that never returns delays the launch
+//   by its whole bound and the operator sees a stopped orchestrator.
 // - kubectl: answers the context listing with an empty set (the env-init
 //   dialog's deterministic empty state) and reports everything else as
 //   unreachable.
+// - claude: an orchestrator row reads "running" only while its spawned session
+//   is live (ListOrchestrators, erun-ui/orchestrator.go), so the specs that
+//   open an orchestrator need that session to stay up. The real binary cannot
+//   in a non-interactive host — no TTY, no credentials — so it exits at once,
+//   the row reads "stopped", and the spec times out; where a real session does
+//   start (a developer's machine, an agent pod), every orchestrator the suite
+//   opens spends the shared agent account on a nested agent nobody asked for.
+//   The stub prints a shell-prompt line (the action runner's setup-complete
+//   marker, see signalSessionReadyOnLine) and then sleeps, so the session is
+//   live, quiet, and killable.
+//
+// Both long-lived stubs register the pid they park under before blocking, so the
+// harness can end a session it opened and never closed — see
+// fixtures/stubProcesses.ts. Keep that in lockstep on POSIX and win32 (the
+// prebuilt PE's registerStub call in fixtures/winstub/main.go).
+// stubRegisterPreamble heads every long-lived stub: it records the pid the stub
+// is about to park under, and which stub it is, in the registry the harness
+// reaps (fixtures/stubProcesses.ts). `exec` keeps that pid, so the number
+// recorded here is the parked process itself. Best-effort by design — a stub
+// invoked outside the harness has no registry in its environment and must still
+// run.
+function stubRegisterPreamble(name: string): string[] {
+  return [
+    '#!/bin/sh',
+    'register_stub() {',
+    '  [ -n "$ERUN_PLAYWRIGHT_STUB_REGISTRY" ] || return 0',
+    `  printf '%s ${name}\\n' "$$" >> "$ERUN_PLAYWRIGHT_STUB_REGISTRY"`,
+    '}',
+  ];
+}
+
 function writeStubBinary(name: string): void {
   if (isWindows) {
     // CreateProcess cannot exec a shell script or a .cmd/.bat file, so copy the
@@ -403,15 +455,28 @@ function writeStubBinary(name: string): void {
   let body: string;
   if (name === 'erun') {
     body = [
-      '#!/bin/sh',
+      ...stubRegisterPreamble(name),
       '# erun playwright stub: keeps ERun/AI tabs alive and inert.',
+      'case "$*" in',
+      '  *--no-shell*) exit 0 ;;',
+      'esac',
       'case "$1" in',
       '  open)',
+      '    register_stub',
       "    printf 'erun@playwright:~$ \\n'",
       '    exec sleep 2147483647',
       '    ;;',
       '  *) exit 0 ;;',
       'esac',
+      '',
+    ].join('\n');
+  } else if (name === 'claude') {
+    body = [
+      ...stubRegisterPreamble(name),
+      '# claude playwright stub: keeps an orchestrator session alive and inert.',
+      'register_stub',
+      "printf 'claude@playwright:~$ \\n'",
+      'exec sleep 2147483647',
       '',
     ].join('\n');
   } else if (name === 'kubectl') {
@@ -635,6 +700,45 @@ export function removeHeldLease(tenant: string, environment: string, name: strin
   fs.rmSync(path.join(activityLeaseDir(tenant, environment), `${name}.json`), { force: true });
 }
 
+// environmentJobDir is the sibling of activityLeaseDir under the same
+// per-env activity directory: XDG_CACHE_HOME/erun/activity/<tenant>/<env>/jobs.
+function environmentJobDir(tenant: string, environment: string): string {
+  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment, 'jobs');
+}
+
+// writeCompletedJob stages a real, already-finished job record — the same
+// on-disk shape eruncommon.EnvironmentJob writes — so a headless spec can
+// prove a lease is genuinely backed by a job without spawning a real
+// supervisor process. A terminal state ("exited") skips the read-time
+// liveness reconciliation a "running" job would need a live PID for.
+export function writeCompletedJob(
+  tenant: string,
+  environment: string,
+  id: string,
+  name: string,
+): void {
+  const dir = environmentJobDir(tenant, environment);
+  fs.mkdirSync(dir, { recursive: true });
+  const startedAt = new Date(Date.now() - 60_000);
+  const endedAt = new Date();
+  fs.writeFileSync(
+    path.join(dir, `${id}.json`),
+    JSON.stringify({
+      id,
+      name,
+      state: 'exited',
+      succeeded: true,
+      exitCode: 0,
+      startedAt: startedAt.toISOString(),
+      endedAt: endedAt.toISOString(),
+    }),
+  );
+}
+
+export function removeCompletedJob(tenant: string, environment: string, id: string): void {
+  fs.rmSync(path.join(environmentJobDir(tenant, environment), `${id}.json`), { force: true });
+}
+
 // seedTenant writes the minimal tenant config.yaml ListTenantConfigs needs to
 // surface a tenant at all — a tenant dir with no config.yaml is skipped as
 // uninitialized. Mirrors what `erun init` writes (createTenantConfig in
@@ -750,7 +854,54 @@ export function addOrchestrators(ids: string[], tenant: string, environment: str
 // YAML marshaller and this suite's hand-written seed disagree on it) rather
 // than assuming a fixed one, and removes the whole entry through whichever
 // line starts the next sibling item or leaves the block.
+// orchestratorOpenStatePath is the desktop's durable open set: which
+// orchestrators to reopen, and the scope each was wired to when it was opened.
+// It is a SEPARATE record from config.yaml -- erun-ui/orchestrator_open_state.go
+// writes it on open and only ever reads it back at launch.
+function orchestratorOpenStatePath(): string {
+  return path.join(isolatedHomeDir(), '.config', 'ERun', 'orchestrator-open.json');
+}
+
+// removeOrchestratorOpenState drops one orchestrator from that open set.
+//
+// Clearing only the config is not enough, and the half-state it leaves is what
+// makes it matter: the next launch reads the surviving entry, finds the
+// orchestrator has no config behind it, and renders "Reopened <id>: its
+// environments changed since its last session (... now no environments)" as a
+// sidebar alert (erun-ui/app_restart.go's orchestratorScopeChangedNotice). That
+// alert is a real role="alert" in the ERUN section, so a later spec asserting on
+// a page-wide role="alert" resolves two elements and fails on the strict-mode
+// violation -- tenant-dashboard-platform-state.spec.ts does exactly that once
+// orchestrator-directories.spec.ts has opened and removed one.
+function removeOrchestratorOpenState(id: string): void {
+  const statePath = orchestratorOpenStatePath();
+  let state: { orchestrators?: Array<{ orchestratorId?: string }> };
+  try {
+    state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as typeof state;
+  } catch {
+    // Absent or unreadable: nothing staged an open orchestrator, so there is
+    // nothing to drop and no file to rewrite.
+    return;
+  }
+  const entries = state.orchestrators ?? [];
+  const kept = entries.filter((entry) => entry.orchestratorId !== id);
+  if (kept.length === entries.length) {
+    return;
+  }
+  if (kept.length === 0) {
+    // writeOpenOrchestrators removes the file rather than writing an empty set,
+    // so match that: a leftover empty file is not a shape the desktop produces.
+    fs.rmSync(statePath, { force: true });
+    return;
+  }
+  fs.writeFileSync(statePath, `${JSON.stringify({ ...state, orchestrators: kept })}\n`);
+}
+
 export function removeOrchestrator(id: string): void {
+  // Before the config edit and outside its early returns: an orchestrator can be
+  // in the open set with no config entry left to find (the desktop re-emits the
+  // whole file through its own marshaller), and that is the case that leaks.
+  removeOrchestratorOpenState(id);
   const configPath = path.join(erunConfigDir(), 'config.yaml');
   const lines = fs.readFileSync(configPath, 'utf8').split('\n');
   const keyIndex = lines.findIndex((line) => line.trimEnd() === ORCHESTRATORS_KEY);

@@ -13,7 +13,9 @@ kubectl-secret-apply: subprocess
 kubectl-pod-watch: subprocess
 kubectl-context-configure: subprocess
 
-Running: Remove unused Docker images
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+docker storage: the erun-dind sidecar — container erun-dind of deployment/team-devops in namespace team-dev, where this environment's image builds run and where its build images are stored
+Running: Remove unused Docker images (the erun-dind sidecar)
 audit: erun doctor --dry-run --prune-images team dev
 trace-log: would append the full trace to <TMP>
 ==> Doctor team/dev
@@ -23,16 +25,26 @@ kubectl --context test-context --namespace team-dev wait --for=condition=Availab
 kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
 doctor-inspect:
   set -eu
-  printf '== Disk usage (/var/lib/docker) ==\n'
+  printf '%s\n' '== Disk usage (/var/lib/docker) =='
   df -h /var/lib/docker
-  printf '\n== Inode usage (/var/lib/docker) ==\n'
+  printf '\n'
+  printf '%s\n' '== Inode usage (/var/lib/docker) =='
   df -i /var/lib/docker
-  printf '\n== Docker system df ==\n'
+  printf '\n'
+  printf '%s\n' '== Docker system df =='
   docker system df
 kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
 kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
 doctor-prune_images:
   set -eu
+  printf '%s\n' 'erun-doctor-read:before'
+  docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'
+  printf '%s\n' 'erun-doctor-read:before:end'
   docker image prune -a -f
+  printf '%s\n' 'erun-doctor-read:after'
+  docker system df --format '{{.Type}}|{{.Size}}|{{.Reclaimable}}'
+  printf '%s\n' 'erun-doctor-read:after:end'
+  printf '\n'
+  printf '%s\n' '== Docker system df =='
   docker system df
 ==> Doctor done team/dev

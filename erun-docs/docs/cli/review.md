@@ -82,20 +82,22 @@ Records a build against a review — the only way an erun client transitions a r
 |---|---|
 | `--commit` | Full 40-character commit hash the build ran against. |
 | `--gate` | Record the merge queue's own `GATE` build kind instead of an ordinary build — set by the environment a review's merge queue promoted to `MERGE`, reporting its own build of the prospective merge. Omit `--version` when this is set: the gate publishes nothing. |
-| `--version` | Version the build minted (from `erun build --release --output json`), required even for a failed build — release resolves the version before the build step runs. Omit with `--gate`. |
+| `--version` | Version the build minted — from the run's own `erun build --output json`, or from `erun build --dry-run --output json` when it failed before printing one. Required even for a failed build. A `RECORDED` build publishes nothing, so the version is metadata no platform path resolves: a version `erun build --release` produced is accepted but not required (see [Builds § Triggering builds](/collaboration/builds#triggering-builds)). Omit with `--gate`. |
 | `--failed` | Record the build as failed instead of successful. |
 | `--failure-detail` | Why the build failed. Only meaningful with `--failed`. |
 
 ### `review report-merged` {#review-report-merged}
 
-Reports a review `MERGED`. This is for the environment a review's merge queue promoted to `MERGE`, once it has fetched the review's target and source (see [`exec gate-merge`](/cli/exec#exec-gate-merge)), gate-built the prospective squash merge, recorded that as a successful `GATE` build (`review record-build --gate`), and pushed the result — never before the push actually landed.
+Reports a review `MERGED`. The platform does not take this on trust, but *which* check it applies depends on where the review is sitting — not on what this command claims. Both refusals are `409 Conflict` (`MERGE_NOT_VERIFIED`), so either way the answer is a fact about the repository rather than the caller's word.
 
-The platform does not take this on trust: it checks `--build-id` names an already-recorded, successful `GATE` build for this review, then fetches `--remote-url` to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with `409 Conflict` (`MERGE_NOT_VERIFIED`) and leaves the review at `MERGE`. See [Merge queue](/collaboration/merge-queue) for the full mechanics.
+**A review at `MERGE` is the merge queue's.** This is for the environment the queue promoted, once it has fetched the review's target and source (see [`exec gate-merge`](/cli/exec#exec-gate-merge)), gate-built the prospective squash merge, recorded that as a successful `GATE` build (`review record-build --gate`), and pushed the result — never before the push actually landed. It checks `--build-id` names an already-recorded, successful `GATE` build for this review, then fetches `--remote-url` to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing leaves the review at `MERGE`.
+
+**Any other review is one whose work landed without the queue** — in practice a GitHub squash merge, where the branch's own commits are deliberately not ancestors of the target and no `GATE` build exists to name. Omit `--build-id`: the platform confirms against the same remote that everything the review's source branch adds, relative to where it diverged from the target, is already present in the target branch's history, and moves the review only if it is. A branch that did not land is refused just as firmly. This is what keeps a squash-landed review from sitting `OPEN` forever — see [Merge queue § Reconciling a review that landed elsewhere](/collaboration/merge-queue#landed-elsewhere).
 
 | Flag | Description |
 |---|---|
-| `--build-id` | The successful `GATE` build's id. |
-| `--remote-url` | The git remote the platform fetches to verify the merge. |
+| `--build-id` | The successful `GATE` build's id. Required for a review at `MERGE`; omit it for work that landed without the queue. |
+| `--remote-url` | The git remote the platform fetches to verify the merge. Required either way. Any form git accepts: an SSH remote — what `git remote get-url origin` returns on an SSH checkout — is read over the same host's HTTPS without credentials, so a public repository verifies either way, and a remote the platform cannot read that way is refused naming the form it needs. |
 
 ### `review requeue` {#review-requeue}
 
@@ -109,7 +111,7 @@ Assign or remove reviewers on a review, and list who's currently assigned. `revi
 
 ### `review queue list` / `review queue advance` {#review-queue-list--review-queue-advance}
 
-Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build with [`review requeue`](#review-requeue) (see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
+Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), if another review already holds that target branch's single `MERGE` slot (`409 Conflict`, naming that review — wait for it, or [`review requeue`](#review-requeue) it back to `READY`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build with [`review requeue`](#review-requeue) (see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
 
 ### `review queue override-advance` {#review-queue-override-advance}
 
@@ -166,12 +168,17 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `record-build` with a `--version` that fails the version grammar. | `400 Bad Request` (`INVALID_VERSION`). |
 | `record-build` on an unknown review id. | `404 Not Found`. |
 | `record-build --gate --failed` whose `--failure-detail` matches a known erun infrastructure-failure signature (a registry or network giving up, not a verdict about the change). | Aborts before any network call, naming the matched signature and the remedy: report the gate run `inconclusive` via [`exec gate-run report`](/cli/exec#exec-gate-run-report) instead of recording a `FAILED` `GATE` build. |
-| `report-merged` whose `--build-id` does not name a recorded, successful `GATE` build for this review. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
-| `report-merged` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
-| `requeue` on a review that is not currently at `MERGE`. | Aborts before the status change, naming the review's actual status. |
+| `report-merged` on a review at `MERGE` whose `--build-id` does not name a recorded, successful `GATE` build for it. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
+| `report-merged` on a review at `MERGE` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
+| `report-merged` on any other review whose source branch's changes are not already in the target branch's history. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review's status is unchanged. |
+| `report-merged` on a `CLOSED` review. | `400 Bad Request` (`INVALID_TRANSITION`); `CLOSED` is terminal. |
+| `requeue` on a review that is not currently at `MERGE`. | Aborts before the status change, naming the review's actual status; the platform's own refusal does too (`409 Conflict`, `REVIEW_NOT_MERGING`). |
 | `reviewers add --user-id` not enrolled in your own tenant. | Aborts before any network call, naming `erun platform user list`/`erun platform user enroll`. |
 | `reviewers add --user-id` already assigned to the review. | `409 Conflict`. |
 | `reviewers remove --user-id` not currently assigned. | `404 Not Found`. |
 | `queue advance` on an empty queue, or whose head is not `READY`. | `404 Not Found`. |
+| `queue advance` while another review already holds that target branch's `MERGE` slot. | `409 Conflict` (`MERGE_QUEUE_OCCUPIED`), naming that review and its source branch. Wait for it, or [`requeue`](#review-requeue) it back to `READY`. |
 | `queue advance` whose head still has unresolved comment threads. | `409 Conflict`, naming the count and the review. Resolve them or use `queue override-advance`. |
 | `queue override-advance` with `--reason` omitted or blank. | Aborts before any network call. |
+
+**One exit code spans every "this machine has no usable platform access" case.** No alias configured, several configured with `--erun-alias` omitted, an alias of the wrong provider type, and an alias whose erun configuration is incomplete all abort before any network call and exit **`127`**. That code is reserved for this condition — an ordinary failure exits `1` — so a caller reading only the exit status can tell "this machine cannot reach the platform at all" apart from "it reached the platform and the call failed", and route the work to a credentialed host instead of retrying. [`erun-merge` and `erun-merge-queue-drive`](/collaboration/merge-queue#capability-split) use it exactly that way.

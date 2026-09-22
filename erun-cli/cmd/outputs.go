@@ -40,7 +40,7 @@ func newOutputsListCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOutputsListCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), dirPath, limit, common.RunRemoteCommand)
+			return runOutputsListCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, limit, common.RunRemoteCommand)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -67,7 +67,7 @@ func newOutputsDownloadCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOutputsDownloadCommand(commandContext(cmd), resolveOpen, scopedOpenParams(tenant, environment), dirPath, args[0], dest, force, common.RunRemoteCommand)
+			return runOutputsDownloadCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, args[0], dest, force, common.RunRemoteCommand)
 		},
 	}
 	addDryRunFlag(cmd)

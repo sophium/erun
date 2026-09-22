@@ -191,6 +191,14 @@ var tenantScopeClassification = map[string]tenantScopeEntry{
 		kind:   scopedExplicitly,
 		reason: "reads TenantID off the security context and filters WHERE tenant_id = ? alongside the caller-supplied environment_id",
 	},
+	"JobRepository.List": {
+		kind:   scopedExplicitly,
+		reason: "reads TenantID off the security context and filters WHERE tenant_id = ? before any caller-supplied filter narrows it further",
+	},
+	"JobRepository.ListByEnvironment": {
+		kind:   scopedExplicitly,
+		reason: "delegates to the already-scoped list, which adds the caller-supplied environment_id on top of WHERE tenant_id = ?",
+	},
 }
 
 // TestContextOnlyRepositoryMethodsAreClassified is the structural half of the

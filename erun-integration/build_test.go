@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -176,6 +178,36 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_component_auto_selects_lone_entry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_dockerfile_test_stage_grants_host_network_entitlement", func(t *testing.T) {
+		// BuildKit default-denies `RUN --network=host`, so a component test stage
+		// that starts a container fixture cannot build at all unless erun grants
+		// the network.host entitlement. The grant is scoped to a Dockerfile that
+		// declares a `test` stage: `--allow network.host` hands a build step the
+		// *builder's* network namespace — this environment pod's — which a
+		// production image with no tests has no use for. This scenario is the
+		// granted arm. The ungranted arm is every other build golden in this
+		// suite, none of whose Dockerfiles declare a test stage: make the grant
+		// unconditional again and all of them fail on the stray token, which is
+		// the only reason this boundary is visible at all.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "", "build/VERSION")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "docker", "api", "Dockerfile"),
+			"FROM --platform=$BUILDPLATFORM alpine:3.22 AS test\n"+
+				"RUN --network=host true && touch /test-ok\n"+
+				"\n"+
+				"FROM alpine:3.22 AS builder\n"+
+				"COPY --from=test /test-ok /tmp/erun-test-ok\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_dockerfile_test_stage_grants_host_network_entitlement", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_component_flag_selects_entry", func(t *testing.T) {
@@ -601,6 +633,291 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_configured_platforms_narrows_build_to_one_architecture", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_project_platform_default_narrows_unlisted_environment", func(t *testing.T) {
+		// docker.platforms at the top level of .erun/config.yaml is the project
+		// default, inherited by every environment that declares no platforms of
+		// its own. A project whose machines are all single-architecture states
+		// the pin once, so an environment nobody listed (here "code1", which has
+		// no entry at all) cannot silently fall back to the multi-arch build and
+		// pay for an emulated architecture its node cannot run.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"docker:\n"+
+				"  platforms: [linux/amd64]\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "code1"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected the project-wide docker.platforms default to exclude arm64 from the build plan:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_project_platform_default_narrows_unlisted_environment", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_empty_platform_list_opts_environment_out_of_project_default", func(t *testing.T) {
+		// The explicit opt-out: an environment declaring platforms: [] is not
+		// pinned by the project default, so the generic environment name `erun
+		// init` assigns keeps building every platform a contributor's own
+		// machine may need.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"docker:\n"+
+				"  platforms: [linux/amd64]\n"+
+				"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      platforms: []\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "linux/arm64") {
+			t.Fatalf("expected an explicit platforms: [] to restore the multi-arch build:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_empty_platform_list_opts_environment_out_of_project_default", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_configured_docker_secret_reaches_build_argv", func(t *testing.T) {
+		// environments.<env>.docker.secrets declares a BuildKit build secret for
+		// this env. The credential stays in the environment variable docker reads
+		// it from; what reaches the build argv is the reference only, so the
+		// trace and the command are safe to log.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        - id: ghcr\n"+
+				"          env: ERUN_TEST_CHART_TOKEN\n",
+		)
+		envVars := append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
+		envVars = append(envVars, "ERUN_TEST_CHART_TOKEN="+dockerSecretFixtureValue)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, dockerSecretFixtureValue) {
+			t.Fatalf("the secret value must never reach the build's output, only the reference to it:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_configured_docker_secret_reaches_build_argv", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_project_docker_secret_default_applies_to_unlisted_environment", func(t *testing.T) {
+		// docker.secrets at the top level is the project default, inherited by
+		// every environment that declares no secrets of its own. A project that
+		// always needs one private registry credential states it once, so an
+		// environment nobody listed (here "code1", which has no entry at all)
+		// still receives it rather than silently building without it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		src := filepath.Join(setup.Cwd, "build-secrets", "chart-repo.json")
+		mustWriteFile(t, src, "{}\n")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"docker:\n"+
+				"  secrets:\n"+
+				"    - id: acme-charts\n"+
+				"      src: "+src+"\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "code1"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_project_docker_secret_default_applies_to_unlisted_environment", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_blank_docker_secret_entry_is_dropped", func(t *testing.T) {
+		// A list literal can leave a wholly blank entry behind. It declares
+		// nothing, so it must not reach the build as an empty --secret, and it
+		// must not disturb the entry beside it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        -\n"+
+				"        - id: ghcr\n"+
+				"          env: ERUN_TEST_CHART_TOKEN\n",
+		)
+		envVars := append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
+		envVars = append(envVars, "ERUN_TEST_CHART_TOKEN="+dockerSecretFixtureValue)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_blank_docker_secret_entry_is_dropped", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_empty_docker_secret_list_opts_environment_out", func(t *testing.T) {
+		// The explicit opt-out: an environment declaring secrets: [] inherits
+		// nothing from the project default, so it builds with no secrets even
+		// though the default names one. The project default's src deliberately
+		// does not exist here — the opt-out must win before the default is read,
+		// not after it has already been validated.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		missing := filepath.Join(setup.Cwd, "build-secrets", "absent.json")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"docker:\n"+
+				"  secrets:\n"+
+				"    - id: acme-charts\n"+
+				"      src: "+missing+"\n"+
+				"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets: []\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "--secret") {
+			t.Fatalf("expected an explicit secrets: [] to opt this environment out of the project default:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_empty_docker_secret_list_opts_environment_out", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fails_when_declared_docker_secret_environment_variable_is_unset", func(t *testing.T) {
+		// A declared secret that cannot be supplied must fail the build. A
+		// Dockerfile guards secret-dependent work with `if [ -f
+		// /run/secrets/<id> ]`, so a secret that silently fails to arrive makes
+		// the build skip that work and still exit zero — reporting success having
+		// verified less than the project asked for. The error names the missing
+		// variable and the remedy.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        - id: ghcr\n"+
+				"          env: ERUN_TEST_UNSET_CHART_TOKEN\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build to fail when a declared secret's environment variable is unset; got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/fails_when_declared_docker_secret_environment_variable_is_unset", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fails_when_declared_docker_secret_file_cannot_be_read", func(t *testing.T) {
+		// The src form gets the same treatment: a path that cannot be read fails
+		// the build and names the remedy, rather than handing docker a secret
+		// source that is not there.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		missing := filepath.Join(setup.Cwd, "build-secrets", "absent.json")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        - id: acme-charts\n"+
+				"          src: "+missing+"\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build to fail when a declared secret's file cannot be read; got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/fails_when_declared_docker_secret_file_cannot_be_read", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fails_when_docker_secret_entry_has_no_id", func(t *testing.T) {
+		// id is what the Dockerfile mounts by, so an entry without one cannot be
+		// mounted at all. Refusing it beats passing docker a secret the
+		// Dockerfile's --mount=type=secret can never name.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        - env: ERUN_TEST_CHART_TOKEN\n",
+		)
+		envVars := append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
+		envVars = append(envVars, "ERUN_TEST_CHART_TOKEN="+dockerSecretFixtureValue)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build to fail for a docker.secrets entry with no id; got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/fails_when_docker_secret_entry_has_no_id", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fails_when_docker_secret_entry_declares_neither_env_nor_src", func(t *testing.T) {
+		// The other half of exactly-one-source: an entry naming an id but no
+		// source at all has nothing to mount, and passing it through would leave
+		// the Dockerfile's mount empty.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        - id: ghcr\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build to fail for a docker.secrets entry declaring neither env nor src; got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/fails_when_docker_secret_entry_declares_neither_env_nor_src", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fails_when_docker_secret_entry_declares_both_env_and_src", func(t *testing.T) {
+		// Exactly one source per entry. Accepting both would silently pick one
+		// and mount a credential the project did not intend.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		src := filepath.Join(setup.Cwd, "build-secrets", "chart-repo.json")
+		mustWriteFile(t, src, "{}\n")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        - id: ghcr\n"+
+				"          env: ERUN_TEST_CHART_TOKEN\n"+
+				"          src: "+src+"\n",
+		)
+		envVars := append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
+		envVars = append(envVars, "ERUN_TEST_CHART_TOKEN="+dockerSecretFixtureValue)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build to fail for a docker.secrets entry declaring both env and src; got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/fails_when_docker_secret_entry_declares_both_env_and_src", normalize.Apply(result.Combined))
+	})
+
+	t.Run("fails_when_docker_secret_field_contains_a_comma", func(t *testing.T) {
+		// docker parses the --secret value as a comma-separated key=value list,
+		// so a comma inside a field would be read as the start of another pair
+		// and silently change which secret gets mounted.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      secrets:\n"+
+				"        - id: ghcr\n"+
+				"          env: \"ERUN_TEST_TOKEN,name=other\"\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected the build to fail for a docker.secrets field containing a comma; got exit 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/fails_when_docker_secret_field_contains_a_comma", normalize.Apply(result.Combined))
+	})
+
 	t.Run("release_platform_flag_conflict_errors", func(t *testing.T) {
 		// --release always publishes every platform erun supports, so combining
 		// it with an explicit --platform override is refused rather than
@@ -697,6 +1014,42 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_step_timing_breaks_a_platform_build_down_into_dockerfile_steps_and_make_phases", func(t *testing.T) {
+		// A gate build renders one image as ~99% of total wall clock, so the
+		// per-platform timing row used to be the finest granularity available --
+		// it could say a build was slow, never which part. BuildKit's own
+		// --progress=plain output (already captured for the two scenarios above)
+		// carries a per-Dockerfile-step DONE line, and the Makefile's own
+		// `>> <phase>` markers ride inside the `RUN make check` step's own output
+		// lines. Both must now surface as their own rows in the step timing table
+		// instead of collapsing into the platform's one duration.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image) case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  buildx) case "$2" in inspect) echo "Platforms: linux/arm64*, linux/amd64" ;; *) exit 0 ;; esac ;;`,
+			`  build) echo "#4 [3/3] RUN make check"; echo "#4 0.10 >> golangci-lint"; echo "#4 5.00 >> go test"; echo "#4 DONE 12.00s"; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "step timing") {
+			t.Fatalf("expected the step timing table, got:\n%s", result.Combined)
+		}
+		for _, want := range []string{"RUN make check", "golangci-lint", "go test"} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected the step timing table to name %q as its own row (a Dockerfile step / make phase, not just the whole platform build), got:\n%s", want, result.Combined)
+			}
+		}
+	})
+
 	t.Run("dry_run_no_incremental_skips_fingerprint_short_circuit", func(t *testing.T) {
 		// --no-incremental forces `docker build` for every image even when a
 		// fingerprint tag exists — no `docker image inspect` short-circuit, no
@@ -752,6 +1105,30 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("expected non-zero exit (build.sh ignored, no docker context), got 0: %s", result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_disable_build_script_ignores_project_build_sh", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_refuses_script_fallback_when_the_project_has_a_docker_module", func(t *testing.T) {
+		// A project whose docker module holds images must never degrade to a
+		// nested project build script: that exits zero having built no image and
+		// run no gate, which the caller reading the exit code cannot tell from a
+		// real pass. Running from a directory that resolves no images is the
+		// shape of that false green, and it must fail loudly instead.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		nestedDir := filepath.Join(setup.Cwd, "erun-ui")
+		if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+			t.Fatalf("mkdir nested dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(nestedDir, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write nested build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", ".")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add nested build script")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: nestedDir, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit (project has a docker module, no image resolved), got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_refuses_script_fallback_when_the_project_has_a_docker_module", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_with_project_build_script_executes_script", func(t *testing.T) {
@@ -1073,11 +1450,13 @@ func TestBuild(t *testing.T) {
 
 	t.Run("dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", func(t *testing.T) {
 		// erun#2081: an environment with no configured runtimedindpod must not
-		// fall back to the host node's real CPU/memory capacity (the bug this
-		// issue is about) -- it must fall back to the same small, fixed
-		// constant the sidecar's own chart default and the Dockerfile's own
-		// ARG default use (4 CPU / 20480Mi), regardless of how large the
-		// machine actually running this test is.
+		// fall back to the host node's real CPU/memory capacity (the bug that
+		// issue is about) -- it must fall back to the same fixed constant the
+		// sidecar's own chart default and the Dockerfile's own ARG default
+		// use, regardless of how large the machine actually running this test
+		// is. The constant's own value is erun-common's rule to decide (it is
+		// sized for a node, not for the host this happens to run on), so it is
+		// read from there rather than restated here.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -1088,8 +1467,9 @@ func TestBuild(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Combined, "--build-arg DIND_CPU_LIMIT=4 --build-arg DIND_MEMORY_LIMIT_MIB=20480") {
-			t.Errorf("expected the docker build to fall back to the conservative constant, not the host's real capacity:\n%s", result.Combined)
+		want := "--build-arg DIND_CPU_LIMIT=" + eruncommon.DefaultRuntimeDindCPU + " --build-arg DIND_MEMORY_LIMIT_MIB=20480"
+		if !strings.Contains(result.Combined, want) {
+			t.Errorf("expected the docker build to fall back to the conservative constant (%s), not the host's real capacity:\n%s", want, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", normalize.Apply(result.Combined))
 	})
@@ -1621,6 +2001,90 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_release_absorbs_a_concurrent_publishers_unknown_blob", func(t *testing.T) {
+		// A release whose push is rejected because a concurrent publisher's
+		// upload of a shared layer has not committed yet must re-push and finish,
+		// not fail the build four minutes in with everything already built.
+		// The docker stub rejects the first push with "unknown blob" and accepts
+		// every later one — the observable shape the registry-side race takes for
+		// the run that loses it.
+		//
+		// The gh stub exists for the credential preflight GHCR runs before any
+		// build (an anonymous push is refused up front), not to drive a login
+		// retry: "unknown blob" is not an authorization failure, so the retry
+		// that absorbs it is the push funnel's blob re-push, which the
+		// "re-pushing" assertion below pins. ERUN_AUTO_LOGIN_ON_PUSH only keeps
+		// an unexpected login path from blocking on a prompt.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		counter := filepath.Join(stubs, "docker-push-counter")
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  push)`,
+			`    count=0`,
+			`    if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
+			`    count=$((count + 1))`,
+			`    printf '%s' "$count" > '` + counter + `'`,
+			`    if [ "$count" = "1" ]; then`,
+			`      printf 'unknown blob\n' >&2`,
+			`      exit 1`,
+			`    fi`,
+			`    exit 0 ;;`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			// manifest inspect backs both the pre-publish probe and the
+			// post-publish verify; marker-file-tracked so this scenario does
+			// not falsely report the image as already published before
+			// manifest push has run.
+			`  manifest)`,
+			`    marker="` + stubs + `/manifest-published-$(printf '%s' "$3" | tr '/:' '__')"`,
+			`    case "$2" in`,
+			`      inspect) [ -f "$marker" ] && exit 0 || exit 1 ;;`,
+			`      push) touch "$marker" ; exit 0 ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// Release operations (tag, push) go through the git stub so the release
+		// stage succeeds without a real remote. The gh stub answers the user
+		// lookup and token read the GHCR credential preflight performs.
+		fixture.StubBinary(t, stubs, "git", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "api user") printf 'octo-owner\n'; exit 0 ;;`,
+			`  "auth token") printf 'gh-token\n'; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git", "helm")...)
+		// tryGHCRLoginViaGH gates on exec.LookPath("gh"), which reads PATH rather
+		// than the ERUN_<NAME>_BIN override.
+		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		result := erun.Run(t, []string{"build", "--release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/real_run_release_absorbs_a_concurrent_publishers_unknown_blob", normalize.Apply(result.Combined))
+		if !strings.Contains(result.Combined, "re-pushing (1/2)") {
+			t.Errorf("expected the release to report the bounded re-push rather than failing, got:\n%s", result.Combined)
+		}
+		// The push counter is a side effect outside the captured streams: >= 2
+		// proves the rejected push was really re-run instead of the rejection
+		// being swallowed.
+		rawCount, err := os.ReadFile(counter)
+		if err != nil {
+			t.Fatalf("read push counter: %v", err)
+		}
+		if pushes, convErr := strconv.Atoi(strings.TrimSpace(string(rawCount))); convErr != nil || pushes < 2 {
+			t.Fatalf("expected at least 2 docker push invocations (blob rejection + re-push), got %q", rawCount)
+		}
+	})
+
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
 		// --release dry-run must trace the per-platform docker build + docker push
 		// for the release-tagged image, plus the local tag for downstream
@@ -1734,6 +2198,43 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("expected a recorded skip for the failed report, got:\n%s", result.Combined)
 		}
 	})
+
+	t.Run("dry_run_e2e_implies_deploy_and_no_playwright_folder_is_a_clean_no_op", func(t *testing.T) {
+		// --e2e implies --deploy (no separate --deploy needed), and composes
+		// the e2e step after the deploy trace; a project with no playwright/
+		// folder makes that step a clean no-op rather than an error.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"build", "--e2e", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "e2e: no playwright/ suite found; nothing to run") {
+			t.Fatalf("expected --e2e to report a clean no-op with no playwright/ folder, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_e2e_implies_deploy_and_no_playwright_folder_is_a_clean_no_op", normalize.Apply(result.Combined))
+	})
+
+	t.Run("e2e_with_project_build_script_errors", func(t *testing.T) {
+		// --e2e implies --deploy, which cannot compose with a project build
+		// script; it must fail with the same clear message --deploy alone
+		// produces, rather than a confusing e2e-specific error.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", "build.sh")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add build script")
+		result := erun.Run(t, []string{"build", "--e2e", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --e2e with a build script, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/e2e_with_project_build_script_errors", normalize.Apply(result.Combined))
+	})
 }
 
 // stubDockerNoLocalImages makes every docker invocation a clean "No such image"
@@ -1741,6 +2242,12 @@ func TestBuild(t *testing.T) {
 // (fingerprint inspects, manifest probes) even though they mutate nothing;
 // without the stub they silently depend on a host docker CLI and fail in
 // docker-less environments such as the image build's test stage.
+// dockerSecretFixtureValue stands in for a build secret's credential in the
+// docker.secrets scenarios. It is a fixture literal, not a credential: the
+// scenarios that set it assert the value never reaches the build's output, so
+// its only job is to be recognisable if one of them ever leaks it.
+const dockerSecretFixtureValue = "fixture-value-must-never-be-traced"
+
 func stubDockerNoLocalImages(t *testing.T, setup env.Setup) []string {
 	t.Helper()
 	stubs := filepath.Join(setup.Cwd, "stubs")

@@ -138,7 +138,7 @@ func (a *App) finishExpiredInvestigation(record investigationRecord) {
 	a.stopOrchestratorSession(record.ID)
 	a.investigations.appendInvestigationLog(record, fmt.Sprintf("terminated: still running after the %s lifetime bound without concluding; stopped by the desktop", investigationAge(investigationLifetime)))
 	if record.Tenant != "" && record.Environment != "" && record.LeaseID != "" {
-		if err := eruncommon.ReleaseEnvironmentActivityLease(record.Tenant, record.Environment, record.LeaseID); err != nil {
+		if _, err := eruncommon.ReleaseEnvironmentActivityLease(record.Tenant, record.Environment, record.LeaseID); err != nil {
 			log.Printf("erun-app: release investigation lease %s: %v", record.LeaseID, err)
 		}
 	}

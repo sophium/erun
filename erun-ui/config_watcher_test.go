@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // TestNewFsnotifyConfigWatcherFailsWhenTheRootCannotBeCreated locks in the
@@ -54,9 +56,11 @@ func TestStartConfigWatcherSurfacesAStartupFailure(t *testing.T) {
 // overflowed event queue) must not be discarded either.
 func TestConfigWatcherSurfacesARuntimeError(t *testing.T) {
 	root := t.TempDir()
-	watcher, err := newFsnotifyConfigWatcher(root)
-	if err != nil {
-		t.Fatalf("newFsnotifyConfigWatcher: %v", err)
+	// Own the injected channels: a real backend can close Errors while the
+	// test sends to it during shutdown.
+	watcher := &fsnotify.Watcher{
+		Events: make(chan fsnotify.Event),
+		Errors: make(chan error),
 	}
 
 	notified := make(chan appNotificationPayload, 1)
@@ -72,6 +76,10 @@ func TestConfigWatcherSurfacesARuntimeError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cw := &configWatcher{watcher: watcher, cancel: cancel, done: make(chan struct{})}
 	go app.runConfigWatcher(ctx, cw, root)
+	t.Cleanup(func() {
+		cancel()
+		<-cw.done
+	})
 
 	watcher.Errors <- errors.New("boom")
 
@@ -83,8 +91,4 @@ func TestConfigWatcherSurfacesARuntimeError(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected a notification for the watcher's runtime error")
 	}
-
-	cancel()
-	_ = watcher.Close()
-	<-cw.done
 }

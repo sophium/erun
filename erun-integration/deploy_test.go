@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
@@ -343,8 +343,8 @@ func TestDeploy(t *testing.T) {
 		// there is no env to name, so the header drops the tenant/environment
 		// pair entirely instead of falling back to a bare separator. Also locks
 		// resolveOpenTenant's inference-permitted-but-unresolved error: it must
-		// name open, not just repeat "default tenant is not configured", and
-		// state the recovery.
+		// name the command that actually ran (deploy, not open), not just repeat
+		// "default tenant is not configured", and state that command's recovery.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
 		if result.ExitCode == 0 {
@@ -3354,6 +3354,57 @@ esac
 		golden.Equal(t, "deploy/dry_run_with_aws_claude_models_traces_set_strings", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_with_openrouter_gateway_traces_set_strings", func(t *testing.T) {
+		// Exercises eruncommon.helmClaudeSetArgs' gateway branch: the erun-level
+		// catalog in root config resolves into the runtime chart's
+		// claude.openRouter* helm --set-string args. Only the credential's Secret
+		// name travels — a token value never reaches helm argv. This env is also
+		// AWS, so it pins that the gateway's available-models and model variables
+		// are not emitted twice.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "managed")
+		envDir := filepath.Join(tenantDir, "prod")
+		for _, dir := range []string{tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("name: managed\nprojectroot: "+setup.Cwd+"\ndefaultenvironment: prod\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: prod\n" +
+			"repopath: " + setup.Cwd + "\n" +
+			"kubernetescontext: edge\n" +
+			"containerregistry: registry.example/test\n" +
+			"runtimeversion: 1.0.0\n" +
+			"managedcloud: true\n" +
+			"cloudprovideralias: dev\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		rootBody := "openrouter:\n" +
+			"  baseurl: https://openrouter.ai/api\n" +
+			"  authtokensecret: erun-claude-gateway\n" +
+			"  defaultmodel: deepseek/deepseek-v4-pro-0813\n" +
+			"  models:\n" +
+			"    - id: deepseek/deepseek-v4.1-flash\n" +
+			"      context: 1048576\n" +
+			"    - id: deepseek/deepseek-v4-pro-0813\n" +
+			"      context: 1024000\n"
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(rootBody), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_with_openrouter_gateway_traces_set_strings", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_helm_pending_recovery_via_auto_recover_env", func(t *testing.T) {
 		// Exercises wrapHelmDeployWithReleaseRecovery + the production
 		// helm-recovery path: a stubbed `helm` exits with the pending
@@ -3805,21 +3856,24 @@ esac
 		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_local_agent_non_runtime_allowed", normalize.Apply(result.Combined))
 	})
 
-	t.Run("devops_k8s_deploy_component_in_pod_non_local_agent_runtime_allowed", func(t *testing.T) {
-		// The guard is scoped to local-agent envs: a remote-agent env owns its
-		// worktree inside the pod, so naming its runtime chart as the component
-		// from inside the pod stays supported — mirrors
-		// in_pod_remote_agent_runtime_deploy_allowed for the component-named path.
+	t.Run("devops_k8s_deploy_component_in_pod_non_local_agent_runtime_refused", func(t *testing.T) {
+		// Regression: naming the runtime release as a component from inside a
+		// remote-agent env's own pod reached the same projection-resolved rollout
+		// the local-agent case already refused. Naming the chart makes the
+		// selection deliberate, not the values authoritative — the resolve still
+		// reads the pod's projection, so it still carries the substituted sshd
+		// state, port block, and runtime sizing. Mirrors
+		// in_pod_remote_agent_runtime_deploy_refused for the component-named path.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		repoPath := filepath.Join(setup.Home, "git", "team")
 		fixture.SeedDevopsRepoAt(t, repoPath, "team", "dev")
 		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
 		result := erun.Run(t, []string{"devops", "k8s", "deploy", "team-devops", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an in-pod non-local-agent component-named runtime deploy:\n%s", result.Combined)
 		}
-		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_non_local_agent_runtime_allowed", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/devops_k8s_deploy_component_in_pod_non_local_agent_runtime_refused", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_parallel_step_deploys_charts_concurrently", func(t *testing.T) {
@@ -4365,17 +4419,77 @@ esac
 		golden.Equal(t, "deploy/in_pod_local_agent_runtime_deploy_refused", normalize.Apply(result.Combined))
 	})
 
-	t.Run("in_pod_remote_agent_runtime_deploy_allowed", func(t *testing.T) {
-		// The guard is scoped to local-agent envs: a remote-agent env owns its
-		// worktree inside the pod, so deploying itself in-pod stays supported.
+	t.Run("in_pod_remote_agent_runtime_deploy_refused", func(t *testing.T) {
+		// Regression: the guard keyed on the target being local-agent, so a
+		// remote-agent env's own pod rolled its own runtime chart from a resolve
+		// that had substituted the projection's values — sshdEnabled=false where
+		// the environment runs the sshd that serves workspace-sync, and the
+		// projection's port block and runtime sizing in place of the host store's.
+		// Owning the worktree inside the pod makes the deploy reachable; it does
+		// not make the values it resolved correct.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an in-pod remote-agent runtime deploy:\n%s", result.Combined)
 		}
-		golden.Equal(t, "deploy/in_pod_remote_agent_runtime_deploy_allowed", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/in_pod_remote_agent_runtime_deploy_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_runtime_env_runtime_deploy_refused", func(t *testing.T) {
+		// Regression: a runtime env's pod carries only the config projection the
+		// chart injected, which has no deploy block — so `deploy.components` is
+		// empty in there even when the env has a saved selection, the
+		// runtime-chart-alone fallback is reached for lack of information rather
+		// than by choice, and the deploy exited 0 having rolled one chart of the
+		// nine the operator selected. The refusal names the runtime chart it would
+		// have rolled alone and both remedies.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a blind in-pod runtime deploy:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_runtime_deploy_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_runtime_env_explicit_runtime_component_refused", func(t *testing.T) {
+		// Regression: naming the runtime release used to be the empty-selection
+		// refusal's own second remedy, and it carried the same
+		// projection-substituted values as the inferred fallback the first remedy
+		// avoids. A deliberate selection is not an authoritative one: the resolve
+		// still reads the pod's projection, so the rollout still emits the
+		// projection's sshd state and port block for this pod's own environment.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnv(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--components", "team-devops", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an in-pod runtime-env runtime-chart deploy:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_explicit_runtime_component_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_pod_runtime_env_saved_selection_refused_by_the_runtime_chart_guard", func(t *testing.T) {
+		// A saved deploy.components selection resolves, so the empty-selection
+		// guard stays silent — its diagnosis, that the pod cannot tell a genuinely
+		// empty selection from the one saved on the host, does not apply. What
+		// refuses the rollout is the runtime-chart guard one layer on, because a
+		// selection that resolved still resolves the runtime chart's values from
+		// the pod's projection.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvWithDeployComponents(t, setup, "team", "dev", []string{"team-devops"})
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.0")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for an in-pod runtime-env deploy of its saved selection:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "refusing to roll the runtime chart alone") {
+			t.Fatalf("a resolved saved selection must not reach the empty-selection guard:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/in_pod_runtime_env_saved_selection_refused_by_the_runtime_chart_guard", normalize.Apply(result.Combined))
 	})
 
 	t.Run("in_pod_local_agent_component_deploy_allowed", func(t *testing.T) {
@@ -4604,7 +4718,7 @@ func reapedChildPID(t *testing.T) int {
 		t.Skip("reaped-pid reclaim relies on Unix signal liveness; Windows PID reuse is non-deterministic")
 	}
 	// Spawn and reap a real child to get a positive, dead PID.
-	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	cmd := harnessexec.Command("/bin/sh", "-c", "exit 0")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("seed reaped child: %v", err)
 	}
@@ -4719,3 +4833,91 @@ const unschedulablePodJSON = `{
     }
   ]
 }`
+
+// A deploy running inside the target env's own runtime pod has none of the
+// three credential routes resolveGHCRBasicAuth knows -- no docker config, no gh
+// session, no GH_TOKEN/GITHUB_TOKEN -- so before this fix every read of the
+// tenant's private chart was anonymous, ghcr refused to mint a token, and deploy
+// refused the read as unconfirmed. The env already declares where the credential
+// lives: its imagepullsecrets names a dockerconfigjson Secret in its own
+// namespace that the pod's service account can read. The pod resolves it from
+// there instead of falling back to anonymous.
+//
+// The in-pod runtime-chart guard refuses the rollout itself once the resolve is
+// done, so the in-pod leg ends at the authenticated chart read rather than at a
+// completed deploy; both are asserted below, so the leg still proves the
+// credential carried the read.
+func TestDeployInPodResolvesDeclaredImagePullSecret(t *testing.T) {
+	t.Parallel()
+
+	// run deploys team/dev from a credential-less process, optionally marking it
+	// as team/dev's own runtime pod. Everything else is identical, so the trace
+	// difference is the gating and nothing else.
+	run := func(t *testing.T, inPod bool) string {
+		t.Helper()
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"imagepullsecrets:\n    - ghcr-pull\n")
+
+		// The pod pulls with the credential the Secret declares; the process
+		// holds no docker config of its own, so only the declared Secret can
+		// supply one.
+		secretJSON := fmt.Sprintf(`{"data":{".dockerconfigjson":%q}}`,
+			base64.StdEncoding.EncodeToString([]byte(`{"auths":{"ghcr.io":{"auth":"cHVsbHNlY3JldDpwdw=="}}}`)))
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", fmt.Sprintf(`case "$*" in
+  *"get secret ghcr-pull -o json"*) cat <<'JSON'
+%s
+JSON
+    ;;
+  *) exit 0 ;;
+esac
+`, secretJSON))
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+
+		envVars := append(setup.Env(),
+			"ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=team-devops:1.0.0",
+			"DOCKER_CONFIG="+t.TempDir())
+		if inPod {
+			envVars = append(envVars, "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev", "ERUN_NAMESPACE=team-dev")
+		}
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if !inPod && result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "pullsecret") {
+			t.Fatalf("the resolved credential must never appear in trace output: %s", result.Combined)
+		}
+		return result.Combined
+	}
+
+	const resolved = "registry credential: resolved 1 registry credential(s) from this environment's declared image pull secret(s) ghcr-pull"
+	// The read the credential exists for: the tenant's private chart probe
+	// authenticates instead of being refused as an anonymous read. The in-pod
+	// runtime-chart guard stops the rollout after the resolve, so this read — not
+	// a completed deploy — is where the in-pod leg ends.
+	const authenticatedRead = "runtime chart team-devops 1.0.0 found in registry.example/test"
+
+	inPodTrace := run(t, true)
+	if !strings.Contains(inPodTrace, resolved) {
+		t.Fatalf("in-pod deploy did not resolve the env's declared image pull secret:\n%s", inPodTrace)
+	}
+	if !strings.Contains(inPodTrace, authenticatedRead) {
+		t.Fatalf("the resolved credential did not carry the tenant's private chart read:\n%s", inPodTrace)
+	}
+	if !strings.Contains(inPodTrace, "refusing to deploy the runtime chart from inside this environment's own pod") {
+		t.Fatalf("the in-pod leg must stop at the in-pod runtime chart guard, not some other failure:\n%s", inPodTrace)
+	}
+	if trace := run(t, false); strings.Contains(trace, resolved) {
+		t.Fatalf("a deploy outside its env's runtime pod must not read that env's declared pull secrets:\n%s", trace)
+	}
+}

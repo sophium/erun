@@ -24,6 +24,17 @@ import (
 // same path) so two environments' dind sidecars sharing one node's cgroup
 // tree — a real, host-namespace-wide path, not one scoped to this pod — never
 // collide on the same cap.
+//
+// The hostname in it is deliberate and cannot be made to survive a pod roll:
+// the path has to name one pod, or two environments' builds on a shared node
+// would nest under the same cap and one environment's OOM would stop the
+// other's build. What that costs is confined to cgroup placement.
+// It is never part of a build's *identity*: not the fingerprint
+// (computeBuildFingerprint), and, measured against buildkit 0.21 on the docker
+// driver, not the layer key or the cache-mount key BuildKit computes either —
+// the same RUN with a different --cgroup-parent reports CACHED, and both its
+// layer and its `--mount=type=cache` records are reused. So a roll changes
+// this path without invalidating anything a build can be served from.
 func buildContainerCPUCapCgroupParent() string {
 	if !inInjectedRuntimePod() {
 		return ""

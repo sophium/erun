@@ -1,5 +1,5 @@
 import { Button, cn, EmptyState, IconTooltip } from 'erun-kit';
-import { ArrowUp, Plus } from 'lucide-react';
+import { ArrowUp, LoaderCircle, Plus } from 'lucide-react';
 import * as React from 'react';
 
 import { openInitializeDialog } from '@/app/environmentDialogThunks';
@@ -14,6 +14,7 @@ export function Sidebar(): React.ReactElement {
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const tenants = useAppSelector((state) => state.tenants.tenants);
+  const tenantsLoaded = useAppSelector((state) => state.tenants.tenantsLoaded);
   const selected = useAppSelector((state) => state.selection.selected);
   return (
     <aside
@@ -59,7 +60,14 @@ export function Sidebar(): React.ReactElement {
             </IconTooltip>
           </div>
         </div>
-        {tenants.length === 0 ? (
+        {!tenantsLoaded ? (
+          <div className="px-2 py-2">
+            <EmptyState
+              icon={<LoaderCircle className="animate-spin" />}
+              heading="Loading environments…"
+            />
+          </div>
+        ) : tenants.length === 0 ? (
           <div className="px-2 py-2">
             <EmptyState
               icon={<Plus />}

@@ -44,6 +44,10 @@ test.describe('review panel reachability framing (#1230)', () => {
     await stubLoadDiffError(page, NOT_OPEN_MESSAGE);
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps, and every
+    // assertion below is scoped to content the panel itself renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     // Not a fault: no role="alert" anywhere, and the informational status
@@ -63,6 +67,10 @@ test.describe('review panel reachability framing (#1230)', () => {
     await stubLoadDiffError(page, STALE_MESSAGE);
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps, and every
+    // assertion below is scoped to content the panel itself renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     const alert = review.errorAlerts();
@@ -80,6 +88,10 @@ test.describe('review panel reachability framing (#1230)', () => {
     await stubLoadDiffError(page, STALE_MESSAGE);
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps, and every
+    // assertion below is scoped to content the panel itself renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     // Both surfaces are visible at once here -- no collapseChangedFilesSection()
@@ -97,6 +109,10 @@ test.describe('review panel reachability framing (#1230)', () => {
     await stubLoadDiffError(page, NOT_OPEN_MESSAGE);
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps, and every
+    // assertion below is scoped to content the panel itself renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     await expect(review.changedFilesTree()).toBeVisible();
@@ -113,6 +129,10 @@ test.describe('review panel reachability framing (#1230)', () => {
     await stubLoadDiffError(page, NOT_OPEN_MESSAGE);
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps, and every
+    // assertion below is scoped to content the panel itself renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     await review
@@ -143,7 +163,13 @@ test.describe('review panel reconnect targeting in an orchestrator session (#123
         { tenant: SEED_TENANT, environment: SEED_ENV_BETA, directory: '/tmp/orch-beta' },
       ],
       tenants: [SEED_TENANT],
-      directories: ['/tmp/orch-alpha', '/tmp/orch-beta'],
+      // Empty, not absent: this orchestrator has only its linked environments, and
+      // the diff panel renders one section per directory an orchestrator works in
+      // itself -- so a fictional path here would add a failing section beside the
+      // ones these tests are about. Empty matches what the desktop sends as well;
+      // see review-directory-target.spec.ts for the directory case, against a real
+      // directory.
+      directories: [],
       sessionId: RUNNING_SESSION_ID,
       status: 'running',
       busy: false,
@@ -228,6 +254,10 @@ test.describe('review panel reconnect targeting in an orchestrator session (#123
     await app.reboot();
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
     await app.titlebar.toggleReviewPanel();
+    // Converge on the panel having opened before asserting on anything inside
+    // it: the toggle and the panel's render are separate steps, and every
+    // assertion below is scoped to content the panel itself renders.
+    await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
     await expect(review.envSectionHeader(ALPHA_ENV_KEY)).toBeVisible();

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -157,7 +156,7 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 	if captured.Result.Environment != "remote" {
 		t.Fatalf("stop resolved the wrong environment: %+v", captured.Result)
 	}
-	waitForEnvStatus(t, emits, envStatusRuntimeStopped, 2*time.Second)
+	waitForEnvStatus(t, emits, envStatusRuntimeStopped)
 	if !app.isRuntimeStopped(selection) {
 		t.Fatal("stop did not latch the intent, so an open tab's reconnect would wake the env straight back up")
 	}
@@ -231,14 +230,14 @@ func TestReconnectRefusedFlagsStoppedRuntimeInsteadOfFailed(t *testing.T) {
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
-	waitForEnvStatus(t, emits, "", 2*time.Second)
+	waitForEnvStatus(t, emits, "")
 
 	sessionsMu.Lock()
 	current := sessions[0]
 	sessionsMu.Unlock()
 	_ = current.Close()
 
-	waitForEnvStatus(t, emits, envStatusRuntimeStopped, 2*time.Second)
+	waitForEnvStatus(t, emits, envStatusRuntimeStopped)
 	for _, payload := range envStatuses(emits) {
 		if payload.Status == envStatusFailed {
 			t.Fatalf("a stopped runtime must not read as a failure: %+v", envStatuses(emits))

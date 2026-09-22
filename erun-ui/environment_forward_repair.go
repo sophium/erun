@@ -68,7 +68,15 @@ type forwardRepairEpisode struct {
 // question is left, and only when there is a listener to ask.
 func (a *App) reconcileForwardHealth(selection uiSelection, port int, portIsBound bool) bool {
 	const established = true
-	health := eruncommon.ClassifyPortForward(established, portIsBound, portIsBound && a.mcpEdgeAnswers(port))
+	// Probe once and use the answer twice: it classifies the forward, and it is
+	// the observation that retires a recorded edge outage. A port nothing holds
+	// is not an edge that came back — no traffic can flow through it — so only a
+	// bound port whose edge answers counts as recovery.
+	answers := portIsBound && a.mcpEdgeAnswers(port)
+	if answers {
+		a.noteOrchestratorEdgeAnswering(selection)
+	}
+	health := eruncommon.ClassifyPortForward(established, portIsBound, answers)
 	if !health.Interrupted() {
 		a.forgetForwardRepair(selection)
 		return false

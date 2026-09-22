@@ -13,7 +13,7 @@ func newReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinde
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "release",
-		Short:         "Cut a release: publish the version's images and charts, then tag and announce it",
+		Short:         "Cut a release: stamp, tag, and push the release's source control",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -25,12 +25,12 @@ func newReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinde
 	cmd.Flags().BoolVar(&force, "force", false, "Delete and recreate conflicting release tags before tagging")
 	cmd.Example = "  erun release --dry-run\n  erun -v release --dry-run"
 	cmd.Long = "Cut a release from the current branch.\n\n" +
-		"Resolves the release version from the version file, stamps it into the charts and package-manager metadata, and commits and tags it locally. It then builds that version's container images for both architectures and publishes them and their helm charts, reading each one back from the registry to prove it resolves. Only then does it push the tag, sync packaging checksums, prepare the next patch version, and push the branches.\n\n" +
-		"Publishing before tagging is the contract: a release that exits 0 means `erun deploy --version <version>` can pull the image and the chart, and a release that cannot publish fails while nothing is public yet.\n\n" +
+		"Resolves the release version from the version file, stamps it into the charts and package-manager metadata, and commits and tags it locally. It then pushes the tag, syncs packaging checksums, prepares the next patch version, and pushes the branches.\n\n" +
+		"It marks source control and nothing else: it never builds, publishes, or verifies an artifact, so it exits 0 having published nothing and says so. Build and publish belong to `erun build --release`, which composes this same stamp/tag work with the build, and to `erun push --version <version>`. A tag whose artifacts never landed names a dead version rather than corrupting anything, and a dead version is not deployable by accident because `erun deploy` never builds — the remedy is to fix the source and release again.\n\n" +
 		"Which branch releases as a stable version vs a candidate comes from .erun/config.yaml.\n\n" +
-		"High blast radius: pushes tags and branches to origin and publishes images and charts to the registry, so the released version becomes public and consumable.\n\n" +
-		"The release step of the build → release → push → deploy flow. It composes build and push itself, so a separate `erun push` afterwards only republishes what release already put in the registry.\n\n" +
-		"Dry-run:\n  --dry-run resolves the version, file updates, git actions, image builds, and chart publishes without executing them."
+		"High blast radius: pushes tags and branches to origin, so the released version's source becomes public.\n\n" +
+		"The release step of the build → release → push → deploy flow. It performs no build and no publish; run `erun build --release` to produce and publish a version's artifacts.\n\n" +
+		"Dry-run:\n  --dry-run resolves the version, file updates, and git actions without executing them."
 	return cmd
 }
 
@@ -58,6 +58,12 @@ func runReleaseCommand(ctx common.Context, store common.DockerStore, findProject
 	scriptToStderr := func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runBuildScript(dir, path, env, stdin, ctx.Stderr, stderr)
 	}
-	buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
-	return common.RunReleaseExecution(ctx, execution, gitToStderr, scriptToStderr, buildWithRetry, push)
+	// Source control only: release stamps, commits, tags and pushes the version
+	// and never builds or publishes an artifact. Build and publish are
+	// `erun build --release` and `erun push --version`. See RunReleaseSpec.
+	spec, ok := common.BuildExecutionReleaseSpec(execution)
+	if !ok {
+		return fmt.Errorf("release: the resolved plan is not a release")
+	}
+	return common.RunReleaseSpec(ctx, spec, gitToStderr, scriptToStderr)
 }

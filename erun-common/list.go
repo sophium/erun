@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -28,6 +29,10 @@ type ListOrchestratorResult struct {
 	ID           string                      `json:"id"`
 	Name         string                      `json:"name"`
 	Environments []ListOrchestratorEnvResult `json:"environments,omitempty"`
+	// Directories are the orchestrator's own: paths it works in that belong to
+	// no environment at all. Reported so an orchestrator pointed only at
+	// directories does not read as having no scope.
+	Directories []string `json:"directories,omitempty"`
 }
 
 // ListOrchestratorEnvResult is the read-model view of one
@@ -338,12 +343,16 @@ func APIURLForListEnvironment(tenant TenantConfig, localPorts EnvironmentLocalPo
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
+// listEnvironmentLocalPorts resolves the ports this process should report for
+// one environment: the config-derived allocation, overridden by the chart's
+// injected ERUN_*_PORT values when this process is that environment's own
+// runtime pod -- see overlayInjectedRuntimeLocalPorts.
 func listEnvironmentLocalPorts(tenant string, env EnvConfig, portAllocations map[string]EnvironmentLocalPorts) EnvironmentLocalPorts {
 	localPorts := portAllocations[environmentPortKey(tenant, env.Name)]
 	if env.SSHD.LocalPort > 0 {
 		localPorts.SSH = env.SSHD.LocalPort
 	}
-	return localPorts
+	return overlayInjectedRuntimeLocalPorts(localPorts, os.Getenv, tenant, env.Name)
 }
 
 func listEnvironmentOpenResult(tenant TenantConfig, env EnvConfig, localPorts EnvironmentLocalPorts) OpenResult {
@@ -441,10 +450,17 @@ func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
 		for _, env := range orchestrator.Environments {
 			envs = append(envs, ListOrchestratorEnvResult(env))
 		}
+		directories := make([]string, 0, len(orchestrator.Directories))
+		for _, dir := range orchestrator.Directories {
+			if path := strings.TrimSpace(dir.Directory); path != "" {
+				directories = append(directories, path)
+			}
+		}
 		results = append(results, ListOrchestratorResult{
 			ID:           orchestrator.ID,
 			Name:         orchestrator.Name,
 			Environments: envs,
+			Directories:  directories,
 		})
 	}
 	return results, nil

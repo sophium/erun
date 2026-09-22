@@ -1,5 +1,6 @@
 audit: erun build --version <VERSION>
 ==> Building
+build: docker root free disk space is not observable from this process (docker info could not run: the executable is not on PATH); skipping the headroom check
 ==> Built in <ELAPSED>
 step timing (ordered by duration):
   build [<ELAPSED>]

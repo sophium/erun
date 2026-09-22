@@ -1,5 +1,7 @@
 import * as React from 'react';
 
+import type { ReviewTarget } from '@/app/selectors';
+
 // ReviewEnvLabel is the one label treatment shared by the review-layers block
 // (ReviewPanel.tsx) and the changed-files tree section (ReviewPanel.ChangedFiles.tsx)
 // for the same environment (#1314): both render this exact component when
@@ -20,4 +22,23 @@ export function ReviewEnvLabel({
       {tenant} / {environment}
     </div>
   );
+}
+
+// ReviewTargetLabel is that same treatment for either kind of target: an
+// environment's "tenant / environment", or a directory's path. A directory has
+// no tenant or environment to render, and showing its path is what tells the
+// operator which checkout this section is, so the two read as one group without
+// one pretending to be the other.
+export function ReviewTargetLabel({ target }: { target: ReviewTarget }): React.ReactElement {
+  if (target.kind === 'directory') {
+    return (
+      <div
+        className="min-w-0 truncate font-mono text-sm font-semibold text-foreground"
+        title={target.directory}
+      >
+        {target.directory}
+      </div>
+    );
+  }
+  return <ReviewEnvLabel tenant={target.tenant} environment={target.environment} />;
 }

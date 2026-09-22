@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -95,7 +96,7 @@ func movedReleaseBaseBranchError(spec ReleaseSpec, branch string, ahead int) err
 		"Building now would publish %s and push its tag, and only then fail at the final push with everything already public.\n"+
 		"Nothing is published yet, so absorb the move and re-run:\n"+
 		"  git -C %s pull --rebase origin %s\n"+
-		"  erun release --force\n"+
+		"  erun build --release --force\n"+
 		"(--force recreates the local v%s tag this run already made, which the rebase leaves behind.)",
 		branch, ahead, spec.Version, spec.ProjectRoot, branch, spec.Version)
 }
@@ -123,8 +124,13 @@ func isReleaseBranchPush(stage ReleaseStage, command ReleaseCommandSpec) bool {
 // cannot apply, or a push that keeps failing, still surfaces the push's own error.
 func runReleaseBranchPush(ctx Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
-	err := runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
+	var pushOutput strings.Builder
+	err := runGit(command.Dir, ctx.Stdout, releasePushStderrWriter(ctx, &pushOutput), command.Args...)
 	for attempt := 1; err != nil && branch != "" && attempt <= releasePushRebaseAttempts; attempt++ {
+		rejections := parseReleasePushRejections(pushOutput.String())
+		if !releasePushRejectedTheMovedBaseBranch(rejections, branch) {
+			return releasePushRejectedError(spec, rejections, err)
+		}
 		ctx.Info(fmt.Sprintf("release: push rejected; origin/%s moved during the release, rebasing onto it and retrying (%d/%d)", branch, attempt, releasePushRebaseAttempts))
 		if rebaseErr := rebaseReleaseOntoRemoteBranch(ctx, command.Dir, branch, runGit); rebaseErr != nil {
 			return fmt.Errorf("%w\nrebasing onto origin/%s to absorb the move failed: %v\nversion %s is already published, so rebase the release's own commits onto origin/%s by hand and push them",
@@ -134,9 +140,119 @@ func runReleaseBranchPush(ctx Context, spec ReleaseSpec, command ReleaseCommandS
 			return fmt.Errorf("%w\nrebasing onto origin/%s absorbed the move, but re-pointing the already-published release tag failed: %v\nversion %s is already published, so move tag v%s onto the rebased release commit by hand and force-push it",
 				err, branch, repointErr, spec.Version, spec.Version)
 		}
-		err = runGit(command.Dir, ctx.Stdout, ctx.Stderr, releaseBranchPushArgs(spec, command)...)
+		pushOutput.Reset()
+		err = runGit(command.Dir, ctx.Stdout, releasePushStderrWriter(ctx, &pushOutput), releaseBranchPushArgs(spec, command)...)
 	}
 	return err
+}
+
+// releasePushStderrWriter streams git's push output to the operator while
+// keeping a copy for the rejection parse. A caller with no stderr sink (tests,
+// embedding callers) would make io.MultiWriter panic on a nil writer, so the
+// capture stands alone there.
+func releasePushStderrWriter(ctx Context, capture *strings.Builder) io.Writer {
+	if ctx.Stderr == nil {
+		return capture
+	}
+	return io.MultiWriter(ctx.Stderr, capture)
+}
+
+// releasePushRejection is one ref git refused to update, as git reported it on
+// the `! [rejected]  <from> -> <to> (reason)` line. The local side is the ref
+// the push named, which is the only thing a remediation may be scoped to; the
+// reason is carried through so an operator reads git's own words.
+type releasePushRejection struct {
+	Ref    string
+	Reason string
+}
+
+// releasePushRejectionLine matches git's rejected-ref line. The reason is
+// optional because not every rejection carries one.
+var releasePushRejectionLine = regexp.MustCompile(`(?m)^\s*!\s*\[rejected\]\s+(\S+)\s*->\s*\S+\s*(?:\(([^)]*)\))?\s*$`)
+
+func parseReleasePushRejections(output string) []releasePushRejection {
+	var rejections []releasePushRejection
+	for _, match := range releasePushRejectionLine.FindAllStringSubmatch(output, -1) {
+		ref := strings.TrimSpace(match[1])
+		if ref == "" || ref == "(none)" {
+			continue
+		}
+		rejections = append(rejections, releasePushRejection{Ref: ref, Reason: strings.TrimSpace(match[2])})
+	}
+	return rejections
+}
+
+// releasePushRejectedTheMovedBaseBranch reports whether this rejection is the
+// one case the rebase-and-retry explains: the base branch itself was rejected,
+// and because it moved.
+//
+// A push carries several refs, and only the base branch can be repaired by
+// rebasing the base branch. A develop rejected as a non-fast-forward is a
+// different failure — the branch diverged, and rebasing main onto an origin/main
+// that never moved is a no-op that spends every retry without ever fetching or
+// merging origin/develop. Anything unrecognised, including a
+// rejection whose reason is a hook rather than a moved branch, is left to the
+// operator with git's own reason attached.
+func releasePushRejectedTheMovedBaseBranch(rejections []releasePushRejection, branch string) bool {
+	if branch == "" || len(rejections) == 0 {
+		return false
+	}
+	for _, rejection := range rejections {
+		if rejection.Ref != branch || !releasePushReasonIsMovedBranch(rejection.Reason) {
+			return false
+		}
+	}
+	return true
+}
+
+func releasePushReasonIsMovedBranch(reason string) bool {
+	reason = strings.ToLower(reason)
+	return strings.Contains(reason, "fast-forward") ||
+		strings.Contains(reason, "fetch first") ||
+		strings.Contains(reason, "stale info")
+}
+
+// releasePushRejectedError names the ref git actually rejected and what is now
+// missing, instead of letting a bare failure stand in for it.
+//
+// By the time this push runs the version is public: its images and charts
+// verified on the registry and its tag is on the remote. The GitHub Release
+// object is created after this push, so a push failure also leaves it absent.
+// The unqualified failure that used to be reported here reads as the
+// pre-publication shape "Recovering an interrupted release" covers, and acting
+// on that shape would delete a public tag and reset a branch that already
+// landed. So the error says which ref did not land, why git refused
+// it, and that the tag must not be deleted.
+func releasePushRejectedError(spec ReleaseSpec, rejections []releasePushRejection, cause error) error {
+	// described carries git's own reason for the reader; names is the bare ref
+	// for the recovery command, where a parenthesised reason would not be a
+	// ref that can be reconciled.
+	described := make([]string, 0, len(rejections))
+	names := make([]string, 0, len(rejections))
+	for _, rejection := range rejections {
+		names = append(names, rejection.Ref)
+		if rejection.Reason != "" {
+			described = append(described, fmt.Sprintf("%s (%s)", rejection.Ref, rejection.Reason))
+			continue
+		}
+		described = append(described, rejection.Ref)
+	}
+	refs := strings.Join(described, ", ")
+	if refs == "" {
+		refs = "a ref git did not name"
+	}
+	unlanded := strings.Join(names, ", ")
+	if unlanded == "" {
+		unlanded = refs
+	}
+	version := strings.TrimSpace(spec.Version)
+	return fmt.Errorf("%w\nrelease: the push was rejected for %s, which is not origin/%s having moved during the release, so nothing is rebased or retried.\n"+
+		"Everything else this release publishes is already public: its images and charts verified on the registry and tag v%s is on the remote. What did not land is %s.\n"+
+		"The GitHub Release object for v%s is created after this push, so it does not exist yet either.\n"+
+		"Recover by hand — do not delete tag v%s and do not reset %s, both are already public:\n"+
+		"  git -C %s fetch origin\n"+
+		"  reconcile %s with its remote, push it, then create the GitHub Release for the existing tag v%s",
+		cause, refs, spec.Branch, version, refs, version, version, spec.Branch, spec.ProjectRoot, unlanded, version)
 }
 
 // repointReleaseTagIfRebased brings the release's own annotated tag back onto

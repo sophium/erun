@@ -68,6 +68,28 @@ export class Titlebar {
     return this.page.getByRole('heading', { name: 'Whip' });
   }
 
+  // Converges on the report having actually replaced the target picker
+  // before a caller reads its content. whipReportBody() (not the heading,
+  // which stays mounted across both the picker and the report views) is the
+  // element gated on that transition -- the click that starts a whip and the
+  // report's own mount are two separate render steps, so asserting on the
+  // report's content right after the click races that transition against the
+  // caller's own budget instead of the report's.
+  async waitForWhipReportOpen(): Promise<void> {
+    await this.whipReportBody().waitFor({ state: 'visible' });
+  }
+
+  // Converges on the whole popover having actually dismissed itself -- the
+  // auto-dismiss timer flips React state, but the popover's own exit
+  // animation runs on the real browser clock even under a test that has
+  // installed a fake one for the timer (see the auto-dismiss specs), so the
+  // heading's removal from the DOM can lag the timer firing. A caller that
+  // asserts dismissal right after advancing the clock needs this settled
+  // against its own full budget, not the shorter `expect` one.
+  async waitForWhipReportClosed(): Promise<void> {
+    await this.whipReportHeading().waitFor({ state: 'hidden' });
+  }
+
   // Scoped to the popover's own landmark: several seeded rows (the sidebar
   // row, the terminal tab) already render the same env/orchestrator name
   // elsewhere on the page, so an unscoped getByText(name)/getByRole(...) is
@@ -77,6 +99,15 @@ export class Titlebar {
     return this.page.getByRole('region', { name: 'Whip' });
   }
 
+  // Converges on the popover actually being open (target list fetched and
+  // rendered, preselection applied) before returning, rather than leaving
+  // every caller to race that render against a bare expect(...).toBeVisible()
+  // with only the shorter `expect` timeout to work with.
+  async openWhipPanel(): Promise<void> {
+    await this.whipButton().click();
+    await this.whipPanel().waitFor({ state: 'visible' });
+  }
+
   // Scoped to the popover's own live region: several seeded rows (the
   // sidebar row, the terminal tab) already render the same env/orchestrator
   // name elsewhere on the page, so an unscoped getByText(name) is ambiguous.
@@ -84,8 +115,13 @@ export class Titlebar {
     return this.page.getByRole('status', { name: 'Whip results' });
   }
 
+  // Converges on the report actually having closed before returning -- a
+  // caller that immediately reopens the popover (a fresh whip's own report
+  // must not race the prior one's close animation) or asserts the heading is
+  // gone both need this settled, not raced against their own fixed budget.
   async closeWhipReport(): Promise<void> {
     await this.page.getByRole('button', { name: 'Close whip' }).click();
+    await this.whipReportHeading().waitFor({ state: 'hidden' });
   }
 
   // The selection surface's own checkable rows -- one per environment
@@ -235,14 +271,27 @@ export class Titlebar {
     return this.messageCenterIcon(kind).locator('span');
   }
 
+  // Converges on the dialog actually being open before returning: it mounts
+  // with a row per unread notification, which is more render work than a
+  // bare expect(...).toBeVisible() right after the click should have to
+  // absorb inside its own shorter `expect` timeout.
   async openMessageCenter(kind: 'error' | 'warning' | 'info' | 'success'): Promise<void> {
     await this.messageCenterIcon(kind).click();
+    await this.messageCenterDialog().waitFor({ state: 'visible' });
   }
 
   // Renders only once every class icon has nothing unread but the session
   // still has history -- see Titlebar.MessageCenter.tsx's own doc comment.
   messageCenterHistoryButton(): Locator {
     return this.page.getByRole('button', { name: 'Message history' });
+  }
+
+  // Converges on the dialog actually being open before returning, the same
+  // reason openMessageCenter does above -- this is the fallback entry point
+  // into the same dialog once every class icon has cleared.
+  async openMessageHistory(): Promise<void> {
+    await this.messageCenterHistoryButton().click();
+    await this.messageCenterDialog().waitFor({ state: 'visible' });
   }
 
   messageCenterDialog(): Locator {
@@ -276,7 +325,12 @@ export class Titlebar {
     return this.messageCenterDialog().getByRole('listitem').filter({ hasText: messageText });
   }
 
+  // Converges on the dialog actually being closed before returning -- a
+  // caller that immediately clicks another titlebar icon behind the modal
+  // overlay (several specs open one class right after closing another) needs
+  // that settled, not raced against its own fixed budget.
   async closeMessageCenter(): Promise<void> {
     await this.page.keyboard.press('Escape');
+    await this.messageCenterDialog().waitFor({ state: 'hidden' });
   }
 }

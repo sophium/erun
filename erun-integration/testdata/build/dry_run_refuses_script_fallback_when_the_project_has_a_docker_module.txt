@@ -1,0 +1,2 @@
+audit: erun build --dry-run
+build resolved nothing to build: the project has a docker build module at <TMP> but this build resolved no images from it, and running <TMP> instead would report success without building an image; re-run from the project root or select the component whose images you meant to build

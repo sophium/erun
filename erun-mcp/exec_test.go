@@ -69,16 +69,22 @@ func TestRawToolRunsFromTheGivenDir(t *testing.T) {
 	if !output.Wait {
 		t.Fatalf("a plain call must run in the foreground, got %+v", output)
 	}
+	// Compare canonical paths: on macOS t.TempDir() hands back the TMPDIR form
+	// (/var/folders/...), while a shell's pwd reports where the directory really
+	// is (/private/var/folders/...), so the two spellings differ for the same
+	// directory. Trim before resolving -- EvalSymlinks on a path still carrying
+	// its trailing newline fails, which would leave that side unresolved and
+	// reintroduce exactly the mismatch this comparison exists to avoid.
 	got := subdir
 	if resolved, evalErr := filepath.EvalSymlinks(got); evalErr == nil {
 		got = resolved
 	}
-	stdout := output.Stdout
+	stdout := trimTrailingNewline(output.Stdout)
 	if resolved, evalErr := filepath.EvalSymlinks(stdout); evalErr == nil {
 		stdout = resolved
 	}
-	if trimmed := trimTrailingNewline(stdout); trimmed != got {
-		t.Fatalf("pwd printed %q, want %q", trimmed, got)
+	if stdout != got {
+		t.Fatalf("pwd printed %q, want %q", stdout, got)
 	}
 }
 

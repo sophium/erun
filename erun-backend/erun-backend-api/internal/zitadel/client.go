@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -108,6 +109,58 @@ func (e *APIError) Error() string {
 // addressed by the request.
 func (e *APIError) NotFound() bool {
 	return e.StatusCode == http.StatusNotFound
+}
+
+// ErrUsernameTaken is the sentinel a caller matches with errors.Is when a
+// user could not be created because the login name asked for was already in
+// use. The concrete error is a *UsernameTakenError, which names the name.
+var ErrUsernameTaken = errors.New("username is already taken")
+
+// UsernameTakenError reports a login name the instance already holds.
+//
+// The instance signals this with the message key
+// "Errors.User.AlreadyExists" ("User already exists") rather than a
+// username-specific one, reaching the caller as Zitadel's AlreadyExists
+// conflict. The caller needs the name they chose back -- the IdP's own text
+// names the account, not the one thing they can change.
+type UsernameTakenError struct {
+	// Username is the login name that was already in use, exactly as the
+	// caller supplied it. Under an instance whose Domain Policy requires
+	// login names to be domain-qualified, the name the instance actually
+	// holds is this one suffixed with the organization's own domain.
+	Username string
+}
+
+func (e *UsernameTakenError) Error() string {
+	return fmt.Sprintf("username %q is already taken; choose a different login name", e.Username)
+}
+
+// Unwrap exposes the sentinel, so errors.Is(err, ErrUsernameTaken) is the
+// check that does not depend on the concrete type.
+func (e *UsernameTakenError) Unwrap() error { return ErrUsernameTaken }
+
+// zitadelUserAlreadyExistsKey is the message key the instance returns when a
+// human-user create collides with a uniqueness constraint on the identity.
+const zitadelUserAlreadyExistsKey = "Errors.User.AlreadyExists"
+
+// usernameConflict relabels Zitadel's user-already-exists conflict on a user
+// create as the named, actionable error above.
+//
+// The discriminator is that message key and not the status alone: a conflict
+// on this endpoint can also mean a colliding email or another uniqueness
+// rule, and relabelling every one of them as a username collision would send
+// the caller to change a name that was never the problem. Every other
+// failure is returned unchanged, so a transport fault or a validation error
+// still reports as itself.
+func usernameConflict(username string, err error) error {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusConflict {
+		return err
+	}
+	if !strings.Contains(apiErr.Body, zitadelUserAlreadyExistsKey) {
+		return err
+	}
+	return &UsernameTakenError{Username: username}
 }
 
 const errorBodyTruncateLimit = 500
@@ -328,7 +381,7 @@ func (c *Client) CreateHumanUser(ctx context.Context, params CreateHumanUserPara
 		UserID string `json:"userId"`
 	}
 	if err := c.callInOrg(ctx, params.OrgID, http.MethodPost, "/management/v1/users/human", body, &resp); err != nil {
-		return User{}, err
+		return User{}, usernameConflict(username, err)
 	}
 	state := "USER_STATE_INITIAL"
 	if hasInitialPassword {

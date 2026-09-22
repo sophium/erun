@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { test } from 'vitest';
 
 // erun-ui/AGENTS.md § "Design-Language Decision Record" names two collisions
 // this repository decided to close for good: a second component named
@@ -61,4 +62,60 @@ test('the desktop no longer hand-rolls a destructive color mapping outside Inlin
     .filter((file) => handRolledDestructiveStyling.test(readFileSync(file, 'utf8')));
 
   assert.deepEqual(offenders, []);
+});
+
+// A destructive confirmation rendered inside a dialog that has its own footer
+// Cancel must name its negative by the effect, not reuse the generic word: the
+// confirmation's "no" and the dialog's "no" do different things (abandon this
+// one action, versus discard every unsaved edit in the dialog), so two buttons
+// reading "Cancel" a few pixels apart are distinguishable only by what they do.
+// The job-cancel confirmation closed that collision first by labelling its
+// negative "Keep running"; the unexpose confirmation was the site still
+// rendering the bare word alongside the footer's Cancel.
+
+const manageDialogComponents = join(frontendSrc, 'components/app');
+
+function readComponent(name: string): string {
+  return readFileSync(join(manageDialogComponents, name), 'utf8');
+}
+
+// Reads the rendered text of the button whose click handler is `handler`, so
+// these assertions are on the label an operator reads rather than on the mere
+// existence of a second button.
+function negativeLabel(source: string, handler: string): string {
+  const escaped = handler.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`${escaped}\\s*\\}\\}\\s*>\\s*([^<>{}]+?)\\s*<\\/Button>`).exec(source);
+  assert.ok(match, `no button whose handler is ${handler} found`);
+  const label = match[1];
+  assert.ok(label, `the button whose handler is ${handler} carries no label`);
+  return label.trim();
+}
+
+const effectNamingNegative = /^Keep \S+/;
+
+test('the unexpose confirmation names its negative by its effect', () => {
+  const label = negativeLabel(
+    readComponent('ManageDialogPortsExposures.tsx'),
+    'dispatch(cancelUnexposeConfirm());',
+  );
+  assert.notEqual(label, 'Cancel', 'the manage dialog footer already renders a Cancel');
+  assert.match(label, effectNamingNegative);
+  assert.equal(label, 'Keep exposed');
+});
+
+test("the unexpose confirmation's negative matches the job-cancel precedent", () => {
+  // ManageDialogJobCancel.tsx is the precedent: same surface, same collision
+  // with the dialog footer's Cancel, solved by naming the effect. Pinning both
+  // keeps a future edit from re-diverging them.
+  const jobCancel = negativeLabel(
+    readComponent('ManageDialogJobCancel.tsx'),
+    'setConfirming(false);',
+  );
+  const unexpose = negativeLabel(
+    readComponent('ManageDialogPortsExposures.tsx'),
+    'dispatch(cancelUnexposeConfirm());',
+  );
+  assert.equal(jobCancel, 'Keep running');
+  assert.match(jobCancel, effectNamingNegative);
+  assert.match(unexpose, effectNamingNegative);
 });

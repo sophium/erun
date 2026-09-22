@@ -45,6 +45,14 @@ func commandOutputMode(cmd *cobra.Command) common.OutputMode {
 	return mode
 }
 
+// commandWantsJSON unifies the global --output json with the per-command --json
+// some commands grew first. Both spellings mean the same thing, so a caller that
+// follows only the documented global flag gets the structured result rather than
+// prose; --json stays a supported alias rather than a second, rival contract.
+func commandWantsJSON(commandCtx common.Context, jsonFlag bool) bool {
+	return jsonFlag || commandCtx.Output == common.OutputJSON
+}
+
 func isDryRunCommand(cmd *cobra.Command) bool {
 	dryRun, err := cmd.Flags().GetBool("dry-run")
 	return err == nil && dryRun
@@ -88,16 +96,35 @@ func isNoShellCommand(cmd *cobra.Command) bool {
 	return err == nil && noShell
 }
 
+// commandScopesTenantByFlag reports whether cmd's --tenant scopes resolution.
+// Commands whose --tenant means something else (list's selects version-drift
+// reporting) return false, so their failures never offer it as the tenant fix;
+// resolution failures name the flag only when it is the real next step.
+func commandScopesTenantByFlag(cmd *cobra.Command) bool {
+	if cmd.Flags().Lookup("tenant") == nil {
+		return false
+	}
+	return !commandTenantFlagIsNotScoping(cmd)
+}
+
+// commandTenantFlagIsNotScoping names the commands whose --tenant flag is not a
+// tenant-scoping flag, so it must never be offered as the tenant remedy.
+func commandTenantFlagIsNotScoping(cmd *cobra.Command) bool {
+	return cmd.Name() == "list"
+}
+
 func commandContext(cmd *cobra.Command) common.Context {
 	verbosity := commandVerbosity(cmd)
 	return common.Context{
-		Logger:    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
-		Verbosity: verbosity,
-		DryRun:    isDryRunCommand(cmd),
-		Output:    commandOutputMode(cmd),
-		Stdin:     cmd.InOrStdin(),
-		Stdout:    cmd.OutOrStdout(),
-		Stderr:    cmd.ErrOrStderr(),
+		Logger:                    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
+		Verbosity:                 verbosity,
+		DryRun:                    isDryRunCommand(cmd),
+		Output:                    commandOutputMode(cmd),
+		Command:                   cmd.CommandPath(),
+		CommandScopesTenantByFlag: commandScopesTenantByFlag(cmd),
+		Stdin:                     cmd.InOrStdin(),
+		Stdout:                    cmd.OutOrStdout(),
+		Stderr:                    cmd.ErrOrStderr(),
 	}
 }
 

@@ -23,11 +23,14 @@ import (
 // scenario takes, and the resolved policy always has one (the default is
 // 08:00-20:00 in the host's zone), so a scenario that leaves it alone exercises
 // a different arm depending on the wall clock and the host's TZ. These two
-// blocks pin the arm: each is the widest window the parser accepts (start and
-// end must differ), inverted, so only the 23:59 UTC minute falls on the other
-// side. Landing on the other side there costs nothing — a held lease refuses the
-// stop identically on both arms, which is the point these scenarios make — so
-// what the pin buys is that each scenario reliably exercises the arm it names.
+// blocks pin the arm: 00:00-23:59 is the all-day span (fixed to stay inside
+// for every minute, including 23:59, since HH:MM has no way to spell
+// midnight/24:00), and 23:59-00:00 is its inversion — the narrowest
+// window the parser accepts, inside only during the 23:59 UTC minute. Landing
+// on that one minute costs the inverted block nothing — a held lease refuses
+// the stop identically on both arms, which is the point these scenarios
+// make — so what the pin buys is that each scenario reliably exercises the
+// arm it names.
 const (
 	insideWorkingHoursIdleBlock  = "idle:\n  workinghours: 00:00-23:59\n  timezone: UTC\n"
 	outsideWorkingHoursIdleBlock = "idle:\n  workinghours: 23:59-00:00\n  timezone: UTC\n"
@@ -774,6 +777,25 @@ func TestActivity(t *testing.T) {
 		golden.Equal(t, "activity/lease_help", normalize.Apply(result.Combined))
 	})
 
+	t.Run("lease_take_help_names_what_an_exclusive_claim_actually_refuses", func(t *testing.T) {
+		// An exclusive take defaults to the "worktree" scope, and a job start
+		// consults only the "environment" scope. Help saying a second agent job
+		// is refused by a worktree claim describes a guard that does not fire:
+		// an orchestrator that takes one over MCP and starts a second job sees
+		// no refusal and reads that silence as protection.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"activity", "lease", "take", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "already working the same worktree is refused") {
+			t.Errorf("help must not claim a worktree-scoped claim refuses a second agent job, which only an environment-scoped claim does; got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "environment") {
+			t.Errorf("help must name the scope a job start actually consults; got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("lease_take_list_and_release", func(t *testing.T) {
 		// The lease lifecycle a wrapper drives: take before the long job, list to
 		// see what is holding the environment, release when it finishes. The
@@ -918,6 +940,80 @@ func TestActivity(t *testing.T) {
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
 		if again.ExitCode != 0 {
 			t.Fatalf("expected the scope free after release, got exit %d: %s", again.ExitCode, again.Combined)
+		}
+	})
+
+	t.Run("lease_release_reports_not_held_for_an_unknown_id", func(t *testing.T) {
+		// A release that removed nothing must say so, not report the same
+		// "lease released" line as a real release. Nothing was ever taken
+		// under this id.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"activity", "lease", "release", "--tenant", "team", "--environment", "dev", "--id", "never-taken",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if result.ExitCode != 0 {
+			t.Fatalf("expected releasing an unknown id to still succeed, got exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "activity/lease_release_reports_not_held_for_an_unknown_id", normalize.Apply(result.Combined))
+	})
+
+	t.Run("lease_release_exclusive_wrong_scope_reports_not_held", func(t *testing.T) {
+		// The actual reproduction: an exclusive claim released against a scope
+		// it was never taken on (here, a mismatched --scope; the reported bug
+		// omitted --exclusive entirely, which lands on this same "nothing at
+		// this key" outcome) must report NotHeld and must leave the real claim
+		// untouched, not silently report the same success as a real release.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-2414", "--id", "job-fix-2414", "--exclusive", "--scope", "/git/worktree-a",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		release := erun.Run(t, []string{
+			"activity", "lease", "release", "--tenant", "team", "--environment", "dev",
+			"--id", "job-fix-2414", "--exclusive", "--scope", "/git/worktree-b",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if release.ExitCode != 0 {
+			t.Fatalf("expected releasing the wrong scope to still succeed as a no-op, got exit %d: %s", release.ExitCode, release.Combined)
+		}
+		golden.Equal(t, "activity/lease_release_exclusive_wrong_scope_reports_not_held", normalize.Apply(release.Combined))
+		list := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if !strings.Contains(list.Combined, "job-fix-2414") {
+			t.Fatalf("expected the real claim to survive a release aimed at the wrong scope, got:\n%s", list.Combined)
+		}
+	})
+
+	t.Run("lease_release_exclusive_held_by_another_id_names_the_holder", func(t *testing.T) {
+		// A release that could not remove the claim because a different id
+		// holds it must fail and name that holder, exactly as a conflicting
+		// take already does - not quietly report success for a claim it never
+		// touched.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		take := erun.Run(t, []string{
+			"activity", "lease", "take", "--tenant", "team", "--environment", "dev",
+			"--name", "job-fix-1201", "--id", "job-fix-1201", "--exclusive", "--orchestrator", "petios",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if take.ExitCode != 0 {
+			t.Fatalf("take: exit %d: %s", take.ExitCode, take.Combined)
+		}
+		release := erun.Run(t, []string{
+			"activity", "lease", "release", "--tenant", "team", "--environment", "dev",
+			"--id", "somebody-else", "--exclusive",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if release.ExitCode == 0 {
+			t.Fatalf("expected a release by the wrong id to fail, got exit 0: %s", release.Combined)
+		}
+		if !strings.Contains(release.Combined, "job-fix-1201") || !strings.Contains(release.Combined, "petios") {
+			t.Fatalf("refusal must name the actual holder (id and orchestrator), got:\n%s", release.Combined)
+		}
+		list := erun.Run(t, []string{"activity", "lease", "list", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: inEnvironment(setup.Env())})
+		if !strings.Contains(list.Combined, "job-fix-1201") {
+			t.Fatalf("expected the real holder's claim to survive a release by the wrong id, got:\n%s", list.Combined)
 		}
 	})
 
@@ -1275,6 +1371,25 @@ func TestActivityAISession(t *testing.T) {
 		}
 		if rows[0]["sessionId"] != "a-session" || rows[1]["sessionId"] != "b-session" {
 			t.Fatalf("expected sessions sorted by id, got %v", rows)
+		}
+	})
+
+	// status_json_reports_empty_array_when_none_recorded pins the actual JSON
+	// text emitted for an environment with no recorded sessions: it must be
+	// "[]", never "null" - a caller doing result.length or
+	// ranging over the field must not have to special-case this one command.
+	// json.Unmarshal happily decodes "null" into a nil slice with no error,
+	// so statusJSON's []map[string]any helper cannot tell the two apart;
+	// this scenario asserts on the raw stdout text instead.
+	t.Run("status_json_reports_empty_array_when_none_recorded", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"activity", "ai-session", "status", "--tenant", "team", "--environment", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("status --json on an untouched environment: exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if got := strings.TrimSpace(result.Stdout); got != "[]" {
+			t.Fatalf("want status --json to print [] for no recorded sessions, got %q", got)
 		}
 	})
 

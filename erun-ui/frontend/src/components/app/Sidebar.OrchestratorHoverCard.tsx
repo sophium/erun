@@ -8,6 +8,7 @@ import { orchestratorEnvironmentLine } from '@/app/orchestratorEnvironmentActivi
 import {
   orchestratorHasNudgeHistory,
   orchestratorNudgeSummary,
+  orchestratorPacingUnreachableNote,
 } from '@/app/orchestratorNudgeSummary';
 import type { OrchestratorInfo } from '@/app/slices/orchestratorsSlice';
 import { useHoverCardOpenState } from '@/app/useHoverCardOpenState';
@@ -15,7 +16,9 @@ import {
   HOVER_CARD_ALERT_CLASS,
   HOVER_CARD_CAPTION_CLASS,
   HOVER_CARD_CAPTION_DEGRADED_CLASS,
+  HOVER_CARD_CLAMP_2_CLASS,
   HOVER_CARD_GRID_CLASS,
+  HOVER_CARD_TRUNCATE_CLASS,
   HOVER_CARD_VALUE_STACK_CLASS,
   HoverCardBadge,
   HoverCardMuted,
@@ -66,6 +69,14 @@ export function OrchestratorHoverCard({
           {children}
         </div>
       </PopoverAnchor>
+      {/* w-90 (22.5rem / 360px), not the environment card's w-72: this card's
+          value column has to hold a background shell's `Shell running for
+          10m45s:` label on one line at the shared 12px type size, and at w-72
+          that label wraps to two, which doubles the Doing row's height budget
+          on its own. The card is wide because it lists nine environments, not
+          because its values are long -- long values still truncate, never
+          widen it (OrchestratorEnvironments). The environment card keeps
+          w-72. */}
       <PopoverContent
         side="right"
         align="start"
@@ -75,7 +86,7 @@ export function OrchestratorHoverCard({
         }}
         onMouseEnter={openNow}
         onMouseLeave={closeSoon}
-        className="w-72 p-0"
+        className="w-90 p-0"
         role="dialog"
         aria-label={`${orchestrator.name} details`}
       >
@@ -112,7 +123,9 @@ export function OrchestratorHoverCard({
           <HoverCardRow label="Environments" wide>
             <OrchestratorEnvironments environments={orchestrator.environments} />
           </HoverCardRow>
-          {(running || orchestratorHasNudgeHistory(orchestrator)) && (
+          {(running ||
+            orchestratorHasNudgeHistory(orchestrator) ||
+            Boolean(orchestrator.pacingUnreachable)) && (
             <HoverCardRow label="Nudges">
               <OrchestratorNudges orchestrator={orchestrator} />
             </HoverCardRow>
@@ -142,29 +155,45 @@ function OrchestratorDoing({
   // orchestratorShellLabel) deliberately DO carry the name, because they hang
   // off a bare icon with no other context -- same facts, different surface.
   const now = Date.now();
-  const lines: string[] = [];
+  const lines: React.ReactNode[] = [];
   if (orchestrator.busy) {
     const elapsed = orchestratorBusyElapsed(orchestrator.busyAtUnix, now);
-    lines.push(elapsed ? `Working, for ${elapsed}` : 'Working');
+    lines.push(<span key="busy">{elapsed ? `Working, for ${elapsed}` : 'Working'}</span>);
   }
   if (orchestrator.shellRunning) {
     const shellElapsed = orchestrator.shellStartedAtUnix
       ? formatElapsed(new Date(orchestrator.shellStartedAtUnix * 1000).toISOString(), now).trim()
       : '';
     const shell = shellElapsed ? `Shell running for ${shellElapsed}` : 'Shell running';
-    lines.push(orchestrator.shellCommand ? `${shell}: ${orchestrator.shellCommand}` : shell);
+    // The shell command is a machine-authored string of unbounded length --
+    // observed at ~170 characters, which wrapped this row over ten lines and
+    // pushed the Environments list, the card's actual subject, out of sight.
+    // So the readable half leads in the value treatment and the command drops
+    // to a muted, held-length caption (spacing level 1: value plus its own
+    // caption, one fact read together). Clamping is presentation only: the
+    // command itself is untouched in the read model, still fully in the DOM,
+    // and recoverable from `title`.
+    lines.push(
+      orchestrator.shellCommand ? (
+        <span key="shell" className={HOVER_CARD_VALUE_STACK_CLASS}>
+          <span>{shell}:</span>
+          <span
+            className={`${HOVER_CARD_CLAMP_2_CLASS} ${HOVER_CARD_CAPTION_CLASS}`}
+            title={orchestrator.shellCommand}
+          >
+            {orchestrator.shellCommand}
+          </span>
+        </span>
+      ) : (
+        <span key="shell">{shell}</span>
+      ),
+    );
   }
   if (lines.length === 0) {
     // Distinct from "Not started": the session is up and simply between turns.
     return <Muted>Idle, waiting for input</Muted>;
   }
-  return (
-    <span className={HOVER_CARD_VALUE_STACK_CLASS}>
-      {lines.map((line) => (
-        <span key={line}>{line}</span>
-      ))}
-    </span>
-  );
+  return <span className={HOVER_CARD_VALUE_STACK_CLASS}>{lines}</span>;
 }
 
 // Each linked environment renders what it is doing, joined from the
@@ -173,7 +202,7 @@ function OrchestratorDoing({
 // motivated the whole card: it used to name two environments and say nothing
 // about either. min-w-0 on both the row and its text column is required for
 // truncate to engage on a grid/flex child (a long environment name or a long
-// busy detail elides instead of blowing out the card's fixed w-72).
+// busy detail elides instead of blowing out the card's fixed w-90).
 function OrchestratorEnvironments({
   environments,
 }: {
@@ -197,8 +226,20 @@ function OrchestratorEnvironments({
               {line.dot && <StatusDotGlyph state={line.dot} />}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate font-semibold">{line.name}</span>
-              <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>{line.status}</span>
+              {/* Identifier: its tail is recoverable from the row it names, so it
+                  clips on one line with the full value in `title` -- the rule
+                  HOVER_CARD_TRUNCATE_CLASS owns (Sidebar.HoverCardRow.tsx). */}
+              <span className={`${HOVER_CARD_TRUNCATE_CLASS} font-semibold`} title={line.name}>
+                {line.name}
+              </span>
+              {/* Prose, not an identifier: the check-failed line's second clause
+                  names the remedy ("open it to check directly"), which is the
+                  only thing this row exists to deliver. Prose wraps rather than
+                  clips -- the `dd`'s own `break-words`, the deploy overlay's
+                  behaviour, and InlineAlert's `[overflow-wrap:anywhere]` -- so a
+                  narrow card cannot discard the actionable half of the string
+                  while keeping the part the operator cannot act on. */}
+              <span className={`block ${HOVER_CARD_CAPTION_CLASS}`}>{line.status}</span>
               {line.roleLabel && (
                 <span className={`block truncate ${HOVER_CARD_CAPTION_CLASS}`}>
                   {line.roleLabel}
@@ -232,12 +273,20 @@ function OrchestratorEnvironments({
 // the cumulative history survives a stopped session (persisted per
 // orchestrator id) -- see orchestratorHasNudgeHistory, which is why this row
 // can still render while stopped.
+//
+// The history and the could-not line are one fact read together, so they stack
+// (spacing level 1, HOVER_CARD_VALUE_STACK_CLASS): what erun has done about
+// this session, and whether it can do anything about it from here. The second
+// is a caption rather than an alert -- nothing the operator did caused it and
+// nothing is failing; the session simply belongs to another desktop, which is
+// also why it is not the amber treatment restartRequired earns.
 function OrchestratorNudges({
   orchestrator,
 }: {
   orchestrator: OrchestratorInfo;
 }): React.ReactElement {
   const summary = orchestratorNudgeSummary(orchestrator, Date.now());
+  const unreachableNote = orchestratorPacingUnreachableNote(orchestrator);
   if (orchestrator.nudgeCapped) {
     return (
       <span className={`flex items-start gap-1.5 ${HOVER_CARD_ALERT_CLASS}`}>
@@ -246,10 +295,16 @@ function OrchestratorNudges({
       </span>
     );
   }
-  if (orchestrator.autoNudgeCount > 0 || orchestrator.whipCount > 0) {
-    return <span>{summary}</span>;
+  const hasHistory = orchestrator.autoNudgeCount > 0 || orchestrator.whipCount > 0;
+  if (!unreachableNote) {
+    return hasHistory ? <span>{summary}</span> : <Muted>{summary}</Muted>;
   }
-  return <Muted>{summary}</Muted>;
+  return (
+    <span className={HOVER_CARD_VALUE_STACK_CLASS}>
+      {hasHistory ? <span>{summary}</span> : <Muted>{summary}</Muted>}
+      <span className={HOVER_CARD_CAPTION_CLASS}>{unreachableNote}</span>
+    </span>
+  );
 }
 
 function Muted({ children }: { children: React.ReactNode }): React.ReactElement {

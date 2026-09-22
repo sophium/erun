@@ -145,8 +145,7 @@ test.describe('titlebar message centre layout and bulk clear', () => {
     await expect(errorIcon).toBeVisible();
     await expect(warningIcon).toBeVisible();
 
-    await errorIcon.click();
-    await expect(app.titlebar.messageCenterDialog()).toBeVisible();
+    await app.titlebar.openMessageCenter('error');
     await app.titlebar.messageCenterMarkClassReadButton('error').click();
     // The rest of the titlebar is aria-hidden while the modal dialog is
     // open, so it must close before any titlebar-icon locator is trusted.
@@ -157,7 +156,7 @@ test.describe('titlebar message centre layout and bulk clear', () => {
     await expect(errorIcon).toHaveCount(0);
     await expect(warningIcon).toBeVisible();
 
-    await warningIcon.click();
+    await app.titlebar.openMessageCenter('warning');
     await app.titlebar.messageCenterMarkAllReadButton().click();
     await app.titlebar.closeMessageCenter();
     await expect(warningIcon).toHaveCount(0);
@@ -165,7 +164,7 @@ test.describe('titlebar message centre layout and bulk clear', () => {
     // Cleared, not deleted: the history fallback replaces the (now empty)
     // icon row, and both messages are still listed in the dialog.
     await expect(app.titlebar.messageCenterHistoryButton()).toBeVisible();
-    await app.titlebar.messageCenterHistoryButton().click();
+    await app.titlebar.openMessageHistory();
     await expect(app.titlebar.messageCenterRow('Scoped clear: error message.')).toBeVisible();
     await expect(app.titlebar.messageCenterRow('Scoped clear: warning message.')).toBeVisible();
   });
@@ -189,7 +188,7 @@ test.describe('titlebar message centre layout and bulk clear', () => {
     expect(errorBox?.x ?? 0).toBeGreaterThan(720);
     expect(warningBox?.x ?? 0).toBeGreaterThan(720);
 
-    await errorIcon.click();
+    await app.titlebar.openMessageCenter('error');
     await app.titlebar.messageCenterMarkAllReadButton().click();
     // The rest of the titlebar is aria-hidden while the modal dialog is
     // open, so it must close before any titlebar-icon locator is trusted.
@@ -199,7 +198,7 @@ test.describe('titlebar message centre layout and bulk clear', () => {
     await expect(warningIcon).toHaveCount(0);
     await expect(app.titlebar.messageCenterHistoryButton()).toBeVisible();
 
-    await app.titlebar.messageCenterHistoryButton().click();
+    await app.titlebar.openMessageHistory();
     await expect(app.titlebar.messageCenterRow('Combined probe: error.')).toBeVisible();
     await expect(app.titlebar.messageCenterRow('Combined probe: warning.')).toBeVisible();
   });

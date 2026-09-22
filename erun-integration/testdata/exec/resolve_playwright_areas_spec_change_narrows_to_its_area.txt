@@ -1,0 +1,2 @@
+smoke,sidebar
+audit: erun exec resolve-playwright-areas

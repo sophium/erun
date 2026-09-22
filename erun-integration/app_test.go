@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,9 @@ func stubDesktopControlServer(t *testing.T, port int, respond string) {
 func writeDesktopControlMarker(t *testing.T, setup env.Setup, pid, controlPort int) {
 	t.Helper()
 	dir := filepath.Join(setup.ConfigHome, "ERun")
+	if runtime.GOOS == "darwin" {
+		dir = filepath.Join(setup.Home, "Library", "Application Support", "ERun")
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}

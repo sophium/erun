@@ -188,6 +188,11 @@ type CloudDependencies struct {
 	// (GET <consoleURL>/version.json, unauthenticated) -- see
 	// control_plane_version_drift.go.
 	FetchConsoleVersion func(Context, string) (string, error)
+	// ResolveHostAddrs resolves a hostname to its IP addresses -- used by
+	// control_plane_version_drift.go to tell a plane's own discovery document
+	// naming a benign canonical alias apart from one advertising a genuinely
+	// different backend.
+	ResolveHostAddrs func(Context, string) ([]string, error)
 }
 
 // DefaultCloudDependencies returns a CloudDependencies with CloudSecretStore
@@ -765,6 +770,25 @@ func NormalizeTenantCloudProviderAliases(aliases []string, primary string) ([]st
 	return normalized, primary
 }
 
+// AttachTenantCloudProviderAlias attaches alias to a tenant's own cloud
+// provider selection, making it the tenant's primary at the same time: the
+// tenant-scoped platform resolution reads the tenant's own selection and, with
+// more than one erun alias there and no primary naming one, has to render the
+// choose-alias state instead. An attach is therefore never an ambiguous
+// selection — the alias just attached is the one the caller meant.
+//
+// Existing aliases are preserved: this adds to a selection the operator built
+// elsewhere, and pruning a different provider's alias here would silently
+// revoke an attachment this call knows nothing about.
+func AttachTenantCloudProviderAlias(aliases []string, primary, alias string) ([]string, string) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return NormalizeTenantCloudProviderAliases(aliases, primary)
+	}
+	attached := append(append(make([]string, 0, len(aliases)+1), aliases...), alias)
+	return NormalizeTenantCloudProviderAliases(attached, alias)
+}
+
 func SaveCloudProviderConfig(store CloudStore, provider CloudProviderConfig) (CloudProviderConfig, error) {
 	if store == nil {
 		return CloudProviderConfig{}, fmt.Errorf("store is required")
@@ -956,6 +980,9 @@ func normalizeERunCloudDependencies(deps CloudDependencies) CloudDependencies {
 	}
 	if deps.FetchConsoleVersion == nil {
 		deps.FetchConsoleVersion = defaultFetchConsoleVersion
+	}
+	if deps.ResolveHostAddrs == nil {
+		deps.ResolveHostAddrs = defaultResolveHostAddrs
 	}
 	return deps
 }

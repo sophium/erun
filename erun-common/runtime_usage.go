@@ -35,23 +35,44 @@ import (
 //     high-water mark for the current container lifetime, not for the
 //     environment. RuntimeUsageHistory (runtime_usage_history.go) retains the
 //     true peak across restarts; nothing may treat one reading as a lifetime
-//     maximum.
+//     maximum. The warning decision follows from that: memory.events' oom_kill
+//     resets on the same restart, and a restart is often how an OOM manifests,
+//     so a warning read only from the live counters goes quiet at the exact
+//     moment it matters. applyRetainedUsageWarnings adds what the retained
+//     history proves and the live counters cannot.
 //  2. PSI is absent on some kernels -- memory.pressure and cpu.pressure simply
 //     do not exist in every runtime container's cgroup, so nothing here or
 //     downstream may depend on pressure stall information. nr_throttled over
 //     nr_periods (RuntimeCPUUsage.ThrottledPeriods / .Periods) is the
 //     CPU-starvation signal that is actually available wherever cgroup v2 is.
-//  3. A build-capable environment's real build work never happens in this
-//     container -- every image build runs in the erun-dind sidecar, a
-//     separate cgroup this reading cannot see: the sidecar's build containers
-//     are cgroup siblings, not descendants, so there is no path from inside
-//     this container to their usage, and the one place that view is
-//     reachable is a host-wide path shared by every build-capable pod on the
-//     node, not attributable to one environment. RuntimeUsage.ExcludesBuilds
-//     (EnvironmentType.UsesDindSidecar) names this instead of letting the
-//     reading imply the environment is idle while a build saturates the
-//     sidecar -- see erun-cli/cmd/usage_render.go and the desktop's matching
-//     Sidebar.EnvHoverCard.tsx caveat.
+//  3. A build-capable environment's real build work never happens in the
+//     runtime container -- every image build runs in the erun-dind sidecar, a
+//     separate cgroup the runtime container's own reading cannot see: the
+//     sidecar's build containers are cgroup siblings, not descendants, so
+//     there is no path from inside the runtime container to their usage.
+//     RunRuntimeUsage closes most of that gap directly: on an environment
+//     that carries the sidecar (EnvironmentType.UsesDindSidecar), it execs
+//     the same reading script into the erun-dind container too (the doctor
+//     inspection's own target, runtimeDindContainerName) and reports it as
+//     RuntimeUsage.Dind, so a busy build no longer reads as an idle
+//     environment. RuntimeUsage.ExcludesBuilds still names the runtime
+//     container's own CPU/Memory as excluding the sidecar's contribution --
+//     that stays true regardless of whether Dind could be read -- see
+//     erun-cli/cmd/usage_render.go and the desktop's matching
+//     Sidebar.EnvHoverCard.tsx caveat. What no reading anywhere in this
+//     process can produce is one host-wide figure spanning every
+//     build-capable pod on the node; that view exists only outside any one
+//     environment's own container set.
+//  4. The watched mount's df figures (RuntimeDiskUsage.TotalBytes/UsedBytes/
+//     PercentUsed) describe the node's filesystem, not this environment's own
+//     footprint -- df has no concept of "this container's share", so every
+//     environment scheduled on the same node reports the identical
+//     total/used/percent regardless of which of them actually wrote the
+//     bytes. RuntimeDiskUsage.NodeShared names this explicitly, and
+//     OwnUsedBytes (a `du` of the watched mount, scoped to this environment's
+//     own filesystem tree) is the number an operator can actually act on by
+//     cleaning up this one environment -- see erun-cli/cmd/usage_render.go's
+//     "(node, shared)" label and the own-usage line rendered beneath it.
 //
 // RunRuntimeUsage is the one reader. It is reached two ways: exec'ing the
 // script below into the container over kubectl, for an on-demand `erun usage`
@@ -83,9 +104,21 @@ const (
 	minRuntimeUsageInterval     = 100 * time.Millisecond
 	maxRuntimeUsageInterval     = 30 * time.Second
 
-	// cgroupV2FSType is what `stat -fc %T /sys/fs/cgroup` reports on a cgroup
-	// v2 host; anything else (a v1 hierarchy, or the path missing) means the
-	// files this reader depends on do not exist.
+	// cgroupV2FSType is the sentinel the reading script prints when
+	// $cg/cgroup.controllers exists -- the portable systemd-style cgroup v2
+	// test (a cgroup2 mount always has this file at its root, delegated
+	// subtree or not; a v1 hierarchy never does). The script used to test
+	// `stat -fc %T "$cg"` = "cgroup2fs" instead, which depends on the local
+	// `stat` binary recognising the cgroup2 magic number by name -- true for
+	// GNU coreutils (the erun-devops runtime container) but not for BusyBox
+	// (the erun-dind sidecar's own shell), which reports every filesystem
+	// type as "UNKNOWN" regardless of what is actually mounted. That silently
+	// made every dind-sidecar reading report "cgroup v2 not detected" on a
+	// real cluster even though cgroup v2 was genuinely mounted there,
+	// confirmed live by exec'ing into erun-dind directly (busybox stat's
+	// docstring has no filesystem-type table at all). The file-existence test
+	// has no such binary dependency: `[ -f ... ]` means the same thing
+	// everywhere.
 	cgroupV2FSType = "cgroup2fs"
 
 	// DefaultCgroupRoot is the container's own cgroup v2 directory, read
@@ -108,6 +141,12 @@ const (
 	// tracks "close calls" the way memory.peak does for RAM), so the warning
 	// threshold sits lower, ahead of ENOSPC rather than reacting to it.
 	RuntimeUsageDiskWarnPercent = 90.0
+
+	// diskOwnUsageTimeoutSeconds bounds the `du` walk of the watched mount so
+	// a huge tree cannot stall the whole reading; a timeout renders as
+	// OwnUsageObserved=false, the same "report unavailability, do not fail
+	// the call" contract every other field here follows.
+	diskOwnUsageTimeoutSeconds = 30
 )
 
 // RuntimeUsageParams configures one usage read.
@@ -138,9 +177,30 @@ type RuntimeUsage struct {
 	// actually running in the sidecar's own cgroup. Mirrors the desktop
 	// hover card's usageExcludesBuilds/excludesBuilds caveat so both
 	// transports disclose the same limitation instead of one silently
-	// under-reporting relative to the other. See the file-level comment for
-	// why the sidecar's own cgroup cannot be read as a fix instead.
+	// under-reporting relative to the other. Stays true even when Dind below
+	// was read successfully -- it describes CPU/Memory above, which never
+	// change meaning regardless of what else this reading also carries.
 	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
+	// Dind is the erun-dind sidecar's own CPU/memory reading, populated only
+	// on an environment that carries the sidecar (ExcludesBuilds true) and
+	// only when its cgroup could actually be read -- nil on any other
+	// environment, and nil (not a zero value) when the exec into the sidecar
+	// failed, so a caller cannot mistake "could not read it" for "read as
+	// zero usage". See the file-level comment for why this exists instead of
+	// treating the sidecar as permanently unreadable.
+	Dind *RuntimeDindUsage `json:"dind,omitempty"`
+}
+
+// RuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading, sampled
+// by exec'ing the exact same script RunRuntimeUsage runs against the runtime
+// container into the sidecar container instead. It deliberately carries no
+// Disk field: the sidecar mounts the same workspace volume the runtime
+// container's RuntimeUsage.Disk already reports on, so a second disk reading
+// here would just repeat that figure under a name that invites reading it as
+// a second, independent filesystem.
+type RuntimeDindUsage struct {
+	CPU    RuntimeCPUUsage    `json:"cpu"`
+	Memory RuntimeMemoryUsage `json:"memory"`
 }
 
 // HasCounters reports whether the read found anything worth retaining. A host
@@ -191,23 +251,58 @@ type RuntimeMemoryUsage struct {
 	// OOMKillsObserved mirrors PeakObserved: memory.events' oom_kill counter
 	// can be as unreadable as memory.peak, and a caller must not read a silent
 	// zero as "no kills" when it actually means "could not tell".
-	OOMKillsObserved bool   `json:"oomKillsObserved,omitempty"`
-	Unavailable      string `json:"unavailable,omitempty"`
+	OOMKillsObserved bool `json:"oomKillsObserved,omitempty"`
+	// CeilingHits is memory.events' "max" counter: how many times this
+	// cgroup's usage hit its memory.max ceiling and the kernel reclaimed hard
+	// rather than killing outright. Distinct from OOMKills -- a container can
+	// spend a long time pinned against its ceiling under reclaim pressure
+	// while never once being OOM-killed, and that state is invisible to
+	// OOMKills alone.
+	CeilingHits int64 `json:"ceilingHits,omitempty"`
+	// CeilingHitsObserved mirrors OOMKillsObserved: a missing or unparseable
+	// counter must not collapse into a reported zero indistinguishable from
+	// a genuine "never hit the ceiling" reading.
+	CeilingHitsObserved bool   `json:"ceilingHitsObserved,omitempty"`
+	Unavailable         string `json:"unavailable,omitempty"`
 }
 
 // RuntimeDiskUsage reports usage for one watched mount (the workspace path,
-// at minimum).
+// at minimum). TotalBytes/UsedBytes/PercentUsed come from a statfs of the
+// whole mount, so they describe the node's filesystem, not this environment's
+// own footprint -- see the file-level comment's point 4. NodeShared names
+// that explicitly; OwnUsedBytes is the one figure scoped to this environment
+// alone.
 type RuntimeDiskUsage struct {
-	Mount       string  `json:"mount"`
-	TotalBytes  int64   `json:"totalBytes,omitempty"`
-	UsedBytes   int64   `json:"usedBytes,omitempty"`
+	Mount      string `json:"mount"`
+	NodeShared bool   `json:"nodeShared,omitempty"`
+	TotalBytes int64  `json:"totalBytes,omitempty"`
+	UsedBytes  int64  `json:"usedBytes,omitempty"`
+	// PercentUsed is the node's own fill level, not this environment's share
+	// of it -- see NodeShared.
 	PercentUsed float64 `json:"percentUsed,omitempty"`
-	Unavailable string  `json:"unavailable,omitempty"`
+	// OwnUsedBytes is a `du` of the watched mount, scoped to this
+	// environment's own filesystem tree rather than the whole node -- the
+	// figure an operator can actually reduce by cleaning up this one
+	// environment. OwnUsageObserved mirrors PeakObserved/OOMKillsObserved:
+	// `du` timing out or being unreadable must render as unavailable, not a
+	// fabricated zero.
+	OwnUsedBytes     int64  `json:"ownUsedBytes,omitempty"`
+	OwnUsageObserved bool   `json:"ownUsageObserved,omitempty"`
+	Unavailable      string `json:"unavailable,omitempty"`
 }
 
 // RunRuntimeUsage execs the reading script into the runtime container and
 // parses its output. Dry-run traces the exec and returns an empty reading,
 // matching RunObservation's dry-run contract.
+//
+// On an environment that carries the erun-dind sidecar, it execs the same
+// script into that container too (runtimeDindContainerName -- doctor's own
+// inspection target) and attaches the parsed result as Dind. That second exec
+// fails soft, deliberately unlike the runtime container's own exec above: an
+// environment whose sidecar cannot be reached today (an older runtime image,
+// a sidecar mid-restart) must still get a usable runtime-container reading
+// rather than losing the whole call over a container this reading has always
+// been unable to see anyway.
 func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, params RuntimeUsageParams) (RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
@@ -215,10 +310,99 @@ func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req 
 	if err != nil {
 		return RuntimeUsage{}, err
 	}
-	if ctx.DryRun {
-		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}, nil
+	usesDind := req.Type.UsesDindSidecar()
+	var dindResult RemoteCommandResult
+	var dindErr error
+	if usesDind {
+		dindResult, dindErr = RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeDindContainerName, "usage-dind", script)
 	}
-	return parseRuntimeUsage(req, result.Stdout, interval), nil
+	if ctx.DryRun {
+		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: usesDind}, nil
+	}
+	usage := parseRuntimeUsage(req, result.Stdout, interval)
+	if usesDind && dindErr == nil {
+		usage.Dind = parseRuntimeDindUsage(dindResult.Stdout, interval)
+		usage.Warnings = runtimeUsageWarnings(usage)
+	}
+	return applyRetainedUsageWarnings(usage), nil
+}
+
+// applyRetainedUsageWarnings adds the memory warnings the environment's
+// retained history proves but the current container's cgroup counters cannot.
+//
+// memory.peak and memory.events' oom_kill are per-container counters, and a
+// restart resets both to zero. A restart is also often how an OOM manifests,
+// so deciding the warning from the live counters alone tells an operator the
+// environment is memory-healthy at exactly the moment it most needs attention.
+// That is the same silent loss of the OOM warning an unreadable memory.peak
+// produces, reached by a different route. RuntimeUsageHistory already retains
+// both across restarts -- its aggregates are monotonic and never rolled off --
+// so this consults it instead of deriving a second, parallel signal.
+//
+// The retained figures are still scored against the *current* container's
+// limit, so this cannot latch a warning on forever: raising runtimepod clears
+// the peak warning on the next read, with no stored flag for anyone to reset.
+// The OOM-kill warning is the standing one the documented `oomKills > 0`
+// threshold asks for -- a kill that already happened stays reported -- and
+// only kills the current container does not account for are added, so a live
+// warning is never repeated.
+func applyRetainedUsageWarnings(usage RuntimeUsage) RuntimeUsage {
+	history, err := LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
+	if err != nil {
+		// No readable history is "nothing observed yet", not a warning: a host
+		// that has never monitored this environment must not manufacture one.
+		return usage
+	}
+	for _, warning := range retainedMemoryUsageWarnings(usage.Memory, history) {
+		if !runtimeUsageHasWarning(usage.Warnings, warning) {
+			usage.Warnings = append(usage.Warnings, warning)
+		}
+	}
+	return usage
+}
+
+// retainedMemoryUsageWarnings is the decision itself, pure so the judgement
+// about what survives a restart is testable without a container or a history
+// file.
+func retainedMemoryUsageWarnings(memory RuntimeMemoryUsage, history RuntimeUsageHistory) []string {
+	// Both warnings are a percentage of the limit, so a reading that could not
+	// supply one has nothing to be scored against.
+	if memory.Unavailable != "" || memory.Unlimited || memory.LimitBytes <= 0 {
+		return nil
+	}
+	var warnings []string
+
+	var liveKills int64
+	if memory.OOMKillsObserved {
+		liveKills = memory.OOMKills
+	}
+	if history.ObservedOOMKills > liveKills {
+		warnings = append(warnings, fmt.Sprintf(
+			"the environment's retained history recorded %d OOM kill(s), which the current container does not account for -- memory.events resets when the container restarts",
+			history.ObservedOOMKills))
+	}
+
+	// Guarded on the retained peak exceeding the live one: an uninterrupted
+	// container's own memory.peak still covers it, and the live warning above
+	// already fired for the same crossing.
+	if history.ObservedPeakMemoryBytes > memory.PeakBytes {
+		retainedPercent := 100 * float64(history.ObservedPeakMemoryBytes) / float64(memory.LimitBytes)
+		if retainedPercent >= RuntimeUsageMemoryPeakWarnPercent {
+			warnings = append(warnings, fmt.Sprintf(
+				"the environment's retained memory peak reached %.0f%% of the limit (warns at %.0f%%) before the container restarted -- this environment came close to an OOM kill",
+				retainedPercent, RuntimeUsageMemoryPeakWarnPercent))
+		}
+	}
+	return warnings
+}
+
+func runtimeUsageHasWarning(warnings []string, warning string) bool {
+	for _, existing := range warnings {
+		if existing == warning {
+			return true
+		}
+	}
+	return false
 }
 
 func clampRuntimeUsageInterval(interval time.Duration) time.Duration {
@@ -240,22 +424,42 @@ func clampRuntimeUsageInterval(interval time.Duration) time.Duration {
 // so a missing file (cgroup v1, no PSI, an already-removed pod) prints an
 // empty value instead of aborting the script under `set -eu` -- the "fail
 // soft, report per-field" contract lives here as much as in the Go parser.
+//
+// $cg resolves to the running process's OWN cgroup rather than assuming
+// /sys/fs/cgroup already is it, via /proc/1/cgroup's unified ("0:...")
+// entry -- "/" for a normally cgroup-namespaced container (the erun-devops
+// runtime container: PID 1's own path is exactly the mount's root, so this
+// is a no-op there), but NOT "/" for erun-dind, confirmed live: that sidecar
+// runs privileged (service.yaml) and its /sys/fs/cgroup is the host's real
+// cgroup2 root, not a namespace scoped to the container -- so a bare
+// /sys/fs/cgroup/cpu.max there is either absent (the safe "unavailable" this
+// script already reports) or, worse, would be some ancestor slice's own
+// limit misattributed to this one environment, and cpu.stat at that same
+// bare root aggregates the entire node, not this container. PID 1's cgroup
+// path is what actually names this container's own leaf cgroup regardless of
+// which of those two shapes /sys/fs/cgroup itself turned out to be.
 const runtimeUsageScriptTemplate = `set -eu
 cg=/sys/fs/cgroup
+cg_rel=$(awk -F: '$1=="0"{print $3; exit}' /proc/1/cgroup 2>/dev/null || true)
+case "$cg_rel" in
+  ""|"/") ;;
+  *) cg="$cg$cg_rel" ;;
+esac
 cg_type=""
-[ -d "$cg" ] && cg_type=$(stat -fc %T "$cg" 2>/dev/null || true)
+[ -f "$cg/cgroup.controllers" ] && cg_type=cgroup2fs
 printf 'cgroup_type=%s\n' "$cg_type"
 read_value() { [ -r "$1" ] && cat "$1" 2>/dev/null || true; }
 printf 'memory_current=%s\n' "$(read_value $cg/memory.current)"
 printf 'memory_max=%s\n' "$(read_value $cg/memory.max)"
 printf 'memory_peak=%s\n' "$(read_value $cg/memory.peak)"
 printf 'memory_oom_kill=%s\n' "$(awk '$1=="oom_kill"{print $2}' $cg/memory.events 2>/dev/null || true)"
+printf 'memory_ceiling_hits=%s\n' "$(awk '$1=="max"{print $2}' $cg/memory.events 2>/dev/null || true)"
 printf 'cpu_max=%s\n' "$(read_value $cg/cpu.max)"
 cpu_usage_before=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
-time_before=$(date +%s%N)
+time_before=$(awk '{printf "%.0f", $1*1000000000}' /proc/uptime 2>/dev/null || true)
 sleep __RUNTIME_USAGE_INTERVAL_SECONDS__
 cpu_usage_after=$(awk '$1=="usage_usec"{print $2}' $cg/cpu.stat 2>/dev/null || true)
-time_after=$(date +%s%N)
+time_after=$(awk '{printf "%.0f", $1*1000000000}' /proc/uptime 2>/dev/null || true)
 printf 'cpu_usage_before=%s\n' "$cpu_usage_before"
 printf 'cpu_usage_after=%s\n' "$cpu_usage_after"
 printf 'cpu_time_before_ns=%s\n' "$time_before"
@@ -263,11 +467,13 @@ printf 'cpu_time_after_ns=%s\n' "$time_after"
 printf 'cpu_periods=%s\n' "$(awk '$1=="nr_periods"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
 printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
 printf 'disk_workspace=%s\n' "$(df -Pk ` + runtimeUsageWatchedMount + ` 2>/dev/null | tail -n1 || true)"
+printf 'disk_own_used_kb=%s\n' "$(timeout __RUNTIME_USAGE_DISK_OWN_TIMEOUT_SECONDS__ du -sxk ` + runtimeUsageWatchedMount + ` 2>/dev/null | awk '{print $1}' || true)"
 `
 
 func runtimeUsageScript(interval time.Duration) string {
 	seconds := strconv.FormatFloat(interval.Seconds(), 'f', -1, 64)
-	return strings.Replace(runtimeUsageScriptTemplate, "__RUNTIME_USAGE_INTERVAL_SECONDS__", seconds, 1)
+	script := strings.Replace(runtimeUsageScriptTemplate, "__RUNTIME_USAGE_INTERVAL_SECONDS__", seconds, 1)
+	return strings.Replace(script, "__RUNTIME_USAGE_DISK_OWN_TIMEOUT_SECONDS__", strconv.Itoa(diskOwnUsageTimeoutSeconds), 1)
 }
 
 func parseRuntimeUsage(req ShellLaunchParams, output string, interval time.Duration) RuntimeUsage {
@@ -315,6 +521,10 @@ func runtimeMemoryUsageFromValues(v map[string]string) RuntimeMemoryUsage {
 	if killed, ok := parseRuntimeInt64(v["memory_oom_kill"]); ok {
 		m.OOMKills = killed
 		m.OOMKillsObserved = true
+	}
+	if hits, ok := parseRuntimeInt64(v["memory_ceiling_hits"]); ok {
+		m.CeilingHits = hits
+		m.CeilingHitsObserved = true
 	}
 	maxRaw := v["memory_max"]
 	if maxRaw == "max" {
@@ -423,7 +633,11 @@ func parseRuntimeInt64(raw string) (int64, bool) {
 }
 
 func runtimeDiskUsageFromValues(v map[string]string) RuntimeDiskUsage {
-	d := RuntimeDiskUsage{Mount: runtimeUsageWatchedMount}
+	d := RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true}
+	if ownKB, ok := parseRuntimeInt64(v["disk_own_used_kb"]); ok {
+		d.OwnUsedBytes = ownKB * 1024
+		d.OwnUsageObserved = true
+	}
 	total, used, ok := parseRuntimeDFUsage(v["disk_workspace"])
 	if !ok || total <= 0 {
 		d.Unavailable = "df did not report usage for " + runtimeUsageWatchedMount
@@ -438,7 +652,7 @@ func runtimeDiskUsageFromValues(v map[string]string) RuntimeDiskUsage {
 // parseRuntimeDFUsage reads the Total/Used columns (1024-byte blocks,
 // guaranteed by -Pk) from `df`'s POSIX-format output, locating them by their
 // neighbor -- the "Capacity" percentage column -- rather than a fixed index.
-// Mirrors parseDFAvailableBytes in release_disk_headroom.go: a long
+// Mirrors parseDFDiskBytes in release_disk_headroom.go: a long
 // filesystem identifier pushes the data row's remaining columns left by one
 // when it wraps onto its own line, so a fixed index reads the wrong column on
 // exactly the inputs that most need this to work.
@@ -465,37 +679,78 @@ func parseRuntimeDFUsage(line string) (totalBytes, usedBytes int64, ok bool) {
 }
 
 func runtimeUsageWarnings(u RuntimeUsage) []string {
-	warnings := runtimeMemoryUsageWarnings(u.Memory)
+	warnings := runtimeMemoryUsageWarnings("", u.Memory)
 	for _, d := range u.Disk {
 		if d.Unavailable == "" && d.PercentUsed >= RuntimeUsageDiskWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
-				"%s is at %.0f%% disk usage (warns at %.0f%%)", d.Mount, d.PercentUsed, RuntimeUsageDiskWarnPercent))
+				"node disk is at %.0f%% (warns at %.0f%%) -- shared with every environment on this node",
+				d.PercentUsed, RuntimeUsageDiskWarnPercent))
 		}
+	}
+	if u.Dind != nil {
+		warnings = append(warnings, runtimeMemoryUsageWarnings("erun-dind: ", u.Dind.Memory)...)
+		warnings = append(warnings, runtimeBuildThrottleWarnings(u.Dind)...)
 	}
 	return warnings
 }
 
-func runtimeMemoryUsageWarnings(memory RuntimeMemoryUsage) []string {
+// runtimeBuildThrottleWarnings reports a build the sidecar's own cap is
+// starving. The sidecar's CPU line alone cannot raise this: throttling is
+// visible only in cpu.stat's nr_throttled, and a build held at its cap and a
+// build merely busy at it read the same utilisation percentage. It matters
+// operationally -- starvation is what turns a lint step into a timeout -- so a
+// throttled build is named as starvation rather than left for an operator to
+// infer from a percentage that happens to sit at 100.
+//
+// Both counters are cumulative for the sidecar's lifetime, so any throttling
+// at all is worth saying out loud; an unreadable CPU reading has no counters
+// to speak from and stays silent.
+func runtimeBuildThrottleWarnings(dind *RuntimeDindUsage) []string {
+	if dind == nil || dind.CPU.Unavailable != "" || dind.CPU.Periods <= 0 || dind.CPU.ThrottledPeriods <= 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"the build was throttled in %d of %d cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment",
+		dind.CPU.ThrottledPeriods, dind.CPU.Periods)}
+}
+
+// runtimeMemoryUsageWarnings takes a scope label ("" for the runtime
+// container, "erun-dind: " for the sidecar) so the same threshold logic
+// produces warnings an operator can tell apart when both containers cross
+// one -- the exact "builds being OOM-killed" signal the runtime container's
+// own reading can never carry on its own.
+func runtimeMemoryUsageWarnings(scope string, memory RuntimeMemoryUsage) []string {
 	var warnings []string
 	if memory.Unavailable == "" && !memory.Unlimited && memory.LimitBytes > 0 {
 		if memory.PercentOfLimit >= RuntimeUsageMemoryWarnPercent {
 			warnings = append(warnings, fmt.Sprintf(
-				"memory is at %.0f%% of its %s limit (warns at %.0f%%)",
-				memory.PercentOfLimit, formatMebibytes(memory.LimitBytes), RuntimeUsageMemoryWarnPercent))
+				"%smemory is at %.0f%% of its %s limit (warns at %.0f%%)",
+				scope, memory.PercentOfLimit, formatMebibytes(memory.LimitBytes), RuntimeUsageMemoryWarnPercent))
 		}
 		if memory.PeakObserved {
 			peakPercent := 100 * float64(memory.PeakBytes) / float64(memory.LimitBytes)
 			if peakPercent >= RuntimeUsageMemoryPeakWarnPercent {
 				warnings = append(warnings, fmt.Sprintf(
-					"memory.peak reached %.0f%% of the limit (warns at %.0f%%) -- this environment came close to an OOM kill",
-					peakPercent, RuntimeUsageMemoryPeakWarnPercent))
+					"%smemory.peak reached %.0f%% of the limit (warns at %.0f%%) -- this environment came close to an OOM kill",
+					scope, peakPercent, RuntimeUsageMemoryPeakWarnPercent))
 			}
 		}
 	}
 	if memory.OOMKillsObserved && memory.OOMKills > 0 {
-		warnings = append(warnings, fmt.Sprintf("the cgroup recorded %d OOM kill(s)", memory.OOMKills))
+		warnings = append(warnings, fmt.Sprintf("%sthe cgroup recorded %d OOM kill(s)", scope, memory.OOMKills))
 	}
 	return warnings
+}
+
+// parseRuntimeDindUsage mirrors parseRuntimeUsage's CPU/memory parsing
+// exactly (same values map shape, same underlying helpers) since the sidecar
+// is exec'd with the identical script -- only the container differs.
+func parseRuntimeDindUsage(output string, interval time.Duration) *RuntimeDindUsage {
+	values := parseRuntimeUsageValues(output)
+	return &RuntimeDindUsage{
+		CPU:    runtimeCPUUsageFromValues(values, interval),
+		Memory: runtimeMemoryUsageFromValues(values),
+	}
 }
 
 func formatMebibytes(bytes int64) string {
@@ -535,6 +790,7 @@ func readLocalCgroupValues(root string) map[string]string {
 		"memory_max":            readLocalCgroupFile(filepath.Join(root, "memory.max")),
 		"memory_peak":           readLocalCgroupFile(filepath.Join(root, "memory.peak")),
 		"memory_oom_kill":       localCgroupStatValue(filepath.Join(root, "memory.events"), "oom_kill"),
+		"memory_ceiling_hits":   localCgroupStatValue(filepath.Join(root, "memory.events"), "max"),
 		"cpu_max":               readLocalCgroupFile(filepath.Join(root, "cpu.max")),
 		"cpu_usage_after":       localCgroupStatValue(filepath.Join(root, "cpu.stat"), "usage_usec"),
 		"cpu_periods":           localCgroupStatValue(filepath.Join(root, "cpu.stat"), "nr_periods"),

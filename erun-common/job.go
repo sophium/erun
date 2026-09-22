@@ -363,6 +363,15 @@ type EnvironmentJob struct {
 	// this job is excluded from its parent's own finish check entirely, both
 	// while it runs and once it is done.
 	Handoff bool `json:"handoff,omitempty"`
+	// CancelledByJobID names the job that asked this job to stop (via
+	// CancelEnvironmentJob, read from that caller's own ERUN_JOB_ID at the
+	// moment it signalled this job), empty when this job was never cancelled
+	// or was cancelled from outside any job. It is what lets a parent whose
+	// own finish check found this job among its failed children
+	// (environmentJobFailedChildren) tell "I asked for this to stop" from
+	// "this died on its own" — only the latter is a real failure of work the
+	// parent waited on.
+	CancelledByJobID string `json:"cancelledByJobId,omitempty"`
 	// Exclusive says this job holds the environment to itself for its
 	// lifetime: while it runs, every other job start in this environment is
 	// refused and told this job holds it (see job_exclusive.go). It is what
@@ -394,8 +403,10 @@ type EnvironmentJob struct {
 	// tell "still beating" from "the same timestamp read twice".
 	AliveSeq int64 `json:"aliveSeq,omitempty"`
 	// AliveAgeMs is computed fresh on every read as now-LastAliveAt, in the
-	// pod's own clock, and is nil only when the job has never beaten (an
-	// attached job, or one whose supervisor has not registered yet). A caller
+	// pod's own clock, and is nil only when the job has never beaten — an
+	// attached job that has not renewed, which has no supervisor to beat for
+	// it. Every record a supervisor wrote for itself carries a beat from the
+	// instant it was published as running. A caller
 	// that sees this exceed EnvironmentJobAliveStaleMs treats the job as
 	// failed — reported as an unknown outcome, never as success and never as
 	// a tool error — rather than waiting on a beat a dead supervisor can no
@@ -525,13 +536,13 @@ func LoadEnvironmentJob(tenant, environment, id string, now time.Time) (Environm
 		}
 		return EnvironmentJob{}, err
 	}
-	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), processAlive, currentJobHostname()), nil
+	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), ProcessAlive, currentJobHostname()), nil
 }
 
 // LoadEnvironmentJobs returns every retained job, newest first, pruning records
 // that aged out as it reads.
 func LoadEnvironmentJobs(tenant, environment string, now time.Time) ([]EnvironmentJob, error) {
-	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), processAlive, currentJobHostname())
+	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), ProcessAlive, currentJobHostname())
 }
 
 func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool, hostname string) ([]EnvironmentJob, error) {
@@ -595,6 +606,19 @@ func reconcileEnvironmentJobWithRestartCheck(dir string, job EnvironmentJob, now
 		job.Succeeded = environmentJobSucceeded(job)
 		return job
 	}
+	// The record above was read before this liveness check, so it can still
+	// say "running" for a supervisor that finished in between: the supervisor
+	// writes its terminal state and only then exits. Re-read before retiring
+	// the job, so the demotion below can never overwrite an outcome that
+	// landed while this check was being made -- and, because a supervisor
+	// that really did die without recording still reads back as running here,
+	// a genuinely lost job is demoted exactly as it was before.
+	if fresh, err := readEnvironmentJob(filepath.Join(dir, job.ID+".json")); err == nil && fresh.State != EnvironmentJobStateRunning {
+		fresh.AliveAgeMs = environmentJobAliveAgeMs(fresh.LastAliveAt, now)
+		fresh.OutputBytes = environmentJobOutputSize(fresh.LogPath, fresh.OutputBytes)
+		fresh.Succeeded = environmentJobSucceeded(fresh)
+		return fresh
+	}
 	job = demoteEnvironmentJobToUnknown(job, now, hostname, restartRunner)
 	job.OutputBytes = environmentJobOutputSize(job.LogPath, job.OutputBytes)
 	job.Succeeded = environmentJobSucceeded(job)
@@ -640,12 +664,66 @@ func demoteEnvironmentJobToUnknown(job EnvironmentJob, now time.Time, hostname s
 func reconcileSamePodUnknownReason(job EnvironmentJob, hostname string, restartRunner openKubectlRunnerFunc) (kind, reason string) {
 	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, DevopsComponentName, restartRunner)
 	if !ok || !restarted || finishedAt.Before(jobLastKnownAliveAt(job)) {
-		return UnknownReasonSupervisorGone, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the pod was not replaced (same hostname), and why the supervisor process ended could not be determined", job.PID)
+		reason := fmt.Sprintf("job supervisor %d is gone without recording an exit status; the pod was not replaced (same hostname), and why the supervisor process ended could not be determined", job.PID)
+		if summary := environmentJobResourceStateSummaryFunc(); summary != "" {
+			reason += ". " + summary
+		}
+		return UnknownReasonSupervisorGone, reason
 	}
 	if terminatedReason == "" {
 		terminatedReason = "no reason reported"
 	}
 	return UnknownReasonContainerRestarted, fmt.Sprintf("job supervisor %d is gone without recording an exit status; the %s container restarted (%s, exit code %d) at %s -- the pod itself was not replaced", job.PID, DevopsComponentName, terminatedReason, exitCode, finishedAt.UTC().Format(time.RFC3339))
+}
+
+// environmentJobResourceStateSummary renders this pod's own cgroup state at
+// read time, for a job whose supervisor vanished with nothing else to
+// explain why (see reconcileSamePodUnknownReason): a supervisor that died
+// while pinned against its memory ceiling or heavily CPU-throttled is a
+// different, more actionable finding than "could not be determined", and
+// this is what stops erun sitting inside a cgroup that already has that
+// answer and never looking. It never claims a cause -- only reports the
+// numbers -- because the read happens after the fact and cannot prove what
+// state the cgroup was actually in at the moment the supervisor died. "" when
+// nothing here is readable (no cgroup v2, an unlimited container), so a
+// caller never appends an empty clause.
+// environmentJobResourceStateSummaryFunc is what reconcileSamePodUnknownReason
+// actually calls; a var, matching environmentJobGateIncompleteWaitCap's
+// established test-seam shape in this file, so a test can substitute a
+// fixture reading instead of depending on this test process's own live
+// cgroup (which, running inside `go test`, was never given the resource
+// limits a real runtime pod has).
+var environmentJobResourceStateSummaryFunc = environmentJobResourceStateSummary
+
+func environmentJobResourceStateSummary() string {
+	usage := ReadLocalRuntimeUsage(DefaultCgroupRoot)
+	var parts []string
+	if usage.Memory.Unavailable == "" && !usage.Memory.Unlimited && usage.Memory.LimitBytes > 0 {
+		part := fmt.Sprintf("memory %.2f/%.2f GiB", gibibytes(usage.Memory.CurrentBytes), gibibytes(usage.Memory.LimitBytes))
+		var details []string
+		if usage.Memory.CeilingHitsObserved {
+			details = append(details, fmt.Sprintf("ceiling reached %d times", usage.Memory.CeilingHits))
+		}
+		if usage.Memory.OOMKillsObserved {
+			details = append(details, fmt.Sprintf("%d OOM kill(s)", usage.Memory.OOMKills))
+		}
+		if len(details) > 0 {
+			part += ", " + strings.Join(details, ", ")
+		}
+		parts = append(parts, part)
+	}
+	if usage.CPU.Unavailable == "" && usage.CPU.Periods > 0 {
+		percent := 100 * float64(usage.CPU.ThrottledPeriods) / float64(usage.CPU.Periods)
+		parts = append(parts, fmt.Sprintf("CPU throttled in %.0f%% of periods (%d/%d)", percent, usage.CPU.ThrottledPeriods, usage.CPU.Periods))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Environment resource state: " + strings.Join(parts, "; ")
+}
+
+func gibibytes(bytes int64) float64 {
+	return float64(bytes) / (1 << 30)
 }
 
 // environmentJobChildren returns every job in dir that names parentID as its
@@ -670,7 +748,7 @@ func environmentJobChildren(dir, parentID string, now time.Time) []EnvironmentJo
 		if err != nil || job.StartedByJobID != parentID {
 			continue
 		}
-		children = append(children, reconcileEnvironmentJob(dir, job, now, processAlive, hostname))
+		children = append(children, reconcileEnvironmentJob(dir, job, now, ProcessAlive, hostname))
 	}
 	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
 	return children
@@ -723,15 +801,32 @@ func environmentJobFailedChildren(dir, parentID string, now time.Time) []Environ
 	}
 	var failed []EnvironmentJob
 	for _, child := range children {
-		if child.Handoff || !child.Finished() || child.Succeeded {
-			continue
+		if environmentJobCountsAsFailedChild(child, parentID, latestStartByName) {
+			failed = append(failed, child)
 		}
-		if child.Name != "" && child.StartedAt.Before(latestStartByName[child.Name]) {
-			continue
-		}
-		failed = append(failed, child)
 	}
 	return failed
+}
+
+// environmentJobCountsAsFailedChild is environmentJobFailedChildren's
+// per-child inclusion rule, split out so each exclusion reads as one
+// documented condition rather than folding into one long loop body.
+func environmentJobCountsAsFailedChild(child EnvironmentJob, parentID string, latestStartByName map[string]time.Time) bool {
+	if child.Handoff || !child.Finished() || child.Succeeded {
+		return false
+	}
+	// A child this same parent deliberately cancelled ended exactly as
+	// asked -- that is the parent's own intent, not a failure of work it
+	// waited for. A cancel issued by anyone else (a different job, or no
+	// job at all) still counts: only the parent that asked for the stop
+	// gets to read it as expected.
+	if child.CancelledByJobID != "" && child.CancelledByJobID == parentID {
+		return false
+	}
+	if child.Name != "" && child.StartedAt.Before(latestStartByName[child.Name]) {
+		return false
+	}
+	return true
 }
 
 // environmentJobAliveAgeMs is nil only when the job has never beaten, so a
@@ -1025,6 +1120,40 @@ func removeEnvironmentJobFiles(dir, id string) {
 	}
 	_ = os.Remove(filepath.Join(dir, id+".json"))
 	_ = os.Remove(filepath.Join(dir, id+".log"))
+	_ = os.Remove(environmentJobCancelMarkerPath(dir, id))
+}
+
+// environmentJobCancelMarkerPath is where CancelEnvironmentJob records who
+// asked a live job to stop, so that job's own supervisor -- the only writer
+// of its JSON record (see jobRecorder) -- can fold the provenance in once it
+// finishes, rather than a second process racing the supervisor to write the
+// same file.
+func environmentJobCancelMarkerPath(dir, id string) string {
+	return filepath.Join(dir, id+".cancelled-by")
+}
+
+// recordEnvironmentJobCancelRequest writes the canceller's own job id (empty
+// when the cancel came from outside any job) just before the signal reaches
+// the target, so the target's own finish check can later tell "my parent
+// deliberately stopped me" from "I died for some other reason". Best-effort,
+// matching the lease/heartbeat release pattern elsewhere in this package: a
+// write that fails here costs only the provenance, not the cancel itself.
+func recordEnvironmentJobCancelRequest(dir, id, cancelledBy string) {
+	_ = os.WriteFile(environmentJobCancelMarkerPath(dir, id), []byte(cancelledBy), 0o644)
+}
+
+// consumeEnvironmentJobCancelRequest reads back and removes the marker
+// recordEnvironmentJobCancelRequest left, so a job's own finish check folds
+// the provenance in exactly once. Absent is the common case -- most jobs end
+// on their own, never cancelled -- and reads as "", ok=false.
+func consumeEnvironmentJobCancelRequest(dir, id string) (string, bool) {
+	path := environmentJobCancelMarkerPath(dir, id)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	_ = os.Remove(path)
+	return string(data), true
 }
 
 func environmentJobOutputSize(path string, fallback int64) int64 {

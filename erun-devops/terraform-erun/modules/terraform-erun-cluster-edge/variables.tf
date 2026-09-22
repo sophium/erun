@@ -243,3 +243,56 @@ variable "manage_coredns_custom_configmap" {
   type        = bool
   default     = null
 }
+
+variable "http_redirect_enabled" {
+  description = <<-EOT
+    Redirect every plaintext request on the edge's web entrypoint to https.
+    On by default. An http request that reaches an application is an
+    application that has no way to tell it was downgraded, and a relative
+    redirect issued behind the edge inherits the scheme the browser started
+    on, so nothing downstream can recover it.
+  EOT
+  type        = bool
+  default     = null
+}
+
+variable "hsts_enabled" {
+  description = <<-EOT
+    Serve Strict-Transport-Security on the edge's secure entrypoint, for every
+    host it routes. On by default; set false for an edge that fronts hosts
+    deliberately served over plaintext.
+  EOT
+  type        = bool
+  default     = null
+}
+
+variable "hsts_max_age_seconds" {
+  description = <<-EOT
+    Strict-Transport-Security max-age, in seconds. Defaults to 86400 (one
+    day): long enough to protect a returning visitor, short enough that a TLS
+    mistake is recoverable within a day. Raise towards 31536000 (one year)
+    only once every host under the domain is verified https-only.
+  EOT
+  type        = number
+  default     = null
+}
+
+variable "hsts_include_subdomains" {
+  description = <<-EOT
+    Add includeSubDomains to Strict-Transport-Security. Binds every name under
+    the domain, including ones this module does not serve, so it is left off
+    until those are known to be https-only.
+  EOT
+  type        = bool
+  default     = null
+}
+
+variable "hsts_preload" {
+  description = <<-EOT
+    Add preload to Strict-Transport-Security. Asks browsers to hard-code the
+    commitment; only meaningful once includeSubDomains is on and the domain is
+    submitted to the preload list.
+  EOT
+  type        = bool
+  default     = null
+}

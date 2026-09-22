@@ -78,6 +78,13 @@ type resolvedRuntimeChart struct {
 	version    string
 	registry   string
 	candidates []string
+	// movedPin is true when the env's own stated chart version was a lagging
+	// pin on the deploy's line and version -- rather than the coordinate the
+	// env states -- so the caller records the chart it actually installs back
+	// to EnvConfig.RuntimeChart. Left false for a chart stated at a version the
+	// deploy is not on, and for one with no version of its own, which already
+	// follows the deploy version.
+	movedPin bool
 }
 
 // resolvePublishedRuntimeChartReference walks the candidate ladder and installs
@@ -140,12 +147,26 @@ func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chart
 // The returned chart version is empty for the looked-up case, meaning "the deploy
 // version", so nothing changes for the envs whose chart and image were published
 // as a pair.
+//
+// A stated version is normally taken as the chart's own, which is how an env
+// rides a chart on another line entirely. The exception is a stated stock
+// erun-devops chart on the deploy's own line at a version the deploy has moved
+// past: see stockRuntimePinMovesWithDeployVersion. Honoring that one installs the
+// older chart while the deploy records the newer version, so the operator reads
+// a version roll that did not happen.
 func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
 		reference, chartVersion := splitChartReferenceVersion(named)
 		chart := resolvedRuntimeChart{reference: reference, name: chartNameFromReference(reference), version: chartVersion}
 		if chartVersion == "" {
 			ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " at the deploy version " + version)
+			return chart, nil
+		}
+		if stockRuntimePinMovesWithDeployVersion(target.Tenant, target.EnvConfig, chart.name, chartVersion, version) {
+			ctx.Trace("deploy: the env's runtime chart " + reference + " is pinned at " + chartVersion +
+				", which is behind this deploy's " + version + " on " + DevopsComponentName + "'s own release line; moving the pin to the deploy version")
+			chart.version = strings.TrimSpace(version)
+			chart.movedPin = true
 			return chart, nil
 		}
 		ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " version " + chartVersion)
@@ -316,7 +337,7 @@ func reportUnconfirmedTenantCharts(required []string, registry string, insecure 
 		return fmt.Errorf("deploy could not confirm whether these tenant charts are published at version %s in %s: %s; deploy refuses to guess rather than treat an unanswered probe as published -- check registry access and retry", version, registry, strings.Join(unresolved, "; "))
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("deploy rolls out the tenant's own artifacts, which run on the tenant's version line, but these charts are not published at version %s in %s: %s; `erun push --version %s` (or `erun release`) publishes the tenant's runtime and component charts together, so publish the missing chart(s) then deploy", version, registry, strings.Join(missing, ", "), version)
+		return fmt.Errorf("deploy rolls out the tenant's own artifacts, which run on the tenant's version line, but these charts are not published at version %s in %s: %s; `erun push --version %s` (or `erun build --release`) publishes the tenant's runtime and component charts together, so publish the missing chart(s) then deploy", version, registry, strings.Join(missing, ", "), version)
 	}
 	return nil
 }
@@ -422,6 +443,11 @@ func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 }
 
 func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, versionOverride, reason, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
+	// Every chart probe below (the runtime ladder and the tenant-chart check)
+	// reads a registry. A deploy running inside the target env's own runtime pod
+	// resolves the credential that env declared for itself first, so a private
+	// namespace read is definitive instead of anonymous-and-therefore-refused.
+	configureInPodDeclaredRegistryAuth(ctx, target)
 	registry := publishedDevopsChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
@@ -456,6 +482,12 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	deployInput.SubchartKey = publishedUmbrellaSubchartKey(target.Tenant, chart.name)
 	deployInput.ChartVersion = chart.version
 	deployInput.ChartCandidates = chart.candidates
+	if chart.movedPin {
+		// The env stated the older version, so the config still records it:
+		// without this the next deploy reads the same lagging pin back and the
+		// roll never converges.
+		deployInput.PersistRuntimeChart = chart.reference + ":" + chart.version
+	}
 	deployInput.ReleaseName = RuntimeReleaseName(target.Tenant)
 	deployInput.UseHostCredentials = target.EnvConfig.HasAWSCloudAlias()
 	deployInput.ContainerRegistry = registry
@@ -670,7 +702,7 @@ func (e *RuntimeChartConfirmationError) Error() string {
 			"check registry credentials/connectivity and retry."
 	}
 	return "no runtime chart is published at version " + version + " at any coordinate deploy probed — " +
-		strings.Join(e.Candidates, "; ") + ". `erun push --version " + version + "` (or `erun release`) publishes a " +
+		strings.Join(e.Candidates, "; ") + ". `erun push --version " + version + "` (or `erun build --release`) publishes a " +
 		"version's runtime chart, so deploy is refusing rather than installing a coordinate that cannot exist; " +
 		"publish the version, or name a chart explicitly with `runtimechart` in the env config (or `--runtime-chart <ref>` for one deploy)."
 }
@@ -707,14 +739,14 @@ func (e *PublishedChartNotFoundError) Error() string {
 	if len(e.Candidates) == 0 {
 		msg += ": that version has no published chart in the registry. " +
 			"`erun push` publishes a version's image and chart together, so a version is deployable only after it is pushed — " +
-			"run `erun push --version " + version + "` (or `erun release` for a release version), then deploy."
+			"run `erun push --version " + version + "` (or `erun build --release` for a release version), then deploy."
 		return msg + helmOutputSuffix(e.HelmOutput)
 	}
 	msg += ": no chart is published at " + version + " at any coordinate the deploy probed — " + strings.Join(e.Candidates, ", ") + ". " +
 		"The " + DevopsComponentName + " platform chart is published only beside the runtime image erun releases, so a registry holding just this project's own images has it at no version: " +
 		"point the environment at the registry that does, with `erun init <tenant> <env> --runtime-registry <registry>`, which persists it as the env's runtimeregistry and redeploys."
 	if tenantChart := strings.TrimSpace(e.TenantChart); tenantChart != "" {
-		msg += " If this project publishes its own " + tenantChart + " umbrella instead, publish it at this version from the project that owns that chart — `erun push --version " + version + "` (or `erun release`) — then deploy."
+		msg += " If this project publishes its own " + tenantChart + " umbrella instead, publish it at this version from the project that owns that chart — `erun push --version " + version + "` (or `erun build --release`) — then deploy."
 	}
 	msg += " If the environment rides a chart on another line entirely, state it outright: `runtimechart` in the env config (the desktop's Runtime tab, \"Runtime chart\") or `--runtime-chart <ref>` for one deploy, and the version keeps naming the image."
 	return msg + helmOutputSuffix(e.HelmOutput)
@@ -774,7 +806,7 @@ func effectiveRuntimeChartCoordinateForImage(chart resolvedRuntimeChart, runtime
 // (explicit or not stale), nothing changed, so persistImage names the same
 // image the config already records -- a no-op write. When it falls through to
 // the deploy's own default, persistImage is the name that default resolved
-// to, healing exactly the field erun#1754 found silently left behind. Empty
+// to, healing exactly the field a prior report found silently left behind. Empty
 // only for the erun product's own environments, which have no line of their
 // own to persist a name for.
 func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, version, chartName, chartVersion, runtimeChartOverride string, runtimeImageExplicit bool) (image, persistImage string) {
@@ -791,6 +823,11 @@ func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, ve
 		staleChartName, staleChartVersion := effectiveRuntimeChartCoordinateForImage(resolvedRuntimeChart{name: chartName, version: chartVersion}, runtimeChartOverride)
 		stale := staleRuntimeImageTrace(image, staleChartName, version, strings.TrimSpace(staleChartVersion))
 		if stale == "" {
+			if moved := laggingStockRuntimeImagePin(target, registry, image, staleChartName, version); moved != "" {
+				ctx.Trace("deploy: moving the env's runtime image pin " + image + " to " + moved +
+					" (the env rides " + DevopsComponentName + "'s own release line, so the pin moves with the deploy version)")
+				return moved, moved
+			}
 			ctx.Trace("deploy: runtime image override " + image + " (imageOverrides." + DevopsComponentName + ")")
 			return image, recorded
 		}
@@ -829,6 +866,83 @@ func staleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 		return "deploy: ignoring stale runtimeimage " + image + " (the env states its runtime chart at " + chartVersion + ", so version " + version + " is on another line and the stock " + DevopsComponentName + " image is not published at it); defaulting to the tenant's own image"
 	}
 	return ""
+}
+
+// stockRuntimePinMovesWithDeployVersion reports whether a stated stock
+// erun-devops runtime coordinate — a chart's explicit version, or an image
+// pin's tag — is a lagging pin this deploy's version moves, rather than the
+// operator's own coordinate on another line.
+//
+// erun publishes the stock erun-devops image and chart together on erun's own
+// release line, so for an environment riding that line the two numbers are one
+// coordinate with the recorded runtime version. A deploy version that has moved
+// on then makes the stated one a pin left behind by an earlier deploy, and
+// honoring it installs the older chart and image while the deploy still records
+// the newer version — a version the pods are not running.
+//
+// Two things must hold, and neither is inferred from the tenant name alone:
+//
+//   - The environment's runtime coordinates must be confirmed on erun's line.
+//     EnvConfig.RuntimeImage is read first, the operative pin, then
+//     RuntimeRunningImage, the last image a deploy actually confirmed; a
+//     reference this cannot classify leaves the pin alone, the same "never
+//     guess a line" rule RuntimeVersionLine follows.
+//   - The deploy's own version must be able to be on that line at all. A tenant
+//     that publishes a devops image of its own runs its components on its own
+//     version line — which is exactly why it states its runtime chart
+//     separately — so there the stated version is the deliberate coordinate and
+//     must not move.
+func stockRuntimePinMovesWithDeployVersion(tenant string, env EnvConfig, pinName, pinVersion, version string) bool {
+	if strings.TrimSpace(pinName) != DevopsComponentName {
+		return false
+	}
+	version = strings.TrimSpace(version)
+	if strings.TrimSpace(pinVersion) == "" || strings.TrimSpace(pinVersion) == version || version == "" {
+		return false
+	}
+	if RuntimeReleaseName(tenant) != DevopsComponentName {
+		return false
+	}
+	for _, reference := range []string{env.RuntimeImage, env.RuntimeRunningImage} {
+		if line, ok := runtimeImageReleaseLine(reference); ok {
+			return line == "erun"
+		}
+	}
+	return false
+}
+
+// laggingStockRuntimeImagePin re-pins a stock runtime image the deploy is about
+// to honor at the deploy version, or returns "" when the pin is not the lagging
+// same-line one stockRuntimePinMovesWithDeployVersion describes. chartName is
+// the chart coordinate the same deploy resolved, so the two halves of the
+// coordinate move together or not at all.
+func laggingStockRuntimeImagePin(target OpenResult, registry, image, chartName, version string) string {
+	if !runtimeImageIsStockDevops(image) {
+		return ""
+	}
+	_, tag, ok := splitImageTag(image)
+	if !ok {
+		return ""
+	}
+	if !stockRuntimePinMovesWithDeployVersion(target.Tenant, target.EnvConfig, chartName, tag, version) {
+		return ""
+	}
+	return moveRuntimeImagePinToVersion(image, registry, version)
+}
+
+// moveRuntimeImagePinToVersion restates an image reference at version, keeping
+// the registry and name it was stated with and qualifying a bare name with the
+// registry the deploy resolves runtime images from — the same shape
+// resolveRuntimeImageOverride gives a tagless pin.
+func moveRuntimeImagePinToVersion(image, registry, version string) string {
+	name := stripRuntimeImageTag(image)
+	if name == "" {
+		return ""
+	}
+	if !strings.Contains(name, "/") {
+		name = strings.TrimSpace(registry) + "/" + name
+	}
+	return name + ":" + strings.TrimSpace(version)
 }
 
 // defaultDeployRuntimeImageBareName names the bare (no registry, no tag)

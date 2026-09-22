@@ -1,5 +1,6 @@
 import type { TenantConfigView } from 'erun-kit';
 import {
+  Activity,
   Building2,
   Cloud,
   Inbox,
@@ -26,6 +27,7 @@ export type ConsoleSectionId =
   | 'invites'
   | 'requests'
   | 'gate-runs'
+  | 'jobs'
   | 'tenants'
   | 'users'
   | 'org-settings'
@@ -58,6 +60,12 @@ const BASE_SECTIONS: ConsoleSection[] = [
   // what is being gated right now, and what recent gates decided (GET
   // /v1/gate-runs is TenantUserClass -- no tenant type restricts it).
   { id: 'gate-runs', label: 'Gate runs', icon: ListChecks },
+  // Jobs is every tenant's own view of what is being worked on right now
+  // (GET /v1/jobs is TenantUserClass -- no tenant type restricts it). It
+  // reads only the caller's own tenant, which is why it is deliberately not
+  // in SCOPE_AWARE_SECTIONS below: the scope selector would otherwise claim
+  // a reach this panel does not have.
+  { id: 'jobs', label: 'Jobs', icon: Activity },
 ];
 
 const OPERATIONS_SECTIONS: ConsoleSection[] = [
@@ -84,3 +92,21 @@ export function sectionsForTenant(tenant: TenantConfigView['tenant']): ConsoleSe
 export const ALL_SECTION_IDS: ConsoleSectionId[] = [...BASE_SECTIONS, ...OPERATIONS_SECTIONS].map(
   (section) => section.id,
 );
+
+// The sections whose own read actually threads scopeTenantId server-side:
+// overview's QuotaPanel, environments' EnvironmentsPanel/AISessionsPanel,
+// and users' UsersPanel. Every other section reads only
+// the caller's own tenant regardless of the scope selector's value --
+// ScopeSelector.tsx uses this to stop claiming a reach it does not have on
+// those sections, rather than leaving that gap unstated. Grow this set only
+// alongside the panel that actually starts honoring scope; a section added
+// here with no matching plumbing would make the selector lie the other way.
+const SCOPE_AWARE_SECTIONS: ReadonlySet<ConsoleSectionId> = new Set<ConsoleSectionId>([
+  'overview',
+  'environments',
+  'users',
+]);
+
+export function sectionHonorsScope(id: ConsoleSectionId): boolean {
+  return SCOPE_AWARE_SECTIONS.has(id);
+}

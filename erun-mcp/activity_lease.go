@@ -22,11 +22,14 @@ type ActivityLeaseTakeInput struct {
 	ID          string `json:"id,omitempty" jsonschema:"lease id to take or renew; defaults to the name, so re-taking the same name renews rather than stacking"`
 	PID         int    `json:"pid,omitempty" jsonschema:"process id of the detached job; the lease is reclaimed once that process exits, so an abandoned lease cannot pin the environment awake"`
 	TTLSeconds  int64  `json:"ttlSeconds,omitempty" jsonschema:"seconds the lease holds without a renewal; defaults to 900, or 300 when exclusive is set"`
-	// Exclusive, Scope, and Orchestrator request the exclusive-claim mode
-	// added for erun#1245: at most one exclusive holder per scope, so a
-	// second agent job or orchestrator working the same worktree is refused
-	// and told who holds it, while a second job in a different scope (a
-	// separate clone in the same pod) is unaffected.
+	// Exclusive, Scope, and Orchestrator request the exclusive-claim mode: at
+	// most one exclusive holder per scope, so a second exclusive take in that
+	// scope is refused and told who holds it, while a holder in a different
+	// scope (a separate clone in the same pod) is unaffected. What a held
+	// claim then refuses depends on its scope: only an "environment" claim
+	// refuses other job starts, a "worktree" claim is refused by the
+	// worktree-rewriting gate-merge guard, and any other scope refuses
+	// neither.
 	Exclusive    bool   `json:"exclusive,omitempty" jsonschema:"take an exclusive claim instead of plain presence: a second exclusive take in the same scope is refused and told who holds it, rather than silently coexisting. Take this before any mutating work in a target environment."`
 	Scope        string `json:"scope,omitempty" jsonschema:"the resource this exclusive claim protects; defaults to 'worktree'. Only meaningful with exclusive=true - exclusivity is scoped, never environment-wide, so two jobs in two separate clones of the same repo in one pod can each hold their own claim"`
 	Orchestrator string `json:"orchestrator,omitempty" jsonschema:"the calling orchestrator's own id (its $ERUN_ORCHESTRATOR_ID), recorded on the lease so a refusal can name who to go ask"`
@@ -38,6 +41,14 @@ type ActivityLeaseResult struct {
 	Environment string                                `json:"environment"`
 	Lease       *eruncommon.EnvironmentActivityLease  `json:"lease,omitempty"`
 	Held        []eruncommon.EnvironmentActivityLease `json:"held"`
+	// Released is set only by activity_lease_release: true when a held claim
+	// actually existed under the given id (and scope, for an exclusive claim)
+	// and this call removed it, false when there was nothing there to remove.
+	// Both are a successful call — releasing an absent or already-expired
+	// lease is idempotent — but collapsing them into the same unconditional
+	// success is what let a release aimed at the wrong store -- an exclusive
+	// claim released without exclusive=true -- go unnoticed.
+	Released *bool `json:"released,omitempty"`
 }
 
 func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ActivityLeaseTakeInput) (*mcp.CallToolResult, ActivityLeaseResult, error) {
@@ -88,7 +99,7 @@ func activityLeaseTakeTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
-		return activityLeaseResult(tenant, environment, &lease)
+		return activityLeaseResult(tenant, environment, &lease, nil)
 	}
 }
 
@@ -143,22 +154,27 @@ func activityLeaseReleaseTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		if strings.TrimSpace(input.ID) == "" {
 			return nil, ActivityLeaseResult{}, fmt.Errorf("lease id is required")
 		}
+		var outcome eruncommon.EnvironmentActivityLeaseReleaseOutcome
 		if input.Exclusive {
-			if err := eruncommon.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID); err != nil {
+			outcome, err = eruncommon.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID)
+			if err != nil {
 				return nil, ActivityLeaseResult{}, err
 			}
-			return activityLeaseResult(tenant, environment, nil)
+		} else {
+			outcome, err = eruncommon.ReleaseEnvironmentActivityLease(tenant, environment, input.ID)
+			if err != nil {
+				return nil, ActivityLeaseResult{}, err
+			}
 		}
-		if err := eruncommon.ReleaseEnvironmentActivityLease(tenant, environment, input.ID); err != nil {
-			return nil, ActivityLeaseResult{}, err
-		}
-		return activityLeaseResult(tenant, environment, nil)
+		released := outcome == eruncommon.EnvironmentActivityLeaseReleased
+		return activityLeaseResult(tenant, environment, nil, &released)
 	}
 }
 
 // activityLeaseResult always returns what is still held, so a caller sees the
 // environment's whole claim set rather than only the lease it just moved.
-func activityLeaseResult(tenant, environment string, lease *eruncommon.EnvironmentActivityLease) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+// released is non-nil only for a release call; take and list pass nil.
+func activityLeaseResult(tenant, environment string, lease *eruncommon.EnvironmentActivityLease, released *bool) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	held, err := eruncommon.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return nil, ActivityLeaseResult{}, err
@@ -166,7 +182,7 @@ func activityLeaseResult(tenant, environment string, lease *eruncommon.Environme
 	if held == nil {
 		held = []eruncommon.EnvironmentActivityLease{}
 	}
-	return nil, ActivityLeaseResult{Tenant: tenant, Environment: environment, Lease: lease, Held: held}, nil
+	return nil, ActivityLeaseResult{Tenant: tenant, Environment: environment, Lease: lease, Held: held, Released: released}, nil
 }
 
 // ActivityLeaseListInput selects the environment to read.
@@ -181,6 +197,6 @@ func activityLeaseListTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		if err != nil {
 			return nil, ActivityLeaseResult{}, err
 		}
-		return activityLeaseResult(tenant, environment, nil)
+		return activityLeaseResult(tenant, environment, nil, nil)
 	}
 }

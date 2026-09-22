@@ -60,6 +60,8 @@ A common pattern is to alias each environment:
 alias my-tenant-local='eval "$(erun open my-tenant local --no-shell)"'
 ```
 
+With `--no-shell`, stdout carries *only* that setup script, so the alias above evaluates nothing but commands. Human-readable output stays out of it: the SSH connection block is printed only when stdout is a terminal, and the alias hint goes to stderr, which `$(...)` does not capture.
+
 ## What `open` does
 
 `open` resolves the env, brings up its cloud context if linked, then — without deploying — checks the runtime is deployed, starts it if it was stopped and waits for it to become available, refreshes the env's [host AWS credentials](/deployment/cloud-setup#host-credentials) if it carries an AWS alias, waits for SSH readiness, best-effort port-forwards SSH + MCP + API for local tooling, and attaches a terminal or IDE. It never builds, pushes, or rolls out a chart. If the runtime is not yet deployed, `open` says so up front and tells you to run [`erun deploy`](/cli/deploy) first or pass `--deploy`; with `--deploy`, `open` deploys before opening (builds-here envs build → push → deploy, runtime envs install the current version). A port-forward that can't bind is a warning, not a failure — the shell runs inside the pod and doesn't depend on it. The full numbered algorithm — including the cluster-API readiness loop, the SSH banner probe, and the port-forward state-file format — is on [Agent reference · `erun open` lifecycle](/agent-reference/cli-flags#erun-open-lifecycle-algorithm).

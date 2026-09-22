@@ -33,9 +33,13 @@ const (
 
 // DesktopControlMarker is what a running desktop app (erun-ui) records at
 // startup and removes at a clean shutdown, so an external trigger can find it
-// and verify it before acting. A marker left behind by a crash still names a
-// pid, which is exactly what lets a stale one be told apart from a live one:
-// see DesktopProcessAlive.
+// and verify it before acting. This package owns the contract — the shape, its
+// location, reading it, and the liveness probe that tells a live record from a
+// stale one — while the desktop owns the record itself: it is the only thing
+// that writes one, and it keeps the rule that a record naming a live process is
+// never overwritten or removed by another instance. A marker left behind by a
+// crash still names a pid, which is exactly what lets a stale one be told apart
+// from a live one: see DesktopProcessAlive.
 type DesktopControlMarker struct {
 	PID           int   `json:"pid"`
 	ControlPort   int   `json:"controlPort"`
@@ -51,22 +55,6 @@ func DefaultDesktopControlMarkerPath() string {
 		return ""
 	}
 	return filepath.Join(dir, desktopControlMarkerFileName)
-}
-
-// WriteDesktopControlMarker persists marker at path, creating its directory if
-// needed. Called once by the desktop at startup.
-func WriteDesktopControlMarker(path string, marker DesktopControlMarker) error {
-	if path == "" {
-		return fmt.Errorf("desktop control marker path is unset")
-	}
-	data, err := json.Marshal(marker)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o600)
 }
 
 // ReadDesktopControlMarker reads what a running (or previously running)
@@ -89,20 +77,6 @@ func ReadDesktopControlMarker(path string) (DesktopControlMarker, error) {
 		return DesktopControlMarker{}, fmt.Errorf("desktop control marker %s names no live target", path)
 	}
 	return marker, nil
-}
-
-// RemoveDesktopControlMarker deletes a marker a clean shutdown no longer
-// vouches for. A missing file is not an error: shutdown may run twice, or the
-// marker may never have been written (a build with no network access to bind
-// the control listener).
-func RemoveDesktopControlMarker(path string) error {
-	if path == "" {
-		return nil
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
 }
 
 // DesktopRestartStatus is the outcome of one RestartDesktopApp call, reported
@@ -184,9 +158,20 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 		return DesktopRestartOutcome{Status: DesktopRestartRefused, Reason: reason}
 	}
 	if !deps.ProcessAlive(marker.PID) {
+		// The record names a process that is gone, so it identifies no desktop
+		// this call could ask to restart — and because a desktop that never
+		// took the record over publishes no endpoint, there is nothing else to
+		// resolve it by. Refusing is therefore the honest answer, but a bare
+		// "the record is stale" is a dead end: the record is not what the
+		// operator acts on. A record naming a dead pid is free, so reopening
+		// the desktop app claims it cleanly and the trigger works again, and
+		// the reason says so rather than leaving them with no path back to a
+		// rebuild.
 		return DesktopRestartOutcome{
-			Status:      DesktopRestartRefused,
-			Reason:      fmt.Sprintf("the desktop app recorded at pid %d is not running; the record is stale", marker.PID),
+			Status: DesktopRestartRefused,
+			Reason: fmt.Sprintf(
+				"the desktop app recorded at pid %d is not running; the record is stale — quit and reopen the desktop app so it records a fresh one",
+				marker.PID),
 			PID:         marker.PID,
 			ControlPort: marker.ControlPort,
 		}

@@ -5,16 +5,16 @@ import * as React from 'react';
 import { diffReviewCommitCount, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { selectDiffPath, toggleDiffDirectory } from '@/app/reviewThunks';
-import { selectReviewEnvTargets } from '@/app/selectors';
+import { type ReviewTarget, selectReviewTargets } from '@/app/selectors';
 import { diffPathKey, type EnvDiffState } from '@/app/slices/reviewSlice';
 import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { DiffEmptyState, ReviewStatus } from '@/components/app/DiffList';
 import type { DiffTreeNode } from '@/types';
 
-import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
+import { ReviewTargetLabel } from './ReviewPanel.EnvLabel';
 
 export function ChangedFileTree(): React.ReactElement {
-  const targets = useAppSelector(selectReviewEnvTargets);
+  const targets = useAppSelector(selectReviewTargets);
   if (targets.length === 0) {
     return <ReviewStatus>No environment selected</ReviewStatus>;
   }
@@ -22,13 +22,7 @@ export function ChangedFileTree(): React.ReactElement {
   return (
     <>
       {targets.map((target) => (
-        <ChangedFileTreeSection
-          key={target.envKey}
-          envKey={target.envKey}
-          tenant={target.tenant}
-          environment={target.environment}
-          showHeader={multi}
-        />
+        <ChangedFileTreeSection key={target.envKey} target={target} showHeader={multi} />
       ))}
     </>
   );
@@ -46,23 +40,20 @@ export function ChangedFileTree(): React.ReactElement {
 // (#1230). The tree shows a short status line instead and points at the diff
 // panel, which keeps the one actionable report.
 function ChangedFileTreeSection({
-  envKey,
-  tenant,
-  environment,
+  target,
   showHeader,
 }: {
-  envKey: string;
-  tenant: string;
-  environment: string;
+  target: ReviewTarget;
   showHeader: boolean;
 }): React.ReactElement {
+  const envKey = target.envKey;
   const slot = useEnvDiffSlot(envKey);
   const diffFilter = useAppSelector((state) => state.review.diffFilter);
   const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
 
   const header = showHeader ? (
     <div className="px-1 pt-2 pb-1">
-      <ReviewEnvLabel tenant={tenant} environment={environment} />
+      <ReviewTargetLabel target={target} />
     </div>
   ) : null;
 

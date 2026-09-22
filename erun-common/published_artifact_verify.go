@@ -104,7 +104,7 @@ func isTransientRegistryReadError(output string) bool {
 		"denied", "unauthorized", "not found", "manifest unknown",
 		"timeout", "timed out", "temporary failure", "connection reset",
 		"connection refused", "eof", "no such host", "tls handshake",
-		"service unavailable", "too many requests", "500 ", "502", "503",
+		"service unavailable", "too many requests", "500", "502", "503",
 	} {
 		if strings.Contains(message, marker) {
 			return true

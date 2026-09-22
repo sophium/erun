@@ -27,9 +27,11 @@ export interface OrchestratorEnvRef {
 }
 
 // OrchestratorInfo mirrors the Go orchestratorInfo JSON contract: a host-side
-// cross-env AI session that links one or more agent environments (each reviewed
-// in a host directory) and, when running, exposes the terminal
-// SessionID the pane attaches to. Transient ones (Investigate) are not persisted.
+// cross-env AI session that links agent environments (each reviewed in a host
+// directory) and may also name directories of its own, which belong to no
+// environment at all, and, when running, exposes the terminal SessionID the pane
+// attaches to. A definition needs at least one of the two. Transient ones
+// (Investigate) are not persisted.
 //
 // `busy` is the snapshot half of the fix: the sidebar spinner used to be
 // lit only by the ai-activity event, so a fetch that lands after the event (a
@@ -90,6 +92,15 @@ export interface OrchestratorInfo {
   // orchestratorNudgeSummary.ts, which renders this case distinctly instead
   // of asserting "Not nudged" for a history that was actually lost.
   nudgeHistoryUnreadable?: boolean;
+  // pacingUnreachable is true when this desktop holds no session for the
+  // orchestrator while its own hooks report one running elsewhere — a session
+  // started in a terminal, or by a previous desktop instance. The pacer decides
+  // only for sessions the desktop holds, so nothing here can nudge it, and its
+  // nudge count stays frozen at zero: exactly what a freshly checked,
+  // needing-nothing orchestrator looks like. See
+  // orchestratorPacingUnreachableNote, which is how the card tells those two
+  // states apart.
+  pacingUnreachable?: boolean;
   // restartRequired mirrors the Go side's own comparison of what this
   // orchestrator's live session was actually spawned with against what it is
   // linked to right now: true means an edit changed the scope while the

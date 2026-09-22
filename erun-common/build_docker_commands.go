@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,8 +15,18 @@ import (
 
 const fingerprintTagPrefix = "fp-"
 
+// errGateTestStagePromoted is a defense-in-depth backstop: applyIncrementalPromotion
+// never sets Promote on a GateTestStage build, so this branch should be
+// unreachable. If some future code path ever produces the combination anyway, fail
+// loudly rather than silently skip the build's own gate — an exit-0 build that never
+// ran its test stage is indistinguishable from a passing one otherwise.
+var errGateTestStagePromoted = errors.New("refusing to promote from a cached fingerprint image: this Dockerfile's test stage runs the build's own gate, and promoting would skip it without ever running make check")
+
 func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
 	if buildInput.Promote {
+		if buildInput.GateTestStage {
+			return fmt.Errorf("%s: %w", strings.TrimSpace(buildInput.Image.Tag), errGateTestStagePromoted)
+		}
 		return promoteDockerImage(buildInput, stdout, stderr)
 	}
 	return runMultiPlatformBuild(buildInput, stdout, stderr)
@@ -32,11 +43,11 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 		cgroupBefore := captureBuildCgroupSnapshot()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
+		output, err := buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
 		elapsed := time.Since(started)
 		if buildInput.PlatformObserver != nil {
 			cgroup := buildCgroupMetricsFromSnapshots(cgroupBefore, captureBuildCgroupSnapshot(), elapsed)
-			buildInput.PlatformObserver(platform, elapsed, err, cgroup)
+			buildInput.PlatformObserver(platform, elapsed, err, cgroup, output)
 		}
 		if err != nil {
 			return err
@@ -53,10 +64,14 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 // fallback promotePlatformImage reaches for when the registry rejects a
 // promoted tag, so a cache-hit decision that turns out to be wrong at push
 // time still ends in a real, correctly-tagged image rather than a failure.
-func buildPlatformImageFromSource(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+// The returned string is the real `docker build`'s own captured
+// `--progress=plain` output, for a caller (PlatformObserver) to mine for a
+// per-Dockerfile-step timing breakdown; the tag/push steps that follow it
+// produce nothing worth parsing the same way.
+func buildPlatformImageFromSource(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 	args := dockerBuildArgs(buildInput, platform)
-	err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
+	output, err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, buildInput.Verbosity, stdout, stderr)
 	if err == nil {
 		err = tagFingerprintAfterBuild(buildInput, platform, stdout, stderr)
 	}
@@ -66,7 +81,7 @@ func buildPlatformImageFromSource(buildInput DockerBuildSpec, platform string, s
 	if err == nil {
 		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
 	}
-	return err
+	return output, err
 }
 
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
@@ -75,11 +90,11 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 		started := time.Now()
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		err := promotePlatformImage(buildInput, platform, stdout, stderr)
+		output, err := promotePlatformImage(buildInput, platform, stdout, stderr)
 		if buildInput.PlatformObserver != nil {
 			// Promotion re-tags and pushes an already-built image; it never runs
 			// `docker build`, so there is no build-cgroup cost to attribute.
-			buildInput.PlatformObserver(platform, time.Since(started), err, nil)
+			buildInput.PlatformObserver(platform, time.Since(started), err, nil, output)
 		}
 		if err != nil {
 			return err
@@ -92,37 +107,120 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 }
 
 // promotePlatformImage re-tags one platform's cached fingerprint image and
-// pushes it under the real version tag. The fingerprint check that chose this
-// path only proves the image exists in the local daemon; it says nothing
-// about whether the registry still holds every blob that image references.
-// A push the registry rejects for a blob it doesn't have — surfacing as
-// "unknown blob" — means the cache hit cannot be trusted for this run, so
-// promotion is only ever an optimization over building from source: a
-// rejection here falls back to building and pushing this platform for real,
-// rather than failing the whole release over a check that was wrong.
-//
-// Any other failure (a real auth or network error, for instance) is not
-// retried, since rebuilding could not change its outcome; it is returned with
-// the promoted tag and its cached source named, so the failure says which
-// image and which operation it belongs to instead of a bare daemon message.
-func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+// pushes it under the real version tag. Promotion is only ever an optimization
+// over building from source, so a promote that cannot be trusted falls back to
+// building and pushing this platform for real rather than failing the whole
+// release over a cache check that was wrong; settlePromoteFailure decides which
+// failures those are. Every other failure is returned with the promoted tag and
+// its cached source named, so it says which image and which operation it
+// belongs to instead of a bare daemon message.
+func promotePlatformImage(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) (string, error) {
 	fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 	platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 	err := runDockerTag(fpTag, platformTag, stdout, stderr)
 	if err == nil {
 		err = tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr)
 	}
+	singlePlatform := true
 	if err == nil {
+		// A cached image that is a whole multi-platform index would be
+		// published as a manifest list under this platform's tag, and the
+		// assembly step rejects input that is a list ("<tag> is a manifest
+		// list"): the two halves of the release would disagree about what a
+		// per-arch tag is. The build path cannot produce that — dockerBuildArgs
+		// passes --provenance=false — but a promoted tag has no build behind it,
+		// so the shape of the image it was re-tagged from is checked here.
+		singlePlatform = localImageIsSinglePlatform(platformTag)
+	}
+	if err == nil && singlePlatform {
 		err = pushPlatformImage(buildInput, platformTag, stdout, stderr)
 	}
-	if err == nil {
-		return nil
+	if err == nil && singlePlatform {
+		return "", nil
 	}
-	if !IsDockerUnknownBlobError(err.Error()) {
-		return fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, err)
+	return settlePromoteFailure(buildInput, platform, platformTag, fpTag, err, stdout, stderr)
+}
+
+// promoteSourceMissing reports an affirmative "no image" from the local store
+// for the fingerprint tag a promote would re-tag. An inspect that could not run
+// at all is not that: it is not evidence the image is gone, so it is left to
+// fail on the daemon's own reason — the same fail-safe direction
+// localImageIsSinglePlatform takes for a shape it cannot read.
+func promoteSourceMissing(fpTag string) bool {
+	present, err := DockerImageExists(fpTag)
+	return err == nil && !present
+}
+
+// settlePromoteFailure decides what a promote that did not publish does. The
+// fingerprint check that chose the promote path proves only that the cached
+// image existed when that check ran, which is before any image in the run
+// builds; this promote runs minutes later, so a disk-floor prune mid-release is
+// enough to take the image out from under a decision already made. That case,
+// a push the registry rejects for a blob it does not hold (surfacing as
+// "unknown blob"), and a cache entry that cannot be published as a per-arch
+// manifest all mean the same thing — this cache entry cannot be trusted this
+// run — so all three rebuild and push this platform from source, instead of
+// aborting a release whose other images have all built.
+//
+// Any other failure (a real auth or network error, for instance) is not
+// retried, since rebuilding could not change its outcome.
+func settlePromoteFailure(buildInput DockerBuildSpec, platform, platformTag, fpTag string, promoteErr error, stdout, stderr io.Writer) (string, error) {
+	switch {
+	case promoteErr == nil:
+		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s would publish a multi-platform image under a per-arch tag; rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, platform)
+	case promoteSourceMissing(fpTag):
+		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); that cached image is no longer in the local image store, so rebuilding %s from source instead of trusting the cache\n", platformTag, fpTag, promoteErr, platform)
+	case IsDockerUnknownBlobError(promoteErr.Error()):
+		_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, promoteErr)
+	default:
+		return "", fmt.Errorf("promote %s from cached fingerprint image %s: %w", platformTag, fpTag, promoteErr)
 	}
-	_, _ = fmt.Fprintf(stderr, "==> promoting %s from cached fingerprint image %s failed (%v); the registry does not have every blob it references, so rebuilding from source instead of trusting the cache\n", platformTag, fpTag, err)
 	return buildPlatformImageFromSource(buildInput, platform, stdout, stderr)
+}
+
+// localImageIsSinglePlatform reports whether a local tag names a single-platform
+// image rather than a whole multi-platform index.
+//
+// A daemon backed by the containerd image store keeps a multi-platform image as
+// the index itself and records that on the image's descriptor; the classic
+// store cannot hold one at all, and records no descriptor. Anything that cannot
+// be read — no descriptor, an older docker, an image that vanished between the
+// tag and this inspect — reports single-platform, so the classic path keeps
+// publishing exactly as it did before.
+func localImageIsSinglePlatform(tag string) bool {
+	cmd := Command("docker", "image", "inspect", tag)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return true
+	}
+	var images []struct {
+		Descriptor struct {
+			MediaType string `json:"mediaType"`
+		} `json:"Descriptor"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &images); err != nil {
+		return true
+	}
+	for _, image := range images {
+		if isImageIndexMediaType(image.Descriptor.MediaType) {
+			return false
+		}
+	}
+	return true
+}
+
+// isImageIndexMediaType reports whether a media type names a manifest list, in
+// either the docker or the OCI spelling.
+func isImageIndexMediaType(mediaType string) bool {
+	switch strings.TrimSpace(mediaType) {
+	case "application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.index.v1+json":
+		return true
+	default:
+		return false
+	}
 }
 
 // pushPlatformImage publishes one platform the moment it is built, instead of
@@ -268,7 +366,12 @@ func platformShortSuffix(platform string) string {
 // returns, so "exit code: N" is never the whole story for a step that just
 // spent minutes running. At debug verbosity the caller already wants
 // everything live, so it streams as it always has.
-func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) error {
+// runDockerBuildOnce returns the build's captured combined output alongside
+// its error (or "" alongside a nil error's own message-shaped output on
+// success — see below) so a caller can mine BuildKit's own per-step timings
+// out of it (build_progress_phases.go) without re-running or re-capturing
+// anything.
+func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, verbosity int, stdout, stderr io.Writer) (string, error) {
 	cmd := Command("docker", args...)
 	cmd.Dir = dir
 	capture := &commandOutputCapture{}
@@ -280,24 +383,24 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 		cmd.Stderr = &capture.stderr
 	}
 	err := cmd.Run()
+	message := capture.combined()
 	if err == nil {
-		return nil
+		return message, nil
 	}
 
-	message := capture.combined()
 	if verbosity < VerbosityDebug && stderr != nil {
 		_, _ = io.WriteString(stderr, message)
 	}
 	if push && IsDockerPushAuthorizationError(message) {
-		return DockerRegistryAuthError{
+		return message, DockerRegistryAuthError{
 			Tag:      authContextTag,
 			Registry: dockerRegistryFromImageTag(authContextTag),
 			Message:  strings.TrimSpace(message),
 			Err:      err,
 		}
 	}
-	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message); ok {
-		return DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
+	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosis(message, err); ok {
+		return message, DockerBuildResourceExhaustionError{Diagnosis: diagnosis, Err: err}
 	}
 	// Keep the step's own last words whatever else is known: they are all the
 	// durable timing record will ever have (see build_failure_reason.go).
@@ -306,9 +409,9 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 		reason = joinFailureReason(reason, diagnosis)
 	}
 	if reason != "" {
-		return DockerBuildStepError{Reason: reason, Err: err}
+		return message, DockerBuildStepError{Reason: reason, Err: err}
 	}
-	return err
+	return message, err
 }
 
 func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
@@ -454,6 +557,7 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	// produced. runDockerBuildOnce is what keeps a successful build quiet below
 	// debug verbosity; this flag only has to make the output exist to capture.
 	args = append(args, "--progress=plain")
+	args = append(args, dockerBuildEntitlementArgs(buildInput)...)
 	args = append(args, "-t", tag)
 	buildArgVersion := dockerBuildArgVersion(buildInput)
 	// A base this run keeps local — a snapshot base, or a pinned-version base built
@@ -481,8 +585,35 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	if buildInput.CgroupParent != "" {
 		args = append(args, "--cgroup-parent", buildInput.CgroupParent)
 	}
+	args = append(args, dockerSecretArgs(buildInput.DockerSecrets)...)
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
+}
+
+// dockerBuildEntitlementArgs returns the BuildKit entitlements this build is
+// granted, empty when it is granted none.
+//
+// BuildKit default-denies a step that asks for `RUN --network=host`, failing
+// the build at LLB load ("network.host is not allowed") before any step runs.
+// Without the grant a Dockerfile test stage that starts a container fixture
+// cannot build at all, which would leave the documented "a component's tests
+// belong in that component's build/test stages" contract unsatisfiable rather
+// than merely unfollowed.
+//
+// Scoped to a Dockerfile that declares a `test` stage, because that is the only
+// place the grant is needed and it is a real capability rather than a harmless
+// flag: it lets a build step join the *builder's* network namespace, which is
+// this environment pod's — its loopback (where the unauthenticated dind
+// listener sits), its address on the cluster network, and whatever else the pod
+// routes to. Every other build erun issues is a production image with no tests
+// in it, and a broad grant on those is a decision nobody made. A Dockerfile
+// with no `test` stage therefore keeps the default deny, and fails loudly at
+// LLB load if it asks anyway, rather than silently reaching the pod's network.
+func dockerBuildEntitlementArgs(buildInput DockerBuildSpec) []string {
+	if !dockerfileDeclaresTestStage(buildInput.DockerfilePath) {
+		return nil
+	}
+	return []string{"--allow", "network.host"}
 }
 
 // dockerBuildArgVersion is the value the ERUN_VERSION build arg carries before
@@ -531,12 +662,59 @@ func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, st
 	return cmd.Run()
 }
 
+// dockerPushUnknownBlobRetries bounds the re-push that absorbs a concurrent
+// publisher. Two releases pushing overlapping layers to the same repository at
+// the same time can have one lose the race: the registry reports a layer as
+// present because the peer's upload of it is in flight but not yet committed,
+// and the manifest that references that layer is then rejected with "unknown
+// blob" even though this run built and uploaded everything it published. The
+// condition is transient by construction — it clears once the peer's upload
+// commits — so the same push is run again. Two retries cover a peer that is
+// still mid-upload; past that the failure is not this race and belongs to the
+// caller.
+const dockerPushUnknownBlobRetries = 2
+
+// dockerPushUnknownBlobBackoff is the pause before each retry, multiplied by
+// the attempt number. It is wall-clock because the condition waited on (the
+// peer's blob commit) lives in the registry; there is no local state to poll.
+const dockerPushUnknownBlobBackoff = 2 * time.Second
+
+// dockerPushWaitFunc pauses before a retry, injected so tests exercise the
+// retry decision without paying the backoff.
+type dockerPushWaitFunc func(attempt int)
+
 func DockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer) error {
+	return dockerImagePusher(tag, verbosity, stdout, stderr, func(attempt int) {
+		time.Sleep(time.Duration(attempt) * dockerPushUnknownBlobBackoff)
+	})
+}
+
+// dockerImagePusher runs one push, then re-runs that same push for the two
+// failures running it again can actually fix: a GHCR token without
+// write:packages (after the namespace re-login that mints a better one), and
+// the "unknown blob" cross-publisher race above. The two are distinct and do
+// not compound — a blob rejection is not an authorization failure, so at most
+// one of them applies to any given error.
+//
+// Every other failure is returned as it failed, on its first occurrence. The
+// retry is gated on IsDockerUnknownBlobError, which matches only the
+// registry-refused-a-blob-it-lacks shape; an auth, policy, or network failure
+// never reaches the loop, so a genuine error cannot be hidden by it.
+func dockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer, wait dockerPushWaitFunc) error {
 	err := runDockerPushOnce(tag, verbosity, stdout, stderr)
 	if err == nil {
 		return nil
 	}
 	if shouldRetryAfterGHCRNamespaceLogin(err, tag, stdout, stderr) {
+		if retryErr := runDockerPushOnce(tag, verbosity, stdout, stderr); retryErr == nil {
+			return nil
+		} else {
+			err = retryErr
+		}
+	}
+	for attempt := 1; attempt <= dockerPushUnknownBlobRetries && IsDockerUnknownBlobError(err.Error()); attempt++ {
+		_, _ = fmt.Fprintf(stderr, "==> push of %s was rejected with an unknown blob, which a concurrent publisher pushing the same repository can cause while its layer upload is still committing; re-pushing (%d/%d)\n", tag, attempt, dockerPushUnknownBlobRetries)
+		wait(attempt)
 		if retryErr := runDockerPushOnce(tag, verbosity, stdout, stderr); retryErr == nil {
 			return nil
 		} else {

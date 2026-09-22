@@ -1,0 +1,11 @@
+audit: erun outputs download erun-darwin-arm64
+outputs: downloading <HOME>/.erun/outputs/erun-darwin-arm64
+outputs: transferring 10000000 bytes in ranges of up to 8388608
+outputs: the range at offset 8388608 failed on attempt 1 of 3: read bytes 8388608-9999999: E0904 16:36:15.551881   90445 v2.go:167] "Unhandled Error" err="read message: unexpected EOF"
+error: error reading from error stream: read message: unexpected EOF: exit status 1
+outputs: the range at offset 8388608 failed on attempt 2 of 3: read bytes 8388608-9999999: E0904 16:36:15.551881   90445 v2.go:167] "Unhandled Error" err="read message: unexpected EOF"
+error: error reading from error stream: read message: unexpected EOF: exit status 1
+outputs: the range at offset 8388608 failed on attempt 3 of 3: read bytes 8388608-9999999: E0904 16:36:15.551881   90445 v2.go:167] "Unhandled Error" err="read message: unexpected EOF"
+error: error reading from error stream: read message: unexpected EOF: exit status 1
+download runtime output "erun-darwin-arm64": transferred 8388608 of 10000000 bytes: read bytes 8388608-9999999: E0904 16:36:15.551881   90445 v2.go:167] "Unhandled Error" err="read message: unexpected EOF"
+error: error reading from error stream: read message: unexpected EOF: exit status 1

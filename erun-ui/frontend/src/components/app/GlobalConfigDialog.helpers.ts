@@ -2,9 +2,6 @@ import { CloudProviderERun } from '@/types';
 
 export const NOT_CONFIGURED_VALUE = '__none__';
 
-export const dialogErrorClassName =
-  'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
-
 const AWS_REGION_NAMES: Record<string, string> = {
   'eu-west-1': 'Ireland',
   'eu-west-2': 'London',

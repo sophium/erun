@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // "Which conversation is this orchestrator's by convention" and "which
@@ -18,7 +20,7 @@ import (
 // under a new id -- but a launch resumes the derived answer anyway, every
 // time, unless the operator has explicitly attached something else.
 //
-// That is a deliberate trade, not an oversight (erun#1696). The alternative --
+// That is a deliberate trade, not an oversight. The alternative --
 // silently adopting whatever conversation a previous session happened to drift
 // onto -- has its own failure: nothing ever moves a drifted record back, so one
 // `/clear` used to rebind an orchestrator to that conversation permanently,
@@ -29,7 +31,9 @@ import (
 // recorded (see readOrchestratorLiveConversation) and offered in the Manage
 // dialog's Conversation section for the operator to attach deliberately (see
 // orchestratorConversationRoles in orchestrator_conversations.go). What it no
-// longer does is override the anchor without being asked.
+// longer does is override the anchor without being asked -- and a launch that
+// lands on the anchor while a usable tracked conversation differs says so, so
+// the drift is never silent either (see orchestratorAnchorDivergenceNotice).
 //
 // A record like this was removed once, and for a good reason: its writer keyed
 // purely on $ERUN_ORCHESTRATOR_ID, so any session that ever ran under the wrong
@@ -63,7 +67,7 @@ const orchestratorLiveConversationDirName = "orchestrator-live"
 // it belongs to. Read at run time by the hook for the same reason the
 // orchestrator id is: the settings file is shared by every orchestrator, so
 // nothing about one launch can be baked into it.
-const orchestratorLaunchEnvVar = "ERUN_ORCHESTRATOR_LAUNCH"
+const orchestratorLaunchEnvVar = eruncommon.OrchestratorLaunchEnvVar
 
 // orchestratorLiveConversation is what one orchestrator's file carries: the
 // conversation its session reported, and the launch that session belongs to.
@@ -86,8 +90,10 @@ const (
 
 // orchestratorConversationChoice is a resolved resume decision: which
 // conversation, why, and what the operator has to be told about it. Notice is
-// non-empty exactly when the answer is not the plain, unsurprising one -- the
-// operator's own explicit attachment could not be honoured.
+// non-empty exactly when the answer is not the plain, unsurprising one: the
+// operator's own explicit attachment could not be honoured, or the anchor that
+// was resumed is not the conversation this orchestrator's own session last
+// reported being on. It reports either; it never changes ConversationID.
 type orchestratorConversationChoice struct {
 	ConversationID string
 	Source         orchestratorConversationSource
@@ -161,18 +167,24 @@ func orchestratorLiveConversationForLaunch(id, launchID, fallback string) string
 // orchestrator resumes, and what to say about it.
 //
 // Order of authority: the conversation the operator explicitly attached, else
-// the anchor derived from the orchestrator id (erun#1696). The attachment has
+// the anchor derived from the orchestrator id. The attachment has
 // to clear two checks the anchor never needs -- its transcript is still on
 // disk, and no other orchestrator claims it -- because the cost of resuming
 // the wrong conversation is somebody else's history presented as this
 // orchestrator's own. A conversation this orchestrator's own session reported
-// being on (see readOrchestratorLiveConversation) is not consulted here at
-// all: it is offered in the Manage dialog for the operator to attach
-// deliberately (see orchestratorConversationRoles), never adopted on its own.
+// being on (see readOrchestratorLiveConversation) never decides the answer: it
+// is offered in the Manage dialog for the operator to attach deliberately (see
+// orchestratorConversationRoles), never adopted on its own. It is read here for
+// one thing only -- whether falling through to the anchor has to be REPORTED,
+// see orchestratorAnchorDivergenceNotice.
 //
 // An attachment that fails falls through to the anchor WITH a notice: an
 // operator's explicit instruction that silently stopped applying is the
-// failure this guards against.
+// failure this guards against. A fall-through that diverged from the
+// conversation this orchestrator's session was actually in is reported the same
+// way for the same reason: from inside the resumed session, a resume that
+// landed somewhere unexpected is indistinguishable from one that landed
+// correctly.
 func (a *App) resolveOrchestratorConversation(entry orchestratorOpenEntry) orchestratorConversationChoice {
 	id := strings.TrimSpace(entry.OrchestratorID)
 	if id == "" {
@@ -192,7 +204,42 @@ func (a *App) resolveOrchestratorConversation(entry orchestratorOpenEntry) orche
 		}
 		return orchestratorConversationChoice{ConversationID: attached, Source: orchestratorConversationAttached}
 	}
-	return orchestratorConversationChoice{ConversationID: derived, Source: orchestratorConversationDerived}
+	return orchestratorConversationChoice{
+		ConversationID: derived,
+		Source:         orchestratorConversationDerived,
+		Notice:         a.orchestratorAnchorDivergenceNotice(id, derived),
+	}
+}
+
+// orchestratorAnchorDivergenceNotice reports that this launch resumes the anchor
+// derived from its id while this orchestrator's own session last reported being
+// on a DIFFERENT conversation that could still be resumed -- or "" when there is
+// nothing surprising to say. It never changes which conversation is resolved:
+// the anchor stays authoritative, and this is a notice, not a third
+// source of truth for ConversationID.
+//
+// It exists because the anchor is fixed at the orchestrator's first-ever
+// conversation and therefore stops tracking the operator the moment they clear
+// or compact, while a resume that lands on that older conversation looks
+// perfectly ordinary from inside the resumed session. Nothing else tells the
+// operator their real conversation was left behind, so this does.
+//
+// Silence is the default, deliberately: a notice on every launch of every
+// orchestrator would be a worse defect than the silence it replaces. There is
+// nothing to say when no session ever reported, when it reported the anchor
+// itself (the ordinary case), or when what it reported cannot be resumed
+// anyway. That last check is orchestratorConversationUnusableReason -- the very
+// predicate the attachment path uses -- so "usable" means one thing in both
+// places rather than two.
+func (a *App) orchestratorAnchorDivergenceNotice(id, derived string) string {
+	record, ok := readOrchestratorLiveConversation(id)
+	if !ok || record.ConversationID == derived {
+		return ""
+	}
+	if reason := orchestratorConversationUnusableReason(record.ConversationID, a.otherOrchestratorConversationClaims(id)); reason != "" {
+		return ""
+	}
+	return orchestratorAnchorDivergedNotice(id, derived, record.ConversationID)
 }
 
 // orchestratorTrackedUnconfirmedReason reports why a tracked record cannot be
@@ -283,6 +330,19 @@ func orchestratorAttachmentUnusableNotice(id, attached, reason string) string {
 	return fmt.Sprintf("Reopened %s without the conversation attached to it (%s): %s. "+
 		"It resumed the conversation derived from its id; manage the orchestrator to attach another.",
 		id, attached, reason)
+}
+
+// orchestratorAnchorDivergedNotice reports that a launch resumed the anchor
+// derived from the orchestrator's id while the orchestrator's own last session
+// was working in a different conversation, and names the conversation the
+// launch DID land on so the operator can tell the two apart. The remedy is the
+// only one that exists: erun does not adopt a tracked conversation on its own
+// say-so, so attaching it by hand from Manage is how the operator
+// gets back to it.
+func orchestratorAnchorDivergedNotice(id, derived, tracked string) string {
+	return fmt.Sprintf("Reopened %s on the conversation derived from its id (%s), not the one its last session was working in (%s). "+
+		"That conversation is still there; manage the orchestrator to attach it.",
+		id, derived, tracked)
 }
 
 // orchestratorLiveConversationHookCommand is the hook that keeps one

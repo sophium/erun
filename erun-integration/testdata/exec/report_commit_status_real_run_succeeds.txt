@@ -1,0 +1,12 @@
+audit: erun exec report-commit-status --description gate build passed --remote-url https://github.com/sophium/erun.git --state success deadbeefcafe
+report-commit-status: resolving commit
+report-commit-status: commit = <SHORTSHA>
+report-commit-status: resolving state
+report-commit-status: state = success
+report-commit-status: resolving description
+report-commit-status: resolving owner/repo from remote-url
+report-commit-status: owner = sophium, repo = erun
+report-commit-status: context not given, defaulting to erun/merge-gate
+github: POST <GITHUB_API>/repos/sophium/erun/statuses/deadbeefcafe (state=success, context=erun/merge-gate, description="gate build passed")
+report-commit-status: resolving a github token
+Reported success status "erun/merge-gate" on sophium/erun@deadbeefcafe.

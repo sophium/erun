@@ -67,7 +67,11 @@ It creates the org and stops there. It does **not** register an erun tenant, mov
 
 Lists every identity (human and machine) of the platform's own organization by default, cross-referenced against erun's own `users` table for the caller's tenant so the response distinguishes an enrolled tenant member from an identity that merely exists in the IdP — the fix for a self-registered account (when `allowRegister` was left open, or an account created before it was closed) rendering identically to an actual member.
 
-**`?orgId=` lists another organization instead** — the same org [enrolling into another organization](#enrolling-into-another-organization) above can target. Without it, an identity created with `orgId` is invisible here: before this parameter existed, this endpoint could only ever see the credential's own org, so a cross-org enrollment (the one a fresh tenant's first admin depends on) had no way to be listed again, let alone deactivated (issue #1916). `enrolled`/`erunUserId` still cross-reference the caller's own tenant regardless of which org is listed — an identity in another tenant's org is correctly reported `enrolled: false` here, since it is not a member of the caller's (`OPERATIONS`) tenant.
+**`username` is the IdP's own username; `erunUsername` (present only when `enrolled` is true) is the separate, independently-chosen erun username for the same row (issue #2050).** The two are unrelated strings — `users.username` is picked at `erun platform user enroll --username` time and has no relationship to the IdP's own username — so an enrolled row can (and often does) show two different names for one person. A client rendering only `username` shows a name the operator may never recognize as their own, since the console header and every review/role/audit entry name them by their erun username instead. `id` (the IdP's own user id) is the OIDC `sub` claim — the same value `GET /v1/whoami`'s own `subject` field reports for the caller's session, and the only reliable join key between the two directories — so a client can mark "this is my own row" by comparing this list's `erunUserId` against `whoami`'s `userId`, without needing to compare either username.
+
+**`?orgId=` lists another organization instead** — the same org [enrolling into another organization](#enrolling-into-another-organization) above can target. Without it, an identity created with `orgId` is invisible here: before this parameter existed, this endpoint could only ever see the credential's own org, so a cross-org enrollment (the one a fresh tenant's first admin depends on) had no way to be listed again, let alone deactivated (issue #1916).
+
+**`?tenantId=` moves the membership join with it, independent of `orgId`** (operations-only for a tenant other than the caller's own, same `resolveTargetTenant` gate `GET /v1/environments?tenantId=` already uses — issue #2112). Without it, `enrolled`/`erunUserId` cross-reference the caller's own tenant regardless of which org `orgId` names — so an OPERATIONS caller listing another tenant's org saw every one of that tenant's genuine members reported `enrolled: false`, since the join never looked at the target tenant's own `users` rows. `tenantId` is taken as-is, never derived from `orgId`: the org↔tenant mapping is not one-to-one (`tenant_issuers` maps one tenant to zero, one, or several orgs), so guessing one from the other would reintroduce the same silent wrong-tenant join this parameter exists to remove. Omitting it keeps today's behaviour: the caller's own tenant.
 
 ```jsonc
 // 200 response
@@ -81,7 +85,8 @@ Lists every identity (human and machine) of the platform's own organization by d
     "lastName": "Operator",
     "isMachine": false,
     "enrolled": true,                  // true only when this subject also has a row in erun's own users table for this tenant
-    "erunUserId": "019a…"              // present only when enrolled is true
+    "erunUserId": "019a…",             // present only when enrolled is true
+    "erunUsername": "alice-erun"       // present only when enrolled is true; the erun user's own username, independent of "username" above
   },
   {
     "id": "387728394274144999",
@@ -153,7 +158,35 @@ The IdP half is created first, since the erun mapping needs the subject the IdP 
 |---|---|---|
 | `400` | `username`/`email` empty, or the body is not valid JSON. | Send both fields. |
 | `403` | Caller's tenant is not `OPERATIONS`. | Call from an operations-tenant token. |
-| Forwarded from Zitadel | The IdP call itself failed (e.g. a username already taken in the IdP). | The response body carries Zitadel's own message; act on it directly. |
+| `409` | `USERNAME_TAKEN` — the login name is already held by another user in the addressed organization. | Choose a different login name. See [A taken login name](#username-taken). |
+| Forwarded from Zitadel | The IdP call itself failed for another reason (e.g. a colliding email, or a password the org's policy rejects). | The response body carries Zitadel's own message; act on it directly. |
+
+### A taken login name {#username-taken}
+
+A login name another user in the addressed organization already holds is the one identity failure **not** forwarded from Zitadel as-is. The instance signals it as a bare `AlreadyExists` conflict whose message names the account rather than the name — so the caller was told the one thing they cannot change, while the name they chose, the one thing they can, went unsaid. It is reported as its own code carrying that name:
+
+```json
+// 409 response — from POST /v1/identity/users, and from invite acceptance
+{
+  "code": "USERNAME_TAKEN",
+  "message": "username \"bob\" is already taken; choose a different login name"
+}
+```
+
+`message` is what the console and CLI render, so an Operator sees the name to change instead of the IdP's own text.
+
+**Effect and recovery.** The IdP rejected the create, so no identity and no erun user exist afterwards — there is nothing half-landed to clean up. What the failure costs the caller differs by entry point, and only the first is retryable as-is:
+
+| Entry point | Effect | Recovery |
+|---|---|---|
+| `POST /v1/identity/users` | Nothing created; a plain failed call. | Retry with a different `username`. |
+| Invite acceptance | Nothing created, **but the invite token is already spent** — it is consumed before the identity is created, and a failed create does not return it. | The invitee cannot reuse the link; issue a new invite. |
+
+**This code is not unique to this endpoint.** [`POST /v1/users`](/agent-reference/api-protocol#post-v1users-and-get-v1users) reports `USERNAME_TAKEN` too, when the *erun* username is taken in the target tenant. The two carry different messages because they concern different fields — an IdP login name here, the erun username there — so a client that branches on the code alone should present `message` rather than a message of its own.
+
+The detection is keyed on Zitadel's `Errors.User.AlreadyExists` **message key**, not on the `409` status alone: a conflict on this endpoint can also mean a colliding email or another uniqueness rule, and relabelling those would send the caller to change a name that was never the problem. Those keep arriving forwarded, as the table above says.
+
+The name in `message` is the one the caller supplied. On a platform whose Domain Policy requires domain-qualified login names, the name the instance actually holds is that one suffixed with the organization's own primary domain — see [login names under an org-scoped issuer](/agent-reference/api-protocol#org-scoped-login-names).
 
 ## `POST /v1/identity/users/{external_id}/deactivate` and `.../reactivate`
 

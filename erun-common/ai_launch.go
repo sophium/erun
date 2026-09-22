@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -39,17 +40,68 @@ func resolveClaudeEffort(config EnvironmentClaudeConfig) string {
 
 // resolveClaudeLaunchModel picks the model the managed AI session starts on,
 // never the agent's own default: the environment may not be able to serve it.
-func resolveClaudeLaunchModel(config EnvironmentClaudeConfig) string {
+//
+// With a gateway configured the catalog supplies the selectable set, but an
+// environment's own choice is honoured even when the catalog does not list it —
+// typing an id the operator has not curated is a supported act, and refusing it
+// here would silently launch a different model than the tab shows. Without a
+// gateway the previous rule stands: the choice must be one of the environment's
+// available models.
+func resolveClaudeLaunchModel(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) string {
+	// Resolved through the environment's own opt-out, so an environment that
+	// stays on its own Claude sign-in is never handed a catalog model.
+	if effective := EffectiveGateway(config, gateway); effective.Configured() {
+		return resolveGatewayLaunchModel(config, effective)
+	}
+	return resolveAvailableClaudeModel(config)
+}
+
+// claudeConfiguredModel returns the environment's own model choice when it is a
+// token the launch can pass safely, and "" otherwise. A choice that is not a
+// safe token is ignored rather than passed through.
+func claudeConfiguredModel(config EnvironmentClaudeConfig) string {
+	if config.DefaultModel == nil {
+		return ""
+	}
+	model := strings.TrimSpace(*config.DefaultModel)
+	if !claudeModelTokenPattern.MatchString(model) {
+		return ""
+	}
+	return model
+}
+
+// resolveGatewayLaunchModel resolves against a gateway: the environment's choice
+// wins even when the catalog does not list it, because typing an uncurated id is
+// a supported act and silently substituting another model would launch
+// something other than what the tab shows.
+//
+// One choice is refused rather than substituted: an id the catalog itself lists
+// as requiring reasoning echo. That listing is the operator stating this model
+// cannot be driven, and nothing about the environment's own record makes it
+// driveable again, so launching it would substitute a mid-run provider refusal
+// for a launch that never happens. It is not a silent substitution of the kind
+// the rule above guards against — the id cannot be launched at all, and
+// ModelIDs no longer offers it, so the resolved default is the only model the
+// tab can present as selectable.
+func resolveGatewayLaunchModel(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) string {
+	if model := claudeConfiguredModel(config); model != "" && !gateway.RequiresReasoningEcho(model) {
+		return model
+	}
+	return gateway.ResolveDefaultModel()
+}
+
+// resolveAvailableClaudeModel resolves against an environment's own available
+// set: the choice must be one of them, so a model the environment cannot serve
+// is never launched.
+func resolveAvailableClaudeModel(config EnvironmentClaudeConfig) string {
 	available := config.NormalizedModels()
 	if len(available) == 0 {
 		available = DefaultClaudeAvailableModels()
 	}
-	if config.DefaultModel != nil {
-		if model := strings.TrimSpace(*config.DefaultModel); claudeModelTokenPattern.MatchString(model) {
-			for _, candidate := range available {
-				if candidate == model {
-					return model
-				}
+	if model := claudeConfiguredModel(config); model != "" {
+		for _, candidate := range available {
+			if candidate == model {
+				return model
 			}
 		}
 	}
@@ -76,12 +128,12 @@ var claudeModelTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
 // avoid (an orchestrator resuming the wrong, empty conversation after a pod
 // restart). If a future resume bug looks like it needs a fresh id, that is a
 // sign the underlying id tracking is wrong, not that this flag is missing.
-func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig, tenant, environment string) string {
+func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig, gateway *OpenRouterConfig, tenant, environment string) string {
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		return tool
 	}
-	prefix := claudeLaunchEnvPrefix(claude)
-	flags := claudeLaunchFlags(claude, tenant, environment)
+	prefix := claudeLaunchEnvPrefix(claude, gateway)
+	flags := claudeLaunchFlags(claude, gateway, tenant, environment)
 	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then ` + prefix + `claude --continue` + flags + `; else ` + prefix + `claude` + flags + `; fi`
 }
 
@@ -90,10 +142,10 @@ func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig, tenan
 // silently falls through to the trailing interactive shell — a tab labelled
 // "AI" showing a bare bash prompt — so the wrapper makes the exit state
 // explicit and puts the resume command one paste away.
-func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig, tenant, environment string) []string {
-	launch := AISessionLaunchCommand(aiTool, claude, tenant, environment)
+func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig, gateway *OpenRouterConfig, tenant, environment string) []string {
+	launch := AISessionLaunchCommand(aiTool, claude, gateway, tenant, environment)
 	label := "Claude"
-	resume := claudeLaunchEnvPrefix(claude) + "claude --continue" + claudeLaunchFlags(claude, tenant, environment)
+	resume := claudeLaunchEnvPrefix(claude, gateway) + "claude --continue" + claudeLaunchFlags(claude, gateway, tenant, environment)
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		label = "The AI tool"
 		resume = tool
@@ -108,25 +160,25 @@ func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig, tenant,
 	}
 }
 
-func claudeLaunchFlags(claude EnvironmentClaudeConfig, tenant, environment string) string {
+func claudeLaunchFlags(claude EnvironmentClaudeConfig, gateway *OpenRouterConfig, tenant, environment string) string {
 	flags := claudeEffortFlags(resolveClaudeEffort(claude))
-	if model := resolveClaudeLaunchModel(claude); model != "" {
+	if model := resolveClaudeLaunchModel(claude, gateway); model != "" {
 		flags += " --model " + model
 	}
 	if claude.VerboseDebug {
 		flags += " --verbose --debug"
 	}
-	flags += claudeRemoteControlFlag(claude, tenant, environment)
+	flags += claudeRemoteControlFlag(claude, gateway, tenant, environment)
 	return flags
 }
 
 // claudeRemoteControlFlag enables Claude Code Remote Control by default so the
 // operator can drive the managed AI session from the Claude iOS app, naming it
-// <tenant>/<env> to keep each environment distinct. Gateway (Bedrock/Mantle)
-// auth disables it: Remote Control pairs through the claude.ai account relay,
-// which those auth modes cannot satisfy, so enabling it would fail to pair.
-func claudeRemoteControlFlag(claude EnvironmentClaudeConfig, tenant, environment string) string {
-	if claudeUsesGatewayAuth(claude) {
+// <tenant>/<env> to keep each environment distinct. Gateway auth disables it:
+// Remote Control pairs through the claude.ai account relay, which gateway
+// credentials cannot satisfy, so enabling it would fail to pair.
+func claudeRemoteControlFlag(claude EnvironmentClaudeConfig, gateway *OpenRouterConfig, tenant, environment string) string {
+	if claudeUsesGatewayAuth(claude, gateway) {
 		return ""
 	}
 	if name := claudeRemoteControlSessionName(tenant, environment); name != "" {
@@ -135,7 +187,15 @@ func claudeRemoteControlFlag(claude EnvironmentClaudeConfig, tenant, environment
 	return " --remote-control"
 }
 
-func claudeUsesGatewayAuth(claude EnvironmentClaudeConfig) bool {
+// claudeUsesGatewayAuth reports whether the session authenticates through a
+// gateway rather than a claude.ai account, which is what decides Remote
+// Control eligibility.
+func claudeUsesGatewayAuth(claude EnvironmentClaudeConfig, gateway *OpenRouterConfig) bool {
+	// Through the opt-out, so an environment that left the gateway keeps Remote
+	// Control, which a gateway credential could not pair.
+	if EffectiveGateway(claude, gateway).Configured() {
+		return true
+	}
 	return (claude.UseBedrock != nil && *claude.UseBedrock) ||
 		(claude.UseMantle != nil && *claude.UseMantle)
 }
@@ -160,14 +220,27 @@ var claudeSessionNameTokenPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._
 
 // claudeLaunchEnvPrefix mirrors the resolved default model into
 // CLAUDE_CODE_SUBAGENT_MODEL so subagents run on the same model the session
-// launches with. It must be an in-string command prefix, not a PTY env entry:
-// for remote-agent envs the guard runs `claude` in the pod via kubectl exec,
-// and only an in-string assignment crosses into the pod.
-func claudeLaunchEnvPrefix(claude EnvironmentClaudeConfig) string {
-	if model := resolveClaudeLaunchModel(claude); model != "" {
-		return "CLAUDE_CODE_SUBAGENT_MODEL=" + model + " "
+// launches with, and declares that model's context window so Claude Code does
+// not have to assume one for an id it does not recognise.
+//
+// It must be an in-string command prefix, not a PTY env entry: for remote-agent
+// envs the guard runs `claude` in the pod via kubectl exec, and only an
+// in-string assignment crosses into the pod.
+//
+// The gateway credential is deliberately absent here. A launch command's argv
+// is visible to anything that can list processes, so the token reaches the pod
+// through Claude Code's settings env block instead — see OpenRouterConfig.
+// AuthTokenRef. Only non-secret routing values belong in this prefix.
+func claudeLaunchEnvPrefix(claude EnvironmentClaudeConfig, gateway *OpenRouterConfig) string {
+	model := resolveClaudeLaunchModel(claude, gateway)
+	if model == "" {
+		return ""
 	}
-	return ""
+	prefix := "CLAUDE_CODE_SUBAGENT_MODEL=" + model + " "
+	if context := gateway.ContextFor(model); context > 0 {
+		prefix = "CLAUDE_CODE_MAX_CONTEXT_TOKENS=" + strconv.Itoa(context) + " " + prefix
+	}
+	return prefix
 }
 
 // claudeEffortFlags maps a resolved effort level to its launch flags. ultracode

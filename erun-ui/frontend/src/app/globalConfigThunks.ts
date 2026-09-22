@@ -4,6 +4,7 @@ import { globalConfigApi } from './api/globalConfigApi';
 import { cloudContextDraftForConfig } from './cloudContextState';
 import { readError } from './errors';
 import { showNotification, showTerminalError } from './notificationThunks';
+import { seedOpenRouterCatalog } from './openRouterCatalogSeed';
 import { patchGlobalConfigDialog, setGlobalConfigDialog } from './slices/globalConfigDialogSlice';
 import type { GlobalConfigDialogState } from './state';
 import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state';
@@ -103,7 +104,11 @@ export const loadGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch, 
     const currentDraft = getState().globalConfigDialog.cloudContextDraft;
     dispatch(
       patchGlobalConfigDialog({
-        config: result,
+        // A catalog left unconfigured opens filled from this machine's own
+        // Claude Code gateway, so an endpoint and model already configured once
+        // are not typed again. The dialog is only pre-filled: nothing is stored
+        // until the operator saves.
+        config: seedOpenRouterCatalog(result),
         cloudContextDraft: cloudContextDraftForConfig(result, currentDraft),
         configLoading: false,
         error: '',

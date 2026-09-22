@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   Ban,
   CheckCircle2,
+  CircleSlash,
+  Hourglass,
   ListChecks,
   LoaderCircle,
   PlugZap,
@@ -119,7 +121,7 @@ export function JobsTab({
     );
   }
   if (error) {
-    return <InlineAlert>Could not read this environment&apos;s jobs. {error}</InlineAlert>;
+    return <JobsReadFailureAlert error={error} onRetry={reload} />;
   }
   if (jobs.length === 0) {
     return (
@@ -143,8 +145,44 @@ interface UnreachableJobsState {
   message: string;
 }
 
+// JobsReadFailureAlert is the counterpart to JobsUnreachableAlert below: the
+// read was answered with a refusal rather than a list. "Could not read" is not
+// "No jobs" -- an empty list here would assert nothing is running when the
+// truth is that nothing is known -- and of the failures that land here a
+// timeout is the most retryable there is: nothing needs re-establishing, only
+// re-asking. JobsUnreachableAlert already carried that action; this surface
+// named its cause and offered no remedy, leaving the operator to switch tabs
+// and hope the remount re-fetched. The Retry re-issues the same read
+// through the caller's reload(), so what replaces the alert is the result --
+// the list, or this alert again with whatever the retry failed on.
+function JobsReadFailureAlert({
+  error,
+  onRetry,
+}: {
+  error: string;
+  onRetry: () => void;
+}): React.ReactElement {
+  return (
+    <InlineAlert
+      action={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          data-testid="manage-jobs-retry"
+          onClick={onRetry}
+        >
+          Retry
+        </Button>
+      }
+    >
+      Could not read this environment&apos;s jobs. {error}
+    </InlineAlert>
+  );
+}
+
 // JobsUnreachableAlert names the same two reachability shapes the sidebar and
-// diff panel already distinguish (#1230): a stale port-forward is a fault
+// diff panel already distinguish: a stale port-forward is a fault
 // worth reconnecting, told apart from an environment nobody has opened. The
 // action reuses the shared reconnect flow (confirm dialog, then the same MCP
 // reconnect call) so recovering from here behaves exactly like recovering
@@ -229,7 +267,7 @@ function JobsEmptyState({ message }: { message: string }): React.ReactElement {
 // Colour never carries the outcome on its own: each state has its own icon and
 // its own words, so the row reads the same to someone who cannot separate the
 // green from the red.
-function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
+export function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
   const outcome = jobOutcome(job);
   const label = jobOutcomeLabel(job);
   const shared = 'inline-flex items-center gap-1.5 text-[12px] font-medium';
@@ -267,6 +305,28 @@ function OutcomeBadge({ job }: { job: JobView }): React.ReactElement {
         data-testid="manage-jobs-row-outcome"
       >
         <AlertTriangle className="size-3.5" aria-hidden="true" />
+        {label}
+      </span>
+    );
+  }
+  // Abandoned wears the destructive styling rather than the amber "unresolved"
+  // one: something is still running in the pod and nothing will report on it
+  // again, so it is the one outcome that needs an operator to act.
+  if (outcome === 'abandoned') {
+    return (
+      <span className={`${shared} text-destructive`} data-testid="manage-jobs-row-outcome">
+        <CircleSlash className="size-3.5" aria-hidden="true" />
+        {label}
+      </span>
+    );
+  }
+  if (outcome === 'gate-incomplete') {
+    return (
+      <span
+        className={`${shared} text-amber-700 dark:text-amber-400`}
+        data-testid="manage-jobs-row-outcome"
+      >
+        <Hourglass className="size-3.5" aria-hidden="true" />
         {label}
       </span>
     );

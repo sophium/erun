@@ -1,0 +1,2 @@
+audit: erun e2e
+erun e2e: <TMP> sets ignoreHTTPSErrors, which erun e2e forbids: the exposed certificate is real, and verifying it is part of what a deploy is checked for

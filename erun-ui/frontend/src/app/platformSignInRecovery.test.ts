@@ -5,9 +5,9 @@ import './api/tenantApi';
 import './api/tenantInviteRequestApi';
 
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
 
 import { configureStore } from '@reduxjs/toolkit';
+import { test } from 'vitest';
 
 import { TENANT_PLATFORM_STATE_NOT_SIGNED_IN } from '@/types';
 
@@ -78,7 +78,7 @@ function seedNotSignedInDashboard(dispatch: AppDispatch): void {
         canApproveInviteRequests: false,
         canDeclineInviteRequests: false,
       },
-      reviewFilter: { mine: false, waitingOnMe: false },
+      reviewFilter: { mine: false, waitingOnMe: false, statuses: ['OPEN', 'MERGE'] },
       platformAliasOverride: '',
       connectApiUrlDraft: '',
       connecting: false,

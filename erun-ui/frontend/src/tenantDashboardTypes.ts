@@ -3,6 +3,14 @@
 // the same pattern). Nothing here changes shape; types.ts re-exports the
 // whole module so every existing `from './types'` import keeps working.
 
+// UIAccessRemedy is the copyable hand-over a capability denial offers: the
+// grant command already resolved for this caller, and the name of the role it
+// grants so the request can be made in the platform's own vocabulary.
+export interface UIAccessRemedy {
+  command?: string;
+  roleName?: string;
+}
+
 export interface UITenantDashboardInput {
   tenant: string;
   environment?: string;
@@ -49,7 +57,17 @@ export interface UITenantDashboard {
   platformUrl?: string;
   platformIssuer?: string;
   platformSubject?: string;
+  // accessRemedies keys a restricted route to the copyable grant that would
+  // give the caller the access they were refused, so a restricted tab hands
+  // over the request rather than only naming what is missing. Absent when no
+  // role covers the access or the tenant's roles could not be read.
+  accessRemedies?: Record<string, UIAccessRemedy>;
   user?: UITenantDashboardUser;
+  // users is the Users tab's roster: the tenant's users, from GET /v1/users.
+  // Distinct from user above, which is the caller's own identity — the tab
+  // lists the tenant, and an unreadable roster is reported on the panel rather
+  // than collapsing back to the caller's single row.
+  users?: UITenantDashboardUser[];
   reviews?: UITenantDashboardReview[];
   mergeQueue?: UITenantDashboardReview[];
   builds?: UITenantDashboardBuild[];
@@ -367,6 +385,54 @@ export interface UITenantDashboardReview {
   updatedAt?: string;
 }
 
+// UIBuildCgroupMetrics is one step's CPU/throttling/I/O cost. available is
+// false either because the step ran outside a build cgroup entirely (the
+// whole UIBuildProfileStep.cgroup field is then undefined instead) or
+// because a pod-injected build's own cgroup counters could not be read
+// (available: false, unavailable: reason) -- render "not available" for the
+// latter, never zeros, since a zero here would misread as "used no CPU".
+export interface UIBuildCgroupMetrics {
+  available: boolean;
+  unavailable?: string;
+  cpuSeconds?: number;
+  cpuPercentOfQuota?: number;
+  // throttledPeriods/totalPeriods is the ratio to show, not cpuPercentOfQuota
+  // alone: a step at 100% CPU that is not throttled is sized correctly, and
+  // one at 18% that is throttled is starved -- duration and a single
+  // percentage cannot distinguish those.
+  throttledPeriods?: number;
+  totalPeriods?: number;
+  throttledSeconds?: number;
+  ioReadBytes?: number;
+  ioWriteBytes?: number;
+  peakMemoryBytes?: number;
+}
+
+// UIBuildProfileStep is one entry in UIBuildProfileSummary's bounded
+// top-N-costliest-steps list. name carries its full ancestry path (e.g.
+// "erun-devops > linux/amd64") so two same-named steps under different
+// parents stay distinguishable once flattened out of the tree.
+export interface UIBuildProfileStep {
+  name: string;
+  durationSeconds: number;
+  cgroup?: UIBuildCgroupMetrics;
+}
+
+// UIBuildProfileSummary is the bounded per-build profile a build
+// self-reports alongside its outcome -- a duration/CPU/throttle/IO summary
+// plus the top costliest steps, never the full step tree, so a build with a
+// deep step tree never grows this payload unbounded.
+// truncatedStepCount is the number of steps left out of topSteps; 0 means
+// topSteps is the whole tree.
+export interface UIBuildProfileSummary {
+  durationSeconds: number;
+  failed?: boolean;
+  cgroup?: UIBuildCgroupMetrics;
+  topSteps?: UIBuildProfileStep[];
+  totalStepCount?: number;
+  truncatedStepCount?: number;
+}
+
 export interface UITenantDashboardBuild {
   buildId: string;
   tenantId: string;
@@ -379,15 +445,25 @@ export interface UITenantDashboardBuild {
   successful: boolean;
   commitId: string;
   version: string;
+  // profile is undefined for a build reported before this feature existed,
+  // or one whose own caller collected no profile.
+  profile?: UIBuildProfileSummary;
   createdAt?: string;
   updatedAt?: string;
 }
 
 // UIConnectERunPlatformInput is the "Connect to erunpaas.com" action's input:
-// just the API base URL, discovered against the platform itself the same way
-// `erun cloud init erun` already does.
+// the API base URL — discovered against the platform itself the same way
+// `erun cloud init erun` already does — and the tenant the click came from.
+//
+// tenant is omitted only by the machine-wide settings dialog, which attaches
+// the alias globally and has no tenant to attach it to. A click on a tenant's
+// dashboard carries that tenant: an alias attached only machine-globally
+// cannot move a tenant whose own alias selection is already non-empty, so
+// without it the Connect card re-renders unchanged.
 export interface UIConnectERunPlatformInput {
   apiUrl: string;
+  tenant?: string;
 }
 
 // UIPlatformUserEnrollInput is the "not enrolled" state's enrollment attempt.

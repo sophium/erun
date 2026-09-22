@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -27,6 +28,32 @@ func ResolveCurrentDockerBuildSpecs(ctx Context, store DockerStore, findProjectR
 	return builds, nil
 }
 
+// ErrBuildPlanEmpty reports a build that resolved no work at all: no docker
+// images, no linux package builds, no project build script, no charts, no
+// release. Nothing about such a plan is a pass -- running it builds nothing and
+// tests nothing -- so both the resolution and execution boundaries refuse it
+// rather than letting the caller's exit code read as a green gate.
+var ErrBuildPlanEmpty = errors.New("build resolved nothing to build")
+
+func newEmptyBuildPlanError(reason string) error {
+	return fmt.Errorf("%w: %s", ErrBuildPlanEmpty, reason)
+}
+
+// ErrGateBuildNotRun reports a gate build whose plan would execute nothing: no
+// script, no linux package build, and every docker image promoted from the
+// fingerprint cache. The fingerprint proves the inputs are unchanged; it does
+// not prove anything ran against them, so such a run has the same exit code as
+// a real gate and none of its evidence. `review record-build --gate` reads only
+// that exit code, so the refusal has to happen here, in the build itself.
+var ErrGateBuildNotRun = errors.New("gate build resolved nothing to run")
+
+func newGateBuildNotRunError(promotedTags []string) error {
+	return fmt.Errorf(
+		"%w: every image would be promoted from the fingerprint cache (%s) and no script or linux package build is planned, "+
+			"so this run would build and test nothing; re-run with --no-incremental to gate a real build, or drop --gate if this is an ordinary incremental build",
+		ErrGateBuildNotRun, strings.Join(promotedTags, ", "))
+}
+
 func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
@@ -43,7 +70,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 	}
 	if script != nil {
 		script.Env = buildScriptEnv(target.VersionOverride)
-		return BuildExecutionSpec{release: releaseSpec, script: script}, nil
+		return BuildExecutionSpec{release: releaseSpec, script: script, gate: target.Gate}, nil
 	}
 
 	linuxBuilds, hadLinuxBuilds, err := resolveLinuxBuildsForExecution(findProjectRoot, resolveBuildContext, target, releaseSpec)
@@ -60,11 +87,23 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 		return resolveBuildExecutionWithoutBuilds(findProjectRoot, target, hadLinuxBuilds)
 	}
 
-	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0}
+	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0, gate: target.Gate}
 	if releaseSpec != nil {
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
 	return finalizeBuildExecution(ctx, execution, target.NoIncremental)
+}
+
+// buildExecutionPlansWork reports whether an execution has anything to run. An
+// execution that plans none of these does no work and tests nothing, so its
+// success would be indistinguishable from a real pass.
+func buildExecutionPlansWork(execution BuildExecutionSpec) bool {
+	return execution.release != nil ||
+		execution.script != nil ||
+		len(execution.linuxBuilds) > 0 ||
+		len(execution.dockerBuilds) > 0 ||
+		len(execution.dockerPushes) > 0 ||
+		len(execution.componentCharts) > 0
 }
 
 // finalizeBuildExecution applies incremental promotion, then resolves the
@@ -203,7 +242,11 @@ func resolveLinuxBuildsForExecution(findProjectRoot ProjectFinderFunc, resolveBu
 
 func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, target DockerCommandTarget, hadLinuxBuilds bool) (BuildExecutionSpec, error) {
 	if hadLinuxBuilds {
-		return BuildExecutionSpec{skippedLinux: true}, nil
+		// The project does have linux package builds, but this host cannot run
+		// them and nothing else resolved either. Exiting zero here is the same
+		// false green as an empty image plan: the host was asked to build and
+		// built nothing. Name the cause instead of reporting success.
+		return BuildExecutionSpec{}, newEmptyBuildPlanError("this project's linux package builds need a Linux host with dpkg-deb, and no docker images resolved")
 	}
 	script, err := resolveNestedProjectBuildScript(findProjectRoot, target)
 	if err != nil {
@@ -211,6 +254,18 @@ func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, targe
 	}
 	if script == nil {
 		return BuildExecutionSpec{}, ErrDockerBuildContextNotFound
+	}
+	// A nested build script only stands in for the image plan when the project
+	// has no docker build module to resolve. When it does, resolving zero images
+	// is a resolution failure, and running the script instead would exit zero
+	// having built no image and run no gate -- a pass a caller cannot tell from
+	// a real one.
+	if dockerDir, ok, err := resolveProjectDockerModuleDir(findProjectRoot, target); err != nil {
+		return BuildExecutionSpec{}, err
+	} else if ok {
+		return BuildExecutionSpec{}, newEmptyBuildPlanError(fmt.Sprintf(
+			"the project has a docker build module at %s, but this build resolved no images from it, and running %s instead would report success without building an image; re-run from the project root or select the component whose images you meant to build",
+			dockerDir, filepath.Join(filepath.Clean(script.Dir), script.Path)))
 	}
 	script.Env = buildScriptEnv(target.VersionOverride)
 	return BuildExecutionSpec{script: script}, nil

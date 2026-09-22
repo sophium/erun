@@ -35,6 +35,15 @@ func run() int {
 		logger := eruncommon.NewLogger(0)
 		logger.Fatal(err)
 	}
+	return exitCodeFor(err)
+}
+
+// exitCodeFor resolves the process exit code for an already-reported failure.
+// The platform-alias condition keeps its own code; everything else falls through
+// to the code the failure itself carries, defaulting to 1. A tenant-selection
+// refusal is tagged with its own code by the command that produced it, so it can
+// never be read as either of the other two.
+func exitCodeFor(err error) int {
 	if errors.Is(err, eruncommon.ErrPlatformAliasUnusable) {
 		return platformAliasUnusableExitCode
 	}

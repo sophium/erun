@@ -21,6 +21,15 @@ import (
 // already-resolved caller, not the token parsing that resolves one.
 func connectWithCapabilities(t *testing.T, capabilities ...string) *mcp.ClientSession {
 	t.Helper()
+	return connectWithRuntime(t, RuntimeConfig{}, capabilities...)
+}
+
+// connectWithRuntime is connectWithCapabilities for a tool whose handler reads
+// beyond the caller's identity — a store-backed resolution, say — so the
+// assertions exercise the payload the server really returns for that runtime
+// rather than a hand-built one.
+func connectWithRuntime(t *testing.T, runtime RuntimeConfig, capabilities ...string) *mcp.ClientSession {
+	t.Helper()
 	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
 		t.Setenv(key, "")
 	}
@@ -31,7 +40,7 @@ func connectWithCapabilities(t *testing.T, capabilities ...string) *mcp.ClientSe
 	}
 	info := eruncommon.BuildInfo{Version: "1.2.3"}
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-		return newServer(info, RuntimeConfig{}, identity, nil)
+		return newServer(info, runtime, identity, nil)
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
 
 	httpServer := httptest.NewServer(handler)
@@ -76,7 +85,7 @@ func TestReadCapabilitySeesOnlyTheReadTools(t *testing.T) {
 		"activity_lease_list", "ai_sessions", "cloud_list", "context_list", "diff", "environment", "exec_diff",
 		"exec_job_await", "exec_job_output", "exec_job_status",
 		"idle", "idle_stop_history",
-		"job_await", "job_output", "job_status", "list", "observe",
+		"job_await", "job_output", "job_status", "jobs_list", "jobs_show", "list", "observe",
 		"outputs_download", "outputs_list", "review_list", "review_queue_list", "review_show", "usage", "version",
 	}
 	if !slices.Equal(got, want) {

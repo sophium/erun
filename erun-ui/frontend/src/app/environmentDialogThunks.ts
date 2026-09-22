@@ -7,17 +7,14 @@ import {
   refreshKubernetesContexts,
 } from './dialogContextsThunks';
 import {
+  environmentDialogResourceLimitMessage,
   missingRequiredFieldReason,
   normalizedEnvironmentDialogValues,
   rememberEnvironmentDialogSelection,
 } from './environmentDialogState';
 import { readError } from './errors';
 import { showTerminalError } from './notificationThunks';
-import {
-  runtimePodConfigToKubernetes,
-  runtimeResourceLimitMessage,
-  unavailableRuntimeResourceStatus,
-} from './runtimeResources';
+import { runtimePodConfigToKubernetes, unavailableRuntimeResourceStatus } from './runtimeResources';
 import { startInitSelection } from './sessionThunks';
 import { patchEnvironmentDialog, setEnvironmentDialog } from './slices/environmentDialogSlice';
 import {
@@ -160,7 +157,12 @@ export const submitEnvironmentDialog =
       form.reportValidity();
       return;
     }
-    const resourceError = runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus);
+    // Asked through the same helper the submit gate uses, so a host env is
+    // exempt here exactly as it is there: the gate enables Create for a host env
+    // by skipping the cluster-shaped blockers, and a resource check that still
+    // fired here would refuse that Create with a message the host form renders no
+    // field to clear.
+    const resourceError = environmentDialogResourceLimitMessage(dialog);
     if (resourceError) {
       dispatch(patchEnvironmentDialog({ error: resourceError }));
       return;
@@ -194,9 +196,11 @@ function environmentDialogSelection(
     return null;
   }
   const values = normalizedEnvironmentDialogValues(dialog);
-  // noGit only affects the remote-worktree init path; local-agent has no
+  // noGit only affects the remote-worktree init path; local-agent and host both
+  // resolve their worktree from a directory on this machine and so have no
   // remote repo, so ignore any stale noGit left by a previous type selection.
-  const noGit = dialog.envType === 'local-agent' ? false : dialog.noGit;
+  const noGit =
+    dialog.envType === 'local-agent' || dialog.envType === 'host' ? false : dialog.noGit;
   return {
     tenant: values.tenant,
     environment: values.environment,
@@ -212,7 +216,10 @@ function environmentDialogInitFields(
   values: ReturnType<typeof normalizedEnvironmentDialogValues>,
 ): Partial<UISelection> {
   const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
-  const isLocalAgent = dialog.envType === 'local-agent';
+  // Both local-agent and host carry the directory the env lives in. A host env
+  // is that directory outright rather than a pod's mount of it, but init takes
+  // it through the same --project-root and refuses the create without it.
+  const carriesLocalRepoPath = dialog.envType === 'local-agent' || dialog.envType === 'host';
   // When the in-cluster registry is chosen, seed a resolvable cluster: entry and
   // omit the static container-registry string (the two are mutually exclusive).
   // useErunRegistry only takes effect once the reachability probe has actually
@@ -231,7 +238,7 @@ function environmentDialogInitFields(
     clusterRegistry: useClusterRegistry,
     erunRegistry: useErunRegistry,
     type: dialog.envType,
-    localRepoPath: isLocalAgent ? values.localRepoPath : undefined,
+    localRepoPath: carriesLocalRepoPath ? values.localRepoPath : undefined,
     setDefaultTenant: dialog.setDefaultTenant,
   };
 }

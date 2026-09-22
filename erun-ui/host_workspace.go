@@ -46,6 +46,41 @@ func (a *App) resolveHostWorkspace(selection uiSelection) (eruncommon.OpenResult
 	return result, path, nil
 }
 
+// LoadDirectoryDiff diffs a directory the orchestrator works in directly: a path
+// on this machine that belongs to no environment, so there is no tenant to
+// resolve, no runtime to reach, and no MCP edge to call.
+//
+// The diff engine is not new. erun-common's ResolveGitDiffWithOptions already
+// runs host git on any path -- it is the same call LoadHostDiff makes below --
+// so what was missing is the path-addressed entrypoint, not a way to diff
+// locally. It deliberately does not reuse LoadHostDiff's env resolution, because
+// a directory is not an environment and resolving one would be exactly the
+// conflation this exists to remove.
+//
+// The path is validated here so a mistyped directory fails naming the path, at
+// this edge, rather than surfacing as git's own error from a layer down.
+func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (eruncommon.DiffResult, error) {
+	path := strings.TrimSpace(directory)
+	if path == "" {
+		return eruncommon.DiffResult{}, fmt.Errorf("load directory diff: no directory given")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return eruncommon.DiffResult{}, fmt.Errorf("load directory diff %s: %w", path, err)
+	}
+	if !info.IsDir() {
+		return eruncommon.DiffResult{}, fmt.Errorf("load directory diff %s: not a directory", path)
+	}
+	// The contribute-clone target has no meaning for a bare directory: there is no
+	// environment whose clone it could be, so the diff is always the directory's
+	// own working tree.
+	return eruncommon.ResolveGitDiffWithOptions(path, eruncommon.DiffOptions{
+		Scope:          strings.TrimSpace(options.Scope),
+		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
+		Target:         eruncommon.DiffTargetEnv,
+	}, nil)
+}
+
 // LoadHostDiff computes the env's diff from its host workspace using host git,
 // reusing the same shared resolver that backs `erun diff` and the MCP diff tool.
 // Unlike LoadDiff it never dials the in-pod MCP, so it works for a remote-agent

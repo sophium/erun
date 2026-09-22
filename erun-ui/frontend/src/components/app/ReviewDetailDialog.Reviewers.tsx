@@ -2,6 +2,7 @@ import { Button, SelectField } from 'erun-kit';
 import { Copy, LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
+import { accessRemedyFor } from '@/app/accessRemedies';
 import { useAppDispatch } from '@/app/hooks';
 import { showNotification } from '@/app/notificationThunks';
 import {
@@ -18,6 +19,7 @@ import {
 import type { ReviewDetailState } from '@/app/state';
 import type { UIReviewer } from '@/types';
 
+import { AccessRemedyNote } from './AccessRemedyNote';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 
@@ -36,6 +38,7 @@ export function ReviewDetailReviewers({
     return (
       <PermissionNotice>
         You do not have access to this review&apos;s reviewers. It needs {data.reviewersRestricted}.
+        <AccessRemedyNote remedy={accessRemedyFor(data.accessRemedies, data.reviewersRestricted)} />
       </PermissionNotice>
     );
   }

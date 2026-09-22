@@ -24,6 +24,11 @@ CREATE TABLE builds (
   -- reason a caller-reported RECORDED failure lives wherever that caller's own
   -- CI recorded it, not here.
   failure_detail TEXT,
+  -- The bounded per-build profile a caller self-reports alongside its
+  -- outcome -- a duration/CPU/throttle/IO summary plus the top costliest
+  -- steps, never the full step tree. NULL when the caller collected none
+  -- (an older erun version, or a build outside a runtime pod).
+  profile JSONB,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),

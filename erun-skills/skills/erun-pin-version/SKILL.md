@@ -1,6 +1,6 @@
 ---
 name: erun-pin-version
-description: Change or try the erun version an environment uses, by re-pinning every place that version is recorded — the Terraform module refs, each umbrella chart's erun dependencies, the build-env image tag, and the environment's own runtime version — in one verified, idempotent motion, then reverting just as easily if it doesn't work out. Use when the user says "change the erun version", "try a newer erun", "pin erun to <version>", "upgrade this environment to erun <version>", "what erun versions can I pin to", "the terraform ref and the charts disagree", "realign the erun pins", "revert the erun version", "roll back the pin", or any similar request to move or align an environment's erun version.
+description: Change or try the erun version an environment uses, by re-pinning every place that version is recorded — the Terraform module refs, an erun image reference set directly in Terraform variables (e.g. the cluster-edge module's dns01_webhook_image), each umbrella chart's erun dependencies, the build-env image tag, a stated runtime chart or runtime image naming erun's own stock release, and the environment's own runtime version — in one verified, idempotent motion, then reverting just as easily if it doesn't work out. Use when the user says "change the erun version", "try a newer erun", "pin erun to <version>", "upgrade this environment to erun <version>", "what erun versions can I pin to", "the terraform ref and the charts disagree", "realign the erun pins", "revert the erun version", "roll back the pin", or any similar request to move or align an environment's erun version.
 ---
 
 # Change an environment's erun version
@@ -20,11 +20,19 @@ around it: resolve a target, verify it is real, show the plan, apply, report.
 | Terraform module ref | `?ref=v<version>` on every `github.com/sophium/erun.git//…` source |
 | Helm chart dependencies | each `<tenant>-<component>` umbrella's `Chart.yaml` erun dependency `version:` |
 | Build-env image | `FROM …/erun-devops:<version>` in a custom runtime image |
-| Environment runtime version | the env's `runtimeversion` |
+| Terraform variable image reference | an erun image reference a tenant's own Terraform sets directly, e.g. the cluster-edge module's `dns01_webhook_image` |
+| Environment runtime image | the env's `runtimeimage`, when it names erun's own stock `erun-devops` image |
+| Environment runtime version | the env's `runtimeversion`, when the environment's own runtime image is erun's |
 
 Only erun's own references. A tenant's own Terraform sources, their own chart
 dependencies, and an umbrella's own `version:` are versioned independently and
-are never touched.
+are never touched. An environment's own runtime coordinate is erun's to move
+only while that environment runs erun's own runtime image: when its
+`runtimeimage`, the image its last deploy confirmed running, or its own
+`runtimechart` says otherwise — or when it records none of those and a deploy
+would therefore install the tenant's own `<tenant>-devops` image — the plan
+leaves its `runtimeversion` where it is and names the statement it read, rather
+than handing the environment a version its own release line never publishes.
 
 ## The motion
 

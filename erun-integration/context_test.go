@@ -1,10 +1,13 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
@@ -142,10 +145,14 @@ func TestContext(t *testing.T) {
 			[]byte("name: team\nprojectroot: "+setup.Cwd+"\ndefaultenvironment: dev\n"), 0o644); err != nil {
 			t.Fatalf("tenant cfg: %v", err)
 		}
-		// The working-hours window 23:00-23:01 UTC is reliably "outside"
-		// for every wall clock minute except a single minute per day, so
-		// the gate refuses without --force.
-		envBody := "name: dev\nrepopath: " + setup.Cwd + "\nkubernetescontext: edge\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\nmanagedcloud: true\ncloudprovideralias: dev\nidle:\n  workinghours: 23:00-23:01\n  timezone: UTC\n"
+		// The windw must be outside the current minute for the gate to refuse
+		// without --force, and it is derived rather than fixed for that reason:
+		// a hardcoded window is outside every minute of the day except its own,
+		// so the one scenario that exercises the refusal cleared once a day and
+		// the suite failed then, with nothing about the code under test having
+		// changed.
+		window := workingHoursWindowOutsideNow(time.Now().UTC())
+		envBody := "name: dev\nrepopath: " + setup.Cwd + "\nkubernetescontext: edge\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\nmanagedcloud: true\ncloudprovideralias: dev\nidle:\n  workinghours: " + window + "\n  timezone: UTC\n"
 		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
 			t.Fatalf("env cfg: %v", err)
 		}
@@ -153,7 +160,11 @@ func TestContext(t *testing.T) {
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when working-hours gate refuses, got 0:\n%s", result.Combined)
 		}
-		golden.Equal(t, "context/start_without_force_blocks_outside_working_hours", normalize.Apply(result.Combined))
+		// The window itself is a function of the run's own clock, so it is
+		// masked rather than compared: everything the scenario is about -- that
+		// the gate refuses, and what it says when it does -- is unchanged.
+		golden.Equal(t, "context/start_without_force_blocks_outside_working_hours",
+			normalize.Apply(result.Combined, normalize.Replacement{Pattern: regexp.MustCompile(regexp.QuoteMeta(window)), Token: "<WORKING_HOURS>"}))
 	})
 
 	t.Run("list_help", func(t *testing.T) {
@@ -614,6 +625,41 @@ func TestContext(t *testing.T) {
 		golden.Equal(t, "context/list_real_run_refresh_failures_mark_unknown", normalize.Apply(result.Combined))
 	})
 
+	t.Run("list_real_run_reports_a_batched_refresh_failure_once", func(t *testing.T) {
+		// One describe-instances call covers every context sharing its
+		// (alias, region), and its failure is one fact about that batch. The
+		// operator must read it once, at the batch level -- not once per
+		// context, where each row would also re-quote the several-hundred-
+		// character command naming every sibling context's instance ID.
+		setup := env.New(t)
+		seedCloudConfigWithContexts(t, setup,
+			contextYAMLItem("ctx-a", "dev", "us-east-1", "i-0aaaa11111aaaa1111")+
+				contextYAMLItem("ctx-b", "dev", "us-east-1", "i-0bbbb22222bbbb2222")+
+				contextYAMLItem("ctx-c", "dev", "us-east-1", "i-0cccc33333cccc3333")+
+				contextYAMLItem("ctx-d", "dev", "us-east-1", "i-0dddd44444dddd4444"))
+		stubs := setup.Cwd + "/stubs"
+		envVars := append(setup.Env(), fixture.StubAWSCloudContext(t, stubs, fixture.AWSCloudContextStubSpec{
+			DescribeInstanceStatesError: &fixture.AWSStubError{
+				Stderr: "An error occurred (ExpiredToken) when calling the DescribeInstances operation: The security token included in the request is expired",
+			},
+		})...)
+		result := erun.Run(t, []string{"context", "list", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The state classification stays honest -- the refresh could not
+		// determine the state, so it reports unknown rather than guessing.
+		if got := strings.Count(result.Combined, "status refresh failed"); got != 1 {
+			t.Fatalf("status refresh failure appears %d times, want exactly once:\n%s", got, result.Combined)
+		}
+		for _, row := range contextListRows(result.Combined) {
+			if strings.Contains(row, "message=") {
+				t.Fatalf("row repeats the shared cause instead of leaving it to the batch line:\n%s", row)
+			}
+		}
+		golden.Equal(t, "context/list_real_run_reports_a_batched_refresh_failure_once", normalize.Apply(result.Combined))
+	})
+
 	t.Run("start_real_run_retries_after_transitional_state", func(t *testing.T) {
 		// Locks the start-instances retry: the first call is rejected because
 		// the instance is still stopping, so production waits for stopped and
@@ -838,8 +884,9 @@ func TestContext(t *testing.T) {
 
 	t.Run("start_real_run_inside_working_hours_gate_clears", func(t *testing.T) {
 		// The permitting arm: an attached env inside its working window
-		// (00:00-23:59, all but one minute per day) lets a start without
-		// --force pass the gate and run the normal start flow.
+		// (00:00-23:59, the all-day span, unconditional including the day's
+		// last minute) lets a start without --force pass the gate and run the
+		// normal start flow.
 		setup := env.New(t)
 		seedCloudContextConfig(t, setup, "edge")
 		root := filepath.Join(setup.ConfigHome, "erun")
@@ -932,6 +979,19 @@ func TestContext(t *testing.T) {
 // contextYAMLItem renders one cloudcontexts YAML item; an empty instanceID
 // omits the instanceid key so refresh scenarios can stage a context the AWS
 // refresh must skip.
+// contextListRows returns only the per-context rows of a context listing, so a
+// batch-level line that legitimately names the whole batch's instance IDs is
+// not mistaken for a row disclosing its siblings.
+func contextListRows(out string) []string {
+	var rows []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "  - ") {
+			rows = append(rows, line)
+		}
+	}
+	return rows
+}
+
 func contextYAMLItem(name, alias, region, instanceID string) string {
 	item := "  - name: " + name + "\n" +
 		"    provider: aws\n" +
@@ -964,4 +1024,16 @@ func seedCloudConfigWithContexts(t testing.TB, setup env.Setup, contextsYAML str
 	if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write cloud config: %v", err)
 	}
+}
+
+// workingHoursWindowOutsideNow returns an HH:MM-HH:MM window, in the clock the
+// caller passes, that cannot contain that clock's current minute: it opens two
+// minutes ahead and runs for one, so a run that takes a minute to reach the
+// gate is still outside it. A window that wraps past midnight is still a valid
+// span -- the evaluation treats start > end as the overnight case -- and the
+// two ends can never be equal, which is the one shape the policy rejects.
+func workingHoursWindowOutsideNow(now time.Time) string {
+	start := (now.Hour()*60 + now.Minute() + 2) % (24 * 60)
+	end := (start + 1) % (24 * 60)
+	return fmt.Sprintf("%02d:%02d-%02d:%02d", start/60, start%60, end/60, end%60)
 }

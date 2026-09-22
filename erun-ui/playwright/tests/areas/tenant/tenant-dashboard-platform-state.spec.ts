@@ -1,5 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
 import {
   SEED_TENANT,
@@ -82,9 +83,14 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
         'https://api.erunpaas.com',
       );
       await expect(app.tenantDashboard.tabs()).toHaveCount(0);
+      // Every tab is replaced, so the body may not name some of them as the
+      // ones that fail -- the tabs it left out read as still working.
+      await expect(app.tenantDashboard.notConnectedBody()).toHaveText(
+        "This tenant isn't connected to a hosted erun platform yet, so none of this dashboard's tabs can load.",
+      );
       await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
       await page.screenshot({
-        path: 'test-results/tenant-dashboard-not-connected-default.png',
+        path: artifactPath('test-results/tenant-dashboard-not-connected-default.png'),
       });
     } finally {
       removeEnvironment(SEED_TENANT, environment);

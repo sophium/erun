@@ -33,7 +33,7 @@ func (r *BuildRepository) Create(ctx context.Context, build model.Build) (model.
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewInsert().
 			Model(&created).
-			Column("review_id", "environment_id", "kind", "successful", "commit_id", "version", "failure_detail").
+			Column("review_id", "environment_id", "kind", "successful", "commit_id", "version", "failure_detail", "profile").
 			Returning("*").
 			Scan(ctx)
 		return classifyBuildError(err)
@@ -68,7 +68,7 @@ func (r *BuildRepository) Get(ctx context.Context, buildID string) (model.Build,
 	var build model.Build
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
-			SELECT b.build_id, b.tenant_id, b.review_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.created_at, b.updated_at, r.name AS review_name
+			SELECT b.build_id, b.tenant_id, b.review_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.profile, b.created_at, b.updated_at, r.name AS review_name
 			  FROM builds b
 			  JOIN reviews r
 			    ON r.tenant_id = b.tenant_id
@@ -93,7 +93,7 @@ func (r *BuildRepository) List(ctx context.Context, filter BuildFilter) ([]model
 			return ErrMissingSecurityContext
 		}
 		query := `
-			SELECT b.build_id, b.tenant_id, b.review_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.created_at, b.updated_at, r.name AS review_name
+			SELECT b.build_id, b.tenant_id, b.review_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.profile, b.created_at, b.updated_at, r.name AS review_name
 			  FROM builds b
 			  JOIN reviews r
 			    ON r.tenant_id = b.tenant_id
@@ -116,7 +116,7 @@ func (r *BuildRepository) List(ctx context.Context, filter BuildFilter) ([]model
 // JOINed: an ordinary erun build's review_id and environment_id are each
 // independently nullable, so an INNER JOIN on either would silently drop
 // exactly the rows this feature exists to surface.
-const buildListColumns = `b.build_id, b.tenant_id, b.review_id, b.environment_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.created_at, b.updated_at, r.name AS review_name, e.name AS environment_name`
+const buildListColumns = `b.build_id, b.tenant_id, b.review_id, b.environment_id, b.kind, b.successful, b.commit_id, b.version, b.failure_detail, b.profile, b.created_at, b.updated_at, r.name AS review_name, e.name AS environment_name`
 
 // BuildCursor identifies a row's position in the newest-first (created_at
 // DESC, build_id DESC) ordering ListPage always uses. The zero value means

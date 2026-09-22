@@ -164,3 +164,68 @@ func TestLoadHostDiffReadsHostWorktreeWithoutMCP(t *testing.T) {
 		t.Fatalf("expected main.go in the host diff, got %+v", diff.Files)
 	}
 }
+
+// TestLoadDirectoryDiffReadsADirectoryWithoutMCP is the path-addressed sibling of
+// the host-diff test above: a directory the orchestrator works in belongs to no
+// environment, so there is no tenant to resolve and no MCP edge to dial. The diff
+// is read with host git from the path itself -- which is what lets the review
+// panel show a directory's changes at all, instead of the panel reading "No
+// environment selected" for a scope the orchestrator actually has.
+func TestLoadDirectoryDiffReadsADirectoryWithoutMCP(t *testing.T) {
+	local := t.TempDir()
+	runGit := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", local}, args...)...)
+		requireWorkspaceSyncNoError(t, cmd.Run(), "git "+strings.Join(args, " "))
+	}
+	runGit("init")
+	runGit("config", "user.email", "t@example")
+	runGit("config", "user.name", "t")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n"), 0o644), "write baseline")
+	runGit("add", ".")
+	runGit("commit", "-m", "init")
+	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(local, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644), "modify")
+
+	// No store and no loadDiff dep at all: a directory diff must not need either.
+	app := NewApp(erunUIDeps{})
+	defer app.shutdown(context.Background())
+
+	diff, err := app.LoadDirectoryDiff(local, uiDiffOptions{})
+	requireWorkspaceSyncNoError(t, err, "load directory diff")
+	if diff.WorkingDirectory != local {
+		t.Fatalf("expected working dir %q, got %q", local, diff.WorkingDirectory)
+	}
+	foundMain := false
+	for _, f := range diff.Files {
+		if f.Path == "main.go" {
+			foundMain = true
+		}
+	}
+	if !foundMain {
+		t.Fatalf("expected main.go in the directory diff, got %+v", diff.Files)
+	}
+}
+
+// A path that names nothing, or names a file, is refused at this edge with the
+// path in the message -- the operator typed it, and git's own error from a layer
+// down would name neither the path nor what was wrong with it.
+func TestLoadDirectoryDiffRefusesAnUnusablePath(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "a-file")
+	requireWorkspaceSyncNoError(t, os.WriteFile(file, []byte("x"), 0o644), "write file")
+	missing := filepath.Join(dir, "not-there")
+
+	app := NewApp(erunUIDeps{})
+	defer app.shutdown(context.Background())
+
+	if _, err := app.LoadDirectoryDiff("", uiDiffOptions{}); err == nil {
+		t.Fatal("expected an empty path to be refused")
+	}
+	if _, err := app.LoadDirectoryDiff(missing, uiDiffOptions{}); err == nil {
+		t.Fatal("expected a missing directory to be refused")
+	} else if !strings.Contains(err.Error(), missing) {
+		t.Fatalf("refusal should name the path, got %q", err)
+	}
+	if _, err := app.LoadDirectoryDiff(file, uiDiffOptions{}); err == nil {
+		t.Fatal("expected a file rather than a directory to be refused")
+	}
+}

@@ -4,6 +4,7 @@ build: docker build root configured as build/docker (.erun/config.yaml paths.doc
 build: version file configured as build/VERSION (.erun/config.yaml paths.version)
 kubectl -n kube-system get svc erun-registry -o 'jsonpath={.spec.clusterIP}'
 kubectl -n kube-system port-forward svc/erun-registry :5000
+docker info -f '{{.DockerRootDir}}'
 docker image inspect localhost:5000/api:fp-<HEX16>-amd64
 fingerprint image not found locally: localhost:5000/api:fp-<HEX16>-amd64
 docker image inspect localhost:5000/api:fp-<HEX16>-arm64

@@ -181,19 +181,37 @@ func runDoctorTenantEnvActions(runtime RuntimeConfig, input DoctorInput, runCtx 
 		return err
 	}
 	req := eruncommon.ShellLaunchParamsFromResult(target)
-	if err := writeDoctorDeployDiagnosis(runCtx, req); err != nil {
+	diagnosis, err := writeDoctorDeployDiagnosis(runCtx, req)
+	if err != nil {
 		return err
 	}
-	if err := writeDoctorGitPushAccess(runCtx, target, req); err != nil {
+	if err := writeDoctorGitPushAccess(runCtx, target, req, diagnosis); err != nil {
 		return err
 	}
 	if err := runDoctorRecoveryToolActions(runCtx, input, req); err != nil {
 		return err
 	}
-	if err := writeDoctorInspection(runCtx, target, req); err != nil {
+	// A host environment's daemon is this machine's own, so an unreachable
+	// cluster says nothing about it -- see the CLI's
+	// runDoctorCleanupActions for the same distinction.
+	if diagnosis.ClusterUnreachable && eruncommon.ResolveDoctorDockerDaemon(req).Kind != eruncommon.DoctorDockerDaemonHost {
+		if err := writeDoctorPodUnreachableSkip(runCtx, "Docker storage"); err != nil {
+			return err
+		}
+		if !anyDoctorActionRequested(input) {
+			return nil
+		}
+		_, err := fmt.Fprintln(runCtx.Stdout, "Skipping the requested prune action(s) for the same reason.")
+		return err
+	}
+	if err := writeDoctorInspection(runCtx, target, req, anyDoctorActionRequested(input)); err != nil {
 		return err
 	}
 	return runDoctorToolActions(runCtx, input, req)
+}
+
+func anyDoctorActionRequested(input DoctorInput) bool {
+	return input.PruneImages || input.PruneBuildCache || input.PruneContainers
 }
 
 // onlyRootConfigDoctorInput mirrors the CLI's doctorOnlyRepairConfig: when the
@@ -339,31 +357,65 @@ func firstNonBlank(values ...string) string {
 }
 
 // writeDoctorDeployDiagnosis reports helm release status and runtime pods so an
-// agent can see why a deploy failed before any cleanup runs. Read-only.
-func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) error {
+// agent can see why a deploy failed before any cleanup runs. Read-only, so it
+// runs under preview/dry-run too — that mode withholds mutations, not reads.
+// The returned diagnosis carries ClusterUnreachable forward so every later
+// section that needs the runtime pod (git push access, docker storage) can
+// skip its own probe instead of independently rediscovering the same
+// unreachable cluster.
+func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) (eruncommon.DeployDiagnosisResult, error) {
 	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
-	if runCtx.DryRun {
-		return nil
-	}
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
-			return err
+			return diagnosis, err
 		}
+	}
+	if diagnosis.ClusterUnreachable {
+		return diagnosis, writeDoctorPodUnreachableSkip(runCtx, "Pods")
 	}
 	if pods := strings.TrimSpace(diagnosis.Pods); pods != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Pods ==\n%s\n\n", pods); err != nil {
-			return err
+			return diagnosis, err
 		}
 	}
-	return nil
+	return diagnosis, nil
 }
 
-func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams) error {
+// writeDoctorPodUnreachableSkip reports a doctor section skipped because an
+// earlier section already confirmed the cluster is unreachable
+// (eruncommon.DeployDiagnosisResult.ClusterUnreachable), instead of paying
+// another multi-minute kubectl timeout to rediscover the same fact. Mirrors
+// the CLI's reportPodSkippedUnreachable
+// (erun-cli/cmd/doctor_pod_diagnosis.go).
+func writeDoctorPodUnreachableSkip(runCtx eruncommon.Context, header string) error {
+	_, err := fmt.Fprintf(runCtx.Stdout, "== %s ==\nskipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header)
+	return err
+}
+
+// writeDoctorInspection reports the docker-storage read, naming the daemon
+// behind every figure it prints.
+//
+// An environment with no daemon holding build images is a report rather than a
+// tool-call failure — nothing there is broken or transient, and the reason
+// carries the next step — unless the caller asked for a prune against it, which
+// cannot run at all: that one fails the call, the same as the CLI refusing it.
+func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams, pruneRequested bool) error {
 	inspection, err := eruncommon.RunDoctorInspection(runCtx, nil, req)
-	if err != nil || runCtx.DryRun {
+	var unavailable eruncommon.DoctorDockerDaemonUnavailableError
+	daemonUnavailable := errors.As(err, &unavailable)
+	if daemonUnavailable && pruneRequested {
 		return err
 	}
+	if err != nil && !daemonUnavailable {
+		return err
+	}
+	if runCtx.DryRun {
+		return nil
+	}
 	if _, err := fmt.Fprintf(runCtx.Stdout, "Target: %s/%s\n", target.Tenant, target.Environment); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(runCtx.Stdout, eruncommon.DoctorDockerDaemonLine(inspection.Daemon)); err != nil {
 		return err
 	}
 	return writeDoctorOutput(runCtx, inspection.Stdout, inspection.Stderr)
@@ -404,7 +456,7 @@ func deployRecoveryActionsFromInput(input DoctorInput) []eruncommon.DeployRecove
 
 func runDoctorToolActions(runCtx eruncommon.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
 	for _, action := range doctorActionsFromInput(input) {
-		if err := writeDoctorAction(runCtx, action); err != nil {
+		if err := writeDoctorAction(runCtx, req, action); err != nil {
 			return err
 		}
 		output, err := eruncommon.RunDoctorAction(runCtx, nil, req, action)
@@ -415,16 +467,25 @@ func runDoctorToolActions(runCtx eruncommon.Context, input DoctorInput, req erun
 			if err := writeDoctorOutput(runCtx, output.Stdout, output.Stderr); err != nil {
 				return err
 			}
+			if summary := eruncommon.DoctorPruneSummary(output); summary != "" {
+				if _, err := fmt.Fprintln(runCtx.Stdout, summary); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
 }
 
-func writeDoctorAction(runCtx eruncommon.Context, action eruncommon.DoctorAction) error {
+// writeDoctorAction names the action and the daemon it acts on: an action run
+// against a daemon that does not hold this environment's build images reclaims
+// nothing, and the reader has to be able to tell which daemon ran.
+func writeDoctorAction(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams, action eruncommon.DoctorAction) error {
 	if runCtx.DryRun {
 		return nil
 	}
-	_, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n", eruncommon.DoctorActionDescription(action))
+	_, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n",
+		eruncommon.DoctorActionDescriptionOn(action, eruncommon.ResolveDoctorDockerDaemon(req)))
 	return err
 }
 

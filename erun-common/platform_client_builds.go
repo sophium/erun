@@ -24,6 +24,9 @@ type PlatformCreateUnattachedBuildParams struct {
 	Version       string `json:"version"`
 	Successful    bool   `json:"successful"`
 	FailureDetail string `json:"failureDetail,omitempty"`
+	// Profile is the bounded per-step profile this build collected, when the
+	// caller has one.
+	Profile *BuildProfileSummary `json:"profile,omitempty"`
 }
 
 // CreateUnattachedBuild records a build against an environment with no

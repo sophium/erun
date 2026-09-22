@@ -100,6 +100,9 @@ async function openDiffPanel(app: AppShell, tenant: string, environment: string)
   await app.sidebar.openEnvironment(tenant, environment);
   await dismissAIOccupancyPromptIfShown(app);
   await app.titlebar.toggleReviewPanel();
+  // The callers all assert on content the panel itself renders, so converge on
+  // it having opened rather than racing its render.
+  await app.reviewPanel.waitForOpen();
 }
 
 test.describe('diff panel keyboard model — next/previous hunk and changed file (#1421)', () => {

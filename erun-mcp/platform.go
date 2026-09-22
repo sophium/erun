@@ -233,6 +233,40 @@ func platformUserEnrollTool(runtime RuntimeConfig) func(context.Context, *mcp.Ca
 	}
 }
 
+type PlatformUserGrantRoleInput struct {
+	platformAliasInput
+	UserID string `json:"userId" jsonschema:"id of the already-enrolled user to grant the role to"`
+	RoleID string `json:"roleId" jsonschema:"id of the role to grant, from the tenant's role list"`
+}
+
+type PlatformUserGrantRoleResult struct {
+	Preview bool     `json:"preview"`
+	UserID  string   `json:"userId"`
+	RoleID  string   `json:"roleId"`
+	Trace   []string `json:"trace,omitempty"`
+}
+
+func platformUserGrantRoleTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformUserGrantRoleInput) (*mcp.CallToolResult, PlatformUserGrantRoleResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input PlatformUserGrantRoleInput) (*mcp.CallToolResult, PlatformUserGrantRoleResult, error) {
+		if strings.TrimSpace(input.UserID) == "" {
+			return nil, PlatformUserGrantRoleResult{}, fmt.Errorf("userId is required")
+		}
+		if strings.TrimSpace(input.RoleID) == "" {
+			return nil, PlatformUserGrantRoleResult{}, fmt.Errorf("roleId is required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		ctx.MCPTool = "platform_user_grant-role"
+		err := eruncommon.RunPlatformGrantUserRole(ctx, runtime.Store, input.Alias, eruncommon.PlatformGrantUserRoleParams{
+			UserID: input.UserID, RoleID: input.RoleID,
+		}, cloudDependencies())
+		if err != nil {
+			return nil, PlatformUserGrantRoleResult{}, err
+		}
+		return nil, PlatformUserGrantRoleResult{Preview: input.Preview, UserID: input.UserID, RoleID: input.RoleID, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 type PlatformUserListInput struct {
 	platformAliasInput
 	TenantID string `json:"tenantId,omitempty" jsonschema:"target tenant id (operations-tenant callers only); defaults to the caller's own tenant"`

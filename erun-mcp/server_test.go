@@ -159,17 +159,17 @@ var wantRegisteredTools = []string{
 	"cloud_init_cloudflare", "cloud_init_erun", "cloud_inject_aws_credentials",
 	"cloud_list", "cloud_login", "cloud_oidc", "cloud_set", "commit",
 	"context_init", "context_list", "context_start", "context_stop",
-	"contribute_clone", "delete", "deploy", "diff", "doctor", "environment", "exec_agent", "exec_close-pr", "exec_commit",
+	"contribute_clone", "delete", "deploy", "diff", "doctor", "e2e", "environment", "exec_agent", "exec_close-pr", "exec_commit",
 	"exec_diff", "exec_gate-merge", "exec_gate-run_report", "exec_gate-run_start", "exec_job_attach", "exec_job_await", "exec_job_cancel", "exec_job_output", "exec_job_status",
 	"exec_merge", "exec_plan-ruleset-bypass", "exec_push", "exec_raw", "exec_reconcile-bypass", "exec_report-commit-status", "exec_route-check", "exec_write", "expose", "gate_list", "gate_show", "idle", "idle_stop_cancel",
 	"idle_stop_history", "idle_stop_record", "init", "job_attach", "job_await",
-	"job_cancel", "job_output", "job_start", "job_status", "list", "observe",
+	"job_cancel", "job_output", "job_start", "job_status", "jobs_finish", "jobs_list", "jobs_show", "jobs_start", "list", "observe",
 	"outputs_download", "outputs_list", "pin", "platform_context_create",
 	"platform_context_get", "platform_context_list", "platform_env_delete",
 	"platform_env_deploy", "platform_env_get", "platform_env_list",
 	"platform_env_register", "platform_env_stop", "platform_identity_org_create", "platform_provision",
 	"platform_tenant_create", "platform_tenant_list", "platform_tenant_repair-org-mapping", "platform_user_enroll",
-	"platform_user_list", "platform_version", "platform_whoami", "publish", "push", "raw",
+	"platform_user_grant-role", "platform_user_list", "platform_version", "platform_whoami", "publish", "push", "raw",
 	"release", "resize", "review_close", "review_comment", "review_create", "review_list",
 	"review_queue_advance", "review_queue_list", "review_queue_override-advance", "review_record-build",
 	"review_report-merged", "review_requeue", "review_resolve",
@@ -591,7 +591,13 @@ func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T
 	if output.Write == nil {
 		t.Fatalf("expected Write result, got %+v", output)
 	}
+	// Canonical, for the same reason exec_test.go compares canonical paths: on
+	// macOS t.TempDir() returns the TMPDIR spelling (/var/folders/...) while the
+	// tool reports the real one (/private/var/folders/...).
 	wantPath := filepath.Join(projectRoot, "config", "values.yaml")
+	if resolved, evalErr := filepath.EvalSymlinks(wantPath); evalErr == nil {
+		wantPath = resolved
+	}
 	if output.Write.Path != wantPath {
 		t.Fatalf("Path = %q, want %q", output.Write.Path, wantPath)
 	}

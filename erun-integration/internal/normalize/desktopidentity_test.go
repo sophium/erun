@@ -2,6 +2,19 @@ package normalize
 
 import "testing"
 
+func TestDesktopControlPathIsHostIndependent(t *testing.T) {
+	for _, path := range []string{
+		"/private/var/folders/ab/TestApp/001/home/Library/Application Support/ERun/desktop-control.json",
+		"/var/folders/ab/TestApp/001/home/Library/Application Support/ERun/desktop-control.json",
+		"/tmp/TestApp/001/home/.config/ERun/desktop-control.json",
+	} {
+		const prefix = "app restart: resolving the running desktop app from "
+		if got := Apply(prefix + path + "\n"); got != prefix+"<TMP>\n" {
+			t.Errorf("unexpected normalized marker path: %q", got)
+		}
+	}
+}
+
 // TestDesktopIdentityPathIsHostIndependent locks that the desktop identity path
 // collapses to one token on every host. It resolves through os.UserConfigDir(),
 // which the harness cannot pin the way ERUN_HOST_OS_OVERRIDE pins a code branch:

@@ -44,7 +44,12 @@ async function emitStaleEnvUsage(page: Page): Promise<void> {
           tenant,
           environment,
           available: true,
-          cpu: { available: true, utilization: '12.0%', quota: '2.00 cores' },
+          cpu: {
+            available: true,
+            utilization: '12.0%',
+            utilizationPercent: 12,
+            quota: '2.00 cores',
+          },
           memory: {
             available: true,
             current: '512Mi',
@@ -101,10 +106,14 @@ test('the env hover card still renders every field: version, branch+issue, activ
     await expect(card.getByText('Activity', { exact: true })).toBeVisible({ timeout: 1_000 });
     await expect(card).toContainText('Idle', { timeout: 1_000 });
 
-    // Usage row: headline figures, staleness flag, and the reading's age.
-    await expect(card.getByText('Usage', { exact: true })).toBeVisible({ timeout: 1_000 });
-    await expect(card).toContainText('CPU 12.0%', { timeout: 1_000 });
-    await expect(card).toContainText('Mem 25% of 2048Mi', { timeout: 1_000 });
+    // Usage rows: separate CPU and Memory figures with their own strips, the
+    // staleness flag, and the reading's age. The labels are `dt`s of their own
+    // now, so they are asserted separately from the figures.
+    await expect(card.getByText('CPU', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card.getByText('Memory', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText('12.0%', { timeout: 1_000 });
+    await expect(card).toContainText('of 2048Mi', { timeout: 1_000 });
+    await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
     await expect(card).toContainText('Stale', { timeout: 1_000 });
     await expect(card).toContainText('ago', { timeout: 1_000 });
   }).toPass({ timeout: 20_000 });
@@ -147,28 +156,34 @@ test('the orchestrator hover card still renders every field: status, doing, link
   });
   await app.reboot();
 
-  await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
-  const card = app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR);
-  await expect(card).toBeVisible();
+  // Every field check lives inside the one retryable block, re-hovering on
+  // each attempt: the card's open state belongs to the hovered row's own
+  // React state, so a re-render can drop it while the pointer still rests
+  // there, and a plain un-retried assertion after it reopens does not
+  // survive that (erun-ui/playwright/AGENTS.md's hover-card bullet) --
+  // mirrors the env card test above.
+  await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+    await expect(card).toBeVisible({ timeout: 1_000 });
 
-  // Header: orchestrator name plus the Transient badge.
-  await expect(card).toContainText(SEED_ORCHESTRATOR);
-  await expect(card.getByText('Transient', { exact: true })).toBeVisible();
+    // Header: orchestrator name plus the Transient badge.
+    await expect(card).toContainText(SEED_ORCHESTRATOR, { timeout: 1_000 });
+    await expect(card.getByText('Transient', { exact: true })).toBeVisible({ timeout: 1_000 });
 
-  // Status row.
-  await expect(card.getByText('Status', { exact: true })).toBeVisible();
-  await expect(card).toContainText('Running');
+    // Status row.
+    await expect(card.getByText('Status', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText('Running', { timeout: 1_000 });
 
-  // Doing row: both the working turn and the background shell are named.
-  await expect(card.getByText('Doing', { exact: true })).toBeVisible();
-  await expect(card).toContainText('Working, for');
-  await expect(card).toContainText('Shell running for');
-  await expect(card).toContainText('yarn build');
+    // Doing row: both the working turn and the background shell are named.
+    await expect(card.getByText('Doing', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText('Working, for', { timeout: 1_000 });
+    await expect(card).toContainText('Shell running for', { timeout: 1_000 });
+    await expect(card).toContainText('yarn build', { timeout: 1_000 });
 
-  // Environments row: linked env's name and status line.
-  await expect(card.getByText('Environments', { exact: true })).toBeVisible();
-  await expect(card).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`);
+    // Environments row: linked env's name and status line.
+    await expect(card.getByText('Environments', { exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(card).toContainText(`${SEED_TENANT} / ${SEED_ENV_ALPHA}`, { timeout: 1_000 });
 
-  // Nudges row (rendered only while running).
-  await expect(card.getByText('Nudges', { exact: true })).toBeVisible();
+    // Nudges row (rendered only while running).
+    await expect(card.getByText('Nudges', { exact: true })).toBeVisible({ timeout: 1_000 });
+  });
 });

@@ -15,7 +15,7 @@ type BuildInput struct {
 	Version       string   `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
 	Release       bool     `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
 	NoIncremental bool     `json:"noIncremental,omitempty" jsonschema:"when true, disable fingerprint-based build caching and rebuild every image from scratch"`
-	Platforms     []string `json:"platforms,omitempty" jsonschema:"optional docker --platform overrides (e.g. [\"linux/amd64\"]) for an environment that can only ever run one architecture; takes precedence over the project's configured environments.<env>.docker.platforms. Mutually exclusive with release, which always publishes every platform erun supports"`
+	Platforms     []string `json:"platforms,omitempty" jsonschema:"optional docker --platform overrides (e.g. [\"linux/amd64\"]) for an environment that can only ever run one architecture; takes precedence over the project's configured docker.platforms (project-wide or per-environment). Mutually exclusive with release, which always publishes every platform erun supports"`
 	Preview       bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Jobs          int      `json:"jobs,omitempty" jsonschema:"build this many images at once; 0 resolves from the machine and 1 is sequential. Independent images build concurrently; an image that FROMs a sibling still waits for it"`
 	Verbosity     int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`

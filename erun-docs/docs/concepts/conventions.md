@@ -68,6 +68,7 @@ A **component** is a deployable unit — typically a service, a migration job, a
 | Source module | `<projectRoot>/<component>/` (top-level) or nested inside another module |
 | Docker build context | `<projectRoot>/<tenant>-devops/docker/<component>/` |
 | Helm chart | `<projectRoot>/<tenant>-devops/k8s/<component>/` |
+| e2e suite (optional) | `<projectRoot>/<tenant>-devops/playwright/<component>/` |
 | Deploy plan entry | `environments.<env>.k8s.deployments[]` in `.erun/config.yaml` |
 | Image tag | `<registry>/<component>:<version>` |
 | Kubernetes resources | Deployment / Service named `<component>`, pod label `app: <component>` |
@@ -122,7 +123,11 @@ Each image lives at `<tenant>-devops/docker/<component>/Dockerfile`. In the stan
 
 If a Dockerfile sits somewhere else, ERun degrades to a flat layout (context = Dockerfile's directory). For the exact decision rule and the trade-offs, see [Conventions spec · Docker build context resolution](/agent-reference/conventions-spec#docker-build-context-resolution).
 
-These default locations — the `docker/`, `k8s/`, and `terraform-<tenant>` folders, and the `VERSION` file — are overridable per project via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`, for repos that don't nest them under a `<tenant>-devops/` module.
+These default locations — the `docker/`, `k8s/`, and `playwright/` folders, the `terraform-<tenant>` folder, and the `VERSION` file — are overridable per project via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`, for repos that don't nest them under a `<tenant>-devops/` module.
+
+## e2e suites
+
+`erun e2e` discovers a `playwright/` folder the same way `build` discovers `docker/`: either `<tenant>-devops/playwright/playwright.config.ts` directly (one suite), or per-component subdirectories (`<tenant>-devops/playwright/<component>/playwright.config.ts`) mirroring the Docker/Helm layout. It runs the suite once against an already-deployed environment, with the resolved HTTPS URL and the deployed version injected — never declared by the suite itself. A project with no `playwright/` folder makes `erun e2e` a clean no-op. See [`erun e2e`](/cli/e2e) and [Delivery pipeline](/pipeline).
 
 ## VERSION files
 
@@ -179,6 +184,7 @@ For the full Job chart skeleton and the rationale, see [Conventions spec · Helm
 | `<projectRoot>/<tenant>-devops/` | every image / every chart | same — act on the full module |
 | `<projectRoot>/<tenant>-devops/docker/<image>/` | one image | act on just that image (build / push only) |
 | `<projectRoot>/<tenant>-devops/k8s/<component>/` | one chart | act on just that component (deploy only) |
+| `<projectRoot>/<tenant>-devops/playwright/<component>/` | one suite | act on just that component (`erun e2e` only) |
 | anywhere else | walks up until a context resolves; errors if nothing matches | — |
 
 The **env type** then determines what each command actually does:

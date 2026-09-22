@@ -12,6 +12,7 @@ import {
   DialogTitle,
   EmptyState,
   Input,
+  StatusBadge,
   Table,
   TableBody,
   TableCell,
@@ -26,11 +27,12 @@ import type { EnrollIdentityUserInput, IdentityUser } from '../app/api/identityA
 import { TenantTargetSelect } from '../shell/TenantTargetSelect';
 import { useTenantTargetSelection } from '../shell/useTenantTargetSelection';
 import type { EnrollState, UsersState } from './controller';
-import { useUsersController } from './controller';
+import { resolveUsersScope, useUsersController } from './controller';
 import { useEnrollOrgTarget } from './enrollOrgTargetController';
 import { EnrollUserForm } from './EnrollUserForm';
 import { EnrollBasicFields, OrgTargetStatus } from './PlatformEnrollFields';
 import { UserRolesDialog } from './UserRolesDialog';
+import { ScopedUsersStatus, UsersScopeBadge } from './usersScope';
 
 // EnrollFeedback tells the operator which of the two enrollment paths the
 // backend actually took: with mail configured, the identity provider emails
@@ -274,13 +276,50 @@ function MembershipBadge({ user }: { user: IdentityUser }): React.ReactElement {
   return <span className="text-xs text-muted-foreground">IdP only, not enrolled</span>;
 }
 
+// UsernameCell renders the username column. The erun username -- the value
+// that already appears in reviews, roles, audit entries, and the console
+// header (whoami's own `username`) -- is the primary label whenever the row
+// is enrolled, with the IdP's own username shown as a secondary line only
+// when the two actually diverge: rendering just one name is the defect
+// that was reported, since an operator seeing a different name here than in
+// the header cannot tell it is their own row. The OIDC subject (`user.id`)
+// is always shown too, in small monospace text -- the one stable value that
+// actually joins the erun and IdP directories, and previously nowhere an
+// operator could read it from at all (item 3). isCaller marks
+// the row matching the signed-in operator's own erun user id (item 1).
+function UsernameCell({
+  user,
+  isCaller,
+}: {
+  user: IdentityUser;
+  isCaller: boolean;
+}): React.ReactElement {
+  const showsBothNames =
+    user.enrolled && user.erunUsername !== undefined && user.erunUsername !== user.username;
+  const primary = showsBothNames ? user.erunUsername : user.username;
+  return (
+    <div className="grid gap-0.5">
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-foreground">{primary}</span>
+        {isCaller && <StatusBadge tone="muted" label="You" showIcon={false} />}
+      </div>
+      {showsBothNames && (
+        <span className="text-xs text-muted-foreground">IdP username: {user.username}</span>
+      )}
+      <span className="font-mono text-[10px] text-muted-foreground">Subject: {user.id}</span>
+    </div>
+  );
+}
+
 function UserRow({
   user,
+  callerErunUserId,
   onSetActive,
   onRequestDeactivate,
   onManageRoles,
 }: {
   user: IdentityUser;
+  callerErunUserId: string | undefined;
   onSetActive: (externalId: string, active: boolean) => Promise<void>;
   onRequestDeactivate: (user: IdentityUser) => void;
   onManageRoles: (user: IdentityUser) => void;
@@ -291,9 +330,13 @@ function UserRow({
   // one-click Deactivate beside them is a footgun on the sign-in path
   // itself, so they get no toggle at all rather than a confirmation dialog.
   const canToggle = !user.isMachine && (active || user.state === 'USER_STATE_INACTIVE');
+  const isCaller =
+    callerErunUserId !== undefined && user.enrolled && user.erunUserId === callerErunUserId;
   return (
     <TableRow>
-      <TableCell className="font-medium text-foreground">{user.username}</TableCell>
+      <TableCell>
+        <UsernameCell user={user} isCaller={isCaller} />
+      </TableCell>
       <TableCell>{user.email ?? ''}</TableCell>
       <TableCell>{user.state}</TableCell>
       <TableCell>
@@ -340,11 +383,13 @@ function UserRow({
 
 function UsersTable({
   users,
+  callerErunUserId,
   onSetActive,
   onRequestDeactivate,
   onManageRoles,
 }: {
   users: IdentityUser[];
+  callerErunUserId: string | undefined;
   onSetActive: (externalId: string, active: boolean) => Promise<void>;
   onRequestDeactivate: (user: IdentityUser) => void;
   onManageRoles: (user: IdentityUser) => void;
@@ -369,6 +414,7 @@ function UsersTable({
           <UserRow
             key={user.id}
             user={user}
+            callerErunUserId={callerErunUserId}
             onSetActive={onSetActive}
             onRequestDeactivate={onRequestDeactivate}
             onManageRoles={onManageRoles}
@@ -381,11 +427,13 @@ function UsersTable({
 
 function UsersBody({
   usersState,
+  callerErunUserId,
   onSetActive,
   onRequestDeactivate,
   onManageRoles,
 }: {
   usersState: UsersState;
+  callerErunUserId: string | undefined;
   onSetActive: (externalId: string, active: boolean) => Promise<void>;
   onRequestDeactivate: (user: IdentityUser) => void;
   onManageRoles: (user: IdentityUser) => void;
@@ -407,6 +455,7 @@ function UsersBody({
   return (
     <UsersTable
       users={usersState.users}
+      callerErunUserId={callerErunUserId}
       onSetActive={onSetActive}
       onRequestDeactivate={onRequestDeactivate}
       onManageRoles={onManageRoles}
@@ -429,13 +478,31 @@ export function UsersPanel({
   token,
   ownTenantId,
   tenantType,
+  callerErunUserId,
+  scopeTenantId,
 }: {
   token: string;
   ownTenantId: string;
   tenantType: string;
+  // The signed-in operator's own erun user id (GET /v1/whoami's `userId`).
+  // Matched against each row's erunUserId to mark the caller's own row
+  // (item 1) -- undefined while whoami hasn't resolved yet, which
+  // simply renders no "You" badge rather than guessing.
+  callerErunUserId?: string;
+  // Set once shell/ScopeSelector.tsx points this OPERATIONS caller at
+  // another tenant; undefined means "my own tenant", today's unchanged
+  // default.
+  scopeTenantId?: string;
 }): React.ReactElement {
+  const targetTenantId = scopeTenantId ?? ownTenantId;
+  const { tenants: scopeTenants, orgTarget } = useEnrollOrgTarget(
+    token,
+    ownTenantId,
+    targetTenantId,
+  );
+  const { scope, ready: scopeReady } = resolveUsersScope(orgTarget, targetTenantId);
   const { usersState, enrollState, enroll, setActive, dismissTemporaryPassword } =
-    useUsersController(token);
+    useUsersController(token, scope, !scopeReady);
   const temporaryPassword =
     enrollState.status === 'enrolled' ? enrollState.result.temporaryPassword : undefined;
   const [pendingDeactivate, setPendingDeactivate] = React.useState<IdentityUser | undefined>(
@@ -446,14 +513,20 @@ export function UsersPanel({
     <Card aria-labelledby="identity-users-heading">
       <CardHeader>
         <CardTitle id="identity-users-heading">Users</CardTitle>
+        <UsersScopeBadge scopeTenantId={scopeTenantId} tenants={scopeTenants} />
       </CardHeader>
       <CardContent className="grid gap-6">
-        <UsersBody
-          usersState={usersState}
-          onSetActive={setActive}
-          onRequestDeactivate={setPendingDeactivate}
-          onManageRoles={setManagingRoles}
-        />
+        {scopeReady ? (
+          <UsersBody
+            usersState={usersState}
+            callerErunUserId={callerErunUserId}
+            onSetActive={setActive}
+            onRequestDeactivate={setPendingDeactivate}
+            onManageRoles={setManagingRoles}
+          />
+        ) : (
+          <ScopedUsersStatus target={orgTarget} tenants={scopeTenants} tenantId={targetTenantId} />
+        )}
         <EnrollForm
           token={token}
           ownTenantId={ownTenantId}

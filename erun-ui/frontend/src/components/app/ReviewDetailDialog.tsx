@@ -22,12 +22,15 @@ import {
 } from '@/app/reviewDetailThunks';
 import type { ReviewDetailState } from '@/app/state';
 import {
+  reviewDetailUnresolvedThreads,
   reviewStatusTone,
   unresolvedThreadsLabel,
   unresolvedThreadsTone,
 } from '@/app/tenantDashboardPanels';
 import type { UITenantDashboardBuild, UITenantDashboardReview } from '@/types';
 
+import { AccessDeniedBody } from './AccessRemedyNote';
+import { BuildProfileDialog, BuildProfileViewButton } from './BuildProfileDialog';
 import { InlineAlert, PermissionNotice } from './InlineAlert';
 import { PlatformErrorAlert } from './PlatformSignInAlert';
 import { ReviewDetailComments } from './ReviewDetailDialog.Comments';
@@ -96,7 +99,11 @@ function ReviewDetailBody({ detail }: { detail: ReviewDetailState }): React.Reac
     return (
       <EmptyState
         heading="You do not have access to this review"
-        body={`It needs ${data.restricted}. Ask an administrator for access.`}
+        body={
+          <AccessDeniedBody remedies={data.accessRemedies} restricted={data.restricted}>
+            {`It needs ${data.restricted}. Ask an administrator for access.`}
+          </AccessDeniedBody>
+        }
       />
     );
   }
@@ -161,7 +168,10 @@ function ReviewDetailThreadStatus({
   if (roots.length === 0) {
     return null;
   }
-  const unresolved = data.unresolvedThreads ?? 0;
+  const unresolved = reviewDetailUnresolvedThreads(data);
+  if (unresolved === undefined) {
+    return null;
+  }
   return (
     <div>
       <StatusBadge
@@ -254,11 +264,16 @@ function ReviewDetailBuilds({
 }: {
   data: NonNullable<ReviewDetailState['data']>;
 }): React.ReactElement {
+  const [selectedBuild, setSelectedBuild] = React.useState<UITenantDashboardBuild | null>(null);
   if (data.buildsRestricted) {
     return (
       <EmptyState
         heading="You do not have access to this review's builds"
-        body={`It needs ${data.buildsRestricted}. Ask an administrator for access.`}
+        body={
+          <AccessDeniedBody remedies={data.accessRemedies} restricted={data.buildsRestricted}>
+            {`It needs ${data.buildsRestricted}. Ask an administrator for access.`}
+          </AccessDeniedBody>
+        }
       />
     );
   }
@@ -272,15 +287,29 @@ function ReviewDetailBuilds({
     );
   }
   return (
-    <ul className="flex flex-col gap-1.5 text-[13px]">
-      {builds.map((build) => (
-        <ReviewDetailBuildRow key={build.buildId} build={build} />
-      ))}
-    </ul>
+    <>
+      <ul className="flex flex-col gap-1.5 text-[13px]">
+        {builds.map((build) => (
+          <ReviewDetailBuildRow key={build.buildId} build={build} onSelect={setSelectedBuild} />
+        ))}
+      </ul>
+      <BuildProfileDialog
+        build={selectedBuild}
+        onClose={() => {
+          setSelectedBuild(null);
+        }}
+      />
+    </>
   );
 }
 
-function ReviewDetailBuildRow({ build }: { build: UITenantDashboardBuild }): React.ReactElement {
+function ReviewDetailBuildRow({
+  build,
+  onSelect,
+}: {
+  build: UITenantDashboardBuild;
+  onSelect: (build: UITenantDashboardBuild) => void;
+}): React.ReactElement {
   return (
     <li className="flex items-center gap-2">
       <StatusBadge
@@ -290,6 +319,7 @@ function ReviewDetailBuildRow({ build }: { build: UITenantDashboardBuild }): Rea
       <span className="text-muted-foreground">{build.commitId}</span>
       {build.version && <span className="text-muted-foreground">v{build.version}</span>}
       <RelativeTime value={build.createdAt} className="ml-auto text-muted-foreground" />
+      <BuildProfileViewButton build={build} onSelect={onSelect} />
     </li>
   );
 }

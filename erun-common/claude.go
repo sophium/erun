@@ -30,8 +30,20 @@ func KnownClaudeModels() []string {
 }
 
 type EnvironmentClaudeConfig struct {
-	UseMantle       *bool    `yaml:"usemantle,omitempty" json:"useMantle,omitempty"`
-	UseBedrock      *bool    `yaml:"usebedrock,omitempty" json:"useBedrock,omitempty"`
+	UseMantle  *bool `yaml:"usemantle,omitempty" json:"useMantle,omitempty"`
+	UseBedrock *bool `yaml:"usebedrock,omitempty" json:"useBedrock,omitempty"`
+	// UseGateway tri-states this environment's use of the erun-level gateway
+	// catalog, the same way UseMantle and UseBedrock do: unset inherits the
+	// catalog, so an environment follows the operator's erun-level decision;
+	// true and false override it for this environment alone. A catalog is one
+	// erun-level list, so without this an environment could only be moved onto
+	// the gateway by moving every environment onto it.
+	UseGateway *bool `yaml:"usegateway,omitempty" json:"useGateway,omitempty"`
+	// There is deliberately no credential field here. The gateway credential is
+	// one erun-level value in the operator's secret store, delivered by deploy
+	// into this environment's namespace — so a per-environment reference would
+	// be a second way to say the same thing, and the wrong one when the catalog
+	// is global.
 	Models          []string `yaml:"models,omitempty" json:"models,omitempty"`
 	MaxOutputTokens *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
 	// Effort is the per-env Claude Code session effort level, one of
@@ -49,7 +61,10 @@ type EnvironmentClaudeConfig struct {
 }
 
 func (c EnvironmentClaudeConfig) IsZero() bool {
-	return c.UseMantle == nil && c.UseBedrock == nil && len(c.Models) == 0 &&
+	// UseGateway counts: an environment whose only claude setting is opting out
+	// of the erun-level gateway has a configuration, and reporting it as zero
+	// would drop that override on the next normalize.
+	return c.UseMantle == nil && c.UseBedrock == nil && c.UseGateway == nil && len(c.Models) == 0 &&
 		c.MaxOutputTokens == nil && c.Effort == nil && c.DefaultModel == nil && !c.VerboseDebug
 }
 

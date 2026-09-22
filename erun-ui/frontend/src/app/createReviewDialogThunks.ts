@@ -1,3 +1,5 @@
+import type { UIReviewCreateCapability } from '@/types';
+
 import { EnvironmentWorkingIssue, TenantReviewCreateCapability } from '../../wailsjs/go/main/App';
 import { execApi } from './api/execApi';
 import { tenantApi } from './api/tenantApi';
@@ -103,7 +105,9 @@ const loadCreateReviewDialogCapability =
   (tenant: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     try {
-      const capability = await TenantReviewCreateCapability(tenant);
+      // Typed at the boundary the way wailsQueryFn types its own calls, so
+      // the hand-written shape (not the generated model) is what this reads.
+      const capability = (await TenantReviewCreateCapability(tenant)) as UIReviewCreateCapability;
       const dialog = getState().createReviewDialog;
       if (!dialog.open || dialog.tenant !== tenant) {
         return;
@@ -112,6 +116,7 @@ const loadCreateReviewDialogCapability =
         patchCreateReviewDialog({
           capabilityLoading: false,
           capabilityRestricted: capability.canCreate ? '' : (capability.restricted ?? ''),
+          capabilityRemedy: capability.canCreate ? undefined : capability.accessRemedy,
         }),
       );
     } catch (error) {

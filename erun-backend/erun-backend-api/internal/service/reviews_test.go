@@ -146,6 +146,11 @@ type fakeMergeVerifier struct {
 	err           error
 	isAncestor    bool
 	isAncestorErr error
+	// contained and landingCommit answer reconcileMerged's own question, the
+	// one a review that landed without the queue is asked instead.
+	contained     bool
+	landingCommit string
+	changesErr    error
 }
 
 func (f fakeMergeVerifier) Contains(_ context.Context, _, _, _ string) (bool, string, error) {
@@ -154,6 +159,10 @@ func (f fakeMergeVerifier) Contains(_ context.Context, _, _, _ string) (bool, st
 
 func (f fakeMergeVerifier) IsAncestor(_ context.Context, _, _, _, _ string) (bool, error) {
 	return f.isAncestor, f.isAncestorErr
+}
+
+func (f fakeMergeVerifier) ContainsChanges(_ context.Context, _, _, _ string) (bool, string, error) {
+	return f.contained, f.landingCommit, f.changesErr
 }
 
 // fakeReleaseTrigger records every release TriggerRelease was asked to start.
@@ -199,23 +208,94 @@ func TestUpdateStatusRefusesMergeAlways(t *testing.T) {
 	}
 }
 
-// TestUpdateStatusRefusesMergedFromAnyStatusButMerge: MERGED is reachable
-// only from MERGE — asserting it from any other status is refused before the
-// git-state checks even run.
-func TestUpdateStatusRefusesMergedFromAnyStatusButMerge(t *testing.T) {
-	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
-	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+// reconcilingReview wires a review sitting at status whose branch the
+// verifier will answer for, so a test can drive reconcileMerged without a
+// real remote.
+func reconcilingReview(status model.ReviewStatus, verifier fakeMergeVerifier) (*fakeReviewRepo, *ReviewService) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", SourceBranch: "bug/thing", Status: status})
+	svc := NewReviewService(reviews, &fakeReviewBuilds{},
+		&fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{}, verifier, nil)
+	return reviews, svc
+}
 
-	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "build-1", "")
+// TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus is the transition
+// erun#2575 is about: a review whose work landed without the queue — a GitHub
+// squash merge — reaches MERGED from wherever it was sitting, on the
+// verifier's word that the branch's changes really are in the target. Before
+// this it could never move at all, so it sat OPEN forever and made the OPEN
+// count grow by one for every change that landed that way.
+func TestReconcileMergedAcceptsALandedBranchFromAnyOpenStatus(t *testing.T) {
+	for _, status := range []model.ReviewStatus{model.ReviewStatusOpen, model.ReviewStatusReady, model.ReviewStatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			reviews, svc := reconcilingReview(status, fakeMergeVerifier{contained: true, landingCommit: "squash-1"})
+
+			updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "", "file:///remote.git")
+			if err != nil {
+				t.Fatalf("UpdateStatus(MERGED) from %s error = %v, want it reconciled", status, err)
+			}
+			if updated.Status != model.ReviewStatusMerged {
+				t.Fatalf("returned status = %s, want MERGED", updated.Status)
+			}
+			if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusMerged {
+				t.Fatalf("persisted status = %s, want MERGED", got)
+			}
+			if got := reviews.reviews["review-1"].LastMergedBuildID; got != "" {
+				t.Fatalf("lastMergedBuildId = %q, want it empty: a reconciliation has no build", got)
+			}
+		})
+	}
+}
+
+// TestReconcileMergedRefusesWhenTheBranchIsNotInTheTarget: the reconciliation
+// verifies rather than believes — a branch that did not land is refused, and
+// the review is left exactly where it was.
+func TestReconcileMergedRefusesWhenTheBranchIsNotInTheTarget(t *testing.T) {
+	reviews, svc := reconcilingReview(model.ReviewStatusOpen, fakeMergeVerifier{contained: false})
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "", "file:///remote.git")
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want *MergeNotVerifiedError", err)
+	}
+	if !errors.Is(err, repository.ErrInvalidInput) {
+		t.Fatalf("error = %v, want it to unwrap to ErrInvalidInput", err)
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusOpen {
+		t.Fatalf("status = %s, want the review left at OPEN, not moved to MERGED", got)
+	}
+}
+
+// TestReconcileMergedRefusesWithNoVerifier: without a way to check the real
+// repository there is nothing to reconcile against, the same fail-closed
+// stance verifyRepositoryState takes for a queue-driven merge.
+func TestReconcileMergedRefusesWithNoVerifier(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", SourceBranch: "bug/thing", Status: model.ReviewStatusOpen})
+	svc := NewReviewService(reviews, &fakeReviewBuilds{},
+		&fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{}, nil, nil)
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "", "")
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want *MergeNotVerifiedError", err)
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusOpen {
+		t.Fatalf("status = %s, want the review left at OPEN", got)
+	}
+}
+
+// TestReconcileMergedRefusesAClosedReview: CLOSED is terminal — reconciliation
+// is for the review that is stuck open, not for reopening a decision already
+// made.
+func TestReconcileMergedRefusesAClosedReview(t *testing.T) {
+	reviews, svc := reconcilingReview(model.ReviewStatusClosed, fakeMergeVerifier{contained: true})
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "", "file:///remote.git")
 	var invalidTransition *InvalidTransitionError
 	if !errors.As(err, &invalidTransition) {
 		t.Fatalf("UpdateStatus(MERGED) error = %v, want *InvalidTransitionError", err)
 	}
-	if invalidTransition.From != model.ReviewStatusReady || invalidTransition.To != model.ReviewStatusMerged {
-		t.Fatalf("InvalidTransitionError = %+v, want from READY to MERGED", invalidTransition)
-	}
-	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusReady {
-		t.Fatalf("UpdateStatus(MERGED) changed the review to %s despite being refused", got)
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusClosed {
+		t.Fatalf("status = %s, want the review left at CLOSED", got)
 	}
 }
 
@@ -304,12 +384,12 @@ func TestAcceptMergedSucceedsWhenParentIsTheGatedTip(t *testing.T) {
 	}
 }
 
-// TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting
-// is the fix for erun#2250: commits that arrived directly on the target
-// branch between the gated tip and the reported commit — the release flow's
-// `[skip ci]` pushes, for instance — mean the reported commit's immediate
-// parent is no longer the gated tip, but the gated work is still really its
-// ancestor, so the merge is accepted rather than permanently refused.
+// TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting:
+// commits that arrived directly on the target branch between the gated tip
+// and the reported commit — the release flow's `[skip ci]` pushes, for
+// instance — mean the reported commit's immediate parent is no longer the
+// gated tip, but the gated work is still really its ancestor, so the merge is
+// accepted rather than permanently refused.
 func TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting(t *testing.T) {
 	reviews, builds := mergingReviewGatedAgainst("merge-commit")
 	release := &fakeReleaseTrigger{}
@@ -430,20 +510,51 @@ func TestMarkBuildResultFailureDequeuesAndPromotesNothing(t *testing.T) {
 
 // TestAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging is the invariant the
 // gate's serialisation depends on: only one review may be MERGE per target
-// branch at a time.
+// branch at a time. The refusal must name the review holding the slot — which
+// review it is decides the operator's next move (finish it, or requeue it back
+// to READY), and a bare not-found sends them looking for a missing endpoint, a
+// deleted review, or a mistyped branch instead.
 func TestAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.T) {
 	reviews := newFakeReviewRepo(
-		model.Review{ReviewID: "review-merging", TargetBranch: "main", Status: model.ReviewStatusMerge},
+		model.Review{ReviewID: "review-merging", Name: "Land the widget", SourceBranch: "feature/widget", TargetBranch: "main", Status: model.ReviewStatusMerge},
 		model.Review{ReviewID: "review-queued", TargetBranch: "main", Status: model.ReviewStatusReady},
 	)
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-queued"}}
 	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
-	if _, err := svc.AdvanceMergeQueue(context.Background(), "main"); err != repository.ErrNotFound {
-		t.Fatalf("AdvanceMergeQueue while another review is merging: err = %v, want ErrNotFound", err)
+	_, err := svc.AdvanceMergeQueue(context.Background(), "main")
+	var occupied *MergeQueueOccupiedError
+	if !errors.As(err, &occupied) {
+		t.Fatalf("AdvanceMergeQueue while another review is merging: err = %v, want *MergeQueueOccupiedError", err)
+	}
+	if occupied.TargetBranch != "main" || occupied.ReviewID != "review-merging" ||
+		occupied.Name != "Land the widget" || occupied.SourceBranch != "feature/widget" {
+		t.Fatalf("occupied = %+v, want the review already at MERGE on main (review-merging, Land the widget, feature/widget)", occupied)
 	}
 	if reviews.reviews["review-queued"].Status != model.ReviewStatusReady {
 		t.Fatalf("review-queued status = %s, want unchanged READY", reviews.reviews["review-queued"].Status)
+	}
+}
+
+// TestOverrideAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging pins the
+// override to the same occupancy rule: bypassing the thread gate does not
+// bypass the one-MERGE-per-branch invariant, and its refusal names the same
+// blocking review rather than falling through to a not-found.
+func TestOverrideAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-merging", Name: "Land the widget", SourceBranch: "feature/widget", TargetBranch: "main", Status: model.ReviewStatusMerge},
+		model.Review{ReviewID: "review-queued", TargetBranch: "main", Status: model.ReviewStatusReady},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-queued"}}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", "hotfix, reviewers unavailable")
+	var occupied *MergeQueueOccupiedError
+	if !errors.As(err, &occupied) {
+		t.Fatalf("OverrideAdvanceMergeQueue while another review is merging: err = %v, want *MergeQueueOccupiedError", err)
+	}
+	if occupied.ReviewID != "review-merging" || occupied.TargetBranch != "main" {
+		t.Fatalf("occupied = %+v, want review-merging on main", occupied)
 	}
 }
 
@@ -531,6 +642,69 @@ func TestMarkBuildResultToleratesQueueHeadWithUnresolvedThreads(t *testing.T) {
 	}
 	if reviews.reviews["review-built"].Status != model.ReviewStatusReady {
 		t.Fatalf("review-built status = %s, want READY (its own build succeeded and it queued normally)", reviews.reviews["review-built"].Status)
+	}
+}
+
+// TestMarkBuildResultToleratesAnotherReviewMerging guards the occupied-slot
+// refusal on the build-reporting path: the review already at MERGE is not
+// necessarily the one whose build just succeeded, so its occupancy must not
+// fail that report any more than a gated queue head does.
+func TestMarkBuildResultToleratesAnotherReviewMerging(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-merging", TargetBranch: "main", Status: model.ReviewStatusMerge},
+		model.Review{ReviewID: "review-built", TargetBranch: "main", Status: model.ReviewStatusOpen},
+	)
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, ok, err := svc.MarkBuildResult(context.Background(), "review-built", "build-1", true)
+	if err != nil {
+		t.Fatalf("MarkBuildResult: %v, want no error even though another review holds MERGE", err)
+	}
+	if ok {
+		t.Fatal("MarkBuildResult reported a promotion while another review holds MERGE")
+	}
+	if reviews.reviews["review-built"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-built status = %s, want READY (its own build succeeded and it queued normally)", reviews.reviews["review-built"].Status)
+	}
+}
+
+// TestRequeueRefusesAReviewThatIsNotMerging: the missed-merge-window requeue
+// only recovers a review holding the queue's slot. The review was resolved by
+// id, so it exists and the caller can see it — the refusal names the status it
+// actually holds rather than reporting a not-found for a review in plain sight.
+func TestRequeueRefusesAReviewThatIsNotMerging(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady})
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusReady, "", "")
+	var notMerging *ReviewNotMergingError
+	if !errors.As(err, &notMerging) {
+		t.Fatalf("requeue of a READY review: err = %v, want *ReviewNotMergingError", err)
+	}
+	if notMerging.ReviewID != "review-1" || notMerging.Status != model.ReviewStatusReady {
+		t.Fatalf("notMerging = %+v, want review-1 at READY", notMerging)
+	}
+	if reviews.reviews["review-1"].Status != model.ReviewStatusReady {
+		t.Fatalf("status = %s, want unchanged READY", reviews.reviews["review-1"].Status)
+	}
+}
+
+// TestRequeueMovesAMergingReviewBackToReady is the recovery the occupied-slot
+// refusal points an operator at: a review stuck at MERGE returns to READY and
+// rejoins its target branch's queue, freeing the slot for the next advance.
+func TestRequeueMovesAMergingReviewBackToReady(t *testing.T) {
+	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusReady, "", "")
+	if err != nil {
+		t.Fatalf("requeue of a MERGE review: %v", err)
+	}
+	if updated.Status != model.ReviewStatusReady {
+		t.Fatalf("status = %s, want READY", updated.Status)
+	}
+	if len(reviews.queue) != 1 || reviews.queue[0].ReviewID != "review-1" {
+		t.Fatalf("queue = %+v, want review-1 re-enqueued", reviews.queue)
 	}
 }
 

@@ -1,0 +1,17 @@
+# Response headers for the published docs site.
+#
+# docs.<base-domain> is served by Cloudflare Pages (the erun-docs deploy Job
+# uploads the Docusaurus build with wrangler), not routed through the cluster
+# edge, so the edge's Strict-Transport-Security never reaches it. Pages reads
+# this file from the deployed root and applies the headers to every response,
+# including the custom domain's.
+#
+# max-age is one day, matching the edge's own value. HSTS cannot be recalled
+# early -- a browser that has read the header refuses plaintext for that host
+# until it expires -- so the short value keeps a TLS mistake recoverable while
+# the commitment is proven. Raise it towards 31536000 (one year) only once
+# every host under the domain is verified https-only; includeSubDomains is the
+# step after that, not the first, because it binds names this site does not
+# serve.
+/*
+  Strict-Transport-Security: max-age=86400

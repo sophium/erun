@@ -11,6 +11,8 @@
     "test:mcp-attach-session:headed": "./run-mcp-attach-session.sh --headed",
     "test:rest-surfaces": "./run-rest-surfaces.sh",
     "test:rest-surfaces:headed": "./run-rest-surfaces.sh --headed",
+    "test:landing-layout": "./run-landing-layout.sh",
+    "test:landing-layout:headed": "./run-landing-layout.sh --headed",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

@@ -56,6 +56,8 @@ var defaultRules = []Replacement{
 	// to re-supply. Scenarios that must prove the concrete path reached the
 	// message assert it against the un-normalized capture.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktopid\.pub`), "<DESKTOP_IDENTITY_PUBLIC>"},
+	// Desktop restart markers share the macOS config path's embedded space.
+	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]*(?:/Library/Application Support)?/ERun/desktop-control\.json`), "<TMP>"},
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]+`), "<TMP>"},
 	// A separate rule for temp paths whose separators are percent-escaped,
 	// which the plain-path rule above cannot match.
@@ -129,6 +131,9 @@ var defaultRules = []Replacement{
 	// a diff's `index <blob>..<blob>` — content-derived and stable — survives.
 	{regexp.MustCompile(`\[([^\s\]]+) [0-9a-f]{7,40}\]`), "[$1 <SHORTSHA>]"},
 	{regexp.MustCompile(`(?m)^(\s+)[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "${1}<SHORTSHA>..<SHORTSHA>"},
+	// A fast-forward merge prints its own short shas on an unindented
+	// "Updating <old>..<new>" line, so the indented range rule above never sees it.
+	{regexp.MustCompile(`(?m)^Updating [0-9a-f]{7,40}\.\.[0-9a-f]{7,40}\b`), "Updating <SHORTSHA>..<SHORTSHA>"},
 	// A forced ref update (`git push --force`/`--force-with-lease`, as the
 	// release tag's repoint-after-rebase does) prints a three-dot range, not
 	// the fast-forward push status line's two-dot range above, and
@@ -229,10 +234,26 @@ func Apply(s string, extra ...Replacement) string {
 // timingLinePattern matches an already-redacted step-timing row: leading
 // indentation (always an even number of spaces — renderStepTimingRows in
 // erun-common/timing.go indents each depth by two), then a label, then the
-// "[<ELAPSED>]" token the bracket-duration rule above just produced. The
-// bracket shape is deliberately unique to the timing table (see that rule's
-// own comment), so any line matching this is a timing row and nothing else.
-var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\]$`)
+// "[<ELAPSED>]" token the bracket-duration rule above just produced, then an
+// optional status suffix — a failed row appends " — <error>" (or "— exit
+// status N") after its duration. The bracket shape is deliberately unique to
+// the timing table (see that rule's own comment), so any line matching this is
+// a timing row and nothing else.
+//
+// The suffix has to be part of the pattern rather than the row ending at the
+// bracket: a failed row is a timing row like any other and must still be
+// recognized, sorted among its siblings, and carry its suffix through
+// unchanged. Without it a failed row is not recognized at all, and because
+// canonicalizeStepTimingOrder ends a run at the first line it cannot parse,
+// one unrecognized row silently disables the canonicalization for the whole
+// tree it sits in — leaving exactly the wall-clock sibling order this is here
+// to remove, and reparenting the rows after it under the wrong step. That is
+// invisible on an idle machine (every sibling ties inside the production
+// noise floor, so the recorded order already is name order) and only shows up
+// where the timings actually diverge, which is why it read as a
+// venue-specific failure. TestGoldenTimingBlocksAreOrderInvariant is what
+// keeps a future row shape from reopening the same hole silently.
+var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\](?: .*)?$`)
 
 // canonicalizeStepTimingOrder reorders each step-timing block's sibling rows
 // by name instead of leaving them in the real wall-clock order they were
@@ -249,31 +270,42 @@ var timingLinePattern = regexp.MustCompile(`^((?: )*)\S.* \[<ELAPSED>\]$`)
 // Canonicalizing every level to name order here removes that remaining
 // variance the same way the synthetic-row drop above removes the variance in
 // whether a gap row appears at all.
+//
+// Sibling order is duration order at *every* level, the shallowest included:
+// a run of same-depth rows are siblings that happen to tie, not independent
+// trees, so sorting only a recognized root's descendants would leave exactly
+// the closest-run steps — the ones most likely to cross the noise floor and
+// swap — in wall-clock order.
 func canonicalizeStepTimingOrder(s string) string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); {
-		rootDepth, ok := timingLineDepth(lines[i])
-		if !ok {
+		if _, ok := timingLineDepth(lines[i]); !ok {
 			out = append(out, lines[i])
 			i++
 			continue
 		}
-		// A tree's root is a timing line whose own depth nothing before it in
-		// this block undercuts; every subsequent line strictly deeper than it
-		// is one of its descendants, and the first line that is not (a
-		// shallower or equal-depth timing line, reportStepTiming's own
-		// "step timing (ordered by duration):" header included, or plain
-		// non-timing text) starts the next tree or leaves the block entirely.
-		end := i + 1
+		// A maximal contiguous run of timing rows (plus the indented
+		// continuation lines belonging to them) is one forest. The rows of a
+		// step-timing tree are emitted as the tree is walked, and a multi-line
+		// step failure interleaves its own message between two rows of the same
+		// tree, so a run ends at a line that is neither — not at a shallower
+		// one, which is a sibling or a parent.
+		end := i
 		for end < len(lines) {
-			d, ok := timingLineDepth(lines[end])
-			if !ok || d <= rootDepth {
+			if _, ok := timingLineDepth(lines[end]); ok {
+				end++
+				continue
+			}
+			// An indented non-timing line is a row's own wrapped error message,
+			// part of this run; anything else (the "timing record written to ..."
+			// footer, an unindented interleaved message) ends it.
+			if !timingContinuationLine(lines[end]) {
 				break
 			}
 			end++
 		}
-		out = append(out, sortedTimingBlock(lines[i:end])...)
+		out = append(out, sortedTimingForest(lines[i:end])...)
 		i = end
 	}
 	return strings.Join(out, "\n")
@@ -292,37 +324,74 @@ func timingLineDepth(line string) (int, bool) {
 	return len(m[1]) / 2, true
 }
 
+// timingContinuationLine reports whether line is the second or later line of a
+// row's error message rather than a row of its own. A failed step renders its
+// error after the duration, and an error can be several lines long (the
+// missing-binfmt refusal ends with a command to run on its own line), so those
+// lines have to travel with the row they belong to when siblings are
+// reordered. Every line of the table is indented — reportStepTiming prefixes
+// each row, and a wrapped error keeps its own leading whitespace — while the
+// "timing record written to ..." line that closes the block, and anything
+// printed after it, is not. Indentation is therefore what separates a
+// continuation from the end of the table.
+func timingContinuationLine(line string) bool {
+	return strings.HasPrefix(line, "  ")
+}
+
 // timingNode is one row of a step-timing tree, parsed from its serialized
 // (depth-indented, DFS pre-order) text form so its children can be sorted
-// and the tree re-serialized.
+// and the tree re-serialized. extra holds the row's own error-message
+// continuation lines, kept beside the row so sorting moves them together.
 type timingNode struct {
 	line     string
 	depth    int
+	extra    []string
 	children []*timingNode
 }
 
-// sortedTimingBlock parses one root row plus its full, contiguous subtree
-// (lines[0] is the root; every later line is some descendant of it) and
-// returns it re-serialized with every level's children sorted by name.
-func sortedTimingBlock(lines []string) []string {
+// sortedTimingForest parses one contiguous run of timing rows into the forest
+// their depths describe — a row deeper than the one above it is that row's
+// child, and a row at the same or shallower depth closes that subtree and
+// starts a sibling — and returns it re-serialized with every level, the roots
+// included, sorted by name.
+func sortedTimingForest(lines []string) []string {
 	if len(lines) == 0 {
 		return nil
 	}
-	root := &timingNode{line: lines[0]}
-	stack := []*timingNode{root}
-	for _, line := range lines[1:] {
-		depth, _ := timingLineDepth(line)
+	var roots []*timingNode
+	var stack []*timingNode
+	for _, line := range lines {
+		depth, ok := timingLineDepth(line)
+		if !ok {
+			// A non-timing line inside the run is the current row's own wrapped
+			// error message (canonicalizeStepTimingOrder only includes indented
+			// ones), so it travels with that row rather than becoming a node.
+			if len(stack) > 0 {
+				top := stack[len(stack)-1]
+				top.extra = append(top.extra, line)
+			}
+			continue
+		}
 		node := &timingNode{line: line, depth: depth}
-		for len(stack) > 1 && stack[len(stack)-1].depth >= depth {
+		for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
 			stack = stack[:len(stack)-1]
 		}
-		parent := stack[len(stack)-1]
-		parent.children = append(parent.children, node)
+		if len(stack) == 0 {
+			roots = append(roots, node)
+		} else {
+			parent := stack[len(stack)-1]
+			parent.children = append(parent.children, node)
+		}
 		stack = append(stack, node)
 	}
-	sortTimingNodeChildren(root)
+	sort.SliceStable(roots, func(i, j int) bool {
+		return strings.TrimSpace(roots[i].line) < strings.TrimSpace(roots[j].line)
+	})
 	out := make([]string, 0, len(lines))
-	appendTimingNode(&out, root)
+	for _, root := range roots {
+		sortTimingNodeChildren(root)
+		appendTimingNode(&out, root)
+	}
 	return out
 }
 
@@ -337,6 +406,7 @@ func sortTimingNodeChildren(node *timingNode) {
 
 func appendTimingNode(out *[]string, node *timingNode) {
 	*out = append(*out, node.line)
+	*out = append(*out, node.extra...)
 	for _, child := range node.children {
 		appendTimingNode(out, child)
 	}

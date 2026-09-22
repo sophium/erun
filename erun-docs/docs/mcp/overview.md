@@ -77,7 +77,7 @@ An env deployed with a trust anchor requires a **bearer on every request**, incl
 | Lifetime | 5 minutes. Mint per request; do not cache. |
 | Failure | `401` with the verification reason. |
 
-An env deployed before key injection (no anchor configured) stays unauthenticated — loopback-only, behind the namespace's default-deny `NetworkPolicy`.
+An env deployed before key injection (no anchor configured) answers any caller that can reach the port. The edge binds the pod IP rather than loopback — the in-pod Service that `erun expose` fronts has to reach it — and the runtime chart's `NetworkPolicy` re-permits `mcp` from any source, so an unanchored edge is reachable from every pod in the cluster, not just the env's own namespace. Inject a key by redeploying before treating an env as safe to leave running unanchored.
 
 **Don't hand-roll the token.** `erun mcp call` and `erun mcp tools` mint one internally per request; `erun mcp proxy` does the same for a client that speaks MCP itself, relaying its stdio to this endpoint; and `erun mcp token` prints one for a caller driving the protocol directly:
 
@@ -172,6 +172,7 @@ These wrap the [pure command primitives](/concepts/command-primitives): `build` 
 | `pin` | `erun pin` | The resolved plan: every erun version reference for the env, its current value and its new one, plus whether it was applied. Verifies the target is published first. Resolves the checkout to rewrite from `projectRoot`, then the server's own runtime repo path; refuses rather than scan a wider directory when neither is set — there is no cwd to fall back to the way a shell user has. `preview` returns the plan without writing. |
 | `expose` | `erun expose` | Resolved public hostname, per-env wildcard record, Host-routing Ingress. Requires a `platform:` block, unless `skipIfUnconfigured` turns that into a no-op. Supports preview (dry-run). |
 | `unexpose` | `erun unexpose` | Removes an environment's per-env wildcard DNS record — the DNS-side counterpart to `expose`, run at teardown. Supports preview. |
+| `e2e` | `erun e2e` | Discovers `playwright/` the way `build` discovers `docker/`, refuses (naming the cause) if the environment isn't deployed, the target service isn't exposed, or its certificate isn't ready, then runs the suite once with the resolved HTTPS URL and deployed version injected. Supports preview and background jobs (`wait: false`). |
 | `terraform` | `erun terraform` | Runs a hosted platform's per-environment Terraform (`apply`/`plan`/`destroy`). `apply`/`destroy` mutate real cloud and cluster state and require `confirm` to equal the environment name. `preview` returns the resolved commands without executing them. |
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
@@ -289,6 +290,7 @@ Talks to a hosted erun platform (`erun-backend-api`) over the `erun`-type cloud 
 | `platform_identity_org_create` | Work | Create an organization on the platform's own identity provider — the org an org-scoped tenant mapping needs before `platform_tenant_create`'s `orgFieldValue` can produce a mapping any token will ever resolve to. Requires an operations-tenant caller. |
 | `platform_user_list` | Read | List a tenant's users. `tenantId` targets another tenant and is honored only for an operations-tenant caller. |
 | `platform_user_enroll` | Work | Enrol a user into a tenant. Same `tenantId` scoping as `platform_user_list`; `roleIds` names the roles to grant instead of the platform's default. |
+| `platform_user_grant-role` | Work | Grant a role to a user already enrolled in the caller's tenant — the post-enrollment grant `platform_user_enroll` cannot perform, since re-enrolling an enrolled identity is a no-op that leaves its roles untouched. `roleId` comes from the tenant's role list. |
 | `platform_env_list` | Read | List the caller's tenant's hosted environments. |
 | `platform_env_get` | Read | Fetch one hosted environment by id. |
 | `platform_env_register` | Work | Register a hosted environment. For a runtime environment with `runtimeVersion` and a deploy executor configured, this also starts a server-side deploy — poll `platform_env_get` to watch it converge. |
@@ -315,14 +317,14 @@ Drives the erun platform's review flow: open a review against a pushed branch, c
 | `review_resolve` | Work (idempotent) | Resolve a comment thread by closing its root comment. `commentId` must be the thread's root — resolving a reply fails, naming the root to retry against. |
 | `review_unresolve` | Work (idempotent) | Reopen a comment thread by marking its root comment `OPEN` again. Same root-only restriction as `review_resolve`. |
 | `review_close` | Work (idempotent) | Close a review without merging it. |
-| `review_record-build` | Work | Record a build against a review — the only way an erun client transitions a review off `OPEN`. A successful build moves it to `READY` (and on to `MERGE` if it was already the merge queue's head); a failed one moves it to `FAILED`. There is no separate tool to set a review's status directly: a `READY` with no build is a different thing entirely (the missed-merge-window requeue). `commitId` must be the full 40-character commit hash the build ran against, and `version` the version it minted — required even when `successful` is `false`, since `release` resolves the version before the build step runs. `gate` records the merge queue's own `GATE` build kind instead: the environment a review's merge queue promoted to `MERGE` reports its own build of the prospective merge this way, and omits `version` since the gate publishes nothing. |
-| `review_report-merged` | Work | Report a review `MERGED`, for the environment a review's merge queue promoted to `MERGE` once it has fetched the review's target and source (`exec_gate-merge`), gate-built the result, recorded that as a successful `GATE` build (`review_record-build` with `gate` set), and pushed it. The platform verifies rather than trusts this: it checks `buildId` names an already-recorded, successful `GATE` build for this review, then fetches `remoteUrl` to confirm that build's commit is really reachable from the target branch's tip with the parent this review was gated against. Either check failing refuses with 409 `MERGE_NOT_VERIFIED` and leaves the review at `MERGE`. |
+| `review_record-build` | Work | Record a build against a review — the only way an erun client transitions a review off `OPEN`. A successful build moves it to `READY` (and on to `MERGE` if it was already the merge queue's head); a failed one moves it to `FAILED`. There is no separate tool to set a review's status directly: a `READY` with no build is a different thing entirely (the missed-merge-window requeue). `commitId` must be the full 40-character commit hash the build ran against, and `version` the version it minted — from the run's own build result (a plain `erun build --output json`, or `erun build --dry-run --output json` when it failed before printing one) — required even when `successful` is `false`. A `RECORDED` build publishes nothing, so the version is metadata no platform path resolves: a version `erun build --release` produced is accepted but not required, and the artifact that ships is cut after merge by the release the accepted review enqueues (see [Builds § Triggering builds](/collaboration/builds#triggering-builds)). `gate` records the merge queue's own `GATE` build kind instead: the environment a review's merge queue promoted to `MERGE` reports its own build of the prospective merge this way, and omits `version` since the gate publishes nothing. |
+| `review_report-merged` | Work | Report a review `MERGED`. The platform verifies rather than trusts this, but which check applies depends on where the review is sitting. A review at `MERGE` is the merge queue's: this is for the environment the queue promoted once it has fetched the review's target and source (`exec_gate-merge`), gate-built the result, recorded that as a successful `GATE` build (`review_record-build` with `gate` set), and pushed it — `buildId` must name that build, and the platform fetches `remoteUrl` to confirm its commit is really reachable from the target branch's tip with the parent this review was gated against. Any other review is one whose work landed without the queue — in practice a GitHub squash merge, where no `GATE` build exists to name: omit `buildId`, and the platform confirms against the same remote that everything the review's source branch adds is already present in the target branch's history. Either way a check failing refuses with 409 `MERGE_NOT_VERIFIED`; a branch that did not land is refused just as firmly. See [Merge queue § Reconciling a review that landed elsewhere](/collaboration/merge-queue#landed-elsewhere). |
 | `review_requeue` | Work (idempotent) | Move a review stuck at `MERGE` back to `READY`, freeing its target branch's merge-queue slot so a different review can be promoted — only one review may be at `MERGE` per target branch. For a review whose gate never reaches a terminal state, or one left at `MERGE` by a batched `exec_gate-merge` whose other members landed but were never promoted. The review rejoins the queue at the tail, not the head. Refuses, naming the review's actual status, when it is not at `MERGE`. See [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges). |
 | `review_reviewers_list` | Read | List the users assigned to review a review. |
 | `review_reviewers_add` | Work (idempotent) | Assign a reviewer, so an Agent can assign a peer Agent (or itself). `userId` must already be enrolled in the caller's own tenant — refused before the network call otherwise. Assigning a reviewer gates no status transition; see [merge queue](/collaboration/merge-queue) for what actually blocks a merge. |
 | `review_reviewers_remove` | Work (destructive, idempotent) | Remove a reviewer from a review. |
 | `review_queue_list` | Read | List a target branch's merge queue, in queue order. |
-| `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGE`, starting that review's merge-gate build — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`, and refuses with the unresolved comment thread count when the head still has open threads (resolve them with `review_resolve`, or use `review_queue_override-advance`). |
+| `review_queue_advance` | Work | Advance a target branch's merge queue head to `MERGE`, starting that review's merge-gate build — a real, immediate mutation of shared control-plane state. Fails if the queue is empty or its head is not `READY`; refuses with the unresolved comment thread count when the head still has open threads (resolve them with `review_resolve`, or use `review_queue_override-advance`); and refuses, naming the occupying review and its source branch, while another review already holds that branch's single `MERGE` slot — wait for it, or free it with `review_requeue`. |
 | `review_queue_override-advance` | Work | Bypass `review_queue_advance`'s unresolved-thread gate and advance anyway. `reason` is required and is recorded in the platform's audit trail alongside the caller's identity — a deliberate, accountable escape hatch, not a routine way to advance the queue. |
 
 All sixteen support `preview` except the immediate writes (`review_create`, `review_comment`, `review_resolve`, `review_unresolve`, `review_close`, `review_record-build`, `review_report-merged`, `review_requeue`, `review_reviewers_add`, `review_reviewers_remove`, `review_queue_advance`, `review_queue_override-advance`), which run for real unless `preview` is set. All are agent-callable and `openWorld: true`.
@@ -358,7 +360,7 @@ The mutations an orchestrator performs constantly on an environment's own reposi
 | `exec_commit` | Stage every change (or, with `paths` set, only those paths) in the runtime repo's working tree and commit it with `message`, taken the same way as `exec_write`'s content. `branch` is the caller's claim about the current branch, verified against `git rev-parse --abbrev-ref HEAD` rather than assumed — a mismatch is refused, loudly, instead of landing the commit on whichever branch HEAD happens to be on. When `paths` is set, the commit is refused just as loudly if the tree has changes outside the declared paths, so an unrelated writer's edits can never be absorbed into it. Reports the branch, commit id, and files committed. Set `preview` to verify the branch and trace the files that would be committed without committing. |
 | `exec_push` | Push the runtime repo's working tree's current branch to a remote. `branch` must match the tree's actual current branch, checked the same way as `exec_commit`. A real, immediate mutation of shared remote state — push before opening a review with `review_create`, since the platform can only fetch a branch once it has actually landed there. Set `preview` to verify the branch and trace the push without running it. |
 | `exec_merge` | Fetch `targetBranch` from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome rather than a generic failure; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or run `git merge --abort`. A real, immediate mutation of the working tree. Set `preview` to trace the fetch and merge without running them. |
-| `exec_gate-merge` | Build the prospective merge a merge queue promotion (or batch) gates: fetch `targetBranch` and every entry's `branch` in `sources`, check out a fresh local branch named `targetBranch` at its own current remote tip, then squash-merge each source onto it in turn, each as its own commit carrying its own `message` — one commit per landed source. Passing more than one entry in `sources` batches several unmerged branches into one prospective merge, so the gate that follows tests whether they compile *together*, not just individually; a single entry is the ordinary one-branch gate. For the environment a review's merge queue promotes to `MERGE`: gate-merge, then build against the result, then `review_record-build` with `gate` set and, only on success, `exec_push` and `review_report-merged`. The working tree must already be clean — this checks out a different local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge. A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict (with its conflicted files) recorded in the result's `skipped` list, and the rest of the batch still gates against the tree as it stood before that attempt; a batch where every source is skipped returns an error. Set `preview` to trace the fetch, checkout, and each squash merge and commit without running them. |
+| `exec_gate-merge` | Build the prospective merge a merge queue promotion (or batch) gates: fetch `targetBranch` and every entry's `branch` in `sources`, check out a fresh local branch named `targetBranch` at its own current remote tip, then squash-merge each source onto it in turn, each as its own commit carrying its own `message` — one commit per landed source. Passing more than one entry in `sources` batches several unmerged branches into one prospective merge, so the gate that follows tests whether they compile *together*, not just individually; a single entry is the ordinary one-branch gate. For the environment a review's merge queue promotes to `MERGE`: gate-merge, then build against the result, then `review_record-build` with `gate` set and, only on success, `exec_push` and `review_report-merged`. The working tree must already be clean — this checks out a different local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge. A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict (with its conflicted files) recorded in the result's `skipped` list, and the rest of the batch still gates against the tree as it stood before that attempt; a source that contributes nothing is skipped the same way — when its squash stages no changes because its content is already on `targetBranch`, it is recorded in `skipped` with that reason rather than failing the batch, so an already-landed branch is a no-op instead of a dead gate; a batch where every source is skipped returns an error. Set `preview` to trace the fetch, checkout, and each squash merge and commit without running them. |
 
 Same commands as [`erun exec write`](/cli/exec#exec-write) / [`erun exec commit`](/cli/exec#exec-commit) / [`erun exec push`](/cli/exec#exec-push) / [`erun exec merge`](/cli/exec#exec-merge) / [`erun exec gate-merge`](/cli/exec#exec-gate-merge). `write`, `commit`, and `diff` (see below) are retired aliases for `exec_write`, `exec_commit`, and `exec_diff`, kept callable for one release (#1186) — new callers should use the `exec_*` names.
 
@@ -394,6 +396,21 @@ A gate run is the first-class record of one attempt to gate a prospective merge,
 
 Same commands as [`erun exec gate-run start`](/cli/exec#exec-gate-run-start) / [`erun exec gate-run report`](/cli/exec#exec-gate-run-report) / [`erun gate list`](/cli/gate#gate-list) / [`erun gate show`](/cli/gate#gate-show). All four support `preview`; `gate_list` and `gate_show` are read-only. `exec_gate-run_start`/`exec_gate-run_report` are agent-callable only — the environment driving the gate reports its own attempt, never something an operator clicks. `gate_list`/`gate_show` are agent-callable too as this feature's first cut; a console/desktop surface is planned as a follow-up.
 
+### Jobs — what is being worked on now {#jobs}
+
+A job is the platform's record of work *in flight*, claimed before the work starts rather than reported only once it finishes the way builds and gate runs are. That is the half that lets two agents see each other: before starting, an agent claims the scope it is about to work on, and a second agent asking for the same scope is told who already holds it and what they are doing.
+
+| Tool | Read/Work | Purpose |
+|---|---|---|
+| `jobs_list` | Read | List the tenant's queue, the live work first, narrowed by any combination of `status`, `environmentId`, `issueRef`, `scope`, and `actorId`. Each entry names what is being done, by whom, and how long it has been going. `RUNNING` is work in flight; `ABANDONED` means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. An empty queue is `[]`, never `null`. |
+| `jobs_show` | Read | Fetch one job by `jobId`, including the scope it claims and the in-pod job id it mirrors, when there is one. |
+| `jobs_start` | Work | Record that this actor is starting a piece of work: `jobType` (one of `fix`, `review`, `gate`, `release`, `deploy`, `investigate`, `plan`, `triage`, `maintenance`), `summary`, `actorId`, and optionally `actorKind`, `environment`, `issueRef`, `scope`, and `localJobId`. With `scope` set this is a **claim**: if an open job already holds that scope, the call is refused with `409` naming the holder — its `actorId`, its prose `summary`, and when it `started` — so you can pick up something else instead of duplicating the work. Returns the new job's id; pass it to `jobs_finish`. The summary is prose describing the work, never the command that performs it — a summary that is only a shell command is refused. |
+| `jobs_finish` | Work | Move `jobId` forward: close it as `SUCCEEDED`, `FAILED`, `ABANDONED`, or `SUPERSEDED`, refresh its `summary`, or record the `localJobId` it mirrors. A job that has already finished cannot be updated (409): its outcome is the record coordination and reporting both read. |
+
+Same commands as [`erun jobs list`](/cli/jobs#jobs-list) / [`erun jobs show`](/cli/jobs#jobs-show) / [`erun jobs start`](/cli/jobs#jobs-start) / [`erun jobs finish`](/cli/jobs#jobs-finish). All four support `preview`; `jobs_list` and `jobs_show` are read-only. The panel these reads back lives in the hosted console's Jobs section.
+
+Claiming is deliberately advisory, not a distributed lock: two claims landing at the same instant can both be recorded. Making the scope exclusive in the database would wedge it permanently the moment an actor disappeared without closing its job — exactly the orphaned running record the sweep exists to clear. What `jobs_list` gives an operator is that overlap, made visible instead of silently prevented.
+
 ### Escape hatch
 
 | Tool | Purpose |
@@ -412,6 +429,12 @@ In order of preference: **inspection > action > working tree > jobs > `exec_raw`
 Generating conventional code (a new service, a migration job, an Ingress, …) isn't a tool-call decision — load the relevant [skill](/concepts/skills) and write the files by hand. The skill teaches the convention; the MCP surface stays out of the generation path.
 
 Every call lands in the audit trail with its tool name, so `exec_raw` invocations are immediately distinguishable from typed ones.
+
+### Dry runs {#dry-runs}
+
+A tool that can rehearse an action instead of performing it accepts `preview`. Set it to `true` and the call resolves what it would do — the plan, the commands, the targets — and returns that without touching anything. It is how a caller checks a reconcile before running one against a live environment.
+
+The capability does not follow tool families. Read it from the tool itself: whenever `preview` appears in a tool's `inputSchema`, that tool's description closes with **Supports preview.**, so a description is enough to tell a tool you can rehearse from one you cannot. A tool whose schema omits `preview` has no dry run — never assume one, and never infer one from a sibling tool in the same family.
 
 ### Full tool index {#full-tool-index}
 
@@ -439,6 +462,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | *(top-level)* | `usage` | `erun usage` | Read |
 | *(top-level)* | `resize` | `erun resize` | Work |
 | *(top-level)* | `delete` | `erun delete` | Work |
+| *(top-level)* | `e2e` | `erun e2e` | Work |
 | exec | `exec_diff` | `erun exec diff` | Read |
 | exec | `exec_raw` | `erun exec raw` | Work |
 | exec | `exec_write` | `erun exec write` | Work |
@@ -481,6 +505,7 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | platform | `platform_identity_org_create` | `erun platform identity org create` | Work |
 | platform | `platform_user_list` | `erun platform user list` | Read |
 | platform | `platform_user_enroll` | `erun platform user enroll` | Work |
+| platform | `platform_user_grant-role` | `erun platform user grant-role` | Work |
 | platform | `platform_env_list` | `erun platform env list` | Read |
 | platform | `platform_env_get` | `erun platform env get` | Read |
 | platform | `platform_env_register` | `erun platform env register` | Work |
@@ -509,6 +534,10 @@ Every tool the server can register, one row each, grouped by `_meta.family` and 
 | review | `review_queue_override-advance` | `erun review queue override-advance` | Work |
 | gate | `gate_list` | `erun gate list` | Read |
 | gate | `gate_show` | `erun gate show` | Read |
+| jobs | `jobs_list` | `erun jobs list` | Read |
+| jobs | `jobs_show` | `erun jobs show` | Read |
+| jobs | `jobs_start` | `erun jobs start` | Work |
+| jobs | `jobs_finish` | `erun jobs finish` | Work |
 | idle | `idle` | `erun idle` | Read |
 | idle | `idle_stop_history` | *(MCP-only)* | Read |
 | idle | `idle_stop_record` | *(MCP-only, desktop-only)* | Work |
@@ -568,6 +597,8 @@ The write side is the CLI verb `erun activity ai-session report`, which a tool's
 ```jsonc
 // ai_sessions { "session": "abc123" }
 {
+  "tenant": "myapp",
+  "environment": "dev",
   "sessions": [
     {
       "sessionId": "abc123",
@@ -579,6 +610,8 @@ The write side is the CLI verb `erun activity ai-session report`, which a tool's
   ]
 }
 ```
+
+`tenant`/`environment` echo the resolved target, the same way `idle_stop_history` does, so an empty `sessions` list cannot be misread as answering for a different target than the one requested. An environment with no recorded sessions returns `"sessions": []`, never `null`.
 
 An `exited` or `oom-killed` session additionally carries `exitCode` when the process reported one. `oom-killed` is reported only when the caller that recorded the exit explicitly said so (`exitReason: "oom"`) — detecting the kill itself (a cgroup `memory.events` read, a `dmesg` scan) is the reporting side's job, not this tool's.
 
@@ -661,12 +694,14 @@ Reads CPU quota utilisation, memory against the container's own cgroup limit, an
   "environment": "prod",
   "cpu": { "quotaCores": 1, "utilizationPercent": 12.4, "intervalSeconds": 1 },
   "memory": { "currentBytes": 413589504, "peakBytes": 1027301376, "limitBytes": 2147483648, "percentOfLimit": 19.3, "oomKills": 0 },
-  "disk": [ { "mount": "/home/erun", "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0 } ],
+  "disk": [ { "mount": "/home/erun", "nodeShared": true, "totalBytes": 202991730688, "usedBytes": 101495865344, "percentUsed": 50.0, "ownUsedBytes": 45097156608, "ownUsageObserved": true } ],
   "excludesBuilds": true
 }
 ```
 
 Every field reports its own unavailability rather than failing the call: a cluster on cgroup v1 (or with `/sys/fs/cgroup` missing) reports `cpu.unavailable`/`memory.unavailable` with the reason instead of a fabricated zero, and an unlimited `memory.max` reports `memory.unlimited: true` rather than a percentage with no denominator. A `warnings` array appears only when a named threshold is crossed (memory ≥ 85% of its limit, `memory.peak` ≥ 95%, or a watched mount ≥ 90% used) — a heavily-loaded environment might return:
+
+**`disk[].totalBytes`/`usedBytes`/`percentUsed` are the node's, not this environment's (`nodeShared: true`).** They come from a statfs of the whole mount, which every environment scheduled on the same node shares — two environments on the same node report the identical figures regardless of which one is actually filling it. `disk[].ownUsedBytes` (a `du` of the mount, scoped to this environment's own directory tree, bounded to 30s) is the number this environment can actually reduce; `ownUsageObserved` distinguishes a genuine reading from an unreadable or timed-out `du`, mirroring `peakObserved`.
 
 `excludesBuilds` is `true` on every environment whose type carries the `erun-dind` sidecar (all but `runtime` and `host`), omitted otherwise: `cpu`/`memory` above are scoped to the `erun-devops` container alone, and an image build actually runs in `erun-dind` — a separate cgroup this reading has no path to, since its build containers are cgroup siblings rather than descendants. This names that gap rather than let a busy build read as an idle environment; `observe` reports the sidecar's own resource limits.
 
@@ -682,7 +717,7 @@ Every field reports its own unavailability rather than failing the call: a clust
 
 `intervalSeconds` (input, default 1, clamped to 0.1–30) sets the CPU sample window: `usage_usec` is read, the window elapses, then it is read again, so utilisation is a rate over the interval rather than a meaningless cumulative counter.
 
-When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `erun list` reports under `runtime-pod:` — so a caller checking on an environment does not need a separate `resize` call just to see it. Omitted when nothing has been observed yet.
+When retained usage history has accumulated a [standing sizing recommendation](/cli/list#the-sizing-recommendation), it rides along as a `sizing` field — the same verdicts and evidence window `resize` reasons from — so a caller checking on an environment does not need a separate `resize` call just to see it. That history is retained by this environment's own pod monitor and lives in this pod, which is why the block appears here: [`erun list`](/cli/list) reaches the same verdict only when run inside the environment itself, a host-run `erun list` reports none for it, and [`erun usage`](/cli/usage) carries no sizing block at all — so neither is a substitute for this tool. Omitted when nothing has been observed yet.
 
 ### `resize`
 
@@ -693,8 +728,8 @@ Changes the runtime pod's and/or the `erun-dind` sidecar's CPU/memory limits and
 {
   "plan": {
     "tenant": "myapp", "environment": "prod",
-    "current": { "cpu": "4", "memory": "8916Mi" },
-    "target":  { "cpu": "6", "memory": "8916Mi" },
+    "current": { "cpu": "4", "memory": "16384Mi" },
+    "target":  { "cpu": "6", "memory": "16384Mi" },
     "dindCurrent": { "cpu": "4", "memory": "20Gi" },
     "dindTarget":  { "cpu": "4", "memory": "24Gi" },
     "actions": [
@@ -820,7 +855,7 @@ Trigger a build. Same semantics as the CLI `erun build` — it builds the images
 | `release` | bool (optional) | Pin a bare release version instead of minting a snapshot. |
 | `force` | bool (optional) | Bypass the fingerprint cache. |
 | `dry_run` | bool (optional) | Preview without building. |
-| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `environments.<env>.docker.platforms`. Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
+| `platforms` | string[] (optional) | Docker `--platform` overrides (e.g. `["linux/amd64"]`) for an environment that can only ever run one architecture; takes precedence over the project's configured `docker.platforms` (per-environment or project-wide). Mutually exclusive with `release`, which always publishes every platform erun supports. See [Multi-architecture](/cli/build#multi-architecture). |
 
 The MCP `build` tool does **not** expose the `--deploy` convenience switch — an Agent composes the rollout by calling `push` and `deploy` itself with the `version` from this tool's output.
 

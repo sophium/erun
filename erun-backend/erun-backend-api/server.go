@@ -159,13 +159,14 @@ func registerProtectedRoutes(mux *http.ServeMux, auth *AuthMiddleware, options H
 	catalog := &routeCatalog{}
 	register := protectedRouteRegistrar(mux, auth, catalog)
 	var users routes.WhoamiUserRepository
+	var tenants routes.WhoamiTenantRepository
 	if txManager != nil {
 		users = repository.NewUserRepository(txManager)
-		registerDatabaseRoutes(register, options, txManager, authorizer)
+		tenants = registerDatabaseRoutes(register, options, txManager, authorizer)
 	}
 	// Whoami registers last, and reads the catalog per request, so its own route
 	// and every route above it are in the capability answer.
-	routes.RegisterWhoamiRoute(register, users, resolveCapabilities(options, authorizer), catalog.sorted)
+	routes.RegisterWhoamiRoute(register, users, tenants, resolveCapabilities(options, authorizer), catalog.sorted)
 	return catalog
 }
 
@@ -271,40 +272,44 @@ func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManage
 // so registration reads as what each route needs rather than as 12 repeated
 // repository.NewXRepository(txManager) calls (#1302).
 type databaseRepositories struct {
-	reviews         *repository.ReviewRepository
-	reviewReviewers *repository.ReviewReviewerRepository
-	builds          *repository.BuildRepository
-	comments        *repository.CommentRepository
-	tenantIssuers   *repository.TenantIssuerRepository
-	tenants         *repository.TenantRepository
-	environments    *repository.EnvironmentRepository
-	aiSessions      *repository.AISessionRepository
-	contexts        *repository.ContextRepository
-	tenantQuotas    *repository.TenantQuotaRepository
-	usageEvents     *repository.UsageEventRepository
-	auditEvents     *repository.AuditEventRepository
-	releases        *repository.ReleaseRepository
-	rateLimits      *repository.PlatformRateLimitRepository
-	gateRuns        *repository.GateRunRepository
+	reviews           *repository.ReviewRepository
+	reviewReviewers   *repository.ReviewReviewerRepository
+	builds            *repository.BuildRepository
+	comments          *repository.CommentRepository
+	tenantIssuers     *repository.TenantIssuerRepository
+	tenants           *repository.TenantRepository
+	environments      *repository.EnvironmentRepository
+	aiSessions        *repository.AISessionRepository
+	contexts          *repository.ContextRepository
+	tenantQuotas      *repository.TenantQuotaRepository
+	usageEvents       *repository.UsageEventRepository
+	auditEvents       *repository.AuditEventRepository
+	releases          *repository.ReleaseRepository
+	rateLimits        *repository.PlatformRateLimitRepository
+	gateRuns          *repository.GateRunRepository
+	jobs              *repository.JobRepository
+	environmentEvents *repository.EnvironmentEventRepository
 }
 
 func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositories {
 	return databaseRepositories{
-		reviews:         repository.NewReviewRepository(txManager),
-		reviewReviewers: repository.NewReviewReviewerRepository(txManager),
-		builds:          repository.NewBuildRepository(txManager),
-		comments:        repository.NewCommentRepository(txManager),
-		tenantIssuers:   repository.NewTenantIssuerRepository(txManager),
-		tenants:         repository.NewTenantRepository(txManager),
-		environments:    repository.NewEnvironmentRepository(txManager),
-		aiSessions:      repository.NewAISessionRepository(txManager),
-		contexts:        repository.NewContextRepository(txManager),
-		tenantQuotas:    repository.NewTenantQuotaRepository(txManager),
-		usageEvents:     repository.NewUsageEventRepository(txManager),
-		auditEvents:     repository.NewAuditEventRepository(txManager),
-		releases:        repository.NewReleaseRepository(txManager),
-		rateLimits:      repository.NewPlatformRateLimitRepository(txManager),
-		gateRuns:        repository.NewGateRunRepository(txManager),
+		reviews:           repository.NewReviewRepository(txManager),
+		reviewReviewers:   repository.NewReviewReviewerRepository(txManager),
+		builds:            repository.NewBuildRepository(txManager),
+		comments:          repository.NewCommentRepository(txManager),
+		tenantIssuers:     repository.NewTenantIssuerRepository(txManager),
+		tenants:           repository.NewTenantRepository(txManager),
+		environments:      repository.NewEnvironmentRepository(txManager),
+		aiSessions:        repository.NewAISessionRepository(txManager),
+		contexts:          repository.NewContextRepository(txManager),
+		tenantQuotas:      repository.NewTenantQuotaRepository(txManager),
+		usageEvents:       repository.NewUsageEventRepository(txManager),
+		auditEvents:       repository.NewAuditEventRepository(txManager),
+		releases:          repository.NewReleaseRepository(txManager),
+		rateLimits:        repository.NewPlatformRateLimitRepository(txManager),
+		gateRuns:          repository.NewGateRunRepository(txManager),
+		jobs:              repository.NewJobRepository(txManager),
+		environmentEvents: repository.NewEnvironmentEventRepository(txManager),
 	}
 }
 
@@ -313,8 +318,9 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 // threaded through only for the routes that need a per-caller entitlement
 // check beyond the route-level TenantUser/TenantAdmin gate already enforced
 // by the outer middleware -- today just the MCP token mint route's erun:admin
-// check (erun#1891).
-func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) {
+// check (erun#1891). It returns the tenant repository so whoami can read the
+// caller's own tenant name off the identical repository tenant list uses.
+func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, authorizer Authorizer) *repository.TenantRepository {
 	repos := newDatabaseRepositories(txManager)
 	// contextCredentials resolves a placed environment's live admin token
 	// (#1112). nil without a cipher (the same precondition context
@@ -336,24 +342,60 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	// triggers it directly on a verified MERGED transition.
 	releaseService := service.NewReleaseService(repos.releases)
 	releaseRoutes := routes.RegisterReleaseRoutes(register, repos.releases, releaseService)
+	registerWorkflowRoutes(register, repos, releaseRoutes)
+	registerEnvironmentRoutes(register, options, repos, placementCredentials)
+	registerEventRoutes(register, repos)
+	registerTokenRoutes(register, options, repos, authorizer)
+	registerCredentialRoutes(register, options, txManager, repos, contextCredentials)
+	registerTenantAdminRoutes(register, options, txManager, repos)
+	registerIdentityAdminRoutes(register, options, txManager)
+	return repos.tenants
+}
+
+// registerWorkflowRoutes wires the routes describing a change in flight:
+// reviews and their comments, the builds reported against them, the gate runs
+// that record a prospective merge attempt, the agent sessions, and the jobs
+// that record what an agent is working on before the work starts. releaseRoutes
+// is threaded in rather than re-registered because reviewService triggers a
+// release directly on a verified MERGED transition.
+func registerWorkflowRoutes(register routes.ProtectedRouteRegistrar, repos databaseRepositories, releaseRoutes routes.ReleaseRoutes) {
 	reviewService := service.NewReviewService(repos.reviews, repos.builds, repos.comments, repos.auditEvents, gitverify.NewRemoteVerifier(), releaseRoutes)
-	commentService := service.NewCommentService(repos.comments)
-	buildService := service.NewBuildService(repos.builds, reviewService)
 	routes.RegisterTenantIssuerRoutes(register, repos.tenantIssuers)
 	routes.RegisterReviewRoutes(register, repos.reviews, repos.reviewReviewers, reviewService)
-	routes.RegisterBuildRoutes(register, repos.builds, buildService)
-	routes.RegisterCommentRoutes(register, repos.comments, commentService)
+	routes.RegisterBuildRoutes(register, repos.builds, service.NewBuildService(repos.builds, reviewService))
+	routes.RegisterCommentRoutes(register, repos.comments, service.NewCommentService(repos.comments))
 	routes.RegisterGateRunRoutes(register, repos.gateRuns, service.NewGateRunService(repos.gateRuns))
+}
+
+// registerEnvironmentRoutes wires the environment lifecycle: what a placement
+// is, what it may consume, and the delete state machine that survives a
+// control-plane restart.
+func registerEnvironmentRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, repos databaseRepositories, placementCredentials deployexec.PlacementCredentialResolver) {
 	deleter := newEnvironmentDeleter(options, repos.environments, repos.usageEvents, placementCredentials)
 	environmentAdmin := service.NewEnvironmentAdminService(repos.environments, repos.auditEvents)
 	routes.RegisterEnvironmentRoutes(register, repos.environments, repos.tenantQuotas, repos.tenants, repos.contexts, newEnvironmentProvisioner(options, repos.environments, repos.usageEvents, placementCredentials), newEnvironmentLifecycle(options, repos.environments, repos.usageEvents, placementCredentials), deleter, environmentAdmin)
 	newEnvironmentDeleteReconciler(options, repos.environments, repos.tenants, repos.contexts, deleter)
 	routes.RegisterAISessionRoutes(register, repos.aiSessions, repos.environments)
+	jobService := service.NewJobService(repos.jobs)
+	routes.RegisterJobRoutes(register, repos.jobs, repos.environments, jobService)
+	newJobAbandonReconciler(options, jobService)
+}
+
+// registerEventRoutes wires the three append-only tenant-wide event reads.
+func registerEventRoutes(register routes.ProtectedRouteRegistrar, repos databaseRepositories) {
+	routes.RegisterEnvironmentEventRoutes(register, repos.environmentEvents, repos.environments)
 	routes.RegisterUsageEventRoutes(register, repos.usageEvents)
 	routes.RegisterAuditEventRoutes(register, repos.auditEvents)
+}
+
+func registerTokenRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, repos databaseRepositories, authorizer Authorizer) {
 	routes.RegisterMCPTokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner, authorizer)
 	routes.RegisterDNS01TokenRoutes(register, repos.environments, repos.tenants, options.MCPSigner)
 	routes.RegisterEnvironmentHostnameRoutes(register, repos.environments, repos.tenants, options.EnvironmentHostnameWriter, options.EnvironmentHostnameServicesZone)
+}
+
+// registerCredentialRoutes wires the Cipher-gated surface.
+func registerCredentialRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, repos databaseRepositories, contextCredentials *repository.ContextCredentialRepository) {
 	// aliases is nil without a cipher, the same precondition every other
 	// Cipher-gated dependency on this page requires -- but unlike those (which
 	// simply leave a caller with a narrower feature set), the console's own
@@ -365,8 +407,10 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	// therefore always registered; setAlias itself reports the missing
 	// configuration with a named, actionable 501 (the same pattern
 	// mintMCPToken uses for a nil signer) instead of the mux's bare 404.
-	var aliases routes.CloudProviderAliasWriter
-	var contextProvisioner routes.ContextProvisioner
+	var (
+		aliases            routes.CloudProviderAliasWriter
+		contextProvisioner routes.ContextProvisioner
+	)
 	if options.Cipher != nil {
 		concreteAliases := repository.NewCloudProviderAliasRepository(txManager, options.Cipher)
 		aliases = concreteAliases
@@ -383,6 +427,12 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	}
 	routes.RegisterCloudProviderAliasRoutes(register, aliases)
 	routes.RegisterContextRoutes(register, repos.contexts, contextProvisioner)
+}
+
+// registerTenantAdminRoutes wires the tenant-administration surface: the
+// tenant registry itself, its quotas and rate limits, user/role management,
+// and the invite requests an operator decides.
+func registerTenantAdminRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, repos databaseRepositories) {
 	tenantService := service.NewTenantService(repos.tenants, repos.environments, options.BootstrapTenantName)
 	routes.RegisterTenantRoutes(register, repos.tenants, tenantService)
 	tenantQuotaAdmin := service.NewTenantQuotaAdminService(repos.tenantQuotas, repos.auditEvents)
@@ -401,7 +451,6 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	inviteRequests := repository.NewInviteRequestRepository(txManager)
 	inviteRequestService := service.NewInviteRequestService(inviteRequests, repos.tenants, repository.NewUserRepository(txManager), repository.NewInviteRepository(txManager))
 	routes.RegisterInviteRequestRoutes(register, inviteRequests, repos.tenants, inviteRequestService)
-	registerIdentityAdminRoutes(register, options, txManager)
 }
 
 // registerIdentityAdminRoutes wires /v1/identity/* (issue #1209) when a
@@ -534,6 +583,19 @@ func newEnvironmentDeleteReconciler(options HandlerOptions, environments *reposi
 	provision.NewEnvDeleteReconciler(options.DBOSContext, environments, tenants, contexts, deleter, provision.DefaultDeleteReconcileSchedule)
 }
 
+// newJobAbandonReconciler schedules the periodic sweep of RUNNING jobs whose
+// actor stopped updating them, so a scope held by a process that is gone is
+// released without an operator noticing and asking for it. Without a DBOS
+// context there is no scheduler to run it against, and the sweep stays an
+// operation a caller performs explicitly rather than something that quietly
+// does not happen.
+func newJobAbandonReconciler(options HandlerOptions, jobs service.JobAbandonSweeper) {
+	if options.DBOSContext == nil {
+		return
+	}
+	service.NewJobAbandonReconciler(options.DBOSContext, jobs, service.DefaultJobAbandonTTL, service.DefaultJobAbandonSchedule)
+}
+
 func registerHealthRoute(mux *http.ServeMux) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -541,7 +603,12 @@ func registerHealthRoute(mux *http.ServeMux) {
 }
 
 func registerProtectedRoute(mux *http.ServeMux, auth *AuthMiddleware, method string, apiPath string, handler http.Handler) {
-	mux.Handle(method+" "+apiPath, withAPIPath(apiPath, auth.Wrap(handler)))
+	// Every authenticated route is registered through here, so binding the
+	// path-id guard at this one seam covers all of them — present and future —
+	// rather than leaving each handler to remember it. It sits inside the auth
+	// wrapper: an unauthorized caller must see 401 whatever shape of id it
+	// sent, so parsing is not observable before authentication.
+	mux.Handle(method+" "+apiPath, withAPIPath(apiPath, auth.Wrap(routes.WithUUIDPathIDs(apiPath, handler))))
 }
 
 func protectedRouteRegistrar(mux *http.ServeMux, auth *AuthMiddleware, catalog *routeCatalog) routes.ProtectedRouteRegistrar {

@@ -1,7 +1,9 @@
 import type { Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
+import { expectFramesAllDistinct, holdResponse } from '../../../fixtures/visualFrames.js';
 
 // The Ports tab's public-exposure surface (issue #1351). The headless harness
 // has no real cluster and no project with a platform block (see
@@ -69,6 +71,13 @@ const PENDING_CERTIFICATE = {
 // Every test below stubs it explicitly rather than falling through to the
 // real backend call: that fallthrough is exactly what let #1911 ship the
 // picker with these specs never actually exercising the paired read.
+// A round-trip failure, not a computed one. refreshManageExposures only ever
+// saw a pair rejection from a read whose RPC itself failed, so this stages the
+// bridge's { error } envelope rather than LOAD_FAILURE's computed
+// { configured, error } result: a computed failure resolves the promise, never
+// reaches the catch that blanked both panels, and so cannot reproduce #1934.
+const SERVICES_READ_FAILURE = { error: 'SERVICES_READ_FAILURE_MARKER' };
+
 const NO_SERVICES = { data: { configured: true, restricted: false, services: [] } };
 const SERVICES_POPULATED = {
   data: {
@@ -98,7 +107,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(docsLink).toBeVisible();
 
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-not-applicable.png',
+      path: artifactPath('test-results/1351-visual/ports-not-applicable.png'),
     });
 
     const [popup] = await Promise.all([app.page.waitForEvent('popup'), docsLink.click()]);
@@ -149,7 +158,9 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await expect(dialog.getByText('You may not have access to see this')).toBeVisible();
     await expect(dialog.getByText('Nothing exposed yet')).toHaveCount(0);
 
-    await dialog.screenshot({ path: 'test-results/1351-visual/ports-restricted.png' });
+    await dialog.screenshot({
+      path: artifactPath('test-results/1351-visual/ports-restricted.png'),
+    });
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -176,11 +187,52 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     const retry = dialog.getByRole('button', { name: 'Try again' });
     await expect(retry).toBeVisible();
 
-    await dialog.screenshot({ path: 'test-results/1351-visual/ports-failed.png' });
+    await dialog.screenshot({ path: artifactPath('test-results/1351-visual/ports-failed.png') });
 
     await retry.click();
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     expect(calls).toBe(2);
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  // #1934's defect, in the only direction the DOM can show it. The two reads
+  // are paired, so a rejection from either used to land in
+  // refreshManageExposures' one catch and overwrite *both* panels with that
+  // error -- the exposure list included, discarding a listing that had already
+  // resolved. Every other case here stubs both reads to the same class of
+  // outcome (both succeed, or the failed one is the exposures read), so a list
+  // blanked by the picker's failure was indistinguishable from one that simply
+  // had nothing to show.
+  //
+  // The failure has to come from the services read specifically: when the
+  // *exposures* read fails, ExposuresBody returns its error state before
+  // reaching ExposeServiceForm, so no picker renders at all and the two states
+  // are observationally identical.
+  test('a failed services read leaves the exposure list’s resolved addresses intact', async ({
+    app,
+    page,
+  }) => {
+    await stubExposureRpcs(page, {
+      ListEnvironmentExposures: () => POPULATED,
+      ListEnvironmentServices: () => SERVICES_READ_FAILURE,
+    });
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Ports');
+    const dialog = app.manageDialog.locator();
+
+    // The read that answered still renders what it answered ...
+    await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
+    // ... and is not wearing the failure of the read that did not.
+    await expect(dialog.getByText("Couldn't load public addresses")).toHaveCount(0);
+
+    // The picker reports its own failure, so the form still names the way out
+    // rather than silently losing its options.
+    const pickerFailure = dialog.getByText(/Could not read this environment's services/);
+    await expect(pickerFailure).toBeVisible();
+    await expect(pickerFailure).toContainText('SERVICES_READ_FAILURE_MARKER');
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -215,7 +267,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     ).toBeVisible();
 
     await dialog.screenshot({
-      path: 'test-results/1918-visual/ports-cert-pending.png',
+      path: artifactPath('test-results/1918-visual/ports-cert-pending.png'),
     });
 
     const refresh = dialog.getByRole('button', { name: 'Refresh public addresses' });
@@ -234,6 +286,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
   }) => {
     let exposeCalls = 0;
     let listCalls = 0;
+    const exposeGate = holdResponse();
     await stubExposureRpcs(page, {
       ListEnvironmentExposures: () => {
         listCalls++;
@@ -241,10 +294,12 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       },
       ExposeEnvironmentService: async () => {
         exposeCalls++;
-        // A real expose round-trips DNS + an Ingress apply; hold the response
-        // open briefly so the in-flight state is actually observable rather
-        // than resolving before the assertion below can catch it.
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // A real expose round-trips DNS + an Ingress apply. Hold the response
+        // open until this spec has captured the in-flight frame below, rather
+        // than for a fixed interval: a sleep races the screenshot, and the
+        // capture that loses writes the settled render into the in-flight
+        // frame, making it byte-identical to ports-populated.png.
+        await exposeGate.held;
         return {
           data: { service: 'api', hostname: 'api.pw-alpha.services.test', scheme: 'https' },
         };
@@ -258,7 +313,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-empty-configured.png',
+      path: artifactPath('test-results/1351-visual/ports-empty-configured.png'),
     });
 
     await dialog.locator('#expose-service-name').fill('api');
@@ -268,14 +323,26 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await expect(dialog.getByRole('button', { name: 'Exposing...' })).toBeVisible();
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-create-inflight.png',
+      path: artifactPath('test-results/1351-visual/ports-create-inflight.png'),
     });
+    // Only now let the stubbed call settle: the frame above is the evidence
+    // that the pending state renders, so it must be on disk before the
+    // response can reach the renderer.
+    exposeGate.release();
 
     await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
     expect(exposeCalls).toBe(1);
     expect(listCalls).toBe(2);
 
-    await dialog.screenshot({ path: 'test-results/1351-visual/ports-populated.png' });
+    await dialog.screenshot({ path: artifactPath('test-results/1351-visual/ports-populated.png') });
+    // Every frame this test wrote must be a distinct file: a capture that
+    // settles early collapses into its settled sibling, and the bundle then
+    // documents a state the run never saw.
+    await expectFramesAllDistinct([
+      artifactPath('test-results/1351-visual/ports-empty-configured.png'),
+      artifactPath('test-results/1351-visual/ports-create-inflight.png'),
+      artifactPath('test-results/1351-visual/ports-populated.png'),
+    ]);
 
     const clipboardWrite = page.waitForRequest(
       (req) =>
@@ -385,6 +452,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
   }) => {
     let unexposeCalls = 0;
     let listCalls = 0;
+    const unexposeGate = holdResponse();
     await stubExposureRpcs(page, {
       ListEnvironmentExposures: () => {
         listCalls++;
@@ -392,7 +460,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       },
       UnexposeEnvironment: async () => {
         unexposeCalls++;
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Same gate as the expose path: the removal round-trip a real cluster
+        // performs is held open until this spec has captured the in-flight
+        // frame, so the capture cannot land after the state has settled.
+        await unexposeGate.held;
         return { data: { wildcardName: '*.pw-alpha.services.test' } };
       },
       ListEnvironmentServices: () => NO_SERVICES,
@@ -414,15 +485,41 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
 
     await confirm.scrollIntoViewIfNeeded();
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-remove-confirm.png',
+      path: artifactPath('test-results/1351-visual/ports-remove-confirm.png'),
     });
+
+    // The negative names its effect rather than reusing the generic word: the
+    // dialog's own footer also renders a Cancel (opposite Save) that closes the
+    // dialog and discards unsaved edits, so two buttons reading "Cancel" a few
+    // pixels apart would do different things. Matches ManageDialogJobCancel's
+    // "Keep running".
+    const keepExposed = dialog.getByRole('button', { name: 'Keep exposed' });
+    await expect(keepExposed).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+
+    // Dismissing keeps every address and issues no write -- the behaviour the
+    // label now names.
+    await keepExposed.click();
+    await expect(dialog.getByRole('button', { name: 'Remove public access' })).toBeVisible();
+    await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
+    expect(unexposeCalls).toBe(0);
+
+    // Re-open the confirm so the committing half of the flow below is unchanged.
+    await removeButton.click();
+    await expect(confirm).toBeVisible();
+    await confirm.scrollIntoViewIfNeeded();
 
     // Step 2: the separate explicit action that actually commits it.
     await confirm.click();
     await expect(dialog.getByRole('button', { name: 'Removing...' })).toBeVisible();
     await dialog.screenshot({
-      path: 'test-results/1351-visual/ports-remove-inflight.png',
+      path: artifactPath('test-results/1351-visual/ports-remove-inflight.png'),
     });
+    unexposeGate.release();
+    await expectFramesAllDistinct([
+      artifactPath('test-results/1351-visual/ports-remove-confirm.png'),
+      artifactPath('test-results/1351-visual/ports-remove-inflight.png'),
+    ]);
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
     expect(unexposeCalls).toBe(1);

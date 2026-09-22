@@ -6,6 +6,12 @@
 # and degrades to the daemon's own default whenever it cannot read a number it
 # trusts.
 #
+# It also mirrors this container's own cpu.max into a per-pod cgroup that
+# `docker build --cgroup-parent` can nest build containers under, which only
+# works once the cpu controller is delegated to that cgroup's parent, and which
+# must report a loud warning rather than a silent no-op whenever it cannot be
+# applied.
+#
 # Drives the real script with a stubbed procfs/sysfs and a stubbed
 # dockerd-entrypoint.sh, so what is asserted is the argv dockerd would actually
 # receive rather than a re-implementation of the resolver.
@@ -59,6 +65,32 @@ stub_own_cgroup() {
     printf '0::%s\n' "${cgroup_path}" >"${root}/proc/self/cgroup"
     mkdir -p "${root}/sys/fs/cgroup${cgroup_path}"
     printf '%s\n' "${cpu_max}" >"${root}/sys/fs/cgroup${cgroup_path}/cpu.max"
+}
+
+# stub_cap_parent declares the cgroup the cap cgroup is created under: the
+# controllers the kernel offers docker/ and the ones it currently delegates to
+# its children. A parent that does not delegate cpu never gets cpu.max in a
+# child, whatever the child's own directory says.
+stub_cap_parent() {
+    root="$1"
+    controllers="$2"
+    subtree="${3-}"
+    parent="${root}/sys/fs/cgroup/docker"
+    mkdir -p "${parent}"
+    printf '%s\n' "${controllers}" >"${parent}/cgroup.controllers"
+    printf '%s\n' "${subtree}" >"${parent}/cgroup.subtree_control"
+}
+
+# assert_uncapped_reported asserts a run that could not apply the cap warned
+# about it exactly once and never announced a cap it did not set: the silent
+# no-op that reads as a working fix is the defect this coverage exists for.
+assert_uncapped_reported() {
+    reported="$(grep -c 'WARNING: build containers are not CPU-capped' "${work_root}/stderr" || true)"
+    [ "${reported}" = "1" ] ||
+        fail "expected exactly one uncapped warning on stderr, got ${reported}: $(cat "${work_root}/stderr")"
+    grep -q 'capping build containers' "${work_root}/stderr" &&
+        fail "a cap that was not applied must not be announced as applied: $(cat "${work_root}/stderr")"
+    return 0
 }
 
 # run_entrypoint executes the wrapper against a stubbed root with a
@@ -150,18 +182,25 @@ root="$(stub_net eth0 1280)"
 argv="$(run_entrypoint "${root}")"
 [ "${argv}" = "--mtu=1280" ] || fail "expected --mtu=1280 to be accepted, got: ${argv}"
 
-# --- 9. erun#2255: this container's own real cpu.max quota is mirrored into a
-# dedicated, per-pod cgroup that `docker build --cgroup-parent` can nest build
-# containers under. ---
+# --- 9. This container's own real cpu.max quota is mirrored into a dedicated,
+# per-pod cgroup that `docker build --cgroup-parent` can nest build containers
+# under, which requires delegating cpu to the cap cgroup's parent first: until
+# that happens the child has no cpu.max to write at all. ---
 root="$(stub_net eth0 1450)"
 stub_own_cgroup "${root}" "400000 100000"
+stub_cap_parent "${root}" "cpuset cpu io memory pids" ""
 run_entrypoint "${root}" >/dev/null
 pod="$(hostname)"
-cap_cgroup="${root}/sys/fs/cgroup/docker/erun-build-cpu-cap-${pod}"
+cap_parent="${root}/sys/fs/cgroup/docker"
+cap_cgroup="${cap_parent}/erun-build-cpu-cap-${pod}"
+grep -qw cpu "${cap_parent}/cgroup.subtree_control" ||
+    fail "expected cpu to be delegated via ${cap_parent}/cgroup.subtree_control before the cap cgroup is used"
 [ "$(cat "${cap_cgroup}/cpu.max" 2>/dev/null)" = "400000 100000" ] ||
     fail "expected the sidecar's own cpu.max to be mirrored into ${cap_cgroup}/cpu.max"
-grep -q "erun-build-cpu-cap-${pod}" "${work_root}/stderr" ||
+grep -q "capping build containers via cgroup docker/erun-build-cpu-cap-${pod}" "${work_root}/stderr" ||
     fail "expected the capped cgroup path to be announced on stderr"
+grep -q 'WARNING' "${work_root}/stderr" &&
+    fail "an applied cap must not warn: $(cat "${work_root}/stderr")"
 
 # --- 10. An unlimited own cgroup (no Kubernetes CPU limit declared) mirrors
 # nothing rather than fabricating a cap that was never asked for. ---
@@ -179,5 +218,53 @@ mkdir -p "${root}/proc" "${root}/sys"
 run_entrypoint "${root}" >/dev/null
 [ -d "${root}/sys/fs/cgroup/docker" ] &&
     fail "expected no docker/ cgroup tree to be created with no readable own cgroup"
+
+# --- 12. A parent that already delegates cpu is left as it is: that is the
+# steady state from the second boot on, and it must neither fail nor need the
+# delegation rewritten. ---
+root="$(stub_net eth0 1450)"
+stub_own_cgroup "${root}" "400000 100000"
+stub_cap_parent "${root}" "cpuset cpu io memory pids" "cpu"
+run_entrypoint "${root}" >/dev/null
+[ "$(cat "${root}/sys/fs/cgroup/docker/erun-build-cpu-cap-$(hostname)/cpu.max" 2>/dev/null)" = "400000 100000" ] ||
+    fail "expected the cap to apply against a parent that already delegates cpu"
+
+# --- 13. A parent the kernel does not offer cpu to cannot delegate it, so the
+# cap cgroup would silently have no cpu.max at all: the run must name what
+# could not be set instead of reporting success. ---
+root="$(stub_net eth0 1450)"
+stub_own_cgroup "${root}" "400000 100000"
+stub_cap_parent "${root}" "cpuset io memory pids" ""
+run_entrypoint "${root}" >/dev/null
+grep -q 'does not list cpu' "${work_root}/stderr" ||
+    fail "expected an undelegatable parent to name what could not be set, got: $(cat "${work_root}/stderr")"
+assert_uncapped_reported
+
+# --- 14. A parent that lists cpu but refuses the delegation write (the
+# kernel's no-internal-process constraint surfaces as EBUSY here) is reported
+# rather than assumed: the write has to be checked, not trusted. ---
+root="$(stub_net eth0 1450)"
+stub_own_cgroup "${root}" "400000 100000"
+stub_cap_parent "${root}" "cpuset cpu io memory pids" ""
+rm -f "${root}/sys/fs/cgroup/docker/cgroup.subtree_control"
+mkdir -p "${root}/sys/fs/cgroup/docker/cgroup.subtree_control"
+run_entrypoint "${root}" >/dev/null
+grep -q 'cpu could not be delegated' "${work_root}/stderr" ||
+    fail "expected a rejected delegation write to be reported, got: $(cat "${work_root}/stderr")"
+assert_uncapped_reported
+
+# --- 15. A write the kernel accepts is not proof the quota is in force: when
+# cpu.max does not read back the mirrored value, the run says so rather than
+# printing the success line the silent version claimed. ---
+root="$(stub_net eth0 1450)"
+stub_own_cgroup "${root}" "400000 100000"
+stub_cap_parent "${root}" "cpuset cpu io memory pids" "cpu"
+cap_dir="${root}/sys/fs/cgroup/docker/erun-build-cpu-cap-$(hostname)"
+mkdir -p "${cap_dir}"
+ln -s /dev/null "${cap_dir}/cpu.max"
+run_entrypoint "${root}" >/dev/null
+grep -q 'reads back' "${work_root}/stderr" ||
+    fail "expected a cpu.max that does not read back the mirrored value to be reported, got: $(cat "${work_root}/stderr")"
+assert_uncapped_reported
 
 echo "ok: erun-devops dind entrypoint tests passed"

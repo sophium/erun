@@ -1,14 +1,22 @@
 #!/bin/sh
 
-# Tests for parallel-gate.sh's `width` mode: the fan-out-sizing helper #1702
-# added so the Makefile's gate widths stop ignoring memory the way #1701 left
-# them. Covers every fallback branch (cgroup v2, cgroup v1, unlimited quota,
-# no cgroup at all, and no `nproc` at all) plus the memory term actually
-# lowering the width below job-count/cpu when the environment is small.
+# Tests for parallel-gate.sh, both of its modes:
+#
+# - `width`: the fan-out-sizing helper #1702 added so the Makefile's gate
+#   widths stop ignoring memory the way #1701 left them. Covers every fallback
+#   branch (cgroup v2, cgroup v1, unlimited quota, no cgroup at all, and no
+#   `nproc` at all) plus the memory term actually lowering the width below
+#   job-count/cpu when the environment is small. `cpu-quota` shares that
+#   override chain.
+# - the runner: the bounded-concurrency fan-out that `check-gate`'s lint,
+#   test-frontend and helm-chart-tests targets all run their scripts through,
+#   and that #1690 made aggregate and output-buffered rather than fail-fast
+#   and interleaved. The runner section at the end of this file pins that
+#   behaviour; without it the suite could pass while the runner regressed.
 #
 # Run directly (not wired into `make check`), same reasoning as
 # agent-gate_test.sh: this drives PARALLEL_GATE_CGROUP_ROOT against synthetic
-# cgroup trees, not the real job-running mode.
+# cgroup trees and asserts process/exit behaviour against the real gate.
 
 set -eu
 
@@ -116,6 +124,25 @@ echo "1200000 100000" >"${case_dir}/cpu.max"
 echo "$((64 * 1024 * 1024 * 1024))" >"${case_dir}/memory.max"
 PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "job-count caps an abundant environment" 3 3 700
 
+# --- the optional 4th arg (reserved-mem-mib) subtracts a flat amount from
+# the read memory ceiling before dividing by mem-per-job-mib, for a caller
+# sizing a job batch that runs concurrently with something else also using
+# memory on the same environment (the Makefile's lint/test-frontend/
+# helm-chart-tests targets each reserve room for one another, since
+# check-gate's own -j fan-out can run any of the three at once). Reuse the
+# "mem-binds" 2GiB shape: with no reservation, 2GiB/700MiB/job = 2; reserving
+# 1024MiB leaves ~1GiB, which still divides to 1 (floored, never 0).
+case_dir="${work_root}/mem-binds"
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-mem-mib lowers the width" 1 6 700 1024
+
+# --- reserving more than the entire ceiling floors at 1, never 0 or negative
+# -- a job list must still make forward progress.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "reserved-mem-mib exceeding the ceiling floors at 1" 1 6 700 4096
+
+# --- omitting reserved-mem-mib entirely (existing 3-arg callers) behaves
+# exactly as before this parameter was added.
+PARALLEL_GATE_CGROUP_ROOT="$case_dir" assert_width "omitted reserved-mem-mib defaults to 0" 2 6 700
+
 # --- PARALLEL_GATE_MEMORY_LIMIT_MIB overrides the cgroup read outright, for
 # a BuildKit RUN step where memory.max reads "max" (unlimited) even though
 # the sidecar's chart-declared limit is real -- see the script's own header
@@ -174,3 +201,162 @@ got=$(PARALLEL_GATE_CPU_LIMIT=24 "$gate" cpu-quota)
 
 echo "ok: parallel-gate.sh width"
 echo "ok: parallel-gate.sh cpu-quota"
+
+# --- runner mode. These are the behaviours whose regression would change or
+# hide a gate verdict: a failing task's exit status dropped, a task skipped
+# after an earlier failure, a failure left unnamed, a block emitted in
+# completion order instead of input order, output interleaved across
+# concurrent tasks, a freed slot left unfilled. #1690 made the reporting
+# aggregate and the output buffered; both are pinned here.
+#
+# The gate is always invoked directly, never under an outer `timeout`: a run
+# clipped by one reports a failure that is not the behaviour under test, and
+# tells the next reader nothing about the runner. (agent-gate_test.sh covers
+# the outer-timeout case for its own gate, which distinguishes one.)
+
+runner_dir="${work_root}/runner"
+mkdir -p "$runner_dir"
+
+# task <name> <marker> <command> -- one runner input line.
+task() {
+	printf '%s\t%s\t%s\n' "$1" "$2" "$3"
+}
+
+# run_gate <width> <prefix> <out-file> <err-file> <task-line>... -- sets `rc`
+# to the gate's exit status. Callers assert on `rc` rather than letting
+# `set -e` abort the suite, since a non-zero status is the expected result in
+# some of these cases.
+run_gate() {
+	rg_width="$1"
+	rg_prefix="$2"
+	rg_out="$3"
+	rg_err="$4"
+	shift 4
+	rc=0
+	printf '%s\n' "$@" | "$gate" "$rg_width" "$rg_prefix" >"$rg_out" 2>"$rg_err" || rc=$?
+}
+
+# marker_names <out-file>: the ">> " marker lines in emission order, with the
+# trailing "[<secs>s]" measured-duration suffix stripped -- the suffix varies
+# per run, the names and their order must not.
+marker_names() {
+	sed -n 's/^>> \(.*\) \[[0-9][0-9]*s\]$/\1/p' "$1"
+}
+
+# bodies <out-file>: every non-marker line, in emission order.
+bodies() {
+	grep -v '^>> ' "$1" || true
+}
+
+# --- aggregate failure reporting, exit status, and full execution. Five tasks
+# at width 3, two of them failing. Every task must run -- a regression to the
+# fail-fast `|| exit 1` that #1690 replaced would stop at bravo and leave
+# charlie, delta and echo5 unstarted -- both failures must be named on the
+# single "failed in:" line, and the status must be non-zero.
+agg_out="${runner_dir}/aggregate.out"
+agg_err="${runner_dir}/aggregate.err"
+run_gate 3 synthetic-gate "$agg_out" "$agg_err" \
+	"$(task alpha alpha 'echo alpha-ok')" \
+	"$(task bravo bravo 'echo bravo-FAILS; exit 3')" \
+	"$(task charlie charlie 'echo charlie-ok')" \
+	"$(task delta delta 'echo delta-FAILS; exit 7')" \
+	"$(task echo5 echo5 'echo echo5-ok')"
+
+[ "$rc" -eq 1 ] || fail "runner aggregate: expected exit 1 when any task fails, got $rc"
+
+want_names=$(printf 'alpha\nbravo\ncharlie\ndelta\necho5')
+got_names=$(marker_names "$agg_out")
+[ "$got_names" = "$want_names" ] ||
+	fail "runner aggregate: expected every task's block in input order, got: $(printf '%s' "$got_names" | tr '\n' ' ')"
+
+got_bodies=$(bodies "$agg_out")
+for want in alpha-ok bravo-FAILS charlie-ok delta-FAILS echo5-ok; do
+	case "$got_bodies" in
+	*"$want"*) ;;
+	*) fail "runner aggregate: '$want' missing -- a task after a failure did not run: $got_bodies" ;;
+	esac
+done
+
+# Both failures named on one line, and nothing else on stderr.
+want_err="synthetic-gate failed in: bravo delta"
+got_err=$(cat "$agg_err")
+[ "$got_err" = "$want_err" ] ||
+	fail "runner aggregate: expected stderr '$want_err', got '$got_err'"
+
+# --- the same path with nothing failing must report success and stay silent
+# on stderr. Width 2 with three tasks also runs the refill path below its
+# batch size.
+ok_out="${runner_dir}/all-pass.out"
+ok_err="${runner_dir}/all-pass.err"
+run_gate 2 some-gate "$ok_out" "$ok_err" \
+	"$(task one one 'echo one-ok')" \
+	"$(task two two 'echo two-ok')" \
+	"$(task three three 'echo three-ok')"
+
+[ "$rc" -eq 0 ] || fail "runner all-pass: expected exit 0 when every task passes, got $rc"
+[ ! -s "$ok_err" ] || fail "runner all-pass: expected empty stderr, got: $(cat "$ok_err")"
+[ "$(marker_names "$ok_out")" = "$(printf 'one\ntwo\nthree')" ] ||
+	fail "runner all-pass: expected three blocks in input order, got: $(marker_names "$ok_out" | tr '\n' ' ')"
+
+# --- output atomicity and emission order under concurrency. Three tasks at
+# width 3, each emitting 40 lines; the first waits for both of the others to
+# finish before emitting anything, so it is the LAST to complete while being
+# the FIRST in the list -- an input-ordered replay and a completion-ordered one
+# cannot be confused for each other. Each task's output must land as one
+# unbroken block, in input order, under its own marker. Unbuffered concurrent
+# writes fragment these blocks into interleaved runs -- the unreadability
+# #1690 set out to remove.
+atomic_dir="${runner_dir}/atomic"
+atomic_out="${runner_dir}/atomic.out"
+mkdir -p "$atomic_dir"
+# alpha's block is emitted only once both writers are done; the wait is
+# bounded so a regression fails this suite instead of hanging it.
+atomic_ready="[ -e \"$atomic_dir/bravo-done\" ] && [ -e \"$atomic_dir/charlie-done\" ]"
+alpha_cmd="i=0; while [ \"\$i\" -lt 100 ]; do if $atomic_ready; then break; fi; sleep 0.1; i=\$((i+1)); done; $atomic_ready || { echo alpha-starved; exit 1; }; n=0; while [ \"\$n\" -lt 40 ]; do echo alpha-line; n=\$((n+1)); done"
+bravo_cmd="n=0; while [ \"\$n\" -lt 40 ]; do echo bravo-line; n=\$((n+1)); done; : > \"$atomic_dir/bravo-done\""
+charlie_cmd="n=0; while [ \"\$n\" -lt 40 ]; do echo charlie-line; n=\$((n+1)); done; : > \"$atomic_dir/charlie-done\""
+run_gate 3 atomic "$atomic_out" "${runner_dir}/atomic.err" \
+	"$(task alpha alpha "$alpha_cmd")" \
+	"$(task bravo bravo "$bravo_cmd")" \
+	"$(task charlie charlie "$charlie_cmd")"
+
+[ "$rc" -eq 0 ] ||
+	fail "runner atomicity: expected exit 0, got $rc (stderr: $(cat "${runner_dir}/atomic.err"))"
+want_body=$(for name in alpha bravo charlie; do n=0; while [ "$n" -lt 40 ]; do echo "${name}-line"; n=$((n+1)); done; done)
+got_body=$(bodies "$atomic_out")
+[ "$got_body" = "$want_body" ] ||
+	fail "runner atomicity: expected one unbroken 40-line block per task in input order; runs were: $(printf '%s\n' "$got_body" | uniq -c | tr '\n' ';')"
+
+bad_markers=$(grep '^>> ' "$atomic_out" | grep -v ' \[[0-9][0-9]*s\]$' || true)
+[ -z "$bad_markers" ] ||
+	fail "runner atomicity: marker line missing its measured '[<secs>s]' duration: $bad_markers"
+
+# --- slot refilling. A freed slot must be refilled as soon as ANY running
+# task finishes, not once the whole batch drains: with a batch drain one slow
+# task idles every free slot behind it. Three tasks at width 2, where alpha
+# waits on a marker file that only charlie creates and charlie is third in the
+# list -- it can only run once bravo's slot is refilled. Under a batch-drain
+# regression alpha waits out its bounded deadline and the gate fails; with
+# refilling it proceeds immediately. The wait is bounded so a regression fails
+# this suite instead of hanging it.
+refill_marker="${runner_dir}/refill-marker"
+rm -f "$refill_marker"
+refill_out="${runner_dir}/refill.out"
+refill_err="${runner_dir}/refill.err"
+run_gate 2 refill "$refill_out" "$refill_err" \
+	"$(task alpha alpha "i=0; while [ \"\$i\" -lt 50 ]; do [ -e \"$refill_marker\" ] && exit 0; sleep 0.1; i=\$((i+1)); done; echo alpha-timed-out; exit 1")" \
+	"$(task bravo bravo 'echo bravo-ok')" \
+	"$(task charlie charlie "echo charlie-ok; : > \"$refill_marker\"")"
+
+[ "$rc" -eq 0 ] ||
+	fail "runner refill: expected exit 0 -- charlie's slot is only freed by refilling bravo's, and alpha waits on charlie (stderr: $(cat "$refill_err"))"
+got_refill=$(bodies "$refill_out")
+case "$got_refill" in
+*alpha-timed-out*) fail "runner refill: alpha timed out waiting for charlie -- the runner drained a whole batch instead of refilling a freed slot" ;;
+esac
+case "$got_refill" in
+*charlie-ok*) ;;
+*) fail "runner refill: charlie never ran: $got_refill" ;;
+esac
+
+echo "ok: parallel-gate.sh runner"

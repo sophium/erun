@@ -19,7 +19,7 @@ import {
   setDiffFilter,
   toggleChangedFiles,
 } from '@/app/reviewThunks';
-import { selectReviewEnvTargets } from '@/app/selectors';
+import { type ReviewTarget, selectReviewTargets } from '@/app/selectors';
 import { contributeEnvKey, type DiffSource } from '@/app/slices/contributeSlice';
 import { MAX_FILES_WIDTH, MIN_FILES_WIDTH } from '@/app/state';
 import { useController } from '@/app/useController';
@@ -29,7 +29,7 @@ import type { DiffCommit } from '@/types';
 import { DiffList } from './DiffList';
 import { ReviewKeyboardShortcutsHint } from './ReviewKeyboardShortcuts';
 import { ChangedFileTree } from './ReviewPanel.ChangedFiles';
-import { ReviewEnvLabel } from './ReviewPanel.EnvLabel';
+import { ReviewTargetLabel } from './ReviewPanel.EnvLabel';
 
 const filesSplitterClassName =
   'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-files_&]:before:bg-border';
@@ -302,17 +302,14 @@ function ReviewBoundaryTrack({
 // shared across two unrelated checkouts would be a value that means nothing
 // (#1178).
 function ReviewRangeControl({
-  envKey,
-  tenant,
-  environment,
+  target,
   showEnvLabel,
 }: {
-  envKey: string;
-  tenant: string;
-  environment: string;
+  target: ReviewTarget;
   showEnvLabel: boolean;
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
+  const envKey = target.envKey;
   const slot = useEnvDiffSlot(envKey);
   const diff = slot.diff;
   const commits = [...(diff?.reviewCommits ?? [])].reverse();
@@ -322,7 +319,7 @@ function ReviewRangeControl({
   }
   return (
     <div className="mb-3.5 flex min-h-0 flex-col gap-2 border-b border-border pb-3.5">
-      {showEnvLabel && <ReviewEnvLabel tenant={tenant} environment={environment} />}
+      {showEnvLabel && <ReviewTargetLabel target={target} />}
       <div className="flex min-w-0 flex-col gap-0.5">
         <div className="text-xs font-semibold text-foreground">Review layers</div>
         <div className="text-[11px] leading-4 text-muted-foreground">
@@ -410,18 +407,12 @@ function ReviewBoundaryButton({
 // ReviewRangeControls renders one range control per environment shown, since
 // each has its own commit list.
 function ReviewRangeControls(): React.ReactElement {
-  const targets = useAppSelector(selectReviewEnvTargets);
+  const targets = useAppSelector(selectReviewTargets);
   const multi = targets.length > 1;
   return (
     <>
       {targets.map((target) => (
-        <ReviewRangeControl
-          key={target.envKey}
-          envKey={target.envKey}
-          tenant={target.tenant}
-          environment={target.environment}
-          showEnvLabel={multi}
-        />
+        <ReviewRangeControl key={target.envKey} target={target} showEnvLabel={multi} />
       ))}
     </>
   );

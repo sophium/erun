@@ -1,0 +1,14 @@
+audit: erun deploy --dry-run --version <VERSION> managed prod
+trace-log: would append the full trace to <TMP>
+deploy: tenant=managed environment=prod version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: version <VERSION> pinned; installing the published image by reference (deploy never builds)
+deploy: resolved 1 spec(s)
+kubectl --context edge get namespace managed-prod -o name
+deploy: namespace managed-prod is created if the check above reports it missing
+apply gateway credentials secret erun-claude-gateway (token redacted)
+kubectl --context edge -n managed-prod apply -f -
+cd <TMP> && helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 5m0s --namespace managed-prod --debug --kube-context edge -f <TMP> --set-string tenant=managed --set-string environment=prod --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=true --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias=dev --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=true --set api.postgres.reset=false --set-json 'containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set disableBuildScript=false --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=16384Mi --set-string runtime.dind.resources.limits.cpu=12 --set-string runtime.dind.resources.limits.memory=20Gi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 --set-string claude.openRouterBaseURL=https://openrouter.ai/api --set-string claude.openRouterAvailableModels=deepseek/deepseek-v4-pro-0813 --set-string claude.openRouterModel=deepseek/deepseek-v4-pro-0813 --set-string claude.openRouterModelContext=1024000 --set-string claude.openRouterAuthTokenSecret=erun-claude-gateway --set-string claude.openRouterAuthTokenKey=token managed-devops <TMP>
+deploy: would watch pods in managed-prod on context edge for early container failure (release managed-devops)
+kubectl --context edge --namespace managed-prod get pods -o json
+dedup: ready (release=edge-managed-prod-managed-devops, hash=<HASH>)

@@ -1,7 +1,7 @@
 import type { UIEnvironmentConfig, UISelection } from '@/types';
 
 import { LoadEnvironmentConfig } from '../../wailsjs/go/main/App';
-import { environmentTypeIsRemoteWorktree } from './environmentType';
+import { environmentTypeIsHost, environmentTypeIsRemoteWorktree } from './environmentType';
 import type { RootState } from './store';
 
 // The gate decides whether opening an env may spawn the ERun tab — which is what
@@ -17,6 +17,15 @@ export async function resolveAutoStartGate(
 ): Promise<AutoStartGateVerdict> {
   const env = findTenantEnvironment(getState(), selection);
   const autoStartPolicy = env?.autoStart;
+  // A host env has no pod and no cluster for `erun open` to enter — the CLI
+  // refuses it and points at the directory itself — so there is no ERun tab to
+  // spawn and no cloud context to start. Opening a host env is a shell in its
+  // own directory, which is the Local tab. Resolving that here rather than
+  // letting StartSession fail keeps the refusal out of the tab-spawn path,
+  // where a rejected spawn is swallowed and reads as a tab that silently died.
+  if (environmentTypeIsHost(env?.type)) {
+    return 'skip-erun';
+  }
   if (!environmentTypeIsRemoteWorktree(env?.type) || autoStartPolicy === true) {
     return 'proceed';
   }

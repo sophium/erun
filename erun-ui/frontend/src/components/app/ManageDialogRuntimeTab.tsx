@@ -1,9 +1,14 @@
-import { Button, SelectField } from 'erun-kit';
-import { Plus, Rocket } from 'lucide-react';
+import { Button, EmptyState, SelectField } from 'erun-kit';
+import { Ban, Plus, Rocket } from 'lucide-react';
 import * as React from 'react';
 
 import {
+  DEPLOY_COMPONENTS_EMPTY_NOTICE_ID,
+  deployComponentsEmptySelection,
+} from '@/app/deployComponentsSelection';
+import {
   environmentTypeBuildsHereLocally,
+  environmentTypeIsHost,
   environmentTypeIsRemoteWorktree,
   environmentTypeIsRuntime,
 } from '@/app/environmentType';
@@ -22,6 +27,7 @@ import { RUNTIME_CHART_NOTICE_ID, runtimeChartBlocksDeploy } from '@/app/runtime
 import type { AppState } from '@/app/state';
 import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
+import { DeployComponentsEmptyNotice } from '@/components/app/ManageDialogDeployComponents';
 import { RuntimeActivityField } from '@/components/app/ManageDialogRuntimeActivity';
 import { RuntimeChartField } from '@/components/app/ManageDialogRuntimeChart';
 import { RuntimeChartNotice } from '@/components/app/ManageDialogRuntimeChartNotice';
@@ -38,6 +44,41 @@ type ManageDialog = AppState['manageDialog'];
 export function RuntimeTab(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
+  // The runtime controls this tab renders are pod or cluster concepts, and a host
+  // env has no pod and no cluster contact of any kind — EnvConfig.HasPod is false
+  // for host alone. There is no runtime image to install, no chart to resolve,
+  // no pod to size or idle-stop, and neither Pin nor Deploy could succeed:
+  // erun pin, erun deploy and erun terraform each refuse a host env outright,
+  // and the deploy planner panics rather than build a plan for one. So those
+  // controls are replaced by a statement of the fact, the same treatment the
+  // Ports tab's Public access section gives this type. Keep the heading
+  // identical to that one: it is the shared wording for "this control has no
+  // referent for this environment type".
+  //
+  // The build-script opt-out is the one control here that is NOT a pod or
+  // cluster concept, so it is rendered for a host env too: erun build resolves
+  // its Docker/release contexts from any env whose builds run in that env's own
+  // directory (ResolveDockerBuildEnvConfig matches on project root, with no
+  // environment-type guard), and this dialog is the only desktop surface that
+  // sets it. Returning before it would leave the setting reachable only by
+  // hand-editing config.yaml.
+  if (environmentTypeIsHost(dialog.config.type)) {
+    return (
+      <>
+        <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+          <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+            Build
+          </div>
+          <BuildScriptField dialog={dialog} />
+        </div>
+        <EmptyState
+          icon={<Ban aria-hidden="true" />}
+          heading="Not available for this environment type"
+          body="A host environment is a directory on this machine — it has no pod and no cluster, so there is no runtime here to size, pin, or deploy. Build and release run in that directory directly."
+        />
+      </>
+    );
+  }
   // Dialog-owned (not the shared tenants slice): this dialog resolves versions for
   // its own env; boot/env-change deltas rewrite the tenants slice for the selected
   // env and must not clobber this picker.
@@ -211,16 +252,7 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           }}
         />
       )}
-      <CheckboxField
-        id="environment-config-disablebuildscript"
-        label="Ignore project build.sh"
-        helper="erun build resolves Docker/release contexts directly instead of running a project build.sh in this environment."
-        checked={config.disableBuildScript}
-        disabled={dialog.busy || dialog.configLoading}
-        onChange={(disableBuildScript) => {
-          dispatch(updateManageConfig({ disableBuildScript }));
-        }}
-      />
+      <BuildScriptField dialog={dialog} />
       <PlatformAccountField dialog={dialog} />
       <MountSourceFields dialog={dialog} />
     </div>
@@ -233,6 +265,27 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
 // agnostic — a hosted runtime platform env or a cluster-provisioning agent env
 // can both be a platform account — so it renders for every type. Extracted to
 // keep IdleStopFields within its size/complexity budget.
+// BuildScriptField is the build.sh opt-out on its own, so the host branch of
+// RuntimeTab can offer it while the pod and cluster controls are replaced by
+// their unavailable notice: `erun build` honours this setting for any env whose
+// builds run in that env's own directory, a host env included. It is a separate
+// component rather than an inline field so both call sites cannot drift.
+function BuildScriptField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <CheckboxField
+      id="environment-config-disablebuildscript"
+      label="Ignore project build.sh"
+      helper="erun build resolves Docker/release contexts directly instead of running a project build.sh in this environment."
+      checked={dialog.config.disableBuildScript}
+      disabled={dialog.busy || dialog.configLoading}
+      onChange={(disableBuildScript) => {
+        dispatch(updateManageConfig({ disableBuildScript }));
+      }}
+    />
+  );
+}
+
 function PlatformAccountField({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const config = dialog.config;
@@ -319,6 +372,19 @@ function parseAutoStartMode(mode: string): boolean | undefined {
   return undefined;
 }
 
+// deployUnavailableNoticeId names the notice that states why Deploy cannot fire
+// on the picked version, so the button describes itself with a reason that is
+// actually rendered. The chart blocks the version outright, so it speaks first.
+function deployUnavailableNoticeId(dialog: ManageDialog): string | undefined {
+  if (runtimeChartBlocksDeploy(dialog)) {
+    return RUNTIME_CHART_NOTICE_ID;
+  }
+  if (deployComponentsEmptySelection(dialog)) {
+    return DEPLOY_COMPONENTS_EMPTY_NOTICE_ID;
+  }
+  return undefined;
+}
+
 function RuntimeDeployField({
   dialog,
   configuredVersion,
@@ -377,15 +443,18 @@ function RuntimeDeployField({
           // until the operator picks one — never a build, never a guess — and
           // until that version's component charts have been probed, so it can't
           // fire the new version with the previous version's chart selection.
-          // ...and on a version the registry says has no runtime chart, with the
-          // reason named beside the button rather than discovered by failing.
+          // ...on a version the registry says has no runtime chart, and on a
+          // checklist the operator emptied, which would otherwise fall through to
+          // the runtime chart alone. Each with the reason named beside the button
+          // rather than discovered by failing.
           disabled={
             disabled === true ||
             overrideVersion.trim() === '' ||
             dialog.deployComponentsLoading ||
-            runtimeChartBlocksDeploy(dialog)
+            runtimeChartBlocksDeploy(dialog) ||
+            deployComponentsEmptySelection(dialog)
           }
-          aria-describedby={runtimeChartBlocksDeploy(dialog) ? RUNTIME_CHART_NOTICE_ID : undefined}
+          aria-describedby={deployUnavailableNoticeId(dialog)}
           onClick={onDeploy}
         >
           <Rocket aria-hidden="true" />
@@ -393,6 +462,7 @@ function RuntimeDeployField({
         </Button>
       </div>
       {!dialog.choicesOpen && <RuntimeChartNotice dialog={dialog} />}
+      {!dialog.choicesOpen && <DeployComponentsEmptyNotice dialog={dialog} />}
       {/* Deploy above installs an existing published version by reference and never
           builds. Producing a new version from this env's source is this explicit,
           separate action (local-agent envs only). */}
@@ -403,7 +473,9 @@ function RuntimeDeployField({
           size="sm"
           variant="outline"
           className="justify-self-start"
-          disabled={disabled}
+          // Scoped by the same checklist as Deploy above, so it refuses an empty
+          // one for the same reason: it would roll the saved default instead.
+          disabled={disabled === true || deployComponentsEmptySelection(dialog)}
           onClick={onCreateVersion}
         >
           <Plus aria-hidden="true" />

@@ -117,6 +117,15 @@ function orchestratorContextLines(
       lines.push(`  - ${env.tenant} / ${env.environment}${env.status ? ` (${env.status})` : ''}`);
     }
   }
+  // The orchestrator's own directories belong to no environment, so they are not
+  // in the list above. Naming them here keeps a definition that works only in
+  // directories from reporting as a scope-less orchestrator, which it is not.
+  if (orchestrator.directories.length > 0) {
+    lines.push('', 'directories:');
+    for (const directory of orchestrator.directories) {
+      lines.push(`  - ${directory}`);
+    }
+  }
   lines.push('', ...appLogLines(context.appLog));
   return lines;
 }

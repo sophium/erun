@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -109,10 +110,15 @@ type PlatformInfo struct {
 // PlatformWhoami mirrors GET /v1/whoami's response. Capabilities is what a
 // client gates its surfaces on; Roles is descriptive only.
 type PlatformWhoami struct {
-	TenantID string   `json:"tenantId"`
-	UserID   string   `json:"userId"`
-	Username string   `json:"username,omitempty"`
-	Roles    []string `json:"roles,omitempty"`
+	TenantID string `json:"tenantId"`
+	// TenantName is the tenant's name -- the same value `platform tenant
+	// list` reports for TenantID, read by the server off the identical
+	// tenants.name column, so the two can never disagree about what a
+	// tenant is called.
+	TenantName string   `json:"tenantName,omitempty"`
+	UserID     string   `json:"userId"`
+	Username   string   `json:"username,omitempty"`
+	Roles      []string `json:"roles,omitempty"`
 	// Capabilities is nil when the platform did not answer with one, and
 	// non-nil but empty when the caller may do nothing. Do not conflate them —
 	// see PlatformCapabilities.Known.
@@ -371,6 +377,86 @@ func (c *PlatformClient) CreateUser(ctx context.Context, params PlatformCreateUs
 	var user PlatformUser
 	err := c.do(ctx, http.MethodPost, "/v1/users", params, true, &user)
 	return user, err
+}
+
+// PlatformRolePermission is one permission a role grants: either an exact
+// apiMethod/apiPath pair or an apiMethodPattern/apiPathPattern regex pair,
+// never both and never neither — the same shape role_permissions stores.
+type PlatformRolePermission struct {
+	APIMethod        string `json:"apiMethod,omitempty"`
+	APIPath          string `json:"apiPath,omitempty"`
+	APIMethodPattern string `json:"apiMethodPattern,omitempty"`
+	APIPathPattern   string `json:"apiPathPattern,omitempty"`
+}
+
+// PlatformRole is a named, tenant-owned bundle of permissions. Name is what an
+// operator recognizes; RoleID is what a grant takes, which is why a client
+// that can only name the missing access has to resolve one to the other
+// before it can hand over a command that runs.
+type PlatformRole struct {
+	RoleID      string                   `json:"roleId"`
+	TenantID    string                   `json:"tenantId,omitempty"`
+	Name        string                   `json:"name"`
+	Permissions []PlatformRolePermission `json:"permissions"`
+}
+
+// Covers reports whether this role would let a caller through to method on to
+// apiPath. It mirrors the server's own resolution: an exact pair matches
+// literally, a pattern pair matches as compiled regexes, and a permission
+// missing either half of its pair never matches anything. An unparseable
+// pattern covers nothing rather than everything — a client rendering a remedy
+// must not promise access on the strength of a pattern it could not read.
+func (r PlatformRole) Covers(method string, apiPath string) bool {
+	for _, permission := range r.Permissions {
+		if permission.covers(method, apiPath) {
+			return true
+		}
+	}
+	return false
+}
+
+// covers reports whether this one permission lets the method through, under
+// whichever of the two shapes it carries. A permission missing either half of
+// its pair covers nothing, and a pattern that does not compile matches
+// nothing rather than everything.
+func (p PlatformRolePermission) covers(method string, apiPath string) bool {
+	if p.APIMethod != "" && p.APIPath != "" {
+		return p.APIMethod == method && p.APIPath == apiPath
+	}
+	if p.APIMethodPattern == "" || p.APIPathPattern == "" {
+		return false
+	}
+	return matchesPattern(p.APIMethodPattern, method) && matchesPattern(p.APIPathPattern, apiPath)
+}
+
+func matchesPattern(pattern string, value string) bool {
+	matched, err := regexp.MatchString(pattern, value)
+	return err == nil && matched
+}
+
+// ListRoles lists the caller's tenant's roles. There is no cross-tenant
+// override: RLS scopes it to the tenant the caller's token resolved.
+func (c *PlatformClient) ListRoles(ctx context.Context) ([]PlatformRole, error) {
+	var roles []PlatformRole
+	err := c.do(ctx, http.MethodGet, "/v1/roles", nil, true, &roles)
+	return roles, err
+}
+
+// PlatformGrantUserRoleParams grants one role to one already-enrolled user.
+// Unlike enrollment, this is how an operator adds a role to somebody who is
+// already in the tenant — the case a client that can see a caller lacks a
+// capability has to hand over, since re-enrolling an enrolled identity is a
+// no-op that leaves its roles untouched.
+type PlatformGrantUserRoleParams struct {
+	UserID string `json:"-"`
+	RoleID string `json:"roleId"`
+}
+
+// GrantUserRole grants RoleID to the user named by UserID, in the caller's own
+// resolved tenant (the endpoint has no cross-tenant override; RLS scopes it).
+func (c *PlatformClient) GrantUserRole(ctx context.Context, params PlatformGrantUserRoleParams) error {
+	path := "/v1/users/" + url.PathEscape(params.UserID) + "/roles"
+	return c.do(ctx, http.MethodPost, path, params, true, nil)
 }
 
 // PlatformListUsersParams optionally targets another tenant, honored only for
@@ -840,7 +926,26 @@ func (e *PlatformStatusError) Error() string {
 	if e.sentinel != nil {
 		base += ": " + e.sentinel.Error()
 	}
+	if e.routeNotRegistered() {
+		base += "; the deployed plane's router has no route matching this path at all (not an application-level " +
+			"not-found) -- it likely predates this route; run `erun exec route-check` to confirm, or " +
+			"`erun list --control-planes` to compare its deployed version against what's published"
+	}
 	return base
+}
+
+// routeNotRegistered reports whether this 404's body is exactly the plane's
+// own unmodified "no route matched" body -- the same discriminator
+// route_check.go uses to tell "this route was never registered on the
+// deployed plane" apart from an application-level 404 (a well-formed request
+// for an id that doesn't exist, which always carries erun-backend-api's own
+// JSON error shape instead). A route can merge, get unit-tested, and close
+// its issue while the deployed plane still predates it; every
+// ordinary typed call funnels through do()/platformStatusError, so without
+// this the operator sees only an opaque "http 404: 404 page not found" with
+// nothing distinguishing a genuine not-found from a plane running old code.
+func (e *PlatformStatusError) routeNotRegistered() bool {
+	return e.Status == http.StatusNotFound && strings.TrimSpace(string(e.Body)) == muxDefaultNotFoundBody
 }
 
 func (e *PlatformStatusError) Unwrap() error {

@@ -1119,7 +1119,15 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 		return false, err
 	}
 	if envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment); err == nil {
-		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, selection.Tenant, selection.Environment)
+		// A root config that cannot be read means "no gateway configured",
+		// matching how a missing env config is tolerated just above: this only
+		// decides whether the launch is verbatim, and the unreadable case is the
+		// unconfigured one.
+		var gateway *eruncommon.OpenRouterConfig
+		if config, _, err := a.deps.store.LoadERunConfig(); err == nil {
+			gateway = config.OpenRouter
+		}
+		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude, gateway, selection.Tenant, selection.Environment)
 		if launch == strings.TrimSpace(envConfig.AITool) {
 			return false, nil
 		}

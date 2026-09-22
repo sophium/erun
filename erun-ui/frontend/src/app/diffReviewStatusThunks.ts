@@ -1,6 +1,6 @@
 import { DiffReviewStatus, EnvironmentWorkingIssue } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
-import { selectReviewEnvTargets } from './selectors';
+import { selectReviewTargets } from './selectors';
 import {
   pruneDiffReviewStatuses,
   setDiffReviewStatus,
@@ -56,7 +56,5 @@ export const loadDiffReviewStatus =
 // pruneStaleDiffReviewStatuses drops chip state for environments no longer
 // shown, mirroring pruneEnvDiffs in reviewThunks.ts's loadReviewDiff.
 export const pruneStaleDiffReviewStatuses = (): AppThunk => (dispatch, getState) => {
-  dispatch(
-    pruneDiffReviewStatuses(selectReviewEnvTargets(getState()).map((target) => target.envKey)),
-  );
+  dispatch(pruneDiffReviewStatuses(selectReviewTargets(getState()).map((target) => target.envKey)));
 };

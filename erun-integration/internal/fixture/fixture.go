@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -21,13 +20,8 @@ import (
 
 	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-integration/internal/env"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
-
-func osExecCommand(name string, args []string, dir string) *osexec.Cmd {
-	cmd := osexec.Command(name, args...)
-	cmd.Dir = dir
-	return cmd
-}
 
 // SeedTenantEnv writes the minimum erun config tree so commands resolve a
 // tenant/environment without prompting.
@@ -487,6 +481,31 @@ func SeedRuntimeTenantEnv(t testing.TB, setup env.Setup, tenant, environment str
 			"runtimeversion: 1.0.0\n"+
 			"type: runtime\n",
 	)
+}
+
+// SeedRuntimeTenantEnvWithDeployComponents writes a runtime-type env tree that
+// also carries a saved deploy.components selection. It models the env as the
+// host sees it, so a scenario can set the in-pod identity and still hand the
+// process a selection that resolved to something — the contrast to
+// SeedRuntimeTenantEnv, whose config has no deploy block at all and is what the
+// pod actually carries.
+func SeedRuntimeTenantEnvWithDeployComponents(t testing.TB, setup env.Setup, tenant, environment string, components []string) {
+	t.Helper()
+	SeedRuntimeTenantEnv(t, setup, tenant, environment)
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	contents := "name: " + environment + "\n" +
+		"repopath: " + filepath.Join(setup.Home, "git", tenant) + "\n" +
+		"kubernetescontext: test-context\n" +
+		"containerregistry: registry.example/test\n" +
+		"runtimeversion: 1.0.0\n" +
+		"type: runtime\n"
+	if len(components) > 0 {
+		contents += "deploy:\n  components:\n"
+		for _, component := range components {
+			contents += "    - " + component + "\n"
+		}
+	}
+	mustWrite(t, filepath.Join(envDir, "config.yaml"), contents)
 }
 
 // SeedRuntimeTenantEnvNoVersion writes a runtime-type env tree with NO
@@ -1392,7 +1411,7 @@ func stubRunnerExe(t testing.TB) string {
 			return
 		}
 		out := filepath.Join(outDir, "erun-stub-runner.exe")
-		cmd := osexec.Command("go", "build", "-o", out, "./internal/fixture/stubrunner")
+		cmd := harnessexec.Command("go", "build", "-o", out, "./internal/fixture/stubrunner")
 		cmd.Dir = moduleRoot
 		if output, err := cmd.CombinedOutput(); err != nil {
 			stubRunnerErr = fmt.Errorf("build stub runner: %v\n%s", err, output)
@@ -1669,6 +1688,102 @@ func StubCodesign(t testing.TB, dir string, spec CodesignStubSpec) string {
 	return logPath
 }
 
+// PodExecStubSpec configures the pod emulator that answers an outputs download.
+type PodExecStubSpec struct {
+	// Root is a directory that stands in for the pod's filesystem root, so a
+	// scenario seeds its payload at Root + the pod path erun will ask for.
+	Root string
+	// MaxStreamBytes is how much one exec may carry before it dies with
+	// kubectl's own stream error. This is the failure being regression-tested:
+	// the reported break sits between 12 MB and 14 MB of payload, and a whole
+	// large file in one exec is what exceeds it. 0 means no limit.
+	MaxStreamBytes int64
+	// RawEncoding drops the emulator to uncompressed ranges, standing in for a
+	// pod with no gzip.
+	RawEncoding bool
+	// FailOnceAt breaks the stream on the first read of each byte offset and
+	// serves it normally afterwards, so a scenario can prove a range is retried.
+	FailOnceAt []int64
+	// FailAlwaysAt breaks the stream on every read of each byte offset, so a
+	// scenario can prove what the download reports when a range never arrives.
+	FailAlwaysAt []int64
+}
+
+// StubPodExec writes a kubectl stub that answers `erun outputs download`
+// through the pod emulator in internal/fixture/podexec. A fixed-stdout stub
+// cannot serve this path — the download asks the pod a different question per
+// call — and the emulator is also what enforces MaxStreamBytes, the exec-stream
+// break the download has to survive.
+func StubPodExec(t testing.TB, dir string, spec PodExecStubSpec) string {
+	t.Helper()
+	// Forward slashes: embedded in the sh stub, where Git Bash handles a
+	// backslash Windows path unreliably.
+	args := []string{
+		shellSingleQuote(filepath.ToSlash(PodExecBinary(t))),
+		"--root", shellSingleQuote(filepath.ToSlash(spec.Root)),
+		"--max-stream-bytes", strconv.FormatInt(spec.MaxStreamBytes, 10),
+	}
+	if spec.RawEncoding {
+		args = append(args, "--encoding", "raw")
+	}
+	if len(spec.FailOnceAt) > 0 {
+		args = append(args, "--fail-once-at", shellSingleQuote(joinInt64s(spec.FailOnceAt)),
+			"--state", shellSingleQuote(filepath.ToSlash(filepath.Join(dir, "podexec-state"))))
+	}
+	if len(spec.FailAlwaysAt) > 0 {
+		args = append(args, "--fail-always-at", shellSingleQuote(joinInt64s(spec.FailAlwaysAt)))
+	}
+	args = append(args, "--", "\"$@\"")
+	return StubBinaryWithScript(t, dir, "kubectl", "exec "+strings.Join(args, " ")+"\n")
+}
+
+func joinInt64s(values []int64) string {
+	rendered := make([]string, 0, len(values))
+	for _, value := range values {
+		rendered = append(rendered, strconv.FormatInt(value, 10))
+	}
+	return strings.Join(rendered, ",")
+}
+
+var (
+	podExecBuildOnce sync.Once
+	podExecPath      string
+	podExecBuildErr  error
+)
+
+// PodExecBinary builds (once per process) the pod emulator that StubPodExec's
+// kubectl stub forwards to. Same shape as PortSimBinary: the stub body needs a
+// real program, and the scenario PATH holds none of the POSIX utilities erun's
+// remote scripts use.
+func PodExecBinary(t testing.TB) string {
+	t.Helper()
+	podExecBuildOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "erun-podexec-*")
+		if err != nil {
+			podExecBuildErr = fmt.Errorf("mkdir podexec cache: %w", err)
+			return
+		}
+		out := filepath.Join(dir, "podexec")
+		_, thisFile, _, ok := runtime.Caller(0)
+		if !ok {
+			podExecBuildErr = fmt.Errorf("resolve fixture package path")
+			return
+		}
+		cmd := harnessexec.Command("go", "build", "-o", out, ".")
+		cmd.Dir = filepath.Join(filepath.Dir(thisFile), "podexec")
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if combined, err := cmd.CombinedOutput(); err != nil {
+			podExecBuildErr = fmt.Errorf("build podexec: %w: %s", err, combined)
+			return
+		}
+		podExecPath = out
+	})
+	if podExecBuildErr != nil {
+		t.Fatalf("%v", podExecBuildErr)
+	}
+	return podExecPath
+}
+
 // StubEnv returns the env-var pairs that route the named binary lookups to
 // the stub at dir/<name>. Pass each result through env.Setup.Env() concat.
 func StubEnv(dir string, names ...string) []string {
@@ -1707,7 +1822,8 @@ func SeedGitRepo(t testing.TB, dir string) {
 }
 
 func exec(name string, args []string, dir string) error {
-	cmd := osExecCommand(name, args, dir)
+	cmd := harnessexec.Command(name, args...)
+	cmd.Dir = dir
 	return cmd.Run()
 }
 
@@ -1743,7 +1859,7 @@ func PortSimBinary(t testing.TB) string {
 			return
 		}
 		pkgDir := filepath.Join(filepath.Dir(thisFile), "portsim")
-		cmd := osexec.Command("go", "build", "-o", out, ".")
+		cmd := harnessexec.Command("go", "build", "-o", out, ".")
 		cmd.Dir = pkgDir
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if combined, err := cmd.CombinedOutput(); err != nil {
@@ -1781,7 +1897,7 @@ func StartServingPortHolder(t testing.TB, port int) int {
 
 func startPortHolder(t testing.TB, port int, extra ...string) int {
 	t.Helper()
-	cmd := osexec.Command(PortSimBinary(t), append([]string{"--port", strconv.Itoa(port)}, extra...)...)
+	cmd := harnessexec.Command(PortSimBinary(t), append([]string{"--port", strconv.Itoa(port)}, extra...)...)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start port holder on %d: %v", port, err)
 	}
@@ -1826,7 +1942,7 @@ func StalePortHolderStopped(port int, timeout time.Duration) bool {
 // bound-but-dead shape.
 func StartUnboundPortForwardProcess(t testing.TB) int {
 	t.Helper()
-	cmd := osexec.Command(PortSimBinary(t), "--no-listen")
+	cmd := harnessexec.Command(PortSimBinary(t), "--no-listen")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start unbound port-forward process: %v", err)
 	}

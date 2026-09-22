@@ -3,6 +3,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -56,6 +57,23 @@ func TestWhip(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "whip/dry_run_one_named_environment_not_open_reports_call_failed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_scoped_environment_excludes_orchestrators", func(t *testing.T) {
+		// An explicit TENANT/ENVIRONMENT scope must narrow every
+		// axis, not just the environment list. With an orchestrator
+		// configured alongside the named environment, a scoped call must
+		// name only that environment -- no orchestrator line at all --
+		// even though the unscoped scenario below would report it.
+		skipIfPortsBusy(t, 26100)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		seedOrchestrator(t, setup, "eng-1", "Eng One")
+		result := erun.Run(t, []string{"whip", "--tenant", "team", "--environment", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "whip/dry_run_scoped_environment_excludes_orchestrators", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_whips_every_configured_environment_and_orchestrator", func(t *testing.T) {
@@ -116,6 +134,67 @@ func TestWhip(t *testing.T) {
 			t.Fatalf("the environment was asked for %q, want whip", call.Tool)
 		}
 		assertToolArgumentsNameTarget(t, call, "team", "dev")
+	})
+
+	t.Run("sweep_continues_past_an_unreachable_channel_and_names_it", func(t *testing.T) {
+		// The whole point of a sweep is that it is useful when something is
+		// down: one environment whose edge is not answering must cost that
+		// environment's row, not the report. The reachable target is served by
+		// a fake edge, the other resolves to a port nothing listens on, and
+		// both must appear.
+		//
+		// Pinned to the 26300 range for the same reason as the scenarios above:
+		// a locally resolved environment's port range must be aligned to
+		// 100-port boundaries from 17000, so it cannot be OS-assigned.
+		reachablePort, unreachablePort := 26300, 26400
+		skipIfPortsBusy(t, reachablePort, unreachablePort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", reachablePort)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "gone", unreachablePort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{Results: map[string]string{"tools/call": `{"content":[{"type":"text","text":"whip"}],` +
+			`"structuredContent":{"candidate":{"Kind":"environment","ID":"team/dev","Name":"team/dev","Reachable":true,"Alive":true},"decision":1,"reason":"nudge","pushed":false}}`}}
+		edge.start(t, reachablePort)
+
+		result := erun.Run(t, []string{"whip", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "team/dev: would push (dry-run)") {
+			t.Fatalf("the reachable target was not reported on:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "team/gone: skipped — channel-down:") {
+			t.Fatalf("the unreachable target was not named as a skipped channel:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "run `erun open team gone`") {
+			t.Fatalf("the unreachable target carried no next action:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("dry_run_never_reattaches_an_unreachable_channel", func(t *testing.T) {
+		// A --dry-run must leave no child behind. The child would be a real
+		// `erun open --reconnect`, spawned by the reattach path, and its own
+		// lifetime is not something this suite can observe without racing its
+		// exit -- so what is asserted here is the spawn decision itself, through
+		// the trace the spawn is always preceded by, on the real binary. The
+		// unit test beside callMCPToolWithReattach asserts the same decision one
+		// layer in, on the spawn call never being invoked.
+		unreachablePort := 26800
+		skipIfPortsBusy(t, unreachablePort)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", unreachablePort)
+		fixture.SeedDesktopIdentity(t, setup)
+
+		result := erun.Run(t, []string{"whip", "--dry-run", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "reattaching with `erun open --reconnect`") {
+			t.Fatalf("a dry run reattached the channel:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "team/dev: skipped — channel-down:") {
+			t.Fatalf("the dry run produced no row for the unreachable target:\n%s", result.Combined)
+		}
 	})
 
 	t.Run("dry_run_only_tenant_given_refuses", func(t *testing.T) {

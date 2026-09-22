@@ -28,7 +28,7 @@ func inPodEnv(envType, tenant, environment string) func(string) string {
 // resolve the pod's own live cgroup memory/CPU limit rather than
 // NormalizeRuntimePodResources' package default (DefaultRuntimePodMemory /
 // DefaultRuntimePodCPU). Without the fix this returns an empty
-// RuntimePodResources, which the caller then normalizes to 8916Mi/4 — masking
+// RuntimePodResources, which the caller then normalizes to 16384Mi/4 — masking
 // this environment's real, deliberately-set 8192Mi/4 limit.
 func TestResolveRuntimePodResourcesForDeployReadsCgroupWhenUnconfigured(t *testing.T) {
 	root := t.TempDir()

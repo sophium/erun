@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
 
 import { configureStore } from '@reduxjs/toolkit';
 import { createApi } from '@reduxjs/toolkit/query';
 import { buildPlatformConfigEndpoints, type PlatformBaseQuery } from 'erun-kit';
+import { describe, it } from 'vitest';
 
 import { wailsQueryFn } from './wailsBaseQuery';
 

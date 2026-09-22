@@ -212,7 +212,7 @@ func takeSharedEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParam
 	// Only a lease still held is renewed. Reusing an id whose previous holder
 	// is gone starts a fresh claim, or the new lease would inherit a start far
 	// enough in the past to be dead on arrival.
-	if existing, err := loadEnvironmentActivityLease(path); err == nil && environmentActivityLeaseHeld(existing, now, processAlive) {
+	if existing, err := loadEnvironmentActivityLease(path); err == nil && environmentActivityLeaseHeld(existing, now, ProcessAlive) {
 		lease.StartedAt = existing.StartedAt
 		lease.RenewedAt = now
 	}
@@ -359,7 +359,7 @@ const (
 func decideExclusiveEnvironmentActivityLeaseClaim(path, id string, now time.Time) (exclusiveEnvironmentActivityLeaseClaim, EnvironmentActivityLease, bool) {
 	existing, err := loadEnvironmentActivityLease(path)
 	staleRecordPresent := err == nil
-	if !staleRecordPresent || !environmentActivityLeaseHeld(existing, now, processAlive) {
+	if !staleRecordPresent || !environmentActivityLeaseHeld(existing, now, ProcessAlive) {
 		return exclusiveClaimFree, EnvironmentActivityLease{}, staleRecordPresent
 	}
 	if existing.ID == id {
@@ -405,64 +405,175 @@ func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) 
 	return lease, nil
 }
 
+// EnvironmentActivityLeaseReleaseOutcome distinguishes what a release actually
+// did, so a caller — and the report it prints — can tell "a held claim was
+// removed" from "there was nothing there to remove" instead of both reading as
+// the same bare success. Both are still success from the release call's own
+// point of view: a wrapper's exit trap must never fail a job that already
+// finished cleanly just because it releases twice.
+type EnvironmentActivityLeaseReleaseOutcome int
+
+const (
+	// EnvironmentActivityLeaseReleased means a held claim existed under the
+	// given id (and, for an exclusive claim, scope) and this call removed it.
+	EnvironmentActivityLeaseReleased EnvironmentActivityLeaseReleaseOutcome = iota
+	// EnvironmentActivityLeaseNotHeld means nothing was held under the given
+	// id/scope: never taken, already released, or already expired and
+	// reclaimed.
+	EnvironmentActivityLeaseNotHeld
+	// EnvironmentActivityLeaseHeldElsewhere means this id is holding a lease
+	// on this environment, but under the other shape than the one this call
+	// asked to release -- a shared lease released with --exclusive, or an
+	// exclusive claim released without it. Nothing was removed and this is
+	// still not an error, but the release was aimed at the wrong store: the
+	// claim the caller meant to drop is untouched and stays held for its full
+	// TTL. EnvironmentActivityLeaseHeldElsewhereNote names the release that
+	// would match.
+	EnvironmentActivityLeaseHeldElsewhere
+)
+
 // ReleaseEnvironmentActivityLease drops a shared (non-exclusive) lease.
 // Idempotent: releasing a lease that already expired or was never taken is
 // success, so a wrapper's exit trap never fails a job that already finished
-// cleanly.
-func ReleaseEnvironmentActivityLease(tenant, environment, id string) error {
+// cleanly — but the returned outcome tells a caller whether anything was
+// actually there to remove, rather than reporting the same success either way.
+func ReleaseEnvironmentActivityLease(tenant, environment, id string) (EnvironmentActivityLeaseReleaseOutcome, error) {
 	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
 	dir, err := environmentActivityLeaseDir(tenant, environment)
 	if err != nil {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
-	if err := os.Remove(filepath.Join(dir, resolved+".json")); err != nil && !os.IsNotExist(err) {
-		return err
+	if err := os.Remove(filepath.Join(dir, resolved+".json")); err != nil {
+		if os.IsNotExist(err) {
+			// Nothing was held as a shared lease. Before calling that simply
+			// "not held", check the other store: a caller who took an
+			// exclusive claim and released it without --exclusive lands here,
+			// and reporting a bare no-match would leave them believing the
+			// claim was dropped while it stays held for its full TTL.
+			if held, heldErr := environmentActivityLeaseHeldAsExclusiveClaim(tenant, environment, resolved); heldErr == nil && held {
+				return EnvironmentActivityLeaseHeldElsewhere, nil
+			}
+			return EnvironmentActivityLeaseNotHeld, nil
+		}
+		return EnvironmentActivityLeaseNotHeld, err
 	}
-	return nil
+	return EnvironmentActivityLeaseReleased, nil
+}
+
+// environmentActivityLeaseHeldAsExclusiveClaim reports whether id is the
+// recorded holder of an exclusive claim on any scope of this environment.
+// Exclusive claims are keyed by scope rather than by holder id (see
+// exclusiveEnvironmentActivityLeaseDir), so this reads that directory instead
+// of probing a single path -- the scope is what the caller would have to name,
+// and it is not recoverable from the id alone.
+func environmentActivityLeaseHeldAsExclusiveClaim(tenant, environment, id string) (bool, error) {
+	dir, err := exclusiveEnvironmentActivityLeaseDir(tenant, environment)
+	if err != nil {
+		return false, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		claim, err := loadEnvironmentActivityLease(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		if claim.ID == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// EnvironmentActivityLeaseHeldElsewhereNote explains a release that matched
+// nothing because the id is held under the other shape, and names the release
+// that would match it. releasedExclusive is the shape the caller asked for, so
+// the note describes the opposite one. It returns "" when the id is not held
+// elsewhere after all, so a caller only ever prints a note it can stand
+// behind rather than a guess about where the claim went.
+func EnvironmentActivityLeaseHeldElsewhereNote(tenant, environment, id string, releasedExclusive bool) (string, error) {
+	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
+	if err != nil {
+		return "", err
+	}
+	if releasedExclusive {
+		dir, err := environmentActivityLeaseDir(tenant, environment)
+		if err != nil {
+			return "", err
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, resolved+".json")); statErr != nil {
+			return "", nil
+		}
+		return "held as a shared lease; release it without --exclusive", nil
+	}
+	held, err := environmentActivityLeaseHeldAsExclusiveClaim(tenant, environment, resolved)
+	if err != nil || !held {
+		return "", err
+	}
+	return "held as an exclusive claim; release it with --exclusive and the --scope it was taken with", nil
 }
 
 // ReleaseExclusiveEnvironmentActivityLease drops an exclusive claim on a
 // scope. It only removes the file when the recorded holder is this same id —
 // releasing by scope name alone, without proving you are the holder, could
 // otherwise drop a different holder's exclusivity out from under them (a
-// stale release call racing a new legitimate claim). A mismatched or already
-// vacated scope is success, matching the shared release's idempotence.
-func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) error {
-	scope = strings.TrimSpace(scope)
-	if scope == "" {
-		scope = defaultEnvironmentActivityLeaseScope
-	}
+// stale release call racing a new legitimate claim). An already-vacated scope
+// is a success outcome, matching the shared release's idempotence, but a
+// scope held by a *different* id is refused outright and names the actual
+// holder (EnvironmentActivityLeaseConflictError) instead of quietly reporting
+// success for a claim it never touched — the same shape a conflicting take
+// already refuses with.
+func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) (EnvironmentActivityLeaseReleaseOutcome, error) {
+	scope = NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
 	resolvedID, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
 	path, err := exclusiveEnvironmentActivityLeasePath(tenant, environment, scope)
 	if err != nil {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
 	existing, err := loadEnvironmentActivityLease(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			// The scope holds nothing. This is the reverse of the shared
+			// release's case: if this id is holding an ordinary shared lease,
+			// the caller asked to drop it with --exclusive, and a bare
+			// no-match would read as "already gone" while the lease stays
+			// held.
+			if dir, dirErr := environmentActivityLeaseDir(tenant, environment); dirErr == nil {
+				if _, statErr := os.Stat(filepath.Join(dir, resolvedID+".json")); statErr == nil {
+					return EnvironmentActivityLeaseHeldElsewhere, nil
+				}
+			}
+			return EnvironmentActivityLeaseNotHeld, nil
 		}
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
 	if existing.ID != resolvedID {
-		return nil
+		return EnvironmentActivityLeaseNotHeld, &EnvironmentActivityLeaseConflictError{Scope: scope, Holder: existing}
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
+		return EnvironmentActivityLeaseNotHeld, err
 	}
-	return nil
+	return EnvironmentActivityLeaseReleased, nil
 }
 
 // LoadEnvironmentActivityLeases returns the leases still holding the
 // environment, reclaiming expired and orphaned ones as it reads.
 func LoadEnvironmentActivityLeases(tenant, environment string, now time.Time) ([]EnvironmentActivityLease, error) {
-	return loadEnvironmentActivityLeases(tenant, environment, now, processAlive)
+	return loadEnvironmentActivityLeases(tenant, environment, now, ProcessAlive)
 }
 
 func loadEnvironmentActivityLeases(tenant, environment string, now time.Time, alive func(int) bool) ([]EnvironmentActivityLease, error) {
@@ -640,6 +751,43 @@ func loadEnvironmentActivityLease(path string) (EnvironmentActivityLease, error)
 	return lease, nil
 }
 
+// FormatLeaseHolders renders held leases as one clause per distinct holder,
+// naming every lease behind that holder rather than repeating the same holder
+// once per lease it happens to hold. A job's own plain presence lease and, when
+// --exclusive, its environment-scope claim carry an identical Holder for
+// exactly this reason: one piece of work, reported once instead of twice under
+// two different-looking lease names.
+func FormatLeaseHolders(leases []EnvironmentActivityLease) string {
+	type leaseHolderGroup struct {
+		holder EnvironmentActivityLeaseHolder
+		names  []string
+	}
+	var groups []leaseHolderGroup
+	index := make(map[EnvironmentActivityLeaseHolder]int)
+	for _, lease := range leases {
+		i, ok := index[lease.Holder]
+		if !ok {
+			i = len(groups)
+			index[lease.Holder] = i
+			groups = append(groups, leaseHolderGroup{holder: lease.Holder})
+		}
+		groups[i].names = append(groups[i].names, lease.Name)
+	}
+	clauses := make([]string, 0, len(groups))
+	for _, group := range groups {
+		quoted := make([]string, len(group.names))
+		for i, name := range group.names {
+			quoted[i] = fmt.Sprintf("%q", name)
+		}
+		noun := "lease"
+		if len(quoted) > 1 {
+			noun = "leases"
+		}
+		clauses = append(clauses, fmt.Sprintf("%s (%s %s)", group.holder.String(), noun, strings.Join(quoted, ", ")))
+	}
+	return strings.Join(clauses, "; ")
+}
+
 // leaseIdleMarker folds the held leases into the same marker shape every other
 // activity signal reports through, so a held lease blocks idle-stop without the
 // stop predicate needing to know leases exist.
@@ -673,13 +821,30 @@ func leaseIdleMarker(leases []EnvironmentActivityLease, now time.Time) Environme
 	return marker
 }
 
-// processAlive reports whether a lease's recorded holder still exists. Signal 0
-// is the portable "does this pid exist" probe on unix — EPERM means the process
-// is there but owned by someone else, which still counts as alive. Windows has
-// no signals, so os.FindProcess failing is the only answer available there.
-func processAlive(pid int) bool {
+// ProcessAlive reports whether pid names a process that is still running: a
+// lease's recorded holder, a job's recorded supervisor, or anything else this
+// codebase asks that question about.
+//
+// Signal 0 is the portable "does this pid exist" probe on unix — EPERM means
+// the process is there but owned by someone else, which still counts as alive.
+// It is not the whole answer, though: signal 0 also succeeds for a zombie, a
+// process that has already exited and is only waiting for a parent to reap it.
+// A caller that reads existence as "still working" has no way to tell a
+// running holder from a dead one, which is how a finished job's supervisor
+// reads as alive for as long as something holds its corpse — a lease stays
+// claimed, an environment stays reading as busy, a cleanup wait expires
+// against a process that is already gone. So where the platform can say what
+// state a pid is in, that answer is the one returned, and the signal probe is
+// only the fallback for the platforms that cannot.
+//
+// Windows has no signals, so os.FindProcess failing is the only answer
+// available there.
+func ProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
+	}
+	if zombie, ok := platformProcessZombie(pid); ok {
+		return !zombie
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {

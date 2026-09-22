@@ -107,12 +107,18 @@ func reviewCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 	}
 }
 
+// ReviewCommentInput's anchor (commitId/filePath/line) is optional, matching
+// `erun review comment`, which sends whatever flags the caller gave it rather
+// than requiring the anchor itself. Only reviewId and body are required here.
+// Whether the platform accepts a comment carrying no anchor is the platform's
+// call, not this transport's: refusing it here made MCP stricter than the CLI
+// over the same shared call, which is the one thing this tool must not do.
 type ReviewCommentInput struct {
 	platformAliasInput
 	ReviewID        string `json:"reviewId" jsonschema:"review id to comment on"`
-	CommitID        string `json:"commitId" jsonschema:"commit hash the comment is anchored to"`
-	FilePath        string `json:"filePath" jsonschema:"file path the comment is anchored to"`
-	Line            int    `json:"line" jsonschema:"line number the comment is anchored to"`
+	CommitID        string `json:"commitId,omitempty" jsonschema:"commit hash the comment is anchored to"`
+	FilePath        string `json:"filePath,omitempty" jsonschema:"file path the comment is anchored to"`
+	Line            int    `json:"line,omitempty" jsonschema:"line number the comment is anchored to"`
 	Body            string `json:"body" jsonschema:"comment text"`
 	ParentCommentID string `json:"parentCommentId,omitempty" jsonschema:"comment id to reply to, making this a reply in that thread"`
 }
@@ -125,8 +131,19 @@ type ReviewCommentResult struct {
 
 func reviewCommentTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewCommentInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
-		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommitID) == "" || strings.TrimSpace(input.FilePath) == "" || strings.TrimSpace(input.Body) == "" {
-			return nil, ReviewCommentResult{}, fmt.Errorf("reviewId, commitId, filePath, and body are required")
+		var missing []string
+		if strings.TrimSpace(input.ReviewID) == "" {
+			missing = append(missing, "reviewId")
+		}
+		if strings.TrimSpace(input.Body) == "" {
+			missing = append(missing, "body")
+		}
+		if len(missing) > 0 {
+			verb := " is"
+			if len(missing) > 1 {
+				verb = " are"
+			}
+			return nil, ReviewCommentResult{}, fmt.Errorf("%s%s required", strings.Join(missing, " and "), verb)
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
@@ -168,7 +185,7 @@ type ReviewRecordBuildInput struct {
 	ReviewID      string `json:"reviewId" jsonschema:"review id to record the build against"`
 	CommitID      string `json:"commitId" jsonschema:"full 40-character commit hash the build ran against"`
 	Gate          bool   `json:"gate,omitempty" jsonschema:"record the merge queue's own GATE build kind instead of an ordinary build — set by the environment a review's merge queue promoted to MERGE, reporting its own build of the prospective merge; a GATE build carries no version"`
-	Version       string `json:"version,omitempty" jsonschema:"version the build minted (from the build tool's result), required even for a failed build since release resolves the version before the build step runs; omit when gate is true"`
+	Version       string `json:"version,omitempty" jsonschema:"version the build minted, from the run's own build result (a plain erun build --output json, or --dry-run --output json when it failed before printing one), required even for a failed build; a RECORDED build publishes nothing, so this is metadata no platform path resolves and a --release produced version is accepted but not required; omit when gate is true"`
 	Successful    bool   `json:"successful" jsonschema:"whether the build succeeded; false records a failed build"`
 	FailureDetail string `json:"failureDetail,omitempty" jsonschema:"why the build failed; only meaningful when successful is false"`
 }
@@ -210,7 +227,7 @@ type ReviewReportMergedInput struct {
 	platformAliasInput
 	ReviewID  string `json:"reviewId" jsonschema:"review id to report merged"`
 	BuildID   string `json:"buildId" jsonschema:"the successful GATE build's id"`
-	RemoteURL string `json:"remoteUrl" jsonschema:"the git remote the platform fetches to verify the merge"`
+	RemoteURL string `json:"remoteUrl" jsonschema:"the git remote the platform fetches to verify the merge, in any form git accepts; an SSH remote is read over its host's HTTPS without credentials"`
 }
 
 type ReviewReportMergedResult struct {

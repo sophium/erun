@@ -22,6 +22,21 @@ export class DebugPanel {
     return (await this.resizeHandle().count()) > 0 && (await this.resizeHandle().isVisible());
   }
 
+  // Converge on the panel's own open/closed state before touching anything
+  // inside it. The toggle click and the panel's render are two separate
+  // steps under React, so an assertion on a tab or pane immediately after
+  // toggle() races that render against its own fixed budget instead of the
+  // panel's — waitFor with no explicit timeout defers to the enclosing
+  // test's own budget instead, the same shape every dialog POM's
+  // waitForOpen/waitForClosed already uses.
+  async waitForOpen(): Promise<void> {
+    await this.resizeHandle().waitFor({ state: 'visible' });
+  }
+
+  async waitForClosed(): Promise<void> {
+    await this.resizeHandle().waitFor({ state: 'hidden' });
+  }
+
   tab(name: 'erun trace' | 'orchestrator' | 'app log' | 'UI trace'): Locator {
     return this.page.getByRole('tab', { name });
   }

@@ -41,6 +41,12 @@ type ReviewBuildRepository interface {
 type MergeVerifier interface {
 	Contains(ctx context.Context, remoteURL, branch, commit string) (ok bool, parent string, err error)
 	IsAncestor(ctx context.Context, remoteURL, branch, ancestor, descendant string) (isAncestor bool, err error)
+	// ContainsChanges is the other half of the same "is this work really in
+	// the target" question, for a review that landed without the queue: it
+	// answers whether everything the source branch adds is present in the
+	// target's history, naming the commit that carries it. See
+	// reconcileMerged.
+	ContainsChanges(ctx context.Context, remoteURL, targetBranch, sourceBranch string) (contained bool, commit string, err error)
 }
 
 // ReleaseTrigger enqueues the release a completed merge earns.
@@ -101,6 +107,43 @@ func (e *EmptyMergeQueueError) Error() string {
 
 func (e *EmptyMergeQueueError) Unwrap() error { return repository.ErrNotFound }
 
+// MergeQueueOccupiedError refuses an advance while another review on the same
+// target branch already holds the queue's single MERGE slot. It carries that
+// review because the refusal's whole job is to name the blocker: reported as a
+// bare not-found it reads as a missing resource — a typo'd endpoint, a deleted
+// review — and sends the operator looking for something that was never wrong,
+// when the review to finish or requeue is the one thing they need.
+type MergeQueueOccupiedError struct {
+	TargetBranch string
+	ReviewID     string
+	Name         string
+	SourceBranch string
+}
+
+func (e *MergeQueueOccupiedError) Error() string {
+	return fmt.Sprintf("merge queue for %s already has a review at MERGE: %s (%s, %s); complete it or requeue it back to READY before advancing",
+		e.TargetBranch, e.ReviewID, e.Name, e.SourceBranch)
+}
+
+func (e *MergeQueueOccupiedError) Unwrap() error { return repository.ErrConflict }
+
+// ReviewNotMergingError refuses the missed-merge-window requeue on a review
+// that is not holding MERGE. The review was already resolved by id, so it
+// exists and the caller can see it: reporting a not-found there describes a
+// missing resource for a review sitting in plain sight, and leaves "requeue
+// did not work" with nothing to act on. The status is what actually explains
+// the refusal.
+type ReviewNotMergingError struct {
+	ReviewID string
+	Status   model.ReviewStatus
+}
+
+func (e *ReviewNotMergingError) Error() string {
+	return fmt.Sprintf("review %s is %s, not MERGE; only a review holding the merge queue's slot can be requeued back to READY", e.ReviewID, e.Status)
+}
+
+func (e *ReviewNotMergingError) Unwrap() error { return repository.ErrConflict }
+
 // InvalidTransitionError refuses a caller's PATCH .../status asserting MERGE
 // directly, or MERGED from any status other than MERGE — AdvanceMergeQueue is
 // the only path to MERGE, and MERGED from MERGE still has to pass
@@ -146,16 +189,18 @@ func (e *MissingBuildIDError) Unwrap() error { return repository.ErrInvalidInput
 // validTargetsFor lists the statuses a caller's PATCH .../status may set from
 // the review's current status, mirroring the Status lifecycle documented in
 // collaboration/reviews.md. MERGE never appears: only AdvanceMergeQueue
-// reaches it. MERGED appears only from MERGE, and even then only once
-// verifyGateBuild/verifyRepositoryState pass.
+// reaches it. MERGED appears from MERGE — where verifyGateBuild and
+// verifyRepositoryState have to pass — and from the three statuses a review
+// can be sitting at while its work has already landed without the queue,
+// where reconcileMerged's own check has to pass instead.
 func validTargetsFor(status model.ReviewStatus) []model.ReviewStatus {
 	switch status {
 	case model.ReviewStatusOpen:
-		return []model.ReviewStatus{model.ReviewStatusFailed, model.ReviewStatusReady, model.ReviewStatusClosed}
+		return []model.ReviewStatus{model.ReviewStatusFailed, model.ReviewStatusReady, model.ReviewStatusMerged, model.ReviewStatusClosed}
 	case model.ReviewStatusFailed:
-		return []model.ReviewStatus{model.ReviewStatusReady, model.ReviewStatusClosed}
+		return []model.ReviewStatus{model.ReviewStatusReady, model.ReviewStatusMerged, model.ReviewStatusClosed}
 	case model.ReviewStatusReady:
-		return []model.ReviewStatus{model.ReviewStatusClosed}
+		return []model.ReviewStatus{model.ReviewStatusMerged, model.ReviewStatusClosed}
 	case model.ReviewStatusMerge:
 		return []model.ReviewStatus{model.ReviewStatusReady, model.ReviewStatusMerged}
 	default:
@@ -237,8 +282,13 @@ func (s *ReviewService) headOfMergeQueue(ctx context.Context, targetBranch strin
 	if targetBranch == "" {
 		return model.Review{}, ErrInvalidTargetBranch
 	}
-	if _, err := s.reviews.FindActiveMergeReview(ctx, targetBranch); err == nil {
-		return model.Review{}, repository.ErrNotFound
+	if occupying, err := s.reviews.FindActiveMergeReview(ctx, targetBranch); err == nil {
+		return model.Review{}, &MergeQueueOccupiedError{
+			TargetBranch: targetBranch,
+			ReviewID:     occupying.ReviewID,
+			Name:         occupying.Name,
+			SourceBranch: occupying.SourceBranch,
+		}
 	} else if !errors.Is(err, repository.ErrNotFound) {
 		return model.Review{}, err
 	}
@@ -325,8 +375,16 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 		return model.Review{}, &InvalidTransitionError{From: review.Status, To: status, ValidTargets: validTargetsFor(review.Status)}
 	}
 
+	// MERGED has two verification stories, and which one applies is decided
+	// by where the review is, not by what the caller claims: one holding
+	// MERGE is the queue's, and is confirmed against its GATE build; any
+	// other review is one whose work landed without the queue, and is
+	// confirmed against the target branch's own history.
 	if status == model.ReviewStatusMerged {
-		return s.acceptMerged(ctx, review, buildID, remoteURL)
+		if review.Status == model.ReviewStatusMerge {
+			return s.acceptMerged(ctx, review, buildID, remoteURL)
+		}
+		return s.reconcileMerged(ctx, review, remoteURL)
 	}
 
 	// READY without a build is the missed-merge-window path, not a build result.
@@ -379,6 +437,51 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 		return model.Review{}, err
 	}
 	s.triggerRelease(ctx, updated, build.CommitID)
+	return updated, nil
+}
+
+// reconcileMerged is the other way to MERGED, for a review whose work landed
+// through something other than this platform's merge queue — in practice a
+// GitHub squash merge, where the branch's own commits are deliberately not
+// made ancestors of the target and no GATE build was ever recorded, so
+// neither of acceptMerged's conditions can ever hold no matter how long the
+// review sits there. Without this the only way out was CLOSED, which renders
+// landed work as abandoned and so is worse than leaving it OPEN — and the
+// OPEN count grows by one for every change that lands this way.
+//
+// The platform still verifies rather than believes: ContainsChanges confirms
+// against the real remote that everything the source branch adds is present
+// in the target branch's history. What is reported here already happened
+// elsewhere, so unlike acceptMerged this triggers no release.
+func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review, remoteURL string) (model.Review, error) {
+	if review.Status == model.ReviewStatusMerged || review.Status == model.ReviewStatusClosed {
+		return model.Review{}, &InvalidTransitionError{From: review.Status, To: model.ReviewStatusMerged, ValidTargets: validTargetsFor(review.Status)}
+	}
+	if s.verifier == nil {
+		return model.Review{}, &MergeNotVerifiedError{Reason: "this control plane has no way to verify merges against the real repository"}
+	}
+	contained, commit, err := s.verifier.ContainsChanges(ctx, remoteURL, review.TargetBranch, review.SourceBranch)
+	if err != nil {
+		return model.Review{}, &MergeNotVerifiedError{Reason: err.Error()}
+	}
+	if !contained {
+		return model.Review{}, &MergeNotVerifiedError{Reason: fmt.Sprintf("branch %s adds nothing that is already in %s", review.SourceBranch, review.TargetBranch)}
+	}
+
+	review.Status = model.ReviewStatusMerged
+	// Deliberately no LastMergedBuildID: there was no build, and
+	// FindLastMergedReview skips build-less merges for exactly this reason —
+	// gatedTargetTip anchors the next queue-driven merge on a build's commit,
+	// which a reconciliation has none of.
+	review.LastMergedBuildID = ""
+	updated, err := s.reviews.Update(ctx, review)
+	if err != nil {
+		return model.Review{}, err
+	}
+	if err := s.reviews.DeleteMergeQueueEntryByReview(ctx, updated.ReviewID); err != nil {
+		return model.Review{}, err
+	}
+	log.Printf("erun api reviews: review %s reconciled MERGED: branch %s landed on %s as %s", updated.ReviewID, updated.SourceBranch, updated.TargetBranch, commit)
 	return updated, nil
 }
 
@@ -480,7 +583,7 @@ func (s *ReviewService) triggerRelease(ctx context.Context, review model.Review,
 // the end of its target branch queue; only a merging review can take that path.
 func (s *ReviewService) requeueMergingReview(ctx context.Context, review model.Review) (model.Review, error) {
 	if review.Status != model.ReviewStatusMerge {
-		return model.Review{}, repository.ErrNotFound
+		return model.Review{}, &ReviewNotMergingError{ReviewID: review.ReviewID, Status: review.Status}
 	}
 	review.Status = model.ReviewStatusReady
 	updated, err := s.reviews.Update(ctx, review)
@@ -549,7 +652,8 @@ func (s *ReviewService) markBuildSucceeded(ctx context.Context, review model.Rev
 	promoted, err := s.AdvanceMergeQueue(ctx, updated.TargetBranch)
 	if err != nil {
 		var blocked *UnresolvedThreadsError
-		if errors.Is(err, repository.ErrNotFound) || errors.As(err, &blocked) {
+		var occupied *MergeQueueOccupiedError
+		if errors.Is(err, repository.ErrNotFound) || errors.As(err, &blocked) || errors.As(err, &occupied) {
 			return model.Review{}, false, nil
 		}
 		return model.Review{}, false, err

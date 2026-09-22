@@ -272,6 +272,43 @@ type uiERunConfig struct {
 	DefaultTenant  string                  `json:"defaultTenant"`
 	CloudProviders []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
 	CloudContexts  []uiCloudContextStatus  `json:"cloudContexts,omitempty"`
+	// OpenRouter is the erun-level gateway catalog. It lives in root config
+	// because it is one list the operator maintains and every environment
+	// selects from it, rather than a per-environment setting.
+	OpenRouter *uiOpenRouterConfig `json:"openRouter,omitempty"`
+	// OpenRouterDefaults is the gateway this machine's own Claude Code already
+	// routes through, so a catalog can be offered pre-filled from it rather than
+	// asking the operator to retype what they configured once already. It is a
+	// starting point, not stored config: nothing here is persisted until the
+	// operator saves the catalog.
+	OpenRouterDefaults *uiHostGatewayDefaults `json:"openRouterDefaults,omitempty"`
+}
+
+// uiOpenRouterModel is one selectable gateway model id and the context window
+// Claude Code must assume for it, since a gateway id carries none of its own.
+type uiOpenRouterModel struct {
+	ID      string `json:"id"`
+	Context int    `json:"context,omitempty"`
+	// RequiresReasoningEcho mirrors the catalog's own declaration (see
+	// OpenRouterModel in erun-common/openrouter.go). It travels through this
+	// type rather than being dropped because the desktop catalog editor writes
+	// the whole catalog back on save: a field the conversion did not carry would
+	// be removed by the first edit, silently returning the model to the
+	// selectable set the declaration exists to keep it out of.
+	RequiresReasoningEcho bool `json:"requiresReasoningEcho,omitempty"`
+}
+
+// uiOpenRouterConfig is the gateway an environment's Claude Code is routed
+// through and the models selectable from it. The credential is a Secret
+// reference, never a value, so config.yaml stays safe to back up and share.
+type uiOpenRouterConfig struct {
+	BaseURL string `json:"baseUrl,omitempty"`
+	// AuthTokenRef is the operator secret store ref the gateway credential is
+	// saved under. A ref, not a value: the token itself never enters the config,
+	// this read model, or a chart value.
+	AuthTokenRef string              `json:"authTokenRef,omitempty"`
+	DefaultModel string              `json:"defaultModel,omitempty"`
+	Models       []uiOpenRouterModel `json:"models,omitempty"`
 }
 
 type uiTenantConfig struct {
@@ -335,12 +372,23 @@ type uiTenantDashboard struct {
 	// PlatformIssuer/PlatformSubject prefill an enrollment request from the
 	// identity already in hand, once a bearer minted successfully — set even
 	// when the subsequent identity read itself failed (not-enrolled).
-	PlatformIssuer  string                    `json:"platformIssuer,omitempty"`
-	PlatformSubject string                    `json:"platformSubject,omitempty"`
-	User            *uiTenantDashboardUser    `json:"user,omitempty"`
-	Reviews         []uiTenantDashboardReview `json:"reviews,omitempty"`
-	MergeQueue      []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
-	Builds          []uiTenantDashboardBuild  `json:"builds,omitempty"`
+	PlatformIssuer  string `json:"platformIssuer,omitempty"`
+	PlatformSubject string `json:"platformSubject,omitempty"`
+	// AccessRemedies keys each panel's restricted route to the copyable grant
+	// that would give the caller the access they were refused, so a restricted
+	// tab hands over the request instead of only naming what is missing.
+	// Absent when no role covers the access or the roles could not be read.
+	AccessRemedies map[string]eruncommon.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
+	User           *uiTenantDashboardUser                     `json:"user,omitempty"`
+	// Users is the Users tab's roster: the tenant's users, read from
+	// GET /v1/users. Distinct from User above, which is the caller's own
+	// identity from whoami — the tab lists the tenant, not the caller, and an
+	// unreadable roster is reported on the panel rather than collapsing back
+	// to that one row.
+	Users      []uiTenantDashboardUser   `json:"users,omitempty"`
+	Reviews    []uiTenantDashboardReview `json:"reviews,omitempty"`
+	MergeQueue []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
+	Builds     []uiTenantDashboardBuild  `json:"builds,omitempty"`
 	// GateRuns is the Gates tab's own queue: what is being gated right now,
 	// and what recent gates decided, independent of whether the change
 	// gated is an erun review at all — see erun-backend-api/AGENTS.md's
@@ -591,8 +639,12 @@ type uiTenantDashboardBuild struct {
 	Successful      bool   `json:"successful"`
 	CommitID        string `json:"commitId"`
 	Version         string `json:"version"`
-	CreatedAt       string `json:"createdAt,omitempty"`
-	UpdatedAt       string `json:"updatedAt,omitempty"`
+	// Profile is the bounded per-step profile this build self-reported, when
+	// it collected one -- nil for a build reported before this feature
+	// existed, or one whose caller collected none.
+	Profile   *eruncommon.BuildProfileSummary `json:"profile,omitempty"`
+	CreatedAt string                          `json:"createdAt,omitempty"`
+	UpdatedAt string                          `json:"updatedAt,omitempty"`
 }
 
 // uiGateRun mirrors eruncommon.PlatformGateRun's JSON-safe subset the Gates
@@ -636,16 +688,21 @@ type uiReviewDetail struct {
 	ReviewID string `json:"reviewId"`
 	// APIError is a whole-detail failure: identity could not be read, so no
 	// capability set exists to gate the reads below honestly.
-	APIError           string                   `json:"apiError,omitempty"`
-	Restricted         string                   `json:"restricted,omitempty"`
-	Error              string                   `json:"error,omitempty"`
-	Review             *uiTenantDashboardReview `json:"review,omitempty"`
-	Comments           []uiReviewComment        `json:"comments,omitempty"`
-	CommentsRestricted string                   `json:"commentsRestricted,omitempty"`
-	CommentsError      string                   `json:"commentsError,omitempty"`
-	Builds             []uiTenantDashboardBuild `json:"builds,omitempty"`
-	BuildsRestricted   string                   `json:"buildsRestricted,omitempty"`
-	BuildsError        string                   `json:"buildsError,omitempty"`
+	APIError   string `json:"apiError,omitempty"`
+	Restricted string `json:"restricted,omitempty"`
+	// AccessRemedies keys each restricted route above to the copyable grant
+	// that would give the caller the access they were refused, so a denial
+	// hands over the request instead of only naming what is missing. Absent
+	// when no role covers the access or the roles could not be read.
+	AccessRemedies     map[string]eruncommon.PlatformAccessRemedy `json:"accessRemedies,omitempty"`
+	Error              string                                     `json:"error,omitempty"`
+	Review             *uiTenantDashboardReview                   `json:"review,omitempty"`
+	Comments           []uiReviewComment                          `json:"comments,omitempty"`
+	CommentsRestricted string                                     `json:"commentsRestricted,omitempty"`
+	CommentsError      string                                     `json:"commentsError,omitempty"`
+	Builds             []uiTenantDashboardBuild                   `json:"builds,omitempty"`
+	BuildsRestricted   string                                     `json:"buildsRestricted,omitempty"`
+	BuildsError        string                                     `json:"buildsError,omitempty"`
 	// QueuePosition is 1-based; 0 means the review is not in its target
 	// branch's merge queue right now.
 	QueuePosition int `json:"queuePosition,omitempty"`
@@ -693,7 +750,7 @@ type uiReviewComment struct {
 	CreatorUserID string `json:"creatorUserId,omitempty"`
 	// CreatorUsername mirrors uiTenantDashboardReview.AuthorUsername: the
 	// tenant user directory's display name for CreatorUserID, resolved
-	// best-effort, empty when it could not be resolved (#1378).
+	// best-effort, empty when it could not be resolved.
 	CreatorUsername string `json:"creatorUsername,omitempty"`
 	Status          string `json:"status"`
 	ParentCommentID string `json:"parentCommentId,omitempty"`
@@ -993,6 +1050,7 @@ type uiEnvironmentConfig struct {
 type uiClaudeConfig struct {
 	UseMantle       *bool    `json:"useMantle,omitempty"`
 	UseBedrock      *bool    `json:"useBedrock,omitempty"`
+	UseGateway      *bool    `json:"useGateway,omitempty"`
 	Models          []string `json:"models,omitempty"`
 	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
 	Effort          *string  `json:"effort,omitempty"`
@@ -1010,6 +1068,10 @@ type uiClaudeDefaults struct {
 	MaxTokens       int      `json:"maxTokens"`
 	Effort          string   `json:"effort"`
 	EffortLevels    []string `json:"effortLevels"`
+	// GatewayConfigured reports whether the erun-level catalog names a gateway.
+	// Without one the per-environment controls have nothing to override, so the
+	// AI tab hides them rather than offering a switch that changes nothing.
+	GatewayConfigured bool `json:"gatewayConfigured"`
 }
 
 type uiRuntimePodConfig struct {

@@ -87,12 +87,18 @@ required** — that is deliberate, because `kubectl top` answers "Metrics API no
 clusters, which are the ones you iterate in all day. The counters are sampled on the same tick the
 [idle monitor](/agent-reference/idle-policy) already runs, and retained per environment.
 
+Retained *inside* the environment: the history is written to the runtime container's own cache by the
+monitor running in that container. So the `sizing:` lines above appear when `erun list` runs in the
+environment they describe, and not from a host, which holds no history to derive a verdict from. The
+[`usage` MCP tool](/mcp/overview#usage) runs in the environment and carries the same verdict as a
+`sizing` field; [`erun usage`](/cli/usage) does not carry it, and says so in its help.
+
 ### What each signal says
 
 | Signal | Direction | Why |
 |---|---|---|
 | `memory.events` `oom_kill` above zero | **raise memory**, high confidence | Something was already killed. One kill is enough. The suggestion is sized from the limit that proved too small, not from the observed peak — the allocation that triggered the kill was refused, so it never reached `memory.peak`. |
-| Observed memory peak at 90% of the limit or more | **raise memory**, high confidence | Sampling means the true peak is at least the peak observed. An environment already this close has plausibly gone further between two reads. |
+| Observed memory peak at 85% of the limit or more | **raise memory**, high confidence | This is [the same 85% a memory warning fires at](/agent-reference/cli-flags#usage-thresholds), deliberately: the alarm and the advisory answer one question about one reading, so a peak that warns is never left without the size that would fix it. Sampling means the true peak is at least the peak observed, so an environment already this close has plausibly gone further between two reads. |
 | Observed memory peak below about two-thirds of the limit, over a long quiet window, no kills | **lower memory**, low confidence | The suggestion keeps 1.5× the observed peak. |
 | 5% or more of scheduling periods throttled | **raise CPU**, high confidence | `nr_throttled`/`nr_periods` is real starvation: the container wanted CPU and the quota refused it. |
 | Any throttling below that threshold | **hold CPU** | Tolerable, but not unused — the quota does bind sometimes, so this is not grounds to shrink. |
@@ -109,6 +115,23 @@ consumes cluster capacity. An under-provisioned one kills a running agent — th
 *"was killed (exit 137) — likely out of memory"*. So ERun raises on modest evidence and shrinks only
 on a long, quiet window, never below 1.5× the peak it actually observed, and never at better than low
 confidence. A quiet window is an argument from silence, and it is labelled as one.
+
+That asymmetry decides how much observation each direction needs. **A raise needs one reading, not a
+window.** A peak at the limit, or a recorded OOM kill, is a fact about something that already
+happened; waiting a day to confirm it would withhold the answer exactly when it is wanted. Only the
+lower direction is gated on the 24-hour window and the sample count behind it — and the
+`insufficient-evidence` line names whichever of the two fell short.
+
+### A warning always arrives with its recommendation
+
+Wherever ERun reports a reading — [`erun usage`](/cli/usage), the `usage` [MCP tool](/mcp/overview),
+`erun list` — a crossed memory threshold and the sizing advice that answers it are derived together,
+from the same counters, in the same call. You will not see *"memory is at 99% of its limit"* without
+the line that says what to resize it to.
+
+The two cannot disagree because there is only one of them: the reading is folded into the retained
+history as one more observation before a single verdict is computed. A live `erun usage` on a host
+with no history at all still answers, because the reading in front of you is evidence on its own.
 
 A raise is also bounded by what the environment's namespace quota can admit, where one is
 configured: a `ResourceQuota` counts every container in the pod, so the `erun-dind` sidecar's own
@@ -139,6 +162,10 @@ runtime pod. Running `erun list` from your laptop shows no sizing lines for a re
 there is no history there to read. Ask the environment (over
 [MCP](/mcp/overview) or an [`erun open`](/cli/open) shell) and it answers about itself; the MCP
 `list` tool carries the same recommendation as a structured `sizing` field on each environment.
+
+[`erun usage`](/cli/usage) is the exception, and deliberately so: it reads the environment live, so
+the reading it just took is itself the evidence, and it prints the recommendation whether or not a
+history happens to exist on the host you ran it from.
 
 A newly created environment prints nothing either, until its monitor has taken a sample.
 
@@ -194,7 +221,7 @@ erun list --control-planes
 
 ```
 published version: 1.0.247
-Control planes:
+Control planes (1 backend, 1 alias):
   - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
     console: url="https://console.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
 ```
@@ -203,9 +230,13 @@ Each plane is checked with its own unauthenticated `GET /v1/platform` — the sa
 
 That same `GET /v1/platform` response also names the plane's linked console (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias), so each reachable plane's console is checked the same way, against the same published baseline, and printed nested under it as a `console:` line — a plane can be current while its console lags behind, or vice versa, and before this there was no way to tell. A plane whose response carries no `consoleUrl` prints no `console:` line at all, rather than guessing.
 
+A console that answers `GET /version.json` but doesn't serve the expected JSON document — for example an SPA fallback page served for a route that isn't wired up yet — is never folded into `reachable=no`: it did answer, so it prints `reachable=yes version=unknown reason="..."` instead, with the reason naming the HTTP status and content type it actually served.
+
+That response also names the apiUrl the plane believes it is served at. When that resolves to a different backend than the one you configured — a plane advertising a different plane's api — it prints an `[advertised apiUrl mismatch: ...]` line beneath the plane's own line. An apiUrl that merely *differs textually* is never flagged: a vanity hostname that CNAMEs to the one erun dialed is the same backend under two names, so the two hostnames are resolved and compared instead of string-matched, and a hostname that doesn't resolve on either side prints nothing rather than a guess.
+
 This makes real network calls (each plane and console, plus erun's registry), so add `--dry-run` to preview which planes, consoles, and registry lookup would be checked without making any call.
 
-This report also exits `0` on its own, same as `--tenant`'s above. Add `--fail-on-drift` to make that one invocation exit non-zero when a plane or its console is behind or ahead of published, a plane or console is unreachable, or the published baseline itself couldn't be resolved — none of those confirm a plane and its console are running what erun actually published:
+This report also exits `0` on its own, same as `--tenant`'s above. Add `--fail-on-drift` to make that one invocation exit non-zero when a plane or its console is behind or ahead of published, a plane advertises a foreign apiUrl, a plane or console is unreachable, or the published baseline itself couldn't be resolved — none of those confirm a plane and its console are running what erun actually published:
 
 ```bash
 erun list --control-planes --fail-on-drift
@@ -236,4 +267,4 @@ erun list | grep "effective"      # what ERun targets right now
 | `--control-planes` combined with `--tenant`/`--gate-environment`. | Errors `--control-planes cannot be combined with --tenant/--gate-environment`; nothing is printed. |
 | `--control-planes` and a configured plane or its linked console is unreachable, or the registry lookup fails. | Not an error — printed as a finding (`reachable=no reason="..."`, or `published version: unresolved (...)`); exit code stays `0` unless `--fail-on-drift` is set. |
 | `--fail-on-drift` passed without `--tenant` or `--control-planes`. | Errors `--fail-on-drift requires --tenant or --control-planes`; nothing is printed. |
-| `--fail-on-drift` set and the report finds drift (an environment behind max, a behind gate, an unreachable/behind/ahead plane or console, or an unresolved published baseline). | The full report still prints, then the command exits non-zero naming what it found. Never fires under `--dry-run` — nothing was probed, so there is nothing to fail on. |
+| `--fail-on-drift` set and the report finds drift (an environment behind max, a behind gate, an unreachable/behind/ahead plane or console, a plane advertising a foreign apiUrl, or an unresolved published baseline). | The full report still prints, then the command exits non-zero naming what it found. Never fires under `--dry-run` — nothing was probed, so there is nothing to fail on. |

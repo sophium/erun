@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -14,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
 // TestJobOffEnvironmentAgentReinvocation drives the bounded-reinvocation
@@ -82,16 +82,23 @@ esac
 	// ERUN_REPO_REMOTE=true (the *nested* gate job start is genuinely
 	// running inside the environment, unlike the outer host call below).
 	// Auth left unset is mcpAuthConfigFromEnv's documented loopback-only mode.
+	// emcp itself never sets GOCOVERDIR through erun.Run (it isn't spawned
+	// that way), so without a private coverage directory of its own it would
+	// have none at all -- and everything it re-execs (the supervisor, the
+	// nested gate jobs) inherits whatever it has. PrivateCoverDir gives this
+	// whole chain the same exclusive-directory treatment Run gives its own
+	// subprocesses.
 	emcpEnv := append(append([]string{}, setup.Env()...), fixture.StubEnv(stubs, "claude", "gatefail", "gateok")...)
 	emcpEnv = append(emcpEnv,
 		"ERUN_ERUN_BIN="+bin,
 		"ERUN_JOB_GATE_INCOMPLETE_WAIT_CAP=2s",
 		"ERUN_JOB_GATE_INCOMPLETE_POLL=20ms",
 		"ERUN_REPO_REMOTE=true",
+		erun.CoverDirEnv+"="+erun.PrivateCoverDir(t),
 	)
 
 	emcpBin := emcpBinaryPath(t)
-	emcpCmd := exec.Command(emcpBin,
+	emcpCmd := harnessexec.Command(emcpBin,
 		"--host", "127.0.0.1", "--port", fmt.Sprint(mcpPort),
 		"--metrics-port", fmt.Sprint(metricsPort),
 		"--tenant", "team", "--environment", "dev", "--repo-path", repoPath,
@@ -169,7 +176,7 @@ func emcpBinaryPath(t *testing.T) string {
 			return
 		}
 		exe := filepath.Join(binDir, "emcp")
-		cmd := exec.Command("go", "build", "-o", exe, "./cmd/emcp")
+		cmd := harnessexec.Command("go", "build", "-o", exe, "./cmd/emcp")
 		cmd.Dir = moduleDir
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if out, buildErr := cmd.CombinedOutput(); buildErr != nil {

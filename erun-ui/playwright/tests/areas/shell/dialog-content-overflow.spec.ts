@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 import { expectDialogContentStaysWithinCard } from '../../../fixtures/boundingBox.js';
 import { test } from '../../../fixtures/erunApp.js';
@@ -133,6 +133,35 @@ test.describe('dialog content stays within its own card — deviceScaleFactor 1.
       app.orchestratorDialog.locator('Edit orchestrator'),
       'Edit orchestrator dialog at deviceScaleFactor 1.5',
     );
+    await app.orchestratorDialog.cancel('Edit orchestrator');
+    await app.orchestratorDialog.waitForClosed('Edit orchestrator');
+  });
+});
+
+// The vertical half of the same contract, which the width checks above cannot
+// see: the Edit orchestrator form carries the linked environments, the
+// orchestrator's own directories, its conversations and its guidance, and at a
+// short window that outgrows the viewport. With no height bound on the panel the
+// footer — and with it Save — sat half off the bottom edge, so the dialog looked
+// like it simply would not save: no call was made, no error was shown, and
+// nothing was written. The panel is bounded and its field region scrolls, so the
+// footer stays fully on screen.
+test.describe('dialog footer stays reachable at a short window height', () => {
+  test('the Edit orchestrator Save button is fully within the viewport', async ({ app, page }) => {
+    await page.setViewportSize({ width: 1280, height: 520 });
+    await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
+    await app.orchestratorDialog.waitForOpen('Edit orchestrator');
+
+    const save = app.orchestratorDialog.saveButton();
+    await expect(save).toBeVisible();
+    const box = await save.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    if (box && viewport) {
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    }
+
     await app.orchestratorDialog.cancel('Edit orchestrator');
     await app.orchestratorDialog.waitForClosed('Edit orchestrator');
   });

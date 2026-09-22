@@ -1,4 +1,4 @@
-import type { DiffResult, UISelection } from '@/types';
+import type { DiffResult } from '@/types';
 
 import { reviewApi } from './api/reviewApi';
 import { sessionApi } from './api/sessionApi';
@@ -12,7 +12,7 @@ import {
   stripMcpUnreachableMarker,
 } from './reconnectCopy';
 import { scrollSelectedDiffIntoView } from './reviewDiffNavigation';
-import { selectReviewEnvTargets } from './selectors';
+import { type ReviewTarget, selectReviewTargets } from './selectors';
 import { setChangedFilesOpen } from './slices/layoutSlice';
 import { bumpReviewDiff } from './slices/requestCountersSlice';
 import type { ReviewScope } from './slices/reviewSlice';
@@ -126,36 +126,62 @@ function applyReviewDiffFailure(
   }
 }
 
-// reviewEnvTargets is selectReviewEnvTargets shaped for the fetch: the same
-// resolution, plus the UISelection each LoadDiff call needs.
-function reviewEnvTargets(
-  state: ReturnType<typeof import('./store').store.getState>,
-): { envKey: string; selection: UISelection }[] {
-  return selectReviewEnvTargets(state).map((target) => ({
-    envKey: target.envKey,
-    selection: { tenant: target.tenant, environment: target.environment },
-  }));
+// reviewTargets is selectReviewTargets, named here so the fetch sites below read
+// as "the targets this panel is showing" rather than reaching into selectors at
+// every one of them.
+function reviewTargets(state: ReturnType<typeof import('./store').store.getState>): ReviewTarget[] {
+  return selectReviewTargets(state);
 }
 
-// loadOneReviewDiff fetches and applies one environment's diff. Every failure is
-// contained here, so allSettled below cannot let one environment's error stop
+// fetchTargetDiff asks the desktop for one target's diff through the endpoint
+// that matches what the target is: an environment's arrives over its MCP edge
+// (LoadDiff resolves the env and its port), while a directory's is read with host
+// git from the path itself. The running-query wait before each initiate is the
+// pre-existing guard against a manual refresh silently inheriting an in-flight
+// periodic tick's result -- see loadOneReviewDiff's own note below.
+async function fetchTargetDiff(
+  dispatch: Parameters<AppThunk>[0],
+  target: ReviewTarget,
+  options: { scope: string; selectedCommit: string; target: string },
+): Promise<DiffResult> {
+  if (target.kind === 'directory') {
+    const args = { directory: target.directory, options };
+    await dispatch(reviewApi.util.getRunningQueryThunk('getDirectoryDiff', args));
+    return dispatch(
+      reviewApi.endpoints.getDirectoryDiff.initiate(args, { forceRefetch: true }),
+    ).unwrap();
+  }
+  const args = {
+    selection: { tenant: target.tenant, environment: target.environment },
+    options,
+  };
+  await dispatch(reviewApi.util.getRunningQueryThunk('getDiff', args));
+  return dispatch(reviewApi.endpoints.getDiff.initiate(args, { forceRefetch: true })).unwrap();
+}
+
+// loadOneReviewDiff fetches and applies one target's diff. Every failure is
+// contained here, so allSettled below cannot let one target's error stop
 // another's fetch from being applied.
 async function loadOneReviewDiff(
   dispatch: Parameters<AppThunk>[0],
   getState: () => ReturnType<typeof import('./store').store.getState>,
-  target: { envKey: string; selection: UISelection },
+  target: ReviewTarget,
   options: { silent?: boolean },
 ): Promise<void> {
-  const { envKey, selection } = target;
+  const { envKey } = target;
   const slot = getState().review.diffByEnv[envKey] ?? emptyEnvDiffState;
-  const contributeTarget = getState().contribute.diffSourceByEnv[envKey] ?? 'env';
   if (!options.silent) {
     dispatch(setEnvDiffLoading({ envKey, loading: true }));
     dispatch(setEnvDiffError({ envKey, error: '', reconnectable: slot.errorReconnectable }));
   }
-  const diffArgs = {
-    selection,
-    options: { scope: slot.scope, selectedCommit: slot.commit, target: contributeTarget },
+  // The contribute source is an environment concept -- which clone inside the
+  // environment to diff -- so a directory, which has no environment and so no
+  // clone, always diffs its own working tree.
+  const diffOptions = {
+    scope: slot.scope,
+    selectedCommit: slot.commit,
+    target:
+      target.kind === 'env' ? (getState().contribute.diffSourceByEnv[envKey] ?? 'env') : 'env',
   };
   try {
     // The periodic silent refresh (scheduleReviewDiffRefresh) and a manual
@@ -166,10 +192,7 @@ async function loadOneReviewDiff(
     // request for the same query before ever looking at forceRefetch (see
     // erun#1953's getInitialState fix), so without this wait the click would
     // silently inherit the in-flight tick's result instead of its own.
-    await dispatch(reviewApi.util.getRunningQueryThunk('getDiff', diffArgs));
-    const diff = await dispatch(
-      reviewApi.endpoints.getDiff.initiate(diffArgs, { forceRefetch: true }),
-    ).unwrap();
+    const diff = await fetchTargetDiff(dispatch, target, diffOptions);
     applyReviewDiffSuccess(dispatch, getState, envKey, diff);
   } catch (error: unknown) {
     applyReviewDiffFailure(dispatch, getState, envKey, error, Boolean(options.silent));
@@ -184,7 +207,7 @@ export const loadReviewDiff =
   (options: { silent?: boolean } = {}): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    const targets = reviewEnvTargets(getState());
+    const targets = reviewTargets(getState());
     if (targets.length === 0) {
       return;
     }
@@ -210,7 +233,7 @@ export const loadReviewDiff =
   };
 
 export const refreshReviewDiff = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
-  if (reviewEnvTargets(getState()).length === 0) {
+  if (reviewTargets(getState()).length === 0) {
     return;
   }
   await dispatch(loadReviewDiff());
@@ -228,7 +251,7 @@ function isCurrentReviewDiffRequest(
   scopeKey: string,
 ): boolean {
   const state = getState();
-  const currentScopeKey = reviewEnvTargets(state)
+  const currentScopeKey = reviewTargets(state)
     .map((target) => target.envKey)
     .join(',');
   return request === state.requestCounters.reviewDiff && scopeKey === currentScopeKey;
@@ -248,12 +271,12 @@ function scheduleReviewDiffRefresh(
   // for exactly the cross-env case (#1178). Keep this guard identical to the
   // timer callback's own below; a mismatch here left periodic review-diff
   // refresh permanently dead for every orchestrator session.
-  if (!state.layout.reviewOpen || reviewEnvTargets(state).length === 0) {
+  if (!state.layout.reviewOpen || reviewTargets(state).length === 0) {
     return;
   }
   controller.scheduleReviewDiffRefreshTimer(() => {
     const next = getState();
-    if (!next.layout.reviewOpen || reviewEnvTargets(next).length === 0) {
+    if (!next.layout.reviewOpen || reviewTargets(next).length === 0) {
       controller.stopReviewDiffRefresh();
       return;
     }

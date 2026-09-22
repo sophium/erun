@@ -1,0 +1,2 @@
+audit: erun gate list --status bogus
+unsupported gate run status "bogus": expected "RUNNING", "PASSED", "FAILED" or "INCONCLUSIVE"

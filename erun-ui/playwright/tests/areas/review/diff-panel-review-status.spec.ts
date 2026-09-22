@@ -75,7 +75,10 @@ async function openDiffPanel(
   await app.sidebar.openEnvironment(tenant, environment);
   await dismissAIOccupancyPromptIfShown(app);
   await app.titlebar.toggleReviewPanel();
-  await expect(app.page.getByText('package main')).toBeVisible();
+  // Converge on the panel having opened, then on the diff it fetches: both are
+  // separate renders after the toggle, and expect's own budget is a fixed 10s.
+  await app.reviewPanel.waitForOpen();
+  await app.page.getByText('package main').waitFor({ state: 'visible' });
 }
 
 test.describe('diff panel — review-status chip', () => {
@@ -122,6 +125,53 @@ test.describe('diff panel — review-status chip', () => {
     await expect(app.reviewPanel.reviewStatusChip(envKey, 'No review')).toBeVisible();
     await expect(app.reviewPanel.reviewStatusChip(envKey, 'Checking status…')).toHaveCount(0);
     await expect(app.reviewPanel.reviewActionButton(envKey, 'Start a review')).toBeVisible();
+  });
+
+  // The chip's read is keyed on the environment and its branch, not on the
+  // render that happens to display it. loadDiffReviewStatus has no in-flight
+  // guard, so a dependency that changes identity on every render turns this
+  // background read into a loop -- each read dispatches, which re-renders, which
+  // reads again. The chip's own text cannot show that (it settles on the
+  // platform's latest answer either way) and the loop is silent while the
+  // platform is reachable, so the read count is the only observable: a settled
+  // panel reads once, and a refresh of the diff does not re-read at all.
+  test('reads the platform once for a settled panel, and a diff refresh does not re-read', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const envKey = `${seededEnv.tenant}/${seededEnv.environment}`;
+    let statusReads = 0;
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        await fulfillJSON(route, DIFF);
+        return;
+      }
+      if (body.method === 'EnvironmentWorkingIssue') {
+        await fulfillJSON(route, { available: true, branch: 'feature/x' });
+        return;
+      }
+      if (body.method === 'DiffReviewStatus') {
+        statusReads += 1;
+        await fulfillJSON(route, { state: 'none', canAdvanceMergeQueue: false });
+        return;
+      }
+      await route.continue();
+    });
+
+    await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
+    // The chip has resolved, so the panel is settled: any read from here is one
+    // the operator did not ask for.
+    await expect(app.reviewPanel.reviewStatusChip(envKey, 'No review')).toBeVisible();
+
+    // A refresh is a real dispatch of its own -- it re-renders the panel and
+    // reloads the diff, which is exactly the churn a re-read would ride on. It
+    // must not reach the status read: the environment and branch are unchanged.
+    await app.reviewPanel.refreshDiff();
+    await expect
+      .poll(() => statusReads, { message: 'one read per environment and branch' })
+      .toBe(1);
   });
 
   test('a READY review with a queue position offers Advance queue, reusing the merge-queue write', async ({

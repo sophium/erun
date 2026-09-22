@@ -114,6 +114,12 @@ var Routes = map[string]Class{
 	"GET /v1/gate-runs/{gate_run_id}":   TenantUserClass,
 	"PATCH /v1/gate-runs/{gate_run_id}": TenantUserClass,
 
+	// environment_events.go — reading an environment's event log and
+	// appending to it is reading and operating environments that already
+	// exist, the same reach TenantUser already has over ai_sessions.
+	"GET /v1/events": TenantUserClass,
+	"POST /v1/environments/{environment_id}/events": TenantUserClass,
+
 	// comments.go — driving review comments.
 	"GET /v1/reviews/{review_id}/comments":                       TenantUserClass,
 	"POST /v1/reviews/{review_id}/comments":                      TenantUserClass,
@@ -156,6 +162,16 @@ var Routes = map[string]Class{
 	// the same class as reading the environment itself.
 	"POST /v1/environments/{environment_id}/ai-sessions": TenantUserClass,
 	"GET /v1/environments/{environment_id}/ai-sessions":  TenantUserClass,
+
+	// jobs.go — recording and updating what this caller is working on is the
+	// same class as reporting a build result: an actor's own account of its
+	// work, not administration of the tenant. Reading the queue back is the
+	// same class as reading the tenant's builds.
+	"GET /v1/jobs":                               TenantUserClass,
+	"POST /v1/jobs":                              TenantUserClass,
+	"GET /v1/jobs/{job_id}":                      TenantUserClass,
+	"PATCH /v1/jobs/{job_id}":                    TenantUserClass,
+	"GET /v1/environments/{environment_id}/jobs": TenantUserClass,
 
 	// contexts.go — reading registered contexts is TenantUser; registering a
 	// new one is tenant administration (explicitly named in the issue this

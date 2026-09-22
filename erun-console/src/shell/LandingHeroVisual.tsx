@@ -14,7 +14,10 @@ export function LandingHeroVisual(): React.ReactElement {
       aria-hidden="true"
       className="relative mx-auto w-full max-w-md motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-6 motion-safe:duration-700 motion-safe:delay-150 motion-safe:fill-mode-both lg:mx-0"
     >
-      <div className="absolute -inset-8 -z-10 rounded-[2rem] bg-accent-brand/10 blur-3xl" />
+      <div
+        data-testid="landing-hero-glow"
+        className="absolute -inset-8 -z-10 rounded-[2rem] bg-accent-brand/10 blur-3xl"
+      />
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-lg">
         <div className="flex items-center gap-1.5 border-b border-border px-4 py-3">
           <span className="size-2.5 rounded-full bg-destructive/60" />

@@ -1,0 +1,11 @@
+audit: erun deploy --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in registry.example/test (the shared platform chart)
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
+deploy: defaulting runtime image to the tenant's team-devops image registry.example/test/team-devops:<VERSION> (imageOverrides.erun-devops)
+deploy: spec resolution failed: deploy team/dev: refusing to deploy the runtime chart from inside this environment's own pod — its ports, sshd state, worktree host path, runtime resources, and chart registry are defined by the host config store, not by the in-pod projection this process reads. Run `erun deploy --tenant team --environment dev --version <VERSION>` from the host CLI instead
+==> Deploy failed team/dev: deploy team/dev: refusing to deploy the runtime chart from inside this environment's own pod — its ports, sshd state, worktree host path, runtime resources, and chart registry are defined by the host config store, not by the in-pod projection this process reads. Run `erun deploy --tenant team --environment dev --version <VERSION>` from the host CLI instead
+deploy team/dev: refusing to deploy the runtime chart from inside this environment's own pod — its ports, sshd state, worktree host path, runtime resources, and chart registry are defined by the host config store, not by the in-pod projection this process reads. Run `erun deploy --tenant team --environment dev --version <VERSION>` from the host CLI instead

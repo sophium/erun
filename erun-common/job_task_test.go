@@ -17,13 +17,20 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 	type taskResult struct {
 		Value string `json:"value"`
 	}
+	// The work blocks until the test has read the handle back. Asserting the
+	// job reads running is only meaningful while the work is genuinely still
+	// in flight: a task that returns immediately can record its outcome
+	// before StartTaskEnvironmentJob has handed the record back, so the
+	// returned handle would legitimately read exited.
 	done := make(chan struct{})
+	release := make(chan struct{})
 	job, err := StartTaskEnvironmentJob(TaskEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "test-task",
 		Run: func(io.Writer) (any, error) {
 			defer close(done)
+			<-release
 			return taskResult{Value: "ok"}, nil
 		},
 	})
@@ -36,7 +43,9 @@ func TestStartTaskEnvironmentJobRecordsATypedResult(t *testing.T) {
 	if job.Kind != EnvironmentJobKindTask {
 		t.Fatalf("job kind = %q, want %q", job.Kind, EnvironmentJobKindTask)
 	}
-
+	// waitForEnvironmentJobFinished is the await that matters: it waits for
+	// the outcome to be recorded, not merely for the work to return.
+	close(release)
 	<-done
 	waitForEnvironmentJobFinished(t, tenant, environment, job.ID)
 
@@ -352,9 +361,17 @@ func TestAHandoffTaskJobIsExcludedFromItsParentsFinishCheck(t *testing.T) {
 		t.Fatalf("StartTaskEnvironmentJob: %v", err)
 	}
 	<-started
-	defer close(release)
 
 	if running := environmentJobRunningChildren(dir, "parent-job", time.Now()); len(running) != 0 {
 		t.Fatalf("running children = %+v, want none: a handoff task must never hold its parent's finish check", running)
 	}
+
+	// Unblock the task and wait for its goroutine to actually finish (not
+	// just signal release) before the test returns. Without this, the
+	// goroutine's own cleanup (recorder.update, then the heartbeat's
+	// deferred ReleaseEnvironmentActivityLease) keeps running concurrently
+	// with whatever test runs next, and races that later test's own
+	// XDG_CACHE_HOME isolation over the shared xdg package state.
+	close(release)
+	waitForEnvironmentJobFinished(t, tenant, environment, "release")
 }

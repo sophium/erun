@@ -133,7 +133,7 @@ func TestConversationListingNeverOffersAnotherOrchestratorsConversation(t *testi
 	defer app.shutdown(context.Background())
 
 	id := createAndStartOrchestrator(t, app)
-	other, err := app.CreateOrchestrator("stranger", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}})
+	other, err := app.CreateOrchestrator("stranger", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}

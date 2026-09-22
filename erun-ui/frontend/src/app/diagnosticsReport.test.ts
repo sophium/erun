@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+
+import { test } from 'vitest';
 
 import { formatDiagnosticsReport } from './diagnosticsReport';
 import type { OrchestratorInfo } from './slices/orchestratorsSlice';
@@ -100,4 +101,25 @@ test('an app context reports the desktop log when neither an env nor an orchestr
 
   assert.doesNotMatch(report, /environment: none selected/);
   assert.match(report, /no log captured yet/);
+});
+
+// A definition may name only directories, with no environment linked at all, so
+// the report must carry them: without this a directory-only orchestrator files a
+// bug report reading "linked environments: (none)", which looks like an
+// orchestrator with no scope rather than one working in directories.
+test('an orchestrator context names the directories it works in', () => {
+  const report = formatDiagnosticsReport({
+    generatedAt: '2026-08-24T00:00:00.000Z',
+    build: null,
+    context: {
+      kind: 'orchestrator',
+      orchestrator: orchestrator({ environments: [], directories: ['/tmp/scratch', '/tmp/notes'] }),
+      linkedEnvironments: [],
+      appLog: null,
+    },
+    uiTrace: [],
+  });
+
+  assert.match(report, /linked environments:\n {2}\(none\)/);
+  assert.match(report, /directories:\n {2}- \/tmp\/scratch\n {2}- \/tmp\/notes/);
 });

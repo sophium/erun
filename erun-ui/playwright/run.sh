@@ -41,8 +41,108 @@
 #                          named tests/areas/<area> directories. Ignored when
 #                          an explicit target is already given, or in
 #                          --e2e-k3d mode.
+#   ERUN_PLAYWRIGHT_ARTIFACTS_DIR
+#                          Root for everything the suite leaves behind --
+#                          Playwright's output dir, the HTML report, and every
+#                          frame a spec captures (fixtures/artifacts.ts).
+#                          Unset keeps them in the suite directory, which is
+#                          what lets a reviewing orchestrator read a pod's
+#                          frames out of the synced worktree. Set it for a run
+#                          whose tree is not its to write to: every
+#                          in-container gate run (the erun-devops Dockerfile's
+#                          test stage and scripts/repro-gate-contention.sh,
+#                          which bind-mounts the worktree over /src and runs as
+#                          root) points it at a container-local path, because
+#                          artifacts written as root into an environment's own
+#                          tree cannot be removed there and fail every later
+#                          run in that environment. An unusable root is
+#                          refused at config load, naming the directory.
 
 set -eu
+
+# reap_process_group (below) can only ever safely act when this script is
+# its own process group's leader -- when it is not, every other member is a
+# stranger it has no business signaling, so it correctly no-ops. Whether that
+# holds depends entirely on how this script was reached: `erun exec job
+# start`'s Setpgid already makes a standalone `./run.sh` invocation the
+# leader, but nothing gives it a fresh group when a Makefile recipe runs it
+# nested inside another job's own process tree (test-playwright inside `make
+# check-gate`, itself already detached with AGENT_GATE_DETACHED=1 set) -- there
+# it is just an ordinary child sharing that ancestor's group, its own reap is
+# a correct no-op, and nothing else in that tree reaps the sleep-stub session
+# orphans it spawns either. That gap, not a flaw in the reap logic itself, is
+# what let a fully-passing `make check-gate` run (not just a standalone suite
+# run) record as abandoned.
+#
+# setsid gives the real work a fresh, genuinely private session+group up
+# front, unconditionally, so reap_process_group always has one it provably
+# owns regardless of nesting depth. This invocation stays behind rather than
+# exec'ing into setsid: exec'ing would replace this exact pid's image while
+# leaving its pid and (crucially) its process-group membership untouched at
+# the OS level -- except setsid(2) itself then moves that same pid into a
+# brand-new session/group as its leader, which silently walks it out of
+# whatever group a job supervisor recorded for cancellation. A cancel sent to
+# that recorded group afterwards reaches only the ancestors still sharing it
+# (make, the wrapping sh) and never this process or anything it spawns.
+# Backgrounding the setsid'd reinvocation instead keeps this process a member
+# of its original group, where a cancel still finds it, and forwards the
+# signal into the child's own private group so the reach is restored.
+#
+# Skipped when already the leader (the ordinary standalone path) to avoid an
+# unnecessary extra layer, and when setsid is unavailable (macOS has no
+# util-linux setsid by default) -- there this falls back to today's
+# leader-or-no-op behavior, not a regression.
+if [ -z "${RUN_SH_OWN_GROUP:-}" ] && command -v setsid >/dev/null 2>&1; then
+	own_pgid_at_start=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
+	if [ -z "$own_pgid_at_start" ] || [ "$own_pgid_at_start" != "$$" ]; then
+		RUN_SH_OWN_GROUP=1
+		export RUN_SH_OWN_GROUP
+		# `-w` makes setsid itself block for the real work's exit and relay
+		# its status, so `$!` names a pid that stays put in THIS group (it
+		# only forks the actual session leader) and can be `wait`-ed on here.
+		setsid -w "$0" "$@" &
+		child=$!
+		# The real private session belongs to setsid's own forked child, not
+		# to setsid itself -- resolve its pgid by ppid rather than assuming a
+		# fixed pid offset from $child.
+		child_pgid=$(ps -axo pid=,ppid=,pgid= 2>/dev/null | awk -v p="$child" '$2==p {print $3; exit}')
+		forward_signal() {
+			if [ -n "$child_pgid" ]; then
+				kill -s "$1" "-$child_pgid" 2>/dev/null || true
+			else
+				# No resolved group to target -- signalling "-" with nothing
+				# after it would fall through to an unintended default
+				# (potentially this process's own group). Fall back to the
+				# single pid we do know about rather than guess at a group.
+				kill -s "$1" "$child" 2>/dev/null || true
+			fi
+		}
+		trap 'forward_signal TERM' TERM
+		trap 'forward_signal INT' INT
+		trap 'forward_signal HUP' HUP
+		# A signal delivered while `wait` is blocked interrupts it before the
+		# child has actually exited (POSIX: an interrupted wait returns a
+		# status greater than 128, distinct from a real exit status), so the
+		# first return can be that interruption rather than the child's own
+		# code. Guard it with `if` -- a bare `wait` whose nonzero interrupted
+		# return trips `set -e` would abort this script right here, before
+		# the loop below gets a chance to re-wait for the real, final status
+		# once the child has genuinely exited.
+		if wait "$child"; then
+			status=0
+		else
+			status=$?
+		fi
+		while kill -0 "$child" 2>/dev/null; do
+			if wait "$child"; then
+				status=0
+			else
+				status=$?
+			fi
+		done
+		exit "$status"
+	fi
+fi
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ERUN_UI_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
@@ -62,6 +162,113 @@ if [ -z "${AGENT_GATE_DETACHED:-}" ] && [ "${RUN_SH_AGENT_GATED:-0}" != "1" ]; t
 	exec "$ERUN_UI_DIR/../scripts/agent-gate.sh" ui-playwright "erun-ui/playwright/run.sh $*" -- "$SCRIPT_DIR/run.sh" "$@"
 fi
 
+# From here on this is the real work: build, lint, and the suite itself, now
+# running in its own private session/group (see the setsid block above). Wire
+# up cancellation and cleanup before any of that starts, not just before the
+# suite invocation at the bottom of the file -- a cancel during the build or
+# yarn-install phase deserves the same reach as one during the suite run.
+#
+# cleanup_isolated_home removes the throwaway HOME the isolated config root
+# below creates. Defined here, ahead of that section, so an early cancel can
+# still call it safely; ERUN_PLAYWRIGHT_HOME_CREATED defaults to 0 below for
+# the same reason -- referencing it before the isolated-root section has run
+# must not be an unset-variable error under `set -u`.
+ERUN_PLAYWRIGHT_HOME_CREATED=0
+cleanup_isolated_home() {
+	if [ "${ERUN_PLAYWRIGHT_HOME_CREATED:-0}" -eq 1 ]; then
+		rm -rf "$ERUN_PLAYWRIGHT_HOME"
+	fi
+}
+
+# reap_process_group kills anything still alive in this script's own process
+# group before it exits. The seeded PATH stub for `erun open` (fixtures/
+# seedRoot.ts) execs `sleep` to hold a tab's session open for the life of the
+# suite, and that child is never explicitly waited on or killed by anything
+# that tears the suite down -- stopping the headless backend it belongs to
+# only waits for the backend's own process to exit, not its children. Left
+# alone, that orphan stays a member of this script's process group long after
+# this script itself is done, and a supervisor watching this script for
+# exactly that shape (background work started and never waited for) records
+# a fully passing run as abandoned.
+#
+# Only ever acts when this script's own pid is the process group's own
+# leader: that is true whenever something gave this invocation a fresh group
+# (a supervisor's Setpgid, or ordinary job-control launching it as its own
+# foreground job), and in that case every other member is provably this
+# script's own descendant -- nothing it would be unsafe to signal. When it is
+# not the leader (this pgid predates this script, e.g. a caller's shell with
+# job control off), this is a no-op rather than a guess at what else shares
+# that group.
+#
+# The group is enumerated via `ps` exactly once, excluding zombies (completed
+# work nobody has reaped yet, not abandoned background work -- the same
+# reasoning the Go supervisor's own check applies in job_process_unix.go) and
+# the `ps`/`awk` pair this one scan itself forks, which otherwise show up as
+# members of the very group they are scanning (a live scan necessarily
+# includes whatever is running it) and never disappear from a *repeated*
+# scan -- that self-sighting used to burn this function's whole settle budget
+# on every single run, clean or not, and left it returning with no actual
+# confirmation the group was empty. Convergence after that is checked with
+# the `kill -0` builtin against the exact pids just captured, which forks
+# nothing and so cannot rediscover its own noise.
+reap_process_group() {
+	own_pgid=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
+	if [ -z "$own_pgid" ] || [ "$own_pgid" != "$$" ]; then
+		return 0
+	fi
+	pids=$(ps -axo pid=,pgid=,stat=,comm= 2>/dev/null | awk -v pg="$own_pgid" -v me="$$" \
+		'$1!=me && $2==pg && $3 !~ /Z/ && $4!="ps" && $4!="awk" {print $1}')
+	[ -n "$pids" ] || return 0
+	# shellcheck disable=SC2086
+	kill -TERM $pids 2>/dev/null || true
+	still_alive() {
+		alive=""
+		for pid in $pids; do
+			if kill -0 "$pid" 2>/dev/null; then
+				alive="$alive $pid"
+			fi
+		done
+		pids="$alive"
+	}
+	settle_attempts=0
+	while [ "$settle_attempts" -lt 20 ]; do
+		still_alive
+		[ -z "$pids" ] && return 0
+		sleep 0.05
+		settle_attempts=$((settle_attempts + 1))
+	done
+	# shellcheck disable=SC2086
+	kill -KILL $pids 2>/dev/null || true
+	# Confirm the kill actually took effect before returning -- SIGKILL's
+	# delivery is not instantaneous under load, and returning without checking
+	# is exactly the gap that could leave a real straggler alive the instant
+	# the supervisor samples this group.
+	settle_attempts=0
+	while [ "$settle_attempts" -lt 20 ]; do
+		still_alive
+		[ -z "$pids" ] && return 0
+		sleep 0.05
+		settle_attempts=$((settle_attempts + 1))
+	done
+}
+
+trap 'reap_process_group; cleanup_isolated_home' EXIT
+
+# A cancel signals this whole private group at once (see the setsid block
+# above), which includes whatever this script currently has running in the
+# foreground -- that sibling dying from the same broadcast is what lets this
+# shell's own blocked wait return promptly. But without a trap of its own for
+# the signal, the shell's default disposition for TERM/INT/HUP is to
+# terminate immediately, which does NOT run the EXIT trap above (verified: a
+# signal death with no trap installed for that signal skips the EXIT trap
+# entirely in both dash and bash). Converting the signal into an explicit
+# `exit` is what makes the EXIT trap -- and so reap_process_group and
+# cleanup_isolated_home -- actually run on a real cancel, not just on a clean
+# finish.
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
 FORCE_BUILD=0
 EXPLICIT_SKIP_BUILD=0
 HEADED=0
@@ -69,6 +276,7 @@ PORT=34123
 PLAYWRIGHT_ARGS=""
 E2E_K3D=0
 SKIP_LINT=0
+SKIP_APP_GATES=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -78,6 +286,22 @@ while [ $# -gt 0 ]; do
 			;;
 		--skip-lint)
 			SKIP_LINT=1
+			shift
+			;;
+		--skip-app-gates)
+			# Skip only the gates build.sh runs around the desktop binary
+			# (erun-ui/frontend typecheck, lint, format:check, test, and
+			# golangci-lint erun-ui), not this suite's own. `make check`
+			# passes it because test-playwright depends on test-frontend,
+			# which has already run exactly those gates as its own parallel
+			# jobs -- build.sh would be running them a second time, and
+			# they are the largest step in the in-image gate.
+			#
+			# Deliberately not --skip-lint: that would also drop this
+			# workspace's own typecheck/lint/format:check, which
+			# test-frontend does not cover (it gates erun-kit,
+			# erun-console and erun-ui/frontend, never erun-ui/playwright).
+			SKIP_APP_GATES=1
 			shift
 			;;
 		--e2e-k3d)
@@ -226,12 +450,13 @@ if [ "$BUILD_NEEDED" -eq 1 ] && [ "$STALE_ONLY" -eq 1 ] && [ "$EXPLICIT_SKIP_BUI
 fi
 
 if [ "$BUILD_NEEDED" -eq 1 ]; then
-	printf '>> playwright: building %s (%s)...\n' "$BIN_PATH" "$BUILD_REASON" >&2
-	if [ "$SKIP_LINT" -eq 1 ]; then
+	_step_started=$(date +%s)
+	if [ "$SKIP_LINT" -eq 1 ] || [ "$SKIP_APP_GATES" -eq 1 ]; then
 		"$ERUN_UI_DIR/build.sh" --skip-lint "$BIN_PATH"
 	else
 		"$ERUN_UI_DIR/build.sh" "$BIN_PATH"
 	fi
+	printf '>> playwright: building %s (%s) [%ss]\n' "$BIN_PATH" "$BUILD_REASON" "$(($(date +%s) - _step_started))" >&2
 fi
 
 if [ ! -x "$BIN_PATH" ]; then
@@ -243,8 +468,9 @@ fi
 # and `playwright install` short-circuits when the bundled Chromium revision
 # is already cached, so this is cheap on warm runs.
 if [ ! -d node_modules ] || [ ! -f node_modules/.yarn-integrity ]; then
-	printf '>> playwright: yarn install\n' >&2
-	"$YARN_BIN" install --frozen-lockfile
+	_step_started=$(date +%s)
+	"$YARN_BIN" install --frozen-lockfile --prefer-offline --network-timeout 600000
+	printf '>> playwright: yarn install [%ss]\n' "$(($(date +%s) - _step_started))" >&2
 fi
 
 PLAYWRIGHT_BIN="$SCRIPT_DIR/node_modules/.bin/playwright"
@@ -258,16 +484,32 @@ fi
 if [ "$SKIP_LINT" -eq 1 ]; then
 	printf '>> SKIPPING typecheck/lint/format:check (--skip-lint)\n' >&2
 else
-	printf '>> playwright: typecheck + lint + format:check\n' >&2
+	_step_started=$(date +%s)
+	# ERUN_PLAYWRIGHT_LINT_CACHE_DIR opts into eslint/prettier result caching,
+	# the same way the Makefile's three workspace gates already cache into
+	# FRONTEND_LINT_CACHE_DIR. Unset (a bare local run) keeps the previous
+	# uncached behaviour rather than scattering cache files into the tree.
+	# Content-addressed rather than mtime-based, because every COPY into the
+	# image build context resets mtimes and would defeat a timestamp check.
 	"$YARN_BIN" typecheck
-	"$YARN_BIN" lint
-	"$YARN_BIN" format:check
+	if [ -n "${ERUN_PLAYWRIGHT_LINT_CACHE_DIR:-}" ]; then
+		mkdir -p "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/eslint"
+		"$YARN_BIN" lint -- --cache --cache-strategy content \
+			--cache-location "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/eslint/playwright/"
+		"$YARN_BIN" format:check -- --cache --cache-strategy content \
+			--cache-location "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/prettier-playwright.json"
+	else
+		"$YARN_BIN" lint
+		"$YARN_BIN" format:check
+	fi
+	printf '>> playwright: typecheck + lint + format:check [%ss]\n' "$(($(date +%s) - _step_started))" >&2
 fi
 
 # `playwright install chromium` is idempotent — it checks whether the
 # expected revision is already on disk and skips the download when it is.
-printf '>> playwright: ensuring chromium\n' >&2
+_step_started=$(date +%s)
 "$PLAYWRIGHT_BIN" install chromium >/dev/null
+printf '>> playwright: ensuring chromium [%ss]\n' "$(($(date +%s) - _step_started))" >&2
 
 ERUN_PLAYWRIGHT_PORT="$PORT"
 export ERUN_PLAYWRIGHT_PORT
@@ -276,64 +518,14 @@ export ERUN_PLAYWRIGHT_PORT
 # child process run against a throwaway HOME, so the suite never reads or
 # writes the developer's real ~/.erun / ~/.config/erun. playwright.config.ts
 # points the webServer's HOME/XDG_* at this root, global-setup seeds the
-# deterministic baseline, and global-teardown removes it. The EXIT trap
-# below covers aborted runs; a caller-provided ERUN_PLAYWRIGHT_HOME is
-# respected and never deleted by the trap.
-ERUN_PLAYWRIGHT_HOME_CREATED=0
+# deterministic baseline, and global-teardown removes it. cleanup_isolated_home
+# (registered on the EXIT trap near the top of this script) covers aborted
+# runs; a caller-provided ERUN_PLAYWRIGHT_HOME is respected and never deleted.
 if [ -z "${ERUN_PLAYWRIGHT_HOME:-}" ]; then
 	ERUN_PLAYWRIGHT_HOME=$(mktemp -d "${TMPDIR:-/tmp}/erun-playwright-home.XXXXXX")
 	ERUN_PLAYWRIGHT_HOME_CREATED=1
 fi
 export ERUN_PLAYWRIGHT_HOME
-cleanup_isolated_home() {
-	if [ "$ERUN_PLAYWRIGHT_HOME_CREATED" -eq 1 ]; then
-		rm -rf "$ERUN_PLAYWRIGHT_HOME"
-	fi
-}
-
-# reap_process_group kills anything still alive in this script's own process
-# group before it exits. The seeded PATH stub for `erun open` (fixtures/
-# seedRoot.ts) execs `sleep` to hold a tab's session open for the life of the
-# suite, and that child is never explicitly waited on or killed by anything
-# that tears the suite down -- stopping the headless backend it belongs to
-# only waits for the backend's own process to exit, not its children. Left
-# alone, that orphan stays a member of this script's process group long after
-# this script itself is done, and a supervisor watching this script for
-# exactly that shape (background work started and never waited for) records
-# a fully passing run as abandoned.
-#
-# Only ever acts when this script's own pid is the process group's own
-# leader: that is true whenever something gave this invocation a fresh group
-# (a supervisor's Setpgid, or ordinary job-control launching it as its own
-# foreground job), and in that case every other member is provably this
-# script's own descendant -- nothing it would be unsafe to signal. When it is
-# not the leader (this pgid predates this script, e.g. a caller's shell with
-# job control off), this is a no-op rather than a guess at what else shares
-# that group.
-reap_process_group() {
-	own_pgid=$(ps -axo pid=,pgid= 2>/dev/null | awk -v me="$$" '$1==me {print $2}')
-	if [ -z "$own_pgid" ] || [ "$own_pgid" != "$$" ]; then
-		return 0
-	fi
-	survivors() {
-		ps -axo pid=,pgid= 2>/dev/null | awk -v pg="$own_pgid" -v me="$$" '$2==pg && $1!=me {print $1}'
-	}
-	pids=$(survivors)
-	[ -n "$pids" ] || return 0
-	# shellcheck disable=SC2086
-	kill -TERM $pids 2>/dev/null || true
-	settle_attempts=0
-	while [ "$settle_attempts" -lt 20 ]; do
-		pids=$(survivors)
-		[ -z "$pids" ] && return 0
-		sleep 0.05
-		settle_attempts=$((settle_attempts + 1))
-	done
-	# shellcheck disable=SC2086
-	kill -KILL $pids 2>/dev/null || true
-}
-
-trap 'reap_process_group; cleanup_isolated_home' EXIT
 
 # Opt-in k3d e2e mode (issue #647): un-stub the backend (real docker/kubectl/
 # helm + the real erun CLI), register binfmt for the mandatory multi-arch build,
@@ -367,20 +559,33 @@ fi
 # those directories under tests/. An explicit caller target -- a bare CLI
 # arg, or the e2e-k3d default above -- always wins; this only supplies a
 # default when nothing else already set one.
-if [ -z "$PLAYWRIGHT_ARGS" ] && [ "$E2E_K3D" -eq 0 ] && [ -n "${PLAYWRIGHT_TEST_AREAS:-}" ] && [ "$PLAYWRIGHT_TEST_AREAS" != "all" ]; then
-	dirs="tests/smoke"
-	old_ifs="$IFS"
-	IFS=,
-	for token in $PLAYWRIGHT_TEST_AREAS; do
-		if [ "$token" != "smoke" ] && [ -n "$token" ]; then
-			dirs="$dirs tests/areas/$token"
-		fi
-	done
-	IFS="$old_ifs"
-	for d in $dirs; do
-		PLAYWRIGHT_ARGS="$PLAYWRIGHT_ARGS \"$d\""
-	done
-	printf '>> playwright: PLAYWRIGHT_TEST_AREAS=%s -> running %s\n' "$PLAYWRIGHT_TEST_AREAS" "$dirs" >&2
+#
+# Which selection the gate used is reported on both branches, not only on the
+# narrowing one. A run that covers everything has to be as legible as a
+# narrowed one: unset, empty, and literally "all" all mean the full suite, and
+# a resolver that failed upstream looks exactly like a tree that genuinely
+# resolved to "all" from here. Staying quiet on the full-suite branch is what
+# let `make check` inside an agent pod run the full suite on a clean tree
+# while a local `erun exec resolve-playwright-areas` on that same tree printed
+# `smoke` -- the difference existed only in a value nobody printed.
+if [ -z "$PLAYWRIGHT_ARGS" ] && [ "$E2E_K3D" -eq 0 ]; then
+	if [ -n "${PLAYWRIGHT_TEST_AREAS:-}" ] && [ "$PLAYWRIGHT_TEST_AREAS" != "all" ]; then
+		dirs="tests/smoke"
+		old_ifs="$IFS"
+		IFS=,
+		for token in $PLAYWRIGHT_TEST_AREAS; do
+			if [ "$token" != "smoke" ] && [ -n "$token" ]; then
+				dirs="$dirs tests/areas/$token"
+			fi
+		done
+		IFS="$old_ifs"
+		for d in $dirs; do
+			PLAYWRIGHT_ARGS="$PLAYWRIGHT_ARGS \"$d\""
+		done
+		printf '>> playwright: area selection %s -> running %s\n' "$PLAYWRIGHT_TEST_AREAS" "$dirs" >&2
+	else
+		printf '>> playwright: area selection %s -> running the full suite\n' "${PLAYWRIGHT_TEST_AREAS:-unset}" >&2
+	fi
 fi
 
 PLAYWRIGHT_FLAGS=""
@@ -388,6 +593,11 @@ if [ "$HEADED" -eq 1 ]; then
 	PLAYWRIGHT_FLAGS="--headed"
 fi
 
-printf '>> playwright: running tests on port %s\n' "$PORT" >&2
+_step_started=$(date +%s)
+_suite_status=0
 # shellcheck disable=SC2086
-eval "\"$PLAYWRIGHT_BIN\" test $PLAYWRIGHT_FLAGS $PLAYWRIGHT_ARGS"
+eval "\"$PLAYWRIGHT_BIN\" test $PLAYWRIGHT_FLAGS $PLAYWRIGHT_ARGS" || _suite_status=$?
+# Reported even on failure: a suite that burned minutes before going red
+# is exactly the one worth seeing in the profile.
+printf '>> playwright: running tests on port %s [%ss]\n' "$PORT" "$(($(date +%s) - _step_started))" >&2
+[ "$_suite_status" -eq 0 ] || exit "$_suite_status"

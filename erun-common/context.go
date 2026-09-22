@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"reflect"
 	"strings"
 )
 
@@ -20,10 +22,25 @@ type Context struct {
 	// policy, so it rides the context rather than the docker command target,
 	// which flows into the env-agnostic resolvers where policy must not leak.
 	// Zero means "resolve it" (see resolveBuildJobs); one is strictly sequential.
-	BuildJobs                  int
-	Stdin                      io.Reader
-	Stdout                     io.Writer
-	Stderr                     io.Writer
+	BuildJobs int
+	Stdin     io.Reader
+	Stdout    io.Writer
+	Stderr    io.Writer
+	// Command is the operator-facing invocation of the command that is running
+	// (for example "erun usage", "erun outputs list"), set once at command
+	// entry. Resolution failures name the command's own recovery from it, so a
+	// failure names the operation the operator actually ran rather than a fixed
+	// one. Empty for callers that are not a CLI command (the desktop app, MCP),
+	// which get the command-free wording instead of a borrowed name.
+	Command string
+	// CommandScopesTenantByFlag reports whether Command takes a --tenant flag
+	// that scopes resolution (rather than, say, `list`'s --tenant, which selects
+	// version-drift reporting). It gates whether the recovery may name that flag
+	// as the fix: offering a flag that does not do what the operator wants is the
+	// same defect as naming the wrong command, so a command with no such flag
+	// (build and push take the tenant positionally) gets a recovery that names
+	// the command without asserting a flag it does not have.
+	CommandScopesTenantByFlag  bool
 	KubernetesContextPreflight KubernetesContextPreflightFunc
 	// RegistryForwards owns any kubectl port-forwards a cluster registry needs.
 	// It is set once at command entry so the forward's lifetime spans registry
@@ -35,6 +52,19 @@ type Context struct {
 	// push, deploy), set by that command's umbrella and nil everywhere else —
 	// see timing.go. Unexported: only erun-common's own umbrellas start one.
 	timing *stepTiming
+	// gateTestStage is the run's record of what each gate image's real `docker
+	// build` did with its Dockerfile's test stage, set by the build and release
+	// umbrellas alongside the timing root and nil everywhere else. It is what
+	// lets gateTestStageProvenanceLines report a run BuildKit served from its
+	// layer cache as the replay it is instead of as a live gate run — see
+	// build_gate_test_stage_evidence.go.
+	gateTestStage *gateTestStageProvenance
+	// progress is the live heartbeat for the command's active build run, set by
+	// RunDockerBuilds (or RunDockerBuild for a lone image) and nil everywhere
+	// else. Every image the run builds registers with it, so one ticker names
+	// whatever is still building however the run is scheduled — see
+	// build_heartbeat.go.
+	progress *buildHeartbeat
 	// MCPTool names the MCP tool that initiated this call, set only by
 	// erun-mcp's tool handlers before they call into shared execution.
 	// newPlatformClientForAlias forwards it to erun-backend-api as an audit
@@ -56,7 +86,7 @@ func (c Context) WriteResult(v any) error {
 	if out == nil {
 		return nil
 	}
-	encoded, err := json.MarshalIndent(v, "", "  ")
+	encoded, err := json.MarshalIndent(normalizeResultSlices(v), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -64,7 +94,47 @@ func (c Context) WriteResult(v any) error {
 	return err
 }
 
+// normalizeResultSlices replaces a top-level nil slice with an empty one, so a
+// result that resolved to no rows marshals as [] rather than null. The two are
+// not interchangeable for the orchestrators --output json exists for: null
+// conflates "we queried and nothing matched" with "this was not determined",
+// while [] can only mean the former. A consumer that iterates the result or
+// reads .length otherwise has to null-guard every command whose cardinality it
+// cannot predict from the surface.
+//
+// Only the top level is rewritten. A nil field inside a struct is left alone:
+// there, absence is part of the declared shape (omitempty marks a value that is
+// genuinely not part of this result), and filling it in would turn a reported
+// absence into a claim -- "refreshFailures": [] asserts the refresh ran and
+// nothing failed, which is false when it was never attempted.
+//
+// Maps are deliberately out of scope: the defect this normalises is a list
+// shape, and widening the rewrite to every container kind is a larger change
+// than the reported evidence supports.
+func normalizeResultSlices(v any) any {
+	if v == nil {
+		return v
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice || !rv.IsNil() {
+		return v
+	}
+	return reflect.MakeSlice(rv.Type(), 0, 0).Interface()
+}
+
 type KubernetesContextPreflightFunc func(Context, string) error
+
+// stderrOnlyContext is for internal status checks that have no caller-supplied
+// Context to thread through (e.g. a background token-verify probe) but still
+// call into code that traces via Context.Trace. A zero-value Context leaves
+// Logger's stdout writer unset, which falls back to the real os.Stdout -- so a
+// diagnostic line lands ahead of a command's own stdout result instead of
+// beside its other diagnostics on stderr. This mirrors how a real transport
+// context is wired (Logger's stdout pointed at stderr) without requiring a
+// caller-supplied Context to exist yet.
+func stderrOnlyContext() Context {
+	return Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
+}
 
 // Trace is the audit channel for decisions, inputs, and outputs; it stays
 // visible at default verbosity so a user can audit a command's plan without

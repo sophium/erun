@@ -38,18 +38,39 @@ func newContextListCmd(store common.CloudContextStore, deps common.CloudContextD
 func runContextListCommand(ctx common.Context, store common.CloudContextStore, deps common.CloudContextDependencies) error {
 	// Status isn't persisted, so it must be refreshed from AWS to show the
 	// live authoritative state rather than an empty value.
-	contexts, err := common.RefreshCloudContextStatuses(ctx, store, deps)
+	result, err := common.RefreshCloudContextList(ctx, store, deps)
 	if err != nil {
 		return err
+	}
+	return writeCloudContextList(ctx, result)
+}
+
+func writeCloudContextList(ctx common.Context, result common.CloudContextListResult) error {
+	if err := ctx.WriteResult(result); err != nil {
+		return err
+	}
+	if ctx.Output == common.OutputJSON {
+		return nil
 	}
 	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Contexts:"); err != nil {
 		return err
 	}
-	if len(contexts) == 0 {
+	// A batched refresh covers every context sharing its (alias, region) and
+	// fails as one fact, so it is reported once here rather than on each row it
+	// covered -- where it repeats the whole command per context and quotes the
+	// instance IDs of every context that shared the batch.
+	for _, failure := range result.RefreshFailures {
+		line := "  status refresh failed for alias=" + quotedValueOrNone(failure.Alias) +
+			" region=" + quotedValueOrNone(failure.Region) + ": " + failure.Message
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
+			return err
+		}
+	}
+	if len(result.CloudContexts) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "  none")
 		return err
 	}
-	for _, context := range contexts {
+	for _, context := range result.CloudContexts {
 		if err := writeCloudContext(ctx, context); err != nil {
 			return err
 		}

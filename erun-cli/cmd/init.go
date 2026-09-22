@@ -405,6 +405,23 @@ func preferCurrentKubernetesContext(contexts []string, current string) []string 
 	return result
 }
 
+// tenantPromptHasAnswer reports whether a non-terminal stdin carries an answer
+// to read. Piped input must keep driving the plain select exactly as it always
+// has, so this peeks rather than declaring every non-terminal stdin unanswerable:
+// only an exhausted stdin (the "< /dev/null" case) is.
+var tenantPromptHasAnswer = func() bool {
+	_, err := plainPromptInput().Peek(1)
+	return err == nil
+}
+
+// tenantSelectionUnavailable reports whether this run has no way to ask which
+// tenant to use, and so must not print a menu it cannot read an answer to. A
+// piped answer still counts as a way to ask -- the plain prompt reads it -- so
+// only an exhausted stdin is unanswerable.
+func tenantSelectionUnavailable() bool {
+	return !stdinIsTerminal() && !tenantPromptHasAnswer()
+}
+
 func selectTenantPrompt(run SelectRunner, tenants []common.TenantConfig) (common.TenantSelectionResult, error) {
 	items := make([]string, 0, len(tenants)+1)
 	for _, tenant := range tenants {

@@ -16,6 +16,7 @@ import { applyPin, closePinVersion, previewPin, revertPin } from '@/app/pinVersi
 import type { PinPlanView } from '@/app/slices/pinVersionSlice';
 import { PIN_LATEST_STABLE_TARGET, setPinTarget } from '@/app/slices/pinVersionSlice';
 import type { RootState } from '@/app/store';
+import { InlineAlert } from '@/components/app/InlineAlert';
 import type { UISelection } from '@/types';
 
 import { PermissionNotice } from './InlineAlert';
@@ -72,9 +73,13 @@ export function PinVersionDialog(): React.ReactElement {
           <DialogTitle>Change erun version</DialogTitle>
           <DialogDescription>
             Re-pins every erun reference for <span className="font-mono">{label}</span> together —
-            the Terraform module refs, each umbrella chart’s erun dependencies, the build-env image
-            tag, and the environment’s runtime version. Nothing is deployed: realizing the version
-            stays a separate <span className="font-mono">terraform apply</span> and{' '}
+            the Terraform module refs, an erun image reference set directly in Terraform variables
+            (e.g. the cluster-edge module’s <span className="font-mono">dns01_webhook_image</span>),
+            each umbrella chart’s erun dependencies, the build-env image tag, a stated runtime chart
+            or runtime image naming erun’s own stock release, and the environment’s own runtime
+            version when that environment runs erun’s own runtime image. Nothing is deployed:
+            realizing the version stays a separate{' '}
+            <span className="font-mono">terraform apply</span> and{' '}
             <span className="font-mono">deploy</span>.
           </DialogDescription>
         </DialogHeader>
@@ -100,11 +105,7 @@ export function PinVersionDialog(): React.ReactElement {
 
           {plan ? <PinPlanTable plan={plan} applied={applied} /> : null}
 
-          {error ? (
-            <p role="alert" className="text-sm break-words text-destructive">
-              {error}
-            </p>
-          ) : null}
+          {error ? <InlineAlert>{error}</InlineAlert> : null}
           {status ? (
             <p role="status" className="text-sm break-words text-muted-foreground">
               {status}
@@ -225,33 +226,57 @@ function PinPlanTable({
   plan: PinPlanView;
   applied: boolean;
 }): React.ReactElement {
-  if (plan.aligned) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Every reference is already on <span className="font-mono">{plan.target}</span> — nothing to
-        change.
-      </p>
-    );
+  return (
+    <>
+      {plan.aligned ? (
+        <p className="text-sm text-muted-foreground">
+          Every reference is already on <span className="font-mono">{plan.target}</span> — nothing
+          to change.
+        </p>
+      ) : (
+        <div className="max-h-72 overflow-y-auto rounded-md border border-border/60">
+          <table
+            className="w-full text-sm"
+            aria-label={applied ? 'Re-pinned references' : 'Pending pin changes'}
+          >
+            <tbody className="divide-y divide-border/60">
+              {plan.sites.map((site) => (
+                <tr key={`${site.kind}:${site.label}`} className={site.aligned ? 'opacity-50' : ''}>
+                  <td className="px-3 py-1.5 font-mono text-[11px] break-all">{site.label}</td>
+                  <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                    <span className="font-mono text-muted-foreground">{site.current || '—'}</span>
+                    <span aria-hidden="true"> → </span>
+                    <span className="font-mono">{site.target}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <PinSkippedNotes notes={plan.skipped} />
+    </>
+  );
+}
+
+// PinSkippedNotes reports what a re-pin deliberately did not touch and why. A
+// repin site can be absent from the plan because it is already aligned or
+// because the environment's own config puts it on another release line, and the
+// operator has to be able to tell those apart: an environment that runs its own
+// runtime image keeps its runtimeversion, and the plan says so rather than
+// leaving a row they expected simply missing.
+function PinSkippedNotes({ notes }: { notes?: string[] }): React.ReactElement | null {
+  if (!notes?.length) {
+    return null;
   }
   return (
-    <div className="max-h-72 overflow-y-auto rounded-md border border-border/60">
-      <table
-        className="w-full text-sm"
-        aria-label={applied ? 'Re-pinned references' : 'Pending pin changes'}
-      >
-        <tbody className="divide-y divide-border/60">
-          {plan.sites.map((site) => (
-            <tr key={`${site.kind}:${site.label}`} className={site.aligned ? 'opacity-50' : ''}>
-              <td className="px-3 py-1.5 font-mono text-[11px] break-all">{site.label}</td>
-              <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                <span className="font-mono text-muted-foreground">{site.current || '—'}</span>
-                <span aria-hidden="true"> → </span>
-                <span className="font-mono">{site.target}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="mt-2 text-xs text-muted-foreground" data-testid="pin-skipped">
+      <p className="font-medium">Left alone:</p>
+      <ul className="mt-1 list-disc space-y-1 pl-4">
+        {notes.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
     </div>
   );
 }

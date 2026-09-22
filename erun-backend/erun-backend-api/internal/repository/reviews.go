@@ -198,6 +198,12 @@ func (r *ReviewRepository) FindActiveMergeReview(ctx context.Context, targetBran
 // targetBranch — the platform's own record of what the branch's tip was the
 // last time a queue-driven merge landed on it. ErrNotFound means no review
 // has ever merged onto this branch through the queue yet.
+//
+// A MERGED review with no last_merged_build_id is skipped: that is a review
+// reconciled against the branch's history rather than merged through the
+// queue, so it records no commit this could anchor on, and returning it would
+// make gatedTargetTip resolve an empty build id — failing every subsequent
+// queue-driven merge on the branch.
 func (r *ReviewRepository) FindLastMergedReview(ctx context.Context, targetBranch string) (model.Review, error) {
 	var review model.Review
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
@@ -206,6 +212,7 @@ func (r *ReviewRepository) FindLastMergedReview(ctx context.Context, targetBranc
 		  FROM reviews
 		 WHERE target_branch = ?
 		   AND status = 'MERGED'
+		   AND last_merged_build_id IS NOT NULL
 		 ORDER BY updated_at DESC, review_id DESC
 		 LIMIT 1
 	`, targetBranch).Scan(ctx, &review)

@@ -32,7 +32,7 @@ const (
 	envUsageEvent               = "env-usage"
 	envNodeEvent                = "env-node"
 	appCloseGateEvent           = "app-close-gate"
-	appSessionEnvVar            = "ERUN_UI_SESSION"
+	appSessionEnvVar            = eruncommon.DesktopSessionEnvVar
 )
 
 type erunUIStore interface {
@@ -156,9 +156,20 @@ type App struct {
 	// port-forward that holds its local port while its edge answers nothing.
 	// See environment_forward_repair.go.
 	forwardRepairs map[string]forwardRepairEpisode
+	// edgeOutages tracks, per environment, an "edge is not answering" entry
+	// logged when an orchestrator wired it, until the sweep sees that edge
+	// answer and logs the matching exit. See orchestrator_edge_recovery.go.
+	edgeOutages    map[string]orchestratorEdgeOutage
 	busyEnvs       map[string]int
 	workspaceSyncs map[string]*workspaceSyncWorker
 	orchestrators  map[string]*orchestratorSession
+	// unmanagedPacingReason is pacingLastReason's counterpart for a configured
+	// orchestrator this desktop holds no session for and therefore has no
+	// orchestratorSession to keep it on: the last pacing reason logged for it,
+	// so the reconciler's decision line covers the whole configured population
+	// without repeating itself every 15s tick. Guarded by a.mu, like the map it
+	// shadows. See orchestratorPacingUnmanagedRows.
+	unmanagedPacingReason map[string]orchestratorPacingReason
 	// investigations bounds how many failure reports become agents, for how
 	// long, and on what input. It holds its own lock; never call into it while
 	// holding a.mu, since it observes session liveness through this App.
@@ -166,7 +177,10 @@ type App struct {
 	// skillsSourceReported latches the one warning a run posts when the shipped
 	// skills cannot be resolved. The condition is a property of this build, so
 	// restating it on every orchestrator launch would be noise.
-	skillsSourceReported      bool
+	skillsSourceReported bool
+	// agentsSourceReported is skillsSourceReported's counterpart for the
+	// reusable agents (erun-builder/erun-reviewer).
+	agentsSourceReported      bool
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
 	activityStatusPoller      func(activityQueueEntry)
@@ -177,7 +191,7 @@ type App struct {
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
 	envEnsureMu               sync.Mutex
-	envEnsureInflight         map[string]struct{}
+	envEnsureInflight         map[string]*envEnsureRun
 	envEnsureDone             map[string]time.Time
 	envEnsureFailNotified     map[string]struct{}
 	// initEmitted dedups the environment-initialized signal per env. `erun init`
@@ -224,6 +238,12 @@ type App struct {
 	emitMu sync.RWMutex
 	emitFn func(name string, args ...any)
 
+	// restartControlMarkerMu guards the control record against this process's
+	// own shutdown, so an adoption still waiting for a previous owner to exit
+	// cannot republish an endpoint after shutdown has removed it.
+	restartControlMarkerMu       sync.Mutex
+	restartControlMarkerReleased bool
+
 	// restartControl is the loopback server a CLI-triggered restart talks
 	// to (see restart_control.go). nil when the bind failed or startup has not
 	// run yet (unit tests that construct an App directly).
@@ -260,18 +280,19 @@ func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
 	app := &App{
-		deps:                 deps,
-		sessions:             make(map[string]*managedTerminal),
-		idleStops:            make(map[string]struct{}),
-		intentionalStops:     make(map[string]struct{}),
-		runtimeStops:         make(map[string]struct{}),
-		sessionHeartbeats:    make(map[string]sessionHeartbeat),
-		busyEnvs:             make(map[string]int),
-		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
-		orchestrators:        make(map[string]*orchestratorSession),
-		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),
-		workingIssueCache:    make(map[string]workingIssueCacheEntry),
-		envUsage:             loadPersistedEnvironmentUsage(deps.environmentUsageHistoryPath),
+		deps:                  deps,
+		sessions:              make(map[string]*managedTerminal),
+		idleStops:             make(map[string]struct{}),
+		intentionalStops:      make(map[string]struct{}),
+		runtimeStops:          make(map[string]struct{}),
+		sessionHeartbeats:     make(map[string]sessionHeartbeat),
+		busyEnvs:              make(map[string]int),
+		workspaceSyncs:        make(map[string]*workspaceSyncWorker),
+		orchestrators:         make(map[string]*orchestratorSession),
+		unmanagedPacingReason: make(map[string]orchestratorPacingReason),
+		credentialRefreshers:  make(map[string]*cloudCredentialsRefresher),
+		workingIssueCache:     make(map[string]workingIssueCacheEntry),
+		envUsage:              loadPersistedEnvironmentUsage(deps.environmentUsageHistoryPath),
 	}
 	app.investigations = newInvestigationRegistry(defaultInvestigationReportDir())
 	app.investigations.live = func(id string) bool {
@@ -626,25 +647,6 @@ func (a *App) startup(ctx context.Context) {
 	go a.reconcileWorkspaceSyncForConfiguredEnvs()
 }
 
-// startRestartControl binds the loopback restart-trigger server and records
-// how to reach it, so a CLI-triggered restart can find and verify this
-// exact process before asking it to restart. A bind failure is logged and
-// left without a marker (see startRestartControlServer): a desktop that
-// cannot expose a restart trigger this launch still works for everything
-// else, and an absent marker is exactly what an external trigger correctly
-// reads as "no running desktop to restart".
-func (a *App) startRestartControl() {
-	server, port := startRestartControlServer(a)
-	if server == nil {
-		return
-	}
-	a.restartControl = server
-	marker := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: port, StartedAtUnix: time.Now().Unix()}
-	if err := eruncommon.WriteDesktopControlMarker(a.deps.desktopControlMarkerPath, marker); err != nil {
-		log.Printf("erun-app: write restart control marker: %v", err)
-	}
-}
-
 func (a *App) shutdown(context.Context) {
 	a.stopConfigWatcher()
 	a.stopActivityPollers()
@@ -652,9 +654,7 @@ func (a *App) shutdown(context.Context) {
 	a.stopActionRunners()
 	a.investigations.stopTimers()
 	a.restartControl.Close()
-	if err := eruncommon.RemoveDesktopControlMarker(a.deps.desktopControlMarkerPath); err != nil {
-		log.Printf("erun-app: remove restart control marker: %v", err)
-	}
+	a.releaseRestartControlMarker()
 	a.mu.Lock()
 	a.stopAllWorkspaceSyncsLocked()
 	a.stopAllCloudCredentialsRefreshersLocked()
