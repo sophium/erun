@@ -709,6 +709,57 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/sshd_enabled_and_host_alias_configured", normalize.Apply(result.Combined))
 	})
 
+	t.Run("orphaned_host_alias_blocks_are_reported", func(t *testing.T) {
+		// The reverse direction of the annotation above. `erun sshd init`
+		// writes a Host block and only env deletion removes one, so a block
+		// left by a rename, a deleted environment or a turned-off sshd stays in
+		// ~/.ssh/config indefinitely -- and because local ports are reissued,
+		// the stale alias starts resolving into whichever live environment
+		// inherited its port. Nothing warned about that: an alias that fails is
+		// legible, an alias that succeeds against the wrong environment is not.
+		//
+		// Four blocks, so the report is pinned to be both complete and precise:
+		// the live env's own block (claimed, not reported), a stale alias whose
+		// port the live env now holds (reported, and named as the environment
+		// `ssh` would actually reach), a stale alias on a port nobody holds
+		// (reported, unqualified), and the operator's own hand-maintained host
+		// (never reported -- erun reports on the aliases it writes).
+		setup := env.New(t)
+		seedListSSHDTenant(t, setup)
+		sshDir := filepath.Join(setup.Home, ".ssh")
+		if err := os.MkdirAll(sshDir, 0o700); err != nil {
+			t.Fatalf("mkdir %s: %v", sshDir, err)
+		}
+		mustWrite(t, filepath.Join(sshDir, "config"),
+			"Host erun-tenant-a-dev\n"+
+				"  HostName 127.0.0.1\n"+
+				"  Port 17022\n"+
+				"  User erun\n"+
+				"  HostKeyAlias erun-tenant-a-dev\n"+
+				"\n"+
+				"Host erun-tenant-a-old\n"+
+				"  HostName 127.0.0.1\n"+
+				"  Port 17022\n"+
+				"  User erun\n"+
+				"  HostKeyAlias erun-tenant-a-old\n"+
+				"\n"+
+				"Host erun-erun-local\n"+
+				"  HostName 127.0.0.1\n"+
+				"  Port 17099\n"+
+				"  User erun\n"+
+				"\n"+
+				"Host myserver\n"+
+				"  HostName 10.0.0.5\n"+
+				"  Port 22\n"+
+				"  User op\n",
+		)
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/orphaned_host_alias_blocks_are_reported", normalize.Apply(result.Combined))
+	})
+
 	t.Run("with_cloud_providers_and_runtime_details", func(t *testing.T) {
 		// The aws stub fails `sts get-caller-identity` deterministically; without it the
 		// developer's real aws CLI would shape the status line and drift the golden between machines.
