@@ -39,8 +39,13 @@ type WhipCandidate struct {
 	// Alive reports whether this transport can currently see a live session
 	// behind the target (a PTY session for an orchestrator, a dtach master for
 	// an environment's AI session).
-	Alive        bool
-	LastActiveAt time.Time
+	Alive bool
+	// The key stays as the field name it has always been on the wire; only the
+	// omission is new. `omitzero`, not `omitempty`, for the same reason the
+	// idle markers use it: a target whose activity was never recorded has no
+	// last-activity time, and reporting Go's zero instant made `erun whip
+	// --json` claim one that had never happened.
+	LastActiveAt time.Time `json:"LastActiveAt,omitzero"`
 	// NudgeCount and Capped carry the target's own consecutive-nudge bookkeeping
 	// forward from whatever the caller persists it in (in-memory for the
 	// desktop's orchestrator sessions, a small on-disk record for an

@@ -122,7 +122,10 @@ closure instead of flashing then disappearing.
 ## Design-Language Decision Record
 
 Shared status, notification, permission, and confirmation decisions live in
-`erun-kit/AGENTS.md`. Desktop reference implementations include
+`erun-kit/AGENTS.md`. Decisions about how this surface *reports state* -- failed
+reads, error headlines, recovery actions, alert-versus-status -- live in the
+Diagnostic Decision Record in `erun-common/AGENTS.md`, which the panels here
+apply alongside this one. Desktop reference implementations include
 `ActivityQueueDrawer` for dialog focus/transition announcements and the shared
 sidebar busy/condition glyphs.
 

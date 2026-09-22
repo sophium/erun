@@ -36,10 +36,47 @@ type stepTiming struct {
 // cacheDecision records whether an image build promoted from the fingerprint
 // cache or rebuilt, and why, so the timing report can answer "how long" and
 // "why" from the same row instead of sending a reader back to the trace.
+//
+// One decision is shared by the image's own step and every per-architecture
+// child under it, and it is deliberately mutable: the promote decision is made
+// before any image in the run builds, and the promote itself runs minutes
+// later, so a cache entry that has gone missing in between makes the build
+// fall back to a real `docker build` -- see settlePromoteFailure. The row that
+// said "cache hit" has to be corrected to say so, or the one artifact an
+// operator reads to diagnose the run asserts the opposite of what happened.
 type cacheDecision struct {
+	mu         sync.Mutex
 	hit        bool
 	missReason string
 }
+
+// decision reads the hit flag and miss reason together, so a renderer can never
+// pair a corrected hit with a stale reason or the reverse.
+func (c *cacheDecision) decision() (bool, string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hit, c.missReason
+}
+
+// notePromoteFallback corrects a recorded hit whose promote could not be
+// published and rebuilt the platform from source instead. The build really did
+// run, so the run is not a cache hit, and reporting it as one is how a release
+// that rebuilt every image ends up claiming it rebuilt nothing.
+func (c *cacheDecision) notePromoteFallback() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hit = false
+	c.missReason = promoteFallbackMissReason
+}
+
+// promoteFallbackMissReason is the miss reason a corrected decision carries. It
+// names the decision that was wrong rather than the mechanism that replaced it,
+// because the stderr note the builder already emitted names the mechanism and
+// which cached tag it could not use.
+const promoteFallbackMissReason = "the promoted fingerprint image could not be published; rebuilt from source"
 
 func newStepTiming(name string, now func() time.Time) *stepTiming {
 	if now == nil {
@@ -94,9 +131,13 @@ func (s *stepTiming) finish(err error) {
 	s.cgroupMetrics = buildCgroupMetricsFromSnapshots(s.cgroupBefore, captureBuildCgroupSnapshot(), s.end.Sub(s.start))
 }
 
-func (s *stepTiming) setCache(hit bool, missReason string) {
+// setCache attaches a decision to this step. The pointer is stored, not copied:
+// the platform children are handed the same object, and a promote that falls
+// back to a real build corrects it after the fact (notePromoteFallback), so all
+// three rows must be reading one decision rather than three snapshots of it.
+func (s *stepTiming) setCache(cache *cacheDecision) {
 	s.mu.Lock()
-	s.cache = &cacheDecision{hit: hit, missReason: missReason}
+	s.cache = cache
 	s.mu.Unlock()
 }
 
@@ -175,12 +216,14 @@ func (c Context) startTimingStep(name string) (Context, func(error)) {
 }
 
 // recordTimingCache attaches a fingerprint cache hit/miss decision to the
-// context's current step (a no-op outside an active timing root).
-func (c Context) recordTimingCache(hit bool, missReason string) {
+// context's current step (a no-op outside an active timing root). The caller
+// keeps the same pointer to hand to the build, so a promote that falls back to
+// a real build can correct the decision the row already carries.
+func (c Context) recordTimingCache(cache *cacheDecision) {
 	if c.timing == nil {
 		return
 	}
-	c.timing.setCache(hit, missReason)
+	c.timing.setCache(cache)
 }
 
 // timingPlatformObserver returns a callback that records one finished
@@ -311,10 +354,10 @@ func renderStepTimingRows(step *stepTiming, depth int) []string {
 		label += " (failed)"
 	}
 	if snap.cache != nil {
-		if snap.cache.hit {
+		if hit, missReason := snap.cache.decision(); hit {
 			label += " (cache hit)"
 		} else {
-			label += " (cache miss: " + snap.cache.missReason + ")"
+			label += " (cache miss: " + missReason + ")"
 		}
 	}
 	row := strings.Repeat("  ", depth) + label + " [" + snap.dur.String() + "]" + buildCgroupSummary(snap.cgroup)
@@ -376,9 +419,9 @@ func (s *stepTiming) toStepJSON() TimingStepJSON {
 		Cgroup:          snap.cgroup,
 	}
 	if snap.cache != nil {
-		hit := snap.cache.hit
+		hit, missReason := snap.cache.decision()
 		out.CacheHit = &hit
-		out.CacheMissReason = snap.cache.missReason
+		out.CacheMissReason = missReason
 	}
 	if len(snap.children) > 0 {
 		out.Steps = make([]TimingStepJSON, 0, len(snap.children))

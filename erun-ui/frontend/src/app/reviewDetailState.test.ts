@@ -11,6 +11,8 @@ import {
   defaultReviewFilter,
   defaultReviewStatuses,
   reviewCountLabel,
+  reviewsFilteredEmptyBody,
+  reviewsFilterIsNarrowing,
   reviewsMatchingStatuses,
   reviewStatusCounts,
   reviewStatusFilterIsDefault,
@@ -83,6 +85,69 @@ test('reviewStatusCounts reports every status, including the empty ones', () => 
   // disappears as history changes is harder to aim at than one reading 0.
   assert.equal(counts.FAILED, 0);
   assert.equal(counts.CLOSED, 0);
+});
+
+// The parent held `mine` and `waitingOnMe` as a pair, handed both
+// to the filter toolbar, and handed the empty state only their `||` — so the
+// copy could not say which filter had come up empty and said "whichever
+// you've turned on" instead. These pin the naming, and with it the shape: one
+// axis at a time, named in the operator's own words.
+test('the empty state names the one authorship filter that is on', () => {
+  assert.equal(
+    reviewsFilteredEmptyBody({ mine: true, waitingOnMe: false, statuses: [] }),
+    'Nothing is Mine right now.',
+  );
+  assert.equal(
+    reviewsFilteredEmptyBody({ mine: false, waitingOnMe: true, statuses: [] }),
+    'Nothing is Waiting on me right now.',
+  );
+});
+
+test('the empty state names both authorship filters only when both are on', () => {
+  assert.equal(
+    reviewsFilteredEmptyBody({ mine: true, waitingOnMe: true, statuses: [] }),
+    'Nothing is both Mine and Waiting on me right now.',
+  );
+});
+
+test('the empty state names the statuses that came up empty', () => {
+  assert.equal(
+    reviewsFilteredEmptyBody({ mine: false, waitingOnMe: false, statuses: ['MERGED'] }),
+    'Nothing has status MERGED right now.',
+  );
+  assert.equal(
+    reviewsFilteredEmptyBody({ mine: false, waitingOnMe: false, statuses: ['MERGED', 'CLOSED'] }),
+    'Nothing has status MERGED or CLOSED right now.',
+  );
+});
+
+test('the empty state names both axes when both are narrowing', () => {
+  assert.equal(
+    reviewsFilteredEmptyBody({ mine: true, waitingOnMe: false, statuses: ['MERGED'] }),
+    'Nothing is Mine right now, with status MERGED.',
+  );
+});
+
+// The two empty states are chosen by the same predicate the copy is built
+// from, so they cannot disagree. An empty status selection and the opening
+// default set both show everything, so neither is a filter the operator
+// turned on — reading either as one switched a tenant with no reviews to
+// "No reviews match this filter", which is the confusion the three-empty-states
+// rule exists to prevent.
+test('the opening default and an empty status selection narrow nothing', () => {
+  assert.equal(
+    reviewsFilterIsNarrowing({
+      mine: false,
+      waitingOnMe: false,
+      statuses: defaultReviewStatuses(),
+    }),
+    false,
+  );
+  assert.equal(reviewsFilterIsNarrowing({ mine: false, waitingOnMe: false, statuses: [] }), false);
+  assert.equal(
+    reviewsFilterIsNarrowing({ mine: true, waitingOnMe: false, statuses: defaultReviewStatuses() }),
+    true,
+  );
 });
 
 test('reviewCountLabel names both numbers only when rows are hidden', () => {

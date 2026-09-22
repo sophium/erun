@@ -120,23 +120,25 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 
 func startAPIPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
-	var process *os.Process
-	if err := retryTransientPortForwardStart(func() error {
-		p, err := launchAPIPortForwardProcess(logPath, args)
+	expectedState.LogPath = logPath
+	process, err := startPortForwardWithBindRetry(ctx, "api", localPort, func() (*os.Process, error) {
+		logStart := portForwardLogSize(logPath)
+		p, err := launchPortForwardProcessRetrying(func() (*os.Process, error) {
+			return launchAPIPortForwardProcess(logPath, args)
+		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		process = p
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-	expectedState.ProcessID = process.Pid
-	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
-		releaseUnreachablePortForward(ctx, "api", process, localPort, err)
-		return 0, err
-	}
-	if err := waitForAPIPortForward(localPort, logPath); err != nil {
+		expectedState.ProcessID = p.Pid
+		if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
+			return p, err
+		}
+		if err := waitForAPIPortForward(localPort, logPath, logStart); err != nil {
+			return p, err
+		}
+		return p, nil
+	})
+	if err != nil {
 		releaseUnreachablePortForward(ctx, "api", process, localPort, err)
 		return 0, err
 	}
@@ -162,11 +164,20 @@ func launchAPIPortForwardProcess(logPath string, args []string) (*os.Process, er
 	return cmd.Process, nil
 }
 
-func waitForAPIPortForward(localPort int, logPath string) error {
+// logStart is where this attempt's own output begins in logPath; see
+// portForwardLogReportsListenConflict for why the caller takes it before
+// launching rather than here.
+func waitForAPIPortForward(localPort int, logPath string, logStart int64) error {
 	deadline := time.Now().Add(mcpPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalAPIEndpoint(localPort) {
 			return nil
+		}
+		// See waitForMCPPortForward: kubectl exits on a failed listen, so the
+		// conflict is readable from the log long before the startup timeout,
+		// and the bind retry depends on being told promptly.
+		if portForwardLogReportsListenConflict(logPath, logStart) {
+			return listenConflictError(localPort, logPath)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -185,15 +196,22 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
 	}
+	// The far side is the environment's own API port, not the canonical
+	// APIServicePort: `erun deploy` renders the erun-backend-api chart's
+	// apiPort from this same per-env allocation (HelmDeploySpec.APIPort, out
+	// of LocalPortsForResult), so an environment allocated 17300 publishes its
+	// API Service on 17333. Pinning the far side to 17033 asks kubectl for a
+	// service port the Service does not expose, and the whole forward fails
+	// for every environment outside the 17000-17099 range. The local side
+	// staying per-env is what keeps concurrent forwards for different
+	// environments from colliding on the laptop, and it is why the two sides
+	// carry the same number here rather than one being rewritten to a
+	// constant: MCP and SSH forward the same way.
+	servicePort := common.APIPortForResult(result)
 	args = append(args,
 		"port-forward",
 		fmt.Sprintf("service/%s", common.APIDeploymentName(result.Tenant)),
-		// The API service is a standalone component chart, published on the
-		// canonical APIServicePort in every namespace; only the local side is
-		// per-env, so concurrent forwards for different environments don't collide
-		// on the laptop. (MCP/SSH forward to the runtime pod, which is deployed on
-		// per-env ports, so those map per-env on both sides.)
-		fmt.Sprintf("%d:%d", localPort, common.APIServicePort),
+		fmt.Sprintf("%d:%d", localPort, servicePort),
 		"--address", "127.0.0.1",
 	)
 	return args

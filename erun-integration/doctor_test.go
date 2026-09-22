@@ -1570,6 +1570,39 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_reports_stale_desktop_app_bundle", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_reports_the_desktop_app_erun_app_launches", func(t *testing.T) {
+		// The dev wrapper writes the CLI and the desktop app into the same
+		// BIN_DIR -- erun-cli/bin, or $ERUN_DEV_BIN_DIR -- and that is where a
+		// running desktop actually came from, because `erun app`'s own sibling
+		// lookup resolves it there. Doctor inspected only ~/Applications and
+		// /Applications, so it reported on a bundle nothing was running and
+		// stayed silent about the live one. Seeding a drifted bundle where the
+		// CLI itself sits must surface it, and must say that this is the copy a
+		// launch reaches. The executable-dir seam stands in for the shared
+		// instrumented binary's own directory, which a scenario cannot write
+		// beside without leaking a bundle into every other scenario in the run.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		binDir := filepath.Join(setup.Home, "erun-cli", "bin")
+		writeDesktopAppBundle(t, filepath.Join(binDir, "ERun.app"), "1.0.51")
+		envVars := append(setup.Env(),
+			"ERUN_HOST_OS_OVERRIDE=darwin",
+			"ERUN_DESKTOP_APP_SYSTEM_APPLICATIONS_DIR_OVERRIDE="+filepath.Join(setup.Home, "no-system-applications"),
+			"ERUN_DESKTOP_APP_EXECUTABLE_DIR_OVERRIDE="+binDir,
+		)
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "erun app launches") {
+			t.Fatalf("doctor inspected a copy beside the CLI but never said whether a launch reaches it:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "Multiple ERun.app bundles") {
+			t.Fatalf("expected no multiple-bundle warning for a single bundle, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_reports_the_desktop_app_erun_app_launches", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_reports_shadowed_desktop_app_bundle", func(t *testing.T) {
 		// The operator-reported shape: a current bundle at
 		// ~/Applications/ERun.app sits alongside a stale one at

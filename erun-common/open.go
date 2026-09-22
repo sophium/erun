@@ -47,7 +47,7 @@ const (
 )
 
 // ShellSessionTakenOverNotice is the stable line `erun open` prints when its
-// persistent session is re-attached from another ERun window (screen -d -r
+// persistent session is re-attached from another ERun window (dtach takeover
 // semantics: the session keeps running, this viewer is detached). The desktop
 // matches this exact line to stop its reconnect loop instead of stealing the
 // session back, so treat the wording as a public contract.
@@ -980,8 +980,8 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 // (dtach -A) a persistent session at socket and take ownership of it from any
 // other viewer, evicting them rather than sharing the pty. This is the
 // takeover half of the reattach contract erun-cli's own shell tabs already
-// run under (screen -d -r semantics: the session keeps running, an evicted
-// viewer only loses its own view) — exported so a caller outside
+// run under (the session keeps running, an evicted viewer only loses its own
+// view, and dtach keeps no scrollback for one to recover it from) — exported so a caller outside
 // erun-cli/erun-common (the WSS session-attach gateway) can reuse it instead
 // of reimplementing the owner-id handoff. launchCommand runs
 // only the first time the session is created; a reattach connects to
@@ -995,8 +995,8 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 func RemoteAppSessionAttachLines(socket, redraw, launchCommand string) []string {
 	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
 	lines := []string{
-		// Take over the session from any other ERun window (screen-style
-		// detach-elsewhere-and-reattach-here): claim ownership, then detach
+		// Take over the session from any other ERun window (detach-elsewhere-
+		// and-reattach-here): claim ownership, then detach
 		// other viewers by killing their dtach clients. The master — which
 		// owns the running shell/claude — is never touched, and when it
 		// cannot be identified no one is kicked. Kicked wrappers find a
