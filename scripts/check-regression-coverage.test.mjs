@@ -53,6 +53,8 @@ test('isTestFile recognises every test shape this repo actually has', () => {
     ['scripts/check-regression-coverage.test.mjs', true],
     ['scripts/agent-gate_test.sh', true],
     ['erun-devops/k8s/erun-backend-db-chart_test.sh', true],
+    ['erun-devops/terraform-erun/modules/terraform-erun-cluster-edge/tests/edge_transport_policy.tftest.hcl', true],
+    ['erun-devops/terraform-erun/modules/terraform-erun-cluster-edge/main.tf', false],
     ['erun-common/thing.go', false],
     ['erun-integration/testdata/push/dry_run.txt', false],
     ['erun-ui/frontend/src/app/selectors.ts', false],

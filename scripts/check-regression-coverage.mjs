@@ -105,6 +105,10 @@ const testFilePatterns = [
   /(^|\/)[^/]+\.(spec|test)\.(ts|tsx|js|jsx|mjs|cjs)$/,
   /(^|\/)[^/]+[_-]test\.(sh|mjs|py|sql)$/,
   /(^|\/)[^/]+[_-]tests?\.sh$/,
+  // Terraform's own test convention. The published modules under
+  // erun-devops/terraform-erun carry their behaviour tests this way, and a
+  // fix whose only reproducer is one of them has to be able to say so.
+  /(^|\/)[^/]+\.tftest\.hcl$/,
   /(^|\/)conftest\.py$/,
 ];
 

@@ -89,8 +89,11 @@ terraform apply -input=false -auto-approve \
 While validating against a fresh zone, add
 `-var acme_server=https://acme-staging-v02.api.letsencrypt.org/directory` to avoid
 Let's Encrypt production rate limits, then re-apply without it for real certs. On a
-cluster that already runs Traefik or cert-manager, add
-`-var install_ingress_controller=false` and/or `-var install_cert_manager=false`.
+cluster that already runs cert-manager, add `-var install_cert_manager=false`. On a
+cluster that already runs an ingress controller add **both**
+`-var install_ingress_controller=false -var manage_transport_policy=false` — the
+second is what says the transport policy below belongs to the controller that is
+already there.
 
 **Plaintext and HSTS are the edge's job, not each Ingress's.** The module
 redirects the plaintext entrypoint to the secure one (301) and serves
@@ -100,9 +103,18 @@ the entrypoint upgrades the scheme, a visitor who types the bare domain stays on
 http — and so does any *relative* redirect issued behind the edge, because a
 relative `Location` inherits whatever scheme the browser started on. A host
 added later therefore cannot forget it, and no application can be left holding
-the pieces. `install_ingress_controller=false` means this module installs no
-controller and declares no transport policy: the controller that already exists
-owns both.
+the pieces. The policy is declared *on the controller this module installs*, so
+`install_ingress_controller=false` leaves it nowhere to land — and the module
+refuses that combination while `manage_transport_policy` is left at its default
+`true`, rather than applying cleanly while `http_redirect_enabled` /
+`hsts_enabled` and the HSTS settings do nothing and every public host serves
+cleartext. Set `manage_transport_policy=false` and the module declares none of
+it, but hands you what it would have carried at the **`edge_transport_policy`**
+output: the redirect and HSTS entrypoint arguments, and the HSTS `Middleware`
+object. Apply that to the controller that is already there instead of
+hand-rolling an overlay that duplicates these defaults and then drifts from
+them — on k3s that is a `HelmChartConfig`; the output is the policy rather than
+the mechanism, so it fits whatever your controller takes.
 
 `hsts_max_age_seconds` defaults to `86400` (one day), with
 `hsts_include_subdomains` and `hsts_preload` off. HSTS cannot be recalled early:

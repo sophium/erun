@@ -32,7 +32,25 @@ variable "acme_server" {
 }
 
 variable "install_ingress_controller" {
-  description = "Install Traefik as the ingress controller. Set false on a cluster that already has one (then point routes at the existing ingressClassName)."
+  description = "Install Traefik as the ingress controller. Set false on a cluster that already has one (then point routes at the existing ingressClassName). This module carries its transport policy on the controller it installs, so install_ingress_controller=false with manage_transport_policy left at its default is refused rather than applied as a no-op: read edge_transport_policy and set manage_transport_policy=false to hand the policy to the controller that is already there."
+  type        = bool
+  default     = null
+}
+
+variable "manage_transport_policy" {
+  description = <<-EOT
+    Let this module carry the edge's transport policy — the plaintext
+    redirect and HSTS. Default true.
+
+    The policy is declared on the controller this module installs, so with
+    install_ingress_controller=false there is nothing for it to take effect on.
+    Set false to say so: the module then declares no policy of its own, will not
+    refuse the configuration, and exposes what it would have carried at
+    edge_transport_policy for the controller that is already there. Leaving it
+    true with install_ingress_controller=false is refused, because a plan that
+    applies cleanly while every public host serves cleartext is the failure this
+    switch exists to name.
+  EOT
   type        = bool
   default     = null
 }
