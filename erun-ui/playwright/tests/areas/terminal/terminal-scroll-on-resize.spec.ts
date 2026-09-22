@@ -1,6 +1,6 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
-import type { Page, Request } from '@playwright/test';
-import type { AppShell } from '../../../pages/index.js';
+import type { Page } from '@playwright/test';
+import { parseInvoke } from '../../../pages/index.js';
 
 // Regression: a terminal resize refit xterm but never re-anchored the
 // viewport, leaving a user at the live prompt stranded mid-history. The fix
@@ -10,12 +10,35 @@ import type { AppShell } from '../../../pages/index.js';
 // A real OS window resize is not reachable headless, so a layout-panel toggle
 // drives the same shared re-anchor path; scrollback is staged by injecting
 // terminal-output events for the selected session.
+//
+// Every convergence below is bounded by this budget, not by the 10s `expect`
+// clock nested inside it. A 30s scenario whose staging wait expires at 10s
+// reports a failure of a step that was still running, with two thirds of the
+// clock it was sized against unspent -- which is the shape a full-suite gate
+// reddened on, twice.
+const SCENARIO_BUDGET_MS = 120_000;
+// The staging wait is the longest single step here -- it covers the app parsing
+// and rendering the whole staged history, the one step that scales with the
+// machine -- so it gets the largest share of that budget.
+const STAGING_BUDGET_MS = 30_000;
+
+// The staged history ends with this line, and the spec waits for it to be
+// rendered. A terminal that has written only the first few lines of the
+// staging already has scrollback, so waiting on "some scrollback exists"
+// releases the spec while the rest of the history is still streaming in --
+// every measurement after it is then taken against a terminal whose size is
+// still changing. The last staged line can only be on screen once the whole
+// payload has landed.
+const STAGING_SENTINEL = 'scrollback sentinel';
+
 test.describe('terminal scroll on resize (#465)', () => {
   test('panel toggle re-anchors an at-bottom viewport and preserves a scrolled-up one', async ({
     app,
     page,
     seededEnv,
   }) => {
+    test.setTimeout(SCENARIO_BUDGET_MS);
+
     // A per-test seeded env keeps the scrollback this spec stages from leaking
     // into the shared baseline rows.
     const { tenant, environment } = seededEnv;
@@ -25,8 +48,11 @@ test.describe('terminal scroll on resize (#465)', () => {
     await localTab.waitFor({ state: 'visible' });
     await localTab.click();
 
-    const sessionId = await discoverSelectedSessionId(app, page);
-    expect(sessionId).toBeGreaterThan(0);
+    const sessionId = await app.terminalPane.selectedSessionId();
+    expect(
+      sessionId,
+      'the sidebar toggle issued no ResizeSession, so the session to stage into cannot be named',
+    ).toBeGreaterThan(0);
 
     // Stage more lines than any viewport height so real scrollback exists.
     // The lines are wider than any plausible cols so a cols-changing resize
@@ -34,9 +60,12 @@ test.describe('terminal scroll on resize (#465)', () => {
     const lines =
       Array.from({ length: 300 }, (_, i) => `scrollback line ${i + 1} ${'x'.repeat(220)}`).join(
         '\r\n',
-      ) + '\r\n';
-    await emitTerminalOutput(page, sessionId, lines);
-    await expect.poll(() => viewportHasScrollback(page)).toBe(true);
+      ) +
+      `\r\n${STAGING_SENTINEL}\r\n`;
+    await app.terminalPane.emitOutput(sessionId, lines);
+    await expect
+      .poll(() => renderedRowText(page), { timeout: STAGING_BUDGET_MS })
+      .toContain(STAGING_SENTINEL);
     // xterm keeps an at-bottom viewport pinned while output streams, so the
     // staging leaves the viewport at the live prompt.
     await expect.poll(() => terminalAtBottom(page)).toBe(true);
@@ -53,11 +82,10 @@ test.describe('terminal scroll on resize (#465)', () => {
     await setViewportScrollTop(page, 0);
     await expect.poll(() => terminalAtBottom(page)).toBe(false);
     const colsMid = await readTerminalCols(page);
+    await watchViewportAnchor(page);
     await resizeSettled(page, () => app.titlebar.toggleReviewPanel());
+    expect(await stopWatchingViewportAnchor(page)).toBe(false);
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsMid);
-    // The faulty force-scroll would fire asynchronously within milliseconds of
-    // the refit, so sample over a short window rather than checking once.
-    expect(await viewportEverAtBottom(page, 600)).toBe(false);
 
     // Window resize (the gesture from the report): at the bottom, shrinking must
     // re-anchor to the prompt; scrolled up, growing must preserve the reading position.
@@ -71,10 +99,11 @@ test.describe('terminal scroll on resize (#465)', () => {
     await setViewportScrollTop(page, 0);
     await expect.poll(() => terminalAtBottom(page)).toBe(false);
     const colsNarrow = await readTerminalCols(page);
+    await watchViewportAnchor(page);
     // config default
     await resizeSettled(page, () => page.setViewportSize({ width: 1440, height: 1200 }));
+    expect(await stopWatchingViewportAnchor(page)).toBe(false);
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsNarrow);
-    expect(await viewportEverAtBottom(page, 600)).toBe(false);
 
     // Leave the viewport at the prompt so later specs in the singleton
     // backend see the usual at-bottom baseline.
@@ -83,66 +112,74 @@ test.describe('terminal scroll on resize (#465)', () => {
   });
 });
 
-interface InvokeCall {
-  method: string;
-  args: unknown[];
-}
-
-function parseInvoke(req: Request): InvokeCall | null {
-  if (req.method() !== 'POST' || !req.url().endsWith('/__erun_invoke')) {
-    return null;
-  }
-  let body: { method?: string; args?: unknown[] } | null = null;
-  try {
-    body = req.postDataJSON() as { method?: string; args?: unknown[] } | null;
-  } catch {
-    return null;
-  }
-  return body?.method ? { method: body.method, args: body.args ?? [] } : null;
-}
-
 // A layout change refits xterm, publishes the new geometry onto the terminal
 // element, and only then pushes it to the PTY — so the ResizeSession call is the
 // app's own "the refit ran" signal. Bounding each resize on that event, rather
 // than on how long a poll is allowed to run, is what keeps the spec honest on a
 // loaded host: the old clock-bounded poll simply expired when the toggle took
 // longer than the window, reporting a re-anchor failure that had not happened.
+//
+// The reflow is scheduled behind that signal, so this waits out the two frames
+// it lands in before returning. Callers that measure the terminal right after a
+// resize are then measuring a terminal that has finished moving.
 async function resizeSettled(page: Page, change: () => Promise<void>): Promise<void> {
   const resized = page.waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession', {
     timeout: 60_000,
   });
   await change();
   await resized;
+  await page.evaluate(async () => {
+    for (let frame = 0; frame < 2; frame++) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  });
 }
 
-async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<number> {
-  const waitForResize = page
-    .waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession')
-    .catch(() => null);
-  await app.titlebar.toggleButton().click();
-  const resize = await waitForResize;
-  await app.titlebar.toggleButton().click();
-  const id = resize ? parseInvoke(resize)?.args[0] : undefined;
-  return typeof id === 'number' ? id : 0;
+// watchViewportAnchor / stopWatchingViewportAnchor bracket a resize with a
+// frame-sampled record of whether the viewport sat at the bottom.
+//
+// The faulty force-scroll fires asynchronously after the refit, so the
+// re-anchor has to be observed across the whole resize rather than checked
+// once. It used to be sampled for a fixed 600ms after the refit, which is a
+// clock on the machine rather than on the product: on a contended builder the
+// refit it was meant to cover had not finished when the window closed, and the
+// spec reported a yank that had not happened. Both ends of the observation are
+// now app events — it opens before the toggle and closes once the refit has
+// settled and rendered — so a loaded machine stretches the window with the
+// work instead of expiring ahead of it.
+async function watchViewportAnchor(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    interface AnchorWatch {
+      anchored: boolean;
+      watching: boolean;
+    }
+    const state: AnchorWatch = { anchored: false, watching: true };
+    (window as unknown as { __anchorWatch?: AnchorWatch }).__anchorWatch = state;
+    const viewport = document.querySelector<HTMLElement>('.xterm-viewport');
+    const sample = (): void => {
+      if (!state.watching || !viewport) {
+        return;
+      }
+      const maxScrollTop = viewport.scrollHeight - viewport.clientHeight;
+      if (viewport.scrollTop >= maxScrollTop - 2) {
+        state.anchored = true;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
 }
 
-// Mirrors what the Go PTY stream emits so the test drives the real output path.
-// btoa is safe here only because every staged byte is < 256.
-async function emitTerminalOutput(page: Page, sessionId: number, raw: string): Promise<void> {
-  await page.evaluate(
-    (payload) => {
-      const runtime = (
-        window as unknown as {
-          runtime: { EventsEmit: (name: string, ...args: unknown[]) => void };
-        }
-      ).runtime;
-      runtime.EventsEmit('terminal-output', {
-        sessionId: payload.sessionId,
-        data: btoa(payload.raw),
-      });
-    },
-    { sessionId, raw },
-  );
+async function stopWatchingViewportAnchor(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const state = (window as unknown as { __anchorWatch?: { anchored: boolean; watching: boolean } })
+      .__anchorWatch;
+    if (!state) {
+      return false;
+    }
+    state.watching = false;
+    return state.anchored;
+  });
 }
 
 async function terminalAtBottom(page: Page): Promise<boolean> {
@@ -156,31 +193,14 @@ async function terminalAtBottom(page: Page): Promise<boolean> {
   });
 }
 
-async function viewportHasScrollback(page: Page): Promise<boolean> {
-  return await page.evaluate(() => {
-    const viewport = document.querySelector<HTMLElement>('.xterm-viewport');
-    return viewport !== null && viewport.scrollHeight > viewport.clientHeight + 10;
-  });
-}
-
-// Proves a scrolled-up viewport stays put across the asynchronous post-resize
-// scroll window.
-async function viewportEverAtBottom(page: Page, duration: number): Promise<boolean> {
-  return await page.evaluate(async (ms) => {
-    const viewport = document.querySelector<HTMLElement>('.xterm-viewport');
-    if (!viewport) {
-      return false;
-    }
-    const deadline = Date.now() + ms;
-    while (Date.now() < deadline) {
-      const maxScrollTop = viewport.scrollHeight - viewport.clientHeight;
-      if (viewport.scrollTop >= maxScrollTop - 2) {
-        return true;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return false;
-  }, duration);
+// xterm only renders the viewport's own rows, so the rendered rows are the
+// observable form of "this line is on screen right now".
+async function renderedRowText(page: Page): Promise<string> {
+  return await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>('.xterm-rows > div'))
+      .map((row) => row.textContent ?? '')
+      .join('\n'),
+  );
 }
 
 // setViewportScrollTop drives a user-style scroll: assigning scrollTop fires
