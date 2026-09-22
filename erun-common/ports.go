@@ -149,6 +149,30 @@ func APIPortForResult(result OpenResult) int {
 	return LocalPortsForResult(result).API
 }
 
+// APIServicePortForResult returns the port the API component chart publishes for
+// this environment's Service — the value `erun deploy` hands the chart as
+// `apiPort` (see HelmDeploySpec.command's `apiPort=` --set, which resolves the
+// same block and falls back the same way). Anything that dials that Service has
+// to use this rather than the canonical APIServicePort.
+//
+// The chart parameterizes the Service and container port per environment
+// (`{{ default 17033 .Values.apiPort }}`), so APIServicePort is the deployed
+// value only for the environment whose own block happens to be the 17000 one.
+// For every other environment the two disagree, and a caller pinned to the
+// constant asks kubectl for a service port the Service does not expose. The
+// MCP and SSH forwards do not have this problem because they already resolve
+// their target port per environment; this is the same resolution for the API
+// Service.
+//
+// The fallback mirrors deploy's own: an environment that resolves no API port
+// at all deploys the chart's `default 17033`, so that is the port to dial.
+func APIServicePortForResult(result OpenResult) int {
+	if port := LocalPortsForResult(result).API; port > 0 {
+		return port
+	}
+	return APIServicePort
+}
+
 func SSHLocalPortForResult(result OpenResult) int {
 	return LocalPortsForResult(result).SSH
 }
