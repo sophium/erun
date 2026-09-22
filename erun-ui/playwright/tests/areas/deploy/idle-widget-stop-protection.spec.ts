@@ -328,7 +328,10 @@ test.describe('idle widget stop protection', () => {
     const cancelBtn = page.getByTestId('titlebar-idle-stop-cancel');
     await expect(cancelBtn).toBeVisible();
     await cancelBtn.click();
-    expect(cancelCalls).toBe(1);
+    // Polled rather than read once: cancelCalls is incremented by the route
+    // handler above, so a single read races the click's dispatch -> fetch ->
+    // route chain and reports 0 whenever that chain has not landed yet.
+    await expect.poll(() => cancelCalls).toBe(1);
     await expect(warning).toBeHidden();
   });
 
