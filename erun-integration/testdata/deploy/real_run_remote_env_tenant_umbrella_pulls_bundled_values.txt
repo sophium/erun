@@ -11,7 +11,7 @@ dedup: claim (release=test-context-team-dev-team-backend-api, hash=<HASH>, pid=<
 ==> Fetching team/dev · team-backend-api <VERSION> chart values
 ==> Deploying team/dev · team-backend-api <VERSION>
     namespace team-dev on context test-context
-    waiting for helm rollout (timeout 5m0s)...
+    waiting for helm rollout (timeout 15m0s)...
 ==> Deployed team/dev · team-backend-api <VERSION> in <ELAPSED>
 step timing (ordered by duration):
   deploy [<ELAPSED>]

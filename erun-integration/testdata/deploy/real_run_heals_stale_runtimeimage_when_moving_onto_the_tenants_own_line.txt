@@ -14,7 +14,7 @@ dedup: claim (release=test-context-frs-build-frs-devops, hash=<HASH>, pid=<PID>)
 ==> Fetching frs/build <VERSION> chart values
 ==> Deploying frs/build <VERSION>
     namespace frs-build on context test-context
-    waiting for helm rollout (timeout 5m0s)...
+    waiting for helm rollout (timeout 15m0s)...
 ==> Deployed frs/build <VERSION> in <ELAPSED>
 step timing (ordered by duration):
   deploy [<ELAPSED>]

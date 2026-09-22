@@ -24,11 +24,26 @@ import (
 )
 
 // DefaultHelmDeploymentTimeout is the fallback helm rollout timeout when an
-// environment sets no deploy.timeout. It is 5m so the first deploy of a large
-// image against a cold node cache is not failed mid-pull: a ~1GB runtime image
-// can take minutes to pull, and the pod watcher waits out an in-progress pull up
-// to this bound, aborting early only on a real, non-pull failure.
-const DefaultHelmDeploymentTimeout = "5m0s"
+// environment sets no deploy.timeout.
+//
+// It is the bound on a cold pull, and the pull is the whole of its job: every
+// runtime chart renders `strategy: Recreate` (required by the RWO home and
+// docker-state claims every chart mounts), so helm tears the previous pod down
+// before the replacement is even scheduled, and until the new image is on the
+// node the environment runs nothing at all. The pod watcher keeps waiting while
+// a pull is in progress and aborts early on a real, non-pull failure, so this
+// value is not a patience setting for a broken rollout -- it is the only bound
+// on a legitimate one.
+//
+// The former 5m was sized for a ~1GB runtime image. Measured on the real
+// artifact: ghcr.io/sophium/erun-devops is 4.78 GB on disk / 1.14 GB compressed
+// and a cold, uncapped `docker pull` of 1.0.295 took 386s (6m26s) on a fast
+// link -- longer than the whole deadline, before any container starts. A fleet
+// rollout makes that worse, not better: four environments pulling the same
+// image at once were what surfaced it. 15m covers a cold pull of that image
+// with room for a contended link and a slower one, and stays well inside the
+// env's own idle/stop timings.
+const DefaultHelmDeploymentTimeout = "15m0s"
 
 // EnvironmentDeployConfig carries per-environment deploy tuning persisted on
 // EnvConfig's `deploy:` block.
@@ -310,8 +325,14 @@ type HelmReleasePendingOperationError struct {
 	ReleaseName       string
 	Namespace         string
 	KubernetesContext string
-	Message           string
-	Err               error
+	// Tenant and Environment name the erun target the recovery is addressed to
+	// (`erun doctor --clear-pending-helm <tenant> <environment>`), which the
+	// helm-level coordinates above cannot express. Empty on a caller that has
+	// no erun target, in which case the error names the kubectl command only.
+	Tenant      string
+	Environment string
+	Message     string
+	Err         error
 }
 
 type KubernetesDeploymentCheckParams struct {
@@ -2791,6 +2812,14 @@ func helmPendingReleaseOperationSelector(releaseName string) string {
 	return "owner=helm,name=" + releaseName + ",status in (pending-install,pending-upgrade,pending-rollback)"
 }
 
+// Error renders the locked release, what it blocks, and the recovery that
+// clears it. Helm's own message ("another operation (install/upgrade/rollback)
+// is in progress") names neither the release nor the remedy, and the command
+// that clears the lock is a different one from the deploy the operator ran, so
+// an error that stops at helm's words leaves the deploy looking like it simply
+// did not work. The erun-level recovery is named first because it is the one
+// reachable from the surface the operator is already using, with the
+// equivalent kubectl command beside it for a caller with no erun target.
 func (e *HelmReleasePendingOperationError) Error() string {
 	if e == nil {
 		return ""
@@ -2800,9 +2829,32 @@ func (e *HelmReleasePendingOperationError) Error() string {
 		message = e.Err.Error()
 	}
 	if message == "" {
-		message = "helm release operation is already in progress"
+		message = "another operation (install/upgrade/rollback) is in progress"
 	}
-	return fmt.Sprintf("%s; recover with: %s", message, e.RecoveryCommand())
+	release := strings.TrimSpace(e.ReleaseName)
+	if release == "" {
+		release = "the release"
+	}
+	diagnosis := fmt.Sprintf("helm release %q is locked by an unfinished install/upgrade/rollback, so this deploy cannot proceed", release)
+	if namespace := strings.TrimSpace(e.Namespace); namespace != "" {
+		diagnosis += " in namespace " + namespace
+	}
+	if target := e.doctorTarget(); target != "" {
+		return fmt.Sprintf("%s; clear the lock with `erun doctor --clear-pending-helm %s`, or with `%s`: %s",
+			diagnosis, target, e.RecoveryCommand(), message)
+	}
+	return fmt.Sprintf("%s; clear the lock with `%s`: %s", diagnosis, e.RecoveryCommand(), message)
+}
+
+// doctorTarget renders the recovery's positional arguments, or "" when this
+// error was raised on a path with no erun target to name.
+func (e *HelmReleasePendingOperationError) doctorTarget() string {
+	tenant := strings.TrimSpace(e.Tenant)
+	environment := strings.TrimSpace(e.Environment)
+	if tenant == "" || environment == "" {
+		return ""
+	}
+	return tenant + " " + environment
 }
 
 func (e *HelmReleasePendingOperationError) Unwrap() error {
@@ -3533,6 +3585,41 @@ func configureHelmDeployCmdOutput(cmd *exec.Cmd, params HelmDeployParams) (*helm
 	return capture, stderr
 }
 
+// helmInterruptGrace is how long a helm the pod watcher has interrupted is
+// given to exit on its own before its process tree is killed.
+//
+// The grace exists because a killed helm leaves the release behind: helm
+// records the upgrade as pending-upgrade before it applies anything, and its
+// signal handler is what writes the terminal status back. A helm killed
+// outright therefore strands the release in a state that holds helm's lock,
+// and every later deploy of that environment fails against it until an
+// operator clears the metadata. Observed live: `helm upgrade --wait` killed
+// hard left `STATUS: pending-upgrade` behind, while the same command sent
+// SIGINT released it and recorded `STATUS: failed`.
+//
+// The abort still has to be prompt, because it fires on a container failure
+// that will not recover (a rejected image, a crash loop) and the deploy is
+// waiting on it. Fifteen seconds is far longer than helm's own shutdown takes
+// in the observed case and far shorter than the rollout timeout the abort
+// exists to beat, so the wait is bounded by the grace and not by helm.
+const helmInterruptGrace = 15 * time.Second
+
+// interruptHelmDeploy asks the running helm upgrade to stop and waits for it,
+// escalating to killing its process tree only once the grace has elapsed. It
+// returns helm's own error, or the wait error if helm had to be killed.
+func interruptHelmDeploy(cmd *exec.Cmd, helmDone <-chan error, grace time.Duration) error {
+	if cmd.Process != nil {
+		_ = cmd.Process.Signal(os.Interrupt)
+	}
+	select {
+	case err := <-helmDone:
+		return err
+	case <-time.After(grace):
+	}
+	terminateProcessTree(cmd)
+	return <-helmDone
+}
+
 // runHelmDeployWithPodWatch runs the already-started helm command alongside the
 // release pod watcher and returns once both finish. If the watcher reports an
 // early container failure before helm exits, helm is interrupted (then killed
@@ -3568,12 +3655,7 @@ func runHelmDeployWithPodWatch(cmd *exec.Cmd, params HelmDeployParams) (podWatch
 		case watchOutcome = <-watchDone:
 			watchFinished = true
 			if watchOutcome.Failure != nil && !helmFinished {
-				_ = cmd.Process.Signal(os.Interrupt)
-				go func() {
-					time.Sleep(2 * time.Second)
-					terminateProcessTree(cmd)
-				}()
-				helmErr = <-helmDone
+				helmErr = interruptHelmDeploy(cmd, helmDone, helmInterruptGrace)
 				helmFinished = true
 				cancelWatch()
 			}
@@ -3618,6 +3700,14 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 	if helmErr == nil {
 		return nil
 	}
+	// A rollout the deadline ended while the image was still downloading is
+	// reported as that, not as helm's own words for it: "Progress deadline
+	// exceeded" reads as a rollout that failed, and was in fact a rollout that
+	// was still working. The pod watcher is the only component that saw which
+	// one it was.
+	if pulling := watchOutcome.Pulling; len(pulling) > 0 {
+		return fmt.Errorf("%w\n%s", helmErr, rolloutRanOutOfWaitWhilePulling(pulling))
+	}
 	// The string matches below read the dedicated stderr capture, not
 	// helmOutput: helm errors land on stderr, and the classification patterns
 	// below are stderr-specific messages that helmOutput's combined stdout
@@ -3627,6 +3717,8 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 			ReleaseName:       params.ReleaseName,
 			Namespace:         params.Namespace,
 			KubernetesContext: params.KubernetesContext,
+			Tenant:            params.Tenant,
+			Environment:       params.Environment,
 			Message:           stderr.String(),
 			Err:               helmErr,
 		}
@@ -3651,6 +3743,21 @@ func classifyHelmDeployResult(params HelmDeployParams, watchOutcome podWatchOutc
 		}
 	}
 	return helmErr
+}
+
+// rolloutRanOutOfWaitWhilePulling explains a rollout the wait ended mid-pull.
+// It states the container, that the wait and not the workload is what ended the
+// deploy, and what that costs here: every runtime chart renders
+// `strategy: Recreate` (the RWO home and docker-state claims leave no choice),
+// so the previous pod was torn down before the replacement was scheduled and
+// the environment has nothing running until the pull finishes. It deliberately
+// does not prescribe the remedy -- a longer `deploy.timeout`, a retry against a
+// now-warm node, or a rollback are all real answers, and which one applies
+// depends on whether the registry or the link was the slow part.
+func rolloutRanOutOfWaitWhilePulling(pulling []string) string {
+	return fmt.Sprintf(
+		"the rollout wait expired while %s was still pulling its image: this is the deploy's own timeout ending the rollout, not a container failure. Every runtime chart replaces its pod with the Recreate strategy, so the previous pod was already torn down and this environment is running no pod until the image finishes and the replacement starts. Raise `deploy.timeout` (or pass --rollout-timeout) if a cold pull of this image legitimately needs longer than the current bound.",
+		strings.Join(pulling, ", "))
 }
 
 // searchedTenantRuntimeChart names the tenant's own runtime umbrella when the
