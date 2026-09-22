@@ -21,6 +21,13 @@ import (
 // This file holds both halves of the answer: the branch is re-read immediately
 // before the build spends anything, and the final push absorbs a move that
 // happened after that read rather than failing on it.
+//
+// Everything here that describes what the registry holds is written for the
+// run that publishes, because `erun build --release` is the run that reaches
+// the final push with its images and charts verified. `erun release` reaches
+// the same push having published nothing (see ReleaseSpec.ArtifactsPublished),
+// so each of those reports is conditioned on that field rather than assuming
+// the publishing shape.
 
 // releasePushStageName is the stage that makes the release's generated commits
 // public. Named once because both the stage constructors and the push's
@@ -114,11 +121,13 @@ func isReleaseBranchPush(stage ReleaseStage, command ReleaseCommandSpec) bool {
 // runReleaseBranchPush pushes the release's generated commits, absorbing a base
 // branch that moved while the release was building.
 //
-// By the time this runs the version is public: its images, charts and tag all
-// resolve. Failing here leaves the repository without the commits that record the
-// release — VERSION still on the version just published, so a plain `erun build`
-// would re-mint it — which is exactly the inconsistency the publish-before-tag
-// ordering exists to prevent. The commits are generated, `[skip ci]`, and
+// By the time this runs the version's tag is public, and so are its images and
+// charts when the run published any. Failing here leaves the repository without
+// the commits that record the release — VERSION still on the version just
+// published, so a plain `erun build` would re-mint it — which is exactly the
+// inconsistency the publish-before-tag ordering exists to prevent. A
+// source-control-only release reaches this with nothing published, so for it
+// the tag is the whole of what is public. The commits are generated, `[skip ci]`, and
 // conflict-free by construction, so rebasing onto the branch as it stands now and
 // retrying is strictly better than stopping. It stays bounded: a rebase that
 // cannot apply, or a push that keeps failing, still surfaces the push's own error.
@@ -133,12 +142,12 @@ func runReleaseBranchPush(ctx Context, spec ReleaseSpec, command ReleaseCommandS
 		}
 		ctx.Info(fmt.Sprintf("release: push rejected; origin/%s moved during the release, rebasing onto it and retrying (%d/%d)", branch, attempt, releasePushRebaseAttempts))
 		if rebaseErr := rebaseReleaseOntoRemoteBranch(ctx, command.Dir, branch, runGit); rebaseErr != nil {
-			return fmt.Errorf("%w\nrebasing onto origin/%s to absorb the move failed: %v\nversion %s is already published, so rebase the release's own commits onto origin/%s by hand and push them",
-				err, branch, rebaseErr, spec.Version, branch)
+			return fmt.Errorf("%w\nrebasing onto origin/%s to absorb the move failed: %v\n%s",
+				err, branch, rebaseErr, releaseRebaseFailedRecovery(spec, branch))
 		}
 		if repointErr := repointReleaseTagIfRebased(ctx, spec, command.Dir, runGit); repointErr != nil {
-			return fmt.Errorf("%w\nrebasing onto origin/%s absorbed the move, but re-pointing the already-published release tag failed: %v\nversion %s is already published, so move tag v%s onto the rebased release commit by hand and force-push it",
-				err, branch, repointErr, spec.Version, spec.Version)
+			return fmt.Errorf("%w\nrebasing onto origin/%s absorbed the move, but re-pointing the already-public release tag failed: %v\n%s",
+				err, branch, repointErr, releaseRepointFailedRecovery(spec))
 		}
 		pushOutput.Reset()
 		err = runGit(command.Dir, ctx.Stdout, releasePushStderrWriter(ctx, &pushOutput), releaseBranchPushArgs(spec, command)...)
@@ -212,17 +221,24 @@ func releasePushReasonIsMovedBranch(reason string) bool {
 		strings.Contains(reason, "stale info")
 }
 
-// releasePushRejectedError names the ref git actually rejected and what is now
-// missing, instead of letting a bare failure stand in for it.
+// releasePushRejectedError names the ref git actually rejected, what the
+// registry holds for this version, and what is now missing, instead of letting
+// a bare failure stand in for it.
 //
-// By the time this push runs the version is public: its images and charts
-// verified on the registry and its tag is on the remote. The GitHub Release
+// By the time this push runs the version's tag is on the remote, and its images
+// and charts are there too when the run published any; the GitHub Release
 // object is created after this push, so a push failure also leaves it absent.
 // The unqualified failure that used to be reported here reads as the
 // pre-publication shape "Recovering an interrupted release" covers, and acting
 // on that shape would delete a public tag and reset a branch that already
 // landed. So the error says which ref did not land, why git refused
 // it, and that the tag must not be deleted.
+//
+// The registry half is the run's own to state, and spec.ArtifactsPublished is
+// what it is stated from: `erun release` marks source control only, so claiming
+// its images and charts verified on a registry sends its operator past the
+// publish this version still needs and onto a version no environment can
+// deploy.
 func releasePushRejectedError(spec ReleaseSpec, rejections []releasePushRejection, cause error) error {
 	// described carries git's own reason for the reader; names is the bare ref
 	// for the recovery command, where a parenthesised reason would not be a
@@ -246,13 +262,50 @@ func releasePushRejectedError(spec ReleaseSpec, rejections []releasePushRejectio
 		unlanded = refs
 	}
 	version := strings.TrimSpace(spec.Version)
+	published := fmt.Sprintf("Everything else this release publishes is already public: its images and charts verified on the registry and tag v%s is on the remote. What did not land is %s.", version, refs)
+	recovery := fmt.Sprintf("  reconcile %s with its remote, push it, then create the GitHub Release for the existing tag v%s", unlanded, version)
+	if !spec.ArtifactsPublished {
+		// Nothing in this run built or published an artifact, so the registry
+		// holds nothing for this version and the recovery has a publish of its
+		// own to name: the tag is public, and a tag with no artifacts behind it
+		// is a version no environment can deploy (erun deploy never builds).
+		published = fmt.Sprintf("This release marks source control only: it built and published no images or charts, so version %s is on no registry. What landed is source control; what did not land is %s.", version, refs)
+		recovery = fmt.Sprintf("  reconcile %s with its remote and push it\n"+
+			"  publish the version's images and charts, which this release never did: erun push --version %s\n"+
+			"  then create the GitHub Release for the existing tag v%s", unlanded, version, version)
+	}
 	return fmt.Errorf("%w\nrelease: the push was rejected for %s, which is not origin/%s having moved during the release, so nothing is rebased or retried.\n"+
-		"Everything else this release publishes is already public: its images and charts verified on the registry and tag v%s is on the remote. What did not land is %s.\n"+
+		published+"\n"+
 		"The GitHub Release object for v%s is created after this push, so it does not exist yet either.\n"+
 		"Recover by hand — do not delete tag v%s and do not reset %s, both are already public:\n"+
 		"  git -C %s fetch origin\n"+
-		"  reconcile %s with its remote, push it, then create the GitHub Release for the existing tag v%s",
-		cause, refs, spec.Branch, version, refs, version, version, spec.Branch, spec.ProjectRoot, unlanded, version)
+		recovery,
+		cause, refs, spec.Branch, version, version, spec.Branch, spec.ProjectRoot)
+}
+
+// releaseRebaseFailedRecovery says what is left to do when the retry's rebase
+// onto the moved branch could not apply. It restates what the registry holds
+// for the same reason releasePushRejectedError does: the release that did not
+// publish must not send its operator away believing there is nothing left to
+// publish.
+func releaseRebaseFailedRecovery(spec ReleaseSpec, branch string) string {
+	version := strings.TrimSpace(spec.Version)
+	if spec.ArtifactsPublished {
+		return fmt.Sprintf("version %s is already published, so rebase the release's own commits onto origin/%s by hand and push them", version, branch)
+	}
+	return fmt.Sprintf("version %s is on no registry — this release marks source control only — so rebase the release's own commits onto origin/%s by hand, push them, then publish the version's images and charts with `erun push --version %s`", version, branch, version)
+}
+
+// releaseRepointFailedRecovery is the same statement for the retry that
+// absorbed the move and then could not bring the already-public release tag
+// back onto the rebased commit. The tag is public either way; the artifacts
+// are not, unless this run published them.
+func releaseRepointFailedRecovery(spec ReleaseSpec) string {
+	version := strings.TrimSpace(spec.Version)
+	if spec.ArtifactsPublished {
+		return fmt.Sprintf("version %s is already published, so move tag v%s onto the rebased release commit by hand and force-push it", version, version)
+	}
+	return fmt.Sprintf("version %s is on no registry — this release marks source control only — so move tag v%s onto the rebased release commit by hand, force-push it, then publish the version's images and charts with `erun push --version %s`", version, version, version)
 }
 
 // repointReleaseTagIfRebased brings the release's own annotated tag back onto
