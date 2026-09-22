@@ -724,13 +724,15 @@ func runtimeUsageWarnings(u RuntimeUsage) []string {
 // problem that was not there. So the warning fires only on a ratio the
 // package calls material (runtimeSizingThrottleRatio).
 //
-// Staying silent below that ratio does drop the sidecar's figure rather than
-// leave it for another line to carry, which is worth saying because the
-// opposite is easy to assume. Sizing's line scores the *runtime container's*
-// counters under knob=runtimepod; the sidecar is a separate cgroup that
-// container cannot see (see the package comment's third limit), so nothing
-// else in the reading reports how throttled a build was. Below the bar that
-// is the intended silence, not a figure reported elsewhere.
+// Staying silent below that ratio withholds the named share, not the
+// evidence: the sidecar's raw periods and throttledPeriods are carried by the
+// reading -- and by its JSON form -- whether or not this warning fires, so a
+// consumer that wants the ratio can still derive the one this silence
+// declines to name. Sizing is no substitute for it: that line scores the
+// *runtime container's* counters under knob=runtimepod, and the sidecar is a
+// separate cgroup that container cannot see (see the package comment's third
+// limit), so below the bar nothing else in the rendered reading names how
+// throttled a build was.
 //
 // The ratio is not the whole bar. A sidecar seconds old has only a few
 // periods behind its ratio, and a build pinned through its own startup is
