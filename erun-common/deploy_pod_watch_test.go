@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -329,5 +331,97 @@ func TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone(t *testin
 	}
 	if strings.Contains(err.Error(), "still pulling") {
 		t.Fatalf("a failure with nothing pulling must not be described as a slow image, got:\n%s", err.Error())
+	}
+}
+
+// pullingPodListJSON is a PodList with one release-owned pod whose container is
+// still fetching its image -- the observation a rollout that ran out its wait
+// mid-pull has to carry back to the deploy.
+const pullingPodListJSON = `{
+  "apiVersion": "v1",
+  "kind": "PodList",
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-abc",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Pending",
+        "conditions": [{"type": "PodScheduled", "status": "True"}],
+        "containerStatuses": [
+          {"name": "erun-devops", "ready": false, "restartCount": 0,
+           "state": {"waiting": {"reason": "ImagePullBackOff", "message": "Back-off pulling image \"ghcr.io/sophium/erun-devops:1.0.296\""}}}
+        ]
+      }
+    }
+  ]
+}`
+
+// TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase reproduces
+// the intermittent half of the mid-pull report: the poll that would have
+// reported a download still in flight is the one the watcher's own cancellation
+// interrupts, because cancelling the context aborts the `get pods` in flight
+// and the loop returns on the next iteration. An unread poll reads nothing, so
+// letting it replace the previous poll's state blanks the observation at the
+// exact moment it is handed to the deploy -- which then falls back to helm's
+// "not ready", the outcome the whole watcher exists to prevent. It surfaced as
+// the deploy integration scenario failing only under the gate's load, where the
+// window between the last readable poll and the cancellation is wide enough to
+// land in.
+//
+// The overlap is forced rather than waited for: the first poll answers with a
+// pod still pulling, the second is held inside the fake API server until this
+// test cancels the context underneath it, so the unread final poll happens
+// every run instead of whenever the scheduler allows it.
+func TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase(t *testing.T) {
+	redirectConfigHomeForTest(t)
+	if err := SaveERunConfig(ERunConfig{Execution: ExecutionConfig{Modes: map[string]string{
+		kubectlPodWatchExecutionOperation: ExecutionModeLibrary,
+	}}}); err != nil {
+		t.Fatalf("SaveERunConfig: %v", err)
+	}
+	t.Setenv("ERUN_DEPLOY_POD_WATCH_INTERVAL", "100ms")
+
+	var polls int32
+	secondPoll := make(chan struct{})
+	var secondOnce sync.Once
+	fakeKubernetesAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/namespaces/team-dev/pods" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if atomic.AddInt32(&polls, 1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(pullingPodListJSON))
+			return
+		}
+		// Held until the watcher's cancellation aborts this request, so the
+		// poll that fails to read is the one in flight when the context ends.
+		secondOnce.Do(func() { close(secondPoll) })
+		select {
+		case <-r.Context().Done():
+		case <-time.After(30 * time.Second):
+			t.Errorf("the watcher never cancelled the poll in flight")
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan podWatchOutcome, 1)
+	go func() {
+		done <- watchReleasePods(ctx, podWatchParams{ReleaseName: "team-devops", Namespace: "team-dev"})
+	}()
+
+	<-secondPoll
+	cancel()
+
+	select {
+	case outcome := <-done:
+		if got := strings.Join(outcome.Pulling, ","); got != "team-devops-abc/erun-devops" {
+			t.Fatalf("the pull state the last readable poll saw must survive the unread poll that cancelled it, got Pulling=%q", got)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("watchReleasePods did not return after its context was cancelled")
 	}
 }

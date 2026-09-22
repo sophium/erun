@@ -307,19 +307,32 @@ func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcom
 	defer ticker.Stop()
 
 	lastSummary := map[string]string{}
-	// lastPulling is the pull state of the most recent poll, replaced rather
-	// than merged: a container that finished pulling and started must stop
-	// being reported as still pulling, or a later deadline would blame a pull
-	// that had already completed.
+	// lastPulling is the pull state of the most recent poll that produced a
+	// reading, replaced rather than merged: a container that finished pulling
+	// and started must stop being reported as still pulling, or a later
+	// deadline would blame a pull that had already completed. A poll that
+	// produced no reading at all is not one of those -- see the read guard
+	// below.
 	var lastPulling []string
 	// unscheduledSince tracks, per pod name, the first poll that observed
 	// PodScheduled=False so classifyTerminalFailure can apply the grace period
 	// across polls rather than deciding on a single snapshot.
 	unscheduledSince := map[string]time.Time{}
 	for {
-		failure, summaries, pulling := pollOnce(ctx, params, unscheduledSince)
-		lastPulling = pulling
-		renderPodSummaries(params.StatusOut, summaries, lastSummary)
+		failure, summaries, pulling, read := pollOnce(ctx, params, unscheduledSince)
+		// Only a poll that actually read the release replaces what the last
+		// one saw. The read that fails is the one interrupted by this loop's
+		// own cancellation -- cancelling the context aborts the `get pods` in
+		// flight, and the watcher then returns immediately -- so letting it
+		// assign would blank the pull state at exactly the moment it is handed
+		// to the caller, and every deploy whose wait expired mid-pull would
+		// intermittently fall back to reporting helm's "not ready" instead of
+		// naming the download. That is the whole fact this watcher exists to
+		// contribute, so an unread poll must not be able to erase it.
+		if read {
+			lastPulling = pulling
+			renderPodSummaries(params.StatusOut, summaries, lastSummary)
+		}
 		if failure != nil {
 			return podWatchOutcome{Failure: failure, Pulling: lastPulling}
 		}
@@ -331,18 +344,23 @@ func watchReleasePods(ctx context.Context, params podWatchParams) podWatchOutcom
 	}
 }
 
-func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[string]time.Time) (*HelmReleaseContainerFailureError, []podSummary, []string) {
+// pollOnce reads the release's pods once. read is false when the poll produced
+// no reading at all -- the kubectl call failed (including because the caller's
+// context was cancelled) or its output could not be parsed -- which is distinct
+// from a reading in which nothing is pulling, and callers must keep the
+// distinction: only the latter means a pull finished.
+func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[string]time.Time) (failure *HelmReleaseContainerFailureError, summaries []podSummary, pulling []string, read bool) {
 	output, err := runKubectlGetPods(ctx, params)
 	if err != nil {
-		return nil, nil, nil
+		return nil, nil, nil, false
 	}
 	pods, ok := parsePodStatusList(output)
 	if !ok {
-		return nil, nil, nil
+		return nil, nil, nil, false
 	}
 	releasePods := filterReleasePods(pods, params.ReleaseName)
-	failure := classifyTerminalFailure(releasePods, params, unscheduledSince)
-	return failure, summarizePods(releasePods), pullingContainers(releasePods)
+	failure = classifyTerminalFailure(releasePods, params, unscheduledSince)
+	return failure, summarizePods(releasePods), pullingContainers(releasePods), true
 }
 
 // pullingContainers names every container of the release currently waiting on
