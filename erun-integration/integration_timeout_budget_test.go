@@ -18,8 +18,8 @@ import (
 // is not: the same suite measured 4m7s on a quiet pod and crossed ten minutes
 // on a contended one, where the goroutine dump at the alarm showed dozens of
 // t.Parallel() scenarios still queued and the package still progressing. The
-// run was failed by its own clock rather than by its tree (erun#2631), which
-// is the one thing a gate must not do.
+// run was failed by its own clock rather than by its tree, which is the one
+// thing a gate must not do.
 //
 // This gate keeps that budget from being dropped by a later edit, the same way
 // TestIntegrationSuiteSharesTheGoTestCPUBudget keeps the suite's -parallel

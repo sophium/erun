@@ -176,8 +176,8 @@ GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 # worse than a slow gate, because it teaches its operators to re-run it.
 #
 # Scale the budget inversely with the resolved CPU quota, the same shape
-# LINT_TIMEOUT above uses for the identical defect in the sibling linter run
-# (erun#2266): the quota is what GO_TEST_GOMAXPROCS already divides into this
+# LINT_TIMEOUT above uses for the identical defect in the sibling linter run:
+# the quota is what GO_TEST_GOMAXPROCS already divides into this
 # suite's `-parallel` share, so at or above GO_TEST_TARGET_COUNT CPUs the suite
 # has its reference share and takes the base, and below it the suite is at its
 # serial floor with proportionally less CPU to finish the same work in.

@@ -63,9 +63,9 @@ const WaitDelay = 10 * time.Second
 //
 // The deadline used to be Go's ten-minute default, with nothing passing
 // -timeout; the suite was then failed by its own clock on a contended node
-// while still making progress (erun#2631), so the gate now sets one. That is
-// the case this comment always anticipated -- raising the deadline is exactly
-// what makes a bounded wait unbounded if the backstop does not move with it.
+// while still making progress, so the gate now sets one. That is the case this
+// comment always anticipated -- raising the deadline is exactly what makes a
+// bounded wait unbounded if the backstop does not move with it.
 //
 // A child that is supposed to outlive its caller -- the harness starts an
 // emcp server and port holders a scenario keeps alive on purpose -- is killed

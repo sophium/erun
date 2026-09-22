@@ -75,8 +75,8 @@
 #     -timeout, and that default is fixed while this suite's duration is not:
 #     it measured 4m7s on a quiet 12-CPU pod and crossed 10m on a contended
 #     one, where the package was still making progress and dozens of
-#     t.Parallel() scenarios sat in the parallelism barrier (erun#2631). The
-#     run was failed by its own clock, not by its tree. So the suite passes an
+#     t.Parallel() scenarios sat in the parallelism barrier. The run was
+#     failed by its own clock, not by its tree. So the suite passes an
 #     explicit budget, derived from the same resolved CPU quota as the width
 #     above and capped so it stays below the harness's own per-child backstop
 #     (internal/harnessexec.HangNet, which is deliberately longer than the
