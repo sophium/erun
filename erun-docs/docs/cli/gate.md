@@ -43,6 +43,7 @@ erun gate show abc123
 | More than one erun-type alias configured, `--erun-alias` omitted. | Aborts asking for an explicit `--erun-alias`. |
 | GATE_RUN_ID does not exist, or belongs to another tenant (`show`). | `404 Not Found`. |
 | GATE_RUN_ID is not a UUID at all (`show`). | `400 Bad Request` with code `INVALID_PATH_ID`, naming the parameter and the value received — a mistyped or truncated id is the caller's to fix, so it is not reported as a platform fault. See [API protocol · Request-level validation errors](/agent-reference/api-protocol#request-level-validation-errors). |
+| `--status` names something other than `RUNNING`, `PASSED`, `FAILED`, or `INCONCLUSIVE` (`list`; any casing). | Refused as a bad argument, naming the accepted values, before any platform call — a mistyped filter would otherwise return an empty listing, indistinguishable from a real "no gate runs". The API refuses the same value with `400 Bad Request` and code `INVALID_QUERY`. |
 
 ## See also
 

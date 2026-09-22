@@ -3,8 +3,11 @@ package routes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -82,17 +85,51 @@ func TestReportGateRunOutcomeNormalizesLowercaseStatus(t *testing.T) {
 	}
 }
 
-// TestListGateRunsNormalizesLowercaseStatusFilter: startGateRun/reportGateRunOutcome
-// already normalize a lowercase status so a caller following `erun exec
-// gate-run report`'s own lowercase examples is accepted -- every status this
-// API ever stores is therefore uppercase. listGateRuns must normalize its own
-// `?status=` filter the same way, or `GET /v1/gate-runs?status=failed`
-// silently returns zero rows against real, uppercase-stored data instead of
-// matching them.
-func TestListGateRunsNormalizesLowercaseStatusFilter(t *testing.T) {
+// TestListGateRunsRefusesAnUnknownStatusFilter: the read route normalized any
+// `?status=` value and handed it straight to the repository, so an
+// unrecognised one matched no row and answered 200 with an empty list -- a
+// mistyped filter was indistinguishable from a real "no gate runs", while the
+// write route refused the same value as a named field. The refusal must name
+// the accepted values, and it must happen before the query, or the caller
+// still receives the empty listing this route is being fixed to stop
+// producing.
+func TestListGateRunsRefusesAnUnknownStatusFilter(t *testing.T) {
 	repo := &stubGateRunRepository{}
 	routes := GateRunRoutes{gateRuns: repo}
-	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=failed", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=bogus-not-a-status", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listGateRuns(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var body errorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response body is not JSON: %v", err)
+	}
+	if body.Code != "INVALID_QUERY" {
+		t.Fatalf("code = %q, want %q", body.Code, "INVALID_QUERY")
+	}
+	for _, want := range []string{"RUNNING", "PASSED", "FAILED", "INCONCLUSIVE"} {
+		if !strings.Contains(body.Message, want) {
+			t.Fatalf("message %q does not name the accepted value %s", body.Message, want)
+		}
+	}
+	if repo.listFilter.Status != "" {
+		t.Fatal("the repository was queried anyway; the refusal must precede it")
+	}
+}
+
+// TestListGateRunsAcceptsRunningAsAStatusFilter: the write side's vocabulary
+// is terminal-only (RUNNING is what Start assigns, never what ReportOutcome
+// may report), but the read side filters the queue's own current work -- a
+// RUNNING filter is the question "what is being gated right now". Validating
+// the filter against the write side's three terminal statuses would refuse it.
+func TestListGateRunsAcceptsRunningAsAStatusFilter(t *testing.T) {
+	repo := &stubGateRunRepository{}
+	routes := GateRunRoutes{gateRuns: repo}
+	req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status=running", nil)
 	rec := httptest.NewRecorder()
 
 	routes.listGateRuns(rec, req)
@@ -100,7 +137,38 @@ func TestListGateRunsNormalizesLowercaseStatusFilter(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	if repo.listFilter.Status != model.GateRunStatusFailed {
-		t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusFailed)
+	if repo.listFilter.Status != model.GateRunStatusRunning {
+		t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusRunning)
+	}
+}
+
+// TestListGateRunsNormalizesLowercaseStatusFilter: startGateRun/reportGateRunOutcome
+// already normalize a lowercase status so a caller following `erun exec
+// gate-run report`'s own lowercase examples is accepted -- every status this
+// API ever stores is therefore uppercase. listGateRuns must normalize its own
+// `?status=` filter the same way, or `GET /v1/gate-runs?status=failed`
+// silently returns zero rows against real, uppercase-stored data instead of
+// matching them. The filter is validated as well as normalized, so the check
+// has to be a membership test on the normalized value: an entry point that
+// validated the raw `?status=` first would refuse `failed` for not being
+// spelled `FAILED` and break the case-insensitivity the CLI's examples rely
+// on.
+func TestListGateRunsNormalizesLowercaseStatusFilter(t *testing.T) {
+	for _, spelling := range []string{"failed", "FAILED", " Failed "} {
+		t.Run(spelling, func(t *testing.T) {
+			repo := &stubGateRunRepository{}
+			routes := GateRunRoutes{gateRuns: repo}
+			req := httptest.NewRequest(http.MethodGet, "/v1/gate-runs?status="+url.QueryEscape(spelling), nil)
+			rec := httptest.NewRecorder()
+
+			routes.listGateRuns(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			if repo.listFilter.Status != model.GateRunStatusFailed {
+				t.Fatalf("repository received status filter = %q, want %q", repo.listFilter.Status, model.GateRunStatusFailed)
+			}
+		})
 	}
 }
