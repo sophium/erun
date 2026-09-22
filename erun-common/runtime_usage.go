@@ -702,11 +702,23 @@ func runtimeUsageWarnings(u RuntimeUsage) []string {
 // throttled build is named as starvation rather than left for an operator to
 // infer from a percentage that happens to sit at 100.
 //
-// Both counters are cumulative for the sidecar's lifetime, so any throttling
-// at all is worth saying out loud; an unreadable CPU reading has no counters
-// to speak from and stays silent.
+// The verdict is worth only what the counters behind it are, and they are
+// cumulative for the sidecar's lifetime. Reading any throttle at all as
+// current starvation therefore turns a lifetime residue into a confident
+// diagnosis -- a reading of 3 throttled periods out of 51,123 (0.006%) is
+// what that looked like in the field, and it sent the reader hunting a CPU
+// problem that was not there. So the warning fires only on throttling the
+// package already treats as material (runtimeThrottleIsMaterial), the same
+// measured bar sizing reads: below it, the ratio is "present but harmless"
+// rather than starvation, and sizing still reports the figure in its own
+// line, so nothing is hidden by staying silent here.
+//
+// An unreadable CPU reading has no counters to speak from and stays silent.
 func runtimeBuildThrottleWarnings(dind *RuntimeDindUsage) []string {
-	if dind == nil || dind.CPU.Unavailable != "" || dind.CPU.Periods <= 0 || dind.CPU.ThrottledPeriods <= 0 {
+	if dind == nil || dind.CPU.Unavailable != "" {
+		return nil
+	}
+	if !runtimeThrottleIsMaterial(dind.CPU.ThrottledPeriods, dind.CPU.Periods) {
 		return nil
 	}
 	return []string{fmt.Sprintf(

@@ -103,8 +103,12 @@ func TestUsage(t *testing.T) {
 			t.Fatalf("expected the watched mount to be the literal /home/erun, got:\n%s", result.Combined)
 		}
 		// nr_periods/nr_throttled are the CPU-starvation signal
-		// RuntimeUsageHistory derives its throttle ratio from; assert them here
-		// since they carry no threshold of their own to warn on.
+		// RuntimeUsageHistory derives its throttle ratio from, so a consumer
+		// can read the ratio rather than take a warning's word for it. These
+		// counters are cumulative for the container's lifetime, and 425 of
+		// 376,556 is 0.11% -- a residue, not starvation -- which is why this
+		// reading carries no build-throttling warning while the materially
+		// throttled scenario below does.
 		if !strings.Contains(result.Combined, `"periods": 376556`) || !strings.Contains(result.Combined, `"throttledPeriods": 425`) {
 			t.Fatalf("expected cpu.periods/throttledPeriods parsed from cpu.stat, got:\n%s", result.Combined)
 		}
@@ -194,6 +198,62 @@ func TestUsage(t *testing.T) {
 			t.Fatalf("expected the node-shared disk label and the own-usage line, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "usage/real_run_local_agent_env_states_the_builds_caveat", normalize.Apply(result.Combined))
+	})
+
+	// real_run_warns_when_the_sidecars_throttling_is_material is the firing
+	// half of the same verdict, and the reason the warning exists at all: a
+	// sidecar whose own cap is genuinely binding is the starvation that turns
+	// a lint step into a timeout, and it must still be named. The sidecar's
+	// counters here are materially throttled -- 4,000 of its 20,000 periods
+	// -- while the runtime container beside it stays at the immaterial 0.11%
+	// the scenario above carries, so the two readings differ in the one way
+	// that decides the verdict rather than in every way at once.
+	t.Run("real_run_warns_when_the_sidecars_throttling_is_material", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExecPerContainer(t, stubs,
+			[]string{
+				"cgroup_type=cgroup2fs",
+				"memory_current=104857600",
+				"memory_max=24696061952",
+				"memory_peak=104857600",
+				"memory_oom_kill=0",
+				"cpu_max=1200000 100000",
+				"cpu_usage_before=1000000",
+				"cpu_usage_after=1003000",
+				"cpu_time_before_ns=1000000000",
+				"cpu_time_after_ns=2000000000",
+				"cpu_periods=376556",
+				"cpu_throttled_periods=425",
+				"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+				"disk_own_used_kb=44040192",
+			},
+			[]string{
+				"cgroup_type=cgroup2fs",
+				"memory_current=2040109465",
+				"memory_max=15032385536",
+				"memory_peak=3435973836",
+				"memory_oom_kill=0",
+				"cpu_max=400000 100000",
+				"cpu_usage_before=1000000",
+				"cpu_usage_after=2900000",
+				"cpu_time_before_ns=1000000000",
+				"cpu_time_after_ns=2000000000",
+				"cpu_periods=20000",
+				"cpu_throttled_periods=4000",
+				"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+			},
+		)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "the build was throttled in 4000 of 20000 cgroup periods") {
+			t.Fatalf("a materially throttled sidecar must still be named as starvation, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "usage/real_run_warns_when_the_sidecars_throttling_is_material", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_cgroup_v1_reports_unavailable_not_an_error", func(t *testing.T) {
