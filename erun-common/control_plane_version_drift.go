@@ -24,32 +24,40 @@ import (
 // on one already-chosen plane without ever asking whether that plane itself
 // is current.
 //
-// The console rides along on the same check (erun#2070): each plane's own
-// GET /v1/platform response names its console's URL (PlatformInfo.ConsoleURL
-// -- a plane and its console are always deployed together, never configured
-// as separate aliases), and the console answers the identical
-// deployed-vs-published question about itself at GET /version.json, a static
-// file stamped from ERUN_VERSION at image build time (erun-devops/AGENTS.md's
-// erun-console chart bullet). Both surfaces publish at the same erun release
-// version, so the one registry lookup that establishes the plane's published
-// baseline also answers for its console -- no second registry probe.
+// The surfaces a plane links to ride along on the same check (erun#2070): each
+// plane's own GET /v1/platform response names both its console's URL
+// (PlatformInfo.ConsoleURL) and its documentation site's
+// (PlatformInfo.DocsURL) -- neither is configured as a separate alias -- and
+// each answers the identical deployed-vs-published question about itself at
+// GET /version.json, a static file stamped from ERUN_VERSION at image build
+// time (erun-devops/AGENTS.md's erun-console chart bullet; the docs site
+// publishes the same file through Cloudflare Pages). Every surface ships at
+// the same erun release version, so the one registry lookup that establishes
+// the plane's published baseline also answers for its console and its docs
+// site -- no second registry probe.
+//
+// The docs site is checked as its own surface rather than folded into the
+// console's because the two deploy independently: a console can be current
+// while the docs site a deploy left behind still serves the release before it,
+// and one verdict covering both would report whichever it read.
 
-// ConsoleVersionStatus is one control plane's linked console's deployed
-// version (GET /version.json, unauthenticated), compared against the same
-// published baseline as its plane.
-type ConsoleVersionStatus struct {
+// VersionSurfaceStatus is one version surface a control plane links to -- its
+// console or its documentation site -- and its deployed version (GET
+// /version.json, unauthenticated), compared against the same published
+// baseline as its plane.
+type VersionSurfaceStatus struct {
 	URL string `json:"url,omitempty"`
-	// Reachable reports whether GET /version.json answered at all. A console
+	// Reachable reports whether GET /version.json answered at all. A surface
 	// erun cannot reach is never reported current: Version/Behind/Ahead stay
 	// unset rather than guessed from silence.
 	Reachable         bool   `json:"reachable"`
 	UnreachableReason string `json:"unreachableReason,omitempty"`
 	Version           string `json:"version,omitempty"`
 	// Reason explains a Version of "unknown" on an otherwise-reachable
-	// console: GET /version.json answered, but not with the expected JSON
+	// surface: GET /version.json answered, but not with the expected JSON
 	// document (most often an SPA's index.html fallback for a route the
 	// deployed nginx config doesn't yet exact-match). Distinct from
-	// UnreachableReason -- the console did answer, so this is a content
+	// UnreachableReason -- the surface did answer, so this is a content
 	// problem, not a reachability problem, and must never be reported as
 	// Reachable=false.
 	Reason string `json:"reason,omitempty"`
@@ -100,7 +108,11 @@ type ControlPlaneVersionStatus struct {
 	Ahead bool `json:"ahead,omitempty"`
 	// Console is nil when the plane's own GET /v1/platform reported no
 	// consoleUrl (nothing to check), never a guessed/defaulted value.
-	Console *ConsoleVersionStatus `json:"console,omitempty"`
+	Console *VersionSurfaceStatus `json:"console,omitempty"`
+	// Docs is nil when the plane's own GET /v1/platform reported no docsUrl.
+	// An absent docs site reads as absent -- never as one that is current,
+	// and never as a plane that is behind on accounts of it.
+	Docs *VersionSurfaceStatus `json:"docs,omitempty"`
 	// AdvertisedAPIURLMismatch is the plane's own discovery document's apiUrl
 	// when it resolves to a different address than the one erun actually
 	// reached for this alias, and empty otherwise. A textually different
@@ -171,7 +183,7 @@ func ResolveControlPlaneVersionDrift(ctx Context, result ListResult, alias strin
 
 	byIdentity := map[string]int{}
 	for _, provider := range planes {
-		resolveOneControlPlaneVersionStatus(ctx, &drift, byIdentity, provider, deps.FetchPlatformInfo, deps.FetchConsoleVersion, deps.ResolveHostAddrs, publishedSemver, publishedOK)
+		resolveOneControlPlaneVersionStatus(ctx, &drift, byIdentity, provider, deps.FetchPlatformInfo, deps.FetchVersionJSON, deps.ResolveHostAddrs, publishedSemver, publishedOK)
 	}
 	return drift, nil
 }
@@ -234,7 +246,7 @@ func traceControlPlaneVersionDriftDryRun(ctx Context, planes []CloudProviderStat
 	ctx.Trace("list: would resolve the published version from erun's own registry")
 	for _, provider := range planes {
 		ctx.Trace("list: would GET " + controlPlaneAPIURL(provider) + "/v1/platform for control plane " + provider.Alias)
-		ctx.Trace("list: would also probe " + provider.Alias + "'s console at /version.json, using the consoleUrl that GET /v1/platform discloses")
+		ctx.Trace("list: would also probe " + provider.Alias + "'s console and docs site at /version.json, using the consoleUrl and docsUrl that GET /v1/platform discloses")
 	}
 }
 
@@ -244,7 +256,7 @@ func traceControlPlaneVersionDriftDryRun(ctx Context, planes []CloudProviderStat
 // before the console is ever probed, so a duplicate alias costs one wasted
 // GET /v1/platform, not a second GET /version.json for a console already
 // checked under the first alias.
-func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersionDrift, byIdentity map[string]int, provider CloudProviderStatus, fetchPlatformInfo func(Context, string) (PlatformInfo, error), fetchConsoleVersion func(Context, string) (string, error), resolveHostAddrs func(Context, string) ([]string, error), publishedSemver semver, publishedOK bool) {
+func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersionDrift, byIdentity map[string]int, provider CloudProviderStatus, fetchPlatformInfo func(Context, string) (PlatformInfo, error), fetchVersionJSON func(Context, string) (string, error), resolveHostAddrs func(Context, string) ([]string, error), publishedSemver semver, publishedOK bool) {
 	apiURL := controlPlaneAPIURL(provider)
 	if apiURL == "" {
 		appendControlPlaneAlias(drift, byIdentity, "no-api-url:"+provider.Alias, ControlPlaneVersionStatus{
@@ -279,8 +291,12 @@ func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersion
 	status.AdvertisedAPIURLMismatch = detectAdvertisedAPIURLMismatch(ctx, provider.Alias, apiURL, info.APIURL, resolveHostAddrs)
 
 	if consoleURL := strings.TrimSpace(info.ConsoleURL); consoleURL != "" {
-		console := resolveConsoleVersionStatus(ctx, provider.Alias, consoleURL, fetchConsoleVersion, publishedSemver, publishedOK)
+		console := resolveVersionSurfaceStatus(ctx, provider.Alias, versionSurfaceConsole, consoleURL, fetchVersionJSON, publishedSemver, publishedOK)
 		status.Console = &console
+	}
+	if docsURL := strings.TrimSpace(info.DocsURL); docsURL != "" {
+		docs := resolveVersionSurfaceStatus(ctx, provider.Alias, versionSurfaceDocs, docsURL, fetchVersionJSON, publishedSemver, publishedOK)
+		status.Docs = &docs
 	}
 	appendControlPlaneAlias(drift, byIdentity, identity, status)
 }
@@ -419,25 +435,38 @@ func defaultResolveHostAddrs(_ Context, host string) ([]string, error) {
 	return net.DefaultResolver.LookupHost(context.Background(), host)
 }
 
-func resolveConsoleVersionStatus(ctx Context, alias, consoleURL string, fetchConsoleVersion func(Context, string) (string, error), publishedSemver semver, publishedOK bool) ConsoleVersionStatus {
-	status := ConsoleVersionStatus{URL: consoleURL}
-	ctx.Trace("list: GET " + consoleURL + "/version.json (console version check for " + alias + ")")
-	version, err := fetchConsoleVersion(ctx, consoleURL)
+// The two labels a surface is reported and traced under. Console and docs site
+// answer the same question the same way; only the discovery field they were
+// resolved from and the word an operator reads differ.
+const (
+	versionSurfaceConsole = "console"
+	versionSurfaceDocs    = "docs site"
+)
+
+func resolveVersionSurfaceStatus(ctx Context, alias, surface, surfaceURL string, fetchVersionJSON func(Context, string) (string, error), publishedSemver semver, publishedOK bool) VersionSurfaceStatus {
+	status := VersionSurfaceStatus{URL: surfaceURL}
+	ctx.Trace("list: GET " + surfaceURL + "/version.json (" + surface + " version check for " + alias + ")")
+	version, err := fetchVersionJSON(ctx, surfaceURL)
 	if err != nil {
-		var contentErr *consoleUnexpectedContentError
+		var contentErr *versionSurfaceUnexpectedContentError
 		if errors.As(err, &contentErr) {
-			// The console answered -- reporting it unreachable would send an
+			// The surface answered -- reporting it unreachable would send an
 			// operator toward DNS/ingress/TLS when the real fault is the
-			// console serving the wrong document (root AGENTS.md's "Advice
+			// surface serving the wrong document (root AGENTS.md's "Advice
 			// that cannot work" dead end).
 			status.Reachable = true
 			status.Version = "unknown"
 			status.Reason = contentErr.Error()
-			ctx.Trace("list: console for " + alias + " reachable but did not serve the expected document: " + contentErr.Error())
+			ctx.Trace("list: " + surface + " for " + alias + " reachable but did not serve the expected document: " + contentErr.Error())
 			return status
 		}
-		status.UnreachableReason = err.Error()
-		ctx.Trace("list: console for " + alias + " unreachable: " + err.Error())
+		// The surface is named on the transport failure the same way the trace
+		// line above names it: a plane with both a console and a docs site
+		// would otherwise report one bare "unreachable" an operator cannot
+		// attribute to either.
+		reason := "fetch " + surface + " version: " + err.Error()
+		status.UnreachableReason = reason
+		ctx.Trace("list: " + surface + " for " + alias + " unreachable: " + reason)
 		return status
 	}
 
@@ -449,7 +478,7 @@ func resolveConsoleVersionStatus(ctx Context, alias, consoleURL string, fetchCon
 
 // versionVerdict compares a deployed version against the published baseline,
 // the shared logic behind both ControlPlaneVersionStatus and
-// ConsoleVersionStatus's Behind/Ahead fields.
+// VersionSurfaceStatus's Behind/Ahead fields.
 func versionVerdict(version string, publishedSemver semver, publishedOK bool) (behind, ahead bool) {
 	if !publishedOK {
 		return false, false
@@ -467,18 +496,18 @@ func versionVerdict(version string, publishedSemver semver, publishedOK bool) (b
 	return false, false
 }
 
-// consoleUnexpectedContentError reports that a console answered GET
+// versionSurfaceUnexpectedContentError reports that a surface answered GET
 // /version.json but did not serve the expected JSON document -- most
 // commonly an SPA's index.html, served by a wildcard nginx fallback for a
 // route the deployed config doesn't yet exact-match. It is deliberately a
-// distinct type from a transport error: the console did answer, so a
+// distinct type from a transport error: the surface did answer, so a
 // caller must never treat this as unreachable.
-type consoleUnexpectedContentError struct {
+type versionSurfaceUnexpectedContentError struct {
 	statusCode  int
 	contentType string
 }
 
-func (e *consoleUnexpectedContentError) Error() string {
+func (e *versionSurfaceUnexpectedContentError) Error() string {
 	contentType := strings.TrimSpace(e.contentType)
 	if contentType == "" {
 		contentType = "(no content-type)"
@@ -486,28 +515,30 @@ func (e *consoleUnexpectedContentError) Error() string {
 	return fmt.Sprintf("/version.json returned %d %s (expected application/json)", e.statusCode, contentType)
 }
 
-// defaultFetchConsoleVersion resolves a deployed console's own build version
-// via its unauthenticated GET /version.json -- the console's counterpart to
-// defaultFetchPlatformInfo's GET /v1/platform. It makes the request directly
-// rather than through fetchJSON so it can tell a transport failure
-// (connection refused, DNS, TLS, timeout -- the request never got an answer)
-// apart from a content failure (an answer arrived, but not the expected
-// JSON document): the two point an operator at completely different first
-// moves, and collapsing them into one "unreachable" verdict misdirects.
-func defaultFetchConsoleVersion(ctx Context, consoleURL string) (string, error) {
-	target := strings.TrimRight(strings.TrimSpace(consoleURL), "/") + "/version.json"
+// defaultFetchVersionJSON resolves a deployed surface's own build version via
+// its unauthenticated GET /version.json -- the console's and the docs site's
+// counterpart to defaultFetchPlatformInfo's GET /v1/platform. It makes the
+// request directly rather than through fetchJSON so it can tell a transport
+// failure (connection refused, DNS, TLS, timeout -- the request never got an
+// answer) apart from a content failure (an answer arrived, but not the
+// expected JSON document): the two point an operator at completely different
+// first moves, and collapsing them into one "unreachable" verdict misdirects.
+func defaultFetchVersionJSON(ctx Context, surfaceURL string) (string, error) {
+	target := strings.TrimRight(strings.TrimSpace(surfaceURL), "/") + "/version.json"
 	ctx.Trace("GET " + target)
 	if ctx.DryRun {
 		return "", nil
 	}
 	req, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
-		return "", fmt.Errorf("fetch console version: %w", err)
+		return "", err
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := (&http.Client{Timeout: erunHTTPTimeout}).Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch console version: %w", err)
+		// Returned unwrapped: the caller knows which surface it asked about
+		// and is the one that says so, in the same words it traces.
+		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -516,7 +547,7 @@ func defaultFetchConsoleVersion(ctx Context, consoleURL string) (string, error) 
 		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(respBody, &body); err != nil {
-		return "", &consoleUnexpectedContentError{statusCode: resp.StatusCode, contentType: resp.Header.Get("Content-Type")}
+		return "", &versionSurfaceUnexpectedContentError{statusCode: resp.StatusCode, contentType: resp.Header.Get("Content-Type")}
 	}
 	return body.Version, nil
 }

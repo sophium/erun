@@ -224,19 +224,22 @@ published version: 1.0.247
 Control planes (1 backend, 1 alias):
   - erun+api.erunpaas.com@erun api-url="https://api.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
     console: url="https://console.erunpaas.com" reachable=yes version="1.0.245" [behind published -- roll it]
+    docs site: url="https://docs.erunpaas.com" reachable=yes version="1.0.247"
 ```
 
 Each plane is checked with its own unauthenticated `GET /v1/platform` — the same call `erun cloud init erun` uses to discover a plane in the first place — so a plane that doesn't answer prints `reachable=no reason="..."` instead of a version; an unreachable plane is never reported current. `[behind published -- roll it]` means the plane is running a real, older release than what's published; `[ahead of published -- running an unpublished version]` means the opposite and more unusual case — the plane is running something the registry has never published at all, which is worth investigating on its own rather than "just roll it".
 
 That same `GET /v1/platform` response also names the plane's linked console (`consoleUrl` — a plane and its console are always deployed together, never configured as a separate alias), so each reachable plane's console is checked the same way, against the same published baseline, and printed nested under it as a `console:` line — a plane can be current while its console lags behind, or vice versa, and before this there was no way to tell. A plane whose response carries no `consoleUrl` prints no `console:` line at all, rather than guessing.
 
-A console that answers `GET /version.json` but doesn't serve the expected JSON document — for example an SPA fallback page served for a route that isn't wired up yet — is never folded into `reachable=no`: it did answer, so it prints `reachable=yes version=unknown reason="..."` instead, with the reason naming the HTTP status and content type it actually served.
+A surface that answers `GET /version.json` but doesn't serve the expected JSON document — for example an SPA fallback page served for a route that isn't wired up yet — is never folded into `reachable=no`: it did answer, so it prints `reachable=yes version=unknown reason="..."` instead, with the reason naming the HTTP status and content type it actually served.
+
+The same response names the plane's documentation site (`docsUrl`), and its version is compared and printed exactly the same way, as a `docs site:` line under the plane. It is worth its own line rather than being folded into the console's because the two are published by different deploys: a docs site is normally uploaded on its own, so a console that is current says nothing about whether the docs you are reading come from the release you are running. As with the console, a plane whose response carries no `docsUrl` prints no `docs site:` line at all — an absent docs site reads as absent, never as one that is up to date.
 
 That response also names the apiUrl the plane believes it is served at. When that resolves to a different backend than the one you configured — a plane advertising a different plane's api — it prints an `[advertised apiUrl mismatch: ...]` line beneath the plane's own line. An apiUrl that merely *differs textually* is never flagged: a vanity hostname that CNAMEs to the one erun dialed is the same backend under two names, so the two hostnames are resolved and compared instead of string-matched, and a hostname that doesn't resolve on either side prints nothing rather than a guess.
 
-This makes real network calls (each plane and console, plus erun's registry), so add `--dry-run` to preview which planes, consoles, and registry lookup would be checked without making any call.
+This makes real network calls (each plane and the surfaces it advertises, plus erun's registry), so add `--dry-run` to preview which planes, linked surfaces, and registry lookup would be checked without making any call.
 
-This report also exits `0` on its own, same as `--tenant`'s above. Add `--fail-on-drift` to make that one invocation exit non-zero when a plane or its console is behind or ahead of published, a plane advertises a foreign apiUrl, a plane or console is unreachable, or the published baseline itself couldn't be resolved — none of those confirm a plane and its console are running what erun actually published:
+This report also exits `0` on its own, same as `--tenant`'s above. Add `--fail-on-drift` to make that one invocation exit non-zero when a plane, its console, or its docs site is behind or ahead of published, a plane advertises a foreign apiUrl, a plane or linked surface is unreachable, or the published baseline itself couldn't be resolved — none of those confirm a plane and its surfaces are running what erun actually published:
 
 ```bash
 erun list --control-planes --fail-on-drift
@@ -265,6 +268,6 @@ erun list | grep "effective"      # what ERun targets right now
 | `--tenant` names a tenant with no config. | Errors `tenant "<name>" not found`. |
 | `--gate-environment` names an environment not in that tenant. | Errors `gate environment "<name>" not found in tenant "<tenant>"`. |
 | `--control-planes` combined with `--tenant`/`--gate-environment`. | Errors `--control-planes cannot be combined with --tenant/--gate-environment`; nothing is printed. |
-| `--control-planes` and a configured plane or its linked console is unreachable, or the registry lookup fails. | Not an error — printed as a finding (`reachable=no reason="..."`, or `published version: unresolved (...)`); exit code stays `0` unless `--fail-on-drift` is set. |
+| `--control-planes` and a configured plane or a surface it advertises is unreachable, or the registry lookup fails. | Not an error — printed as a finding (`reachable=no reason="..."`, or `published version: unresolved (...)`); exit code stays `0` unless `--fail-on-drift` is set. |
 | `--fail-on-drift` passed without `--tenant` or `--control-planes`. | Errors `--fail-on-drift requires --tenant or --control-planes`; nothing is printed. |
-| `--fail-on-drift` set and the report finds drift (an environment behind max, a behind gate, an unreachable/behind/ahead plane or console, a plane advertising a foreign apiUrl, or an unresolved published baseline). | The full report still prints, then the command exits non-zero naming what it found. Never fires under `--dry-run` — nothing was probed, so there is nothing to fail on. |
+| `--fail-on-drift` set and the report finds drift (an environment behind max, a behind gate, an unreachable/behind/ahead plane or linked surface, a plane advertising a foreign apiUrl, or an unresolved published baseline). | The full report still prints, then the command exits non-zero naming what it found. Never fires under `--dry-run` — nothing was probed, so there is nothing to fail on. |

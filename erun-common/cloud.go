@@ -184,10 +184,11 @@ type CloudDependencies struct {
 	RunERunAuthCodeLogin         func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 	RefreshERunTokens            func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 
-	// FetchConsoleVersion resolves a deployed console's own build version
-	// (GET <consoleURL>/version.json, unauthenticated) -- see
+	// FetchVersionJSON resolves a deployed version surface's own build version
+	// (GET <surfaceURL>/version.json, unauthenticated) -- a control plane's
+	// console and its docs site both answer it the same way. See
 	// control_plane_version_drift.go.
-	FetchConsoleVersion func(Context, string) (string, error)
+	FetchVersionJSON func(Context, string) (string, error)
 	// ResolveHostAddrs resolves a hostname to its IP addresses -- used by
 	// control_plane_version_drift.go to tell a plane's own discovery document
 	// naming a benign canonical alias apart from one advertising a genuinely
@@ -978,8 +979,8 @@ func normalizeERunCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.RefreshERunTokens == nil {
 		deps.RefreshERunTokens = defaultRefreshERunTokens
 	}
-	if deps.FetchConsoleVersion == nil {
-		deps.FetchConsoleVersion = defaultFetchConsoleVersion
+	if deps.FetchVersionJSON == nil {
+		deps.FetchVersionJSON = defaultFetchVersionJSON
 	}
 	if deps.ResolveHostAddrs == nil {
 		deps.ResolveHostAddrs = defaultResolveHostAddrs

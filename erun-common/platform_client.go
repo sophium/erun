@@ -95,9 +95,16 @@ func (c *PlatformClient) WithMCPTool(tool string) *PlatformClient {
 // package is internal and erun-backend-api depends on erun-common, not the
 // reverse.
 type PlatformInfo struct {
-	Issuer          string `json:"issuer"`
-	APIURL          string `json:"apiUrl"`
-	ConsoleURL      string `json:"consoleUrl"`
+	Issuer     string `json:"issuer"`
+	APIURL     string `json:"apiUrl"`
+	ConsoleURL string `json:"consoleUrl"`
+	// DocsURL is the documentation site this plane's own front door links to,
+	// and the address the docs-site version check resolves its target from --
+	// the same discovery contract ConsoleURL carries for the console. Empty on
+	// a plane that advertises none (an older platform, or one whose deploy
+	// carried no platform config), which reads as no docs site rather than as
+	// one that is up to date.
+	DocsURL         string `json:"docsUrl"`
 	ConsoleClientID string `json:"consoleClientId"`
 	CLIClientID     string `json:"cliClientId"`
 	Brand           string `json:"brand"`
