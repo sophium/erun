@@ -195,11 +195,14 @@ func traceReleaseUmbrella(ctx Context, version string, builds []DockerBuildSpec)
 	}
 	started := time.Now()
 	ctx.Info(releasing)
-	for _, line := range gateTestStageProvenanceLines(builds) {
+	// As in traceBuildUmbrella: the opening lines are the plan, the closing ones
+	// the outcome, and the run's gate-stage evidence is what tells them apart.
+	for _, line := range gateTestStagePlanLines(builds) {
 		ctx.Info(line)
 	}
 	root := newStepTiming("release", nil)
 	ctx.timing = root
+	ctx.gateTestStage = newGateTestStageProvenance()
 	return ctx, func(errp *error) {
 		var err error
 		if errp != nil {
@@ -207,7 +210,7 @@ func traceReleaseUmbrella(ctx Context, version string, builds []DockerBuildSpec)
 		}
 		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
-		for _, line := range gateTestStageProvenanceLines(builds) {
+		for _, line := range gateTestStageProvenanceLines(builds, ctx.gateTestStage) {
 			ctx.Info(line)
 		}
 		if err != nil {
