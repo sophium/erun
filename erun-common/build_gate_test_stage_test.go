@@ -265,7 +265,7 @@ func TestNoIncrementalStillDeclaresTheGateLineAndTheLiveTestStage(t *testing.T) 
 	var buf bytes.Buffer
 	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &buf, &buf)}
 	traceDockerBuild(ctx, out[0])
-	lines := gateTestStageProvenanceLines(out)
+	lines := gateTestStageProvenanceLines(out, nil)
 	rendered := buf.String() + strings.Join(lines, "\n")
 
 	if !strings.Contains(rendered, "because its Dockerfile's test stage runs the build's own gate") {
@@ -281,7 +281,7 @@ func TestGateTestStageProvenanceLinesReportLiveAndCachedStatus(t *testing.T) {
 	cached := DockerBuildSpec{GateTestStage: true, Promote: true, Image: DockerImageReference{Tag: "ghcr.io/sophium/erun-devops:1.0.247"}}
 	ordinary := DockerBuildSpec{Image: DockerImageReference{Tag: "ghcr.io/sophium/erun-console:1.0.248"}}
 
-	lines := gateTestStageProvenanceLines([]DockerBuildSpec{live, ordinary})
+	lines := gateTestStageProvenanceLines([]DockerBuildSpec{live, ordinary}, nil)
 	if len(lines) != 1 {
 		t.Fatalf("expected exactly one provenance line for one gate build, got %v", lines)
 	}
@@ -289,7 +289,7 @@ func TestGateTestStageProvenanceLinesReportLiveAndCachedStatus(t *testing.T) {
 		t.Errorf("expected a non-promoted gate build to report LIVE, got: %s", lines[0])
 	}
 
-	cachedLines := gateTestStageProvenanceLines([]DockerBuildSpec{cached})
+	cachedLines := gateTestStageProvenanceLines([]DockerBuildSpec{cached}, nil)
 	if len(cachedLines) != 1 || !bytes.Contains([]byte(cachedLines[0]), []byte("CACHED")) {
 		t.Errorf("expected a promoted gate build to report CACHED, got: %v", cachedLines)
 	}
