@@ -7,8 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
@@ -26,12 +30,19 @@ import (
 // second state in which Process.Wait itself never returns.
 func writePipeHolderFixture(t *testing.T, surviveSignal bool) string {
 	t.Helper()
-	script := filepath.Join(t.TempDir(), "holder.sh")
+	dir := t.TempDir()
+	script := filepath.Join(dir, "holder.sh")
+	pidFile := filepath.Join(dir, "holder.pid")
 	body := "#!/bin/sh\n" +
 		"echo fixture: started\n" +
 		// Outlives its parent by design: this is the process that keeps the
-		// inherited stdout open after the child it came from is gone.
+		// inherited stdout open after the child it came from is gone. It
+		// records its own pid on the way, because nothing else can reach it
+		// afterwards: the child it came from is gone, and it is not the
+		// process the test started, so the cleanup below is the only thing
+		// that can end it.
 		"sleep 300 &\n" +
+		"echo $! > \"" + pidFile + "\"\n" +
 		"echo fixture: waiting\n"
 	if surviveSignal {
 		body += "trap '' QUIT\n"
@@ -42,7 +53,43 @@ func writePipeHolderFixture(t *testing.T, surviveSignal bool) string {
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
+	// Ending it here is not tidiness. The pipe holder outlives the run by
+	// design, so left alive it also outlives the package and the command that
+	// ran it -- and a supervisor adopts it, as a child subreaper, once the
+	// process it came from is gone. The job that ran this suite then reports
+	// itself abandoned for work it started and never waited for, which is a
+	// clean gate recorded as anything but.
+	t.Cleanup(func() { killFixturePipeHolder(t, pidFile) })
 	return script
+}
+
+// killFixturePipeHolder ends the process path records the pid of, and waits
+// for it to actually go rather than only for the kill to be sent. A file that
+// is missing or unreadable means the fixture never reached that line, which
+// the assertions in the test above it have already reported.
+func killFixturePipeHolder(t *testing.T, path string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for eruncommon.ProcessAlive(pid) {
+		_ = proc.Kill()
+		if !time.Now().Before(deadline) {
+			t.Errorf("the pipe holder (pid %d) is still alive %s after being killed, so it outlives the run that started it", pid, 10*time.Second)
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // driveSupervise starts fixture and runs supervise against it exactly the way
