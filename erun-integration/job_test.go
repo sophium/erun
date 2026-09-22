@@ -2,7 +2,6 @@ package integration
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,9 +10,10 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
@@ -89,6 +89,15 @@ func stopJob(t *testing.T, setup env.Setup, envVars []string, id string) {
 // "directory not empty" TempDir cleanup failures. A job whose supervisor
 // never registered a pid, or is already gone, is treated as done immediately;
 // this only waits out a supervisor provably still alive.
+//
+// "Alive" is erun-common's own answer (ProcessAlive), not a bare signal 0. A
+// supervisor that has exited but has not been reaped answers signal 0, so the
+// bare probe cannot tell it from one still running -- and in an agent pod
+// nothing reaps it, because a process the pod's supervisor adopts as a child
+// subreaper and never waits on stays a zombie for the pod's lifetime. Every
+// scenario's wait then expires on a supervisor that is already gone, and the
+// package burns its whole deadline as a timeout that reads like a hang in
+// whichever change was being gated.
 func awaitJobSupervisorExit(t *testing.T, setup env.Setup, envVars []string, id string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -102,7 +111,7 @@ func awaitJobSupervisorExit(t *testing.T, setup env.Setup, envVars []string, id 
 		if json.Unmarshal([]byte(result.Stdout), &payload) == nil {
 			pid = payload.PID
 		}
-		if pid <= 0 || !processAlive(pid) {
+		if pid <= 0 || !eruncommon.ProcessAlive(pid) {
 			return
 		}
 		if !time.Now().Before(deadline) {
@@ -110,25 +119,6 @@ func awaitJobSupervisorExit(t *testing.T, setup env.Setup, envVars []string, id 
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-}
-
-// processAlive mirrors erun-common's own unexported helper of the same name
-// (activity_lease.go): signal 0 is the portable "does this pid exist" probe
-// on unix, and EPERM still counts as alive. Duplicated here rather than
-// imported because that helper is package-private to erun-common.
-func processAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = proc.Signal(syscall.Signal(0))
-	if err == nil || errors.Is(err, syscall.EPERM) {
-		return true
-	}
-	return runtime.GOOS == "windows"
 }
 
 // waitForJobActivity blocks until the supervisor has folded enough of an agent's
