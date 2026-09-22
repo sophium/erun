@@ -54,17 +54,24 @@ const WaitDelay = 10 * time.Second
 // HangNet bounds how long a harness child may run without exiting.
 //
 // It is a backstop, not a latency SLA, and it is set longer than the suite's
-// own package deadline so it can never fail a healthy child: the gate runs
-// this module with `go test -count=1 -parallel=<width> ./...` and no -timeout
-// override, so Go's ten-minute default ends a wedged run first. What this
-// catches is a run whose deadline was raised or disabled, where an unbounded
-// wait would otherwise never conclude at all.
+// own package deadline so it can never fail a healthy child: that deadline is
+// the INTEGRATION_TEST_TIMEOUT the gate derives (see the Makefile), capped so
+// its maximum is a value this constant can be compared against at build time
+// rather than a number that moves with the environment. What this catches is a
+// run whose deadline was raised past that cap or disabled outright, where an
+// unbounded wait would otherwise never conclude at all.
+//
+// The deadline used to be Go's ten-minute default, with nothing passing
+// -timeout; the suite was then failed by its own clock on a contended node
+// while still making progress (erun#2631), so the gate now sets one. That is
+// the case this comment always anticipated -- raising the deadline is exactly
+// what makes a bounded wait unbounded if the backstop does not move with it.
 //
 // A child that is supposed to outlive its caller -- the harness starts an
 // emcp server and port holders a scenario keeps alive on purpose -- is killed
 // by its own test cleanup long before this; the net exists for the child
 // nothing else would end.
-const HangNet = 15 * time.Minute
+const HangNet = 60 * time.Minute
 
 // Command builds a child process with the harness's bounds armed. It is the
 // only constructor the harness uses; see the package comment for why.
