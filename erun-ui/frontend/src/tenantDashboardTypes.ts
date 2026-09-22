@@ -366,6 +366,11 @@ export interface UITenantDashboardReview {
   // resolved, so the caller falls back to the raw id.
   authorUsername?: string;
   name: string;
+  // repository is the repository the review's branches belong to, as the
+  // platform records it. Undefined for a review created before the platform
+  // recorded one; the merge-queue panel names it so a queue spanning more
+  // than one repository is visibly not one queue.
+  repository?: string;
   targetBranch: string;
   sourceBranch: string;
   status: string;

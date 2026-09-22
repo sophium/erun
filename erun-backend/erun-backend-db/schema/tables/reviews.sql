@@ -2,6 +2,12 @@ CREATE TABLE reviews (
   review_id UUID PRIMARY KEY DEFAULT uuidv7(),
   tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
   author_user_id UUID NOT NULL DEFAULT erun_current_user_id(),
+  -- The repository whose branches this review proposes to merge, as a
+  -- canonical remote identity (erun-common's RepositoryIdentity). NULL only
+  -- for reviews created before the platform recorded one: a tenant may serve
+  -- more than one repository, and without this a review's source/target
+  -- branch pair names the repository only by convention.
+  repository TEXT,
   name TEXT NOT NULL,
   target_branch TEXT NOT NULL,
   source_branch TEXT NOT NULL,
@@ -16,6 +22,7 @@ CREATE TABLE reviews (
   CONSTRAINT reviews_status_check CHECK (status IN ('OPEN', 'CLOSED', 'FAILED', 'READY', 'MERGE', 'MERGED')),
   CONSTRAINT reviews_target_branch_check CHECK (length(trim(target_branch)) > 0),
   CONSTRAINT reviews_source_branch_check CHECK (length(trim(source_branch)) > 0),
+  CONSTRAINT reviews_repository_check CHECK (repository IS NULL OR length(trim(repository)) > 0),
   CONSTRAINT reviews_status_build_link_check CHECK (
     (status <> 'FAILED' OR last_failed_build_id IS NOT NULL)
     AND (status <> 'READY' OR last_ready_build_id IS NOT NULL)
@@ -23,6 +30,5 @@ CREATE TABLE reviews (
     AND (status <> 'MERGED' OR last_merged_build_id IS NOT NULL)
   ),
   CONSTRAINT reviews_tenant_review_key UNIQUE (tenant_id, review_id),
-  CONSTRAINT reviews_tenant_name_key UNIQUE (tenant_id, name),
   CONSTRAINT reviews_tenant_target_review_key UNIQUE (tenant_id, target_branch, review_id)
 );

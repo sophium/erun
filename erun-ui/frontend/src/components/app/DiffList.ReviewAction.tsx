@@ -254,7 +254,9 @@ function DiffAdvanceQueueAction({
             // Refreshes the chip once the write settles regardless of
             // outcome (advanced, blocked, or failed) -- the chip must never
             // keep showing "Ready" once the platform's own answer changed.
-            void dispatch(submitAdvanceMergeQueue(tenant, targetBranch)).then(() => {
+            void dispatch(
+              submitAdvanceMergeQueue(tenant, status.repository ?? '', targetBranch),
+            ).then(() => {
               void dispatch(loadDiffReviewStatus(envKey, tenant, environment, targetBranch));
             });
           }}

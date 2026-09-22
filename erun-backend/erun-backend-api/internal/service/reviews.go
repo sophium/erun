@@ -12,19 +12,24 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type ReviewRepository interface {
 	Get(ctx context.Context, reviewID string) (model.Review, error)
 	Update(ctx context.Context, review model.Review) (model.Review, error)
-	FindNextMergeQueueReview(ctx context.Context, targetBranch string) (model.Review, error)
-	FindActiveMergeReview(ctx context.Context, targetBranch string) (model.Review, error)
+	FindNextMergeQueueReview(ctx context.Context, repository, targetBranch string) (model.Review, error)
+	FindActiveMergeReview(ctx context.Context, repository, targetBranch string) (model.Review, error)
+	// QueuedRepositories reports the distinct repositories with a review
+	// waiting in a target branch's queue, so a promotion that names none can
+	// refuse when that queue is really several.
+	QueuedRepositories(ctx context.Context, targetBranch string) ([]string, error)
 	// FindLastMergedReview is the platform's own record of what targetBranch's
 	// tip was the last time a queue-driven merge landed on it — condition 2 of
 	// accepting a MERGED report confirms a reported commit descends from it.
 	// repository.ErrNotFound means no review has ever merged onto this
 	// branch through the queue yet.
-	FindLastMergedReview(ctx context.Context, targetBranch string) (model.Review, error)
+	FindLastMergedReview(ctx context.Context, repository, targetBranch string) (model.Review, error)
 	CreateMergeQueueEntry(ctx context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error)
 	DeleteMergeQueueEntryByReview(ctx context.Context, reviewID string) error
 }
@@ -127,6 +132,32 @@ func (e *MergeQueueOccupiedError) Error() string {
 
 func (e *MergeQueueOccupiedError) Unwrap() error { return repository.ErrConflict }
 
+// AmbiguousMergeQueueError refuses to promote from a queue the caller did not
+// settle on a repository. A target branch alone names one queue only in a
+// tenant that serves exactly one repository; where several have reviews
+// waiting, promoting "the head" would gate whichever repository's review
+// happened to sort first — a branch that need not exist in the checkout the
+// gate runs in. It names the repositories so the caller can name one.
+type AmbiguousMergeQueueError struct {
+	TargetBranch string
+	Repositories []string
+}
+
+func (e *AmbiguousMergeQueueError) Error() string {
+	named := make([]string, 0, len(e.Repositories))
+	for _, repository := range e.Repositories {
+		if strings.TrimSpace(repository) == "" {
+			named = append(named, "(no repository recorded)")
+			continue
+		}
+		named = append(named, repository)
+	}
+	return fmt.Sprintf("the merge queue for %s holds reviews from more than one repository (%s); name the one to advance",
+		e.TargetBranch, strings.Join(named, ", "))
+}
+
+func (e *AmbiguousMergeQueueError) Unwrap() error { return repository.ErrConflict }
+
 // ReviewNotMergingError refuses the missed-merge-window requeue on a review
 // that is not holding MERGE. The review was already resolved by id, so it
 // exists and the caller can see it: reporting a not-found there describes a
@@ -224,11 +255,46 @@ func NewReviewService(reviews ReviewRepository, builds ReviewBuildRepository, co
 	return &ReviewService{reviews: reviews, builds: builds, comments: comments, audit: audit, verifier: verifier, release: release}
 }
 
-func (s *ReviewService) PrepareCreate(review model.Review) model.Review {
+// InvalidRepositoryError refuses a repository the platform cannot canonicalize
+// — an empty host, a bare forge with no repository path — rather than storing
+// a value no other caller could ever match.
+type InvalidRepositoryError struct {
+	Reason string
+}
+
+func (e *InvalidRepositoryError) Error() string { return e.Reason }
+
+func (e *InvalidRepositoryError) Unwrap() error { return repository.ErrInvalidInput }
+
+// PrepareCreate normalizes a new review's status and repository identity. The
+// repository is canonicalized here rather than trusted as sent: two clients
+// holding SSH and HTTPS remotes for one repository must produce one identity,
+// or each would find only its own reviews. An absent repository is left
+// absent — a review of a repository with no nameable remote still records
+// that honestly, and the queue reports it as unrecorded rather than guessing.
+func (s *ReviewService) PrepareCreate(review model.Review) (model.Review, error) {
 	if review.Status == "" {
 		review.Status = model.ReviewStatusOpen
 	}
-	return review
+	repositoryIdentity, err := canonicalRepository(review.Repository)
+	if err != nil {
+		return model.Review{}, err
+	}
+	review.Repository = repositoryIdentity
+	return review, nil
+}
+
+// canonicalRepository canonicalizes a caller-supplied repository, leaving an
+// absent one absent.
+func canonicalRepository(repository string) (string, error) {
+	if strings.TrimSpace(repository) == "" {
+		return "", nil
+	}
+	identity, err := eruncommon.RepositoryIdentity(repository)
+	if err != nil {
+		return "", &InvalidRepositoryError{Reason: err.Error()}
+	}
+	return identity, nil
 }
 
 // AdvanceMergeQueue promotes targetBranch's queue head to MERGE, refusing
@@ -237,8 +303,8 @@ func (s *ReviewService) PrepareCreate(review model.Review) model.Review {
 // straight to this endpoint (the CLI, the API directly, a client bug) must
 // meet the same bar a careful desktop user would. OverrideAdvanceMergeQueue is
 // the one deliberate, audited way past it.
-func (s *ReviewService) AdvanceMergeQueue(ctx context.Context, targetBranch string) (model.Review, error) {
-	review, err := s.headOfMergeQueue(ctx, targetBranch)
+func (s *ReviewService) AdvanceMergeQueue(ctx context.Context, repository, targetBranch string) (model.Review, error) {
+	review, err := s.headOfMergeQueue(ctx, repository, targetBranch)
 	if err != nil {
 		return model.Review{}, err
 	}
@@ -258,7 +324,7 @@ func (s *ReviewService) AdvanceMergeQueue(ctx context.Context, targetBranch stri
 // quiet workaround: a caller-stated reason, and a durable audit record of it.
 // Both are required — a missing reason or an unconfigured audit logger fails
 // closed rather than silently promoting anyway.
-func (s *ReviewService) OverrideAdvanceMergeQueue(ctx context.Context, targetBranch, reason string) (model.Review, error) {
+func (s *ReviewService) OverrideAdvanceMergeQueue(ctx context.Context, repositoryIdentity, targetBranch, reason string) (model.Review, error) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return model.Review{}, repository.ErrInvalidInput
@@ -266,7 +332,11 @@ func (s *ReviewService) OverrideAdvanceMergeQueue(ctx context.Context, targetBra
 	if s.audit == nil {
 		return model.Review{}, errors.New("merge queue override requires audit logging, which is not configured on this control plane")
 	}
-	review, err := s.headOfMergeQueue(ctx, targetBranch)
+	repositoryIdentity, err := canonicalRepository(repositoryIdentity)
+	if err != nil {
+		return model.Review{}, err
+	}
+	review, err := s.headOfMergeQueue(ctx, repositoryIdentity, targetBranch)
 	if err != nil {
 		return model.Review{}, err
 	}
@@ -276,13 +346,16 @@ func (s *ReviewService) OverrideAdvanceMergeQueue(ctx context.Context, targetBra
 	return s.promoteToMerge(ctx, review)
 }
 
-// headOfMergeQueue resolves targetBranch's next queued review, refusing when
-// another review is already merging on that branch.
-func (s *ReviewService) headOfMergeQueue(ctx context.Context, targetBranch string) (model.Review, error) {
+// headOfMergeQueue resolves the next review queued to merge into targetBranch
+// in repository, refusing when another review is already merging on that
+// branch. An empty repository is one queue spanning every repository the
+// tenant serves — what a target branch alone has always meant, and what a
+// review created before the platform recorded a repository belongs to.
+func (s *ReviewService) headOfMergeQueue(ctx context.Context, repositoryIdentity, targetBranch string) (model.Review, error) {
 	if targetBranch == "" {
 		return model.Review{}, ErrInvalidTargetBranch
 	}
-	if occupying, err := s.reviews.FindActiveMergeReview(ctx, targetBranch); err == nil {
+	if occupying, err := s.reviews.FindActiveMergeReview(ctx, repositoryIdentity, targetBranch); err == nil {
 		return model.Review{}, &MergeQueueOccupiedError{
 			TargetBranch: targetBranch,
 			ReviewID:     occupying.ReviewID,
@@ -292,11 +365,36 @@ func (s *ReviewService) headOfMergeQueue(ctx context.Context, targetBranch strin
 	} else if !errors.Is(err, repository.ErrNotFound) {
 		return model.Review{}, err
 	}
-	review, err := s.reviews.FindNextMergeQueueReview(ctx, targetBranch)
+	review, err := s.reviews.FindNextMergeQueueReview(ctx, repositoryIdentity, targetBranch)
 	if errors.Is(err, repository.ErrNotFound) {
 		return model.Review{}, &EmptyMergeQueueError{TargetBranch: targetBranch}
 	}
-	return review, err
+	if err != nil {
+		return model.Review{}, err
+	}
+	if strings.TrimSpace(repositoryIdentity) == "" {
+		if err := s.refuseAmbiguousQueue(ctx, targetBranch); err != nil {
+			return model.Review{}, err
+		}
+	}
+	return review, nil
+}
+
+// refuseAmbiguousQueue refuses a promotion from an unfiltered queue that is
+// really several repositories' queues. A queue holding reviews from one
+// repository — including the one queue every review created before the
+// platform recorded a repository shares — still promotes exactly as it always
+// has; only a genuinely mixed one, where "the head" names no single
+// repository, is refused.
+func (s *ReviewService) refuseAmbiguousQueue(ctx context.Context, targetBranch string) error {
+	repositories, err := s.reviews.QueuedRepositories(ctx, targetBranch)
+	if err != nil {
+		return err
+	}
+	if len(repositories) < 2 {
+		return nil
+	}
+	return &AmbiguousMergeQueueError{TargetBranch: targetBranch, Repositories: repositories}
 }
 
 // promoteToMerge moves review from the queue to MERGE. Both AdvanceMergeQueue
@@ -381,10 +479,14 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 	// other review is one whose work landed without the queue, and is
 	// confirmed against the target branch's own history.
 	if status == model.ReviewStatusMerged {
-		if review.Status == model.ReviewStatusMerge {
-			return s.acceptMerged(ctx, review, buildID, remoteURL)
+		repositoryIdentity, err := resolveReportedRepository(review, remoteURL)
+		if err != nil {
+			return model.Review{}, err
 		}
-		return s.reconcileMerged(ctx, review, remoteURL)
+		if review.Status == model.ReviewStatusMerge {
+			return s.acceptMerged(ctx, review, buildID, remoteURL, repositoryIdentity)
+		}
+		return s.reconcileMerged(ctx, review, remoteURL, repositoryIdentity)
 	}
 
 	// READY without a build is the missed-merge-window path, not a build result.
@@ -402,6 +504,28 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 	return s.dequeueWithStatus(ctx, review, status)
 }
 
+// resolveReportedRepository answers which repository the report's
+// remoteURL names, refusing a remote that contradicts the repository the
+// review already records. Verification is only meaningful against the
+// review's own repository: a caller pointing the platform at a different one
+// could have it confirm a commit that landed somewhere else entirely, which
+// is the confusion a review without repository identity made possible.
+//
+// The identity is canonicalized first, so the SSH remote a checkout reports
+// verifies against the HTTPS one the review recorded.
+func resolveReportedRepository(review model.Review, remoteURL string) (string, error) {
+	reported, err := eruncommon.RepositoryIdentity(remoteURL)
+	if err != nil {
+		return "", &MergeNotVerifiedError{Reason: err.Error()}
+	}
+	recorded := strings.TrimSpace(review.Repository)
+	if recorded != "" && recorded != reported {
+		return "", &MergeNotVerifiedError{Reason: fmt.Sprintf(
+			"review %s belongs to %s, but the reported remote names %s", review.ReviewID, recorded, reported)}
+	}
+	return reported, nil
+}
+
 // acceptMerged is the one path to MERGED, open to any caller — the guarantee
 // is no longer who calls it, but what it can verify: a successful GATE build
 // already recorded against this exact review and commit (verifyGateBuild),
@@ -409,7 +533,7 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 // tip this review was gated against (verifyRepositoryState). Any check
 // failing refuses with *MergeNotVerifiedError; nothing about the review
 // changes.
-func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, buildID, remoteURL string) (model.Review, error) {
+func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, buildID, remoteURL, repositoryIdentity string) (model.Review, error) {
 	if review.Status != model.ReviewStatusMerge {
 		return model.Review{}, &InvalidTransitionError{From: review.Status, To: model.ReviewStatusMerged, ValidTargets: validTargetsFor(review.Status)}
 	}
@@ -429,6 +553,11 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 
 	review.Status = model.ReviewStatusMerged
 	review.LastMergedBuildID = build.BuildID
+	// Recorded only now, once the merge is accepted: a review created before
+	// the platform recorded a repository adopts the one this report named,
+	// which is the only moment the platform ever holds it. A refused report
+	// changes nothing.
+	review.Repository = repositoryIdentity
 	updated, err := s.reviews.Update(ctx, review)
 	if err != nil {
 		return model.Review{}, err
@@ -453,7 +582,7 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 // against the real remote that everything the source branch adds is present
 // in the target branch's history. What is reported here already happened
 // elsewhere, so unlike acceptMerged this triggers no release.
-func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review, remoteURL string) (model.Review, error) {
+func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review, remoteURL, repositoryIdentity string) (model.Review, error) {
 	if review.Status == model.ReviewStatusMerged || review.Status == model.ReviewStatusClosed {
 		return model.Review{}, &InvalidTransitionError{From: review.Status, To: model.ReviewStatusMerged, ValidTargets: validTargetsFor(review.Status)}
 	}
@@ -472,8 +601,10 @@ func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review
 	// Deliberately no LastMergedBuildID: there was no build, and
 	// FindLastMergedReview skips build-less merges for exactly this reason —
 	// gatedTargetTip anchors the next queue-driven merge on a build's commit,
-	// which a reconciliation has none of.
+	// which a reconciliation has none of. The repository this report named is
+	// recorded, though: that is review identity, not build provenance.
 	review.LastMergedBuildID = ""
+	review.Repository = repositoryIdentity
 	updated, err := s.reviews.Update(ctx, review)
 	if err != nil {
 		return model.Review{}, err
@@ -525,7 +656,7 @@ func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.
 	if !onBranch {
 		return &MergeNotVerifiedError{Reason: fmt.Sprintf("commit %s is not on the target branch %s", commit, review.TargetBranch)}
 	}
-	gatedTip, err := s.gatedTargetTip(ctx, review.TargetBranch)
+	gatedTip, err := s.gatedTargetTip(ctx, review)
 	if err != nil {
 		return err
 	}
@@ -551,8 +682,8 @@ func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.
 // Empty with no error means no review has ever merged onto this branch
 // through the queue yet — the bootstrap case, with nothing recorded to
 // compare against.
-func (s *ReviewService) gatedTargetTip(ctx context.Context, targetBranch string) (string, error) {
-	last, err := s.reviews.FindLastMergedReview(ctx, targetBranch)
+func (s *ReviewService) gatedTargetTip(ctx context.Context, review model.Review) (string, error) {
+	last, err := s.reviews.FindLastMergedReview(ctx, review.Repository, review.TargetBranch)
 	if errors.Is(err, repository.ErrNotFound) {
 		return "", nil
 	}
@@ -648,8 +779,9 @@ func (s *ReviewService) markBuildSucceeded(ctx context.Context, review model.Rev
 	// failure of this build. Nor is the queue head having unresolved comment
 	// threads: that review is not necessarily the one this build belongs to, so
 	// its own gate blocking has nothing to do with whether reporting this build
-	// succeeded.
-	promoted, err := s.AdvanceMergeQueue(ctx, updated.TargetBranch)
+	// succeeded. The queue advanced is the built review's own repository's, so
+	// another repository's queue on the same target branch is unaffected.
+	promoted, err := s.AdvanceMergeQueue(ctx, updated.Repository, updated.TargetBranch)
 	if err != nil {
 		var blocked *UnresolvedThreadsError
 		var occupied *MergeQueueOccupiedError

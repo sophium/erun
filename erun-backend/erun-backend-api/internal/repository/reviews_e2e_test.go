@@ -570,7 +570,7 @@ func TestReviewListMergeQueueScopesToTheOperationsCallersOwnTenant(t *testing.T)
 	})
 	mustNoErr(t, err, "queue ops review")
 
-	listed, err := reviews.ListMergeQueue(opsCtx, "")
+	listed, err := reviews.ListMergeQueue(opsCtx, "", "")
 	mustNoErr(t, err, "list merge queue as operations caller")
 	if len(listed) != 1 || listed[0].ReviewID != opsReview.ReviewID {
 		t.Fatalf("ListMergeQueue = %+v, want exactly the operations caller's own queued review %s, not the stranger's as well", listed, opsReview.ReviewID)
@@ -638,5 +638,96 @@ func TestReviewReviewerListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	mustNoErr(t, err, "list reviewers as operations caller")
 	if len(listed) != 1 || listed[0].UserID != opsReviewer {
 		t.Fatalf("List = %+v, want exactly the operations caller's own reviewer %s, not the stranger's as well", listed, opsReviewer)
+	}
+}
+
+// TestReviewRepositoryScopesNameUniquenessToTheRepository is the reported
+// failure against real Postgres: two repositories a tenant serves have
+// branches with the same names and, in a rebased-again workflow, the same
+// squash-merge message, so a name reserved tenant-wide made the second
+// repository's review unopenable for a reason that had nothing to do with it.
+func TestReviewRepositoryScopesNameUniquenessToTheRepository(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	ctx := reviewsContext(tenantID, author)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+
+	first, err := reviews.Create(ctx, model.Review{
+		Repository: "https://github.com/sophium/erun", Name: "Fix the widget",
+		TargetBranch: "main", SourceBranch: "feature/widget", Status: model.ReviewStatusOpen,
+	})
+	mustNoErr(t, err, "create the first repository's review")
+
+	second, err := reviews.Create(ctx, model.Review{
+		Repository: "https://github.com/sophium/other", Name: "Fix the widget",
+		TargetBranch: "main", SourceBranch: "feature/widget", Status: model.ReviewStatusOpen,
+	})
+	mustNoErr(t, err, "create the same message and branch pair in a second repository")
+
+	if second.Name != first.Name || second.Repository == first.Repository {
+		t.Fatalf("second review = %+v, want the same name in a different repository", second)
+	}
+
+	if _, err := reviews.Create(ctx, model.Review{
+		Repository: "https://github.com/sophium/erun", Name: "Fix the widget",
+		TargetBranch: "main", SourceBranch: "feature/other", Status: model.ReviewStatusOpen,
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("a second review with the same name in the same repository: err = %v, want ErrConflict", err)
+	}
+}
+
+// TestReviewMergeQueueIsPerRepository is the queue half of the same failure:
+// a target branch is not what names a queue, so a repository's own queued
+// reviews are only ever found by naming its identity too.
+func TestReviewMergeQueueIsPerRepository(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	ctx := reviewsContext(tenantID, author)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
+
+	queue := func(repository, sourceBranch string) model.Review {
+		review, err := reviews.Create(ctx, model.Review{
+			Repository: repository, Name: "Land " + sourceBranch,
+			TargetBranch: "main", SourceBranch: sourceBranch, Status: model.ReviewStatusOpen,
+		})
+		mustNoErr(t, err, "create review "+sourceBranch)
+		build, err := builds.Create(ctx, model.Build{
+			ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: sourceBranch + "-sha", Version: "1.0.0",
+		})
+		mustNoErr(t, err, "create build "+sourceBranch)
+		review.Status = model.ReviewStatusReady
+		review.LastReadyBuildID = build.BuildID
+		review, err = reviews.Update(ctx, review)
+		mustNoErr(t, err, "mark "+sourceBranch+" READY")
+		_, err = reviews.CreateMergeQueueEntry(ctx, model.ReviewMergeQueueEntry{TargetBranch: review.TargetBranch, ReviewID: review.ReviewID})
+		mustNoErr(t, err, "queue "+sourceBranch)
+		return review
+	}
+
+	ours := queue("https://github.com/sophium/erun", "feature/ours")
+	theirs := queue("https://github.com/sophium/other", "feature/theirs")
+
+	listed, err := reviews.ListMergeQueue(ctx, "https://github.com/sophium/erun", "main")
+	mustNoErr(t, err, "list our repository's queue")
+	if len(listed) != 1 || listed[0].ReviewID != ours.ReviewID {
+		t.Fatalf("ListMergeQueue(erun) = %+v, want exactly %s — the other repository's review %s shares the target branch, not the queue",
+			listed, ours.ReviewID, theirs.ReviewID)
+	}
+
+	head, err := reviews.FindNextMergeQueueReview(ctx, "https://github.com/sophium/erun", "main")
+	mustNoErr(t, err, "find our queue head")
+	if head.ReviewID != ours.ReviewID {
+		t.Fatalf("our queue head = %s, want %s", head.ReviewID, ours.ReviewID)
+	}
+
+	if _, err := reviews.FindActiveMergeReview(ctx, "https://github.com/sophium/other", "main"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the other repository reports a merging review: err = %v, want ErrNotFound", err)
+	}
+
+	repositories, err := reviews.QueuedRepositories(ctx, "main")
+	mustNoErr(t, err, "read the branch's queued repositories")
+	if len(repositories) != 2 {
+		t.Fatalf("QueuedRepositories(main) = %v, want both repositories — an unfiltered promotion over these is the ambiguity the platform must refuse", repositories)
 	}
 }

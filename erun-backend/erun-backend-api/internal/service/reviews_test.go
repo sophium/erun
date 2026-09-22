@@ -47,37 +47,65 @@ func (f *fakeReviewRepo) Update(_ context.Context, review model.Review) (model.R
 	return r, nil
 }
 
-func (f *fakeReviewRepo) FindNextMergeQueueReview(_ context.Context, targetBranch string) (model.Review, error) {
+// inRepository mirrors the real queries' repository predicate: an empty
+// repository filters nothing, and a named one matches exactly, so a review
+// with no recorded repository is reached only by the unfiltered answer.
+func inRepository(review model.Review, repositoryFilter string) bool {
+	return repositoryFilter == "" || review.Repository == repositoryFilter
+}
+
+func (f *fakeReviewRepo) FindNextMergeQueueReview(_ context.Context, repositoryFilter, targetBranch string) (model.Review, error) {
 	for _, entry := range f.queue {
 		if entry.TargetBranch != targetBranch {
 			continue
 		}
-		if review, ok := f.reviews[entry.ReviewID]; ok && review.Status == model.ReviewStatusReady {
+		if review, ok := f.reviews[entry.ReviewID]; ok && review.Status == model.ReviewStatusReady && inRepository(*review, repositoryFilter) {
 			return *review, nil
 		}
 	}
 	return model.Review{}, repository.ErrNotFound
 }
 
-func (f *fakeReviewRepo) FindActiveMergeReview(_ context.Context, targetBranch string) (model.Review, error) {
+func (f *fakeReviewRepo) FindActiveMergeReview(_ context.Context, repositoryFilter, targetBranch string) (model.Review, error) {
 	for _, review := range f.reviews {
-		if review.TargetBranch == targetBranch && review.Status == model.ReviewStatusMerge {
+		if review.TargetBranch == targetBranch && review.Status == model.ReviewStatusMerge && inRepository(*review, repositoryFilter) {
 			return *review, nil
 		}
 	}
 	return model.Review{}, repository.ErrNotFound
 }
 
-// FindLastMergedReview picks any MERGED review on targetBranch: tests never
-// have more than one, so insertion order does not matter here the way it
-// does for the real query's ORDER BY.
-func (f *fakeReviewRepo) FindLastMergedReview(_ context.Context, targetBranch string) (model.Review, error) {
+// FindLastMergedReview picks any MERGED review on targetBranch in repository:
+// tests never have more than one, so insertion order does not matter here the
+// way it does for the real query's ORDER BY.
+func (f *fakeReviewRepo) FindLastMergedReview(_ context.Context, repositoryFilter, targetBranch string) (model.Review, error) {
 	for _, review := range f.reviews {
-		if review.TargetBranch == targetBranch && review.Status == model.ReviewStatusMerged {
+		if review.TargetBranch == targetBranch && review.Status == model.ReviewStatusMerged && inRepository(*review, repositoryFilter) {
 			return *review, nil
 		}
 	}
 	return model.Review{}, repository.ErrNotFound
+}
+
+// QueuedRepositories mirrors the real query: the distinct repositories of the
+// READY reviews this fake has queued for targetBranch.
+func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	for _, entry := range f.queue {
+		if entry.TargetBranch != targetBranch {
+			continue
+		}
+		review, ok := f.reviews[entry.ReviewID]
+		if !ok || review.Status != model.ReviewStatusReady {
+			continue
+		}
+		if !seen[review.Repository] {
+			seen[review.Repository] = true
+			out = append(out, review.Repository)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeReviewRepo) CreateMergeQueueEntry(_ context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error) {
@@ -522,7 +550,7 @@ func TestAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.T) {
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-queued"}}
 	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
-	_, err := svc.AdvanceMergeQueue(context.Background(), "main")
+	_, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
 	var occupied *MergeQueueOccupiedError
 	if !errors.As(err, &occupied) {
 		t.Fatalf("AdvanceMergeQueue while another review is merging: err = %v, want *MergeQueueOccupiedError", err)
@@ -548,7 +576,7 @@ func TestOverrideAdvanceMergeQueueRefusesWhileAnotherReviewIsMerging(t *testing.
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-queued"}}
 	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
 
-	_, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", "hotfix, reviewers unavailable")
+	_, err := svc.OverrideAdvanceMergeQueue(context.Background(), "", "main", "hotfix, reviewers unavailable")
 	var occupied *MergeQueueOccupiedError
 	if !errors.As(err, &occupied) {
 		t.Fatalf("OverrideAdvanceMergeQueue while another review is merging: err = %v, want *MergeQueueOccupiedError", err)
@@ -569,7 +597,7 @@ func TestAdvanceMergeQueueRefusesUnresolvedThreads(t *testing.T) {
 	}}
 	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{}, nil, nil)
 
-	_, err := svc.AdvanceMergeQueue(context.Background(), "main")
+	_, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
 	var blocked *UnresolvedThreadsError
 	if !errors.As(err, &blocked) {
 		t.Fatalf("AdvanceMergeQueue error = %v, want *UnresolvedThreadsError", err)
@@ -602,7 +630,7 @@ func TestAdvanceMergeQueuePromotesWhenAllThreadsResolved(t *testing.T) {
 	}}
 	svc := NewReviewService(reviews, &fakeReviewBuilds{}, comments, &fakeReviewAudit{}, nil, nil)
 
-	promoted, err := svc.AdvanceMergeQueue(context.Background(), "main")
+	promoted, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
 	if err != nil {
 		t.Fatalf("AdvanceMergeQueue with all threads resolved: %v", err)
 	}
@@ -718,7 +746,7 @@ func TestOverrideAdvanceMergeQueueRequiresReason(t *testing.T) {
 	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, audit, nil, nil)
 
 	for _, reason := range []string{"", "   "} {
-		if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", reason); !errors.Is(err, repository.ErrInvalidInput) {
+		if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "", "main", reason); !errors.Is(err, repository.ErrInvalidInput) {
 			t.Fatalf("OverrideAdvanceMergeQueue(reason=%q) error = %v, want ErrInvalidInput", reason, err)
 		}
 	}
@@ -746,7 +774,7 @@ func TestOverrideAdvanceMergeQueueBypassesGateAndAudits(t *testing.T) {
 		TenantID: "tenant-1", ErunUserID: "user-1", ExternalIssuer: "https://issuer.example", ExternalUserID: "sub-1",
 	})
 
-	promoted, err := svc.OverrideAdvanceMergeQueue(ctx, "main", "hotfix, reviewers unavailable")
+	promoted, err := svc.OverrideAdvanceMergeQueue(ctx, "", "main", "hotfix, reviewers unavailable")
 	if err != nil {
 		t.Fatalf("OverrideAdvanceMergeQueue: %v", err)
 	}
@@ -775,7 +803,7 @@ func TestOverrideAdvanceMergeQueueFailsClosedWithoutAuditLogger(t *testing.T) {
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
 	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, nil, nil, nil)
 
-	if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", "reason"); err == nil {
+	if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "", "main", "reason"); err == nil {
 		t.Fatal("OverrideAdvanceMergeQueue with no audit logger configured: want an error, got nil")
 	}
 	if reviews.reviews["review-1"].Status != model.ReviewStatusReady {
@@ -791,10 +819,155 @@ func TestOverrideAdvanceMergeQueueRequiresSecurityContext(t *testing.T) {
 	reviews.queue = []model.ReviewMergeQueueEntry{{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"}}
 	svc := NewReviewService(reviews, &fakeReviewBuilds{}, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{}, nil, nil)
 
-	if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "main", "reason"); !errors.Is(err, repository.ErrMissingSecurityContext) {
+	if _, err := svc.OverrideAdvanceMergeQueue(context.Background(), "", "main", "reason"); !errors.Is(err, repository.ErrMissingSecurityContext) {
 		t.Fatalf("error = %v, want ErrMissingSecurityContext", err)
 	}
 	if reviews.reviews["review-1"].Status != model.ReviewStatusReady {
 		t.Fatalf("review-1 status = %s, want unchanged", reviews.reviews["review-1"].Status)
+	}
+}
+
+// The reported failure: a review recorded no repository, so a tenant serving
+// two repositories had one queue per target branch and a promotion took
+// whichever review happened to sort first. The gate then ran in the wrong
+// repository's checkout — against a branch that need not exist there — and
+// contributed nothing, which the gate reports as a skip rather than a
+// failure. These two cases are the two halves of that: naming the repository
+// takes the right head, and naming none refuses rather than guessing.
+func TestAdvanceMergeQueuePromotesTheNamedRepositorysOwnHead(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-other", Repository: "https://github.com/sophium/other", TargetBranch: "main", Status: model.ReviewStatusReady},
+	)
+	// The other repository's review is queued first, so a promotion keyed on
+	// the target branch alone would take it.
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-other"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-erun"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	promoted, err := svc.AdvanceMergeQueue(context.Background(), "https://github.com/sophium/erun", "main")
+	if err != nil {
+		t.Fatalf("AdvanceMergeQueue: %v", err)
+	}
+	if promoted.ReviewID != "review-erun" {
+		t.Fatalf("promoted %s, want review-erun: the queue of the repository named, not the first review queued for that branch", promoted.ReviewID)
+	}
+	if got := reviews.reviews["review-other"].Status; got != model.ReviewStatusReady {
+		t.Fatalf("the other repository's review is %s, want it left READY and unqueued-from, not promoted", got)
+	}
+}
+
+func TestAdvanceMergeQueueRefusesAQueueThatIsNotOneRepositorys(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-other", Repository: "https://github.com/sophium/other", TargetBranch: "main", Status: model.ReviewStatusReady},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-other"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-erun"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
+	var ambiguous *AmbiguousMergeQueueError
+	if !errors.As(err, &ambiguous) {
+		t.Fatalf("AdvanceMergeQueue with no repository: error = %v, want *AmbiguousMergeQueueError", err)
+	}
+	for _, want := range []string{"https://github.com/sophium/erun", "https://github.com/sophium/other"} {
+		if !strings.Contains(ambiguous.Error(), want) {
+			t.Fatalf("refusal = %q, want it to name %s so the caller can name one", ambiguous.Error(), want)
+		}
+	}
+	for _, id := range []string{"review-erun", "review-other"} {
+		if got := reviews.reviews[id].Status; got != model.ReviewStatusReady {
+			t.Fatalf("%s is %s, want both left READY: an ambiguous queue promotes nothing", id, got)
+		}
+	}
+}
+
+// A queue holding reviews from one repository — including the single queue
+// every review created before the platform recorded a repository shares —
+// still promotes exactly as it always has: refusing it would strand work the
+// platform has no other way to advance.
+func TestAdvanceMergeQueuePromotesAnUnrecordedQueueThatIsStillOneRepository(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-2", TargetBranch: "main", Status: model.ReviewStatusReady},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-1"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-2"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	promoted, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
+	if err != nil {
+		t.Fatalf("AdvanceMergeQueue: %v", err)
+	}
+	if promoted.ReviewID != "review-1" {
+		t.Fatalf("promoted %s, want the queue head review-1", promoted.ReviewID)
+	}
+}
+
+// The reported failure, second half: verification fetched whatever remote the
+// reporter named, so a caller could have the platform confirm a commit
+// against a repository the review has nothing to do with. Naming a different
+// repository is now refused outright, and the reported identity is the
+// canonicalized one — an SSH remote verifies against the HTTPS identity the
+// review recorded.
+func TestAcceptMergedRefusesARemoteForADifferentRepository(t *testing.T) {
+	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	reviews.reviews["review-1"].Repository = "https://github.com/sophium/erun"
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: true}, nil)
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "https://github.com/sophium/other")
+
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want *MergeNotVerifiedError", err)
+	}
+	if !strings.Contains(err.Error(), "https://github.com/sophium/erun") {
+		t.Fatalf("error = %q, want it to name the repository the review records", err.Error())
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusMerge {
+		t.Fatalf("status = %s, want the review left at MERGE", got)
+	}
+}
+
+// The SSH remote a checkout reports has to be the repository the review
+// recorded over HTTPS, or every merge reported from an SSH clone would be
+// refused for naming a repository it is not.
+func TestAcceptMergedAcceptsAnSSHSpellingOfTheReviewsOwnRepository(t *testing.T) {
+	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	reviews.reviews["review-1"].Repository = "https://github.com/sophium/erun"
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: true}, nil)
+
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "git@github.com:sophium/erun.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED): %v", err)
+	}
+	if updated.Repository != "https://github.com/sophium/erun" {
+		t.Fatalf("repository = %q, want the review's own canonical identity", updated.Repository)
+	}
+}
+
+// A review created before the platform recorded a repository has nothing to
+// compare a reported remote against, so the report is what records it — the
+// only moment the platform ever holds it.
+func TestAcceptMergedRecordsTheRepositoryAnUnrecordedReviewWasReportedUnder(t *testing.T) {
+	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: true}, nil)
+
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "git@github.com:sophium/erun.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED): %v", err)
+	}
+	if updated.Repository != "https://github.com/sophium/erun" {
+		t.Fatalf("repository = %q, want the reported remote recorded as the review's identity", updated.Repository)
 	}
 }

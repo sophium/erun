@@ -33,13 +33,13 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/v1/reviews` | List reviews. Optional filters, all composable: `?targetBranch=<name>`, `?sourceBranch=<name>`, `?status=<OPEN\|CLOSED\|FAILED\|READY\|MERGE\|MERGED>`, `?authorUserId=<id>`, `?reviewerUserId=<id>`. |
-| `POST` | `/v1/reviews` | Create a review. Body: `name`, `sourceBranch`, `targetBranch`. Refused with `409 Conflict` if another non-`MERGED`/`CLOSED` review already proposes the same `sourceBranch` onto the same `targetBranch`. |
+| `GET` | `/v1/reviews` | List reviews. Optional filters, all composable: `?repository=<remote>`, `?targetBranch=<name>`, `?sourceBranch=<name>`, `?status=<OPEN\|CLOSED\|FAILED\|READY\|MERGE\|MERGED>`, `?authorUserId=<id>`, `?reviewerUserId=<id>`. |
+| `POST` | `/v1/reviews` | Create a review. Body: `repository`, `name`, `sourceBranch`, `targetBranch`. `repository` is canonicalized (an SSH remote and its HTTPS form are one repository); an absent one is recorded as none. Refused with `400`/`INVALID_REPOSITORY` for a value that names no repository, and with `409 Conflict` if another review in the same repository already holds the name (unless it is `CLOSED`) or already proposes the same `sourceBranch` onto the same `targetBranch` while non-`MERGED`/`CLOSED`. |
 | `GET` | `/v1/reviews/{reviewId}` | Fetch one review. |
 | `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`, and (only for `status: "MERGED"`) `remoteUrl` — the git remote the merge was pushed to, fetched to verify the report against the real repository. `buildId` is required for a review at `MERGE` and for `READY`/`FAILED`; a `MERGED` report for a review at any other status omits it, since there is no gate build for work that landed without the queue. |
-| `GET` | `/v1/reviews/merge-queue` | List reviews *waiting* to merge for a target branch (status `READY`, not yet promoted). Optional `?targetBranch=<name>`. |
-| `POST` | `/v1/reviews/merge-queue/advance` | Promote the next waiting review to `MERGE`. Body: `targetBranch`. Refuses with `409 Conflict` when the head still has unresolved comment threads — see [Merge queue](#merge-queue). The promoted review is expected to build and push its own merge and report the outcome; this call does not itself produce `MERGED`. |
-| `POST` | `/v1/reviews/merge-queue/override-advance` | Bypass the unresolved-thread refusal and advance anyway. Body: `targetBranch`, `reason`. A distinct, separately-authorized route — see [Overriding the gate](#overriding-the-gate). |
+| `GET` | `/v1/reviews/merge-queue` | List reviews *waiting* to merge into a target branch (status `READY`, not yet promoted). Optional `?repository=<remote>`, `?targetBranch=<name>`; an absent `repository` lists every repository's queue, which is what a target branch alone has always meant. |
+| `POST` | `/v1/reviews/merge-queue/advance` | Promote the next waiting review to `MERGE`. Body: `repository`, `targetBranch`. Refuses with `409 Conflict` when the head still has unresolved comment threads, and with `409`/`MERGE_QUEUE_AMBIGUOUS` when no repository was named and the queue holds more than one repository's reviews — see [Merge queue](#merge-queue). The promoted review is expected to build and push its own merge and report the outcome; this call does not itself produce `MERGED`. |
+| `POST` | `/v1/reviews/merge-queue/override-advance` | Bypass the unresolved-thread refusal and advance anyway. Body: `repository`, `targetBranch`, `reason`. A distinct, separately-authorized route — see [Overriding the gate](#overriding-the-gate). |
 | `GET` | `/v1/reviews/{reviewId}/reviewers` | List the review's reviewers. |
 | `POST` | `/v1/reviews/{reviewId}/reviewers` | Add a reviewer. Body: `userId`. |
 | `DELETE` | `/v1/reviews/{reviewId}/reviewers/{userId}` | Remove a reviewer. `204 No Content` on success. |
@@ -63,11 +63,25 @@ The reviewer resource:
 }
 ```
 
+The `repository` list filter is what separates two repositories a tenant serves that propose the same branch pair; it is not defaulted from a client's checkout, because a listing is how you find work across every repository.
+
 The `authorUserId` and `reviewerUserId` list filters make two questions answerable directly, without client-side filtering: "my reviews" is `GET /v1/reviews?authorUserId=<me>`, and "reviews waiting on me" is `GET /v1/reviews?reviewerUserId=<me>`. Both compose with `status`, `targetBranch`, and `sourceBranch`.
+
+## Repository identity
+
+A review records the repository its branches belong to, as a canonicalized remote: `git@github.com:org/repo.git` and `https://github.com/org/repo` are one identity, so a review opened from an SSH checkout is the one a merge-queue environment finds over HTTPS. The platform canonicalizes whatever the caller sends rather than trusting the spelling.
+
+Every review-scoped uniqueness rule and the merge queue are keyed by it. A tenant may serve more than one repository, and two of them will share branch names — both a `main` and a `feature/x` — so a target branch alone names a queue only in a tenant that serves exactly one repository. `MERGE_QUEUE_AMBIGUOUS` is what a promotion over a genuinely mixed queue gets instead of a guess.
+
+A review created before the platform recorded a repository carries none, and appears only in an unfiltered listing or queue. It adopts an identity from the `remoteUrl` of the first `MERGED` report about it, which is the only moment the remote is in hand.
+
+## Name uniqueness
+
+A review's `name` is its eventual squash-merge message, so two reviews that could both land in one repository must not claim the same one. It is unique per `(tenant, repository, name)` among reviews that are not `CLOSED`: a closed review never landed, so its name was never used as a merge message and holds nothing, and re-opening work on a rebased branch reuses its own subject line rather than rewording it.
 
 ## One live review per branch pair
 
-At most one non-`MERGED`, non-`CLOSED` review may propose a given `sourceBranch` onto a given `targetBranch` at a time. `POST /v1/reviews` for a branch pair that already has a live review fails with `409 Conflict`. Once that review reaches `MERGED` or `CLOSED`, the same branch pair can be proposed again — branch history is unbounded, only *live* duplicates are refused. This prevents two reviews from independently reaching the merge queue for the same change, where the second would merge a branch the target already contains.
+At most one non-`MERGED`, non-`CLOSED` review may propose a given `sourceBranch` onto a given `targetBranch` in one repository at a time. `POST /v1/reviews` for a branch pair that already has a live review fails with `409 Conflict`. Once that review reaches `MERGED` or `CLOSED`, the same branch pair can be proposed again — branch history is unbounded, only *live* duplicates are refused. This prevents two reviews from independently reaching the merge queue for the same change, where the second would merge a branch the target already contains.
 
 ## Status lifecycle
 
@@ -138,7 +152,7 @@ Every endpoint returns a JSON body `{code, message, details}` — `code` is alwa
 | `401 Unauthorized` | No `Authorization` header, or token validation failed. | Bearer token expired. |
 | `403 Forbidden` | Token valid; caller not allowed in this tenant. | Agent of tenant A calling on tenant B. |
 | `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller; a `buildId` on `PATCH .../status` that doesn't belong to the review or whose `successful` flag doesn't match the target status; `merge-queue/advance` against a target branch with nothing waiting to promote — see [Merge queue § Failure table](/collaboration/merge-queue#failure-table). | `GET /v1/reviews/01a01b39-0000-7000-8000-000000000000`; `POST /v1/reviews/merge-queue/advance` on an empty queue. |
-| `409 Conflict` | A second live review for a branch pair already proposed by a live review; a reviewer already assigned to the review; the queue head has unresolved comment threads; another review already holds the target branch's `MERGE` slot; a `READY` transition with no `buildId` on a review that is not at `MERGE`; a `MERGED` report the platform could not verify against the real repository, either check. | `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](/collaboration/merge-queue#the-unresolved-thread-check) for that response's structured body; `advance` while another review is already `MERGE` for that branch — see [Merge queue § Failure table](/collaboration/merge-queue#failure-table) for `MERGE_QUEUE_OCCUPIED`; `PATCH .../status` with `{"status": "MERGED"}` whose `buildId`/`remoteUrl` don't check out — see [Merge queue § The gate](/collaboration/merge-queue#the-gate). |
+| `409 Conflict` | A second live review for a branch pair already proposed by a live review in the same repository; a name already held by that repository's non-`CLOSED` review; a `merge-queue/advance` naming no repository whose queue holds more than one (`MERGE_QUEUE_AMBIGUOUS`); a reviewer already assigned to the review; the queue head has unresolved comment threads; another review already holds the target branch's `MERGE` slot; a `READY` transition with no `buildId` on a review that is not at `MERGE`; a `MERGED` report the platform could not verify against the real repository, either check. | `POST /v1/reviews` proposing `feature-a` onto `main` while another live review already does; `advance` against a head review with an open thread — see [Merge queue](/collaboration/merge-queue#the-unresolved-thread-check) for that response's structured body; `advance` while another review is already `MERGE` for that branch — see [Merge queue § Failure table](/collaboration/merge-queue#failure-table) for `MERGE_QUEUE_OCCUPIED`; `PATCH .../status` with `{"status": "MERGED"}` whose `buildId`/`remoteUrl` don't check out — see [Merge queue § The gate](/collaboration/merge-queue#the-gate). |
 | `429 Too Many Requests` `(Planned.)` | Not implemented — no request ever gets this today. Kept here as the target shape; see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits). | n/a |
 | `500 Internal Server Error` | Server error. Retry. | Database unavailable. |
 
@@ -157,6 +171,8 @@ The codes below are the ones this API's review/merge-queue routes can actually d
 | `REVIEW_NOT_MERGING` | `PATCH /status` to `READY` with no `buildId` — the missed-merge-window requeue — on a review that is not at `MERGE`. `details` names the `reviewId` and the `status` it actually holds. | `409` |
 | `INVALID_BODY` | Request body missing required field or fails type validation (malformed JSON), or `PATCH /status` to `READY`/`FAILED`/`MERGED` with no `buildId` (`details.field` names it: `buildId`). | `400` |
 | `INVALID_TARGET_BRANCH` | `targetBranch` is empty on `merge-queue/advance` or `override-advance`. | `400` |
+| `MERGE_QUEUE_AMBIGUOUS` | `POST /merge-queue/advance` (or `override-advance`) naming no repository while the target branch's queue holds `READY` reviews from more than one. `details` names the `targetBranch` and the `repositories`; the message says to name one. A queue holding one repository's reviews — including the queue every review created before the platform recorded a repository shares — advances normally. | `409` |
+| `INVALID_REPOSITORY` | `POST /reviews` with a `repository` that names no repository — an empty value, a bare forge. | `400` |
 | `INVALID_PATH_ID` | An id in the path — `{review_id}`, `{build_id}`, `{comment_id}`, `{user_id}` — is not a UUID. The message names the parameter and the value received. Shared by every route with an id in its path, so its full contract lives once in [API protocol · Request-level validation errors](/agent-reference/api-protocol#request-level-validation-errors). | `400` |
 
 ### Pagination + rate limits

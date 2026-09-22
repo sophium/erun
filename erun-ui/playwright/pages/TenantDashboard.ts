@@ -263,9 +263,11 @@ export class TenantDashboard {
 
   // A queue spanning several target branches has no single head, so the action
   // is replaced by the reason rather than silently absent.
+  // The note now covers both halves of what names a queue: a panel spanning
+  // branches, or repositories, has no single unambiguous head to advance.
   advanceMergeQueueMixedBranchNote(): Locator {
     return this.activePanel().getByText(
-      'These reviews target more than one branch, so there is no single queue head to advance.',
+      'These reviews do not all name one branch and repository, so there is no single queue head to advance.',
     );
   }
 

@@ -53,7 +53,7 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, existing := range reviews {
-			if existing["name"] == body["name"] {
+			if existing["name"] == body["name"] && existing["repository"] == body["repository"] {
 				http.Error(w, "conflict: a review named "+body["name"]+" already exists", http.StatusConflict)
 				return
 			}
@@ -62,7 +62,8 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		nextReview++
 		review := map[string]any{
 			"reviewId": id, "tenantId": "tenant-1", "authorUserId": "user-1",
-			"name": body["name"], "targetBranch": body["targetBranch"], "sourceBranch": body["sourceBranch"],
+			"repository": body["repository"],
+			"name":       body["name"], "targetBranch": body["targetBranch"], "sourceBranch": body["sourceBranch"],
 			"status": "OPEN", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
 		}
 		reviews[id] = review
@@ -81,6 +82,9 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		out := []map[string]any{}
 		for _, id := range reviewOrder {
 			review := reviews[id]
+			if v := query.Get("repository"); v != "" && review["repository"] != v {
+				continue
+			}
 			if v := query.Get("targetBranch"); v != "" && review["targetBranch"] != v {
 				continue
 			}
@@ -136,10 +140,14 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		mu.Lock()
 		defer mu.Unlock()
 		targetBranch := r.URL.Query().Get("targetBranch")
+		repository := r.URL.Query().Get("repository")
 		out := []map[string]any{}
 		for _, id := range reviewOrder {
 			review := reviews[id]
 			if review["targetBranch"] != targetBranch {
+				continue
+			}
+			if repository != "" && review["repository"] != repository {
 				continue
 			}
 			if review["status"] != "READY" && review["status"] != "MERGE" {
@@ -169,6 +177,9 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 			if review["targetBranch"] != body["targetBranch"] || review["status"] != "MERGE" {
 				continue
 			}
+			if body["repository"] != "" && review["repository"] != body["repository"] {
+				continue
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -187,6 +198,9 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		for _, id := range reviewOrder {
 			review := reviews[id]
 			if review["targetBranch"] != body["targetBranch"] {
+				continue
+			}
+			if body["repository"] != "" && review["repository"] != body["repository"] {
 				continue
 			}
 			if review["status"] == "READY" {
@@ -217,6 +231,9 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		for _, id := range reviewOrder {
 			review := reviews[id]
 			if review["targetBranch"] != body["targetBranch"] {
+				continue
+			}
+			if body["repository"] != "" && review["repository"] != body["repository"] {
 				continue
 			}
 			if review["status"] == "READY" {
@@ -338,13 +355,25 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 	return server
 }
 
+// reviewRepository is the repository the review scenarios below open their
+// reviews in. A review has to name one — two repositories a tenant serves
+// would otherwise share a queue for the same target branch — and scenarios
+// that do not exercise the checkout's own origin derive it, name it here so
+// the assertion is about the review rather than about the runner's cwd.
+const reviewRepository = "https://github.com/sophium/erun"
+
+// otherRepository is a second repository the same tenant serves, which is the
+// shape that made a target branch alone an ambiguous name for a queue.
+const otherRepository = "https://github.com/sophium/other"
+
 // createReviewJSON runs `review create --output json` against the stub
 // server and decodes the resulting reviewId, for scenarios that need a real
 // review to act on rather than a --dry-run trace.
 func createReviewJSON(t testing.TB, setup env.Setup, name, sourceBranch, targetBranch string) struct{ ReviewID string } {
 	t.Helper()
 	result := erun.Run(t, []string{
-		"review", "create", "--name", name, "--source-branch", sourceBranch, "--target-branch", targetBranch, "--output", "json",
+		"review", "create", "--name", name, "--repository", reviewRepository,
+		"--source-branch", sourceBranch, "--target-branch", targetBranch, "--output", "json",
 	}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 	if result.ExitCode != 0 {
 		t.Fatalf("review create exit %d: %s", result.ExitCode, result.Combined)
@@ -512,7 +541,8 @@ func TestReview(t *testing.T) {
 	t.Run("create_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
-		args := []string{"review", "create", "--name", "Add widget", "--source-branch", "feature/widget", "--target-branch", "main", "--dry-run"}
+		args := []string{"review", "create", "--name", "Add widget", "--repository", reviewRepository,
+			"--source-branch", "feature/widget", "--target-branch", "main", "--dry-run"}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -529,7 +559,8 @@ func TestReview(t *testing.T) {
 		platformAlias(t, setup, server)
 
 		create := erun.Run(t, []string{
-			"review", "create", "--name", "Add widget", "--source-branch", "feature/widget", "--target-branch", "main", "--output", "json",
+			"review", "create", "--name", "Add widget", "--repository", reviewRepository,
+			"--source-branch", "feature/widget", "--target-branch", "main", "--output", "json",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if create.ExitCode != 0 {
 			t.Fatalf("create exit %d: %s", create.ExitCode, create.Combined)
@@ -581,7 +612,8 @@ func TestReview(t *testing.T) {
 		setup := env.New(t)
 		server := reviewAPIStubServer(t)
 		platformAlias(t, setup, server)
-		args := []string{"review", "create", "--name", "dup", "--source-branch", "a", "--target-branch", "main"}
+		args := []string{"review", "create", "--name", "dup", "--repository", reviewRepository,
+			"--source-branch", "a", "--target-branch", "main"}
 		first := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if first.ExitCode != 0 {
 			t.Fatalf("first create exit %d: %s", first.ExitCode, first.Combined)
@@ -1000,18 +1032,108 @@ func TestReview(t *testing.T) {
 	t.Run("merge_queue_list_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
-		result := erun.Run(t, []string{"review", "queue", "list", "--target-branch", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"review", "queue", "list", "--repository", reviewRepository, "--target-branch", "main", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "review/merge_queue_list_dry_run", normalize.Apply(result.Combined))
 	})
 
+	// The reported failure, end to end: one tenant, two repositories, both
+	// with a `main`. The queue used to be keyed on the target branch alone, so
+	// each repository's `erun review queue list --target-branch main` printed
+	// the other's waiting work as its own, and advancing promoted whichever
+	// review happened to be queued first — into a gate that runs in the
+	// checkout of a repository whose branch that review does not name.
+	t.Run("merge_queue_is_the_repositorys_own", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		readied := func(name, repository, sourceBranch string) string {
+			reviewID := createReviewJSON(t, setup, name, sourceBranch, "main")
+			build := erun.Run(t, []string{
+				"review", "record-build", reviewID.ReviewID,
+				"--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3", "--output", "json",
+			}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+			if build.ExitCode != 0 {
+				t.Fatalf("record-build for %s exit %d: %s", name, build.ExitCode, build.Combined)
+			}
+			return reviewID.ReviewID
+		}
+		// createReviewJSON always opens in reviewRepository; the second
+		// repository's review is opened directly so both branches — and the
+		// name — are spelled the same way in each.
+		ours := readied("Land the widget", reviewRepository, "feature/widget")
+		theirs := erun.Run(t, []string{
+			"review", "create", "--name", "Land the widget", "--repository", otherRepository,
+			"--source-branch", "feature/widget", "--target-branch", "main", "--output", "json",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if theirs.ExitCode != 0 {
+			t.Fatalf("the other repository's create exit %d: %s; the name and branch pair are only reserved within one repository",
+				theirs.ExitCode, theirs.Combined)
+		}
+		var other struct {
+			ReviewID string `json:"reviewId"`
+		}
+		if err := json.Unmarshal([]byte(theirs.Stdout), &other); err != nil {
+			t.Fatalf("decode the other repository's review: %v", err)
+		}
+		build := erun.Run(t, []string{
+			"review", "record-build", other.ReviewID,
+			"--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3", "--output", "json",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if build.ExitCode != 0 {
+			t.Fatalf("record-build for the other repository exit %d: %s", build.ExitCode, build.Combined)
+		}
+
+		for _, tc := range []struct {
+			repository string
+			want       string
+			absent     string
+		}{
+			{reviewRepository, ours, other.ReviewID},
+			{otherRepository, other.ReviewID, ours},
+		} {
+			listed := erun.Run(t, []string{
+				"review", "queue", "list", "--repository", tc.repository, "--target-branch", "main",
+			}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+			if listed.ExitCode != 0 {
+				t.Fatalf("queue list for %s exit %d: %s", tc.repository, listed.ExitCode, listed.Combined)
+			}
+			if !strings.Contains(listed.Combined, tc.want) {
+				t.Fatalf("queue list for %s = %q, want it to name %s", tc.repository, listed.Combined, tc.want)
+			}
+			if strings.Contains(listed.Combined, tc.absent) {
+				t.Fatalf("queue list for %s = %q, want the other repository's %s left out", tc.repository, listed.Combined, tc.absent)
+			}
+		}
+
+		// Advancing names one repository's queue; the other's review stays
+		// where it is rather than being promoted by a queue it is not in.
+		promoted := erun.Run(t, []string{
+			"review", "queue", "advance", "--repository", otherRepository, "--target-branch", "main", "--output", "json",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if promoted.ExitCode != 0 {
+			t.Fatalf("advance exit %d: %s", promoted.ExitCode, promoted.Combined)
+		}
+		var advanced struct {
+			ReviewID string `json:"reviewId"`
+			Status   string `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(promoted.Stdout), &advanced); err != nil {
+			t.Fatalf("decode the promoted review: %v", err)
+		}
+		if advanced.ReviewID != other.ReviewID || advanced.Status != "MERGE" {
+			t.Fatalf("promoted %+v, want the named repository's own head %s at MERGE", advanced, other.ReviewID)
+		}
+	})
+
 	t.Run("merge_queue_advance_empty_queue_real_run", func(t *testing.T) {
 		setup := env.New(t)
 		server := reviewAPIStubServer(t)
 		platformAlias(t, setup, server)
-		result := erun.Run(t, []string{"review", "queue", "advance", "--target-branch", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"review", "queue", "advance", "--repository", reviewRepository, "--target-branch", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for an empty merge queue, got:\n%s", result.Combined)
 		}
@@ -1034,7 +1156,7 @@ func TestReview(t *testing.T) {
 		occupying := createReviewJSON(t, setup, "Land the widget", "feature/widget", "main")
 		for _, args := range [][]string{
 			{"review", "record-build", occupying.ReviewID, "--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3"},
-			{"review", "queue", "advance", "--target-branch", "main"},
+			{"review", "queue", "advance", "--repository", reviewRepository, "--target-branch", "main"},
 		} {
 			if result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()}); result.ExitCode != 0 {
 				t.Fatalf("%v exit %d: %s", args, result.ExitCode, result.Combined)
@@ -1050,7 +1172,7 @@ func TestReview(t *testing.T) {
 			t.Fatalf("record-build exit %d: %s", build.ExitCode, build.Combined)
 		}
 
-		result := erun.Run(t, []string{"review", "queue", "advance", "--target-branch", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"review", "queue", "advance", "--repository", reviewRepository, "--target-branch", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit advancing while %s holds MERGE, got:\n%s", occupying.ReviewID, result.Combined)
 		}
@@ -1071,7 +1193,7 @@ func TestReview(t *testing.T) {
 	t.Run("merge_queue_override_advance_dry_run", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
-		args := []string{"review", "queue", "override-advance", "--target-branch", "main", "--reason", "hotfix, reviewers unavailable", "--dry-run"}
+		args := []string{"review", "queue", "override-advance", "--repository", reviewRepository, "--target-branch", "main", "--reason", "hotfix, reviewers unavailable", "--dry-run"}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -1082,7 +1204,7 @@ func TestReview(t *testing.T) {
 	t.Run("merge_queue_override_advance_requires_reason", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
-		args := []string{"review", "queue", "override-advance", "--target-branch", "main", "--dry-run"}
+		args := []string{"review", "queue", "override-advance", "--repository", reviewRepository, "--target-branch", "main", "--dry-run"}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for a blank --reason, got:\n%s", result.Combined)
@@ -1103,7 +1225,8 @@ func TestReview(t *testing.T) {
 		server := reviewAPIStubServer(t)
 		platformAlias(t, setup, server)
 		result := erun.Run(t, []string{
-			"review", "queue", "override-advance", "--target-branch", "main", "--reason", "hotfix, reviewers unavailable",
+			"review", "queue", "override-advance", "--repository", reviewRepository,
+			"--target-branch", "main", "--reason", "hotfix, reviewers unavailable",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for an empty merge queue, got:\n%s", result.Combined)
@@ -1117,7 +1240,8 @@ func TestReview(t *testing.T) {
 		setup := env.New(t)
 		server := reviewAPIStubServer(t)
 		platformAlias(t, setup, server)
-		args := []string{"review", "create", "--name", "json test", "--source-branch", "a", "--target-branch", "main", "--output", "json"}
+		args := []string{"review", "create", "--name", "json test", "--repository", reviewRepository,
+			"--source-branch", "a", "--target-branch", "main", "--output", "json"}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)

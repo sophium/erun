@@ -4,8 +4,8 @@ Usage:
   erun review queue [command]
 
 Available Commands:
-  advance          Advance a target branch's merge queue head to MERGE
-  list             List a target branch's merge queue, in queue order
+  advance          Advance a repository's merge queue head to MERGE
+  list             List a repository's merge queue for a target branch, in queue order
   override-advance Bypass the unresolved-thread gate and advance the merge queue anyway
 
 Flags:

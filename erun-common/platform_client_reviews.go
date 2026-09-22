@@ -20,9 +20,15 @@ import (
 
 // PlatformReview mirrors model.Review's JSON shape.
 type PlatformReview struct {
-	ReviewID          string    `json:"reviewId"`
-	TenantID          string    `json:"tenantId"`
-	AuthorUserID      string    `json:"authorUserId,omitempty"`
+	ReviewID     string `json:"reviewId"`
+	TenantID     string `json:"tenantId"`
+	AuthorUserID string `json:"authorUserId,omitempty"`
+	// Repository is the repository the review's branches belong to, as a
+	// canonical remote identity (RepositoryIdentity). Empty for a review
+	// created before the platform recorded one: a tenant may serve more than
+	// one repository, and without it a source/target branch pair names the
+	// repository only by convention.
+	Repository        string    `json:"repository,omitempty"`
 	Name              string    `json:"name"`
 	TargetBranch      string    `json:"targetBranch"`
 	SourceBranch      string    `json:"sourceBranch"`
@@ -84,8 +90,11 @@ type PlatformBuild struct {
 
 // PlatformReviewFilter mirrors the discovery filters GET /v1/reviews accepts.
 // AuthorUserID selects "my reviews"; ReviewerUserID selects "reviews waiting
-// on me" (a review whose review_reviewers includes that user).
+// on me" (a review whose review_reviewers includes that user); Repository
+// narrows to one repository's reviews, which is what distinguishes two
+// repositories a tenant serves that propose the same branch pair.
 type PlatformReviewFilter struct {
+	Repository     string
 	TargetBranch   string
 	SourceBranch   string
 	Status         string
@@ -95,6 +104,9 @@ type PlatformReviewFilter struct {
 
 func (f PlatformReviewFilter) queryString() string {
 	values := url.Values{}
+	if strings.TrimSpace(f.Repository) != "" {
+		values.Set("repository", f.Repository)
+	}
 	if strings.TrimSpace(f.TargetBranch) != "" {
 		values.Set("targetBranch", f.TargetBranch)
 	}
@@ -126,15 +138,19 @@ func (c *PlatformClient) ListReviews(ctx context.Context, filter PlatformReviewF
 }
 
 // PlatformCreateReviewParams is the review-creation input. Status is not
-// caller-settable: the backend always creates a review OPEN.
+// caller-settable: the backend always creates a review OPEN. Repository is
+// the repository the branches belong to (RepositoryIdentity); the backend
+// canonicalizes it, so any spelling of one repository is one repository here.
 type PlatformCreateReviewParams struct {
+	Repository   string `json:"repository,omitempty"`
 	Name         string `json:"name"`
 	TargetBranch string `json:"targetBranch"`
 	SourceBranch string `json:"sourceBranch"`
 }
 
 // CreateReview opens a review. name is the eventual squash-merge message and
-// is unique per tenant; a colliding name is reported as ErrPlatformConflict.
+// is unique per tenant and repository; a colliding name is reported as
+// ErrPlatformConflict.
 func (c *PlatformClient) CreateReview(ctx context.Context, params PlatformCreateReviewParams) (PlatformReview, error) {
 	var review PlatformReview
 	err := c.do(ctx, http.MethodPost, "/v1/reviews", params, true, &review)
@@ -154,6 +170,9 @@ func (c *PlatformClient) GetReview(ctx context.Context, reviewID string) (Platfo
 // the review is — a review at MERGE is checked through BuildID's GATE build,
 // and any other review through whether its source branch's changes are
 // already in the target branch's history, which is why BuildID is optional.
+// It must name the review's own repository; a remote for a different one is
+// refused rather than verified, and a review that recorded no repository
+// adopts the one this names.
 type PlatformUpdateReviewStatusParams struct {
 	Status    string `json:"status"`
 	BuildID   string `json:"buildId,omitempty"`
@@ -167,28 +186,46 @@ func (c *PlatformClient) UpdateReviewStatus(ctx context.Context, reviewID string
 	return review, err
 }
 
+// PlatformMergeQueueParams addresses one repository's merge queue. An empty
+// TargetBranch lists every target branch's queue; an empty Repository lists
+// every repository's, which is only meaningful for a tenant serving one.
+type PlatformMergeQueueParams struct {
+	Repository   string
+	TargetBranch string
+}
+
+func (p PlatformMergeQueueParams) queryString() string {
+	values := url.Values{}
+	if strings.TrimSpace(p.TargetBranch) != "" {
+		values.Set("targetBranch", p.TargetBranch)
+	}
+	if strings.TrimSpace(p.Repository) != "" {
+		values.Set("repository", p.Repository)
+	}
+	return values.Encode()
+}
+
 // ListMergeQueue lists the reviews queued (or already READY) to merge into
-// targetBranch, in queue order. An empty targetBranch lists every queued
-// review, across target branches.
-func (c *PlatformClient) ListMergeQueue(ctx context.Context, targetBranch string) ([]PlatformReview, error) {
+// params' target branch, in queue order.
+func (c *PlatformClient) ListMergeQueue(ctx context.Context, params PlatformMergeQueueParams) ([]PlatformReview, error) {
 	path := "/v1/reviews/merge-queue"
-	if strings.TrimSpace(targetBranch) != "" {
-		path += "?targetBranch=" + url.QueryEscape(targetBranch)
+	if query := params.queryString(); query != "" {
+		path += "?" + query
 	}
 	var reviews []PlatformReview
 	err := c.do(ctx, http.MethodGet, path, nil, true, &reviews)
 	return reviews, err
 }
 
-// AdvanceMergeQueue advances targetBranch's merge queue head to MERGE,
-// refusing with a *PlatformMergeQueueBlockedError (wrapping ErrPlatformConflict)
-// when that review still has unresolved comment threads, and with a
+// AdvanceMergeQueue advances params' merge queue head to MERGE, refusing with
+// a *PlatformMergeQueueBlockedError (wrapping ErrPlatformConflict) when that
+// review still has unresolved comment threads, and with a
 // *PlatformMergeQueueOccupiedError when another review already holds that
 // branch's single MERGE slot. OverrideAdvanceMergeQueue is the one deliberate,
 // audited way past the thread refusal.
-func (c *PlatformClient) AdvanceMergeQueue(ctx context.Context, targetBranch string) (PlatformReview, error) {
+func (c *PlatformClient) AdvanceMergeQueue(ctx context.Context, params PlatformMergeQueueParams) (PlatformReview, error) {
 	var review PlatformReview
-	err := c.do(ctx, http.MethodPost, "/v1/reviews/merge-queue/advance", map[string]string{"targetBranch": targetBranch}, true, &review)
+	err := c.do(ctx, http.MethodPost, "/v1/reviews/merge-queue/advance", map[string]string{"repository": params.Repository, "targetBranch": params.TargetBranch}, true, &review)
 	return review, decorateMergeQueueRefusalError(err)
 }
 
@@ -284,9 +321,9 @@ func decorateMergeQueueRefusalError(err error) error {
 // OverrideAdvanceMergeQueue bypasses AdvanceMergeQueue's unresolved-thread
 // gate. reason is required — the backend refuses a blank one — and is
 // recorded in the platform's audit trail alongside the caller's identity.
-func (c *PlatformClient) OverrideAdvanceMergeQueue(ctx context.Context, targetBranch, reason string) (PlatformReview, error) {
+func (c *PlatformClient) OverrideAdvanceMergeQueue(ctx context.Context, params PlatformMergeQueueParams, reason string) (PlatformReview, error) {
 	var review PlatformReview
-	err := c.do(ctx, http.MethodPost, "/v1/reviews/merge-queue/override-advance", map[string]string{"targetBranch": targetBranch, "reason": reason}, true, &review)
+	err := c.do(ctx, http.MethodPost, "/v1/reviews/merge-queue/override-advance", map[string]string{"repository": params.Repository, "targetBranch": params.TargetBranch, "reason": reason}, true, &review)
 	return review, err
 }
 
@@ -390,6 +427,9 @@ func (c *PlatformClient) CreateBuild(ctx context.Context, reviewID string, param
 // detail strings, in a fixed order so a dry-run trace is deterministic.
 func reviewFilterTraceDetails(filter PlatformReviewFilter) []string {
 	var details []string
+	if strings.TrimSpace(filter.Repository) != "" {
+		details = append(details, "repository="+filter.Repository)
+	}
 	if strings.TrimSpace(filter.TargetBranch) != "" {
 		details = append(details, "targetBranch="+filter.TargetBranch)
 	}

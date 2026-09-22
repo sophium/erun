@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -194,7 +195,7 @@ func TestCloseReviewSurfacesForbiddenAsAnError(t *testing.T) {
 }
 
 func TestAdvanceMergeQueueRequiresATenant(t *testing.T) {
-	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).AdvanceMergeQueue(uiAdvanceMergeQueueInput{TargetBranch: "main"})
+	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).AdvanceMergeQueue(uiAdvanceMergeQueueInput{Repository: "https://github.com/org/repo", TargetBranch: "main"})
 	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
 	}
@@ -208,7 +209,7 @@ func TestAdvanceMergeQueueAdvancesTheTargetBranchsHead(t *testing.T) {
 	defer server.Close()
 
 	review, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
-		Tenant: "frs", TargetBranch: "main",
+		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "main",
 	})
 	if err != nil {
 		t.Fatalf("AdvanceMergeQueue failed: %v", err)
@@ -226,10 +227,39 @@ func TestAdvanceMergeQueueRequiresATargetBranch(t *testing.T) {
 	defer server.Close()
 
 	_, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
-		Tenant: "frs",
+		Tenant: "frs", Repository: "https://github.com/org/repo",
 	})
 	if err == nil || !strings.Contains(err.Error(), "target branch is required") {
 		t.Fatalf("expected a target-branch-required error, got %v", err)
+	}
+}
+
+// TestAdvanceMergeQueuePassesTheRepository: the repository is what settles
+// which of several same-branch queues is advanced, so the input has to reach
+// the platform call rather than being dropped on the way. It is deliberately
+// not required — a review created before the platform recorded a repository
+// has none to send, and the platform refuses the resulting ambiguous queue
+// rather than this layer guessing at one.
+func TestAdvanceMergeQueuePassesTheRepository(t *testing.T) {
+	var body map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/v1/reviews/merge-queue/advance" {
+			http.NotFound(w, req)
+			return
+		}
+		_ = json.NewDecoder(req.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"MERGE"}`))
+	}))
+	defer server.Close()
+
+	if _, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
+		Tenant: "frs", Repository: "https://github.com/sophium/erun", TargetBranch: "main",
+	}); err != nil {
+		t.Fatalf("AdvanceMergeQueue failed: %v", err)
+	}
+	if body["repository"] != "https://github.com/sophium/erun" {
+		t.Fatalf("advance body = %v, want the repository the caller named", body)
 	}
 }
 
@@ -243,7 +273,7 @@ func TestAdvanceMergeQueueReportsUnresolvedThreadsAsABlockNotAnError(t *testing.
 	defer server.Close()
 
 	review, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
-		Tenant: "frs", TargetBranch: "blocked",
+		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "blocked",
 	})
 	if err != nil {
 		t.Fatalf("AdvanceMergeQueue: %v, want a blocked result rather than an error", err)
@@ -263,7 +293,7 @@ func TestAdvanceMergeQueueNamesTheReviewHoldingTheMergeSlot(t *testing.T) {
 	defer server.Close()
 
 	_, err := tenantDashboardApp(t, server.URL).AdvanceMergeQueue(uiAdvanceMergeQueueInput{
-		Tenant: "frs", TargetBranch: "occupied",
+		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "occupied",
 	})
 	if err == nil {
 		t.Fatal("AdvanceMergeQueue: want a refusal naming the occupying review, got no error")
@@ -280,7 +310,7 @@ func TestAdvanceMergeQueueNamesTheReviewHoldingTheMergeSlot(t *testing.T) {
 
 func TestOverrideAdvanceMergeQueueRequiresATenant(t *testing.T) {
 	_, err := NewApp(erunUIDeps{store: stubUIStore{}}).OverrideAdvanceMergeQueue(uiOverrideAdvanceMergeQueueInput{
-		TargetBranch: "blocked", Reason: "hotfix, reviewers unavailable",
+		Repository: "https://github.com/org/repo", TargetBranch: "blocked", Reason: "hotfix, reviewers unavailable",
 	})
 	if err == nil || !errors.Is(err, ErrTenantNotGiven) {
 		t.Fatalf("expected ErrTenantNotGiven, got %v", err)
@@ -295,7 +325,7 @@ func TestOverrideAdvanceMergeQueueBypassesTheGate(t *testing.T) {
 	defer server.Close()
 
 	review, err := tenantDashboardApp(t, server.URL).OverrideAdvanceMergeQueue(uiOverrideAdvanceMergeQueueInput{
-		Tenant: "frs", TargetBranch: "blocked", Reason: "hotfix, reviewers unavailable",
+		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "blocked", Reason: "hotfix, reviewers unavailable",
 	})
 	if err != nil {
 		t.Fatalf("OverrideAdvanceMergeQueue failed: %v", err)
@@ -310,7 +340,7 @@ func TestOverrideAdvanceMergeQueueRequiresAReason(t *testing.T) {
 	defer server.Close()
 
 	_, err := tenantDashboardApp(t, server.URL).OverrideAdvanceMergeQueue(uiOverrideAdvanceMergeQueueInput{
-		Tenant: "frs", TargetBranch: "blocked",
+		Tenant: "frs", Repository: "https://github.com/org/repo", TargetBranch: "blocked",
 	})
 	if err == nil || !strings.Contains(err.Error(), "a reason is required") {
 		t.Fatalf("expected a reason-required error, got %v", err)

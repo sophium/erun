@@ -18,6 +18,7 @@ import (
 type ReviewListInput struct {
 	platformAliasInput
 	TargetBranch   string `json:"targetBranch,omitempty" jsonschema:"filter by target branch"`
+	Repository     string `json:"repository,omitempty" jsonschema:"filter by repository, in any form git accepts; not defaulted from the checkout, since a listing is how you find work across every repository"`
 	SourceBranch   string `json:"sourceBranch,omitempty" jsonschema:"filter by source branch"`
 	Status         string `json:"status,omitempty" jsonschema:"filter by status: OPEN, CLOSED, FAILED, READY, MERGE, or MERGED"`
 	AuthorUserID   string `json:"authorUserId,omitempty" jsonschema:"filter by author user id"`
@@ -38,6 +39,7 @@ func reviewListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_list"
 		reviews, err := eruncommon.RunReviewList(ctx, runtime.Store, input.Alias, eruncommon.ReviewListParams{
+			Repository:   input.Repository,
 			TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch, Status: input.Status,
 			AuthorUserID: input.AuthorUserID, ReviewerUserID: input.ReviewerUserID,
 			Mine: input.Mine, WaitingOnMe: input.WaitingOnMe,
@@ -78,7 +80,8 @@ func reviewShowTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 
 type ReviewCreateInput struct {
 	platformAliasInput
-	Name         string `json:"name" jsonschema:"review name (unique per tenant; the eventual squash-merge message)"`
+	Name         string `json:"name" jsonschema:"review name (unique per tenant and repository among reviews that can still land; the eventual squash-merge message)"`
+	Repository   string `json:"repository" jsonschema:"repository the branches belong to, in any form git accepts; defaults to this agent's own checkout origin"`
 	TargetBranch string `json:"targetBranch" jsonschema:"branch this review proposes merging into"`
 	SourceBranch string `json:"sourceBranch" jsonschema:"branch this review proposes merging; must already be pushed to the remote (use exec_push)"`
 }
@@ -98,7 +101,7 @@ func reviewCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_create"
 		review, err := eruncommon.RunReviewCreate(ctx, runtime.Store, input.Alias, eruncommon.PlatformCreateReviewParams{
-			Name: input.Name, TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch,
+			Repository: input.Repository, Name: input.Name, TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch,
 		}, cloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
@@ -406,6 +409,7 @@ func reviewReviewerRemoveTool(runtime RuntimeConfig) func(context.Context, *mcp.
 type ReviewMergeQueueListInput struct {
 	platformAliasInput
 	TargetBranch string `json:"targetBranch" jsonschema:"target branch to list the merge queue for"`
+	Repository   string `json:"repository" jsonschema:"repository whose queue to list, in any form git accepts; defaults to this agent's own checkout origin"`
 }
 
 func reviewMergeQueueListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueListInput) (*mcp.CallToolResult, ReviewListResult, error) {
@@ -416,7 +420,9 @@ func reviewMergeQueueListTool(runtime RuntimeConfig) func(context.Context, *mcp.
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_list"
-		reviews, err := eruncommon.RunReviewMergeQueueList(ctx, runtime.Store, input.Alias, input.TargetBranch, cloudDependencies())
+		reviews, err := eruncommon.RunReviewMergeQueueList(ctx, runtime.Store, input.Alias, eruncommon.PlatformMergeQueueParams{
+			Repository: input.Repository, TargetBranch: input.TargetBranch,
+		}, cloudDependencies())
 		if err != nil {
 			return nil, ReviewListResult{}, err
 		}
@@ -427,6 +433,7 @@ func reviewMergeQueueListTool(runtime RuntimeConfig) func(context.Context, *mcp.
 type ReviewMergeQueueAdvanceInput struct {
 	platformAliasInput
 	TargetBranch string `json:"targetBranch" jsonschema:"target branch whose merge queue to advance"`
+	Repository   string `json:"repository" jsonschema:"repository whose queue to advance, in any form git accepts; defaults to this agent's own checkout origin"`
 }
 
 func reviewMergeQueueAdvanceTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewMergeQueueAdvanceInput) (*mcp.CallToolResult, ReviewResult, error) {
@@ -437,7 +444,9 @@ func reviewMergeQueueAdvanceTool(runtime RuntimeConfig) func(context.Context, *m
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_advance"
-		review, err := eruncommon.RunReviewMergeQueueAdvance(ctx, runtime.Store, input.Alias, input.TargetBranch, cloudDependencies())
+		review, err := eruncommon.RunReviewMergeQueueAdvance(ctx, runtime.Store, input.Alias, eruncommon.PlatformMergeQueueParams{
+			Repository: input.Repository, TargetBranch: input.TargetBranch,
+		}, cloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
 		}
@@ -448,6 +457,7 @@ func reviewMergeQueueAdvanceTool(runtime RuntimeConfig) func(context.Context, *m
 type ReviewMergeQueueOverrideAdvanceInput struct {
 	platformAliasInput
 	TargetBranch string `json:"targetBranch" jsonschema:"target branch whose merge queue to advance"`
+	Repository   string `json:"repository" jsonschema:"repository whose queue to advance, in any form git accepts; defaults to this agent's own checkout origin"`
 	Reason       string `json:"reason" jsonschema:"why the unresolved-thread gate is being bypassed; required, and recorded in the platform's audit trail"`
 }
 
@@ -459,7 +469,9 @@ func reviewMergeQueueOverrideAdvanceTool(runtime RuntimeConfig) func(context.Con
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_override-advance"
-		review, err := eruncommon.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, input.TargetBranch, input.Reason, cloudDependencies())
+		review, err := eruncommon.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, eruncommon.PlatformMergeQueueParams{
+			Repository: input.Repository, TargetBranch: input.TargetBranch,
+		}, input.Reason, cloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err
 		}
