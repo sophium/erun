@@ -1,8 +1,11 @@
 package eruncommon
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -245,4 +248,86 @@ func TestExecutionModeReportListsKubectlPodWatchOperation(t *testing.T) {
 		}
 	}
 	t.Fatalf("kubectl-pod-watch not found in report: %+v", report)
+}
+
+// pullingPod builds a pod whose container is still fetching its image, the way
+// a cold node reports a large one: kubelet alternates between ErrImagePull and
+// ImagePullBackOff while it retries.
+func pullingPod(name, container, reason, message string) podStatusItem {
+	pod := podStatusItem{}
+	pod.Metadata.Name = name
+	pod.Status.Phase = "Pending"
+	pod.Status.Conditions = []podConditionEntry{{Type: "PodScheduled", Status: "True"}}
+	pod.Status.ContainerStatuses = []containerStatusEntry{
+		{Name: container, State: containerState{Waiting: &containerStateWaiting{Reason: reason, Message: message}}},
+	}
+	return pod
+}
+
+// TestPullingContainersNamesTheContainersStillFetchingTheirImage covers the one
+// observation helm cannot make: its rollout deadline is a fixed duration and
+// expires identically whether the image finished downloading or not, so a
+// deploy that ran out its wait mid-pull reports "Progress deadline exceeded"
+// for a rollout that was working exactly as intended.
+//
+// The terminal image-pull rejection is the case that must NOT be reported as
+// progress: the watcher aborts on it and carries the registry's own message,
+// and describing a refused image as a slow one would misstate the failure.
+func TestPullingContainersNamesTheContainersStillFetchingTheirImage(t *testing.T) {
+	rejected := pullingPod("team-devops-ghi", "erun-devops", "ErrImagePull", "manifest unknown: manifest unknown")
+	pods := []podStatusItem{
+		pullingPod("team-devops-abc", "erun-devops", "ImagePullBackOff", `Back-off pulling image "ghcr.io/sophium/erun-devops:1.0.296"`),
+		pullingPod("team-devops-def", "erun-dind", "ErrImagePull", "rpc error: code = DeadlineExceeded"),
+		rejected,
+		scheduledPod("team-devops-jkl"),
+	}
+
+	got := strings.Join(pullingContainers(pods), ",")
+	want := "team-devops-abc/erun-devops,team-devops-def/erun-dind"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+// TestClassifyHelmDeployResultReportsAWaitThatExpiredMidPull is the second half
+// of the same contract: the observation has to reach the deploy's error, or the
+// operator still reads only helm's words for a rollout that was progressing.
+func TestClassifyHelmDeployResultReportsAWaitThatExpiredMidPull(t *testing.T) {
+	stderr := new(strings.Builder)
+	stderr.WriteString("Error: UPGRADE FAILED: resource Deployment/team-dev/team-devops not ready. status: InProgress, message: Available: 0/1\n")
+
+	err := classifyHelmDeployResult(HelmDeployParams{}, podWatchOutcome{Pulling: []string{"team-devops-abc/erun-devops"}},
+		errors.New("exit status 1"), &helmOutputCapture{stdout: new(bytes.Buffer), stderr: new(bytes.Buffer)}, stderr)
+
+	if err == nil {
+		t.Fatal("expected the failed rollout to report an error")
+	}
+	for _, want := range []string{
+		"team-devops-abc/erun-devops was still pulling its image",
+		"this is the deploy's own timeout ending the rollout, not a container failure",
+		"the previous pod was already torn down and this environment is running no pod",
+		"exit status 1",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected %q in the deploy error, got:\n%s", want, err.Error())
+		}
+	}
+}
+
+// TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone is the
+// negative case: a rollout that failed with nothing in flight keeps reporting
+// exactly what helm said, with no pull narrative attached to it.
+func TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone(t *testing.T) {
+	stderr := new(strings.Builder)
+	stderr.WriteString("Error: UPGRADE FAILED: values don't meet the specifications\n")
+
+	err := classifyHelmDeployResult(HelmDeployParams{}, podWatchOutcome{},
+		errors.New("exit status 1"), &helmOutputCapture{stdout: new(bytes.Buffer), stderr: new(bytes.Buffer)}, stderr)
+
+	if err == nil {
+		t.Fatal("expected the failed rollout to report an error")
+	}
+	if strings.Contains(err.Error(), "still pulling") {
+		t.Fatalf("a failure with nothing pulling must not be described as a slow image, got:\n%s", err.Error())
+	}
 }
