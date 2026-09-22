@@ -104,6 +104,20 @@ const (
 	minRuntimeUsageInterval     = 100 * time.Millisecond
 	maxRuntimeUsageInterval     = 30 * time.Second
 
+	// runtimeBuildThrottleMinPeriods is the fewest scheduling periods the
+	// sidecar's throttle ratio must be read over before the build-starvation
+	// warning acts on it -- deliberately far below sizing's own floor
+	// (runtimeSizingThrottlePeriods). The floor answers a question about the
+	// verdict behind it, not about the ratio: sizing recommends a pod size
+	// over a 24-hour window and can afford to wait out a few hundred swinging
+	// periods, while this warning is about the build running now, and an
+	// erun-devops rebuild occupies 10-20 minutes. One minute (600 periods at
+	// cgroup v2's 100ms default) is long enough that a sidecar pinned
+	// throughout it is past its own startup rather than merely young, and it
+	// leaves most of a rebuild inside the window where the warning can still
+	// explain a build that looks stuck.
+	runtimeBuildThrottleMinPeriods = 600
+
 	// cgroupV2FSType is the sentinel the reading script prints when
 	// $cg/cgroup.controllers exists -- the portable systemd-style cgroup v2
 	// test (a cgroup2 mount always has this file at its root, delegated
@@ -707,23 +721,48 @@ func runtimeUsageWarnings(u RuntimeUsage) []string {
 // current starvation therefore turns a lifetime residue into a confident
 // diagnosis -- a reading of 3 throttled periods out of 51,123 (0.006%) is
 // what that looked like in the field, and it sent the reader hunting a CPU
-// problem that was not there. So the warning fires only on throttling the
-// package already treats as material (runtimeThrottleIsMaterial), the same
-// measured bar sizing reads: below it, the ratio is "present but harmless"
-// rather than starvation, and sizing still reports the figure in its own
-// line, so nothing is hidden by staying silent here.
+// problem that was not there. So the warning fires only on a ratio the
+// package calls material (runtimeSizingThrottleRatio).
+//
+// Staying silent below that ratio withholds the named share, not the
+// evidence: the sidecar's raw periods and throttledPeriods are carried by the
+// reading -- and by its JSON form -- whether or not this warning fires, so a
+// consumer that wants the ratio can still derive the one this silence
+// declines to name. Sizing is no substitute for it: that line scores the
+// *runtime container's* counters under knob=runtimepod, and the sidecar is a
+// separate cgroup that container cannot see (see the package comment's third
+// limit), so below the bar nothing else in the rendered reading names how
+// throttled a build was.
+//
+// The ratio is not the whole bar. A sidecar seconds old has only a few
+// periods behind its ratio, and a build pinned through its own startup is
+// what that looks like, so sizing's own floor (runtimeSizingThrottlePeriods,
+// 10,000 periods -- ~16.6 minutes at cgroup v2's 100ms default) cannot be the
+// floor here: it outlives the 10-20 minute rebuild this warning exists to
+// explain, and the rebuild it describes is over before it fires. The build
+// path reads the same ratio over runtimeBuildThrottleMinPeriods instead.
 //
 // An unreadable CPU reading has no counters to speak from and stays silent.
 func runtimeBuildThrottleWarnings(dind *RuntimeDindUsage) []string {
 	if dind == nil || dind.CPU.Unavailable != "" {
 		return nil
 	}
-	if !runtimeThrottleIsMaterial(dind.CPU.ThrottledPeriods, dind.CPU.Periods) {
+	if !runtimeBuildThrottleIsStarvation(dind.CPU.ThrottledPeriods, dind.CPU.Periods) {
 		return nil
 	}
 	return []string{fmt.Sprintf(
 		"the build was throttled in %d of %d cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment",
 		dind.CPU.ThrottledPeriods, dind.CPU.Periods)}
+}
+
+// runtimeBuildThrottleIsStarvation is this warning's whole bar: the package's
+// one material ratio (runtimeSizingThrottleRatio), over the build path's own
+// period floor rather than sizing's. It is deliberately not
+// runtimeThrottleIsMaterial -- see runtimeBuildThrottleMinPeriods for why the
+// two verdicts cannot share a floor, and runtimeThrottleIsMaterial for why
+// they must still share a ratio.
+func runtimeBuildThrottleIsStarvation(throttled, periods int64) bool {
+	return periods >= runtimeBuildThrottleMinPeriods && float64(throttled) >= float64(periods)*runtimeSizingThrottleRatio
 }
 
 // runtimeMemoryUsageWarnings takes a scope label ("" for the runtime
