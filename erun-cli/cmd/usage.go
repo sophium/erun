@@ -41,13 +41,17 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"A busy build no longer reads as an idle environment. If the sidecar's own\n" +
 			"cgroup could not be read, the output says so instead; `erun observe` reports\n" +
 			"its resource limits either way.\n\n" +
-			"The environment's standing sizing recommendation is not part of this output.\n" +
-			"It is derived from usage history the environment's own pod monitor retained,\n" +
-			"and this reading does not carry that history back to the caller, so there is\n" +
-			"nothing here to derive a verdict from. Read it from inside the environment\n" +
-			"instead: the `usage` and `resize` tools over its MCP endpoint, or the desktop\n" +
-			"Runtime tab. `erun list` prints it under `runtime-pod:` only when run inside\n" +
-			"the environment itself, where that history lives; from a host it prints none.",
+			"The standing sizing recommendation printed beneath the reading is derived\n" +
+			"from this reading together with the environment's retained usage history --\n" +
+			"the same evidence, and the same verdict, the `usage`/`resize` tools over the\n" +
+			"environment's MCP endpoint and the desktop Runtime tab report. That history\n" +
+			"is retained by the environment's own pod, so a reading taken from a host has\n" +
+			"the live counters to reason from and no observed window: the advice the\n" +
+			"counters prove (a raise, after a peak at the limit or a recorded OOM kill) is\n" +
+			"reported there too, while the shrink direction, which needs a day of quiet\n" +
+			"evidence, reads as insufficient-evidence. `erun list` prints the window-only\n" +
+			"view under `runtime-pod:`, and only when run inside the environment, where\n" +
+			"that history lives.",
 		Example: "  erun usage --tenant team --environment dev\n" +
 			"  erun usage --tenant team --environment dev --interval 3 --output json",
 		Args:          cobra.NoArgs,

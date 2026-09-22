@@ -21,6 +21,9 @@ STATUS: deployed
 skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+== Resources ==
+skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
 docker storage: this machine's docker daemon — the docker daemon on this machine, where a host environment's builds run (it is a worktree here with no pod)
 == Disk usage (/var/lib/docker) ==
 Filesystem  Size  Used  Avail  Use%  Mounted on

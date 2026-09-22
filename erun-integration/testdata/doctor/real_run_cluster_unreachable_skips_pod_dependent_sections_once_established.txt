@@ -34,6 +34,9 @@ skipped: the runtime pod is not reachable for this check; see the helm release s
 == Git push access ==
 skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
 
+== Resources ==
+skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
+
 == Docker storage ==
 skipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.
 

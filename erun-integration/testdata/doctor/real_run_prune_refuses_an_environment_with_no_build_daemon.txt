@@ -22,6 +22,10 @@ NAME                READY   STATUS    RESTARTS
 team-devops-pod-1   2/2     Running   0
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+== Resources ==
+not observed: cgroup v2 not detected under /sys/fs/cgroup; memory usage needs memory.current/memory.max.
+This is not a healthy reading -- nothing here says this environment is sized correctly, only that its own CPU and memory counters could not be read. `erun usage` reports each field's own unavailability in the same words.
+
 == Docker storage ==
 no build daemon — this environment resolves to type "runtime", which installs published versions by reference and never builds: its pod carries no erun-dind sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead
 
