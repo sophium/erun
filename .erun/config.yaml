@@ -23,32 +23,13 @@ docker:
     platforms:
         - linux/amd64
 environments:
-    # code2: a persistent remote-agent env for the erun tenant, PVC-backed, whose
-    # `erun build` resolves its environment key to "code2" (not "local") —
-    # confirmed live by pinning a bogus platform here and checking the build
-    # trace picked it up. Its platforms come from the project-wide pin above,
-    # which this environment inherits; its node is x86_64 and a build here
-    # publishes nothing.
-    code2:
+    code1:
         docker:
             fingerprints:
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
-    # code1/code3/code4: the erun tenant's other persistent remote-agent envs.
-    # They carry the same fingerprint pins as code2 and local because a pin is
-    # a property of the published image, not of the environment reading it, and
-    # DockerFingerprintsForEnvironment resolves the environment key exactly --
-    # there is no shared or default scope to inherit from, so an environment
-    # with no entry here silently rebuilds every pinned base from source.
-    # Keep these in step with local's block; they must all name the fingerprint
-    # the current Dockerfile computes, or the fast path quietly does nothing.
-    #
-    # Platform pins are the opposite case: they do have a shared scope, so these
-    # three deliberately declare no platforms and inherit the amd64-only default
-    # above. That is what keeps a fourth agent environment added later from
-    # silently going back to emulated arm64.
-    code1:
+    code2:
         docker:
             fingerprints:
                 erun-ubuntu: 43855fd29e16b9aa
@@ -66,19 +47,11 @@ environments:
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
-    # local: the default environment name `erun init` assigns when none is
-    # given (see erun-common/init.go's DefaultEnvironment). Deliberately left
-    # unpinned: unlike code2 (a specific, confirmed-amd64 pod), "local" is a
-    # generic name any contributor's own machine can carry, including an
-    # arm64 laptop — hardcoding amd64 here would misdirect (or silently
-    # narrow) builds for whoever's actual "local" isn't this architecture.
-    # Pin a specific contributor/environment's own platforms locally instead
-    # of widening this shared entry.
-    #
-    # The explicit empty list is that refusal spelled out: it opts this
-    # environment out of the project-wide docker.platforms default above and
-    # restores erun's built-in platforms, so this shared config constrains no
-    # other machine's "local".
+        containerregistries:
+            - registry: ghcr.io/sophium
+              roles:
+                - build
+                - deploy
     local:
         containerregistries:
             - registry: ghcr.io/sophium
@@ -90,7 +63,6 @@ environments:
                 erun-ubuntu: 43855fd29e16b9aa
                 erun-zitadel: 3cba9e2a8ff916f2
                 erun-zitadel-login: f3c59225f0f48170
-            platforms: []
         k8s:
             deployments:
                 - - erun-devops
