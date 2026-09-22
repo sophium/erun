@@ -3,7 +3,9 @@
 # Tests for the entrypoint's MCP wiring: the runtime (devops) path starts the
 # edge, the supervisor restarts a crashed server, an explicitly disabled edge
 # starts nothing, and the standalone mcp command still serves the same server
-# with the same flags plus its own pass-through arguments.
+# with the same flags plus its own pass-through arguments. Also the boot-time
+# credential seeding `erun init` provisions from the host: the registry
+# credential and the erun platform alias.
 
 set -eu
 
@@ -283,6 +285,109 @@ case "${config}" in
     *cHJvdmlzaW9uZWQ6dG9rZW4=*) fail "the provisioned credential must not replace an existing host entry: ${config}" ;;
     *) ;;
 esac
+stop_run
+
+# --- 8b. Platform alias sync seeds the pod's erun cloud config from the Secret
+# `erun init` minted on the invoking host's signed-in alias, so a fresh agent
+# environment can call the platform API without a human completing an OIDC login
+# it could never complete. Covers the token file landing at the name init
+# computed, not a shell re-derivation of it. ---
+prepare_run platform_alias_seed
+alias_src="${run_dir}/platform-alias"
+mkdir -p "${alias_src}"
+cat >"${alias_src}/cloud-provider-entry.yaml" <<'YAML'
+  - alias: erun+api.erunpaas.com@erun
+    provider: erun
+    username: erun
+    accountid: api.erunpaas.com
+    oidcissuerurl: https://api.erunpaas.com
+    erun:
+      apiurl: https://api.erunpaas.com
+      clientid: erun-cli
+      refreshtokenref: erun/refresh/erun+api.erunpaas.com@erun
+YAML
+printf '%s' 'deadbeef.token' >"${alias_src}/cloud-secret-file"
+printf '%s' 'refresh-token-value' >"${alias_src}/cloud-secret-token"
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=true \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+    ERUN_PLATFORM_ALIAS_SRC_OVERRIDE="${alias_src}" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+alias_config="${run_dir}/home/.config/erun/config.yaml"
+wait_for 'grep -q "erun+api.erunpaas.com@erun" "${alias_config}" 2>/dev/null' ||
+    fail "the mounted platform alias should be seeded into the pod's root config"
+grep -q '^cloudproviders:$' "${alias_config}" ||
+    fail "a pod with no infrastructure provider should still get the cloudproviders key: $(cat "${alias_config}")"
+grep -q '^defaulttenant: team$' "${alias_config}" ||
+    fail "seeding the alias must not disturb the rest of the root config: $(cat "${alias_config}")"
+alias_token="${run_dir}/home/.config/erun/cloud-secrets/deadbeef.token"
+wait_for '[ -f "${alias_token}" ]' ||
+    fail "the refresh token should be written to the filename init shipped"
+[ "$(cat "${alias_token}")" = "refresh-token-value" ] ||
+    fail "the seeded token file should carry the provisioned token: $(cat "${alias_token}")"
+[ "$(stat -c '%a' "${alias_token}")" = "600" ] ||
+    fail "the seeded token must be 0600, matching the file secret store"
+stop_run
+
+# --- 8c. The alias arrives as another *item* of the cloudproviders sequence,
+# never a second key: the pod's config already emits that key for the
+# infrastructure provider the chart injected, and a duplicate mapping key makes
+# the config reader refuse the whole file. ---
+prepare_run platform_alias_with_infrastructure_provider
+alias_src="${run_dir}/platform-alias"
+mkdir -p "${alias_src}"
+cat >"${alias_src}/cloud-provider-entry.yaml" <<'YAML'
+  - alias: erun+api.erunpaas.com@erun
+    provider: erun
+    username: erun
+    accountid: api.erunpaas.com
+    erun:
+      apiurl: https://api.erunpaas.com
+      clientid: erun-cli
+      refreshtokenref: erun/refresh/erun+api.erunpaas.com@erun
+YAML
+printf '%s' 'deadbeef.token' >"${alias_src}/cloud-secret-file"
+printf '%s' 'refresh-token-value' >"${alias_src}/cloud-secret-token"
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=true \
+    ERUN_CLOUD_PROVIDER=aws \
+    ERUN_CLOUD_PROVIDER_ALIAS=dev-aws \
+    ERUN_CLOUD_REGION=eu-west-1 \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+    ERUN_PLATFORM_ALIAS_SRC_OVERRIDE="${alias_src}" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+alias_config="${run_dir}/home/.config/erun/config.yaml"
+wait_for 'grep -q "erun+api.erunpaas.com@erun" "${alias_config}" 2>/dev/null' ||
+    fail "the mounted platform alias should be seeded alongside an infrastructure provider"
+[ "$(grep -c '^cloudproviders:$' "${alias_config}")" -eq 1 ] ||
+    fail "the alias must join the existing cloudproviders block, not open a second one: $(cat "${alias_config}")"
+grep -q -- '- alias: dev-aws' "${alias_config}" ||
+    fail "the infrastructure provider entry must survive: $(cat "${alias_config}")"
+stop_run
+
+# --- 8d. No mounted Secret is a no-op, so an env init found no signed-in host
+# alias for renders an unchanged config. ---
+prepare_run platform_alias_absent
+start_run true devops
+wait_for 'booted' || fail "the devops path should reach its idle foreground"
+alias_config="${run_dir}/home/.config/erun/config.yaml"
+[ -f "${alias_config}" ] || fail "the root config should still be written"
+grep -q '^cloudproviders:' "${alias_config}" &&
+    fail "no alias should be seeded without a mounted Secret: $(cat "${alias_config}")"
+[ -e "${run_dir}/home/.config/erun/cloud-secrets" ] &&
+    fail "no secret store directory should be created without a mounted Secret"
 stop_run
 
 # --- 8a. The cloud-context defaults the entrypoint emits match the Go path ---
