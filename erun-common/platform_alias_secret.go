@@ -171,11 +171,10 @@ func provisionPlatformAliasSecret(ctx Context, store CloudReadStore, tenant, nam
 // reconcilePlatformAliasSecret retrofits the platform alias onto an environment
 // that was initialised before anything provisioned one for it.
 //
-// provisionPlatformAliasSecret is only ever reached from init, so an environment
-// initialised before it existed was left permanently unable to call the platform
-// API: nothing mints the Secret, nothing records its name on the env, so the
-// runtime chart mounts nothing and the entrypoint's seeder correctly does
-// nothing. Deploy is where that is fixable, because it is the one step an
+// provisioning was reachable from init alone, so an environment initialised
+// before it existed was left permanently unable to call the platform API:
+// nothing mints the Secret, nothing records its name on the env, so the runtime
+// chart mounts nothing and the entrypoint's seeder correctly does nothing. Deploy is where that is fixable, because it is the one step an
 // existing environment takes that already has the invoking host's credentials in
 // hand and already writes pre-rollout Secrets into the namespace -- the same
 // place the registry credential, the MCP auth key and the image pull secrets are

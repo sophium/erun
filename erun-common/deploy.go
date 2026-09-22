@@ -995,7 +995,8 @@ func runPublishedValuesPull(ctx Context, pull *publishedValuesPull, target strin
 var ensureDeployNamespace NamespaceEnsurerFunc = EnsureKubernetesNamespace
 
 // applyPreRolloutResources creates the namespace and applies everything that
-// must exist in it before the chart rollout. Grouped rather than inline so the
+// must exist in it before the chart rollout, including the credentials the
+// deployment plan resolved on this host. Grouped rather than inline so the
 // ordering is stated in one place as this list grows.
 //
 // The namespace is ensured here and not only in the chart deployer, because the
