@@ -44,11 +44,21 @@ func TestIntegrationSuiteTimeoutBudgetIsDerivedAndCappedUnderTheHangNet(t *testi
 	// Derived from the environment's real quota, not a constant: the quota is
 	// what GO_TEST_GOMAXPROCS already divides into this suite's -parallel
 	// share, so a constant here would under-serve a small environment and
-	// over-serve a large one.
-	if !strings.Contains(makefileText, "parallel-gate.sh cpu-quota") {
-		t.Error("INTEGRATION_TEST_TIMEOUT no longer derives its budget from the environment's real CPU quota " +
-			"(parallel-gate.sh cpu-quota): the suite's wall clock is a function of the CPU it actually gets, " +
-			"so a budget that does not read that quota is a guess")
+	// over-serve a large one. Read the definition itself rather than the file
+	// around it -- LINT_TIMEOUT above reads the same cpu-quota helper, so a
+	// whole-file search would still pass on a definition that had been
+	// replaced outright with a literal.
+	definition := makeVariableDefinition(t, makefileText, "INTEGRATION_TEST_TIMEOUT")
+	if !strings.Contains(definition, "parallel-gate.sh cpu-quota") {
+		t.Errorf("INTEGRATION_TEST_TIMEOUT is defined as:\n  %s\nwhich no longer derives its budget from the "+
+			"environment's real CPU quota (parallel-gate.sh cpu-quota): the suite's wall clock is a function "+
+			"of the CPU it actually gets, so a budget that does not read that quota is a guess",
+			strings.TrimSpace(definition))
+	}
+	if !strings.Contains(definition, "INTEGRATION_TEST_TIMEOUT_CAP_MINUTES") {
+		t.Errorf("INTEGRATION_TEST_TIMEOUT is defined as:\n  %s\nwhich no longer clamps to "+
+			"INTEGRATION_TEST_TIMEOUT_CAP_MINUTES: the cap is what keeps the deadline below the backstop "+
+			"harnessexec.HangNet is sized against, so dropping it reopens that bound", strings.TrimSpace(definition))
 	}
 	base := makeIntVariable(t, makefileText, "INTEGRATION_TEST_TIMEOUT_BASE_MINUTES")
 	capMinutes := makeIntVariable(t, makefileText, "INTEGRATION_TEST_TIMEOUT_CAP_MINUTES")
@@ -171,6 +181,31 @@ func testTimeoutFallback(t testing.TB, assignment string) time.Duration {
 		t.Fatalf("the test_timeout fallback in %q is not a parsable duration: %v", strings.TrimSpace(assignment), err)
 	}
 	return d
+}
+
+// makeVariableDefinition returns a Makefile variable's full definition,
+// including any backslash-continued lines, so a caller can assert what that
+// one definition does rather than what the file mentions somewhere. It fails
+// rather than returning an empty string: an empty definition would turn every
+// containment assertion about it into a vacuous pass, and would also make the
+// negated ones pass for the wrong reason.
+func makeVariableDefinition(t testing.TB, makefileText, name string) string {
+	t.Helper()
+	lines := strings.Split(makefileText, "\n")
+	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(name) + `\s*[:?]?=`)
+	for i, line := range lines {
+		if !pattern.MatchString(line) {
+			continue
+		}
+		definition := line
+		for strings.HasSuffix(strings.TrimRight(definition, " \t"), "\\") && i+1 < len(lines) {
+			i++
+			definition += "\n" + lines[i]
+		}
+		return definition
+	}
+	t.Fatalf("the Makefile no longer defines %s, so what its definition does cannot be asserted", name)
+	return ""
 }
 
 // makeIntVariable reads a single-line, literal integer Makefile variable so a
