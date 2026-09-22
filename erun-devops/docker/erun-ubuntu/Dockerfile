@@ -17,8 +17,8 @@ ENV TZ=Europe
 # lists across builds -- Docker's stock apt.conf.d/docker-clean hook purges
 # both after every apt-get invocation specifically to keep container images
 # small, which defeats a cache mount's whole purpose. Safe here because
-# nothing under /var/cache/apt or /var/lib/apt/lists is a cache-mount target
-# ever lands in the committed image layer regardless of this setting.
+# neither /var/cache/apt nor /var/lib/apt/lists ever lands in the committed
+# image layer: both are cache-mount targets regardless of this setting.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists \
     rm -f /etc/apt/apt.conf.d/docker-clean && \

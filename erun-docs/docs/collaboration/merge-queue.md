@@ -50,21 +50,28 @@ The gate's steps do not all need the same credentials, and that difference decid
 
 **Every `erun review` call does.** `erun review list`, `create`, `record-build`, `report-merged`, and the [`erun exec gate-run`](/cli/exec#exec-gate-run-start) family all resolve a configured erun platform cloud alias first, and abort **before any network call** when there is none. They exit with code **127**, not `1` — a distinct code precisely so a script reading only the exit status can tell "this machine cannot reach the platform" apart from "it tried and failed". See [`erun review` § Error behaviour](/cli/review#error-behaviour).
 
-That distinction matters because an **agent environment has no erun platform cloud alias, and cannot get one**:
+That distinction matters because an **agent environment can hold a platform alias, but cannot sign itself in to get one**:
 
-- `erun cloud init erun --api-url <url>` succeeds unattended — it reads the platform's public `GET /v1/platform` and writes the alias.
-- `erun cloud login` does not. It completes through an OIDC **Device Authorization Grant** or **Authorization Code + PKCE**, and both need a human at a browser: the device grant requires someone to open the verification URL and approve it, and the PKCE flow's loopback redirect reuses an already-authenticated browser session. No retry, timeout, or piped answer substitutes for that person, so an unattended environment cannot provision itself one no matter how long it tries.
+- `erun cloud init erun --api-url <url>` succeeds unattended — it reads the platform's public `GET /v1/platform` and writes the alias. It performs no sign-in, so the alias it writes has no session behind it.
+- `erun cloud login` does not. It completes through an OIDC **Device Authorization Grant** or **Authorization Code + PKCE**, and both need a human at a browser: the device grant requires someone to open the verification URL and approve it, and the PKCE flow's loopback redirect reuses an already-authenticated browser session. No retry, timeout, or piped answer substitutes for that person, so an unattended environment cannot sign *itself* in no matter how long it tries.
 
-So a gate drive is a **credentialed-host operation**, run by an orchestrator or operator machine that has `erun cloud login` done and can reach the environment's worktree. The environment contributes the workspace, the daemon, and the warm caches the build runs in — not the record of what it built. Concretely:
+The session therefore has to arrive from outside, and it does — by the same route the environment's registry credential takes. **`erun init` resolves the invoking machine's own signed-in erun alias and provisions it into the environment it creates.** The runtime pod mounts it read-only and seeds its cloud config from it at boot, so the environment's `erun` resolves the alias with no interactive step of its own, and it survives pod recreation. An environment created this way can drive the whole queue itself.
+
+Two consequences are worth stating plainly:
+
+- **The environment acts as the operator whose machine ran `init`.** This is that operator's own identity, not a distinct machine identity, so every call an environment makes is attributed to them, and two environments provisioned from one host are indistinguishable in the platform's audit trail. A dedicated non-human identity for queue participation remains the better long-term answer; it is a separate, still-open design.
+- **It covers only what `erun init` provisioned, from a host that had an alias.** An environment created before this existed, or by a host with no alias configured, still has none — and nothing inside the pod repairs that. Re-running `erun init` from a signed-in host is the fix.
+
+Where an environment holds no alias, a gate drive is a **credentialed-host operation**, run by an orchestrator or operator machine that has `erun cloud login` done and can reach the environment's worktree. The environment contributes the workspace, the daemon, and the warm caches the build runs in — not the record of what it built. Concretely:
 
 | Step | Runs on |
 |---|---|
 | `erun-merge`: resolve the target, `erun exec merge`, commit, push | The environment |
-| `erun-merge`: the already-merged review check, `erun review create`, `erun review record-build` | A credentialed host |
+| `erun-merge`: the already-merged review check, `erun review create`, `erun review record-build` | Either — wherever a usable alias is |
 | `erun-merge`: the build whose version that `record-build` carries | Either — the environment has the warm caches, and the build itself needs no alias |
-| `erun-merge-queue-drive`: every rung, including resolving each review and reporting `MERGED` | A credentialed host |
+| `erun-merge-queue-drive`: every rung, including resolving each review and reporting `MERGED` | Either — a provisioned environment drives its own queue; otherwise a credentialed host |
 
-Both skills on this side now say so instead of discovering it mid-run. `erun-merge` and `erun-merge-queue-drive` probe for a usable alias before they touch git or take the environment claim, and stop there with this split named rather than proceeding into a call that cannot succeed. `erun-merge-queue-drive` stops **before** its exclusive environment claim in particular, so a drive that could never record anything does not reserve the environment and refuse the gate job a credentialed host could actually run.
+Both skills say so instead of discovering it mid-run. `erun-merge` and `erun-merge-queue-drive` probe for a usable alias before they touch git or take the environment claim, and stop there with this split named rather than proceeding into a call that cannot succeed. `erun-merge-queue-drive` stops **before** its exclusive environment claim in particular, so a drive that could never record anything does not reserve the environment and refuse the gate job that could actually run.
 
 One exception on the build side: a project whose configured container registry is the platform-hosted `registry.erunpaas.com` authenticates that push with the operator's own platform bearer token, so the image *push* needs the alias. A registry the tenant runs itself does not.
 
@@ -211,9 +218,9 @@ Content-Type: application/json
 { "status": "READY" }
 ```
 
-Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. Refused with `404 Not Found` from any status other than `MERGE`.
+Omitting `buildId` on a `READY` transition is what marks this as the missed-merge-window path rather than a build result: the review moves back to `READY` and rejoins its target branch's queue **at the tail**, not the head — it does not get promoted again immediately. Refused with `409 Conflict` and `REVIEW_NOT_MERGING` from any status other than `MERGE`, naming the status the review actually holds — the review was resolved by id, so reporting it as missing would describe something the caller can see.
 
-- **CLI:** `erun review requeue REVIEW_ID` — see [`erun review requeue`](/cli/review#review-requeue). Fetches the review first so a caller-side refusal names its actual status rather than surfacing the API's ambiguous 404.
+- **CLI:** `erun review requeue REVIEW_ID` — see [`erun review requeue`](/cli/review#review-requeue). Fetches the review first, so a review that is not at `MERGE` is refused before the write, naming its actual status; the server's own refusal names it too.
 - **MCP:** `review_requeue` — same behaviour, `reviewId` the only input.
 - Neither takes a reason: unlike [`override-advance`](#overriding-the-gate), this transition bypasses no safety gate, so there is nothing to make accountable.
 
@@ -222,10 +229,11 @@ Omitting `buildId` on a `READY` transition is what marks this as the missed-merg
 | Refusal | HTTP status | Body | How to unblock |
 |---|---|---|---|
 | No `READY` review waiting for that target branch (queue empty) | `404 Not Found` | `{code: "EMPTY_QUEUE", message}` (no `details`) | Wait for a review to reach `READY` — its build succeeded — then advance again. |
-| Another review is already `MERGE` for that target branch | `404 Not Found` | `{code: "NOT_FOUND", message}` (no `details`) | Wait for it to reach `MERGED`/`FAILED`, or see [When the gate wedges](#when-the-gate-wedges) if it looks stuck. |
+| Another review is already `MERGE` for that target branch | `409 Conflict` | `{code: "MERGE_QUEUE_OCCUPIED", message, details}` — `details` names `targetBranch`, `reviewId`, `name`, `sourceBranch` | Wait for that review to reach `MERGED`/`FAILED`, or `review requeue` it back to `READY` to free the slot — see [When the gate wedges](#when-the-gate-wedges) if it looks stuck. |
 | The head review has an unresolved comment thread | `409 Conflict` | structured — `{error, message, reviewId, unresolvedThreads}`, shown [above](#the-unresolved-thread-check) | Resolve the thread (its root author only), or [`override-advance`](#overriding-the-gate). |
+| A `READY` transition with no `buildId` on a review that is not at `MERGE` (the requeue path) | `409 Conflict` | `{code: "REVIEW_NOT_MERGING", message, details}` — `details` names `reviewId` and the `status` the review actually holds | Requeue only recovers a review stuck at `MERGE`; nothing to do for any other status, whose own path applies. |
 
-The first two rows both 404, but are distinguishable now: [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes) names `EMPTY_QUEUE` for the first case (nothing `READY` waiting), while the second — another review already merging — falls through to the generic `NOT_FOUND` code every 404 gets by default, since that case has no business-specific code of its own.
+Only the empty-queue case is a `404`. Every other advance refusal is a `409` that names what is actually in the way, so a reader is never sent after a missing resource: [Reviews · Machine error codes](/collaboration/reviews#machine-error-codes) names `EMPTY_QUEUE` for the empty queue, `MERGE_QUEUE_OCCUPIED` for an occupied slot, and `REVIEW_NOT_MERGING` for a requeue from the wrong status.
 
 ## See also
 

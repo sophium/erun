@@ -132,8 +132,12 @@ func TestPin(t *testing.T) {
 		for _, want := range []string{
 			"terraform-ref",
 			"helm-dependency",
-			"runtime-version",
 			"1.0.175",
+			// The environment's own runtime coordinate is not erun's to move
+			// here: team/dev records no runtimeimage, so a deploy of it installs
+			// the tenant's own team-devops image, and the plan says so rather
+			// than listing a runtime-version site the caller did not ask about.
+			"skipped: runtimeversion team/dev rides team-devops",
 		} {
 			if !strings.Contains(result.Combined, want) {
 				t.Fatalf("the plan must name %q:\n%s", want, result.Combined)
@@ -292,6 +296,38 @@ func TestPin(t *testing.T) {
 		}
 	})
 
+	// The reported defect: pin resolved a checkout sitting behind its remote and
+	// printed a plan that was internally consistent -- every site reading the
+	// old version, the counts right, no warning anywhere -- so a plan computed
+	// from a stale base was indistinguishable from a current one, and applying
+	// it would have moved the listed sites while silently reverting anything the
+	// missing commits changed elsewhere in the tree. The plan must name both the
+	// divergence and the ref it is measured against.
+	t.Run("names_a_base_that_is_behind_its_remote", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "frs", "prod")
+		fixture.SeedGitRepoBehindItsRemote(t, setup.Cwd)
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+
+		result := erun.Run(t, []string{"pin", "frs", "prod", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"1 commit(s) behind origin/main",
+			"the plan describes that older base",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected %q in the plan:\n%s", want, result.Combined)
+			}
+		}
+		// The warning annotates the plan; it must not replace it. The sites a
+		// stale tree still lists are exactly the ones an operator needs to see.
+		if !strings.Contains(result.Combined, "change terraform-ref terraform-team/dev/main.tf") {
+			t.Fatalf("expected the plan's sites to survive the warning:\n%s", result.Combined)
+		}
+	})
+
 	// The reported gap: dns01_webhook_image, set directly in a tenant's own
 	// terraform variables, is an erun-published image reference just like the
 	// module ref above it, and pin's dry-run must name it as a site to move
@@ -395,8 +431,11 @@ func TestPin(t *testing.T) {
 
 	// A tenant's own runtimechart line is a real, deliberate configuration —
 	// --runtime-chart exists precisely so the chart can be versioned
-	// separately from the image and the erun release. A re-pin must leave it
-	// exactly as stated, even while the rest of the coordinate moves.
+	// separately from the image and the erun release. A re-pin must leave the
+	// whole coordinate exactly as stated: the env running that umbrella runs
+	// the image the umbrella publishes, so its runtimeversion is that line's
+	// number too, and writing the erun target into it hands the environment a
+	// version its own release line never publishes.
 	t.Run("real_run_leaves_a_tenant_own_runtimechart_line_unchanged", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
@@ -421,9 +460,34 @@ func TestPin(t *testing.T) {
 		if !strings.Contains(string(after), "runtimechart: oci://ghcr.io/sophium/charts/team-devops:1.0.76") {
 			t.Fatalf("a tenant's own runtimechart line must be left alone, got:\n%s", after)
 		}
-		if !strings.Contains(string(after), "runtimeversion: 1.0.175") {
-			t.Fatalf("runtimeversion should still move, got:\n%s", after)
+		if !strings.Contains(string(after), "runtimeversion: 1.0.0") {
+			t.Fatalf("an own-umbrella env's runtimeversion must be left alone too, got:\n%s", after)
 		}
+	})
+
+	// The reported case, binary-reachable: the environment states no
+	// runtimeimage, so only its own umbrella names the line its runtime pod
+	// runs. The plan must skip runtimeversion with a note saying what it read,
+	// rather than adding the erun target to an environment whose own release
+	// line never publishes it.
+	t.Run("skips_an_own_umbrella_envs_runtimeversion_and_says_so", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "frs", "build")
+		seedDriftedPins(t, setup.Cwd, filepath.Join(setup.ConfigHome, "erun"))
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "frs", "build", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envConfigPath, append(existing, []byte("runtimechart: oci://ghcr.io/sophium/charts/frs-devops:1.0.134\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+
+		result := erun.Run(t, []string{"pin", "frs", "build", "--version", "1.0.175", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "pin/skips_an_own_umbrella_envs_runtimeversion_and_says_so", normalize.Apply(result.Combined))
 	})
 
 	// Discovery answers "what can I pin to" from the registry, so choosing a

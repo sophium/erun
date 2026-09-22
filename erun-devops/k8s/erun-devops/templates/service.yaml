@@ -83,6 +83,20 @@ emitted; type is the single source of truth.
        builds, so the docker daemon sidecar (and its state PVC) has nothing to
        do there; only the env types that build get it. */ -}}
 {{- $dindEnabled := ne $envType "runtime" -}}
+{{- /* The size of the docker sidecar's state claim, declared once in GiB and
+       rendered twice: as the PVC's own request, and as the byte count the build
+       bounds this environment's BuildKit cache by. One value feeds both so they
+       cannot drift apart — the dind sidecar's image tag once shipped as a
+       literal that disagreed with the image VERSION beside it, and the fix it
+       carried was inert on every environment for a release because of exactly
+       that.
+
+       The build cannot read this from the mount it is handed: where the claim
+       lands on a node-local volume carrying no quota, df at /var/lib/docker
+       reports the whole node, so every environment on it reads the same total
+       and none of them can tell what it is actually sized for. Defaults to the
+       50Gi the claim has always requested. */ -}}
+{{- $dockerVolumeGi := int (default 50 .Values.dockerVolumeGi) -}}
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
 {{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
@@ -112,7 +126,7 @@ emitted; type is the single source of truth.
 {{- $dindResources := default dict $dind.resources -}}
 {{- $dindLimits := default dict $dindResources.limits -}}
 {{- $dindRequests := default dict $dindResources.requests -}}
-{{- $dindCPU := default "4" $dindLimits.cpu -}}
+{{- $dindCPU := default "12" $dindLimits.cpu -}}
 {{- $dindMemory := default "20480Mi" $dindLimits.memory -}}
 {{- $dindRequestCPU := default "0.25" $dindRequests.cpu -}}
 {{- $dindRequestMemory := default "1024Mi" $dindRequests.memory -}}
@@ -189,6 +203,17 @@ emitted; type is the single source of truth.
 {{- $registryCredentialSecretName := default "" .Values.registryCredentialSecretName -}}
 {{- $registryCredentialMountDir := "/etc/erun/registry-credential" -}}
 {{- $registryCredentialKeyFile := ".dockerconfigjson" -}}
+{{- /* Platform alias: `erun init` mints this Secret from the invoking host's
+       own signed-in erun platform cloud provider alias, so a fresh agent
+       environment can call the platform API (the merge queue's read and
+       self-report routes) the moment it is promoted to drive the gate, with no
+       human completing an interactive OIDC login inside the pod. Mounted
+       read-only; the entrypoint seeds the pod's own erun cloud config from it,
+       writing only what the pod does not already carry. Absent (no secret
+       minted) renders byte-for-byte unchanged. `optional: true` so a deploy
+       that races ahead of the secret's own apply still starts. */ -}}
+{{- $platformAliasSecretName := default "" .Values.platformAliasSecretName -}}
+{{- $platformAliasMountDir := "/etc/erun/platform-alias" -}}
 {{- $claude := default dict .Values.claude -}}
 {{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
 {{- $claudeUseMantle := default "0" $claude.useMantle -}}
@@ -249,7 +274,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 50Gi
+      storage: {{ $dockerVolumeGi }}Gi
 {{- end }}
 {{- if eq $worktreeStorage "pvc" }}
 ---
@@ -802,6 +827,10 @@ spec:
             - name: CLOUDFLARE_ACCOUNT_ID
               value: {{ $cloudflareAccountId | quote }}
             {{- end }}
+            {{- if $dindEnabled }}
+            - name: ERUN_DOCKER_VOLUME_BYTES
+              value: {{ mul $dockerVolumeGi 1073741824 | quote }}
+            {{- end }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT
@@ -884,6 +913,11 @@ spec:
             {{- if $registryCredentialSecretName }}
             - name: registry-credential
               mountPath: {{ $registryCredentialMountDir | quote }}
+              readOnly: true
+            {{- end }}
+            {{- if $platformAliasSecretName }}
+            - name: platform-alias
+              mountPath: {{ $platformAliasMountDir | quote }}
               readOnly: true
             {{- end }}
             {{- with .Values.extraVolumeMounts }}
@@ -1018,6 +1052,16 @@ spec:
             items:
               - key: {{ $registryCredentialKeyFile | quote }}
                 path: {{ $registryCredentialKeyFile | quote }}
+        {{- end }}
+        {{- /* Every key mounts (no `items`): the entrypoint needs the alias
+               entry, the hashed secret filename, and the token together, and
+               those key names are a fixed contract with
+               platform_alias_secret.go. */ -}}
+        {{- if $platformAliasSecretName }}
+        - name: platform-alias
+          secret:
+            secretName: {{ $platformAliasSecretName | quote }}
+            optional: true
         {{- end }}
         {{- if $dindEnabled }}
         - name: docker-state

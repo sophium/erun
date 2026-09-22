@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 
+import { artifactPath } from '../../../fixtures/artifacts.js';
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
@@ -330,10 +331,14 @@ test.describe('orchestrator restore notices render by kind', () => {
     await expect(app.sidebar.orchestratorRestoreStatusNotices()).toContainText(text);
     await expect(app.sidebar.orchestratorsAlert()).toHaveCount(0);
 
-    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-info-light.png' });
+    await page.screenshot({
+      path: artifactPath('test-results/orchestrator-restore-notice-info-light.png'),
+    });
     await app.titlebar.toggleTheme();
     await expect(app.documentElement()).toHaveClass(/dark/);
-    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-info-dark.png' });
+    await page.screenshot({
+      path: artifactPath('test-results/orchestrator-restore-notice-info-dark.png'),
+    });
   });
 
   test('a single warning notice keeps the destructive alert treatment it deserves', async ({
@@ -359,10 +364,14 @@ test.describe('orchestrator restore notices render by kind', () => {
     await expect(app.sidebar.orchestratorsAlert()).toContainText(text);
     await expect(app.sidebar.orchestratorRestoreStatusNotices()).toHaveCount(0);
 
-    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-warning-light.png' });
+    await page.screenshot({
+      path: artifactPath('test-results/orchestrator-restore-notice-warning-light.png'),
+    });
     await app.titlebar.toggleTheme();
     await expect(app.documentElement()).toHaveClass(/dark/);
-    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-warning-dark.png' });
+    await page.screenshot({
+      path: artifactPath('test-results/orchestrator-restore-notice-warning-dark.png'),
+    });
   });
 
   // The heart of the bug: several orchestrators resolved on the same restore
@@ -411,10 +420,14 @@ test.describe('orchestrator restore notices render by kind', () => {
     await expect(app.sidebar.orchestratorRestoreStatusNotices()).toContainText(infoText);
     await expect(app.sidebar.orchestratorRestoreStatusNotices()).not.toContainText(warningText);
 
-    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-mixed-light.png' });
+    await page.screenshot({
+      path: artifactPath('test-results/orchestrator-restore-notice-mixed-light.png'),
+    });
     await app.titlebar.toggleTheme();
     await expect(app.documentElement()).toHaveClass(/dark/);
-    await page.screenshot({ path: 'test-results/orchestrator-restore-notice-mixed-dark.png' });
+    await page.screenshot({
+      path: artifactPath('test-results/orchestrator-restore-notice-mixed-dark.png'),
+    });
   });
 
   // A kind this launch does not recognise — a payload from a backend version

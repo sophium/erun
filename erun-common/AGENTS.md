@@ -134,6 +134,19 @@ demonstrated:
 - Release cadence/coalescing is an unwired design in
   `erun-backend/erun-backend-api/AGENTS.md` § "Release cadence policy".
   Do not treat drift reporting as an automated release drainer.
+- A build's own trace states what the builder did with its Dockerfile's `test`
+  stage, not what the plan intended. `dockerfileHasGateTestStage` keeps a gate
+  image out of the *fingerprint* promotion path, but BuildKit's layer cache sits
+  underneath that guard and can serve the whole test stage on its own: the build
+  finishes in seconds at zero CPU, `make check` never executes, and the exit code
+  is 0 — the same green as a real gate run. `gateTestStagePlanLines` announces the
+  plan and must not use the outcome vocabulary; `gateTestStageProvenanceLines`
+  reports the outcome — LIVE, CACHED or REPLAYED — read from the builder's own
+  captured `--progress=plain` stream, which is the one report a warm cache cannot
+  fake (an in-image marker is replayed along with the layer holding it). Keep the
+  stage's `FROM` step out of that evidence: BuildKit reports it DONE even when
+  every instruction below it was CACHED, which would hide the replay
+  (`build_gate_test_stage_evidence.go`).
 - Preserve the gate wrapper's distinction between a clean pass, an exit-zero
   process that left unsupervised work (reported with an explicit warning and job
   ID), and a genuine failure. The orphan warning is not proof of completed work;

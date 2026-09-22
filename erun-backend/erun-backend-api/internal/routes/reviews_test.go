@@ -3,6 +3,7 @@ package routes
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -151,6 +152,55 @@ func TestAdvanceMergeQueueBlockedReportsCountAndReview(t *testing.T) {
 	}
 }
 
+// TestAdvanceMergeQueueOccupiedNamesTheBlocker: an occupied MERGE slot is a
+// conflict with the branch's current state, not a missing resource, and the
+// body has to carry the review holding it — that review is the operator's next
+// move (finish it, or requeue it back to READY).
+func TestAdvanceMergeQueueOccupiedNamesTheBlocker(t *testing.T) {
+	svc := &stubReviewService{err: &service.MergeQueueOccupiedError{
+		TargetBranch: "main",
+		ReviewID:     "review-9",
+		Name:         "Land the widget",
+		SourceBranch: "feature/widget",
+	}}
+	routes := ReviewRoutes{service: svc}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
+	rec := httptest.NewRecorder()
+	routes.advanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"code":"MERGE_QUEUE_OCCUPIED"`, `"reviewId":"review-9"`, `"sourceBranch":"feature/widget"`, `"targetBranch":"main"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body = %q, want it to carry %s", body, want)
+		}
+	}
+	if !strings.Contains(body, "requeue") {
+		t.Fatalf("body = %q, want the message to name the requeue remedy", body)
+	}
+}
+
+// TestUpdateReviewStatusRequeueRefusalNamesTheStatus: requeue recovers only a
+// review at MERGE, so a refusal from any other status has to name the status
+// the review is actually in rather than reporting it as missing.
+func TestUpdateReviewStatusRequeueRefusalNamesTheStatus(t *testing.T) {
+	svc := &stubReviewService{err: &service.ReviewNotMergingError{ReviewID: "review-1", Status: model.ReviewStatusReady}}
+	routes := ReviewRoutes{service: svc}
+
+	rec := patchReviewStatus(t, routes, `{"status":"READY"}`)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"REVIEW_NOT_MERGING"`) || !strings.Contains(body, `"reviewId":"review-1"`) || !strings.Contains(body, `"status":"READY"`) {
+		t.Fatalf("body = %q, want the code and the review's actual status", body)
+	}
+}
+
 // TestOverrideAdvanceMergeQueuePassesTargetBranchAndReason: the route is a
 // thin adapter over the service, so its only job is getting both request
 // fields to OverrideAdvanceMergeQueue unchanged.
@@ -210,6 +260,61 @@ func TestListReviewsTranslatesQueryParamsIntoAReviewFilter(t *testing.T) {
 	}
 	if reviews.gotFilter != want {
 		t.Fatalf("filter = %+v, want %+v", reviews.gotFilter, want)
+	}
+}
+
+// TestListReviewsRefusesAnUnknownStatusFilter: the read route handed any
+// `?status=` value straight to the repository, so an unrecognised one matched
+// no row and answered 200 with an empty list -- a mistyped filter was
+// indistinguishable from a review queue that genuinely had nothing in that
+// state, which is the conclusion an operator acts on. The refusal must name
+// the accepted values, and it must happen before the query, or the caller
+// still receives the empty listing this route is being fixed to stop
+// producing.
+func TestListReviewsRefusesAnUnknownStatusFilter(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews?status=bogus-not-a-status", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listReviews(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var body errorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response body is not JSON: %v", err)
+	}
+	if body.Code != "INVALID_QUERY" {
+		t.Fatalf("code = %q, want %q", body.Code, "INVALID_QUERY")
+	}
+	for _, want := range []string{"OPEN", "CLOSED", "FAILED", "READY", "MERGE", "MERGED"} {
+		if !strings.Contains(body.Message, want) {
+			t.Fatalf("message %q does not name the accepted value %s", body.Message, want)
+		}
+	}
+	if reviews.gotFilter.Status != "" {
+		t.Fatalf("the refused filter reached the repository as %q, want no query at all", reviews.gotFilter.Status)
+	}
+}
+
+// Case-insensitivity is the documented behavior on this route, so a lower-case
+// spelling resolves to the stored one rather than being refused alongside the
+// values that are genuinely outside the vocabulary.
+func TestListReviewsResolvesALowerCaseStatusFilter(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews?status=ready", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listReviews(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if reviews.gotFilter.Status != model.ReviewStatusReady {
+		t.Fatalf("filter status = %q, want %q", reviews.gotFilter.Status, model.ReviewStatusReady)
 	}
 }
 

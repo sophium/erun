@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
@@ -57,6 +57,29 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_retrofits_the_platform_alias_on_a_pre_existing_env", func(t *testing.T) {
+		// The reported failure: an environment initialised before anything
+		// provisioned a platform alias records no platform-alias Secret, so the
+		// runtime chart mounts nothing, the entrypoint's seeder correctly finds
+		// nothing, and the pod can never call the platform API -- `erun gate
+		// list` among them. Deploying it from a host that is signed in is the one
+		// step such an environment takes that can fix it, and this is what that
+		// deploy now renders: the Secret applied, its name threaded into the helm
+		// upgrade so the chart mounts it, and the name recorded on the
+		// environment so every later deploy keeps it. Before the change this
+		// deploy was byte-for-byte the same as an env whose host had nothing to
+		// give -- no Secret, no --set, and the pod left unable to reach the
+		// platform.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithSignedInERunPlatformAlias(t, setup, "team", "dev", "erun+test@erun")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_retrofits_the_platform_alias_on_a_pre_existing_env", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_unaffected_by_kubectl_pod_watch_library_execution_mode", func(t *testing.T) {
@@ -4718,7 +4741,7 @@ func reapedChildPID(t *testing.T) int {
 		t.Skip("reaped-pid reclaim relies on Unix signal liveness; Windows PID reuse is non-deterministic")
 	}
 	// Spawn and reap a real child to get a positive, dead PID.
-	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	cmd := harnessexec.Command("/bin/sh", "-c", "exit 0")
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("seed reaped child: %v", err)
 	}

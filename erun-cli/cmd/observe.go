@@ -27,6 +27,9 @@ func newObserveCmd(resolveOpen OpenResolver) *cobra.Command {
 			"runtimeversion/runtimeimage/runtimepod, so a disagreement (a hand-patched\n" +
 			"image, a resized pod the release never recorded) is named instead of left for\n" +
 			"the reader to spot by comparing two dumps.\n\n" +
+			"That verdict is named in both surfaces: the last line of the text stream, and\n" +
+			"a drift list in the JSON result, empty when the comparison found nothing to\n" +
+			"report.\n\n" +
 			"Every call is a kubectl get or a helm status: nothing here can mutate the\n" +
 			"cluster, which is what makes this safe to grant an orchestrator that must\n" +
 			"never reach for `exec raw`.",

@@ -318,31 +318,35 @@ COPY erun-skills/skills/erun-merge/SKILL.md /src/erun-skills/skills/erun-merge/S
 # own resolved value already tracks the environment.
 ARG DIND_MEMORY_LIMIT_MIB=20480
 # DIND_CPU_LIMIT is the same blind-cgroup problem as DIND_MEMORY_LIMIT_MIB
-# above, for CPU instead of memory. playwright.config.ts's own worker-count
-# derivation reads os.availableParallelism() -- quota-aware everywhere else --
-# but this RUN step is a sibling of the erun-dind sidecar's own limited
-# cgroup, not a descendant of it, so cpu.max reads "max" here regardless of
-# the sidecar's configured limit and the derivation falls through to the
-# node's real core count (24 on the pod #2081 was measured on), oversized for
-# an environment that does not own that many cores exclusively -- 6 workers
-# (6 Go backends + 6 headless Chromiums) contending with everything else
-# scheduled on the node produced a different spec failing every run (#2081).
-# Default mirrors runtime.dind.resources.limits.cpu / eruncommon.DefaultRuntimeDindCPU
-# ("4"), the same source DIND_MEMORY_LIMIT_MIB's default mirrors for memory --
-# the CPU budget the operator actually provisioned for this environment's
-# build work, rather than the node's raw core count. ERUN_PLAYWRIGHT_WORKERS
-# applies the config's own "two cores per worker" rule (a worker is a Go
-# backend *and* a headless Chromium, and they compete) to that budget instead
-# of to the unbounded node, floored at 1 and capped at 4 -- one more than the
-# config comment's own "2 workers clean on 4 cores" data point, kept as a
-# ceiling rather than raised further without new measurement. Like
-# DIND_MEMORY_LIMIT_MIB above, `erun build` passes this as a real --build-arg
-# resolved from EnvConfig.RuntimeDindPod, so the default below is only the
-# bare-`docker build` fallback -- the same constant the sidecar's own chart
-# default and NormalizeRuntimeDindPodResources use, never the node's core
-# count. A tenant image with a different sidecar CPU default only needs to
-# change this fallback to match.
-ARG DIND_CPU_LIMIT=4
+# above, for CPU instead of memory: this RUN step is a sibling of the
+# erun-dind sidecar's own limited cgroup, not a descendant of it, so cpu.max
+# reads "max" here regardless of the sidecar's configured limit and anything
+# deriving a width from the cgroup falls through to the node's real core
+# count. What this ARG carries is therefore the CPU budget the operator
+# actually provisioned for this environment's build work, resolved by
+# `erun build` from EnvConfig.RuntimeDindPod.
+#
+# Default mirrors runtime.dind.resources.limits.cpu /
+# eruncommon.DefaultRuntimeDindCPU ("12"), the same source
+# DIND_MEMORY_LIMIT_MIB's default mirrors for memory, and the same rule
+# produced it: a 24-CPU node divided across the two build-capable environments
+# erun assumes are building on it at once. It is a ceiling, not a reservation
+# -- see eruncommon.RuntimeDindCPULimit, which owns the rule and the reasons
+# both halves of it are what they are. The value used to be a flat 4, which
+# throttled a build to a sixth of an otherwise-idle node; that is the shape
+# this default exists to stop shipping. Like DIND_MEMORY_LIMIT_MIB above, this
+# is only the bare-`docker build` fallback -- the same constant the sidecar's
+# own chart default and NormalizeRuntimeDindPodResources use, never the node's
+# core count. A tenant image with a different sidecar CPU default only needs
+# to change this fallback to match.
+#
+# ERUN_PLAYWRIGHT_WORKERS is deliberately *not* derived from this ARG here any
+# more; the Makefile resolves it from the same CPU quota, beside every other
+# gate width (see its own comment). DIND_CPU_LIMIT is still what reaches that
+# quota through PARALLEL_GATE_CPU_LIMIT below, so a resized environment still
+# gets a wider suite -- but as one of the gate's widths rather than as an
+# inline halving of a resource limit.
+ARG DIND_CPU_LIMIT=12
 # PLAYWRIGHT_TEST_AREAS carries `erun build`'s resolved smoke+area selection
 # (applyPlaywrightAreaBuildArgs in erun-common/build_playwright_areas.go,
 # derived from the Playwright spec-file diff against the merge base) into
@@ -354,6 +358,25 @@ ARG DIND_CPU_LIMIT=4
 # resolution -- the safe, fail-open direction is the full suite, never zero
 # coverage.
 ARG PLAYWRIGHT_TEST_AREAS=""
+# ERUN_PLAYWRIGHT_ARTIFACTS_DIR is the suite's one artifact root
+# (erun-ui/playwright/fixtures/artifacts.ts): Playwright's own output dir, the
+# HTML report, and every frame a spec captures by hand all resolve through it.
+# Set here to a container-local path instead of left at its default, which is
+# the suite's own directory inside /src.
+#
+# What this guards is not the reporters this stage writes (they land in a COPY
+# of the tree and are discarded with the build container). It is every *other*
+# in-container run of this suite that mirrors this stage, and above all
+# scripts/repro-gate-contention.sh: that one rebuilds this stage's arrangement
+# outside a build by bind-mounting an environment's own worktree over /src and
+# running as root, so artifacts left at the default path come back owned by uid
+# 0 in a tree the environment user owns -- where rm -rf cannot remove them and
+# every later run in that environment fails with a bare EACCES inside whichever
+# spec writes first, for every branch rather than only the one that poisoned
+# it. Declaring the container-local root here makes it part of what "the test
+# stage's environment" means, so a run that mirrors the stage inherits it
+# rather than having to re-derive why it needs one.
+ARG ERUN_PLAYWRIGHT_ARTIFACTS_DIR="/tmp/erun-playwright-artifacts"
 # golangci-lint's own analysis cache sat unmounted here even though the Go
 # module and build caches right above it were: HOME is /root in this stage
 # (root user, no ENV HOME override), so the tool's default cache dir is
@@ -446,9 +469,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     ERUN_WAILSJS_CACHE_DIR=/root/.cache/erun-wailsjs \
     ERUN_PLAYWRIGHT_LINT_CACHE_DIR=/src/.cache/frontend-lint \
+    ERUN_PLAYWRIGHT_ARTIFACTS_DIR="${ERUN_PLAYWRIGHT_ARTIFACTS_DIR}" \
     PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
     PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
-    ERUN_PLAYWRIGHT_WORKERS="$(w=$(( ${DIND_CPU_LIMIT} / 2 )); [ "$w" -ge 1 ] || w=1; [ "$w" -le 4 ] && echo "$w" || echo 4)" \
     PLAYWRIGHT_TEST_AREAS="${PLAYWRIGHT_TEST_AREAS}" \
     make check && touch /test-ok
 

@@ -469,8 +469,8 @@ for gb in $(pvc_storage_requests "${rendered}"); do
     total_storage_gb=$((total_storage_gb + gb))
 done
 
-[ "${total_cpu_millicores}" = "8000" ] ||
-    fail "pod cpu limits should sum to 8000m (erun-devops ${runtime_cpu} + erun-dind ${dind_cpu}), got ${total_cpu_millicores}m"
+[ "${total_cpu_millicores}" = "16000" ] ||
+    fail "pod cpu limits should sum to 16000m (erun-devops ${runtime_cpu} + erun-dind ${dind_cpu}), got ${total_cpu_millicores}m"
 [ "${total_memory_mb}" = "36864" ] ||
     fail "pod memory limits should sum to 36864Mi (erun-devops ${runtime_memory}Mi + erun-dind ${dind_memory}Mi), got ${total_memory_mb}Mi"
 [ "${total_storage_gb}" = "72" ] ||
@@ -620,6 +620,35 @@ grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q '^ 
 grep -A5 '^        - name: registry-credential$' "${volume_block}" | grep -q 'key: ".dockerconfigjson"' ||
     fail "the registry credential volume should project the .dockerconfigjson key"
 
+# --- 25b. platformAliasSecretName mounts the Secret `erun init` mints from the
+# invoking host's signed-in erun platform alias, so a fresh agent environment
+# can call the platform API without an interactive OIDC login inside the pod.
+# Renders nothing without a name, so an env init found no host alias for stays
+# byte-for-byte unchanged. ---
+rendered=$(render)
+grep -q 'name: platform-alias' "${rendered}" &&
+    fail "no platform-alias volume or mount should render without a secret name"
+
+rendered=$(render --set-string platformAliasSecretName=team-devops-platform-alias)
+runtime_block="${work_root}/platform-alias-runtime.yaml"
+runtime_container "${rendered}" >"${runtime_block}"
+grep -A2 '^            - name: platform-alias$' "${runtime_block}" | grep -q 'mountPath: "/etc/erun/platform-alias"' ||
+    fail "the platform alias mount belongs on the runtime container at /etc/erun/platform-alias"
+grep -A2 '^            - name: platform-alias$' "${runtime_block}" | grep -q 'readOnly: true' ||
+    fail "the platform alias mount should be read-only"
+
+volume_block="${work_root}/platform-alias-volume.yaml"
+awk '/^      volumes:/{f=1} f{print}' "${rendered}" >"${volume_block}"
+grep -A4 '^        - name: platform-alias$' "${volume_block}" | grep -q 'secretName: "team-devops-platform-alias"' ||
+    fail "the platform alias volume should name the secret erun init minted"
+grep -A4 '^        - name: platform-alias$' "${volume_block}" | grep -q '^            optional: true$' ||
+    fail "the platform alias volume should be optional, so a deploy that races ahead of the secret's own apply still starts"
+# Every key must mount: the entrypoint needs the alias entry, the hashed secret
+# filename, and the token together, and those key names are a fixed contract
+# with platform_alias_secret.go. An `items:` projection would drop some.
+grep -A4 '^        - name: platform-alias$' "${volume_block}" | grep -q 'items:' &&
+    fail "the platform alias volume must mount every key, not a projection"
+
 # --- The dind sidecar starts through the MTU-deriving wrapper, and the
 # chart's own dockerd args still ride behind it. The wrapper's resolution
 # logic is covered directly in erun-devops-dind-entrypoint_test.sh; what is
@@ -693,5 +722,37 @@ rendered=$(render \
 count=$(grep -c '^            - name: ERUN_CLAUDE_AVAILABLE_MODELS$' "${rendered}")
 [ "${count}" = "1" ] ||
     fail "ERUN_CLAUDE_AVAILABLE_MODELS should render exactly once with a gateway on an AWS env, got ${count}"
+
+# --- 15. The build's cache bound and the docker claim describe the same volume ---
+# The byte count the build bounds this environment's BuildKit cache by is only a
+# bound if it is the size of the volume that cache actually lives on. Two
+# independently written numbers drift: the dind sidecar's image tag once shipped
+# as a literal that disagreed with the image VERSION beside it, and the fix it
+# carried was inert on every environment for a release because of exactly that.
+# Derived from the rendered claim rather than restated, so a change that moves
+# both sides together cannot pass.
+docker_claim_gi() {
+    awk '/^  name: test-docker$/{found=1}
+         found && /^      storage: /{sub(/^      storage: /,""); sub(/Gi$/,""); print; exit}' "$1"
+}
+
+cache_bound_bytes() {
+    grep -A1 '^            - name: ERUN_DOCKER_VOLUME_BYTES$' "$1" |
+        sed -n 's/^              value: "\([0-9]*\)"$/\1/p'
+}
+
+rendered=$(render --set dockerVolumeGi=120)
+claim_gi=$(docker_claim_gi "${rendered}")
+[ "${claim_gi}" = "120" ] ||
+    fail "the docker claim should render the configured volume (120Gi), got '${claim_gi}'"
+bound=$(cache_bound_bytes "${rendered}")
+[ "${bound}" = "$((claim_gi * 1073741824))" ] ||
+    fail "the build's cache bound should be the docker claim's own size (${claim_gi}Gi = $((claim_gi * 1073741824)) bytes), got '${bound}'"
+
+# A runtime env runs no dind sidecar and has no docker claim, so there is no
+# volume to bound and nothing should claim otherwise.
+rendered=$(render --set worktreeStorage=none)
+[ -z "$(cache_bound_bytes "${rendered}")" ] ||
+    fail "no cache bound should render for an env with no docker volume"
 
 echo "PASS: erun-devops chart pod shape"

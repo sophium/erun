@@ -91,9 +91,14 @@ type ReleasePackagingSyncSpec struct {
 // ReleaseSpec splits its stages around the publish deliberately. Stages run
 // while the release is still private and every step is recoverable;
 // PostPublishStages carry the outward-facing, irreversible steps (the tag push,
-// the branch push, and the packaging sync that depends on the public tag) and
-// are reached only once the version's images and charts are published and
-// proven resolvable.
+// the branch push, and the packaging sync that depends on the public tag).
+//
+// A run that publishes reaches them only once the version's images and charts
+// are published and proven resolvable, and ArtifactsPublished records that it
+// did. `erun release` marks source control only, so it reaches the same stages
+// having published nothing at all — the split is around a publish it does not
+// perform — and a failure there has to say so rather than congratulate the
+// operator on a registry it never wrote to.
 type ReleaseSpec struct {
 	ProjectRoot       string                   `json:"projectRoot"`
 	ReleaseRoot       string                   `json:"releaseRoot"`
@@ -111,6 +116,13 @@ type ReleaseSpec struct {
 	PostPublishStages []ReleaseStage           `json:"postPublishStages,omitempty"`
 	LinuxReleases     []scriptSpec
 	SkippedLinux      bool `json:"-"`
+
+	// ArtifactsPublished records that this run built, pushed and verified the
+	// version's images and charts, so the push-stage failures that come after
+	// it may say the registry holds them. It is run state rather than part of
+	// the resolved plan, so it is not serialized -- and it stays false for
+	// `erun release`, which marks source control and never publishes.
+	ArtifactsPublished bool `json:"-"`
 }
 
 type releaseInputs struct {
@@ -195,11 +207,14 @@ func traceReleaseUmbrella(ctx Context, version string, builds []DockerBuildSpec)
 	}
 	started := time.Now()
 	ctx.Info(releasing)
-	for _, line := range gateTestStageProvenanceLines(builds) {
+	// As in traceBuildUmbrella: the opening lines are the plan, the closing ones
+	// the outcome, and the run's gate-stage evidence is what tells them apart.
+	for _, line := range gateTestStagePlanLines(builds) {
 		ctx.Info(line)
 	}
 	root := newStepTiming("release", nil)
 	ctx.timing = root
+	ctx.gateTestStage = newGateTestStageProvenance()
 	return ctx, func(errp *error) {
 		var err error
 		if errp != nil {
@@ -207,7 +222,7 @@ func traceReleaseUmbrella(ctx Context, version string, builds []DockerBuildSpec)
 		}
 		root.finish(err)
 		elapsed := time.Since(started).Round(time.Second)
-		for _, line := range gateTestStageProvenanceLines(builds) {
+		for _, line := range gateTestStageProvenanceLines(builds, ctx.gateTestStage) {
 			ctx.Info(line)
 		}
 		if err != nil {
@@ -277,6 +292,14 @@ func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	if err := publishClaimedRelease(ctx, spec, runGit, publisher); err != nil {
 		return err
 	}
+	// The publish, when this run has one, has now built, pushed and verified
+	// every image and chart this version resolves, which is what the
+	// post-publish stages' failures are allowed to say. `erun release` reaches
+	// the same stages with no publisher and nothing published, and those
+	// messages must not tell its operator otherwise.
+	if publisher != nil && publisher.Publish != nil {
+		spec.ArtifactsPublished = true
+	}
 	if err := runReleaseStages(ctx, spec, spec.PostPublishStages, runGit, syncPackagingChecksums); err != nil {
 		return err
 	}
@@ -308,6 +331,7 @@ func publishClaimedRelease(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	if publisher == nil {
 		if spec.Version != "" {
 			ctx.Info("release version: " + spec.Version + " (source control only; no artifacts were built or published)")
+			ctx.Info("next: `erun build --release` publishes this version's images and charts before tagging, or `erun push --version " + spec.Version + "` publishes them for the tag already pushed")
 		}
 		return nil
 	}
@@ -1096,6 +1120,8 @@ func discoverSupportedReleaseLinuxScripts(releaseRoot, version string) ([]script
 // come first because they are recoverable, and everything that makes the version
 // public — the tag push, the packaging sync that reads the published archive,
 // the version bump, and the branch push — waits until the artifacts exist.
+// A run with no publish (erun release) still gets the second half; nothing
+// exists for it to wait on and it says so when it finishes.
 func resolveReleaseStages(inputs releaseInputs, releaseFileUpdates []ReleaseFileUpdate, packagingSync *ReleasePackagingSyncSpec) (string, []ReleaseStage, []ReleaseStage, error) {
 	stages := baseReleaseStages(inputs, releaseFileUpdates)
 	postPublishStages := stablePackagingStages(inputs, packagingSync)

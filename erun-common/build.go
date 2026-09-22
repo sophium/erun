@@ -54,6 +54,36 @@ func newGateBuildNotRunError(promotedTags []string) error {
 		ErrGateBuildNotRun, strings.Join(promotedTags, ", "))
 }
 
+// ErrGateTestStageReplayed reports a gate build that ran, but whose Dockerfile's
+// test stage BuildKit served entirely from its own layer cache -- so `make check`
+// did not execute in this run.
+//
+// It is deliberately a different error from ErrGateBuildNotRun, and a different
+// mechanism from the guard that produces it. That one is judged from the resolved
+// plan and reports erun's own fingerprint cache promoting every image, so nothing
+// reaches a docker build at all. This one is judged from what the build itself
+// reported and reports the cache *underneath* that one: the plan named real work
+// for every image, docker was genuinely invoked, and BuildKit found every step's
+// inputs byte-identical to a previous build and replayed them. A gate that ran no
+// test stage exits zero exactly like one that ran the whole gate, and
+// `review record-build --gate` reads only that exit code, so the two are
+// indistinguishable to the queue that consumes it.
+//
+// The remedy follows from which cache is at fault. --no-incremental is the right
+// answer to ErrGateBuildNotRun and the wrong one here: it bypasses erun's
+// fingerprint cache and never touches BuildKit's layer cache, so a replayed stage
+// replays again. Only the builder's own cache can be cleared, which is why the
+// message names that rather than reusing the flag its sibling names.
+var ErrGateTestStageReplayed = errors.New("gate build replayed its test stage from the layer cache")
+
+func newGateTestStageReplayedError(replayedTags []string) error {
+	return fmt.Errorf(
+		"%w (%s): this run did invoke docker build, but BuildKit served every instruction step of the test stage from its layer cache, "+
+			"so make check did not execute; that cache sits below erun's fingerprint cache, so --no-incremental will not clear it -- "+
+			"prune the builder's cache (docker builder prune) or change the tree, then re-run the gate",
+		ErrGateTestStageReplayed, strings.Join(replayedTags, ", "))
+}
+
 func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 

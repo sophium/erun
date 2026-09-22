@@ -14,6 +14,10 @@ runtimeversion/runtimeimage/runtimepod, so a disagreement (a hand-patched
 image, a resized pod the release never recorded) is named instead of left for
 the reader to spot by comparing two dumps.
 
+That verdict is named in both surfaces: the last line of the text stream, and
+a drift list in the JSON result, empty when the comparison found nothing to
+report.
+
 Every call is a kubectl get or a helm status: nothing here can mutate the
 cluster, which is what makes this safe to grant an orchestrator that must
 never reach for `exec raw`.

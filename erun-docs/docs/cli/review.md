@@ -42,7 +42,7 @@ Lists reviews visible to the caller's tenant. Every filter is optional and compo
 | Flag | Description |
 |---|---|
 | `--target-branch` / `--source-branch` | Filter by branch name. |
-| `--status` | `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED`. |
+| `--status` | `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED`; any casing. Anything else is refused rather than listed — see [Error behaviour](#error-behaviour). |
 | `--author-user-id` / `--reviewer-user-id` | Filter by an explicit user id. |
 | `--mine` | Reviews you authored. Resolves your user id via a `whoami` call first; cannot be combined with `--author-user-id`. |
 | `--waiting-on-me` | Reviews you are a reviewer on. Resolves your user id via a `whoami` call first; cannot be combined with `--reviewer-user-id`. |
@@ -111,7 +111,7 @@ Assign or remove reviewers on a review, and list who's currently assigned. `revi
 
 ### `review queue list` / `review queue advance` {#review-queue-list--review-queue-advance}
 
-Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build with [`review requeue`](#review-requeue) (see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
+Lists or advances a target branch's merge queue. `list` returns the queue in order; `advance` promotes the queue's head to `MERGE` and starts its merge-gate build — a real build of the prospective merge, gating whether it actually lands. It fails if the queue is empty or its head is not `READY` (both surface as `404 Not Found`), if another review already holds that target branch's single `MERGE` slot (`409 Conflict`, naming that review — wait for it, or [`review requeue`](#review-requeue) it back to `READY`), or if the head still has unresolved comment threads (`409 Conflict`). On that last refusal, the command names how many threads and on which review; resolve them with [`review resolve`](#review-resolve--review-unresolve) or use `review queue override-advance`. See [Merge queue](/collaboration/merge-queue) for the full mechanics — why the queue exists, what the gate does, and how to recover a wedged gate build with [`review requeue`](#review-requeue) (see [Merge queue § When the gate wedges](/collaboration/merge-queue#when-the-gate-wedges)).
 
 ### `review queue override-advance` {#review-queue-override-advance}
 
@@ -160,6 +160,7 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | No erun-type cloud alias configured. | Aborts before any network call, naming `erun cloud init erun --api-url <url>`. |
 | More than one erun-type alias configured, `--erun-alias` omitted. | Aborts asking for an explicit `--erun-alias`. |
 | `--mine`/`--waiting-on-me` combined with the equivalent explicit `--author-user-id`/`--reviewer-user-id` (`list`). | Aborts before any network call. |
+| `--status` names something other than `OPEN`, `CLOSED`, `FAILED`, `READY`, `MERGE`, or `MERGED` (`list`; any casing). | Refused as a bad argument, naming the accepted values, before the alias lookup — a mistyped filter would otherwise return an empty listing, indistinguishable from a review queue that genuinely has nothing in that state. The API refuses the same value with `400 Bad Request` and code `INVALID_QUERY`. |
 | `create` with a `--name` that collides with an existing review. | `409 Conflict`. |
 | `create` with a `--source-branch` that already has a live (non-`MERGED`/`CLOSED`) review proposing it onto the same `--target-branch`. | `409 Conflict` — see [branch uniqueness](/collaboration/reviews#author-reviewers-and-discovery). |
 | `show`/`comment`/`close` on an unknown review id. | `404 Not Found`. |
@@ -172,11 +173,12 @@ erun review queue override-advance --target-branch main --reason "hotfix, review
 | `report-merged` on a review at `MERGE` whose build's commit is not reachable from the target branch's tip, or whose parent does not match the tip this review was gated against. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review stays at `MERGE`. |
 | `report-merged` on any other review whose source branch's changes are not already in the target branch's history. | `409 Conflict` (`MERGE_NOT_VERIFIED`); the review's status is unchanged. |
 | `report-merged` on a `CLOSED` review. | `400 Bad Request` (`INVALID_TRANSITION`); `CLOSED` is terminal. |
-| `requeue` on a review that is not currently at `MERGE`. | Aborts before the status change, naming the review's actual status. |
+| `requeue` on a review that is not currently at `MERGE`. | Aborts before the status change, naming the review's actual status; the platform's own refusal does too (`409 Conflict`, `REVIEW_NOT_MERGING`). |
 | `reviewers add --user-id` not enrolled in your own tenant. | Aborts before any network call, naming `erun platform user list`/`erun platform user enroll`. |
 | `reviewers add --user-id` already assigned to the review. | `409 Conflict`. |
 | `reviewers remove --user-id` not currently assigned. | `404 Not Found`. |
 | `queue advance` on an empty queue, or whose head is not `READY`. | `404 Not Found`. |
+| `queue advance` while another review already holds that target branch's `MERGE` slot. | `409 Conflict` (`MERGE_QUEUE_OCCUPIED`), naming that review and its source branch. Wait for it, or [`requeue`](#review-requeue) it back to `READY`. |
 | `queue advance` whose head still has unresolved comment threads. | `409 Conflict`, naming the count and the review. Resolve them or use `queue override-advance`. |
 | `queue override-advance` with `--reason` omitted or blank. | Aborts before any network call. |
 

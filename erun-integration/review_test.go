@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -160,6 +161,29 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		mu.Lock()
 		defer mu.Unlock()
+		// One MERGE per target branch, the same invariant the real backend
+		// enforces: a branch whose slot is taken refuses with the review
+		// holding it rather than promoting the next one.
+		for _, id := range reviewOrder {
+			review := reviews[id]
+			if review["targetBranch"] != body["targetBranch"] || review["status"] != "MERGE" {
+				continue
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": "MERGE_QUEUE_OCCUPIED",
+				"message": fmt.Sprintf("merge queue for %v already has a review at MERGE: %v (%v, %v); complete it or requeue it back to READY before advancing",
+					review["targetBranch"], review["reviewId"], review["name"], review["sourceBranch"]),
+				"details": map[string]any{
+					"targetBranch": review["targetBranch"],
+					"reviewId":     review["reviewId"],
+					"name":         review["name"],
+					"sourceBranch": review["sourceBranch"],
+				},
+			})
+			return
+		}
 		for _, id := range reviewOrder {
 			review := reviews[id]
 			if review["targetBranch"] != body["targetBranch"] {
@@ -408,6 +432,81 @@ func TestReview(t *testing.T) {
 			t.Fatalf("expected non-zero exit combining --mine with --author-user-id, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "review/list_rejects_mine_combined_with_author_user_id", normalize.Apply(result.Combined))
+	})
+
+	// The reported failure: a mistyped --status reached the platform verbatim,
+	// came back as a clean empty listing, and printed "no reviews" at exit 0 --
+	// indistinguishable from a review queue that genuinely has nothing in that
+	// state. Both halves are asserted together below, because the defect is
+	// precisely that the two were the same output.
+	t.Run("list_mistyped_status_is_refused_rather_than_listed_as_empty", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		// The control: a valid status that genuinely matches nothing. This one
+		// legitimately reports an empty result at exit 0.
+		empty := erun.Run(t, []string{"review", "list", "--status", "OPEN"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if empty.ExitCode != 0 {
+			t.Fatalf("a valid status matching nothing should still exit 0, got %d:\n%s", empty.ExitCode, empty.Combined)
+		}
+		if !strings.Contains(empty.Combined, "no reviews") {
+			t.Fatalf("expected the genuine empty listing to say 'no reviews', got:\n%s", empty.Combined)
+		}
+
+		// The reproduction: the same empty queue, reached by a typo.
+		bogus := erun.Run(t, []string{"review", "list", "--status", "BOGUS"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if bogus.ExitCode == 0 {
+			t.Fatalf("a mistyped --status must not exit 0, got:\n%s", bogus.Combined)
+		}
+		if strings.Contains(bogus.Combined, "no reviews") {
+			t.Fatalf("a mistyped --status must not be reported as an empty listing, got:\n%s", bogus.Combined)
+		}
+		for _, want := range []string{"BOGUS", "OPEN", "CLOSED", "FAILED", "READY", "MERGE", "MERGED"} {
+			if !strings.Contains(bogus.Combined, want) {
+				t.Fatalf("expected the refusal to name %q, got:\n%s", want, bogus.Combined)
+			}
+		}
+		golden.Equal(t, "review/list_mistyped_status_is_refused", normalize.Apply(bogus.Combined))
+
+		// A near-miss typo is the same refusal: the defect was that any value
+		// outside the vocabulary listed as empty, not only an obviously foreign one.
+		nearMiss := erun.Run(t, []string{"review", "list", "--status", "MERGEDD"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if nearMiss.ExitCode == 0 || strings.Contains(nearMiss.Combined, "no reviews") {
+			t.Fatalf("a near-miss --status must be refused too, got exit %d:\n%s", nearMiss.ExitCode, nearMiss.Combined)
+		}
+	})
+
+	// Case-insensitivity is the documented behavior here, so a lower-case
+	// spelling must resolve to the stored one rather than be refused with it:
+	// the rejection is only for values outside the six in any casing.
+	t.Run("list_lowercase_status_resolves_to_the_stored_spelling", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		createReviewJSON(t, setup, "Add widget", "feature/widget", "main")
+
+		result := erun.Run(t, []string{"review", "list", "--status", "open"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("a lower-case --status should resolve, not be refused, got %d:\n%s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Add widget") {
+			t.Fatalf("expected --status open to match the OPEN review, got:\n%s", result.Combined)
+		}
+	})
+
+	// The refusal is a bad-argument error, so it must not depend on the platform
+	// being configured at all: a caller with no alias still learns their filter
+	// was wrong rather than being sent to set up an alias that would not help.
+	t.Run("list_rejects_unknown_status_before_resolving_an_alias", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"review", "list", "--status", "BOGUS"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a non-zero exit for a mistyped --status, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "unsupported review status") {
+			t.Fatalf("expected the refusal, not an alias-resolution failure, got:\n%s", result.Combined)
+		}
 	})
 
 	t.Run("create_dry_run", func(t *testing.T) {
@@ -918,6 +1017,54 @@ func TestReview(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "empty queue") {
 			t.Fatalf("expected the stub's empty-queue error to surface, got:\n%s", result.Combined)
+		}
+	})
+
+	// merge_queue_advance_names_the_occupying_review drives the reported
+	// failure end to end: a review already at MERGE (its gate build still
+	// running) while a second READY review is advanced. The refusal has to
+	// reach the operator naming the review holding the slot — which is the one
+	// they must finish or requeue — rather than as a not-found that sends them
+	// looking for a missing endpoint.
+	t.Run("merge_queue_advance_names_the_occupying_review", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+
+		occupying := createReviewJSON(t, setup, "Land the widget", "feature/widget", "main")
+		for _, args := range [][]string{
+			{"review", "record-build", occupying.ReviewID, "--commit", "abc123def456abc123def456abc123def456abcd", "--version", "1.2.3"},
+			{"review", "queue", "advance", "--target-branch", "main"},
+		} {
+			if result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()}); result.ExitCode != 0 {
+				t.Fatalf("%v exit %d: %s", args, result.ExitCode, result.Combined)
+			}
+		}
+
+		queued := createReviewJSON(t, setup, "Add the next widget", "feature/next-widget", "main")
+		build := erun.Run(t, []string{
+			"review", "record-build", queued.ReviewID,
+			"--commit", "def456abc123def456abc123def456abc123def4", "--version", "1.2.4",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if build.ExitCode != 0 {
+			t.Fatalf("record-build exit %d: %s", build.ExitCode, build.Combined)
+		}
+
+		result := erun.Run(t, []string{"review", "queue", "advance", "--target-branch", "main"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit advancing while %s holds MERGE, got:\n%s", occupying.ReviewID, result.Combined)
+		}
+		if !strings.Contains(result.Combined, occupying.ReviewID) || !strings.Contains(result.Combined, "feature/widget") {
+			t.Fatalf("expected the refusal to name the occupying review %s and its source branch, got:\n%s", occupying.ReviewID, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "requeue") {
+			t.Fatalf("expected the refusal to name the requeue remedy, got:\n%s", result.Combined)
+		}
+		// The client decodes the refusal into its own typed error and renders
+		// that; a raw envelope here would mean the message reached the operator
+		// as an undecoded body instead of a sentence.
+		if strings.Contains(result.Combined, `"code":"MERGE_QUEUE_OCCUPIED"`) {
+			t.Fatalf("expected a decoded refusal, got the raw response body:\n%s", result.Combined)
 		}
 	})
 

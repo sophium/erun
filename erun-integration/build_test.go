@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	eruncommon "github.com/sophium/erun/erun-common"
+
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -1448,11 +1450,13 @@ func TestBuild(t *testing.T) {
 
 	t.Run("dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", func(t *testing.T) {
 		// erun#2081: an environment with no configured runtimedindpod must not
-		// fall back to the host node's real CPU/memory capacity (the bug this
-		// issue is about) -- it must fall back to the same small, fixed
-		// constant the sidecar's own chart default and the Dockerfile's own
-		// ARG default use (4 CPU / 20480Mi), regardless of how large the
-		// machine actually running this test is.
+		// fall back to the host node's real CPU/memory capacity (the bug that
+		// issue is about) -- it must fall back to the same fixed constant the
+		// sidecar's own chart default and the Dockerfile's own ARG default
+		// use, regardless of how large the machine actually running this test
+		// is. The constant's own value is erun-common's rule to decide (it is
+		// sized for a node, not for the host this happens to run on), so it is
+		// read from there rather than restated here.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
@@ -1463,8 +1467,9 @@ func TestBuild(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Combined, "--build-arg DIND_CPU_LIMIT=4 --build-arg DIND_MEMORY_LIMIT_MIB=20480") {
-			t.Errorf("expected the docker build to fall back to the conservative constant, not the host's real capacity:\n%s", result.Combined)
+		want := "--build-arg DIND_CPU_LIMIT=" + eruncommon.DefaultRuntimeDindCPU + " --build-arg DIND_MEMORY_LIMIT_MIB=20480"
+		if !strings.Contains(result.Combined, want) {
+			t.Errorf("expected the docker build to fall back to the conservative constant (%s), not the host's real capacity:\n%s", want, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_dockerfile_dind_args_default_to_conservative_constant_when_unconfigured", normalize.Apply(result.Combined))
 	})

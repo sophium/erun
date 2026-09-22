@@ -161,6 +161,50 @@ GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
 
+# INTEGRATION_TEST_TIMEOUT is the wall-clock budget the integration suite's own
+# `go test` runs under. Left to itself it inherits Go's ten-minute default,
+# which does not move with the machine -- so a slow-but-progressing run is
+# reported as a failure of the tree rather than of the clock.
+#
+# The gate is the case that matters, and it is a fixed deadline against a
+# variable amount of work: the suite measured 4m7s on a quiet 12-CPU pod and
+# crossed the 10m default on a contended one that reported 7487/13091 CPU
+# periods throttled (57%) -- the same command, the same suite, a correct tree.
+# No test was stuck; the goroutine dump at the alarm showed dozens of
+# t.Parallel() scenarios queued in the parallelism barrier and the package
+# still making progress. A gate that fails a correct tree for being slow is
+# worse than a slow gate, because it teaches its operators to re-run it.
+#
+# Scale the budget inversely with the resolved CPU quota, the same shape
+# LINT_TIMEOUT above uses for the identical defect in the sibling linter run.
+# The quota is what GO_TEST_GOMAXPROCS already divides into this suite's
+# `-parallel` share, so at or above GO_TEST_TARGET_COUNT CPUs the suite has its
+# reference share and takes the base, and below it the suite is at its serial
+# floor with proportionally less CPU to finish the same work in.
+#
+# The cap is not decoration: it is what keeps the budget provably below the
+# harness's own per-child backstop, harnessexec.HangNet. That constant is
+# deliberately longer than the package deadline so it can never fail a healthy
+# child; an uncapped inverse scale would climb past it on a small environment
+# and reopen that failure inside the harness. HangNet moves with this cap, and
+# TestIntegrationSuiteTimeoutBudgetIsDerivedAndCappedUnderTheHangNet holds the
+# two together.
+#
+# The quota is a floor on what an environment declares, not a ceiling on how
+# slow it can be -- it cannot see contention from outside its cgroup, which is
+# exactly the measured case -- so the base is generous in absolute terms rather
+# than tight against the quiet measurement. The trade is deliberate: a genuinely
+# wedged run is now diagnosed in up to CAP_MINUTES instead of 10m, and a
+# correct-but-starved one finishes instead of failing.
+INTEGRATION_TEST_TIMEOUT_REFERENCE_CPU := $(GO_TEST_TARGET_COUNT)
+INTEGRATION_TEST_TIMEOUT_BASE_MINUTES := 30
+INTEGRATION_TEST_TIMEOUT_CAP_MINUTES := 45
+INTEGRATION_TEST_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	m=$$(( $(INTEGRATION_TEST_TIMEOUT_BASE_MINUTES) * $(INTEGRATION_TEST_TIMEOUT_REFERENCE_CPU) / cpu )); \
+	[ "$$m" -ge $(INTEGRATION_TEST_TIMEOUT_BASE_MINUTES) ] || m=$(INTEGRATION_TEST_TIMEOUT_BASE_MINUTES); \
+	[ "$$m" -le $(INTEGRATION_TEST_TIMEOUT_CAP_MINUTES) ] || m=$(INTEGRATION_TEST_TIMEOUT_CAP_MINUTES); \
+	echo "$${m}m")
+
 # Run golangci-lint across the gated modules concurrently (bounded by
 # LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
 # none, so it uses the default linters). Every module's combined stdout/stderr
@@ -422,6 +466,38 @@ FRONTEND_VITEST_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota);
 	n=$$(( cpu / $(FRONTEND_VITEST_JOB_COUNT) )); \
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
+
+# ERUN_PLAYWRIGHT_WORKERS is the desktop suite's worker count, and it is
+# resolved here -- beside every other quota-derived gate width -- rather than
+# in the erun-devops Dockerfile, which used to compute it as DIND_CPU_LIMIT/2
+# inline in a RUN line. That made a test-parallelism decision an incidental
+# function of a resource limit: raising the sidecar's CPU cap silently raised
+# the suite's worker count, and a cap of 4 could only ever yield 2 workers no
+# matter what the gate could actually afford. The number is decided on its own
+# terms now, and the CPU cap only reaches it as the environment's CPU quota,
+# the same input every other width here divides.
+#
+# Two cores per worker, which is playwright.config.ts's own measured rule (a
+# worker is a Go backend *and* a headless Chromium, and they compete: 3 workers
+# on 4 cores timed out two specs, 2 passed clean; the 12-core environment runs
+# 6 without a contention failure). One environment's worth of that rule is
+# deliberately not the ceiling here: `make check` runs this suite concurrently
+# with the five Go test targets, golangci-lint, the integration suite and the
+# chart tests, all dividing the same quota, so the suite takes a bounded share
+# of it rather than the whole of it -- 4 workers needs 8 of the environment's
+# cores and leaves the rest of the fan-out its budget. Raise it by hand
+# (`make test-playwright ERUN_PLAYWRIGHT_WORKERS=6`) on an environment that is
+# not running the rest of the gate. Floored at 1 so a small environment still
+# runs, and the same `?=` shape as the widths above so a caller (the
+# contention repro script, or a one-off measurement) can override it.
+PLAYWRIGHT_CPU_PER_WORKER := 2
+PLAYWRIGHT_WORKER_CEILING := 4
+ERUN_PLAYWRIGHT_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	n=$$(( cpu / $(PLAYWRIGHT_CPU_PER_WORKER) )); \
+	[ "$$n" -ge 1 ] || n=1; \
+	[ "$$n" -le $(PLAYWRIGHT_WORKER_CEILING) ] || n=$(PLAYWRIGHT_WORKER_CEILING); \
+	echo $$n)
+export ERUN_PLAYWRIGHT_WORKERS
 
 # eslint/prettier's own --cache, one shared root so the erun-devops image test
 # stage can mount it with a single BuildKit cache mount
@@ -730,7 +806,7 @@ integration-test:
 	./scripts/agent-gate.sh integration-test "make integration-test" -- $(MAKE) integration-test-gate
 
 integration-test-gate:
-	GO_TEST_GOMAXPROCS=$(GO_TEST_GOMAXPROCS) ./erun-integration/scripts/integration-test.sh
+	GO_TEST_GOMAXPROCS=$(GO_TEST_GOMAXPROCS) INTEGRATION_TEST_TIMEOUT=$(INTEGRATION_TEST_TIMEOUT) ./erun-integration/scripts/integration-test.sh
 
 # The front door. Everywhere but an agent pod this is check-gate by another
 # name: scripts/agent-gate.sh execs it directly and exits with exactly its
@@ -743,9 +819,9 @@ integration-test-gate:
 # small, bounded number of calls. See scripts/agent-gate.sh for why this is
 # the fix and not just documentation.
 #
-# check-gate's own ten prerequisites (below) used to run back-to-back: on a
+# check-gate's own twelve prerequisites (below) used to run back-to-back: on a
 # real release, the first seven alone (everything before test-playwright)
-# cost ~14.5 minutes, and test-playwright is the single largest of the ten by
+# cost ~14.5 minutes, and test-playwright is the single largest of the twelve by
 # itself (measured standalone at ~16.4 minutes -- more than every other
 # target combined). `-j` is what actually parallelizes them: check-gate's own
 # prerequisite line has to keep every target listed in plain, literal text
@@ -762,27 +838,36 @@ integration-test-gate:
 # bookkeeping system -- and `make`'s own job server is a true event-driven
 # scheduler (a slot is reused the instant any job frees it), which is a
 # strictly better fit here than replaying scripts/parallel-gate.sh's
-# fixed-batch model would be for ten wildly uneven-duration jobs.
+# fixed-batch model would be for twelve wildly uneven-duration jobs.
 # CHECK_GATE_PARALLELISM deliberately passes no mem-per-job-mib: unlike
 # lint/test-frontend/helm-chart-tests (each a uniform fan-out of near-
-# identical jobs with a real measured per-job cost), these ten targets are
+# identical jobs with a real measured per-job cost), these twelve targets are
 # wildly heterogeneous -- some are flat single processes, three are
 # themselves internally parallel fan-outs, and none has a comparable
 # measured per-job memory figure, so a number here would be fabricated
 # rather than measured (the same "measure, don't fabricate a slope" standard
 # HELM_CHART_TEST_JOB_MEMORY_MIB's own comment holds to). CPU/job-count alone
 # deciding the width matches that target's own precedent for the identical
-# reason. What this width does NOT bound: three of these ten
+# reason. What this width does NOT bound: three of these twelve
 # (lint/test-frontend/helm-chart-tests) each already run their own internal
 # fan-out sized against the full memory ceiling -- CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
 # (see lint's own comment above) is what stops those three from
 # double-booking memory against *each other* when `-j` runs them side by
-# side. It does not bound the other seven (in particular test-erun-ui's
+# side. It does not bound the other nine (in particular test-erun-ui's
 # race-enabled test process) against any of the
-# ten running concurrently -- verify actual peak memory on a real
+# twelve running concurrently -- verify actual peak memory on a real
 # `make check-gate` run before trusting this width in a memory-constrained
 # environment, and narrow it with real numbers if that run shows a problem.
-CHECK_GATE_TARGET_COUNT := 10
+#
+# This is the count of check-gate's own prerequisite targets above, and it is
+# kept equal to it by erun-integration/check_gate_target_count_test.go rather
+# than by hand: it is the term that keeps `-j` from opening more slots than
+# there are jobs to fill them, so a target added without bumping it queues
+# behind a free slot instead of taking one. It went stale exactly that way --
+# two targets joined the list while this still read 10, which resolved -j10
+# for twelve targets because the CPU term (the in-pod DIND_CPU_LIMIT of 12)
+# was the larger one. Derive it, do not re-count it by eye.
+CHECK_GATE_TARGET_COUNT := 12
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
 check:
@@ -809,12 +894,12 @@ check:
 # it to bypass failures; diagnose against comparable state and fix them under
 # root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
-# These eleven run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# These twelve run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
 # rather than scripts/parallel-gate.sh is what drives it here, and where the
 # two real ordering dependencies -- test-playwright and
 # test-erun-ui-windows-build each needing test-frontend -- are declared).
-# Do not drop any of the eleven from this line to move the fan-out elsewhere:
+# Do not drop any of the twelve from this line to move the fan-out elsewhere:
 # erun-integration/build_check_coverage_test.go and
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
@@ -831,7 +916,7 @@ check:
 # 4-CPU build container those are the longest jobs in the gate. Listing the
 # critical-path targets first lets the chain head take a slot in the first
 # dispatch batch. This is a no-op when the width already covers every target
-# (the in-pod gate resolves -j10 and dispatches all eleven within 0.32s), which is
+# (the in-pod gate resolves -j12 and dispatches all twelve within 0.32s), which is
 # why it is a scheduling fix and not on its own a wall-time reduction.
 # Reordering this line is safe (nothing keys on the order); DROPPING a name is
 # not -- see the coverage-test note directly above.

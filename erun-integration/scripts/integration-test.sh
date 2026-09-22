@@ -28,6 +28,12 @@
 #   INTEGRATION_TEST_PARALLELISM   override the `go test -parallel` value
 #                                  outright, skipping the width calculation
 #                                  below.
+#   INTEGRATION_TEST_TIMEOUT       override the `go test -timeout` value
+#                                  outright. The gate supplies it from the
+#                                  Makefile, which derives it from the same
+#                                  CPU quota the width above is derived from;
+#                                  the fallback below is for a run of this
+#                                  script that did not come through the gate.
 #
 # Notes:
 #   - The instrumented binary is rebuilt each run so signatures stay aligned
@@ -65,6 +71,22 @@
 #     script uses it; the `width` fallback is for a standalone run, where no
 #     sibling is competing and the whole quota really is free. Measured on the
 #     6-CPU pod: standalone `width` gives 6, under the gate the share is 1.
+#   - `go test` inherits a ten-minute default timeout when nothing passes
+#     -timeout, and that default is fixed while this suite's duration is not:
+#     it measured 4m7s on a quiet 12-CPU pod and crossed 10m on a contended
+#     one, where the package was still making progress and dozens of
+#     t.Parallel() scenarios sat in the parallelism barrier. The run was
+#     failed by its own clock, not by its tree. So the suite passes an
+#     explicit budget, derived from the same resolved CPU quota as the width
+#     above and capped so it stays below the harness's own per-child backstop
+#     (internal/harnessexec.HangNet, which is deliberately longer than the
+#     package deadline so it can never fail a healthy child). The fallback
+#     here is that cap: a run that did not come through the gate should not be
+#     handed a tighter budget than the gate gives, and it cannot be handed a
+#     looser one without breaking the invariant HangNet depends on.
+#     The resolved budget is printed in the banner below, so a run that is
+#     slow can be told from a run that is stuck without reading the job log's
+#     goroutine dump.
 #   - Unlike the shell-dispatched fleets `width` was built for (N independent
 #     lint or helm-chart-test processes, each with its own roughly-fixed
 #     memory cost), this suite's memory use does not scale linearly with
@@ -215,16 +237,20 @@ test_output="$(mktemp "${TMPDIR:-/tmp}/erun-integration-test-output.XXXXXX")"
 cleanup_dirs+=("$test_output")
 
 test_parallelism="${INTEGRATION_TEST_PARALLELISM:-${GO_TEST_GOMAXPROCS:-$("$here/../scripts/parallel-gate.sh" width 32 "")}}"
+# See the note on the default in the header: this fallback is the same cap the
+# Makefile clamps its derived budget to, so no path through this script can
+# exceed the deadline harnessexec.HangNet is sized against.
+test_timeout="${INTEGRATION_TEST_TIMEOUT:-45m}"
 
 if [[ "$update_golden" -eq 1 ]]; then
     echo ">> reseeding golden files (comparisons disabled, coverage gate skipped)"
-    UPDATE_GOLDEN=1 go test -count=1 -parallel="$test_parallelism" ./...
+    UPDATE_GOLDEN=1 go test -count=1 -parallel="$test_parallelism" -timeout="$test_timeout" ./...
     echo ">> golden files reseeded; inspect the testdata diff, then re-run without --update-golden to gate"
     exit 0
 fi
 
-"$here/../scripts/timed-step.sh" "running integration suite (cover dir: $cover_dir, parallel: $test_parallelism)" \
-    go test -count=1 -parallel="$test_parallelism" ./... 2>&1 | tee "$test_output"
+"$here/../scripts/timed-step.sh" "running integration suite (cover dir: $cover_dir, parallel: $test_parallelism, timeout: $test_timeout)" \
+    go test -count=1 -parallel="$test_parallelism" -timeout="$test_timeout" ./... 2>&1 | tee "$test_output"
 
 # A coverage meta-data emit failure (concurrent invocations racing a
 # write-then-rename into a shared GOCOVERDIR) prints this line to the losing

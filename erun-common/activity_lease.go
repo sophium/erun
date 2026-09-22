@@ -212,7 +212,7 @@ func takeSharedEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParam
 	// Only a lease still held is renewed. Reusing an id whose previous holder
 	// is gone starts a fresh claim, or the new lease would inherit a start far
 	// enough in the past to be dead on arrival.
-	if existing, err := loadEnvironmentActivityLease(path); err == nil && environmentActivityLeaseHeld(existing, now, processAlive) {
+	if existing, err := loadEnvironmentActivityLease(path); err == nil && environmentActivityLeaseHeld(existing, now, ProcessAlive) {
 		lease.StartedAt = existing.StartedAt
 		lease.RenewedAt = now
 	}
@@ -359,7 +359,7 @@ const (
 func decideExclusiveEnvironmentActivityLeaseClaim(path, id string, now time.Time) (exclusiveEnvironmentActivityLeaseClaim, EnvironmentActivityLease, bool) {
 	existing, err := loadEnvironmentActivityLease(path)
 	staleRecordPresent := err == nil
-	if !staleRecordPresent || !environmentActivityLeaseHeld(existing, now, processAlive) {
+	if !staleRecordPresent || !environmentActivityLeaseHeld(existing, now, ProcessAlive) {
 		return exclusiveClaimFree, EnvironmentActivityLease{}, staleRecordPresent
 	}
 	if existing.ID == id {
@@ -573,7 +573,7 @@ func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id str
 // LoadEnvironmentActivityLeases returns the leases still holding the
 // environment, reclaiming expired and orphaned ones as it reads.
 func LoadEnvironmentActivityLeases(tenant, environment string, now time.Time) ([]EnvironmentActivityLease, error) {
-	return loadEnvironmentActivityLeases(tenant, environment, now, processAlive)
+	return loadEnvironmentActivityLeases(tenant, environment, now, ProcessAlive)
 }
 
 func loadEnvironmentActivityLeases(tenant, environment string, now time.Time, alive func(int) bool) ([]EnvironmentActivityLease, error) {
@@ -821,13 +821,30 @@ func leaseIdleMarker(leases []EnvironmentActivityLease, now time.Time) Environme
 	return marker
 }
 
-// processAlive reports whether a lease's recorded holder still exists. Signal 0
-// is the portable "does this pid exist" probe on unix — EPERM means the process
-// is there but owned by someone else, which still counts as alive. Windows has
-// no signals, so os.FindProcess failing is the only answer available there.
-func processAlive(pid int) bool {
+// ProcessAlive reports whether pid names a process that is still running: a
+// lease's recorded holder, a job's recorded supervisor, or anything else this
+// codebase asks that question about.
+//
+// Signal 0 is the portable "does this pid exist" probe on unix — EPERM means
+// the process is there but owned by someone else, which still counts as alive.
+// It is not the whole answer, though: signal 0 also succeeds for a zombie, a
+// process that has already exited and is only waiting for a parent to reap it.
+// A caller that reads existence as "still working" has no way to tell a
+// running holder from a dead one, which is how a finished job's supervisor
+// reads as alive for as long as something holds its corpse — a lease stays
+// claimed, an environment stays reading as busy, a cleanup wait expires
+// against a process that is already gone. So where the platform can say what
+// state a pid is in, that answer is the one returned, and the signal probe is
+// only the fallback for the platforms that cannot.
+//
+// Windows has no signals, so os.FindProcess failing is the only answer
+// available there.
+func ProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
+	}
+	if zombie, ok := platformProcessZombie(pid); ok {
+		return !zombie
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {

@@ -133,7 +133,8 @@
       "cpu": "12",
       "memory": "23552Mi"
     }
-  }
+  },
+  "drift": []
 }
 audit: erun observe --output json
 observe: when a certificate is not Ready, its CertificateRequest -> Order -> Challenge chain is read for the failure reason

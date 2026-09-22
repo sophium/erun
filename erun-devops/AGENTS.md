@@ -124,10 +124,32 @@ composition and release invariants belong to root/shared logic, not chart policy
   buildkitd configuration is not read by dockerd's embedded builder; daemon-wide
   cgroup-parent changes broke exec/readiness. Per-leaf caps do not prove aggregate
   isolation. Keep this memory-enforcement gap explicit.
+- BuildKit attributes its cache records and cache mounts to the daemon's own
+  engine id (moby's builder passes `ID: opt.EngineID`), which dockerd persists
+  at `<data-root>/engine-id` on the docker-state volume and reuses on every
+  later start — so a rolled pod keeps serving the cache that volume already
+  holds, `<engine-id>::<ref>` keys and all. Do not anchor a worker id in
+  `dind-entrypoint.sh`: `<buildkit>/workerid` is read only by standalone
+  buildkitd's runc/containerd workers, so writing one changes no key.
+  `dind-entrypoint.sh` carries the measured detail beside the wrapper.
 - Thread resolved environment CPU/memory limits through
   `applyDindResourceBuildArgs` into the test-stage parallel-gate overrides;
   unbounded cgroup readings must not size fan-out for the entire host.
   Report killed/resource-exhausted builds as resource failures, not lint verdicts.
+- Size the dind CPU cap from the node, never as a flat safe-looking constant:
+  a CPU limit is a ceiling, not a reservation, so a build capped well under the
+  node is throttled while the node sits idle, which is what a CPU-pressure
+  figure near 100% beside a load average far below the core count means.
+  `RuntimeDindCPULimit` (erun-common/runtime_resources.go) owns the rule — the
+  node's CPUs divided across the build-capable environments expected to be
+  building on it at once, floored at `MinimumRuntimeDindCPU` — and
+  `DefaultRuntimeDindCPU`, the chart's `runtime.dind.resources.limits.cpu`
+  fallback and the Dockerfile's `DIND_CPU_LIMIT` ARG default are three copies
+  of one number that move together (`runtime_dind_default_mirrors_test.go`).
+- Decide the desktop suite's Playwright worker count in the Makefile beside the
+  other quota-derived gate widths, never in the Dockerfile as arithmetic on
+  `DIND_CPU_LIMIT`: the two are independent decisions, and a value set in the
+  build's RUN step silently wins over the Makefile's.
 - CPU enforcement uses a distinct, tested mechanism: `dind-entrypoint.sh` mirrors
   its live `cpu.max` into a per-pod capped parent and in-pod builds pass that parent
   per invocation. Do not apply this to host builds or change daemon placement.
@@ -226,6 +248,15 @@ composition and release invariants belong to root/shared logic, not chart policy
   cache generally: BuildKit's per-instruction layer cache inside a real
   `docker build` is untouched. `build_gate_test_stage_test.go` locks the detection
   and the refusal.
+- The test stage is also the definition other in-container runs of the Playwright
+  suite mirror, so its environment carries `ERUN_PLAYWRIGHT_ARTIFACTS_DIR`: the
+  suite's one artifact root (Playwright's output dir, the HTML report, every frame a
+  spec captures) pointed at a container-local path. A run that mirrors the stage by
+  bind-mounting a worktree over `/src` as root — `scripts/repro-gate-contention.sh`
+  does — otherwise leaves artifacts owned by uid 0 in a tree the environment user
+  owns, where `rm -rf` cannot remove them and every later run in that environment
+  fails with a bare `EACCES` inside whichever spec writes first, for every branch.
+  Change the value here and the mirror changes with it.
 - Previews show concrete commands for the operations selected, without adding
   build/push actions to a pure deploy.
 - **A test needing a real container runtime reaches it from a `RUN` step via the

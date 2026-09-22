@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -21,13 +20,8 @@ import (
 
 	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-integration/internal/env"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
-
-func osExecCommand(name string, args []string, dir string) *osexec.Cmd {
-	cmd := osexec.Command(name, args...)
-	cmd.Dir = dir
-	return cmd
-}
 
 // SeedTenantEnv writes the minimum erun config tree so commands resolve a
 // tenant/environment without prompting.
@@ -1417,7 +1411,7 @@ func stubRunnerExe(t testing.TB) string {
 			return
 		}
 		out := filepath.Join(outDir, "erun-stub-runner.exe")
-		cmd := osexec.Command("go", "build", "-o", out, "./internal/fixture/stubrunner")
+		cmd := harnessexec.Command("go", "build", "-o", out, "./internal/fixture/stubrunner")
 		cmd.Dir = moduleRoot
 		if output, err := cmd.CombinedOutput(); err != nil {
 			stubRunnerErr = fmt.Errorf("build stub runner: %v\n%s", err, output)
@@ -1775,7 +1769,7 @@ func PodExecBinary(t testing.TB) string {
 			podExecBuildErr = fmt.Errorf("resolve fixture package path")
 			return
 		}
-		cmd := osexec.Command("go", "build", "-o", out, ".")
+		cmd := harnessexec.Command("go", "build", "-o", out, ".")
 		cmd.Dir = filepath.Join(filepath.Dir(thisFile), "podexec")
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if combined, err := cmd.CombinedOutput(); err != nil {
@@ -1827,8 +1821,44 @@ func SeedGitRepo(t testing.TB, dir string) {
 	}
 }
 
+// SeedGitRepoBehindItsRemote makes dir a git checkout that is one commit
+// behind the bare origin it tracks -- the state a machine that has not pulled
+// since the last release is in, and the state a reported pin ran on: it read
+// such a checkout and printed a plan that was internally consistent, with every
+// site reading the old version and nothing anywhere saying the base was old.
+func SeedGitRepoBehindItsRemote(t testing.TB, dir string) {
+	t.Helper()
+	SeedGitRepo(t, dir)
+	origin := dir + "-origin.git"
+	if err := exec("git", []string{"init", "-q", "--bare", "-b", "main", origin}, ""); err != nil {
+		t.Fatalf("git init bare origin: %v", err)
+	}
+	for _, args := range [][]string{
+		{"remote", "add", "origin", origin},
+		{"push", "-q", "-u", "origin", "main"},
+	} {
+		if err := exec("git", args, dir); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	// The advance lands on the remote only: the checkout is rewound to what it
+	// held before it, so the remote carries a commit this tree does not.
+	mustWrite(t, filepath.Join(dir, "README.md"), "# test\n\nlanded after this checkout\n")
+	for _, args := range [][]string{
+		{"add", "."},
+		{"commit", "-q", "-m", "advance the remote"},
+		{"push", "-q", "origin", "main"},
+		{"reset", "-q", "--hard", "HEAD~1"},
+	} {
+		if err := exec("git", args, dir); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+}
+
 func exec(name string, args []string, dir string) error {
-	cmd := osExecCommand(name, args, dir)
+	cmd := harnessexec.Command(name, args...)
+	cmd.Dir = dir
 	return cmd.Run()
 }
 
@@ -1864,7 +1894,7 @@ func PortSimBinary(t testing.TB) string {
 			return
 		}
 		pkgDir := filepath.Join(filepath.Dir(thisFile), "portsim")
-		cmd := osexec.Command("go", "build", "-o", out, ".")
+		cmd := harnessexec.Command("go", "build", "-o", out, ".")
 		cmd.Dir = pkgDir
 		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 		if combined, err := cmd.CombinedOutput(); err != nil {
@@ -1902,7 +1932,7 @@ func StartServingPortHolder(t testing.TB, port int) int {
 
 func startPortHolder(t testing.TB, port int, extra ...string) int {
 	t.Helper()
-	cmd := osexec.Command(PortSimBinary(t), append([]string{"--port", strconv.Itoa(port)}, extra...)...)
+	cmd := harnessexec.Command(PortSimBinary(t), append([]string{"--port", strconv.Itoa(port)}, extra...)...)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start port holder on %d: %v", port, err)
 	}
@@ -1947,7 +1977,7 @@ func StalePortHolderStopped(port int, timeout time.Duration) bool {
 // bound-but-dead shape.
 func StartUnboundPortForwardProcess(t testing.TB) int {
 	t.Helper()
-	cmd := osexec.Command(PortSimBinary(t), "--no-listen")
+	cmd := harnessexec.Command(PortSimBinary(t), "--no-listen")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start unbound port-forward process: %v", err)
 	}
@@ -2299,4 +2329,38 @@ func sanitizeFilename(s string) string {
 		return "_"
 	}
 	return b.String()
+}
+
+// SeedTenantEnvWithSignedInERunPlatformAlias seeds a tenant/environment exactly
+// as SeedTenantEnv does, plus the invoking host's own signed-in erun platform
+// alias: the root config naming it (with the stored-session ref the alias
+// carries) and the refresh token that ref resolves to. That pair is what makes
+// a host a credential source -- an alias with no stored session is deliberately
+// "nothing to give" -- so it is the shape any scenario about provisioning a
+// platform alias into an environment has to start from.
+//
+// The store itself writes the token, so the basename it lands under is the one
+// production will later look for rather than a second copy of that hash.
+func SeedTenantEnvWithSignedInERunPlatformAlias(t testing.TB, setup env.Setup, tenant, environment, alias string) {
+	t.Helper()
+	SeedTenantEnv(t, setup, tenant, environment)
+	root := filepath.Join(setup.ConfigHome, "erun")
+	// The stored-session reference travels with the alias, exactly as it does in
+	// a real signed-in config: the alias is inert without it.
+	ref := "erun/refresh/" + alias
+	mustWrite(t, filepath.Join(root, "config.yaml"),
+		"defaulttenant: "+tenant+"\n"+
+			"cloudproviders:\n"+
+			"  - alias: "+alias+"\n"+
+			"    provider: erun\n"+
+			"    oidcissuerurl: https://api.example.test\n"+
+			"    erun:\n"+
+			"      apiurl: https://api.example.test\n"+
+			"      clientid: cli-test-client\n"+
+			"      refreshtokenref: "+ref+"\n",
+	)
+	store := eruncommon.NewFileCloudSecretStore(filepath.Join(root, "cloud-secrets"))
+	if err := store.SaveCloudSecret(ref, "refresh-token-value"); err != nil {
+		t.Fatalf("save host refresh token: %v", err)
+	}
 }

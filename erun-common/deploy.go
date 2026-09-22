@@ -198,9 +198,16 @@ type HelmDeploySpec struct {
 	// provisioned one for is byte-for-byte unchanged. Mirrors
 	// EnvConfig.RegistryCredentialSecretName; only the runtime chart consumes it.
 	RegistryCredentialSecretName string
-	ResetDatabase                bool
-	Idle                         EnvironmentIdleConfig
-	Claude                       EnvironmentClaudeConfig
+	// PlatformAliasSecretName names the Secret `erun init` minted from the
+	// invoking host's own signed-in erun platform cloud provider alias, threaded
+	// to the runtime chart as platformAliasSecretName so it can mount it where
+	// the pod's `erun` reads its cloud config. Empty renders nothing, so an env
+	// init found no host alias for is byte-for-byte unchanged. Mirrors
+	// EnvConfig.PlatformAliasSecretName; only the runtime chart consumes it.
+	PlatformAliasSecretName string
+	ResetDatabase           bool
+	Idle                    EnvironmentIdleConfig
+	Claude                  EnvironmentClaudeConfig
 	// OpenRouter is the erun-level gateway catalog stamped from root config (see
 	// openrouter.go). It is deliberately not read from EnvConfig: the catalog is
 	// one list the operator maintains and every environment selects from it. Nil
@@ -988,7 +995,8 @@ func runPublishedValuesPull(ctx Context, pull *publishedValuesPull, target strin
 var ensureDeployNamespace NamespaceEnsurerFunc = EnsureKubernetesNamespace
 
 // applyPreRolloutResources creates the namespace and applies everything that
-// must exist in it before the chart rollout. Grouped rather than inline so the
+// must exist in it before the chart rollout, including the credentials the
+// deployment plan resolved on this host. Grouped rather than inline so the
 // ordering is stated in one place as this list grows.
 //
 // The namespace is ensured here and not only in the chart deployer, because the
@@ -997,25 +1005,31 @@ var ensureDeployNamespace NamespaceEnsurerFunc = EnsureKubernetesNamespace
 // with "namespaces not found". An environment that already exists hid this,
 // which is why it only ever broke provisioning. Ensuring is idempotent, so the
 // deployer ensuring it again afterwards costs nothing.
-func applyPreRolloutResources(ctx Context, deployInput HelmDeploySpec) error {
+func applyPreRolloutResources(ctx Context, deployInput *HelmDeploySpec) error {
 	if !ctx.DryRun {
 		if err := ensureDeployNamespace(deployInput.KubernetesContext, deployInput.Namespace); err != nil {
 			return err
 		}
 	}
-	if err := applyCloudflareCredentialsSecret(ctx, deployInput); err != nil {
+	if err := applyCloudflareCredentialsSecret(ctx, *deployInput); err != nil {
 		return err
 	}
-	if err := applyGatewayCredentialsSecret(ctx, deployInput); err != nil {
+	if err := applyGatewayCredentialsSecret(ctx, *deployInput); err != nil {
 		return err
 	}
-	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
+	if err := applyMCPAuthSecret(ctx, *deployInput); err != nil {
 		return err
 	}
-	if err := refreshImagePullSecrets(ctx, deployInput); err != nil {
+	if err := refreshImagePullSecrets(ctx, *deployInput); err != nil {
 		return err
 	}
-	return recordMCPAuthKeyOnEnv(ctx, deployInput)
+	// Takes the spec rather than a copy: the chart mounts the platform-alias
+	// volume only when the upgrade names the Secret, so a retrofit has to reach
+	// the command built below from this same spec.
+	if err := reconcilePlatformAliasSecret(ctx, deployInput); err != nil {
+		return err
+	}
+	return recordMCPAuthKeyOnEnv(ctx, *deployInput)
 }
 
 func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
@@ -1032,7 +1046,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
 	TraceApplyKubernetesResourceQuota(ctx, deployInput.KubernetesContext, deployInput.Namespace, deployInput.NamespaceQuota)
 	announceWorktreeVolumeChange(ctx, deployInput)
-	if err := applyPreRolloutResources(ctx, deployInput); err != nil {
+	if err := applyPreRolloutResources(ctx, &deployInput); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	depBuild, err := chartDependencyBuildPlan(ctx, deployInput)
@@ -1683,6 +1697,7 @@ func resolveInstallExistingVersionDeploySpec(ctx Context, store DeployStore, tar
 	// nothing, since newHelmDeploySpecWithValues never sets it.
 	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
 		deployInput.RegistryCredentialSecretName = strings.TrimSpace(target.EnvConfig.RegistryCredentialSecretName)
+		deployInput.PlatformAliasSecretName = strings.TrimSpace(target.EnvConfig.PlatformAliasSecretName)
 	}
 	// The version alone governs the reset decision, same as a fresh build's
 	// deploy below: a released, non-snapshot version must never wipe.
@@ -2687,6 +2702,7 @@ func (d HelmDeploySpec) command() commandSpec {
 	}
 	args = append(args, helmImagePullSecretSetArgs(d.ImagePullSecrets)...)
 	args = append(args, helmRegistryCredentialSecretSetArgs(d.RegistryCredentialSecretName)...)
+	args = append(args, helmPlatformAliasSecretSetArgs(d.PlatformAliasSecretName)...)
 	args = append(args, helmPlatformSetArgs(d.Platform)...)
 	args = append(args,
 		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
@@ -3029,6 +3045,16 @@ func helmRegistryCredentialSecretSetArgs(name string) []string {
 		return nil
 	}
 	return []string{"--set-string", "registryCredentialSecretName=" + name}
+}
+
+// helmPlatformAliasSecretSetArgs renders platformAliasSecretName as a single
+// helm --set key, empty input yielding no args so an env init found no host
+// alias for is byte-for-byte unchanged.
+func helmPlatformAliasSecretSetArgs(name string) []string {
+	if name = strings.TrimSpace(name); name == "" {
+		return nil
+	}
+	return []string{"--set-string", "platformAliasSecretName=" + name}
 }
 
 func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) []string {

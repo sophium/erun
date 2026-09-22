@@ -1,6 +1,6 @@
 ---
 name: erun-merge
-description: Take the current branch from "the work is done" to a review sitting at READY on the erun platform — resolve or accept a target branch, merge it in, commit and push, open or reuse the review, build and record the result. Stops at READY/FAILED and never advances the merge queue. Needs a machine with a configured erun platform cloud alias; an agent environment has none and cannot obtain one, so there it stops after the push and hands the review rungs to a credentialed host. Use when the user says "merge this branch", "land this change", "merge onto main", "advance the merge queue for this branch", "run erun-merge", or any similar request to take a finished change to review.
+description: Take the current branch from "the work is done" to a review sitting at READY on the erun platform — resolve or accept a target branch, merge it in, commit and push, open or reuse the review, build and record the result. Stops at READY/FAILED and never advances the merge queue. Needs a machine with a configured erun platform cloud alias; an agent environment can hold one only if `erun init` provisioned it from a signed-in host, so where it has none it stops after the push and hands the review rungs to a credentialed host. Use when the user says "merge this branch", "land this change", "merge onto main", "advance the merge queue for this branch", "run erun-merge", or any similar request to take a finished change to review.
 ---
 
 # Land the current branch: /erun-merge \<targetBranch\>
@@ -60,9 +60,12 @@ Split the run by what each side can actually do:
 
   * THIS environment can build. `erun build` needs no platform alias: with
     none configured it simply skips reporting its outcome to the platform.
-  * A CREDENTIALED HOST makes every `erun review` call — the already-merged
-    check in rung 3, `erun review create` in rung 4, `erun review
-    record-build` in rung 5, and everything `erun-merge-queue-drive` runs.
+  * Every `erun review` call — the already-merged check in rung 3,
+    `erun review create` in rung 4, `erun review record-build` in rung 5, and
+    everything `erun-merge-queue-drive` runs — goes to whichever side holds a
+    usable alias. That is a CREDENTIALED HOST when this environment has none;
+    an environment `erun init` provisioned from a signed-in host has one, and
+    makes those calls itself.
 
 So stop here and hand the branch over. Commit and push it if it is not pushed
 yet — that needs only git, and this rung stopped before the merge rungs, so do

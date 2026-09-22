@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -50,8 +51,22 @@ func componentChartRegistryAndRoot(builds []DockerBuildSpec) (registry, projectR
 	return registry, projectRoot
 }
 
+// publishDockerTarget pins a push target to every platform erun supports,
+// before any build spec resolves. A push is the step that puts a version's
+// artifacts in the registry, so the .erun/config.yaml docker.platforms pin --
+// which exists so a machine confirmed to be one architecture stops paying for
+// emulated cross-builds on every local build -- must not narrow what is
+// published. It is the same override ResolveDockerBuildTarget applies to a
+// release build; without it here, the pin reaches the registry and a version
+// ships a manifest the fleet's other architecture cannot pull.
+func publishDockerTarget(target DockerCommandTarget) DockerCommandTarget {
+	target.Platforms = slices.Clone(multiPlatformDockerBuilds)
+	return target
+}
+
 func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+	target = publishDockerTarget(target)
 
 	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
 	if err != nil {
@@ -88,6 +103,7 @@ func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot 
 
 func ResolveDockerPushSpec(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushSpec, *DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+	target = publishDockerTarget(target)
 
 	buildContext, err := resolveBuildContext()
 	if err != nil {

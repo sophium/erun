@@ -24,6 +24,7 @@ stage: release
 [main <SHORTSHA>] [skip ci] release <VERSION>
  2 files changed, 4 insertions(+), 4 deletions(-)
 release version: <VERSION> (source control only; no artifacts were built or published)
+next: `erun build --release` publishes this version's images and charts before tagging, or `erun push --version <VERSION>` publishes them for the tag already pushed
 stage: post-release-version-bump
 [main <SHORTSHA>] [skip ci] prepare <VERSION>
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -46,8 +47,10 @@ To <TMP>
 error: failed to push some refs to '<TMP>'
 exit status 1
 release: the push was rejected for develop (non-fast-forward), which is not origin/main having moved during the release, so nothing is rebased or retried.
-Everything else this release publishes is already public: its images and charts verified on the registry and tag <VERSION> is on the remote. What did not land is develop (non-fast-forward).
+This release marks source control only: it built and published no images or charts, so version <VERSION> is on no registry. What landed is source control; what did not land is develop (non-fast-forward).
 The GitHub Release object for <VERSION> is created after this push, so it does not exist yet either.
 Recover by hand — do not delete tag <VERSION> and do not reset main, both are already public:
   git -C <TMP> fetch origin
-  reconcile develop with its remote, push it, then create the GitHub Release for the existing tag <VERSION>
+  reconcile develop with its remote and push it
+  publish the version's images and charts, which this release never did: erun push --version <VERSION>
+  then create the GitHub Release for the existing tag <VERSION>

@@ -35,6 +35,7 @@ cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 cd <TMP> && git tag -a <VERSION> -m 'Release candidate <VERSION>'
 release version: <VERSION> (source control only; no artifacts were built or published)
+next: `erun build --release` publishes this version's images and charts before tagging, or `erun push --version <VERSION>` publishes them for the tag already pushed
 stage: push
 release: a push rejected by a branch that moved during the release is rebased onto origin/develop and retried (up to 2 attempts)
 cd <TMP> && git push --follow-tags origin develop

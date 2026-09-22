@@ -536,13 +536,13 @@ func LoadEnvironmentJob(tenant, environment, id string, now time.Time) (Environm
 		}
 		return EnvironmentJob{}, err
 	}
-	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), processAlive, currentJobHostname()), nil
+	return reconcileEnvironmentJob(dir, job, normalizeJobNow(now), ProcessAlive, currentJobHostname()), nil
 }
 
 // LoadEnvironmentJobs returns every retained job, newest first, pruning records
 // that aged out as it reads.
 func LoadEnvironmentJobs(tenant, environment string, now time.Time) ([]EnvironmentJob, error) {
-	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), processAlive, currentJobHostname())
+	return loadEnvironmentJobs(tenant, environment, normalizeJobNow(now), ProcessAlive, currentJobHostname())
 }
 
 func loadEnvironmentJobs(tenant, environment string, now time.Time, alive func(int) bool, hostname string) ([]EnvironmentJob, error) {
@@ -748,7 +748,7 @@ func environmentJobChildren(dir, parentID string, now time.Time) []EnvironmentJo
 		if err != nil || job.StartedByJobID != parentID {
 			continue
 		}
-		children = append(children, reconcileEnvironmentJob(dir, job, now, processAlive, hostname))
+		children = append(children, reconcileEnvironmentJob(dir, job, now, ProcessAlive, hostname))
 	}
 	sort.Slice(children, func(i, j int) bool { return children[i].ID < children[j].ID })
 	return children

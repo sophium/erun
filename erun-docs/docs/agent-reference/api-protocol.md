@@ -396,7 +396,7 @@ A newly-registered environment is `registered` — the row exists but nothing is
 
 **Per-tenant environment-count quota.** After validating the body and before persisting, the endpoint enforces the tenant's environment-count cap: it compares how many environments the tenant already has against the cap and rejects the registration with HTTP `409` once the tenant is at or over it. The cap defaults to **10** and is overridden per tenant by a `tenant_quotas.max_environments` row. That override row is set by the operations-only [`PUT /v1/tenants/{tenant_id}/quota`](#put-v1tenantstenant_idquota) endpoint (below). Both the count and the cap are scoped explicitly to the tenant the write targets — the caller's own by default, or the `tenantId` named above for an operations caller — read off the security context rather than left to row-level security alone — the same operations-caller distinction the note under [First-identity bootstrap](#sign-in-oidc) above explains. **Environments mid-teardown do not count.** The comparison excludes rows at `deleting` and `deletion-blocked`: the delete that would free the slot is the same call that is stuck, so counting a wedged teardown would lock a tenant out of its own allowance. The aggregate resource budget below counts differently — it uses the tenant's runtime-environment count as-is, mid-teardown rows included.
 
-**Per-environment resource-cap floor.** For a `runtime` environment, the endpoint also checks the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the `erun-devops` chart's own minimum requirement — cpu `8000m`, memory `17832Mi`, storage `72Gi`, the pod's `erun-devops` and `erun-dind` containers summed together, since a Kubernetes `ResourceQuota` counts every container in the pod — and rejects with `409` if the tenant's cap is configured below it, naming the shortfall. This catches a knowable failure before it happens: a namespace `ResourceQuota` sized under the stock runtime pod's own footprint would otherwise let the create call succeed and only fail later, when Kubernetes refuses to admit the pod. [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) re-checks the same floor, since an operator can lower a tenant's quota after the environment already exists. See [Quotas](/concepts/hosted-platform#quotas) for how the caps are enforced and derived.
+**Per-environment resource-cap floor.** For a `runtime` environment, the endpoint also checks the tenant's `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` caps against the `erun-devops` chart's own minimum requirement — cpu `16000m`, memory `36864Mi`, storage `72Gi`, the pod's `erun-devops` and `erun-dind` containers summed together, since a Kubernetes `ResourceQuota` counts every container in the pod — and rejects with `409` if the tenant's cap is configured below it, naming the shortfall. This catches a knowable failure before it happens: a namespace `ResourceQuota` sized under the stock runtime pod's own footprint would otherwise let the create call succeed and only fail later, when Kubernetes refuses to admit the pod. [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) re-checks the same floor, since an operator can lower a tenant's quota after the environment already exists. See [Quotas](/concepts/hosted-platform#quotas) for how the caps are enforced and derived.
 
 **Aggregate resource budget (#1113).** For a `runtime` environment, the endpoint also projects the tenant's total CPU/memory/storage if this environment is admitted — `(existing runtime environment count + 1) × the per-environment cap` — against `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb`, and rejects with `409` naming which resource and by how much the projection would exceed the budget. This is the separate tenant-wide ceiling the per-environment floor above does not cover: raising `maxEnvironments` alone lets a tenant multiply its total footprint with nothing capping the sum. [`POST /v1/environments/{id}/deploy`](#deploy-endpoint) re-checks it too, using the count as-is (a redeploy does not add a new environment). See [Quotas](/concepts/hosted-platform#quotas) for the full budget model.
 
@@ -884,8 +884,8 @@ Provide **either** a `context` block (provision a new cluster — its bootstrap 
   "plan": [
     "provision: tenant acme (resolved from token)",
     "quota: tenant has 2 of 10 environments — within quota",
-    "quota: namespace capped at 8000m CPU / 17832Mi memory / 72Gi storage",
-    "quota: 2 runtime environment(s) at that cap project to 16000m CPU / 35664Mi memory / 144Gi storage against a tenant budget of 80000m / 178320Mi / 720Gi — within budget",
+    "quota: namespace capped at 16000m CPU / 36864Mi memory / 72Gi storage",
+    "quota: 2 runtime environment(s) at that cap project to 32000m CPU / 73728Mi memory / 144Gi storage against a tenant budget of 160000m / 368640Mi / 720Gi — within budget",
     "context: deploys into this platform's own cluster (v1 single-cluster placement)",
     "namespace: would create acme-prod",
     "register: would persist environment prod (runtime) in tenant acme referencing context ",
@@ -1333,11 +1333,11 @@ Sets a tenant's full quota row — the environment-count cap the [`POST /v1/envi
 // PUT /v1/tenants/019a7fa5-…/quota body
 {
   "maxEnvironments": 50,          // required — the env-count cap (>= 0); 0 blocks all new environments
-  "maxCpuMillicores": 8000,       // required — per-environment namespace CPU ceiling in millicores (> 0)
-  "maxMemoryMb": 17832,           // required — per-environment namespace memory ceiling in MiB (> 0)
+  "maxCpuMillicores": 16000,      // required — per-environment namespace CPU ceiling in millicores (> 0)
+  "maxMemoryMb": 36864,           // required — per-environment namespace memory ceiling in MiB (> 0)
   "maxStorageGb": 72,             // required — per-environment namespace storage ceiling in GiB (> 0)
-  "maxTotalCpuMillicores": 80000, // required — aggregate tenant-wide CPU budget in millicores (> 0)
-  "maxTotalMemoryMb": 178320,     // required — aggregate tenant-wide memory budget in MiB (> 0)
+  "maxTotalCpuMillicores": 160000, // required — aggregate tenant-wide CPU budget in millicores (> 0)
+  "maxTotalMemoryMb": 368640,      // required — aggregate tenant-wide memory budget in MiB (> 0)
   "maxTotalStorageGb": 720        // required — aggregate tenant-wide storage budget in GiB (> 0)
 }
 
@@ -1345,18 +1345,18 @@ Sets a tenant's full quota row — the environment-count cap the [`POST /v1/envi
 {
   "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
   "maxEnvironments": 50,
-  "maxCpuMillicores": 8000,
-  "maxMemoryMb": 17832,
+  "maxCpuMillicores": 16000,
+  "maxMemoryMb": 36864,
   "maxStorageGb": 72,
-  "maxTotalCpuMillicores": 80000,
-  "maxTotalMemoryMb": 178320,
+  "maxTotalCpuMillicores": 160000,
+  "maxTotalMemoryMb": 368640,
   "maxTotalStorageGb": 720,
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:05:00Z"
 }
 ```
 
-**What the resource caps mean.** `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` are a **per-environment namespace ceiling**, not an aggregate tenant budget: every `runtime` environment this tenant provisions gets its own Kubernetes `ResourceQuota` + `LimitRange` capped at these same values (see [Quotas](/concepts/hosted-platform#quotas)), so a tenant with ten environments can use up to this cap in *each* of the ten namespaces, not this cap split across all ten. `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` are the separate **aggregate tenant-wide budget**: since every environment gets the identical per-environment cap, admission projects `(existing runtime environment count + 1) × the per-environment cap` against this budget and refuses a create that would exceed it (a redeploy uses the count as-is, since it does not add one). Absent a `tenant_quotas` row, a tenant gets the default cap: `maxEnvironments: 10`, `maxCpuMillicores: 8000`, `maxMemoryMb: 36864`, `maxStorageGb: 72` — sized to fit the `erun-devops` chart's own default runtime pod summed across **both** its containers (`erun-devops` cpu limit `4` + memory limit `16384Mi`, plus the `erun-dind` sidecar at cpu limit `4` + memory limit `20Gi` — the sidecar's own default is larger, since every image build's `make check` gate runs there) plus its three default PVCs (`2Gi + 50Gi + 20Gi = 72Gi`) — and `maxTotalCpuMillicores: 80000`, `maxTotalMemoryMb: 368640`, `maxTotalStorageGb: 720` (`maxEnvironments` × the per-environment defaults, so the default budget accommodates the default environment-count cap at the default per-environment size). Setting either resource cap below this floor is accepted here (an operator may deliberately want a tenant that cannot provision runtime environments yet), but the next [`POST /v1/environments`](#post-v1environments) or [`POST .../deploy`](#deploy-endpoint) for that tenant then refuses with `409` rather than letting the create/deploy proceed toward a pod Kubernetes will never admit.
+**What the resource caps mean.** `maxCpuMillicores`/`maxMemoryMb`/`maxStorageGb` are a **per-environment namespace ceiling**, not an aggregate tenant budget: every `runtime` environment this tenant provisions gets its own Kubernetes `ResourceQuota` + `LimitRange` capped at these same values (see [Quotas](/concepts/hosted-platform#quotas)), so a tenant with ten environments can use up to this cap in *each* of the ten namespaces, not this cap split across all ten. `maxTotalCpuMillicores`/`maxTotalMemoryMb`/`maxTotalStorageGb` are the separate **aggregate tenant-wide budget**: since every environment gets the identical per-environment cap, admission projects `(existing runtime environment count + 1) × the per-environment cap` against this budget and refuses a create that would exceed it (a redeploy uses the count as-is, since it does not add one). Absent a `tenant_quotas` row, a tenant gets the default cap: `maxEnvironments: 10`, `maxCpuMillicores: 16000`, `maxMemoryMb: 36864`, `maxStorageGb: 72` — sized to fit the `erun-devops` chart's own default runtime pod summed across **both** its containers (`erun-devops` cpu limit `4` + memory limit `16384Mi`, plus the `erun-dind` sidecar at cpu limit `12` + memory limit `20Gi` — the sidecar's own default is larger, since every image build's `make check` gate runs there) plus its three default PVCs (`2Gi + 50Gi + 20Gi = 72Gi`) — and `maxTotalCpuMillicores: 160000`, `maxTotalMemoryMb: 368640`, `maxTotalStorageGb: 720` (`maxEnvironments` × the per-environment defaults, so the default budget accommodates the default environment-count cap at the default per-environment size). Setting either resource cap below this floor is accepted here (an operator may deliberately want a tenant that cannot provision runtime environments yet), but the next [`POST /v1/environments`](#post-v1environments) or [`POST .../deploy`](#deploy-endpoint) for that tenant then refuses with `409` rather than letting the create/deploy proceed toward a pod Kubernetes will never admit.
 
 **Error behaviour.** Bare HTTP status with the generic JSON `{code, message}` envelope (see [Errors](#errors)) — `code` is the status-derived default (e.g. `NOT_FOUND`, `CONFLICT`); none of the [Reviews-specific machine codes](/collaboration/reviews#machine-error-codes) apply here:
 
@@ -1378,11 +1378,11 @@ Returns the caller's own tenant's full quota row by default — the identical sh
 {
   "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f50",
   "maxEnvironments": 10,
-  "maxCpuMillicores": 8000,
-  "maxMemoryMb": 17832,
+  "maxCpuMillicores": 16000,
+  "maxMemoryMb": 36864,
   "maxStorageGb": 72,
-  "maxTotalCpuMillicores": 80000,
-  "maxTotalMemoryMb": 178320,
+  "maxTotalCpuMillicores": 160000,
+  "maxTotalMemoryMb": 368640,
   "maxTotalStorageGb": 720,
   "createdAt": "2026-06-24T10:00:00Z",
   "updatedAt": "2026-06-24T10:05:00Z"
@@ -1407,8 +1407,8 @@ Lists the caller's tenant's metering events, most recent first — the usage-met
     "tenantId": "019a7fa5-c2c0-7c55-bc70-714873a71f10",
     "environmentId": "019a7fa5-c2c0-7c55-bc70-714873a71f30",
     "eventType": "environment_provisioned",   // "environment_provisioned" | "environment_stopped" | "environment_deleted"
-    "cpuMillicores": 8000,    // the namespace cap applied at the time — only "environment_provisioned" carries these
-    "memoryMb": 17832,
+    "cpuMillicores": 16000,   // the namespace cap applied at the time — only "environment_provisioned" carries these
+    "memoryMb": 36864,
     "storageGb": 72,
     "createdAt": "2026-06-24T10:00:00Z"
   }
@@ -1449,6 +1449,16 @@ Every `401` the auth layer produces carries a JSON `{code, message}` envelope (t
 | `403` | *(none — plain text)* | `Forbidden` | Authenticated, but the user's roles/permissions do not allow the request's method + path. | Grant the needed role/permission (admin action). |
 
 The audit trail records every authorized request with `issuer`, `sub`, org, and timestamp. Rejected requests (missing/invalid token, unknown issuer, unresolved tenant, unenrolled subject, denied permission) are **not** audited — see [the audit log spec](/agent-reference/audit-log).
+
+#### Request-level validation errors
+
+Past authentication, a request whose own inputs cannot be used is answered as a client error, never as a `500`. Every route carrying an id in its path shares one code:
+
+| Status | `code` | Example `message` | Condition | Recovery |
+|---|---|---|---|---|
+| `400` | `INVALID_PATH_ID` | `path parameter "review_id" must be a UUID such as 01a01b39-0000-7000-8000-000000000000; got "not-a-uuid"` | A path parameter naming an externally visible id — every `/v1/<resource>/{…_id}` segment — is not a UUID. Both the parameter's name and the value received are in the message. The two path parameters that are deliberately not ids are excluded: `{alias}` (a cloud-provider credential's own name) and `{external_id}` (the identity provider's subject identifier). | Re-send the request with the id as it was returned to you. A typo or a truncated paste is the cause; this code never reports anything about the platform's own state. |
+
+Only the **spelling** is judged, not the version or existence: a well-formed id that names nothing is a `404`, not a `400`, so the two answers a caller acts on differently stay distinct. `00000000-0000-0000-0000-000000000000` is well-formed and is the ordinary absent-id probe; brace-, `urn:`- and unhyphenated UUID spellings are not accepted. The guard runs *after* authentication, so an unauthenticated caller gets `401` for every id shape and whether a given id parses is never observable before authorization.
 
 #### Structured error codes `(Planned.)`
 

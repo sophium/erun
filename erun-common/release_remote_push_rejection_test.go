@@ -193,6 +193,10 @@ func TestParseReleasePushRejections(t *testing.T) {
 // object and the ref that did not land, never to delete the tag and reset a
 // branch that already landed.
 func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationShape(t *testing.T) {
+	// This is the run that published: `erun build --release` reaches the push
+	// with its images and charts verified on the registry.
+	publishedSpec := releasePushTestSpec()
+	publishedSpec.ArtifactsPublished = true
 	cases := []struct {
 		name       string
 		rejections []releasePushRejection
@@ -229,7 +233,7 @@ func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationSha
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := releasePushRejectedError(releasePushTestSpec(), testCase.rejections, errors.New("exit status 1"))
+			err := releasePushRejectedError(publishedSpec, testCase.rejections, errors.New("exit status 1"))
 			message := err.Error()
 			for _, want := range testCase.wantIn {
 				if !strings.Contains(message, want) {
@@ -242,6 +246,90 @@ func TestReleasePushRejectedErrorNamesTheHalfReleaseAndNeverThePrePublicationSha
 				}
 			}
 		})
+	}
+}
+
+// The reported failure: a release that never built or published anything failed
+// its final push and reported "its images and charts verified on the registry".
+// Nothing in that run wrote to a registry — its own dry run says "source control
+// only; no artifacts were built or published", `erun release --help` states the
+// same contract, and the stage that would have produced an artifact runs after
+// the one that failed.
+//
+// The cost is not the wording. The message is read at the moment an operator is
+// deciding what is left to do, and it answered "only develop and the GitHub
+// Release object" when the entire artifact set was missing, so the publish that
+// version still needed was the one step it told them to skip. A tag with no
+// artifacts behind it is a version no environment can deploy: `erun deploy`
+// installs by reference and never builds.
+func TestReleasePushRejectedErrorDoesNotClaimArtifactsASourceControlOnlyReleaseNeverPublished(t *testing.T) {
+	spec := releasePushTestSpec() // ArtifactsPublished stays false: `erun release`.
+	message := releasePushRejectedError(spec, []releasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}}, errors.New("exit status 1")).Error()
+
+	assertMessageOmits(t, message,
+		"images and charts verified on the registry",
+		"Everything else this release publishes is already public",
+	)
+	assertMessageNames(t, message,
+		"source control only",
+		"version 1.4.2 is on no registry",
+		"erun push --version 1.4.2",
+		"develop (non-fast-forward)",
+		"do not delete tag v1.4.2",
+	)
+
+	// The same claim is made by the push's two deep recoveries, and they carry
+	// the same obligation: name the publish this run still owes.
+	recoveries := []struct {
+		name    string
+		message string
+	}{
+		{"the rebase that could not absorb the move", releaseRebaseFailedRecovery(spec, "main")},
+		{"the tag that could not be re-pointed", releaseRepointFailedRecovery(spec)},
+	}
+	for _, recovery := range recoveries {
+		assertMessageOmits(t, recovery.message, "already published")
+		assertMessageNames(t, recovery.message, "erun push --version 1.4.2")
+	}
+}
+
+// And the run that did publish keeps the claim, because for it the claim is
+// true: this is the release's own accounting, not a hedge in every message.
+func TestReleasePushRejectedErrorKeepsTheRegistryClaimForARunThatPublished(t *testing.T) {
+	spec := releasePushTestSpec()
+	spec.ArtifactsPublished = true
+
+	message := releasePushRejectedError(spec, []releasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}}, errors.New("exit status 1")).Error()
+	assertMessageNames(t, message, "images and charts verified on the registry")
+	assertMessageOmits(t, message, "erun push --version")
+
+	for _, recovery := range []string{
+		releaseRebaseFailedRecovery(spec, "main"),
+		releaseRepointFailedRecovery(spec),
+	} {
+		assertMessageNames(t, recovery, "is already published")
+		assertMessageOmits(t, recovery, "erun push --version")
+	}
+}
+
+// assertMessageNames and assertMessageOmits keep the per-string loops out of
+// the tests that make several of these claims at once, so a case's list of
+// expectations reads as the claim rather than as iteration.
+func assertMessageNames(t *testing.T, message string, wants ...string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message must contain %q, got:\n%s", want, message)
+		}
+	}
+}
+
+func assertMessageOmits(t *testing.T, message string, unwanted ...string) {
+	t.Helper()
+	for _, omit := range unwanted {
+		if strings.Contains(message, omit) {
+			t.Fatalf("message must not contain %q, got:\n%s", omit, message)
+		}
 	}
 }
 

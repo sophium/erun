@@ -56,7 +56,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--bootstrap` | bool | `false` | — | **Deprecated, ignored.** Prints a deprecation warning; `init` no longer scaffolds a `<tenant>-devops/` module — envs deploy the published `erun-devops` chart. |
 | `--runtime-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimepod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
 | `--runtime-memory <value>` | Kubernetes quantity | A **new** env takes `16384Mi`; an **existing** env keeps `EnvConfig.runtimepod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. Merges with `--runtime-cpu` the same way. Sized for an in-pod `make check-gate` (the same ten-target gate the `erun-dind` sidecar runs during an image build), so an env that only serves an app can be trimmed below it. |
-| `--dind-cpu <value>` | Kubernetes quantity | A **new** env takes `4`; an **existing** env keeps `EnvConfig.runtimedindpod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimedindpod.cpu` — the `erun-dind` sidecar's own limit, independent of `--runtime-cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. |
+| `--dind-cpu <value>` | Kubernetes quantity | A **new** env takes `12`; an **existing** env keeps `EnvConfig.runtimedindpod.cpu`. | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimedindpod.cpu` — the `erun-dind` sidecar's own limit, independent of `--runtime-cpu`. Supplied alone it merges — naming only the CPU leaves the recorded memory where it was. Unlike `--runtime-cpu`, this default is a sizing rule rather than a constant (`eruncommon.RuntimeDindCPULimit`: the node's CPUs divided across the build-capable environments expected to be building on it at once, floored at `4`), because a limit is a ceiling and not a reservation — see [Sizing the build CPU cap](/concepts/runtime-pods#sizing-the-build-cpu-cap). |
 | `--dind-memory <value>` | Kubernetes quantity | A **new** env takes `20Gi`; an **existing** env keeps `EnvConfig.runtimedindpod.memory`. | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimedindpod.memory`. Merges with `--dind-cpu` the same way. Raise this when a multi-arch `erun release`/`erun build --release` OOMs inside the sidecar — every image build runs there, not in the runtime container. |
 | `--codecommit-ssh-key-id <id>` | string (`APKA…` shape) | unset | Must start with `APKA`; must be a valid IAM key id (length 21). | Stored in the in-pod bootstrap marker (`bootstrap.yaml` → `codecommitSshKeyId`). |
 | `--confirm-environment` | bool | `false` | — | Equivalent to `-y` for the env-overwrite confirmation only. |
@@ -715,11 +715,30 @@ Resolves tenant/environment/namespace the same way every other typed command doe
     "tls": [ { "hosts": ["prod.example.com"], "secretName": "web-tls" } ] } ],
   "certificates": [ { "name": "wildcard", "ready": false, "reason": "Issuing", "message": "…",
     "secretName": "wildcard-tls", "dnsNames": ["*.prod.example.com"], "orders": [ /* see below */ ] } ],
-  "secrets": [ { "name": "db-credentials", "key": "password", "exists": true, "hasKey": true, "error": "" } ]
+  "secrets": [ { "name": "db-credentials", "key": "password", "exists": true, "hasKey": true, "error": "" } ],
+  "helmRelease": { "name": "myapp-devops", "found": true, "revision": 42, "status": "deployed",
+    "chart": "erun-devops", "chartVersion": "1.0.247", "appVersion": "1.0.247",
+    "imageOverrides": { "erun-devops": "ghcr.io/…/erun-devops:1.0.247" },
+    "runtimePod": { "cpu": "4", "memory": "8192Mi" } },
+  "drift": []
 }
 ```
 
-`reason` on a pod is the container's `waiting`/`terminated` reason if present, else the `PodScheduled=False` reason (a pod never admitted to a node has no container status to read a reason from), else the `Ready=False` condition's reason. `secrets` is omitted entirely when no `--secret` was given.
+`reason` on a pod is the container's `waiting`/`terminated` reason if present, else the `PodScheduled=False` reason (a pod never admitted to a node has no container status to read a reason from), else the `Ready=False` condition's reason.
+
+`secrets` is omitted entirely when no `--secret` was given. `helmRelease` is present on every run that read the cluster — `found: false` when no release is deployed, with `error` naming the cause when the read itself failed rather than the release being genuinely absent. Both are omitted only in a preview that read nothing, where every list above is `null` for that same reason.
+
+### The drift verdict
+
+`drift` carries the same verdict the text stream prints as its last line, computed on every run — the orchestrator contract's "read the live release and diff it against the plan", already done. Each entry is one finding, worded exactly as the text stream prints it: the env config's recorded `runtimeversion`/`runtimeimage`/`runtimepod` against the release's own record, the release's `imageOverrides` against the containers actually running, and a release that is absent or unreadable when the env config expected one.
+
+| Value | Means |
+|---|---|
+| `["<finding>", …]` | The comparison ran and named something that disagrees. |
+| `[]` | The comparison ran and nothing disagreed. |
+| `null` | Nothing was read — a preview. `--dry-run` prints no JSON at all; this is the MCP `observe` tool's `preview: true` payload, where every list is unread for the same reason. |
+
+The key is always present on a real run, so a consumer checks `drift` alone and never has to distinguish "no drift this run" from "this field is never populated".
 
 ### The Certificate → CertificateRequest → Order → Challenge walk {#certificate-failure-chain}
 

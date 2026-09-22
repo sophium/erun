@@ -11,6 +11,9 @@ cross-repository structural gates, not production helpers.
 - `internal/erun` builds/runs the instrumented binary; `env` isolates scenarios;
   `fixture` seeds state/stubs; `normalize` removes nondeterminism; `golden`
   compares reviewed output. Read these implementations instead of copying examples.
+- `internal/harnessexec` is the module's only way to spawn a child process; see
+  § "Subprocess bounds" below. Every other package, test file, and stub binary
+  builds its commands through it.
 - Only subprocess coverage contributes to this gate's CLI/common percentage.
   Owner unit suites may validate genuinely non-CLI behavior; they do not contribute
   to that percentage.
@@ -54,6 +57,42 @@ cross-repository structural gates, not production helpers.
 - For shared fixture/harness changes, validate on Linux as well as the local host;
   local success must not depend on tools absent from the image test stage.
 
+## Subprocess bounds
+
+- Every child the harness spawns is built by `internal/harnessexec`, never by
+  `exec.Command` at the call site. `exec_bound_test.go` fails the build when a
+  bare constructor appears elsewhere in the module and names what to call
+  instead; the list is zero-tolerance with no baseline, so a new call site has
+  nowhere to hide.
+- The defect this exists for is not a slow child but a finished one. os/exec
+  drains a child's stdout/stderr from goroutines of its own and `Cmd.Wait`
+  waits for those goroutines, so a process the child left behind still holding
+  the write end keeps the drain from EOF and blocks `Wait` forever -- with
+  nothing left to wait for and no signal that ends it, because a kill only
+  concludes a wait whose child was still running. The block reads as a hang in
+  whichever test happened to be running, which is why patching call sites one
+  at a time moved it rather than fixing it.
+- `harnessexec` arms the two distinct bounds. `Cmd.WaitDelay` covers the state
+  above, and it applies to a child that has *exited* with no context at all --
+  a context is not what arms it, so a call site cannot substitute for the
+  constructor by supplying one. `HangNet`, reached through the context
+  cancellation, covers a child that never exits, where `Process.Wait` never
+  returns and the post-exit path consulting the delay is never reached. Both
+  are hang-nets rather than latency SLAs: `WaitDelay` sits far below the
+  suite's own deadline so a stranded descendant fails as a bounded, named
+  failure, and `HangNet` is deliberately longer than the package deadline so
+  it cannot fail a healthy child.
+- A caller whose child has its own legitimate deadline passes a context;
+  `RunOptions.Timeout` on the CLI under test is the case that matters, since
+  only it leaves processes behind that outlive it. A child meant to outlive its
+  caller -- the emcp server, a port holder a scenario keeps alive on purpose --
+  is ended by its own test cleanup.
+- Both bounds are driven at test speed in `internal/harnessexec`, including a
+  fixture that reproduces the unbounded wait through a bare `exec.Command` and
+  requires it to still be blocked. That fixture is why the guard's refusal is a
+  statement about a real wedge rather than a style preference: if a future
+  os/exec ever bounds the drain on its own, that test fails and says so.
+
 ## Prompts, ports, and parallelism
 
 - Plain piped prompts share one buffered reader: supply one stdin line per prompt,
@@ -73,6 +112,14 @@ cross-repository structural gates, not production helpers.
   starved producer. Keep their current parallel execution, but investigate real
   failures through resource evidence and width/heartbeat calibration, not retries
   until green or reflexive whole-suite serialization.
+- The suite's `go test -timeout` is a budget, not a constant: the gate derives
+  it from the resolved CPU quota and clamps it below `harnessexec.HangNet`, and
+  the gate script's fallback is that same clamp. Never let a deadline the gate
+  can resolve reach `HangNet` — the backstop is sized to outlast the deadline so
+  it cannot fail a healthy child, and an uncapped budget reorders the two. Go's
+  ten-minute default is what failed a correct tree on a contended node
+  (erun#2631); a slow run that is progressing is not a failed run, so restore a
+  budget by fixing the derivation rather than by loosening an assertion.
 
 ## Goldens and normalization
 
