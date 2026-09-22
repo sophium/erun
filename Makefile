@@ -161,6 +161,50 @@ GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
 
+# INTEGRATION_TEST_TIMEOUT is the wall-clock budget the integration suite's own
+# `go test` runs under. Left to itself it inherits Go's ten-minute default,
+# which does not move with the machine -- so a slow-but-progressing run is
+# reported as a failure of the tree rather than of the clock.
+#
+# The gate is the case that matters, and it is a fixed deadline against a
+# variable amount of work: the suite measured 4m7s on a quiet 12-CPU pod and
+# crossed the 10m default on a contended one that reported 7487/13091 CPU
+# periods throttled (57%) -- the same command, the same suite, a correct tree.
+# No test was stuck; the goroutine dump at the alarm showed dozens of
+# t.Parallel() scenarios queued in the parallelism barrier and the package
+# still making progress. A gate that fails a correct tree for being slow is
+# worse than a slow gate, because it teaches its operators to re-run it.
+#
+# Scale the budget inversely with the resolved CPU quota, the same shape
+# LINT_TIMEOUT above uses for the identical defect in the sibling linter run.
+# The quota is what GO_TEST_GOMAXPROCS already divides into this suite's
+# `-parallel` share, so at or above GO_TEST_TARGET_COUNT CPUs the suite has its
+# reference share and takes the base, and below it the suite is at its serial
+# floor with proportionally less CPU to finish the same work in.
+#
+# The cap is not decoration: it is what keeps the budget provably below the
+# harness's own per-child backstop, harnessexec.HangNet. That constant is
+# deliberately longer than the package deadline so it can never fail a healthy
+# child; an uncapped inverse scale would climb past it on a small environment
+# and reopen that failure inside the harness. HangNet moves with this cap, and
+# TestIntegrationSuiteTimeoutBudgetIsDerivedAndCappedUnderTheHangNet holds the
+# two together.
+#
+# The quota is a floor on what an environment declares, not a ceiling on how
+# slow it can be -- it cannot see contention from outside its cgroup, which is
+# exactly the measured case -- so the base is generous in absolute terms rather
+# than tight against the quiet measurement. The trade is deliberate: a genuinely
+# wedged run is now diagnosed in up to CAP_MINUTES instead of 10m, and a
+# correct-but-starved one finishes instead of failing.
+INTEGRATION_TEST_TIMEOUT_REFERENCE_CPU := $(GO_TEST_TARGET_COUNT)
+INTEGRATION_TEST_TIMEOUT_BASE_MINUTES := 30
+INTEGRATION_TEST_TIMEOUT_CAP_MINUTES := 45
+INTEGRATION_TEST_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	m=$$(( $(INTEGRATION_TEST_TIMEOUT_BASE_MINUTES) * $(INTEGRATION_TEST_TIMEOUT_REFERENCE_CPU) / cpu )); \
+	[ "$$m" -ge $(INTEGRATION_TEST_TIMEOUT_BASE_MINUTES) ] || m=$(INTEGRATION_TEST_TIMEOUT_BASE_MINUTES); \
+	[ "$$m" -le $(INTEGRATION_TEST_TIMEOUT_CAP_MINUTES) ] || m=$(INTEGRATION_TEST_TIMEOUT_CAP_MINUTES); \
+	echo "$${m}m")
+
 # Run golangci-lint across the gated modules concurrently (bounded by
 # LINT_PARALLELISM), each against its own .golangci.yml (erun-integration has
 # none, so it uses the default linters). Every module's combined stdout/stderr
@@ -762,7 +806,7 @@ integration-test:
 	./scripts/agent-gate.sh integration-test "make integration-test" -- $(MAKE) integration-test-gate
 
 integration-test-gate:
-	GO_TEST_GOMAXPROCS=$(GO_TEST_GOMAXPROCS) ./erun-integration/scripts/integration-test.sh
+	GO_TEST_GOMAXPROCS=$(GO_TEST_GOMAXPROCS) INTEGRATION_TEST_TIMEOUT=$(INTEGRATION_TEST_TIMEOUT) ./erun-integration/scripts/integration-test.sh
 
 # The front door. Everywhere but an agent pod this is check-gate by another
 # name: scripts/agent-gate.sh execs it directly and exits with exactly its
