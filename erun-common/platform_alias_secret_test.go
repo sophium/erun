@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -346,5 +347,190 @@ func TestHelmPlatformAliasSecretSetArgs(t *testing.T) {
 	want := []string{"--set-string", "platformAliasSecretName=team-devops-platform-alias"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+// signedInDefaultHostStore is the host side of the retrofit as production
+// resolves it: the real config store and the real default secret store, over
+// whatever XDG config home the test redirected to. resolveHostPlatformAlias is
+// reached with a static store everywhere else in this file, which cannot prove
+// the deploying host's own config is what gets read.
+func signedInDefaultHostStore(t *testing.T, provider CloudProviderConfig) {
+	t.Helper()
+	store, err := DefaultCloudSecretStore()
+	if err != nil {
+		t.Fatalf("default cloud secret store: %v", err)
+	}
+	if err := store.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
+	if err := SaveERunConfig(ERunConfig{DefaultTenant: "team", CloudProviders: []CloudProviderConfig{provider}}); err != nil {
+		t.Fatalf("save root config: %v", err)
+	}
+}
+
+// TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne is
+// the reproduction of the reported failure. An environment initialised before
+// anything provisioned a platform alias records no Secret name, so the runtime
+// chart mounts nothing, so the entrypoint's seeder finds nothing to seed -- and
+// nothing on the deploy path ever changed that, leaving the pod permanently
+// unable to call the platform API (the reported `erun gate list` abort). Before
+// this change a deploy of that environment carried no platform-alias Secret and
+// no name for the chart to mount; this drives one against a host that is signed
+// in and asserts the environment leaves the deploy with both, and with the record
+// that keeps them on every later deploy.
+func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne(t *testing.T) {
+	redirectConfigHomeForTest(t)
+	captured := installCapturingKubectl(t)
+	provider := testPlatformAliasProvider()
+	signedInDefaultHostStore(t, provider)
+
+	// The environment exactly as a pre-fix init left it: no platform-alias
+	// Secret named anywhere.
+	if err := SaveEnvConfig("team", EnvConfig{Name: "dev"}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+	deployInput := HelmDeploySpec{
+		Tenant:      "team",
+		Environment: "dev",
+		ReleaseName: RuntimeReleaseName("team"),
+		Namespace:   "team-dev",
+	}
+	// The reported state, asserted rather than assumed: with no name recorded
+	// the upgrade renders no platform-alias argument at all, which is what made
+	// the chart mount nothing.
+	if got := helmPlatformAliasSecretSetArgs(deployInput.PlatformAliasSecretName); got != nil {
+		t.Fatalf("the unprovisioned deploy already named a platform alias: %v", got)
+	}
+
+	var log bytes.Buffer
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if want := "team-devops-platform-alias"; deployInput.PlatformAliasSecretName != want {
+		t.Fatalf("the deploy still names no platform-alias Secret: got %q, want %q", deployInput.PlatformAliasSecretName, want)
+	}
+	manifest := captured.read(t)
+	for _, want := range []string{
+		"name: team-devops-platform-alias",
+		"alias: " + provider.Alias,
+		cloudSecretFileName(provider.ERun.RefreshTokenRef),
+		"refresh-token-value",
+	} {
+		if !strings.Contains(manifest, want) {
+			t.Errorf("the retrofitted Secret is missing %q:\n%s", want, manifest)
+		}
+	}
+	if !strings.Contains(log.String(), "apply platform alias secret team-devops-platform-alias") {
+		t.Errorf("the retrofit is not visible in the trace:\n%s", log.String())
+	}
+
+	// The record is what keeps it: without it the next deploy reads back an
+	// empty field, and a deploy from a host that has since lost its alias would
+	// pass no name and drop the mount from an environment that had one.
+	recorded, _, err := LoadEnvConfig("team", "dev")
+	if err != nil {
+		t.Fatalf("load env config: %v", err)
+	}
+	if want := "team-devops-platform-alias"; recorded.PlatformAliasSecretName != want {
+		t.Fatalf("the environment did not record the Secret: got %q, want %q", recorded.PlatformAliasSecretName, want)
+	}
+}
+
+// TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone is
+// the safety half: the Secret carries the delegating operator's own identity, so
+// an environment that already names one is not re-provisioned from whoever
+// happens to run this deploy. The host here is signed in, so only the gate stops
+// the apply; a kubectl that must not run proves none happened.
+func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone(t *testing.T) {
+	redirectConfigHomeForTest(t)
+	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
+	signedInDefaultHostStore(t, testPlatformAliasProvider())
+	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", PlatformAliasSecretName: "team-devops-platform-alias"}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	deployInput := HelmDeploySpec{
+		Tenant:                  "team",
+		Environment:             "dev",
+		ReleaseName:             RuntimeReleaseName("team"),
+		Namespace:               "team-dev",
+		PlatformAliasSecretName: "team-devops-platform-alias",
+	}
+	if err := reconcilePlatformAliasSecret(testTraceContext(false), &deployInput); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "team-devops-platform-alias"; deployInput.PlatformAliasSecretName != want {
+		t.Fatalf("an already-provisioned environment's alias was changed: got %q, want %q", deployInput.PlatformAliasSecretName, want)
+	}
+	recorded, _, err := LoadEnvConfig("team", "dev")
+	if err != nil {
+		t.Fatalf("load env config: %v", err)
+	}
+	if want := "team-devops-platform-alias"; recorded.PlatformAliasSecretName != want {
+		t.Fatalf("the recorded alias changed: got %q, want %q", recorded.PlatformAliasSecretName, want)
+	}
+}
+
+// TestReconcilePlatformAliasSecretSilentlySkipsWhenTheHostHasNothingToGive
+// pins the no-op: a host with no signed-in platform alias leaves the deploy
+// byte-for-byte as it was -- no Secret applied, no name threaded, no line added
+// to a trace every runtime deploy carries. Without the last part a deploy on a
+// machine that never signed in would report a platform-alias decision it did
+// not make.
+func TestReconcilePlatformAliasSecretSilentlySkipsWhenTheHostHasNothingToGive(t *testing.T) {
+	redirectConfigHomeForTest(t)
+	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
+	if err := SaveEnvConfig("team", EnvConfig{Name: "dev"}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	deployInput := HelmDeploySpec{
+		Tenant:      "team",
+		Environment: "dev",
+		ReleaseName: RuntimeReleaseName("team"),
+		Namespace:   "team-dev",
+	}
+	var log bytes.Buffer
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deployInput.PlatformAliasSecretName != "" {
+		t.Fatalf("got %q, want no name when the host has no alias to give", deployInput.PlatformAliasSecretName)
+	}
+	if got := log.String(); strings.TrimSpace(got) != "" {
+		t.Fatalf("a host with nothing to give must add nothing to the trace, got:\n%s", got)
+	}
+	recorded, _, err := LoadEnvConfig("team", "dev")
+	if err != nil {
+		t.Fatalf("load env config: %v", err)
+	}
+	if recorded.PlatformAliasSecretName != "" {
+		t.Fatalf("got %q, want the environment left unrecorded", recorded.PlatformAliasSecretName)
+	}
+}
+
+// TestReconcilePlatformAliasSecretScopesItselfToTheRuntimeRelease keeps the
+// retrofit off component releases, which never carry the platform-alias volume
+// -- a component chart naming one would be a value nothing consumes.
+func TestReconcilePlatformAliasSecretScopesItselfToTheRuntimeRelease(t *testing.T) {
+	redirectConfigHomeForTest(t)
+	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
+	signedInDefaultHostStore(t, testPlatformAliasProvider())
+
+	deployInput := HelmDeploySpec{
+		Tenant:      "team",
+		Environment: "dev",
+		ReleaseName: "team-dev-api",
+		Namespace:   "team-dev",
+	}
+	if err := reconcilePlatformAliasSecret(testTraceContext(false), &deployInput); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deployInput.PlatformAliasSecretName != "" {
+		t.Fatalf("a component release must not carry a platform alias, got %q", deployInput.PlatformAliasSecretName)
 	}
 }

@@ -995,7 +995,8 @@ func runPublishedValuesPull(ctx Context, pull *publishedValuesPull, target strin
 var ensureDeployNamespace NamespaceEnsurerFunc = EnsureKubernetesNamespace
 
 // applyPreRolloutResources creates the namespace and applies everything that
-// must exist in it before the chart rollout. Grouped rather than inline so the
+// must exist in it before the chart rollout, including the credentials the
+// deployment plan resolved on this host. Grouped rather than inline so the
 // ordering is stated in one place as this list grows.
 //
 // The namespace is ensured here and not only in the chart deployer, because the
@@ -1004,25 +1005,31 @@ var ensureDeployNamespace NamespaceEnsurerFunc = EnsureKubernetesNamespace
 // with "namespaces not found". An environment that already exists hid this,
 // which is why it only ever broke provisioning. Ensuring is idempotent, so the
 // deployer ensuring it again afterwards costs nothing.
-func applyPreRolloutResources(ctx Context, deployInput HelmDeploySpec) error {
+func applyPreRolloutResources(ctx Context, deployInput *HelmDeploySpec) error {
 	if !ctx.DryRun {
 		if err := ensureDeployNamespace(deployInput.KubernetesContext, deployInput.Namespace); err != nil {
 			return err
 		}
 	}
-	if err := applyCloudflareCredentialsSecret(ctx, deployInput); err != nil {
+	if err := applyCloudflareCredentialsSecret(ctx, *deployInput); err != nil {
 		return err
 	}
-	if err := applyGatewayCredentialsSecret(ctx, deployInput); err != nil {
+	if err := applyGatewayCredentialsSecret(ctx, *deployInput); err != nil {
 		return err
 	}
-	if err := applyMCPAuthSecret(ctx, deployInput); err != nil {
+	if err := applyMCPAuthSecret(ctx, *deployInput); err != nil {
 		return err
 	}
-	if err := refreshImagePullSecrets(ctx, deployInput); err != nil {
+	if err := refreshImagePullSecrets(ctx, *deployInput); err != nil {
 		return err
 	}
-	return recordMCPAuthKeyOnEnv(ctx, deployInput)
+	// Takes the spec rather than a copy: the chart mounts the platform-alias
+	// volume only when the upgrade names the Secret, so a retrofit has to reach
+	// the command built below from this same spec.
+	if err := reconcilePlatformAliasSecret(ctx, deployInput); err != nil {
+		return err
+	}
+	return recordMCPAuthKeyOnEnv(ctx, *deployInput)
 }
 
 func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
@@ -1039,7 +1046,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
 	TraceApplyKubernetesResourceQuota(ctx, deployInput.KubernetesContext, deployInput.Namespace, deployInput.NamespaceQuota)
 	announceWorktreeVolumeChange(ctx, deployInput)
-	if err := applyPreRolloutResources(ctx, deployInput); err != nil {
+	if err := applyPreRolloutResources(ctx, &deployInput); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	depBuild, err := chartDependencyBuildPlan(ctx, deployInput)

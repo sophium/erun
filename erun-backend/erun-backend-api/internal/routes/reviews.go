@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type ReviewRepository interface {
@@ -94,12 +96,25 @@ type addReviewerRequest struct {
 	UserID string `json:"userId"`
 }
 
+// listReviews answers GET /v1/reviews. The `?status=` filter is normalized and
+// then validated before it reaches the repository: an unrecognised value
+// matches no row, so passing one through answered `200` with an empty list a
+// caller reads as "no reviews" -- the conclusion an operator acts on when they
+// check whether anything is waiting on them. The membership check is the shared
+// eruncommon.NormalizeReviewStatus, the same refusal `erun review list` makes
+// before it ever calls the platform, so both surfaces accept the same
+// spellings and name the same accepted values.
 func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
+	status := model.ReviewStatus(strings.ToUpper(strings.TrimSpace(query.Get("status"))))
+	if _, err := eruncommon.NormalizeReviewStatus(string(status)); err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
+		return
+	}
 	filter := apirepository.ReviewFilter{
 		TargetBranch:   query.Get("targetBranch"),
 		SourceBranch:   query.Get("sourceBranch"),
-		Status:         model.ReviewStatus(query.Get("status")),
+		Status:         status,
 		AuthorUserID:   query.Get("authorUserId"),
 		ReviewerUserID: query.Get("reviewerUserId"),
 	}
