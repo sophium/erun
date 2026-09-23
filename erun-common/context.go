@@ -23,9 +23,18 @@ type Context struct {
 	// which flows into the env-agnostic resolvers where policy must not leak.
 	// Zero means "resolve it" (see resolveBuildJobs); one is strictly sequential.
 	BuildJobs int
-	Stdin     io.Reader
-	Stdout    io.Writer
-	Stderr    io.Writer
+	// PlatformAlias is the operator's own choice of which configured erun-type
+	// cloud provider alias this run should act as, set by a transport from its
+	// selection flag (`erun deploy --erun-alias`) and empty when they made no
+	// choice. It rides the context so a shared step deep behind a transport's
+	// own wiring can honour an explicit pick without a new parameter threaded
+	// through every caller in between -- the consumer today is the platform
+	// alias retrofit in platform_alias_secret.go. Empty is the default every
+	// consumer already had, so a caller that never sets it is unaffected.
+	PlatformAlias string
+	Stdin         io.Reader
+	Stdout        io.Writer
+	Stderr        io.Writer
 	// Command is the operator-facing invocation of the command that is running
 	// (for example "erun usage", "erun outputs list"), set once at command
 	// entry. Resolution failures name the command's own recovery from it, so a
