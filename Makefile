@@ -90,18 +90,19 @@ LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun
 LINT_JOB_MEMORY_MIB := 700
 
 # check-gate's own `-j` fan-out (see check-gate's own comment further below)
-# can run lint, test-frontend, and helm-chart-tests concurrently with each
-# other, and each of the three independently sizes its own width against the
-# *entire* memory ceiling via scripts/parallel-gate.sh -- three individually
-# safe widths can still sum past the box's real ceiling once check-gate runs
-# them side by side: independent parallelism mechanisms can double-book memory
-# even when each is individually safe. CHECK_GATE_FANOUT_PEAK_MEMORY_MIB is the
-# largest of the three's own already-measured peaks -- lint's own worst case,
-# every LINT_MODULES entry running at once -- and each of the three passes it
-# as parallel-gate.sh width's reserved-mem-mib argument before dividing what
-# is left among its own jobs. In a box sized like the reference build
+# can run lint, test-frontend, helm-chart-tests and terraform-test
+# concurrently with each other, and each of the four independently sizes its
+# own width against the *entire* memory ceiling via scripts/parallel-gate.sh --
+# four individually safe widths can still sum past the box's real ceiling once
+# check-gate runs them side by side: independent parallelism mechanisms can
+# double-book memory even when each is individually safe.
+# CHECK_GATE_FANOUT_PEAK_MEMORY_MIB is the largest of the four's own
+# already-measured peaks -- lint's own worst case, every LINT_MODULES entry
+# running at once -- and each of the four passes it as parallel-gate.sh
+# width's reserved-mem-mib argument before dividing what is left among its
+# own jobs. In a box sized like the reference build
 # environment (~20GiB, see erun-devops/AGENTS.md's dind sidecar defaults),
-# none of the three's own job-count/CPU caps are memory-bound in the first
+# none of the four's own job-count/CPU caps are memory-bound in the first
 # place, so this reservation is a no-op there; it only narrows a width in a
 # smaller environment where memory actually binds -- exactly the case this
 # guards against.
@@ -737,13 +738,27 @@ helm-chart-tests:
 # the gate outright is an open policy question, not a decision made here.
 #
 # Provider delivery is gate-time egress to registry.terraform.io (measured
-# ~8-11s per module cold, ~40MB of providers; the whole target is ~35s and
-# runs inside check-gate's existing fan-out, so it adds no gate latency). The
-# alternative, if that egress is ever unwanted, is to bake a provider cache
+# ~8-11s per module cold; the whole target is ~35s and runs inside check-gate's
+# existing fan-out, so it adds no gate latency). Each cold build re-downloads
+# the tested modules' providers -- measured cloudflare 44.7MB + helm 18.2MB +
+# kubernetes 18.0MB, ~81MB (77MiB) in, unpacking to ~351MiB on disk (du:
+# cloudflare-apex 245M, cluster-edge 106M) -- and nothing between builds caches
+# them. Those sizes are the versions each module's `~>` range resolves to
+# today, not a committed lock file, so they drift. cloudflare is not served
+# from releases.hashicorp.com: the registry answers with a github.com release
+# URL, so this egress rests on a wider third-party surface than the registry
+# host alone suggests.
+#
+# The alternative, if that egress is ever unwanted, is to bake a provider cache
 # into the image and point TF_PLUGIN_CACHE_DIR or init's -plugin-dir at it:
 # that removes the network dependency at a cost of ~350MB of image weight for
 # both provider sets, and of having to refresh the cache when a module's
-# version constraint moves. Egress is what is implemented; the cache is not.
+# version constraint moves. That ~350MB is about right, which makes the choice
+# closer than it reads: it is nearly what these providers already weigh
+# unpacked, so the two options cost the same order of bytes and the cache is
+# not rejected here on size. What decides it is where the cost lands -- the
+# download is transient, the cache is weight every pull carries. Egress is what
+# is implemented; the cache is not.
 #
 # TERRAFORM_TEST_JOB_MEMORY_MIB is the measured peak resident set of one cold
 # `init -backend=false && test` against the heaviest current suite
@@ -879,9 +894,9 @@ integration-test-gate:
 # small, bounded number of calls. See scripts/agent-gate.sh for why this is
 # the fix and not just documentation.
 #
-# check-gate's own twelve prerequisites (below) used to run back-to-back: on a
+# check-gate's own thirteen prerequisites (below) used to run back-to-back: on a
 # real release, the first seven alone (everything before test-playwright)
-# cost ~14.5 minutes, and test-playwright is the single largest of the twelve by
+# cost ~14.5 minutes, and test-playwright is the single largest of the thirteen by
 # itself (measured standalone at ~16.4 minutes -- more than every other
 # target combined). `-j` is what actually parallelizes them: check-gate's own
 # prerequisite line has to keep every target listed in plain, literal text
@@ -898,24 +913,24 @@ integration-test-gate:
 # bookkeeping system -- and `make`'s own job server is a true event-driven
 # scheduler (a slot is reused the instant any job frees it), which is a
 # strictly better fit here than replaying scripts/parallel-gate.sh's
-# fixed-batch model would be for twelve wildly uneven-duration jobs.
+# fixed-batch model would be for thirteen wildly uneven-duration jobs.
 # CHECK_GATE_PARALLELISM deliberately passes no mem-per-job-mib: unlike
 # lint/test-frontend/helm-chart-tests (each a uniform fan-out of near-
-# identical jobs with a real measured per-job cost), these twelve targets are
-# wildly heterogeneous -- some are flat single processes, three are
-# themselves internally parallel fan-outs, and none has a comparable
-# measured per-job memory figure, so a number here would be fabricated
+# identical jobs with a real measured per-job cost), these thirteen targets are
+# wildly heterogeneous -- some are flat single processes, four are
+# themselves internally parallel fan-outs, and none of the rest has a
+# comparable measured per-job memory figure, so a number here would be fabricated
 # rather than measured (the same "measure, don't fabricate a slope" standard
 # HELM_CHART_TEST_JOB_MEMORY_MIB's own comment holds to). CPU/job-count alone
 # deciding the width matches that target's own precedent for the identical
-# reason. What this width does NOT bound: three of these twelve
-# (lint/test-frontend/helm-chart-tests) each already run their own internal
-# fan-out sized against the full memory ceiling -- CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
-# (see lint's own comment above) is what stops those three from
+# reason. What this width does NOT bound: four of these thirteen
+# (lint/test-frontend/helm-chart-tests/terraform-test) each already run their
+# own internal fan-out sized against the full memory ceiling -- CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
+# (see lint's own comment above) is what stops those four from
 # double-booking memory against *each other* when `-j` runs them side by
 # side. It does not bound the other nine (in particular test-erun-ui's
 # race-enabled test process) against any of the
-# twelve running concurrently -- verify actual peak memory on a real
+# thirteen running concurrently -- verify actual peak memory on a real
 # `make check-gate` run before trusting this width in a memory-constrained
 # environment, and narrow it with real numbers if that run shows a problem.
 #

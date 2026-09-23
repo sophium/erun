@@ -130,13 +130,18 @@ RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-lin
 #
 # Build-time egress to registry.terraform.io is how those suites get their
 # providers: each module's own `terraform init -backend=false` fetches helm,
-# kubernetes and cloudflare (~40MB, ~8-11s per module). Egress is deliberate --
-# the alternative is baking a provider cache into this image and pointing
+# kubernetes and cloudflare (~8-11s per module; measured ~81MB downloaded per
+# cold build, unpacking to ~351MiB on disk). cloudflare is not a
+# releases.hashicorp.com download -- the registry returns a github.com release
+# URL for it -- so this is not a single vendor's surface. Egress is deliberate
+# -- the alternative is baking a provider cache into this image and pointing
 # TF_PLUGIN_CACHE_DIR or init's -plugin-dir at it, which removes the network
 # dependency at the cost of ~350MB of image weight for both provider sets and a
-# second thing to refresh whenever a module's version constraint moves. See the
-# root Makefile's terraform-test comment, which records the same trade-off
-# where a reader changing the target will meet it.
+# second thing to refresh whenever a module's version constraint moves. That
+# ~350MB is about right rather than a comfortable margin over the download, so
+# the trade-off is closer than it looks; see the root Makefile's terraform-test
+# comment, which records the same trade-off where a reader changing the target
+# will meet it.
 ARG TERRAFORM_VERSION
 RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${BUILDARCH}.zip" && \
     unzip -q /tmp/terraform.zip -d /tmp && \

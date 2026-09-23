@@ -106,9 +106,10 @@ __debug_bin*
 # Terraform init artifacts (provider binaries + module lock) written by a local
 # `terraform init` or by this repo's own `make terraform-test`. The erun-devops
 # test stage COPYs erun-devops/terraform-erun and runs `terraform init` in-image,
-# so without these the host's ~40MB+ of host-arch provider binaries would enter
-# the build context -- while staying out of computeBuildFingerprint, which
-# honours the root .gitignore's matching `**/.terraform/` rules. That is the same
+# so without these the host's own-architecture provider binaries -- measured
+# ~351MiB unpacked from a ~81MB download -- would enter the build context, while
+# staying out of computeBuildFingerprint, which honours the root .gitignore's
+# matching `**/.terraform/` rules. That is the same
 # context/fingerprint divergence the erun-docs entries above document.
 # Deliberately written without the trailing slash the .gitignore uses, matching
 # the entries above: a trailing slash makes the pattern directory-only, and the
