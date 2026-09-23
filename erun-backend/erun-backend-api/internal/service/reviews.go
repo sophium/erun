@@ -562,6 +562,9 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 	if buildID == "" {
 		return model.Review{}, &MissingBuildIDError{Status: model.ReviewStatusMerged}
 	}
+	// Whether this row is adopting an identity it never had, captured before
+	// the assignment below overwrites the evidence.
+	adoptedFromNone := strings.TrimSpace(review.Repository) == ""
 	build, err := s.builds.Get(ctx, review.TenantID, buildID)
 	if err != nil {
 		return model.Review{}, err
@@ -569,7 +572,7 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 	if err := s.verifyGateBuild(review, build); err != nil {
 		return model.Review{}, err
 	}
-	if err := s.verifyRepositoryState(ctx, review, build.CommitID, remoteURL); err != nil {
+	if err := s.verifyRepositoryState(ctx, review, repositoryIdentity, build.CommitID, remoteURL); err != nil {
 		return model.Review{}, err
 	}
 
@@ -578,8 +581,13 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 	// Recorded only now, once the merge is accepted: a review created before
 	// the platform recorded a repository adopts the one this report named,
 	// which is the only moment the platform ever holds it. A refused report
-	// changes nothing.
+	// changes nothing. The same identity is what both verification conditions
+	// above were answered against, so what the row ends up recording is what
+	// the check actually established, and not a second, unstated choice.
 	review.Repository = repositoryIdentity
+	if adoptedFromNone {
+		log.Printf("erun api reviews: review %s recorded no repository and adopted %s from its accepted MERGED report", review.ReviewID, repositoryIdentity)
+	}
 	updated, err := s.reviews.Update(ctx, review)
 	if err != nil {
 		return model.Review{}, err
@@ -667,7 +675,18 @@ func (s *ReviewService) verifyGateBuild(review model.Review, build model.Build) 
 // refusing a commit whose history never really passed through the gated
 // tip at all — the case that matters, a rewritten or replaced history
 // (a force-push standing in for a buggy or malicious reporter).
-func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.Review, commit, remoteURL string) error {
+//
+// Both conditions are asked of repositoryIdentity — the repository the
+// report's remote names — and never of the review's own repository column,
+// which is empty on a row created before the platform recorded one. An empty
+// repository means "every repository" to FindLastMergedReview's filter, so
+// anchoring condition 2 on the column rather than on the identity would let
+// whichever repository merged onto a same-named target branch most recently
+// stand in as this row's gated base: it refuses a real landing because a
+// stranger's commit is not one of its ancestors, and it defeats the force-push
+// check for a repository whose own history really was rewritten, by finding
+// some other repository's commit where it should have found that repository's.
+func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.Review, repositoryIdentity, commit, remoteURL string) error {
 	if s.verifier == nil {
 		return &MergeNotVerifiedError{Reason: "this control plane has no way to verify merges against the real repository"}
 	}
@@ -678,7 +697,7 @@ func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.
 	if !onBranch {
 		return &MergeNotVerifiedError{Reason: fmt.Sprintf("commit %s is not on the target branch %s", commit, review.TargetBranch)}
 	}
-	gatedTip, err := s.gatedTargetTip(ctx, review)
+	gatedTip, err := s.gatedTargetTip(ctx, repositoryIdentity, review.TargetBranch)
 	if err != nil {
 		return err
 	}
@@ -696,16 +715,21 @@ func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.
 }
 
 // gatedTargetTip is the merge commit of the most recently MERGED review on
-// targetBranch — still the right anchor even though it can no longer be
-// compared by strict equality: the one-MERGE-per-target-branch invariant
-// means nothing else advances the queue's own notion of the branch's tip
-// while a review holds MERGE, so this is the review's actual gated base
+// targetBranch in repositoryIdentity — still the right anchor even though it
+// can no longer be compared by strict equality: the one-MERGE-per-target-branch
+// invariant means nothing else advances the queue's own notion of the branch's
+// tip while a review holds MERGE, so this is the review's actual gated base
 // regardless of what else (a release push) landed on the branch around it.
-// Empty with no error means no review has ever merged onto this branch
-// through the queue yet — the bootstrap case, with nothing recorded to
-// compare against.
-func (s *ReviewService) gatedTargetTip(ctx context.Context, review model.Review) (string, error) {
-	last, err := s.reviews.FindLastMergedReview(ctx, review.Repository, review.TargetBranch)
+//
+// The repository is a parameter rather than something read off a review
+// because the two are not always the same question, and passing the wrong one
+// here is silent: a review that recorded no repository has to be anchored on
+// the repository its report names — the one it adopts — since asking for
+// "any repository" would answer with a stranger's merge. Empty with no error
+// means this repository has never merged onto this branch through the queue
+// yet — the bootstrap case, with nothing recorded to compare against.
+func (s *ReviewService) gatedTargetTip(ctx context.Context, repositoryIdentity, targetBranch string) (string, error) {
+	last, err := s.reviews.FindLastMergedReview(ctx, repositoryIdentity, targetBranch)
 	if errors.Is(err, repository.ErrNotFound) {
 		return "", nil
 	}
