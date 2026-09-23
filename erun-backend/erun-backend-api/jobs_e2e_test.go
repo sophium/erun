@@ -79,9 +79,27 @@ func claimJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Context
 // backdateJob moves a job's last-update stamp into the past, the way an actor
 // going quiet would. It writes through the same connection pool as the
 // repository, so the sweep's own transaction sees it.
+//
+// The timestamp trigger owns updated_at on UPDATE -- erun_set_timestamps sets
+// it to NOW() unconditionally, discarding whatever the statement supplied --
+// so a plain backdating UPDATE is overwritten before the sweep can read it and
+// the stale job the sweep is supposed to abandon is never stale. The trigger
+// is disabled for this one write, because the state being set up is the one
+// production reaches by an actor simply not writing again, which no UPDATE of
+// this test's can imitate while the trigger owns the column. DISABLE TRIGGER
+// is catalog-level, so it applies to the pool's connection for the UPDATE
+// whichever one that turns out to be.
 func backdateJob(t *testing.T, db *sql.DB, jobID string, ago time.Duration) {
 	t.Helper()
-	_, err := db.Exec(`UPDATE jobs SET updated_at = NOW() - $2::interval WHERE job_id = $1`, jobID, ago.String())
+	_, err := db.Exec(`ALTER TABLE jobs DISABLE TRIGGER jobs_set_timestamps`)
+	mustNoErr(t, err, "disable the jobs timestamp trigger")
+	defer func() {
+		if _, err := db.Exec(`ALTER TABLE jobs ENABLE TRIGGER jobs_set_timestamps`); err != nil {
+			t.Fatalf("re-enable the jobs timestamp trigger: %v", err)
+		}
+	}()
+
+	_, err = db.Exec(`UPDATE jobs SET updated_at = NOW() - $2::interval WHERE job_id = $1`, jobID, ago.String())
 	mustNoErr(t, err, "backdate job")
 }
 

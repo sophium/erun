@@ -1,4 +1,4 @@
-h1:+weOHpDsXTWiE9bH/iI/rMRpYxZrW0YQY/5k3k00Dlc=
+h1:fCye32pO2aShQxNOn6X7v2ZcdVKqZDrClMRKrftdqjM=
 20260501120000_initial_tenant_identity.sql h1:RpS03/4sFjbCggwYgcGNn6k3jNZCNTNl0BD/afOKFzo=
 20260503143000_tenant_issuer_names.sql h1:VEZjICG3/jU2YtEx0XX05l9Q8lJyWKeiRY8f4dXOkvE=
 20260503170000_audit_events.sql h1:OLjiGP/FhLTWvkx1bxS2xCcJK6tExdufnEC8R6LsKWA=
@@ -33,3 +33,4 @@ h1:+weOHpDsXTWiE9bH/iI/rMRpYxZrW0YQY/5k3k00Dlc=
 20260921120000_environment_events.sql h1:QSIn8yA487yLDjKfEHB5Xuki+OQZ05rIXBR/N+1GVbc=
 20260921130000_jobs.sql h1:PngkNvjDZ+luOn7f0ueusnE+pbWK4c7KEUddg6GVAZ8=
 20260922120000_review_repository_identity.sql h1:7MqYwgqsc/J1iLoSisWC5oTxwl1g2rJuUtbQBjQ/7Dk=
+20260923120000_builds_tenant_environment_fk.sql h1:bd5r4Uw9HxWkNn4OX0gMWs7hKBrWbdNXyYtP2cJsoSA=
