@@ -331,6 +331,16 @@ composition and release invariants belong to root/shared logic, not chart policy
   `k8s` are discovered automatically. Keep real-daemon tests separate and explicit:
   `test-postgres-restart` for reset/migration/recovery and `test-console-nginx`
   for shipped nginx behavior. Run affected entrypoint/helper script tests too.
+- `terraform-test` runs the published `terraform-erun` modules' own
+  `terraform test` suites in `make check`. Every suite mocks the providers it
+  uses, so no cloud credentials, cluster or kubeconfig are involved, but each
+  module's `terraform init -backend=false` needs egress to
+  `registry.terraform.io` at gate time -- the alternative, an image-baked
+  provider cache, is the trade-off recorded at the target itself. Modules are
+  discovered by scanning `terraform-erun/modules/`, and a module carrying no
+  `tests/*.tftest.hcl` is reported explicitly rather than passing silently,
+  because `terraform test` also exits 0 on an empty test set.
+  `erun-integration/terraform_test_target_test.go` locks the wiring.
 - Live RBAC, resource isolation, and restart guarantees need corresponding real
   probes when changed; render tests alone cannot establish them.
 - Guidance-only edits use root's consistency/reference validation exemption.
