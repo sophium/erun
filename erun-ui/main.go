@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -32,7 +34,10 @@ Flags:
   -h, --help          Show this help message and exit.
       --headless      Run without a native window, serving the UI over
                        HTTP+SSE instead (see erun-ui/playwright/AGENTS.md).
-      --port <n>      Port for --headless mode to listen on (default 34123).
+      --port <n>      Port for --headless mode to prefer (default 34123). A
+                      port already in use falls back to an OS-assigned one;
+                      the address it actually serves on is announced on
+                      startup.
 `
 
 func main() {
@@ -237,15 +242,25 @@ func runHeadless(app *App, port int) error {
 	// normally supply, so mirror its startup/teardown lifecycle by hand here.
 	app.startup(ctx)
 
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	log.Printf("erun-app headless: listening on http://%s/", addr)
+	// Bind here, not inside the server, so the announcement below names the
+	// address this process is really serving on: --port is a preference (see
+	// listenHeadless), and a caller that assumed the port it asked for would be
+	// reading a listener that may not exist.
+	listener, bindErr := listenHeadless(fmt.Sprintf("127.0.0.1:%d", port))
+	if bindErr == nil {
+		log.Printf("erun-app headless: listening on http://%s/", listener.Addr().String())
+	}
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- server.Listen(ctx, addr)
+		if bindErr != nil {
+			errCh <- bindErr
+			return
+		}
+		errCh <- server.Serve(ctx, listener)
 	}()
 
 	var listenErr error
@@ -261,4 +276,30 @@ func runHeadless(app *App, port int) error {
 	_ = app.beforeClose(ctx)
 	app.shutdown(ctx)
 	return listenErr
+}
+
+// listenHeadless binds the address the headless server will serve on and
+// returns the listener, so the caller can announce the address actually bound.
+//
+// --port is a preference, not a guarantee. A port another process already holds
+// is not fatal: falling back to an OS-assigned port keeps a stale listener — a
+// backend left behind by a run that died partway, or any host process that
+// reached the port first — from failing the whole run, which is exactly what a
+// caller that reads the announcement back is set up to absorb. Only
+// address-in-use falls back; every other bind error (a bad address, a port this
+// process may not have) is returned and stays fatal.
+func listenHeadless(addr string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", addr)
+	if err == nil {
+		return listener, nil
+	}
+	if !errors.Is(err, syscall.EADDRINUSE) {
+		return nil, err
+	}
+	fallback, fallbackErr := net.Listen("tcp", "127.0.0.1:0")
+	if fallbackErr != nil {
+		return nil, err
+	}
+	log.Printf("erun-app headless: %s is in use, listening on an OS-assigned port instead", addr)
+	return fallback, nil
 }

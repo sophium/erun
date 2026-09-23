@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +89,114 @@ func TestEnvironmentCountScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	mustNoErr(t, err, "list as operations caller")
 	if len(list) != 1 || list[0].EnvironmentID != own.EnvironmentID {
 		t.Fatalf("List = %v, want exactly [%s]", list, own.EnvironmentID)
+	}
+}
+
+// TestEnvironmentGetScopesToTheOperationsCallersOwnTenant pins the tenant
+// scoping every operate route depends on, and is the one read this file's
+// own "EnvironmentRepository's tenant scoping is proven against the actual
+// erun_operations RLS policy" contract never exercised. EnvironmentRepository.Get
+// is the first call POST /v1/environments/{id}/deploy, POST
+// /v1/environments/{id}/stop, DELETE /v1/environments/{id} and every
+// env-scoped sub-route make; unlike List/Count/CountByContext it was left
+// without the explicit tenant filter those carry, and erun_operations' RLS
+// policy is USING (true), so nothing downstream refused it either. An
+// OPERATIONS caller naming a stranger tenant's environment id therefore read
+// that row — and then deployed to, stopped, or deleted it — for an
+// environment its own tenant-scoped List does not even show it.
+func TestEnvironmentGetScopesToTheOperationsCallersOwnTenant(t *testing.T) {
+	opsCtx, strangerCtx, _, _, db := operationsScopeDatabase(t)
+	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
+
+	stranger, err := environments.Create(strangerCtx, model.Environment{Name: "stranger-env", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.0.0"})
+	mustNoErr(t, err, "create stranger environment")
+	own, err := environments.Create(opsCtx, model.Environment{Name: "ops-env", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.0.0"})
+	mustNoErr(t, err, "create ops environment")
+
+	got, err := environments.Get(opsCtx, own.EnvironmentID)
+	if err != nil || got.EnvironmentID != own.EnvironmentID {
+		t.Fatalf("Get of the caller's own environment = (%q, %v), want %q and no error", got.EnvironmentID, err, own.EnvironmentID)
+	}
+
+	if _, err := environments.Get(opsCtx, stranger.EnvironmentID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("Get of a stranger tenant's environment = %v, want %v: an OPERATIONS caller must not reach an environment outside its tenant, because the operate routes take this row as authority to deploy to, stop, or delete it", err, repository.ErrNotFound)
+	}
+}
+
+// TestEnvironmentGetRefusesAStrangerTenantsEnvironmentForACompanyCaller is
+// the company-tenant half of the same boundary, where RLS is the enforcement
+// rather than the explicit filter: a caller can name any environment id in a
+// request, so the refusal must come from the read, not from the caller
+// choosing a polite id.
+func TestEnvironmentGetRefusesAStrangerTenantsEnvironmentForACompanyCaller(t *testing.T) {
+	_, strangerCtx, _, _, db := operationsScopeDatabase(t)
+	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
+
+	stranger, err := environments.Create(strangerCtx, model.Environment{Name: "stranger-only-env", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.0.0"})
+	mustNoErr(t, err, "create stranger environment")
+
+	companyTenantID := seedScopeTestTenant(t, db, "company-get-scope-e2e", model.TenantTypeCompany)
+	t.Cleanup(func() {
+		if _, err := db.Exec(`DELETE FROM environments WHERE tenant_id = $1`, companyTenantID); err != nil {
+			t.Logf("clearing the company tenant's environments: %v", err)
+		}
+		if _, err := db.Exec(`DELETE FROM tenants WHERE tenant_id = $1`, companyTenantID); err != nil {
+			t.Logf("clearing the company tenant: %v", err)
+		}
+	})
+	companyCtx := security.WithContext(context.Background(), security.Context{TenantID: companyTenantID, TenantType: string(model.TenantTypeCompany)})
+
+	if _, err := environments.Get(companyCtx, stranger.EnvironmentID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("Get of another tenant's environment = %v, want %v", err, repository.ErrNotFound)
+	}
+}
+
+// TestGetEnvironmentHTTPRefusesAnEnvironmentOutsideTheCallersTenant drives
+// the same boundary through the real handler, auth middleware, and database
+// rather than the repository alone: GET /v1/environments/{environment_id} is
+// the read every operate route performs first, so what it answers for an id
+// naming another tenant's environment is what deploy/stop/delete are handed.
+// It must answer 404 — never the row — in both directions and for both tenant
+// types, since a caller can put any id in a URL.
+func TestGetEnvironmentHTTPRefusesAnEnvironmentOutsideTheCallersTenant(t *testing.T) {
+	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
+	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
+	strangerEnv, err := environments.Create(strangerCtx, model.Environment{Name: "stranger-http-env", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.0.0"})
+	mustNoErr(t, err, "create stranger environment")
+	ownEnv, err := environments.Create(opsCtx, model.Environment{Name: "ops-http-env", Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.0.0"})
+	mustNoErr(t, err, "create ops environment")
+
+	opsUserID := seedScopeTestUser(t, db, opsTenantID, "ops-caller")
+	strangerUserID := seedScopeTestUser(t, db, strangerTenantID, "stranger-caller")
+	opsServer := startEnvironmentsAPIServer(t, db, opsTenantID, model.TenantTypeOperations, opsUserID)
+	strangerServer := startEnvironmentsAPIServer(t, db, strangerTenantID, model.TenantTypeCompany, strangerUserID)
+
+	// The caller's own environment still resolves: the refusals below are the
+	// boundary, not a read that stopped working.
+	code, body := e2eRequest(t, opsServer.URL, http.MethodGet, "/v1/environments/"+ownEnv.EnvironmentID, nil)
+	if code != http.StatusOK {
+		t.Fatalf("operations caller reading its own environment: HTTP %d: %s", code, body)
+	}
+	if !strings.Contains(body, "ops-http-env") {
+		t.Fatalf("operations caller reading its own environment = %s, want the environment row", body)
+	}
+
+	for _, tc := range []struct {
+		label         string
+		serverURL     string
+		environmentID string
+		ownedName     string
+	}{
+		{"operations caller naming a stranger tenant's environment", opsServer.URL, strangerEnv.EnvironmentID, "stranger-http-env"},
+		{"stranger tenant naming the operations tenant's environment", strangerServer.URL, ownEnv.EnvironmentID, "ops-http-env"},
+	} {
+		code, body = e2eRequest(t, tc.serverURL, http.MethodGet, "/v1/environments/"+tc.environmentID, nil)
+		if code != http.StatusNotFound {
+			t.Fatalf("%s: HTTP %d (want 404): %s", tc.label, code, body)
+		}
+		if strings.Contains(body, tc.ownedName) {
+			t.Fatalf("%s: the refusal leaked the environment row: %s", tc.label, body)
+		}
 	}
 }
 

@@ -200,7 +200,10 @@ export class Sidebar {
   // This is the whole close contract for a spec — do not re-assert the indicator
   // afterwards: a closed environment produces no further traffic, so there is no
   // event to bound a "still closed" check against, and a bare re-check is a race
-  // with any tab spawn the open left in flight.
+  // with any tab spawn the open left in flight. Being the whole contract is also
+  // why the toPass is bare: the dot clears only once CloseEnvironmentSessions
+  // answers, so the deadline this step may spend is the calling test's, not one
+  // it picked for itself.
   async closeEnvironment(tenant: string, env: string): Promise<void> {
     const dot = this.envOpenDot(tenant, env);
     await expect(async () => {
@@ -209,7 +212,7 @@ export class Sidebar {
         await dot.press('Enter');
       }
       await expect(dot).toHaveCount(0, { timeout: 2_000 });
-    }).toPass({ timeout: 30_000 });
+    }).toPass();
   }
 
   async hasLocalBadge(tenant: string, env: string): Promise<boolean> {
@@ -342,7 +345,9 @@ export class Sidebar {
   }
 
   // readOrchestratorHoverCard is readEnvHoverCard's orchestrator-row mirror,
-  // convergent for the same reason -- see that method's own comment.
+  // convergent for the same reason -- see that method's own comment. Bare for
+  // the same reason too: readEnvHoverCard has no cap of its own, and a cap here
+  // would be a number the calling test never chose.
   async readOrchestratorHoverCard(
     name: string,
     read: (card: Locator) => Promise<void>,
@@ -350,19 +355,20 @@ export class Sidebar {
     await expect(async () => {
       await this.hoverOrchestratorRow(name);
       await read(this.orchestratorHoverCard(name));
-    }).toPass({ timeout: 25_000 });
+    }).toPass();
   }
 
   // hoverOrchestratorRow is the orchestrator-row mirror of
   // hoverEnvironmentRow, convergent for the same reason: the card's open state
   // belongs to the row that raised it, and a re-render drops it with no way
-  // back while the pointer still sits there.
+  // back while the pointer still sits there. Bare, like its env-row mirror --
+  // the caller's own budget is the bound, and a slow boot is not a failed step.
   async hoverOrchestratorRow(name: string): Promise<void> {
     await expect(async () => {
       await this.page.mouse.move(0, 0);
       await this.orchestratorRowButton(name).hover();
       await this.orchestratorHoverCard(name).waitFor({ state: 'visible', timeout: 2_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   }
 
   // The tenant name button that opens its dashboard, carrying aria-current
@@ -449,13 +455,15 @@ export class Sidebar {
   // 4-attempt x 2000ms loop caps the whole wait at 8s regardless of the
   // test's real 30s budget, so a merely slow (not swallowed) render under
   // contention fails the step with budget still unused. Wrapping the probe
-  // in toPass converges up to the test's own budget instead.
+  // in a bare toPass converges up to the test's own budget instead -- the
+  // bare form is what carries that property, since `toPass({ timeout: N })`
+  // takes `min(test deadline, now + N)` and would reinstate the cap.
   async openOrchestratorDialog(name: string): Promise<void> {
     const dialog = this.page.getByRole('dialog', { name: 'Edit orchestrator' });
     await expect(async () => {
       await this.orchestratorDetailsButton(name).press('Enter');
       await dialog.waitFor({ state: 'visible', timeout: 2_000 });
-    }).toPass({ timeout: 25_000 });
+    }).toPass();
   }
 
   async tenants(): Promise<string[]> {

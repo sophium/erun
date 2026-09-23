@@ -10,7 +10,11 @@ CREATE TABLE builds (
   -- review-nested route carry no environment today) and SET NULL if the
   -- environment is later deleted -- an append-only build history should
   -- outlive the row it described, the same choice usage_events.environment_id
-  -- already made.
+  -- already made. The reference carries tenant_id (builds_tenant_environment_fkey
+  -- below), so it can only ever name the tenant's own environment; a
+  -- single-column reference accepted another tenant's id, which made this
+  -- route able to tell a caller whether any tenant holds a given environment
+  -- id.
   environment_id UUID,
   -- RECORDED is a reported build (client POST or a release's own build), which
   -- always names the version it produced. GATE is the merge queue's own
@@ -33,7 +37,13 @@ CREATE TABLE builds (
   updated_at TIMESTAMPTZ,
   FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
   FOREIGN KEY (tenant_id, review_id) REFERENCES reviews (tenant_id, review_id),
-  FOREIGN KEY (environment_id) REFERENCES environments (environment_id) ON DELETE SET NULL,
+  -- ON DELETE SET NULL names environment_id alone: deleting an environment
+  -- clears the build's reference to it and nothing else. A bare SET NULL over
+  -- the whole composite key would try to null tenant_id too, which is NOT
+  -- NULL, and the delete would fail instead.
+  CONSTRAINT builds_tenant_environment_fkey
+    FOREIGN KEY (tenant_id, environment_id) REFERENCES environments (tenant_id, environment_id)
+    ON DELETE SET NULL (environment_id),
   CONSTRAINT builds_kind_check CHECK (kind IN ('RECORDED', 'GATE')),
   CONSTRAINT builds_gate_requires_review_check CHECK (kind <> 'GATE' OR review_id IS NOT NULL),
   CONSTRAINT builds_commit_id_check CHECK (length(trim(commit_id)) > 0),

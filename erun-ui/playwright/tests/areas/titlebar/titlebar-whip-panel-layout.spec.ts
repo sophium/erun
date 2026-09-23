@@ -71,9 +71,10 @@ test('a realistic population keeps the whip action reachable without scrolling',
     // reload it so the population is visibly staged before driving the panel.
     // This spec's seed (9 environments plus 7 orchestrators written in one
     // batch) is far larger than any other waitForSeededRow caller's, so a
-    // reload here genuinely costs more to resolve and render -- widen the
-    // budget rather than share the single-row default.
-    await waitForSeededRow(app, tenant, lastEnvironment, 60_000);
+    // reload here genuinely costs more to resolve and render. No explicit
+    // budget: the helper's default is now this test's own declared 90s, and a
+    // 60s number typed here would only put a cap under it again.
+    await waitForSeededRow(app, tenant, lastEnvironment);
 
     await app.titlebar.openWhipPanel();
 
