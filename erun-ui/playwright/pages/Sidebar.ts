@@ -97,8 +97,13 @@ export class Sidebar {
   // keydown is retried quickly, but the fixed 4-attempt loop this replaced
   // capped the whole wait at 4x2s regardless of the test's real 30s budget --
   // under contention a merely slow (not swallowed) render blew that cap and
-  // failed the step with over 20s of budget still unused. Wrapping the probe
-  // in toPass converges up to the test's own budget instead.
+  // failed the step with over 20s of budget still unused.
+  //
+  // A bare toPass() is what gives the probe that property, and it is why this
+  // one must stay bare: `toPass({ timeout: N })` takes `min(test deadline,
+  // now + N)`, so N is a second fixed cap of exactly the kind being replaced --
+  // a calling test that declared 60s would still fail the step at N. Any N
+  // here is a number the step's own test never chose.
   async openManageDialogViaKeyboard(tenant: string, env: string): Promise<void> {
     const dialog = this.page
       .getByRole('dialog')
@@ -107,7 +112,7 @@ export class Sidebar {
     await expect(async () => {
       await this.environmentRow(tenant, env).press('Enter');
       await dialog.waitFor({ state: 'visible', timeout: 2_000 });
-    }).toPass({ timeout: 25_000 });
+    }).toPass();
   }
 
   // Targets the clickable env-row button, not the edit button environmentRow() returns.
@@ -134,7 +139,7 @@ export class Sidebar {
       await this.page.mouse.move(0, 0);
       await this.envRowButton(tenant, env).hover();
       await this.envHoverCard(tenant, env).waitFor({ state: 'visible', timeout: 2_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   }
 
   envHoverCard(tenant: string, env: string): Locator {
@@ -161,7 +166,7 @@ export class Sidebar {
     await expect(async () => {
       await this.hoverEnvironmentRow(tenant, env);
       await read(this.envHoverCard(tenant, env));
-    }).toPass({ timeout: 25_000 });
+    }).toPass();
   }
 
   // Scoped through the row button's parent so it resolves one env's dot even

@@ -1,4 +1,4 @@
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // The desktop resolved and passed a private --runtime-image but had no field
@@ -76,23 +76,30 @@ test.describe('manage dialog pull coordinates', () => {
     await app.manageDialog.addPullSecretButton().click();
     await app.manageDialog.pullSecretInput(0).fill('wrong-secret');
     await app.manageDialog.save();
-    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('General')).toBe(false);
+    // withTestBudget, not expect's 10s default: this test declared 60s, and a
+    // save round-trip that is merely slow under contention must be allowed to
+    // use it (see fixtures/erunApp.ts).
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('General'), withTestBudget())
+      .toBe(false);
 
     await app.manageDialog.removePullSecretButton(0).click();
-    await expect(app.manageDialog.pullSecretInput(0)).toHaveCount(0);
+    await expect(app.manageDialog.pullSecretInput(0)).toHaveCount(0, withTestBudget());
     await app.manageDialog.save();
     // Dot clearing confirms this second save round-tripped before the dialog
     // closes, so the reopen below reads back the removal instead of racing it.
-    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('General')).toBe(false);
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('General'), withTestBudget())
+      .toBe(false);
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
 
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
-    await expect(app.manageDialog.pullSecretInput(0)).toHaveCount(0);
+    await expect(app.manageDialog.pullSecretInput(0)).toHaveCount(0, withTestBudget());
     await expect(
       app.manageDialog.locator().getByText('A runtime image in a private registry needs a'),
-    ).toBeVisible();
+    ).toBeVisible(withTestBudget());
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
