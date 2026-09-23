@@ -3,24 +3,27 @@
 // header for the design rationale and for what it deliberately does not try
 // to decide). Run with `node --test scripts/check-regression-coverage.test.mjs`.
 //
-// Every case below drives the pure classifier against synthetic git facts and
-// an injected filesystem, so nothing here reads the real tree -- the same
-// split erun-integration's structural gates use. The gate has to fail what it
-// should catch and pass what it should allow, so both directions are asserted
-// for every rule, not just the failing one: a gate that only ever fails is as
-// useless as one that only ever passes, and the second half is what keeps a
-// legitimate change (a docs fix, a revert) from being blocked.
+// Every case below drives the pure classifier against synthetic git facts, an
+// injected filesystem and an injected git, so nothing here reads the real tree
+// or runs a real git -- the same split erun-integration's structural gates use.
+// The gate has to fail what it should catch and pass what it should allow, so
+// both directions are asserted for every rule, not just the failing one: a gate
+// that only ever fails is as useless as one that only ever passes, and the
+// second half is what keeps a legitimate change (a docs fix, a revert, or an
+// ordinary change on a branch that is not bug/…) from being blocked.
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  branchNameForRef,
+  defectFixScope,
   evaluateRegressionCoverage,
   exemptionKinds,
-  isDefectFix,
   isDocumentationPath,
   isTestFile,
   parseTrailers,
+  readChangeFromGit,
   statementIsSubstantive,
 } from './check-regression-coverage.mjs';
 
@@ -104,19 +107,119 @@ test('parseTrailers reads declarations from any commit in the range, not just th
   assert.equal(trailers['Closes'], undefined);
 });
 
-test('isDefectFix follows the branch convention and honours the explicit override', () => {
-  assert.equal(isDefectFix(change({ branchName: 'bug/2123-thing' })), true);
-  assert.equal(isDefectFix(change({ branchName: 'feature/2123-thing' })), false);
-  assert.equal(
-    isDefectFix(change({ branchName: 'feature/2123-thing', commits: [{ sha: '1', subject: 's', body: 'Defect-Fix: yes' }] })),
-    true,
+test('defectFixScope follows the branch convention, honours the override, and records what decided it', () => {
+  // Which of these answers says something about the change, and which says
+  // something about the branch it was built on, is the whole difference the
+  // caller has to be able to report.
+  assert.deepEqual(defectFixScope(change({ branchName: 'bug/2123-thing' })), { defectFix: true, source: 'branch-name' });
+  assert.deepEqual(defectFixScope(change({ branchName: 'feature/2123-thing' })), { defectFix: false, source: 'branch-name' });
+  assert.deepEqual(defectFixScope(change({ branchName: 'feature/2123-thing', forceDefectFix: false })), {
+    defectFix: false,
+    source: 'forced',
+  });
+  assert.deepEqual(defectFixScope(change({ forceDefectFix: true, branchName: 'main' })), { defectFix: true, source: 'forced' });
+  assert.deepEqual(
+    defectFixScope(change({ branchName: 'feature/2123-thing', commits: [{ sha: '1', subject: 's', body: 'Defect-Fix: yes' }] })),
+    { defectFix: true, source: 'trailer' },
   );
-  assert.equal(
-    isDefectFix(change({ branchName: 'bug/2123-thing', commits: [{ sha: '1', subject: 's', body: 'Defect-Fix: no' }] })),
-    false,
+  assert.deepEqual(
+    defectFixScope(change({ branchName: 'bug/2123-thing', commits: [{ sha: '1', subject: 's', body: 'Defect-Fix: no' }] })),
+    { defectFix: false, source: 'trailer' },
   );
-  assert.equal(isDefectFix(change({ forceDefectFix: true, branchName: 'main' })), true);
 });
+
+// --- which ref the scope is read from ---------------------------------
+
+// A git double: `symbolic` maps a ref to what `rev-parse --symbolic-full-name`
+// prints for it (nothing at all for a bare object name, a tag's ref, or a
+// detached HEAD's literal "HEAD"), and the range facts are the synthetic ones
+// the classifier tests above use. Anything else is a call this gate is not
+// supposed to be making.
+function gitDouble(symbolic, { commits = [], files = [] } = {}) {
+  const FS = '\x1f';
+  const RS = '\x1e';
+  const calls = [];
+  const run = (args) => {
+    calls.push(args.join(' '));
+    if (args[0] === 'rev-parse') return symbolic[args[args.length - 1]] ?? '';
+    if (args[0] === 'log') return commits.map((c) => `${c.sha}${FS}${c.subject}${FS}${c.body || ''}${RS}`).join('');
+    if (args[0] === 'diff') return files.map((f) => `${f.status}\t${f.path}`).join('\n');
+    throw new Error(`unexpected git call: ${args.join(' ')}`);
+  };
+  return { run, calls };
+}
+
+test('the scope signal follows the ref being graded, not the branch that is checked out', () => {
+  // The reported failure, in the direction the checkout hides: the same commit
+  // and the same tree graded as `--head bug/124-probe` from a feature/ probe
+  // checkout came back not-a-defect-fix, because the branch name read for scope
+  // was HEAD's rather than the graded ref's. Graded on its own branch the
+  // identical range exits 1.
+  const { run } = gitDouble(
+    {
+      HEAD: 'refs/heads/feature/124-probe',
+      'feature/124-probe': 'refs/heads/feature/124-probe',
+      'bug/124-probe': 'refs/heads/bug/124-probe',
+    },
+    { commits: [{ sha: '78932dd1', subject: 'Land the probe fix on the integration branch', body: '' }] },
+  );
+
+  const graded = readChangeFromGit({ base: 'origin/main', head: 'bug/124-probe' }, run);
+  assert.equal(graded.branchName, 'bug/124-probe');
+  assert.equal(evaluateRegressionCoverage(graded, io({})).classification, 'undeclared');
+
+  // The same range reached through the checkout is not in scope -- and now says
+  // so instead of reporting a clean pass over a range it never looked at.
+  const checkedOut = readChangeFromGit({ base: 'origin/main', head: 'HEAD' }, run);
+  assert.equal(checkedOut.branchName, 'feature/124-probe');
+  const verdict = evaluateRegressionCoverage(checkedOut, io({}));
+  assert.equal(verdict.classification, 'not-a-defect-fix');
+  assert.deepEqual(verdict.failures, []);
+  assert.match(verdict.notes[0], /^UNCHECKED: scope came from the branch name \("feature\/124-probe"\)/);
+});
+
+test('branchNameForRef reads a branch out of the ref, and reads nothing out of the rest', () => {
+  const { run } = gitDouble({
+    HEAD: 'refs/heads/feature/2646-thing',
+    'bug/2123-thing': 'refs/heads/bug/2123-thing',
+    'origin/bug/2123-thing': 'refs/remotes/origin/bug/2123-thing',
+    '9b4a3d0c': '',
+    'v1.0.300': 'refs/tags/v1.0.300',
+  });
+  assert.equal(branchNameForRef('HEAD', run), 'feature/2646-thing');
+  assert.equal(branchNameForRef('bug/2123-thing', run), 'bug/2123-thing');
+  // A remote-tracking ref for a bug/… branch is that same branch.
+  assert.equal(branchNameForRef('origin/bug/2123-thing', run), 'bug/2123-thing');
+  // A bare commit and a tag have no branch to read, so the fallback cannot
+  // apply to them however the branch convention is spelled.
+  assert.equal(branchNameForRef('9b4a3d0c', run), '');
+  assert.equal(branchNameForRef('v1.0.300', run), '');
+
+  // A detached checkout prints "HEAD" for HEAD and carries no branch.
+  assert.equal(branchNameForRef('HEAD', gitDouble({ HEAD: 'HEAD' }).run), '');
+
+  // A ref that names no branch falls back to the checkout, so grading one
+  // commit by SHA from the branch it belongs to keeps working -- and a detached
+  // checkout grading one by SHA has nothing to fall back to and reads no branch
+  // at all, which the notice above reports rather than passing over.
+  const gradedBySha = gitDouble({
+    HEAD: 'refs/heads/bug/124-probe',
+    '9b4a3d0c': '',
+  });
+  assert.equal(readChangeFromGit({ base: 'origin/main', head: '9b4a3d0c' }, gradedBySha.run).branchName, 'bug/124-probe');
+  const detached = gitDouble({ HEAD: 'HEAD', '9b4a3d0c': '' });
+  assert.equal(readChangeFromGit({ base: 'origin/main', head: '9b4a3d0c' }, detached.run).branchName, '');
+
+  // A ref that does not resolve is not a branch either -- git's own failure is
+  // reported by the `log` that follows, not as a phantom branch name here.
+  assert.equal(
+    branchNameForRef('nope', () => {
+      throw new Error('fatal: ambiguous argument');
+    }),
+    '',
+  );
+});
+
 
 // --- the case the gate exists to catch --------------------------------
 
@@ -271,6 +374,42 @@ test('a change that is not a defect fix is out of scope entirely', () => {
   assert.equal(result.defectFix, false);
   assert.equal(result.classification, 'not-a-defect-fix');
   assert.deepEqual(result.failures, []);
+});
+
+test('a range scoped by branch name reports that nothing in it was examined', () => {
+  // The reported route: squashing source branches into an integration branch
+  // replaces their messages, so the declarations they carried are gone from the
+  // only place this gate reads. That still exits 0 -- a feature branch is out
+  // of scope, and a branch-name decision is the convention every non-bug/
+  // change relies on -- but it can no longer do so silently.
+  const result = evaluateRegressionCoverage(change({ branchName: 'feature/124-integration' }), io({}));
+  assert.equal(result.classification, 'not-a-defect-fix');
+  assert.deepEqual(result.failures, []);
+  assert.match(result.notes[0], /^UNCHECKED: scope came from the branch name \("feature\/124-integration"\)/);
+  assert.match(result.notes[0], /no "Regression-Test:" or "Reproduces:" trailer was read/);
+  assert.match(result.notes[1], /"Defect-Fix: yes"/);
+
+  // A detached checkout is the same answer for the same reason: a branch-name
+  // decision was made without a branch name, so the range is equally unexamined.
+  const detached = evaluateRegressionCoverage(change({ branchName: '' }), io({}));
+  assert.equal(detached.classification, 'not-a-defect-fix');
+  assert.match(detached.notes[0], /^UNCHECKED: neither the graded ref nor the checkout names a branch/);
+});
+
+test('a scope decision that read a declaration is not reported as unexamined', () => {
+  // The other direction: an author who says "Defect-Fix: no" has answered the
+  // scope question in the range itself, and a caller who passes --not-defect-fix
+  // has answered it outright. Neither leaves the gate unable to tell.
+  const declaredNo = evaluateRegressionCoverage(
+    change({ branchName: 'feature/124-integration', commits: [{ sha: '1', subject: 'Land it', body: 'Defect-Fix: no' }] }),
+    io({}),
+  );
+  assert.equal(declaredNo.classification, 'not-a-defect-fix');
+  assert.deepEqual(declaredNo.failures, []);
+  assert.deepEqual(declaredNo.notes, ['Not a defect fix (a "Defect-Fix: no" trailer in this range), so no reproduction is required.']);
+
+  const forced = evaluateRegressionCoverage(change({ branchName: 'feature/1-new-thing', forceDefectFix: false }), io({}));
+  assert.ok(!forced.notes.some((note) => note.startsWith('UNCHECKED:')));
 });
 
 test('a docs-only fix is allowed, and the claim is verified against the real diff', () => {
@@ -436,8 +575,46 @@ test('audit mode classifies a historical fix by whether it carries any test at a
   assert.match(covered.notes.join(' '), /cannot tell whether any of them reproduces the reported failure mode/);
 });
 
-test('an empty range is not a failure', () => {
+test('audit mode audits a range the branch name cannot scope', () => {
+  // Audit mode asks a diff-derived question, and a range of history is usually
+  // not a defect fix by convention either. Letting scope short-circuit it is
+  // how `--audit` over a trailer-less range of main reported not-a-defect-fix
+  // without auditing anything -- the same silent success, one mode over.
+  const uncovered = evaluateRegressionCoverage(
+    change({ auditOnly: true, branchName: 'feature/124-probe', changedFiles: [{ status: 'M', path: 'erun-common/thing.go' }] }),
+    io({}),
+  );
+  assert.equal(uncovered.classification, 'uncovered');
+  assert.equal(uncovered.defectFix, false);
+  assert.equal(uncovered.failures.length, 1);
+
+  const covered = evaluateRegressionCoverage(
+    change({
+      auditOnly: true,
+      branchName: '',
+      changedFiles: [
+        { status: 'M', path: 'erun-common/thing.go' },
+        { status: 'M', path: 'erun-integration/thing_test.go' },
+      ],
+    }),
+    io({}),
+  );
+  assert.equal(covered.classification, 'covered-undeclared');
+  assert.deepEqual(covered.failures, []);
+});
+
+test('an empty range is not a failure, and is settled before scope is', () => {
   const result = evaluateRegressionCoverage(change({ commits: [], changedFiles: [] }), io({}));
   assert.equal(result.classification, 'empty');
   assert.deepEqual(result.failures, []);
+  assert.deepEqual(result.notes, ['No commits in the range yet -- nothing to check.']);
+
+  // Whatever branch it was taken from: there is nothing here that could have
+  // been examined, so it is not the "scope decided by convention" case either.
+  const fromFeature = evaluateRegressionCoverage(
+    change({ branchName: 'feature/1-thing', commits: [], changedFiles: [] }),
+    io({}),
+  );
+  assert.equal(fromFeature.classification, 'empty');
+  assert.ok(!fromFeature.notes.some((note) => note.startsWith('UNCHECKED:')));
 });
