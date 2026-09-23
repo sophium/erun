@@ -4,6 +4,8 @@ deploy is a pure consume operation: it installs the image and chart already publ
 
 deploy waits for the rollout to become ready — default 15m, or the env's `deploy.timeout`, or --rollout-timeout — and watches the new pods: it keeps waiting while an image is still pulling and aborts early on a real container failure (crash, config error, or a permanent image-pull rejection) instead of waiting out the timeout. The default is sized for a cold pull of the runtime image, which the rollout has to wait out with the previous pod already torn down; raise it if a genuinely cold pull of a bigger image needs longer. Pass --max-cpu/--max-memory/--max-storage together to cap the environment's namespace with a Kubernetes ResourceQuota+LimitRange for this deploy; omit to use the env's saved namespace quota, if any.
 
+A runtime deploy also hands the pod this host's own signed-in erun platform identity — the credential its `erun review` and `erun gate` calls act as — for an environment that records none yet; pass --erun-alias to say which alias that delegates when this host has several configured, since erun cannot guess. An environment that already records one keeps it.
+
 Usage:
   erun deploy [TENANT] [ENVIRONMENT] [flags]
 
@@ -13,12 +15,14 @@ Examples:
   erun deploy team dev --version <VERSION> --runtime-image ghcr.io/sophium/erun-devops
   erun deploy team prod --version <VERSION> --rollout-timeout 10m
   erun deploy team prod --version <VERSION> --max-cpu 4 --max-memory 8Gi --max-storage 80Gi
+  erun deploy team prod --version <VERSION> --erun-alias erun+api.acme.services.erunpaas.com@erun
 
 Flags:
       --components strings                        Deploy exactly these charts this run — chart directory names under <tenant>-devops/k8s/, or the runtime release name (<tenant>-devops); overrides the env's saved selection and the k8s.deployments plan. Empty falls back to the saved selection, then the plan, then the runtime chart alone
       --current                                   Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version
       --dry-run                                   Resolve and trace mutating actions without executing them.
       --environment string                        Deploy for a specific environment; requires --tenant
+      --erun-alias string                         erun platform cloud alias to hand the environment's runtime as its platform identity when it records none (defaults to the sole configured erun-type alias; only needed to disambiguate when more than one is configured)
       --force                                     Re-run the helm upgrade even when the deployed release already matches the requested version
   -h, --help                                      help for deploy
       --max-cpu string                            Cap the environment's namespace to this much CPU (Kubernetes quantity, e.g. 4) via a ResourceQuota+LimitRange; requires --max-memory and --max-storage too, and overrides the env's saved namespace quota for this deploy only
