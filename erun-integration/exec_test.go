@@ -1622,6 +1622,13 @@ func TestExec(t *testing.T) {
 		// The caller here passes only the review name, which is the state the
 		// report describes; a caller that passes the branch's message verbatim
 		// already carried the trailer by accident.
+		//
+		// The trailers are separated from a trailing "Co-Authored-By:" by a
+		// blank line, because that is the shape the report was observed on: the
+		// carriage read only the final run of non-empty lines, so that run was
+		// the Co-Authored-By: alone and every declaration above it was
+		// discarded. Without that blank line the scenario never reached the
+		// failure it exists for.
 		setup := env.New(t)
 		fixture.SeedGitRepo(t, setup.Cwd)
 		seedBareOrigin(t, setup)
@@ -1629,7 +1636,7 @@ func TestExec(t *testing.T) {
 		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
 		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
-		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "Fix the widget\n\nCloses #2601\nReproduces: a caller reading the widget got its parts in the wrong order.\nRegression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "Fix the widget\n\nCloses #2601\nReproduces: a caller reading the widget got its parts in the wrong order.\nRegression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
 		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
 		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
 

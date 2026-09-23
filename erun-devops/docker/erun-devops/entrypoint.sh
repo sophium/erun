@@ -283,6 +283,47 @@ prune_stale_app_sessions() {
     erun-prune-sessions "$(runtime_session_dir)" 2>/dev/null || true
 }
 
+# start_cache_trim bounds the go build cache for as long as the container lives.
+# Nothing else in this pod caps it: it lives under ~/.cache on the home volume,
+# the volume's declared size is not a quota on a node-local storage class, and
+# the go command's own trim is by age with no ceiling. An environment that keeps
+# building grows it into tens of gigabytes and, sharing a node with the other
+# environments doing the same, is what puts that node under DiskPressure.
+#
+# It runs in the background rather than at a blocking point because the first
+# pass is the migration: an environment that already holds tens of gigabytes is
+# brought under the cap by it, and deleting that much is not something to hold
+# the rest of the boot behind. It repeats rather than running once because a
+# container outlives the boot that started it -- without the loop, a long-lived
+# pod would simply grow back to the size this exists to bound.
+#
+# The cap travels from the chart (ERUN_GO_BUILD_CACHE_MAX_BYTES), for the reason
+# the docker volume's does: the pod cannot read the home claim's size off the
+# mounted filesystem. A cap of 0, or none rendered at all by an older chart, is
+# read as "no bound" rather than as a bound of zero, which would clear the cache
+# and make every build cold.
+start_cache_trim() {
+    cache_dir="${GOCACHE:-${HOME}/.cache/go-build}"
+    max_bytes="${ERUN_GO_BUILD_CACHE_MAX_BYTES:-17179869184}"
+    interval="${ERUN_CACHE_TRIM_INTERVAL_SECONDS:-1800}"
+
+    case "${max_bytes}" in
+        '' | *[!0-9]*) return 0 ;;
+    esac
+    [ "${max_bytes}" -gt 0 ] || return 0
+    case "${interval}" in
+        '' | *[!0-9]*) interval=1800 ;;
+    esac
+    [ "${interval}" -gt 0 ] || return 0
+
+    (
+        while :; do
+            erun-trim-cache "${cache_dir}" "${max_bytes}" || true
+            sleep "${interval}"
+        done
+    ) &
+}
+
 runtime_cloud_environment() {
     case "${ERUN_CLOUD_ENVIRONMENT:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -1313,6 +1354,9 @@ fi
 
 if [ "${1:-}" = "devops" ] || [ "$#" -eq 0 ]; then
     prune_stale_app_sessions
+    # Started before the rest of the boot so an environment already over its cap
+    # begins coming back under it immediately; it blocks nothing.
+    start_cache_trim
     ensure_runtime_source
     link_runtime_release
     initialize_erun_config

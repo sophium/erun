@@ -285,6 +285,9 @@ func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	if err := ensureReleaseWorktreeClean(ctx, spec.ProjectRoot); err != nil {
 		return err
 	}
+	if err := ensureReleaseHasDiskHeadroom(ctx, publisher); err != nil {
+		return err
+	}
 
 	if err := runReleaseStages(ctx, spec, spec.Stages, runGit, syncPackagingChecksums); err != nil {
 		return err
@@ -310,10 +313,33 @@ func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	return runScriptSpecs(ctx, spec.LinuxReleases, runScript)
 }
 
+// ensureReleaseHasDiskHeadroom runs the release's disk preflight before the
+// release stage, the last of the refusals that precede any mutation, so a
+// refusal leaves the repository exactly as it was found.
+//
+// It belongs there rather than immediately before the publish, where it used to
+// run. By that point the "release" stage had already written the version files,
+// committed the stamp and created the annotated tag, so a run refused for space
+// left all three behind, unpushed — and the next attempt failed on that residue
+// (`release tag "vX" already exists at <sha>, expected current HEAD <sha>`)
+// instead of on the disk that was still too short. The remedy that collision
+// names ("delete it with `git tag -d vX` to retry") then reapplied to a symptom,
+// one fresh tag per attempt, for as long as the node stayed full. Everything
+// before this point in the run is read-only, and the only thing the preflight
+// itself writes is docker's own build cache, so a refusal here is
+// side-effect-free.
+//
+// A nil publisher means the caller is marking source control only (see
+// RunReleaseSpec), which builds nothing and so has no disk to size.
+func ensureReleaseHasDiskHeadroom(ctx Context, publisher *ReleasePublisher) error {
+	if publisher == nil {
+		return nil
+	}
+	return ensureReleaseDiskHeadroom(ctx)
+}
+
 // ensureReleaseCouldPublish refuses a release whose resolved images nothing in
-// this run would publish. A nil publisher means the caller is marking source
-// control only (see RunReleaseSpec), which publishes nothing by definition and
-// so has no such mismatch to catch.
+// this run would publish.
 func ensureReleaseCouldPublish(spec ReleaseSpec, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		return nil
@@ -322,11 +348,11 @@ func ensureReleaseCouldPublish(spec ReleaseSpec, publisher *ReleasePublisher) er
 }
 
 // publishClaimedRelease runs the release's own publication, or reports that
-// there was none. With a publisher it first runs the checks that must pass
-// immediately before the build spends anything; without one -- erun release,
-// which marks source control only -- it says what did not happen, so a release
-// that exits 0 having published nothing cannot read as one that published
-// something.
+// there was none. With a publisher it first re-checks the base branch, the one
+// pre-spend check that has to hold as late as possible; without one -- erun
+// release, which marks source control only -- it says what did not happen, so a
+// release that exits 0 having published nothing cannot read as one that
+// published something.
 func publishClaimedRelease(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		if spec.Version != "" {
@@ -335,21 +361,15 @@ func publishClaimedRelease(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 		}
 		return nil
 	}
-	if err := ensureReleaseReadyToPublish(ctx, spec, runGit); err != nil {
-		return err
-	}
-	return runReleasePublication(ctx, *publisher)
-}
-
-// ensureReleaseReadyToPublish runs the checks that must pass immediately
-// before the build spends anything: the base branch has not moved since
-// sync-remote re-established it, and the node has room for the build that is
-// about to start.
-func ensureReleaseReadyToPublish(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
+	// The base branch is re-checked here rather than earlier on purpose: this is
+	// the last moment before the build spends, so the window in which it could
+	// have moved is as small as the check can make it. The disk preflight,
+	// which refuses without mutating anything, runs before the release stage
+	// instead; see ensureReleaseHasDiskHeadroom.
 	if err := ensureReleaseBaseBranchUnmoved(ctx, spec, runGit); err != nil {
 		return err
 	}
-	return ensureReleaseDiskHeadroom(ctx)
+	return runReleasePublication(ctx, *publisher)
 }
 
 func runReleaseStages(ctx Context, spec ReleaseSpec, stages []ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {

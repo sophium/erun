@@ -25,12 +25,13 @@ type BuildService interface {
 }
 
 type BuildRoutes struct {
-	builds  BuildRepository
-	service BuildService
+	builds       BuildRepository
+	environments EnvironmentGetter
+	service      BuildService
 }
 
-func RegisterBuildRoutes(register ProtectedRouteRegistrar, builds BuildRepository, service BuildService) {
-	routes := BuildRoutes{builds: builds, service: service}
+func RegisterBuildRoutes(register ProtectedRouteRegistrar, builds BuildRepository, environments EnvironmentGetter, service BuildService) {
+	routes := BuildRoutes{builds: builds, environments: environments, service: service}
 	register(http.MethodGet, "/v1/reviews/{review_id}/builds", http.HandlerFunc(routes.listBuilds))
 	register(http.MethodPost, "/v1/reviews/{review_id}/builds", http.HandlerFunc(routes.createBuild))
 	register(http.MethodGet, "/v1/reviews/{review_id}/builds/{build_id}", http.HandlerFunc(routes.getBuild))
@@ -54,6 +55,10 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	build.ReviewID = req.PathValue("review_id")
+	if err := r.requireEnvironment(req.Context(), build.EnvironmentID); err != nil {
+		writeBuildError(w, req, err)
+		return
+	}
 	// A caller may report either kind now: RECORDED for its own build, or GATE
 	// for a merge-queue gate it ran itself — see AGENTS.md "Merge Queue". An
 	// unrecognized kind is refused rather than silently coerced to RECORDED.
@@ -72,6 +77,29 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusCreated, build)
 }
 
+// requireEnvironment confirms a caller-supplied environmentId names one of
+// the caller's own environments before a build is accepted against it, the
+// same check jobs/ai-sessions/environment-events already run before acting
+// on an environment id. EnvironmentID is empty for a review-linked build
+// that reports no environment, which is a real case rather than an unknown
+// id, so it is let through and the build's own identity rules decide.
+//
+// The lookup is row-level-security scoped, so another tenant's environment
+// id and an id that exists nowhere are both simply not-found and are
+// answered identically. That indistinguishability is the point: the row this
+// build would land in carries the caller's own tenant, so row-level security
+// never objected, and the environment reference used to be single-column, so
+// the schema accepted another tenant's id -- which made a created build
+// versus a refusal on this route report whether an id existed in *any*
+// tenant, to any tenant user.
+func (r BuildRoutes) requireEnvironment(ctx context.Context, environmentID string) error {
+	if strings.TrimSpace(environmentID) == "" {
+		return nil
+	}
+	_, err := r.environments.Get(ctx, environmentID)
+	return err
+}
+
 // createUnattachedBuild is POST /v1/builds: an ordinary `erun build`
 // self-reporting outside any review (erun#1954). ReviewID is always cleared
 // regardless of what the body carries -- a review-linked build is reported
@@ -86,6 +114,10 @@ func (r BuildRoutes) createUnattachedBuild(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	build.ReviewID = ""
+	if err := r.requireEnvironment(req.Context(), build.EnvironmentID); err != nil {
+		writeBuildError(w, req, err)
+		return
+	}
 	if build.Kind == "" {
 		build.Kind = model.BuildKindRecorded
 	}

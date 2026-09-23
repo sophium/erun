@@ -13,6 +13,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"reflect"
 	"strings"
@@ -385,13 +386,16 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	}
 }
 
-// Listen serves the handler on addr and blocks until ctx is cancelled,
-// returning any non-graceful shutdown error.
-func (s *Server) Listen(ctx context.Context, addr string) error {
-	server := &http.Server{Addr: addr, Handler: s.Handler()}
+// Serve serves the handler on an already-bound listener and blocks until ctx is
+// cancelled, returning any non-graceful shutdown error. The caller binds, so it
+// can announce the address actually bound rather than the one it asked for —
+// which is what lets a --port of 0, or a port that turned out to be taken,
+// still hand every client a usable address.
+func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+	server := &http.Server{Handler: s.Handler()}
 	errCh := make(chan error, 1)
 	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
 		}

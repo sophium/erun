@@ -16,6 +16,7 @@ release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
+release: docker root free disk space is not observable from this process (docker reported no root directory); skipping the headroom check
 stage: sync-remote
 stage: release
 ==> Build failed after <ELAPSED>

@@ -26,7 +26,10 @@
 #                         only (and forward the same skip to build.sh when a
 #                         rebuild runs). Use only when iterating locally;
 #                         never in CI.
-#   --port N              Backend port (default 34123).
+#   --port N              Preferred backend port (default 34123). Each worker
+#                         prefers this base plus its own index, and a port that
+#                         is already taken falls back to an OS-assigned one:
+#                         every worker serves the address its backend announces.
 #   --headed              Run the browser with a visible window.
 #   --                    Forward everything after this to `playwright test`.
 #

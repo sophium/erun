@@ -17,6 +17,7 @@ publishing image: ghcr.io/sophium/api:<VERSION>
 publishing image: ghcr.io/sophium/erun-webhook:<VERSION>
 git -C <TMP> status --porcelain --untracked-files=no
 release: worktree clean = true
+docker info -f '{{.DockerRootDir}}'
 stage: sync-remote
 cd <TMP> && git fetch origin
 cd <TMP> && git rebase origin/main
@@ -38,7 +39,6 @@ cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
 cd <TMP> && git fetch origin main
 cd <TMP> && git rev-list --count HEAD..FETCH_HEAD
 release: a base branch that moved since sync-remote refuses the release here, before the build spends anything
-docker info -f '{{.DockerRootDir}}'
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
 docker manifest inspect ghcr.io/sophium/base:<VERSION>
 docker manifest inspect ghcr.io/sophium/erun-webhook:<VERSION>
