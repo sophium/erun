@@ -167,6 +167,17 @@ var (
 // prunes reclaimable build cache down to that floor and refuses if the disk
 // is still too full afterward — rather than letting the build itself trigger
 // the eviction it cannot recover from.
+//
+// It runs before the release stage rather than just before the build that
+// follows it, so a refusal cannot leave the release's own unpushed stamp commit
+// and tag behind — residue the next attempt then reports as a tag collision
+// instead of the disk that is still short. See ensureReleaseHasDiskHeadroom.
+//
+// The other pre-spend refusal, ensureReleaseBaseBranchUnmoved, cannot be hoisted
+// this way: its answer is only worth having as late as possible, so it still
+// runs after the stages and a refusal there still leaves the stamp commit and
+// tag behind. It is named here so that placement reads as the known limit of
+// this rule rather than as an oversight.
 func ensureReleaseDiskHeadroom(ctx Context) error {
 	// The ceiling is checked first and unconditionally: it is a bound on how
 	// much cache this environment may hold, so it has to hold whether or not

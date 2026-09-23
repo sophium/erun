@@ -16,6 +16,8 @@ release: branch= mode=prerelease version=<VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
 git -C <TMP> status --porcelain --untracked-files=no
 release: worktree clean = true
+docker info -f '{{.DockerRootDir}}'
+release: docker root free disk space is not observable from this process (docker reported no root directory); skipping the headroom check
 stage: release
 write <TMP>
   apiVersion: v2
@@ -32,8 +34,6 @@ cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
 git -C <TMP> rev-parse HEAD
 release tag already exists at HEAD; skipping <VERSION>
-docker info -f '{{.DockerRootDir}}'
-release: docker root free disk space is not observable from this process (docker reported no root directory); skipping the headroom check
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
 docker manifest inspect ghcr.io/sophium/base:<VERSION>
 stage: publish

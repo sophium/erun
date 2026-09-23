@@ -15,6 +15,7 @@ release: branch=develop mode=candidate version=<VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
 git -C <TMP> status --porcelain --untracked-files=no
 release: worktree clean = true
+docker info -f '{{.DockerRootDir}}'
 stage: sync-remote
 cd <TMP> && git fetch origin
 cd <TMP> && git rebase origin/develop
@@ -36,7 +37,6 @@ cd <TMP> && git tag -a <VERSION> -m 'Release candidate <VERSION>'
 cd <TMP> && git fetch origin develop
 cd <TMP> && git rev-list --count HEAD..FETCH_HEAD
 release: a base branch that moved since sync-remote refuses the release here, before the build spends anything
-docker info -f '{{.DockerRootDir}}'
 docker manifest inspect ghcr.io/sophium/api:<VERSION>
 docker manifest inspect ghcr.io/sophium/base:<VERSION>
 stage: publish
