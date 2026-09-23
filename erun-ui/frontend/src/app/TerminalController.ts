@@ -14,8 +14,8 @@ import { reconcileSidebarForViewport } from './layoutThunks';
 import type { MountElements, TerminalDataDisposable, TerminalWriteData } from './model';
 import { showTerminalError } from './notificationThunks';
 import { ReviewDiffKeyboardNav } from './reviewDiffKeyboardNav';
-import { scrollSelectedTreeNodeIntoView, visibleDiffPath } from './reviewDiffNavigation';
-import { setSelectedDiffPath } from './slices/reviewSlice';
+import { scrollSelectedTreeNodeIntoView, visibleDiffFile } from './reviewDiffNavigation';
+import { diffPathKey, setSelectedDiffPath } from './slices/reviewSlice';
 import { loadSavedTerminalScreenReaderMode } from './storage';
 import { store } from './store';
 import {
@@ -455,16 +455,22 @@ export class TerminalController {
   }
 
   private updateSelectedDiffPathFromScroll(): void {
-    const path = visibleDiffPath(this._diffList, this.reviewMain);
-    if (!path || path === store.getState().review.selectedDiffPath) {
+    const visible = visibleDiffFile(this._diffList, this.reviewMain);
+    if (!visible) {
       return;
     }
-    store.dispatch(setSelectedDiffPath(path));
+    // The selection every reader compares against is env-keyed (diffPathKey);
+    // only the tree lookup below takes the bare path.
+    const selected = diffPathKey(visible.envKey, visible.path);
+    if (selected === store.getState().review.selectedDiffPath) {
+      return;
+    }
+    store.dispatch(setSelectedDiffPath(selected));
     // Keep the now-active node visible in the changed-files tree. Only
     // the diff→tree direction drives this, and it scrolls the tree container,
-    // never the diff — so it can't feed back into visibleDiffPath above (which
+    // never the diff — so it can't feed back into visibleDiffFile above (which
     // reads the diff/reviewMain scroll position) and re-trigger selection.
-    scrollSelectedTreeNodeIntoView(this.treeContainer, path);
+    scrollSelectedTreeNodeIntoView(this.treeContainer, visible.path);
   }
 
   stopReviewDiffRefresh(): void {
