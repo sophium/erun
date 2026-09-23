@@ -362,7 +362,7 @@ func registerWorkflowRoutes(register routes.ProtectedRouteRegistrar, repos datab
 	reviewService := service.NewReviewService(repos.reviews, repos.builds, repos.comments, repos.auditEvents, gitverify.NewRemoteVerifier(), releaseRoutes)
 	routes.RegisterTenantIssuerRoutes(register, repos.tenantIssuers)
 	routes.RegisterReviewRoutes(register, repos.reviews, repos.reviewReviewers, reviewService)
-	routes.RegisterBuildRoutes(register, repos.builds, service.NewBuildService(repos.builds, reviewService))
+	routes.RegisterBuildRoutes(register, repos.builds, repos.environments, service.NewBuildService(repos.builds, reviewService))
 	routes.RegisterCommentRoutes(register, repos.comments, service.NewCommentService(repos.comments))
 	routes.RegisterGateRunRoutes(register, repos.gateRuns, service.NewGateRunService(repos.gateRuns))
 }

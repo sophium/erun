@@ -27,6 +27,26 @@ func (s *stubBuildService) Create(_ context.Context, build model.Build) (model.B
 	return build, nil
 }
 
+// ownEnvironmentGetter resolves the named ids as the caller's own and refuses
+// everything else, standing in for the real row-level-security-scoped
+// environment read.
+func ownEnvironmentGetter(ids ...string) EnvironmentGetter {
+	known := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		known[id] = true
+	}
+	return ownEnvironments(known)
+}
+
+type ownEnvironments map[string]bool
+
+func (s ownEnvironments) Get(_ context.Context, environmentID string) (model.Environment, error) {
+	if s[environmentID] {
+		return model.Environment{EnvironmentID: environmentID}, nil
+	}
+	return model.Environment{}, apirepository.ErrNotFound
+}
+
 type stubBuildRepository struct {
 	build model.Build
 	err   error
@@ -142,7 +162,7 @@ func TestGetBuildReturnsTheRepositoryResult(t *testing.T) {
 // for).
 func TestCreateUnattachedBuildClearsAnyCallerSuppliedReviewID(t *testing.T) {
 	service := &stubBuildService{}
-	routes := BuildRoutes{service: service}
+	routes := BuildRoutes{service: service, environments: ownEnvironmentGetter("env-1")}
 	req := httptest.NewRequest(http.MethodPost, "/v1/builds",
 		bytes.NewBufferString(`{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"1.0.0","environmentId":"env-1","reviewId":"review-1"}`))
 	rec := httptest.NewRecorder()
@@ -164,7 +184,7 @@ func TestCreateUnattachedBuildClearsAnyCallerSuppliedReviewID(t *testing.T) {
 // specific review's merge, so it has no unattached form.
 func TestCreateUnattachedBuildRejectsGateKind(t *testing.T) {
 	service := &stubBuildService{}
-	routes := BuildRoutes{service: service}
+	routes := BuildRoutes{service: service, environments: ownEnvironmentGetter("env-1")}
 	req := httptest.NewRequest(http.MethodPost, "/v1/builds",
 		bytes.NewBufferString(`{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","environmentId":"env-1","kind":"GATE"}`))
 	rec := httptest.NewRecorder()
@@ -245,5 +265,145 @@ func TestListAllBuildsRejectsAMalformedSuccessfulFilter(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// stubTrackingEnvironmentGetter records every id it was asked about, so a
+// test can tell "the environment was never consulted" from "it was consulted
+// and answered not-found".
+type stubTrackingEnvironmentGetter struct {
+	own   ownEnvironments
+	asked []string
+}
+
+func (s *stubTrackingEnvironmentGetter) Get(_ context.Context, environmentID string) (model.Environment, error) {
+	s.asked = append(s.asked, environmentID)
+	return s.own.Get(context.Background(), environmentID)
+}
+
+// postBuild drives one of the two build-reporting handlers.
+func postBuild(t *testing.T, routes BuildRoutes, path, environmentID, reviewID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+	if reviewID != "" {
+		req.SetPathValue("review_id", reviewID)
+	}
+	rec := httptest.NewRecorder()
+	if reviewID != "" {
+		routes.createBuild(rec, req)
+	} else {
+		routes.createUnattachedBuild(rec, req)
+	}
+	return rec
+}
+
+// TestBuildRoutesRefuseAnotherTenantsEnvironmentBeforeCreating covers both
+// build-reporting routes: an environmentId the caller's own RLS-scoped read
+// cannot see is refused before the build is ever written, so the route is
+// never the place that decides whether an id exists somewhere the caller
+// cannot look.
+func TestBuildRoutesRefuseAnotherTenantsEnvironmentBeforeCreating(t *testing.T) {
+	// The getter's rule is the real one: an id the caller's tenant does not
+	// own is simply not found. Cross-tenant and nonexistent are then distinct
+	// inputs -- only one of them names a row that really exists -- which is
+	// exactly why their answers must not differ.
+	environments := &stubTrackingEnvironmentGetter{own: ownEnvironments{"env-mine": true}}
+
+	cases := []struct {
+		name          string
+		path          string
+		reviewID      string
+		body          string
+		wantEnvironmt string
+	}{
+		{
+			name:          "unattached, another tenant's environment",
+			path:          "/v1/builds",
+			body:          `{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"1.0.0","environmentId":"env-theirs"}`,
+			wantEnvironmt: "env-theirs",
+		},
+		{
+			name:          "unattached, an environment that exists nowhere",
+			path:          "/v1/builds",
+			body:          `{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"1.0.0","environmentId":"env-nowhere"}`,
+			wantEnvironmt: "env-nowhere",
+		},
+		{
+			name:          "review-linked, another tenant's environment",
+			path:          "/v1/reviews/review-1/builds",
+			reviewID:      "review-1",
+			body:          `{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"1.0.0","environmentId":"env-theirs"}`,
+			wantEnvironmt: "env-theirs",
+		},
+		{
+			name:          "review-linked, an environment that exists nowhere",
+			path:          "/v1/reviews/review-1/builds",
+			reviewID:      "review-1",
+			body:          `{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"1.0.0","environmentId":"env-nowhere"}`,
+			wantEnvironmt: "env-nowhere",
+		},
+	}
+
+	responses := make(map[string]string, len(cases))
+	for _, tc := range cases {
+		service := &stubBuildService{}
+		routes := BuildRoutes{service: service, environments: environments}
+		rec := postBuild(t, routes, tc.path, tc.wantEnvironmt, tc.reviewID, tc.body)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		if service.created.BuildID != "" || service.created.CommitID != "" {
+			t.Fatalf("%s: the build was created anyway: %+v", tc.name, service.created)
+		}
+		responses[tc.name] = rec.Body.String()
+	}
+
+	// The refusal must not depend on which of the two it was: a caller that
+	// does not own the id must learn nothing about whether it exists.
+	if responses["unattached, another tenant's environment"] != responses["unattached, an environment that exists nowhere"] {
+		t.Fatalf("the two unattached refusals differ:\n  other tenant: %q\n  nonexistent:  %q",
+			responses["unattached, another tenant's environment"], responses["unattached, an environment that exists nowhere"])
+	}
+	if responses["review-linked, another tenant's environment"] != responses["review-linked, an environment that exists nowhere"] {
+		t.Fatalf("the two review-linked refusals differ:\n  other tenant: %q\n  nonexistent:  %q",
+			responses["review-linked, another tenant's environment"], responses["review-linked, an environment that exists nowhere"])
+	}
+}
+
+// TestBuildRoutesAcceptTheCallersOwnEnvironment: the guard refuses ids the
+// caller does not own, not environmentId itself.
+func TestBuildRoutesAcceptTheCallersOwnEnvironment(t *testing.T) {
+	environments := &stubTrackingEnvironmentGetter{own: ownEnvironments{"env-mine": true}}
+	service := &stubBuildService{}
+	routes := BuildRoutes{service: service, environments: environments}
+
+	rec := postBuild(t, routes, "/v1/builds", "env-mine", "",
+		`{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"1.0.0","environmentId":"env-mine"}`)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	if service.created.EnvironmentID != "env-mine" {
+		t.Fatalf("environmentId persisted = %q, want env-mine", service.created.EnvironmentID)
+	}
+}
+
+// TestUnattachedBuildWithNoEnvironmentIsNotAnEnvironmentLookup: an omitted
+// environmentId is a real case (the build's own identity rule then decides),
+// not an id that failed to resolve -- so the guard must not invent a lookup
+// for it.
+func TestUnattachedBuildWithNoEnvironmentIsNotAnEnvironmentLookup(t *testing.T) {
+	environments := &stubTrackingEnvironmentGetter{own: ownEnvironments{}}
+	service := &stubBuildService{err: &service.UnattachedBuildRequiresEnvironmentError{}}
+	routes := BuildRoutes{service: service, environments: environments}
+
+	rec := postBuild(t, routes, "/v1/builds", "", "",
+		`{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"1.0.0"}`)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if len(environments.asked) != 0 {
+		t.Fatalf("environment lookups = %v, want none for an omitted environmentId", environments.asked)
 	}
 }
