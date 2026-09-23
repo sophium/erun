@@ -596,6 +596,81 @@ source_hook
 [ "$(count_lines "${run_dir}/install-skills-argv")" -gt "${skills_after_boot}" ] ||
     fail "a fresh container must reconcile the agent configuration again"
 
+# --- 11b. The AI tool's turn-boundary hooks are installed, and the command they
+# install reaches the report verb ---
+# The structured AI-session status model resolves its state from turn-boundary
+# events, so a settings file carrying no hooks leaves it resolving nothing at
+# all -- and "awaiting-input", the state the model exists to surface, reachable
+# by nothing. Assert both halves rather than the presence of a string: which
+# events carry a report and what each reports, and that running the installed
+# command actually invokes the CLI verb with that event. A command that is
+# installed but does not reach the verb is the same inertness in a new place.
+prepare_run ai_session_hooks
+run_dir="${work_root}/ai_session_hooks"
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings_file="${run_dir}/home/.claude/settings.json"
+[ -r "${settings_file}" ] || fail "the boot should write ${settings_file}"
+
+while read -r tool_event model_event; do
+    [ -n "${tool_event}" ] || continue
+    hook_command=$(
+        ERUN_SETTINGS_FILE="${settings_file}" ERUN_HOOK_EVENT="${tool_event}" node -e '
+const fs = require("fs");
+const settings = JSON.parse(fs.readFileSync(process.env.ERUN_SETTINGS_FILE, "utf8"));
+for (const block of (settings.hooks || {})[process.env.ERUN_HOOK_EVENT] || []) {
+  for (const entry of block.hooks || []) {
+    if (String(entry.command).includes("ai-session hook")) {
+      process.stdout.write(entry.command);
+    }
+  }
+}
+' 2>/dev/null || true
+    )
+    [ -n "${hook_command}" ] ||
+        fail "no AI-session report is installed on ${tool_event}, so a session in that state can never be surfaced"
+    case "${hook_command}" in
+        *"--event ${model_event}"*) ;;
+        *) fail "${tool_event} should report ${model_event}, got: ${hook_command}" ;;
+    esac
+
+    # Run it. The stub `erun` on PATH records the argv it was handed, so this
+    # proves the installed command reaches the verb -- not that a string is
+    # present in a config file.
+    : >"${run_dir}/erun-argv"
+    printf '{"session_id":"0d5b1e0a-6f2b-4a0e-9a1f-2b1f8d3c4e77","hook_event_name":"%s"}' "${tool_event}" |
+        env -i HOME="${run_dir}/home" PATH="${run_dir}/bin:/usr/bin:/bin" \
+            ERUN_TENANT=team ERUN_ENVIRONMENT=dev sh -c "${hook_command}"
+    grep -q "^activity ai-session hook --event ${model_event} --tool claude$" "${run_dir}/erun-argv" ||
+        fail "the ${tool_event} hook should reach the report verb with --event ${model_event}, got: $(cat "${run_dir}/erun-argv")"
+
+    # The same command in a session with no environment in scope must report
+    # nothing rather than guess one: this settings file is the operator's, and a
+    # Claude they started themselves has no erun environment to report against.
+    : >"${run_dir}/erun-argv"
+    printf '{"session_id":"0d5b1e0a-6f2b-4a0e-9a1f-2b1f8d3c4e77"}' |
+        env -i HOME="${run_dir}/home" PATH="${run_dir}/bin:/usr/bin:/bin" sh -c "${hook_command}"
+    [ ! -s "${run_dir}/erun-argv" ] ||
+        fail "a hook with no environment in scope must not report: $(cat "${run_dir}/erun-argv")"
+done <<'EOF'
+UserPromptSubmit turn-start
+PreToolUse tool-use
+PostToolUse tool-use
+Stop turn-end
+Notification notify
+SessionEnd exit
+EOF
+stop_run
+
 # --- 12. An unreachable IMDS costs one timeout, not two ---
 # The region probe only runs on AWS, and where the link-local address answers
 # nothing it drains curl's whole timeout; the unauthenticated fallback can only
@@ -623,4 +698,4 @@ imds_calls=$(count_lines "${run_dir}/curl-argv")
 grep -q -- '--connect-timeout' "${run_dir}/curl-argv" ||
     fail "the IMDS probe should bound its connect phase: $(cat "${run_dir}/curl-argv")"
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, cloud-context default parity with the Go normalizer, and once-per-boot agent configuration"
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, AI-session turn-boundary hooks, cloud-context default parity with the Go normalizer, and once-per-boot agent configuration"
