@@ -103,7 +103,7 @@ func commitPresentIn(t *testing.T, remote mergeQueueRemote, commit string) bool 
 }
 
 // TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit is
-// the reproduction of #2662.
+// the reproduction of the report this change fixes.
 //
 // Two repositories of one tenant both serve a target branch named the same.
 // Repository A merges a review through the queue, so the platform records A's
@@ -176,7 +176,7 @@ func TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit(t
 }
 
 // TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly is the
-// other half of #2662's acceptance: a review that *does* record a repository
+// other half of that acceptance: a review that *does* record a repository
 // keeps verifying against that one, and is still refused for a different one.
 // The fix for the row above must not have been "stop telling repositories
 // apart".

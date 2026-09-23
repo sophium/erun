@@ -75,7 +75,7 @@ A review records the repository its branches belong to, as a canonicalized remot
 
 Every review-scoped uniqueness rule and the merge queue are keyed by it. A tenant may serve more than one repository, and two of them will share branch names — both a `main` and a `feature/x` — so a target branch alone names a queue only in a tenant that serves exactly one repository. `MERGE_QUEUE_AMBIGUOUS` is what a promotion over a genuinely mixed queue gets instead of a guess.
 
-A review created before the platform recorded a repository carries none, and appears only in an unfiltered listing or queue. It adopts an identity from the `remoteUrl` of the first `MERGED` report about it, which is the only moment the remote is in hand.
+A review created before the platform recorded a repository carries none, and appears only in an unfiltered listing or queue. It adopts an identity from the `remoteUrl` of the first `MERGED` report about it, which is the only moment the remote is in hand. That identity is also what the report is *verified* against — the accepted report records the very repository its checks were answered against, so a row carrying none is never measured against another repository that happens to share the target branch's name. See [Merge queue § The gate](/collaboration/merge-queue#the-gate).
 
 Carrying none is not holding a second identity: such a review is grouped with no repository rather than with a repository of its own, so one named repository's queue plus any number of these rows is one repository's queue. Only a queue holding more than one *named* repository is ambiguous.
 
