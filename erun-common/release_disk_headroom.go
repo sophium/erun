@@ -214,9 +214,9 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 	// accounting for build cache has understated what a real prune frees by
 	// several times over on a real node, and declining on a figure that
 	// understates in that direction refuses releases a prune would have
-	// rescued. What they are not trusted for at all is deciding whether to
-	// prune, because that question this reading is structurally unable to
-	// answer — see the prune below.
+	// rescued. What they cannot be trusted for at all is deciding whether to
+	// prune: that is a question this reading is structurally unable to answer,
+	// and is why the prune below no longer asks it.
 	reclaimable, reclaimErr := readReclaimable(policy.limits.read)
 	known := reclaimErr == nil
 
