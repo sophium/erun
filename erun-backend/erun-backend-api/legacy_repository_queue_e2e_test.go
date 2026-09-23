@@ -16,7 +16,7 @@ import (
 // before carry no repository at all, rows created after carry the canonical
 // identity. "No repository recorded" is the absence of an answer, not a second
 // answer, so grouping the queue must not read it as a repository of its own —
-// see AGENTS.md "Merge Queue" and erun#2659.
+// see AGENTS.md "Merge Queue".
 //
 // These gates drive the real API against a real migrated PostgreSQL, the same
 // way merge_queue_e2e_test.go does (ERUN_E2E_MERGE_DATABASE_URL).
@@ -113,7 +113,7 @@ func legacyQueueState(t *testing.T, baseURL string, remote mergeQueueRemote) (le
 }
 
 // TestMergeQueueTreatsNoRecordedRepositoryAsUnknown is the reproduction of
-// erun#2659: one repository's queue holding a review that records the
+// the reported failure: one repository's queue holding a review that records the
 // repository plus a legacy review that records none. That is one repository,
 // not two, so the unfiltered promotion must not refuse.
 func TestMergeQueueTreatsNoRecordedRepositoryAsUnknown(t *testing.T) {
@@ -218,7 +218,7 @@ func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 }
 
 // TestLegacyReviewAdoptsTheRepositoryItReportsMergedInto covers the other half
-// of erun#2659: a legacy row's work that landed without the queue must still
+// of the same failure: a legacy row's work that landed without the queue must still
 // be reportable, without a buildId, and adopting the repository the report
 // names.
 func TestLegacyReviewAdoptsTheRepositoryItReportsMergedInto(t *testing.T) {

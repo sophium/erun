@@ -399,8 +399,8 @@ func (s *ReviewService) headOfMergeQueue(ctx context.Context, repositoryIdentity
 // makes a queue ambiguous nor resolves one: one named repository beside any
 // number of unrecorded rows is still one repository's queue, which is what a
 // tenant that predates repository identity has. Counting the absence as a
-// second repository refused that tenant's queue outright — the state erun#2659
-// reports, where the rows it refused to promote were its own.
+// second repository refused that tenant's queue outright, and the rows it
+// refused to advance were the tenant's own.
 func (s *ReviewService) refuseAmbiguousQueue(ctx context.Context, targetBranch string) error {
 	queued, err := s.reviews.QueuedRepositories(ctx, targetBranch)
 	if err != nil {
@@ -657,7 +657,7 @@ func (s *ReviewService) verifyGateBuild(review model.Review, build model.Build) 
 // Queue") — is still really its ancestor. This is a reachability check, not
 // a strict parent-equality one: the release flow pushes its own
 // `[skip ci]` commits directly to the target branch between one review
-// landing and the next being reported (erun#2250), and requiring the
+// landing and the next being reported, and requiring the
 // reported commit's immediate parent to equal the gated tip made every
 // review report unverifiable forever after the first release. Ancestry
 // tolerates any number of unrelated commits landing in between while still

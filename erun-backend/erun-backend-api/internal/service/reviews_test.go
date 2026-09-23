@@ -946,7 +946,7 @@ func TestAdvanceMergeQueuePromotesAnUnrecordedQueueThatIsStillOneRepository(t *t
 	}
 }
 
-// erun#2659: one named repository beside reviews created before the platform
+// One named repository beside reviews created before the platform
 // recorded a repository is one repository's queue, not two. Counting the
 // absence as a repository refused a tenant's own queue, and the rows it
 // refused to promote were the legacy ones — which are reachable here, in
