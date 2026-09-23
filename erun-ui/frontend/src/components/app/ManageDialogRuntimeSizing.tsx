@@ -116,11 +116,15 @@ function RuntimeSizingResizeOutcome({
     return (
       <div className="grid gap-2 rounded-[var(--radius)] border border-amber-300 bg-amber-50 p-2 dark:border-amber-800 dark:bg-amber-950">
         <p
-          className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-700 dark:text-amber-400"
+          className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-700 dark:text-amber-400 [overflow-wrap:anywhere]"
           role="alert"
         >
           <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
-          <span>{heldByOther}</span>
+          {/* `heldByOther` names the caller holding the sizing, and a holder
+              is an identifier that can be long and unbreakable; without the
+              wrap the flex row grows past the dialog instead of the name
+              breaking inside it. */}
+          <span className="min-w-0">{heldByOther}</span>
         </p>
         <Button
           id="environment-config-sizing-override"

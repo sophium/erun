@@ -168,7 +168,10 @@ function RedeployBanner({ dialog }: { dialog: ManageDialogState }): React.ReactE
         className="size-[18px] text-amber-700 dark:text-amber-400"
         aria-hidden="true"
       />
-      <div className="min-w-0">
+      {/* `minmax(0,1fr)` and `min-w-0` let this column shrink; on their own
+          they do not give the text anywhere to break, so an unbreakable run in
+          the copy still overflows the track it was sized to. */}
+      <div className="min-w-0 [overflow-wrap:anywhere]">
         <div className="font-semibold text-foreground">Pending redeploy</div>
         <div className="text-muted-foreground">
           {noComponents
