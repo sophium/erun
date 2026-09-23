@@ -297,10 +297,23 @@ func writeAdvanceMergeQueueError(w http.ResponseWriter, req *http.Request, err e
 	}
 	var ambiguous *service.AmbiguousMergeQueueError
 	if errors.As(err, &ambiguous) {
-		writeErrorDetails(w, http.StatusConflict, "MERGE_QUEUE_AMBIGUOUS", ambiguous.Error(), map[string]any{
+		details := map[string]any{
 			"targetBranch": ambiguous.TargetBranch,
 			"repositories": ambiguous.Repositories,
-		})
+		}
+		// Named separately from the repositories because they are not one: a
+		// caller told only the repositories would have to work out for itself
+		// which waiting rows belong to none of them. Always present, so a
+		// client rendering the refusal has one shape to read.
+		unrecorded := ambiguous.UnrecordedReviewIDs
+		if unrecorded == nil {
+			// An empty array, not null: "none" and "the platform cannot say"
+			// are different answers, and a client iterating the field must not
+			// have to guard one of them.
+			unrecorded = []string{}
+		}
+		details["unrecordedRepositoryReviewIds"] = unrecorded
+		writeErrorDetails(w, http.StatusConflict, "MERGE_QUEUE_AMBIGUOUS", ambiguous.Error(), details)
 		return
 	}
 	var empty *service.EmptyMergeQueueError

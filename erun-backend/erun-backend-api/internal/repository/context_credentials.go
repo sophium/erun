@@ -35,16 +35,28 @@ func (r *ContextCredentialRepository) Set(ctx context.Context, contextID, k3sAdm
 	})
 }
 
-// Get returns the decrypted k3s admin token for a context, or ErrNotFound when the
-// context has no custodied token.
-func (r *ContextCredentialRepository) Get(ctx context.Context, contextID string) (string, error) {
+// Get returns the decrypted k3s admin token for a context owned by tenantID,
+// or ErrNotFound when that tenant's context has no custodied token.
+//
+// The owning tenant is an explicit argument and an explicit predicate.
+// erun_operations' RLS policy on context_credentials is unconditional
+// (USING (true)), so for an OPERATIONS caller nothing but this WHERE clause
+// scopes the read: without it, naming any tenant's context id released that
+// tenant's cluster-admin token, which is then written into a placement Secret
+// and handed to a Job running kubectl against that tenant's cluster. Every
+// path that reaches here knows the owner without consulting a security
+// context — the environment row carries tenant_id, and the delete reconciler
+// runs with no tenant in context at all — which is why the tenant travels as
+// a parameter rather than being read back from ctx.
+func (r *ContextCredentialRepository) Get(ctx context.Context, tenantID, contextID string) (string, error) {
 	var encrypted []byte
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		scanErr := tx.NewRaw(`
 			SELECT k3s_admin_token_encrypted
 			  FROM context_credentials
 			 WHERE context_id = ?
-		`, contextID).Scan(ctx, &encrypted)
+			   AND tenant_id = ?
+		`, contextID, tenantID).Scan(ctx, &encrypted)
 		return normalizeNoRows(scanErr)
 	})
 	if err != nil {

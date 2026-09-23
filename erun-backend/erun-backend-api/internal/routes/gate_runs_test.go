@@ -12,13 +12,14 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 type stubGateRunRepository struct {
 	listFilter apirepository.GateRunFilter
 }
 
-func (s *stubGateRunRepository) Get(_ context.Context, gateRunID string) (model.GateRun, error) {
+func (s *stubGateRunRepository) Get(_ context.Context, _ string, gateRunID string) (model.GateRun, error) {
 	return model.GateRun{GateRunID: gateRunID}, nil
 }
 
@@ -30,6 +31,9 @@ func (s *stubGateRunRepository) List(_ context.Context, filter apirepository.Gat
 type stubGateRunService struct {
 	startedStatus  model.GateRunStatus
 	reportedStatus model.GateRunStatus
+	// reportedTenantID records the tenant the route named, so a test can hold
+	// the handler to passing the caller's own rather than merely passing one.
+	reportedTenantID string
 }
 
 func (s *stubGateRunService) Start(_ context.Context, run model.GateRun) (model.GateRun, error) {
@@ -38,8 +42,9 @@ func (s *stubGateRunService) Start(_ context.Context, run model.GateRun) (model.
 	return run, nil
 }
 
-func (s *stubGateRunService) ReportOutcome(_ context.Context, gateRunID string, status model.GateRunStatus, _, _, _ string) (model.GateRun, error) {
+func (s *stubGateRunService) ReportOutcome(_ context.Context, tenantID, gateRunID string, status model.GateRunStatus, _, _, _ string) (model.GateRun, error) {
 	s.reportedStatus = status
+	s.reportedTenantID = tenantID
 	return model.GateRun{GateRunID: gateRunID, Status: status}, nil
 }
 
@@ -73,6 +78,9 @@ func TestReportGateRunOutcomeNormalizesLowercaseStatus(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/v1/gate-runs/gate-run-1",
 		bytes.NewBufferString(`{"status":"inconclusive","logRef":"wrapper hit its own 8m cap"}`))
 	req.SetPathValue("gate_run_id", "gate-run-1")
+	// The verdict names the caller's tenant, so the handler needs the scoped
+	// security context the auth middleware would have installed.
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "tenant-1", TenantType: string(model.TenantTypeCompany)}))
 	rec := httptest.NewRecorder()
 
 	routes.reportGateRunOutcome(rec, req)
@@ -82,6 +90,9 @@ func TestReportGateRunOutcomeNormalizesLowercaseStatus(t *testing.T) {
 	}
 	if svc.reportedStatus != model.GateRunStatusInconclusive {
 		t.Fatalf("service received status = %q, want %q", svc.reportedStatus, model.GateRunStatusInconclusive)
+	}
+	if svc.reportedTenantID != "tenant-1" {
+		t.Fatalf("service received tenant %q, want the caller's own tenant-1", svc.reportedTenantID)
 	}
 }
 

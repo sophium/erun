@@ -64,7 +64,16 @@ func classifyBuildError(err error) error {
 	}
 }
 
-func (r *BuildRepository) Get(ctx context.Context, buildID string) (model.Build, error) {
+// Get returns a build owned by tenantID. The join onto reviews below is on
+// tenant and review together — it makes the build's review name readable, it
+// does not scope the read: for an OPERATIONS caller an id-only lookup
+// answered with a build belonging to any tenant, reachable through
+// GET /v1/reviews/{review_id}/builds/{build_id}, whose review_id segment was
+// never a filter either. tenantID is therefore an explicit predicate, and it
+// is the tenant that owns the read — the caller's own on the route, the
+// review's own where the merge service reads a build back for a review it
+// already holds.
+func (r *BuildRepository) Get(ctx context.Context, tenantID, buildID string) (model.Build, error) {
 	var build model.Build
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
@@ -74,7 +83,8 @@ func (r *BuildRepository) Get(ctx context.Context, buildID string) (model.Build,
 			    ON r.tenant_id = b.tenant_id
 			   AND r.review_id = b.review_id
 			 WHERE b.build_id = ?
-		`, buildID).Scan(ctx, &build)
+			   AND b.tenant_id = ?
+		`, buildID, tenantID).Scan(ctx, &build)
 		return normalizeNoRows(err)
 	})
 	return build, err

@@ -71,6 +71,94 @@ func TestGateMergeOneSourceCarriesTheSourceBranchesTrailers(t *testing.T) {
 	}
 }
 
+// TestGateMergeOneSourceCarriesTrailersSeparatedFromACoAuthoredBy is the
+// reproduction of the reported failure: a branch whose authored trailers are
+// separated from a trailing "Co-Authored-By:" by a blank line — the shape git
+// itself produces, and the one five sources of a real landing carried — lost
+// every one of them. gateMergeTrailerBlock read only the final run of
+// non-empty lines, and that run was the Co-Authored-By: alone, so the authored
+// "Closes #N" and three reproduction trailers were dropped from the squash.
+// The issue stayed open and the commit that landed asserted no reproduction for
+// the defect it fixed, with nothing warning that anything had been discarded.
+func TestGateMergeOneSourceCarriesTrailersSeparatedFromACoAuthoredBy(t *testing.T) {
+	const branchBody = "Fix the widget\n\n" +
+		"The widget was assembled backwards, so every caller reading it got\n" +
+		"the parts in the wrong order.\n\n" +
+		"Closes #2642\n" +
+		"Reproduces: a caller reading the widget got its parts in the order they\n" +
+		"  were appended rather than the order they were declared.\n" +
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n" +
+		"\n" +
+		"Co-Authored-By: Claude <noreply@anthropic.com>\n"
+	var committed string
+	deps := gateMergeTrailerSeam(branchBody, &committed)
+
+	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "feature", Message: "Assemble the widget in declared order"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
+		t.Fatalf("gate-merge one source: %v", err)
+	}
+
+	for _, want := range []string{
+		"Closes #2642",
+		"Reproduces: a caller reading the widget got its parts in the order they\n  were appended rather than the order they were declared.",
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
+	} {
+		if !strings.Contains(committed, want) {
+			t.Fatalf("the squash commit must carry the branch's own %q trailer across the Co-Authored-By: line, got:\n%s", want, committed)
+		}
+	}
+	if strings.Contains(committed, "assembled backwards") {
+		t.Fatalf("only the branch's trailers belong beneath the review name, not its prose, got:\n%s", committed)
+	}
+	// The Co-Authored-By: is a trailer-shaped line like the rest of the block,
+	// not a boundary that replaces it; it is simply not one this squash carries.
+	if strings.Contains(committed, "Co-Authored-By:") {
+		t.Fatalf("the squash carries only the load-bearing trailers, got:\n%s", committed)
+	}
+}
+
+// TestGateMergeTrailerBlockIsEmptyWhenTheBodyDeclaresNoTrailers pins the
+// ordinary case the collapse must not regress: a message whose trailing
+// paragraph is prose yields no block, so nothing is read as a trailer that was
+// never meant as one.
+func TestGateMergeTrailerBlockIsEmptyWhenTheBodyDeclaresNoTrailers(t *testing.T) {
+	body := "Fix the widget\n\n" +
+		"The widget was assembled backwards, so every caller reading it got\n" +
+		"the parts in the wrong order.\n"
+	if got := gateMergeTrailerBlock(body); len(got) != 0 {
+		t.Fatalf("expected no trailer block, got %q", got)
+	}
+	if got := gateMergeTrailersFromBody(body); len(got) != 0 {
+		t.Fatalf("expected no carried trailers, got %q", got)
+	}
+}
+
+// TestGateMergeTrailerBlockSpansABlankLineBetweenTrailerParagraphs covers the
+// other half of the collapse: git permits a blank line between two trailer
+// paragraphs, and the block has to span it rather than keep only the paragraph
+// closest to the end.
+func TestGateMergeTrailerBlockSpansABlankLineBetweenTrailerParagraphs(t *testing.T) {
+	body := "Fix the widget\n\n" +
+		"Closes #2642\n" +
+		"\n" +
+		"Reproduces: the parts arrived in append order.\n" +
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n"
+
+	got := gateMergeTrailersFromBody(body)
+	want := []string{
+		"Closes #2642",
+		"Reproduces: the parts arrived in append order.",
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d trailers across the blank line, got %d: %q", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("trailer %d: expected %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
 // TestGateMergeOneSourceDoesNotRepeatTrailersTheCallerAlreadyPassed covers the
 // other half of the same contract: a caller that supplies the branch's own
 // message verbatim — which is how the one squash known to carry trailers got

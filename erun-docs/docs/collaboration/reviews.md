@@ -75,7 +75,9 @@ A review records the repository its branches belong to, as a canonicalized remot
 
 Every review-scoped uniqueness rule and the merge queue are keyed by it. A tenant may serve more than one repository, and two of them will share branch names — both a `main` and a `feature/x` — so a target branch alone names a queue only in a tenant that serves exactly one repository. `MERGE_QUEUE_AMBIGUOUS` is what a promotion over a genuinely mixed queue gets instead of a guess.
 
-A review created before the platform recorded a repository carries none, and appears only in an unfiltered listing or queue. It adopts an identity from the `remoteUrl` of the first `MERGED` report about it, which is the only moment the remote is in hand.
+A review created before the platform recorded a repository carries none, and appears only in an unfiltered listing or queue. It adopts an identity from the `remoteUrl` of the first `MERGED` report about it, which is the only moment the remote is in hand. That identity is also what the report is *verified* against — the accepted report records the very repository its checks were answered against, so a row carrying none is never measured against another repository that happens to share the target branch's name. See [Merge queue § The gate](/collaboration/merge-queue#the-gate).
+
+Carrying none is not holding a second identity: such a review is grouped with no repository rather than with a repository of its own, so one named repository's queue plus any number of these rows is one repository's queue. Only a queue holding more than one *named* repository is ambiguous.
 
 ## Issue links
 
@@ -189,7 +191,7 @@ The codes below are the ones this API's review/merge-queue routes can actually d
 | `REVIEW_NOT_MERGING` | `PATCH /status` to `READY` with no `buildId` — the missed-merge-window requeue — on a review that is not at `MERGE`. `details` names the `reviewId` and the `status` it actually holds. | `409` |
 | `INVALID_BODY` | Request body missing required field or fails type validation (malformed JSON), or `PATCH /status` to `READY`/`FAILED`/`MERGED` with no `buildId` (`details.field` names it: `buildId`). | `400` |
 | `INVALID_TARGET_BRANCH` | `targetBranch` is empty on `merge-queue/advance` or `override-advance`. | `400` |
-| `MERGE_QUEUE_AMBIGUOUS` | `POST /merge-queue/advance` (or `override-advance`) naming no repository while the target branch's queue holds `READY` reviews from more than one. `details` names the `targetBranch` and the `repositories`; the message says to name one. A queue holding one repository's reviews — including the queue every review created before the platform recorded a repository shares — advances normally. | `409` |
+| `MERGE_QUEUE_AMBIGUOUS` | `POST /merge-queue/advance` (or `override-advance`) naming no repository while the target branch's queue holds `READY` reviews naming more than one repository. `details` names the `targetBranch`, the `repositories`, and `unrecordedRepositoryReviewIds` — the waiting rows that record no repository, always present and empty when there are none; the message says to name a repository. A review carrying no repository is not one: a queue holding one named repository beside any number of such rows — the queue a tenant predating repository identity has — advances normally. | `409` |
 | `INVALID_REPOSITORY` | `POST /reviews` with a `repository` that names no repository — an empty value, a bare forge. | `400` |
 | `INVALID_PATH_ID` | An id in the path — `{review_id}`, `{build_id}`, `{comment_id}`, `{user_id}` — is not a UUID. The message names the parameter and the value received. Shared by every route with an id in its path, so its full contract lives once in [API protocol · Request-level validation errors](/agent-reference/api-protocol#request-level-validation-errors). | `400` |
 

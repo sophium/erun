@@ -73,7 +73,7 @@ func (f *fakeJobRepo) backdate(t *testing.T, jobID string, ago time.Duration) {
 	job.UpdatedAt = time.Now().UTC().Add(-ago)
 }
 
-func (f *fakeJobRepo) Get(_ context.Context, jobID string) (model.Job, error) {
+func (f *fakeJobRepo) Get(_ context.Context, _ string, jobID string) (model.Job, error) {
 	job, ok := f.jobs[jobID]
 	if !ok {
 		return model.Job{}, repository.ErrNotFound
@@ -99,7 +99,7 @@ func (f *fakeJobRepo) FindOpenByScope(_ context.Context, scope string) (model.Jo
 	return *found, nil
 }
 
-func (f *fakeJobRepo) Update(_ context.Context, job model.Job) (model.Job, error) {
+func (f *fakeJobRepo) Update(_ context.Context, _ string, job model.Job) (model.Job, error) {
 	if _, ok := f.jobs[job.JobID]; !ok {
 		return model.Job{}, repository.ErrNotFound
 	}
@@ -194,7 +194,7 @@ func TestJobServiceClaimAllowsASecondClaimOnceTheHolderFinishes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Claim() error = %v", err)
 	}
-	if _, err := svc.Update(ctx, first.JobID, model.JobStatusSucceeded, "", ""); err != nil {
+	if _, err := svc.Update(ctx, first.TenantID, first.JobID, model.JobStatusSucceeded, "", ""); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 
@@ -366,7 +366,7 @@ func TestJobServiceUpdateClosesARunningJob(t *testing.T) {
 		t.Fatalf("Claim() error = %v", err)
 	}
 
-	updated, err := svc.Update(ctx, created.JobID, model.JobStatusFailed, "", "")
+	updated, err := svc.Update(ctx, created.TenantID, created.JobID, model.JobStatusFailed, "", "")
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -390,7 +390,7 @@ func TestJobServiceUpdateRefreshesTheSummaryOnly(t *testing.T) {
 		t.Fatalf("Claim() error = %v", err)
 	}
 
-	updated, err := svc.Update(ctx, created.JobID, "", "waiting on the gate build", "")
+	updated, err := svc.Update(ctx, created.TenantID, created.JobID, "", "waiting on the gate build", "")
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -417,7 +417,7 @@ func TestJobServiceUpdateRevalidatesARefreshedSummary(t *testing.T) {
 		t.Fatalf("Claim() error = %v", err)
 	}
 
-	_, err = svc.Update(ctx, created.JobID, "", "git push --force-with-lease", "")
+	_, err = svc.Update(ctx, created.TenantID, created.JobID, "", "git push --force-with-lease", "")
 
 	var invalid *InvalidJobInputError
 	if !errors.As(err, &invalid) || invalid.Field != "summary" {
@@ -436,11 +436,11 @@ func TestJobServiceUpdateRefusesAFinishedJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
-	if _, err := svc.Update(ctx, created.JobID, model.JobStatusSucceeded, "", ""); err != nil {
+	if _, err := svc.Update(ctx, created.TenantID, created.JobID, model.JobStatusSucceeded, "", ""); err != nil {
 		t.Fatalf("closing Update() error = %v", err)
 	}
 
-	_, err = svc.Update(ctx, created.JobID, model.JobStatusFailed, "", "")
+	_, err = svc.Update(ctx, created.TenantID, created.JobID, model.JobStatusFailed, "", "")
 
 	var finished *JobAlreadyFinishedError
 	if !errors.As(err, &finished) {
@@ -468,7 +468,7 @@ func TestJobServiceUpdateRefusesAnUnknownStatus(t *testing.T) {
 		t.Fatalf("Claim() error = %v", err)
 	}
 
-	_, err = svc.Update(ctx, created.JobID, model.JobStatus("cancelled"), "", "")
+	_, err = svc.Update(ctx, created.TenantID, created.JobID, model.JobStatus("cancelled"), "", "")
 
 	var invalid *InvalidJobInputError
 	if !errors.As(err, &invalid) || invalid.Field != "status" {
@@ -489,7 +489,7 @@ func TestJobServiceUpdateOfRunningToRunningIsANoOp(t *testing.T) {
 		t.Fatalf("Claim() error = %v", err)
 	}
 
-	updated, err := svc.Update(ctx, created.JobID, model.JobStatusRunning, "", "")
+	updated, err := svc.Update(ctx, created.TenantID, created.JobID, model.JobStatusRunning, "", "")
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
@@ -577,7 +577,7 @@ func TestJobServiceSweepLeavesAFreshJobAlone(t *testing.T) {
 		t.Fatalf("abandoned = %+v, want none; the job is inside its TTL", abandoned)
 	}
 
-	job, err := svc.jobs.Get(ctx, created.JobID)
+	job, err := svc.jobs.Get(ctx, created.TenantID, created.JobID)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -598,7 +598,7 @@ func TestJobServiceSweepLeavesAFinishedJobAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Claim() error = %v", err)
 	}
-	if _, err := svc.Update(ctx, created.JobID, model.JobStatusFailed, "", ""); err != nil {
+	if _, err := svc.Update(ctx, created.TenantID, created.JobID, model.JobStatusFailed, "", ""); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 	repo.backdate(t, created.JobID, 30*DefaultJobAbandonTTL)
@@ -611,7 +611,7 @@ func TestJobServiceSweepLeavesAFinishedJobAlone(t *testing.T) {
 		t.Fatalf("abandoned = %+v, want none; the job already finished", abandoned)
 	}
 
-	job, err := svc.jobs.Get(ctx, created.JobID)
+	job, err := svc.jobs.Get(ctx, created.TenantID, created.JobID)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}

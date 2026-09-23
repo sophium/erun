@@ -298,7 +298,6 @@ var issueReferenceBaseline = map[string]int{
 	"erun-backend/erun-backend-api/internal/service/invite_requests.go":              1,
 	"erun-backend/erun-backend-api/internal/service/invite_requests_test.go":         1,
 	"erun-backend/erun-backend-api/internal/service/invites_test.go":                 2,
-	"erun-backend/erun-backend-api/internal/service/reviews.go":                      1,
 	"erun-backend/erun-backend-api/internal/service/reviews_test.go":                 1,
 	"erun-backend/erun-backend-api/internal/service/tenants_test.go":                 1,
 	"erun-backend/erun-backend-api/internal/zitadel/client_e2e_test.go":              2,

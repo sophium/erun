@@ -29,7 +29,7 @@ type fakeReconcilerEnvironments struct {
 	blockedErr error
 }
 
-func (f *fakeReconcilerEnvironments) MarkDeleteBlocked(_ context.Context, environmentID, reason string) error {
+func (f *fakeReconcilerEnvironments) MarkDeleteBlocked(_ context.Context, _ string, environmentID, reason string) error {
 	if f.blocked == nil {
 		f.blocked = map[string]string{}
 	}
@@ -41,7 +41,7 @@ func (f *fakeReconcilerEnvironments) ListByStatuses(_ context.Context, _ []model
 	return f.environments, f.listErr
 }
 
-func (f *fakeReconcilerEnvironments) ClaimDelete(_ context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
+func (f *fakeReconcilerEnvironments) ClaimDelete(_ context.Context, _ string, environmentID string, staleAfter time.Duration) (bool, error) {
 	f.claims = append(f.claims, claimCall{environmentID: environmentID, staleAfter: staleAfter})
 	if f.claimErr != nil {
 		return false, f.claimErr
@@ -68,9 +68,15 @@ func (f *fakeReconcilerTenants) List(_ context.Context) ([]model.Tenant, error) 
 type fakeReconcilerContexts struct {
 	contexts map[string]model.Context
 	err      error
+	// askedTenants records the owning tenant each Get was asked for. The
+	// reconciler runs with an empty TenantID in its security context, so the
+	// owner can only come from the environment row it found — a Get with no
+	// tenant is the shape that lets an id name somebody else's context.
+	askedTenants []string
 }
 
-func (f *fakeReconcilerContexts) Get(_ context.Context, contextID string) (model.Context, error) {
+func (f *fakeReconcilerContexts) Get(_ context.Context, tenantID, contextID string) (model.Context, error) {
+	f.askedTenants = append(f.askedTenants, tenantID)
 	if f.err != nil {
 		return model.Context{}, f.err
 	}

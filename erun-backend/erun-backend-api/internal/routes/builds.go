@@ -11,11 +11,15 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
 type BuildRepository interface {
-	Get(ctx context.Context, buildID string) (model.Build, error)
+	// Get takes the caller's tenant alongside the build id: builds is
+	// tenant-owned and erun_operations' RLS policy is unconditional, so an
+	// id-only lookup would answer an OPERATIONS caller with a stranger's build.
+	Get(ctx context.Context, tenantID, buildID string) (model.Build, error)
 	List(ctx context.Context, filter apirepository.BuildFilter) ([]model.Build, error)
 	ListPage(ctx context.Context, filter apirepository.BuildListFilter) (apirepository.BuildPage, error)
 }
@@ -234,7 +238,14 @@ func writeBuildError(w http.ResponseWriter, req *http.Request, err error) {
 }
 
 func (r BuildRoutes) getBuild(w http.ResponseWriter, req *http.Request) {
-	build, err := r.builds.Get(req.Context(), req.PathValue("build_id"))
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	// A build read through this route is always the caller's own, so a
+	// cross-tenant build id answers 404 exactly as an id that names nothing.
+	build, err := r.builds.Get(req.Context(), securityContext.TenantID, req.PathValue("build_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return

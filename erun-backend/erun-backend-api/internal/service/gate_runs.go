@@ -39,8 +39,10 @@ func (e *GateRunAlreadyDecidedError) Unwrap() error { return repository.ErrConfl
 
 type GateRunRepository interface {
 	Create(ctx context.Context, run model.GateRun) (model.GateRun, error)
-	Get(ctx context.Context, gateRunID string) (model.GateRun, error)
-	Update(ctx context.Context, run model.GateRun) (model.GateRun, error)
+	// Get and Update take the owning tenant explicitly; see
+	// repository.GateRunRepository.Get for why an id alone is not a scope.
+	Get(ctx context.Context, tenantID, gateRunID string) (model.GateRun, error)
+	Update(ctx context.Context, tenantID string, run model.GateRun) (model.GateRun, error)
 }
 
 type GateRunService struct {
@@ -85,11 +87,11 @@ func (s *GateRunService) Start(ctx context.Context, run model.GateRun) (model.Ga
 // ReportOutcome moves an existing gate run from RUNNING to a terminal
 // status. Reporting against a gate run that already has one is refused —
 // see GateRunAlreadyDecidedError.
-func (s *GateRunService) ReportOutcome(ctx context.Context, gateRunID string, status model.GateRunStatus, failingStep, logRef, mergeCommit string) (model.GateRun, error) {
+func (s *GateRunService) ReportOutcome(ctx context.Context, tenantID, gateRunID string, status model.GateRunStatus, failingStep, logRef, mergeCommit string) (model.GateRun, error) {
 	if !terminalGateRunStatuses[status] {
 		return model.GateRun{}, &InvalidGateRunInputError{Field: "status", Reason: "must be PASSED, FAILED, or INCONCLUSIVE"}
 	}
-	existing, err := s.gateRuns.Get(ctx, gateRunID)
+	existing, err := s.gateRuns.Get(ctx, tenantID, gateRunID)
 	if err != nil {
 		return model.GateRun{}, err
 	}
@@ -107,7 +109,7 @@ func (s *GateRunService) ReportOutcome(ctx context.Context, gateRunID string, st
 	existing.FailingStep = failingStep
 	existing.LogRef = logRef
 	existing.MergeCommit = merged
-	return s.gateRuns.Update(ctx, existing)
+	return s.gateRuns.Update(ctx, tenantID, existing)
 }
 
 // validateGateRunOutcome mirrors the gate_runs table's own CHECK constraints

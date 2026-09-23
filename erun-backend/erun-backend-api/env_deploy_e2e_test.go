@@ -441,7 +441,8 @@ func assertDeployRejectedWhileInFlight(t *testing.T, db *sql.DB, baseURL, enviro
 	t.Helper()
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
 	ctx := e2eOperationsContext(t, db)
-	claimed, err := environments.ClaimDeploy(ctx, environmentID, time.Hour)
+	tenantID := e2eOperationsTenantID(t, ctx)
+	claimed, err := environments.ClaimDeploy(ctx, tenantID, environmentID, time.Hour)
 	mustNoErr(t, err, "hold the claim")
 	if !claimed {
 		t.Fatal("could not hold the claim on a running environment")
@@ -453,7 +454,7 @@ func assertDeployRejectedWhileInFlight(t *testing.T, db *sql.DB, baseURL, enviro
 	}
 	// Hand the claim back, so the test does not leave behind an environment that
 	// looks wedged mid-deploy.
-	mustNoErr(t, environments.UpdateProvisioningStatus(ctx, environmentID, repository.EnvironmentStatusUpdate{
+	mustNoErr(t, environments.UpdateProvisioningStatus(ctx, tenantID, environmentID, repository.EnvironmentStatusUpdate{
 		Status: "running",
 	}), "release the held claim")
 }
@@ -506,24 +507,25 @@ func assertDeployClaimIsExclusive(t *testing.T, db *sql.DB, environmentID string
 	t.Helper()
 	environments := repository.NewEnvironmentRepository(repository.NewTxManager(db, repository.DialectPostgres))
 	ctx := e2eOperationsContext(t, db)
+	tenantID := e2eOperationsTenantID(t, ctx)
 
-	claimed, err := environments.ClaimDeploy(ctx, environmentID, time.Hour)
+	claimed, err := environments.ClaimDeploy(ctx, tenantID, environmentID, time.Hour)
 	mustNoErr(t, err, "first claim")
 	if !claimed {
 		t.Fatal("first claim was refused on a registered environment")
 	}
-	claimed, err = environments.ClaimDeploy(ctx, environmentID, time.Hour)
+	claimed, err = environments.ClaimDeploy(ctx, tenantID, environmentID, time.Hour)
 	mustNoErr(t, err, "second claim")
 	if claimed {
 		t.Fatal("second claim succeeded, so two concurrent deploys could run into the same release")
 	}
 	// A zero window makes every claim stale, which is the wedged-deploy recovery.
-	claimed, err = environments.ClaimDeploy(ctx, environmentID, 0)
+	claimed, err = environments.ClaimDeploy(ctx, tenantID, environmentID, 0)
 	mustNoErr(t, err, "stale claim")
 	if !claimed {
 		t.Fatal("a stale claim was refused, so a crashed deploy would lock the environment out permanently")
 	}
-	mustNoErr(t, environments.UpdateProvisioningStatus(ctx, environmentID, repository.EnvironmentStatusUpdate{
+	mustNoErr(t, environments.UpdateProvisioningStatus(ctx, tenantID, environmentID, repository.EnvironmentStatusUpdate{
 		Status: "registered",
 	}), "reset status")
 }
@@ -536,6 +538,18 @@ func e2eOperationsContext(t *testing.T, db *sql.DB) context.Context {
 	err := db.QueryRow(`SELECT tenant_id, type FROM tenants ORDER BY created_at ASC LIMIT 1`).Scan(&tenantID, &tenantType)
 	mustNoErr(t, err, "read bootstrap tenant")
 	return security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: tenantType})
+}
+
+// e2eOperationsTenantID names the tenant e2eOperationsContext is bound to, for
+// the repository calls that take the owning tenant explicitly rather than
+// reading it back from the security context.
+func e2eOperationsTenantID(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		t.Fatal("e2e operations context carries no security context")
+	}
+	return securityContext.TenantID
 }
 
 // awaitEnvironmentRunning polls the environment until the durable workflow

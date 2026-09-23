@@ -30,18 +30,24 @@ type EnvironmentRepository interface {
 	// CountByType reports how many of the caller's tenant's environments are
 	// of the given type, for the aggregate resource-budget check (#1113).
 	CountByType(ctx context.Context, envType model.EnvironmentType) (int, error)
-	ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
+	// The mutating methods below take the owning tenant explicitly, alongside
+	// the environment id. They are reached both from here — where the row was
+	// just read back under the caller's own tenant — and from the delete
+	// reconciler and lifecycle, whose contexts carry no tenant at all, so the
+	// owner has to travel as an argument rather than be inferred from ctx.
+	// See repository.EnvironmentRepository.UpdateProvisioningStatus.
+	ClaimDeploy(ctx context.Context, tenantID, environmentID string, staleAfter time.Duration) (bool, error)
 	// MarkDeployFailed records a deploy claim that never reached the durable
 	// workflow (see writeStartProvisioningError), so the environment does not
 	// stay stranded in provisioning.
-	MarkDeployFailed(ctx context.Context, environmentID, reason string) error
+	MarkDeployFailed(ctx context.Context, tenantID, environmentID, reason string) error
 	// ClaimDelete takes exclusive ownership of a delete attempt (#1140),
 	// mirroring ClaimDeploy: false means another delete already holds it.
-	ClaimDelete(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
+	ClaimDelete(ctx context.Context, tenantID, environmentID string, staleAfter time.Duration) (bool, error)
 	// MarkDeleteBlocked records a delete claim that never reached the durable
 	// workflow (see writeStartDeleteError), so the environment does not stay
 	// stranded in `deleting`.
-	MarkDeleteBlocked(ctx context.Context, environmentID, reason string) error
+	MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error
 }
 
 // PlacementContextRepository is the read access placement (#1112) needs: list
@@ -49,7 +55,10 @@ type EnvironmentRepository interface {
 // fetch one by id to validate an explicit request and read its coordinates.
 type PlacementContextRepository interface {
 	List(ctx context.Context) ([]model.Context, error)
-	Get(ctx context.Context, contextID string) (model.Context, error)
+	// Get takes the owning tenant alongside the context id. erun_operations'
+	// RLS policy on contexts is unconditional, so an id-only lookup returns
+	// whichever tenant's context that id names.
+	Get(ctx context.Context, tenantID, contextID string) (model.Context, error)
 }
 
 // EnvironmentProvisioner starts the durable server-side deploy of an
@@ -219,7 +228,7 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 	// from launching two delete Jobs against the same namespace, and reclaims
 	// a stale or already-blocked attempt so a retry never needs an operator
 	// to notice and wait it out by hand.
-	claimed, err := r.environments.ClaimDelete(ctx, environment.EnvironmentID, deleteClaimStaleAfter)
+	claimed, err := r.environments.ClaimDelete(ctx, environment.TenantID, environment.EnvironmentID, deleteClaimStaleAfter)
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -229,7 +238,7 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if err := r.startDelete(ctx, environment); err != nil {
-		r.writeStartDeleteError(w, ctx, environment.EnvironmentID, err)
+		r.writeStartDeleteError(w, ctx, environment, err)
 		return
 	}
 	environment.Status = model.EnvironmentStatusDeleting
@@ -247,20 +256,27 @@ func (r EnvironmentRoutes) startDelete(ctx context.Context, environment model.En
 	if err != nil {
 		return err
 	}
-	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
-	if err != nil {
-		return err
-	}
 	securityContext, ok := security.FromContext(ctx)
 	if !ok {
 		return fmt.Errorf("missing security context")
+	}
+	// The workflow's tenant identity and the placement's owner both come from
+	// the environment row, not from the caller: the row is what owns the
+	// context whose credential the teardown Job will be handed. On the
+	// ordinary single-tenant path the two are the same tenant and this is a
+	// no-op; it is what keeps an OPERATIONS caller's own tenant from being
+	// paired with a context that belongs to someone else.
+	ownerTenantID := placementOwnerTenant(environment, securityContext)
+	placement, err := r.resolvePlacementCoordinates(ctx, ownerTenantID, environment.ContextID)
+	if err != nil {
+		return err
 	}
 	version := environment.DeployedVersion
 	if version == "" {
 		version = environment.RuntimeVersion
 	}
 	return r.deleter.Start(provision.EnvDeleteInput{
-		TenantID:                   securityContext.TenantID,
+		TenantID:                   ownerTenantID,
 		TenantType:                 securityContext.TenantType,
 		ErunUserID:                 securityContext.ErunUserID,
 		EnvironmentID:              environment.EnvironmentID,
@@ -304,8 +320,8 @@ func deleteClaimRefusal(status model.EnvironmentStatus) string {
 // 500: ClaimDelete already moved the row to `deleting` before startDelete
 // ran, so any failure to even enqueue the durable workflow would otherwise
 // strand the environment there with no workflow run left to move it out.
-func (r EnvironmentRoutes) writeStartDeleteError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
-	_ = r.environments.MarkDeleteBlocked(ctx, environmentID, err.Error())
+func (r EnvironmentRoutes) writeStartDeleteError(w http.ResponseWriter, ctx context.Context, environment model.Environment, err error) {
+	_ = r.environments.MarkDeleteBlocked(ctx, environment.TenantID, environment.EnvironmentID, err.Error())
 	logServerErrorForRoute(ctx, "DELETE /v1/environments/{environment_id}", err)
 	writeError(w, http.StatusInternalServerError, "failed to start delete")
 }
@@ -320,7 +336,10 @@ func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model
 	if err != nil {
 		return provision.EnvLifecycleInput{}, err
 	}
-	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
+	// The stop/delete Job's placement credential is fetched for the tenant
+	// that owns the environment, never for whoever asked — see startDelete.
+	ownerTenantID := r.placementOwnerTenantFor(ctx, environment)
+	placement, err := r.resolvePlacementCoordinates(ctx, ownerTenantID, environment.ContextID)
 	if err != nil {
 		return provision.EnvLifecycleInput{}, err
 	}
@@ -329,6 +348,7 @@ func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model
 		version = environment.RuntimeVersion
 	}
 	return provision.EnvLifecycleInput{
+		TenantID:                   ownerTenantID,
 		Tenant:                     strings.TrimSpace(tenant.Name),
 		Environment:                environment.Name,
 		EnvironmentID:              environment.EnvironmentID,
@@ -345,16 +365,47 @@ func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model
 // delete always targets the cluster the environment was already placed on.
 // Empty contextID (the platform's own cluster) resolves to the zero
 // resolvedPlacement with no repository read.
-func (r EnvironmentRoutes) resolvePlacementCoordinates(ctx context.Context, contextID string) (resolvedPlacement, error) {
+//
+// tenantID owns the context being read back, and is an explicit argument
+// rather than the caller's own tenant read out of ctx: a context read that
+// named only an id would return whichever tenant's context that id happened
+// to name, which erun_operations' unconditional RLS policy does nothing to
+// prevent.
+func (r EnvironmentRoutes) resolvePlacementCoordinates(ctx context.Context, tenantID, contextID string) (resolvedPlacement, error) {
 	contextID = strings.TrimSpace(contextID)
 	if contextID == "" {
 		return resolvedPlacement{}, nil
 	}
-	cloudContext, err := r.contexts.Get(ctx, contextID)
+	cloudContext, err := r.contexts.Get(ctx, tenantID, contextID)
 	if err != nil {
 		return resolvedPlacement{}, err
 	}
 	return placementFromContext(cloudContext), nil
+}
+
+// placementOwnerTenant names the tenant a placement's coordinates and
+// credential are resolved for: the environment row's own tenant_id, which is
+// what owns the context it references. An environment that carries no row yet
+// — the create path, where the database mints tenant_id from the scoped
+// security context — falls back to the caller's resolved tenant, which is
+// already the target tenant on that path (see
+// resolveCreateEnvironmentTenantScope).
+func placementOwnerTenant(environment model.Environment, securityContext security.Context) string {
+	if owner := strings.TrimSpace(environment.TenantID); owner != "" {
+		return owner
+	}
+	return securityContext.TenantID
+}
+
+// placementOwnerTenantFor resolves placementOwnerTenant from ctx, for the
+// route handlers that hold an environment row and no separately-read security
+// context.
+func (r EnvironmentRoutes) placementOwnerTenantFor(ctx context.Context, environment model.Environment) string {
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		return ""
+	}
+	return placementOwnerTenant(environment, securityContext)
 }
 
 // deployEnvironmentRequest re-deploys at an explicit version; omitted, the
@@ -400,7 +451,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	}
 	// Claiming before starting the workflow is what keeps a double-submit from
 	// running two rollouts into the same release.
-	claimed, err := r.environments.ClaimDeploy(ctx, environment.EnvironmentID, deployClaimStaleAfter)
+	claimed, err := r.environments.ClaimDeploy(ctx, environment.TenantID, environment.EnvironmentID, deployClaimStaleAfter)
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -410,7 +461,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if err := r.startDeploy(ctx, environment, version); err != nil {
-		r.writeStartDeployError(w, ctx, environment.EnvironmentID, err)
+		r.writeStartDeployError(w, ctx, environment, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, environment)
@@ -498,7 +549,9 @@ func (r EnvironmentRoutes) resolvePlacement(ctx context.Context, environment mod
 	if contextID == "" {
 		return r.autoSelectPlacement(ctx)
 	}
-	cloudContext, err := r.contexts.Get(ctx, contextID)
+	// Name the context's owner explicitly: a context id on its own is not a
+	// tenant boundary, because erun_operations' RLS policy is unconditional.
+	cloudContext, err := r.contexts.Get(ctx, r.placementOwnerTenantFor(ctx, environment), contextID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return resolvedPlacement{}, errPlacementContextNotFound
@@ -1011,8 +1064,8 @@ func writeStartProvisioningError(w http.ResponseWriter, ctx context.Context, err
 // ClaimDeploy already moved the row to provisioning before startDeploy ran, so
 // any failure to even enqueue the durable workflow would otherwise strand the
 // environment there with no workflow run left to move it out.
-func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
-	_ = r.environments.MarkDeployFailed(ctx, environmentID, err.Error())
+func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx context.Context, environment model.Environment, err error) {
+	_ = r.environments.MarkDeployFailed(ctx, environment.TenantID, environment.EnvironmentID, err.Error())
 	logServerErrorForRoute(ctx, "POST /v1/environments/{environment_id}/deploy", err)
 	writeError(w, http.StatusInternalServerError, "failed to start deploy")
 }
@@ -1076,7 +1129,7 @@ func (r EnvironmentRoutes) startProvisioning(ctx context.Context, created model.
 // already placed on at create time (resolvePlacementCoordinates), never a
 // freshly auto-selected one.
 func (r EnvironmentRoutes) startDeploy(ctx context.Context, environment model.Environment, version string) error {
-	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
+	placement, err := r.resolvePlacementCoordinates(ctx, r.placementOwnerTenantFor(ctx, environment), environment.ContextID)
 	if err != nil {
 		return err
 	}
@@ -1108,7 +1161,7 @@ func (r EnvironmentRoutes) deployInput(ctx context.Context, environment model.En
 		return provision.EnvProvisionInput{}, err
 	}
 	return provision.EnvProvisionInput{
-		TenantID:                   securityContext.TenantID,
+		TenantID:                   placementOwnerTenant(environment, securityContext),
 		TenantType:                 securityContext.TenantType,
 		ErunUserID:                 securityContext.ErunUserID,
 		EnvironmentID:              environment.EnvironmentID,

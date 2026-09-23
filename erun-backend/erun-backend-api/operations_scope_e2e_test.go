@@ -40,7 +40,10 @@ func operationsScopeDatabase(t *testing.T) (opsCtx, strangerCtx context.Context,
 	strangerTenantID = seedScopeTestTenant(t, db, "stranger-scope-e2e", model.TenantTypeCompany)
 	t.Cleanup(func() {
 		for _, tenantID := range []string{opsTenantID, strangerTenantID} {
-			for _, table := range []string{"audit_events", "usage_events", "user_roles", "role_permissions", "roles", "users", "environments", "contexts", "tenant_quotas", "tenants"} {
+			// Children before parents: builds and gate_runs reference reviews,
+			// and the operate-path scope tests below seed all four, so leaving
+			// them out leaves rows the tenants delete cannot cascade past.
+			for _, table := range []string{"audit_events", "usage_events", "user_roles", "role_permissions", "roles", "builds", "gate_runs", "reviews", "jobs", "environments", "contexts", "tenant_quotas", "users", "tenants"} {
 				if _, err := db.Exec(`DELETE FROM `+table+` WHERE tenant_id = $1`, tenantID); err != nil {
 					t.Logf("clearing %s for tenant %s: %v", table, tenantID, err)
 				}

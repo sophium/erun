@@ -443,7 +443,7 @@ func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
 		t.Fatal("Create did not return the profile it was given")
 	}
 
-	fetched, err := builds.Get(ctx, created.BuildID)
+	fetched, err := builds.Get(ctx, created.TenantID, created.BuildID)
 	mustNoErr(t, err, "get the build back")
 	if fetched.Profile == nil {
 		t.Fatal("Get did not read back a profile")
@@ -500,7 +500,7 @@ func TestBuildTenantIsolation(t *testing.T) {
 		}
 	}
 
-	if _, err := builds.Get(ctxB, buildA.BuildID); !errors.Is(err, ErrNotFound) {
+	if _, err := builds.Get(ctxB, tenantB, buildA.BuildID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("tenant B fetching tenant A's build by ID: err = %v, want ErrNotFound", err)
 	}
 }
@@ -796,9 +796,12 @@ func TestReviewMergeQueueIsPerRepository(t *testing.T) {
 		t.Fatalf("the other repository reports a merging review: err = %v, want ErrNotFound", err)
 	}
 
-	repositories, err := reviews.QueuedRepositories(ctx, "main")
+	queued, err := reviews.QueuedRepositories(ctx, "main")
 	mustNoErr(t, err, "read the branch's queued repositories")
-	if len(repositories) != 2 {
-		t.Fatalf("QueuedRepositories(main) = %v, want both repositories — an unfiltered promotion over these is the ambiguity the platform must refuse", repositories)
+	if len(queued.Named) != 2 {
+		t.Fatalf("QueuedRepositories(main).Named = %v, want both repositories — an unfiltered promotion over these is the ambiguity the platform must refuse", queued.Named)
+	}
+	if len(queued.Unrecorded) != 0 {
+		t.Fatalf("QueuedRepositories(main).Unrecorded = %v, want none — both reviews recorded a repository", queued.Unrecorded)
 	}
 }

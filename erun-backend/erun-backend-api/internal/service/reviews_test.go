@@ -88,10 +88,11 @@ func (f *fakeReviewRepo) FindLastMergedReview(_ context.Context, repositoryFilte
 }
 
 // QueuedRepositories mirrors the real query: the distinct repositories of the
-// READY reviews this fake has queued for targetBranch.
-func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch string) ([]string, error) {
+// READY reviews this fake has queued for targetBranch, and the queued reviews
+// that record none, in queue order.
+func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch string) (repository.MergeQueueRepositories, error) {
 	seen := map[string]bool{}
-	var out []string
+	queued := repository.MergeQueueRepositories{}
 	for _, entry := range f.queue {
 		if entry.TargetBranch != targetBranch {
 			continue
@@ -100,12 +101,16 @@ func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch stri
 		if !ok || review.Status != model.ReviewStatusReady {
 			continue
 		}
+		if strings.TrimSpace(review.Repository) == "" {
+			queued.Unrecorded = append(queued.Unrecorded, review.ReviewID)
+			continue
+		}
 		if !seen[review.Repository] {
 			seen[review.Repository] = true
-			out = append(out, review.Repository)
+			queued.Named = append(queued.Named, review.Repository)
 		}
 	}
-	return out, nil
+	return queued, nil
 }
 
 func (f *fakeReviewRepo) CreateMergeQueueEntry(_ context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error) {
@@ -132,7 +137,7 @@ type fakeReviewBuilds struct {
 	builds map[string]model.Build
 }
 
-func (f *fakeReviewBuilds) Get(_ context.Context, buildID string) (model.Build, error) {
+func (f *fakeReviewBuilds) Get(_ context.Context, _ string, buildID string) (model.Build, error) {
 	b, ok := f.builds[buildID]
 	if !ok {
 		return model.Build{}, repository.ErrNotFound
@@ -327,10 +332,18 @@ func TestReconcileMergedRefusesAClosedReview(t *testing.T) {
 	}
 }
 
+// testRepository is the identity every acceptMerged report names, canonical
+// spelling included, so the repository a fixture records and the one the
+// report carries are the same string — which is what makes these fixtures
+// exercise a merge inside one repository rather than across two.
+const testRepository = "file:///remote"
+
 // mergingReviewWithGateBuild sets up a review sitting at MERGE with a
 // successful GATE build already recorded against it — the state every
 // acceptMerged test starts from, so each one only has to vary the one
-// condition it means to exercise.
+// condition it means to exercise. The review records no repository, the
+// legacy-row shape the adoption tests need; tests about the gated tip add a
+// prior merge that does record one (mergingReviewGatedAgainst).
 func mergingReviewWithGateBuild(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
 	builds := &fakeReviewBuilds{builds: map[string]model.Build{
@@ -363,11 +376,15 @@ func TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch(t *testing.T) {
 }
 
 // mergingReviewGatedAgainst wires up mergingReviewWithGateBuild plus a prior
-// MERGED review on the same branch at commit "real-tip" — the target tip
-// this review's gate build has to descend from.
+// MERGED review on the same branch of the repository these tests report
+// against, at commit "real-tip" — the target tip this review's gate build has
+// to descend from. What makes it *this* review's gated tip rather than a
+// stranger's is the repository it records: the review under test records none,
+// so it is anchored on the repository its report adopts (testRepository), and
+// a prior merge belonging to any other repository must not answer for it.
 func mergingReviewGatedAgainst(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
 	reviews, builds := mergingReviewWithGateBuild(commit)
-	priorMerge := model.Review{ReviewID: "review-0", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-0"}
+	priorMerge := model.Review{ReviewID: "review-0", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-0", Repository: testRepository}
 	reviews.reviews["review-0"] = &priorMerge
 	builds.builds["gate-0"] = model.Build{BuildID: "gate-0", ReviewID: "review-0", Kind: model.BuildKindGate, Successful: true, CommitID: "real-tip"}
 	return reviews, builds
@@ -696,6 +713,36 @@ func TestMarkBuildResultToleratesAnotherReviewMerging(t *testing.T) {
 	}
 }
 
+// TestMarkBuildResultToleratesAnAmbiguousQueue is the same shape of
+// non-failure for the refusal that names no repository: the build is already
+// recorded and its review already READY by the time the promotion is
+// attempted, and the ambiguity is about which repository's queue an
+// unfiltered promotion would be for. Failing the report would tell a caller
+// their build did not land when it did, and a retry would record a second one.
+func TestMarkBuildResultToleratesAnAmbiguousQueue(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-other", Repository: "https://github.com/sophium/other", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-built", TargetBranch: "main", Status: model.ReviewStatusOpen},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-erun"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-other"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, ok, err := svc.MarkBuildResult(context.Background(), "review-built", "build-1", true)
+	if err != nil {
+		t.Fatalf("MarkBuildResult: %v, want no error even though the queue is several repositories'", err)
+	}
+	if ok {
+		t.Fatal("MarkBuildResult reported a promotion from a queue no repository was named for")
+	}
+	if reviews.reviews["review-built"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-built status = %s, want READY (its own build succeeded and it queued normally)", reviews.reviews["review-built"].Status)
+	}
+}
+
 // TestRequeueRefusesAReviewThatIsNotMerging: the missed-merge-window requeue
 // only recovers a review holding the queue's slot. The review was resolved by
 // id, so it exists and the caller can see it — the refusal names the status it
@@ -911,6 +958,64 @@ func TestAdvanceMergeQueuePromotesAnUnrecordedQueueThatIsStillOneRepository(t *t
 	}
 }
 
+// One named repository beside reviews created before the platform
+// recorded a repository is one repository's queue, not two. Counting the
+// absence as a repository refused a tenant's own queue, and the rows it
+// refused to promote were the legacy ones — which are reachable here, in
+// queue order, exactly as if they had recorded a repository.
+func TestAdvanceMergeQueuePromotesAQueueOfOneRepositoryPlusUnrecordedRows(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-legacy", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-legacy"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-erun"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	promoted, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
+	if err != nil {
+		t.Fatalf("AdvanceMergeQueue over one repository plus unrecorded rows: %v", err)
+	}
+	if promoted.ReviewID != "review-legacy" {
+		t.Fatalf("promoted %s, want the queue head review-legacy: an unrecorded row is still in the queue it was queued in", promoted.ReviewID)
+	}
+}
+
+// A queue that really is several repositories' still refuses, and now names
+// the rows it cannot attribute: they belong to none of the named
+// repositories, so a caller told only the repositories would have to work out
+// for itself which rows are stuck.
+func TestAdvanceMergeQueueNamesTheRowsItCannotAttribute(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-other", Repository: "https://github.com/sophium/other", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-legacy", TargetBranch: "main", Status: model.ReviewStatusReady},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-erun"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-other"},
+		{ReviewMergeQueueID: 3, TargetBranch: "main", ReviewID: "review-legacy"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
+	var ambiguous *AmbiguousMergeQueueError
+	if !errors.As(err, &ambiguous) {
+		t.Fatalf("AdvanceMergeQueue: error = %v, want *AmbiguousMergeQueueError", err)
+	}
+	if len(ambiguous.Repositories) != 2 {
+		t.Fatalf("Repositories = %v, want the two named repositories and only those", ambiguous.Repositories)
+	}
+	if len(ambiguous.UnrecordedReviewIDs) != 1 || ambiguous.UnrecordedReviewIDs[0] != "review-legacy" {
+		t.Fatalf("UnrecordedReviewIDs = %v, want review-legacy", ambiguous.UnrecordedReviewIDs)
+	}
+	if !strings.Contains(ambiguous.Error(), "review-legacy") {
+		t.Fatalf("refusal = %q, want it to name the row it cannot attribute", ambiguous.Error())
+	}
+}
+
 // The reported failure, second half: verification fetched whatever remote the
 // reporter named, so a caller could have the platform confirm a commit
 // against a repository the review has nothing to do with. Naming a different
@@ -968,6 +1073,37 @@ func TestAcceptMergedRecordsTheRepositoryAnUnrecordedReviewWasReportedUnder(t *t
 		t.Fatalf("UpdateStatus(MERGED): %v", err)
 	}
 	if updated.Repository != "https://github.com/sophium/erun" {
+		t.Fatalf("repository = %q, want the reported remote recorded as the review's identity", updated.Repository)
+	}
+}
+
+// A review that records no repository is anchored on the repository its report
+// names — the one it adopts — and never on whichever repository happened to
+// merge onto a same-named target branch most recently. The repository layer
+// reads an empty repository filter as "every repository", so asking the
+// review's own column would answer with a stranger's merge commit here; this
+// verifier reports that stranger's tip is not an ancestor, which is exactly
+// the refusal such an anchor produces.
+func TestAcceptMergedDoesNotAnchorAnUnrecordedReviewOnAnotherRepositorysMerge(t *testing.T) {
+	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	// The only prior merge on this branch belongs to a different repository,
+	// and is the target tip this review was never gated against.
+	otherRepoMerge := model.Review{ReviewID: "review-other", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-other", Repository: "file:///other"}
+	reviews.reviews["review-other"] = &otherRepoMerge
+	builds.builds["gate-other"] = model.Build{BuildID: "gate-other", ReviewID: "review-other", Kind: model.BuildKindGate, Successful: true, CommitID: "other-repository-tip"}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: false}, nil)
+
+	// The report names file:///remote, whose queue has never merged onto this
+	// branch, so there is nothing to descend from and the merge is accepted.
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want the merge accepted: the other repository's tip is not this review's gated base", err)
+	}
+	if updated.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", updated.Status)
+	}
+	if updated.Repository != testRepository {
 		t.Fatalf("repository = %q, want the reported remote recorded as the review's identity", updated.Repository)
 	}
 }

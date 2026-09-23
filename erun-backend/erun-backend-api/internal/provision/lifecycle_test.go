@@ -54,12 +54,12 @@ type stubRowDeleter struct {
 	err     error
 }
 
-func (s *stubRowDeleter) Delete(_ context.Context, environmentID string) error {
+func (s *stubRowDeleter) Delete(_ context.Context, _ string, environmentID string) error {
 	s.deleted = append(s.deleted, environmentID)
 	return s.err
 }
 
-func (s *stubRowDeleter) MarkDeleteBlocked(_ context.Context, environmentID, reason string) error {
+func (s *stubRowDeleter) MarkDeleteBlocked(_ context.Context, _ string, environmentID, reason string) error {
 	s.blocked = append(s.blocked, blockedDeleteCall{environmentID: environmentID, reason: reason})
 	return nil
 }
@@ -329,7 +329,7 @@ func TestEnvLifecycleStopThreadsThePlacementCredential(t *testing.T) {
 	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, credentials)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
-		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
+		TenantID: "tenant-1", Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
 		ContextID: "ctx-1", PlacementKubernetesContext: "prod-cluster", PlacementServerURL: "https://203.0.113.10:6443",
 	})
 	if err != nil {
@@ -338,6 +338,12 @@ func TestEnvLifecycleStopThreadsThePlacementCredential(t *testing.T) {
 	got := runner.stopCalls[0].Placement
 	if got.AdminToken != "live-token" || got.KubernetesContext != "prod-cluster" || got.ServerURL != "https://203.0.113.10:6443" {
 		t.Fatalf("stop job placement = %+v", got)
+	}
+	// The credential is asked for on behalf of the tenant that owns the
+	// environment — the argument the credential read is keyed on — not on
+	// behalf of whoever is running the Job.
+	if got.TenantID != "tenant-1" {
+		t.Fatalf("stop job placement TenantID = %q, want tenant-1", got.TenantID)
 	}
 }
 
@@ -370,6 +376,6 @@ type stubLifecycleCredentials struct {
 	err   error
 }
 
-func (s stubLifecycleCredentials) Get(context.Context, string) (string, error) {
+func (s stubLifecycleCredentials) Get(context.Context, string, string) (string, error) {
 	return s.token, s.err
 }
