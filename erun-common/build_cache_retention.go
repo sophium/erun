@@ -109,8 +109,7 @@ func dockerVolumeBytes() (uint64, error) {
 // from the same `docker system df` the headroom path already reads for what it
 // could free. The two questions need different columns — a size to compare
 // against a ceiling, a reclaimable figure to size a prune — so this is its own
-// reading rather than a second field on dockerReclaimable, whose name says what
-// it holds.
+// reading rather than a second figure on the headroom path's reclaimable one.
 //
 // Treat the figure as a lower bound, for the same measured reason
 // dockerReclaimableBytes does: docker's own accounting for build cache has
