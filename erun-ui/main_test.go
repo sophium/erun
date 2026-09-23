@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -203,5 +204,45 @@ func TestCLIUsageDocumentsTheRealFlags(t *testing.T) {
 		if !strings.Contains(cliUsage, want) {
 			t.Errorf("usage does not document %s:\n%s", want, cliUsage)
 		}
+	}
+}
+
+// The worker harness asks for a stable per-worker port and then serves the
+// address the backend announces, so a port another process already holds must
+// not be fatal: a probe-then-bind harness loses exactly that race and the
+// backend then dies at startup with "bind: address already in use" before any
+// test in that worker runs. Falling back to an OS-assigned port keeps the run
+// alive and leaves the announced address as the only one a caller may use.
+func TestListenHeadlessFallsBackWhenTheRequestedPortIsHeld(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("holding a port: %v", err)
+	}
+	defer func() { _ = held.Close() }()
+
+	listener, err := listenHeadless(held.Addr().String())
+	if err != nil {
+		t.Fatalf("listenHeadless(%q) with the port held: %v", held.Addr().String(), err)
+	}
+	defer func() { _ = listener.Close() }()
+
+	if listener.Addr().String() == held.Addr().String() {
+		t.Fatalf("listener bound %s, which another process holds", listener.Addr())
+	}
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing the announced address %s: %v", listener.Addr(), err)
+	}
+	_ = conn.Close()
+}
+
+// Every bind failure that is not address-in-use stays fatal: a caller that
+// cannot bind the address it was given must hear about it rather than be handed
+// a silently different one.
+func TestListenHeadlessKeepsNonAddressInUseFailuresFatal(t *testing.T) {
+	listener, err := listenHeadless("127.0.0.1:not-a-port")
+	if err == nil {
+		_ = listener.Close()
+		t.Fatal("listenHeadless accepted an unusable address")
 	}
 }
