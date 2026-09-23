@@ -490,6 +490,14 @@ func parseDockerSize(value string) (uint64, bool) {
 // also what expresses this check's actual invariant — prune until free space
 // reaches the floor — rather than capping how much cache is retained and
 // leaving the free space it was meant to recover unaddressed.
+//
+// What it removes is build cache and nothing else — the command's own contract,
+// and the only thing this file needs from it. It cannot touch images, so an
+// unconditional attempt cannot delete the environment's own running image, and
+// there is no store state that attempting it puts at risk. That is what makes
+// attempting it always, rather than only on a figure that says there is
+// something to reclaim, a safe way to ask the question docker's size columns
+// cannot answer.
 func diskHeadroomPruneArgs(floor uint64) []string {
 	return []string{"buildx", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10)}
 }
