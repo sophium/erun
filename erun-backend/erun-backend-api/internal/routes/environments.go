@@ -49,7 +49,10 @@ type EnvironmentRepository interface {
 // fetch one by id to validate an explicit request and read its coordinates.
 type PlacementContextRepository interface {
 	List(ctx context.Context) ([]model.Context, error)
-	Get(ctx context.Context, contextID string) (model.Context, error)
+	// Get takes the owning tenant alongside the context id. erun_operations'
+	// RLS policy on contexts is unconditional, so an id-only lookup returns
+	// whichever tenant's context that id names.
+	Get(ctx context.Context, tenantID, contextID string) (model.Context, error)
 }
 
 // EnvironmentProvisioner starts the durable server-side deploy of an
@@ -247,20 +250,27 @@ func (r EnvironmentRoutes) startDelete(ctx context.Context, environment model.En
 	if err != nil {
 		return err
 	}
-	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
-	if err != nil {
-		return err
-	}
 	securityContext, ok := security.FromContext(ctx)
 	if !ok {
 		return fmt.Errorf("missing security context")
+	}
+	// The workflow's tenant identity and the placement's owner both come from
+	// the environment row, not from the caller: the row is what owns the
+	// context whose credential the teardown Job will be handed. On the
+	// ordinary single-tenant path the two are the same tenant and this is a
+	// no-op; it is what keeps an OPERATIONS caller's own tenant from being
+	// paired with a context that belongs to someone else.
+	ownerTenantID := placementOwnerTenant(environment, securityContext)
+	placement, err := r.resolvePlacementCoordinates(ctx, ownerTenantID, environment.ContextID)
+	if err != nil {
+		return err
 	}
 	version := environment.DeployedVersion
 	if version == "" {
 		version = environment.RuntimeVersion
 	}
 	return r.deleter.Start(provision.EnvDeleteInput{
-		TenantID:                   securityContext.TenantID,
+		TenantID:                   ownerTenantID,
 		TenantType:                 securityContext.TenantType,
 		ErunUserID:                 securityContext.ErunUserID,
 		EnvironmentID:              environment.EnvironmentID,
@@ -320,7 +330,10 @@ func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model
 	if err != nil {
 		return provision.EnvLifecycleInput{}, err
 	}
-	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
+	// The stop/delete Job's placement credential is fetched for the tenant
+	// that owns the environment, never for whoever asked — see startDelete.
+	ownerTenantID := r.placementOwnerTenantFor(ctx, environment)
+	placement, err := r.resolvePlacementCoordinates(ctx, ownerTenantID, environment.ContextID)
 	if err != nil {
 		return provision.EnvLifecycleInput{}, err
 	}
@@ -329,6 +342,7 @@ func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model
 		version = environment.RuntimeVersion
 	}
 	return provision.EnvLifecycleInput{
+		TenantID:                   ownerTenantID,
 		Tenant:                     strings.TrimSpace(tenant.Name),
 		Environment:                environment.Name,
 		EnvironmentID:              environment.EnvironmentID,
@@ -345,16 +359,47 @@ func (r EnvironmentRoutes) lifecycleInput(ctx context.Context, environment model
 // delete always targets the cluster the environment was already placed on.
 // Empty contextID (the platform's own cluster) resolves to the zero
 // resolvedPlacement with no repository read.
-func (r EnvironmentRoutes) resolvePlacementCoordinates(ctx context.Context, contextID string) (resolvedPlacement, error) {
+//
+// tenantID owns the context being read back, and is an explicit argument
+// rather than the caller's own tenant read out of ctx: a context read that
+// named only an id would return whichever tenant's context that id happened
+// to name, which erun_operations' unconditional RLS policy does nothing to
+// prevent.
+func (r EnvironmentRoutes) resolvePlacementCoordinates(ctx context.Context, tenantID, contextID string) (resolvedPlacement, error) {
 	contextID = strings.TrimSpace(contextID)
 	if contextID == "" {
 		return resolvedPlacement{}, nil
 	}
-	cloudContext, err := r.contexts.Get(ctx, contextID)
+	cloudContext, err := r.contexts.Get(ctx, tenantID, contextID)
 	if err != nil {
 		return resolvedPlacement{}, err
 	}
 	return placementFromContext(cloudContext), nil
+}
+
+// placementOwnerTenant names the tenant a placement's coordinates and
+// credential are resolved for: the environment row's own tenant_id, which is
+// what owns the context it references. An environment that carries no row yet
+// — the create path, where the database mints tenant_id from the scoped
+// security context — falls back to the caller's resolved tenant, which is
+// already the target tenant on that path (see
+// resolveCreateEnvironmentTenantScope).
+func placementOwnerTenant(environment model.Environment, securityContext security.Context) string {
+	if owner := strings.TrimSpace(environment.TenantID); owner != "" {
+		return owner
+	}
+	return securityContext.TenantID
+}
+
+// placementOwnerTenantFor resolves placementOwnerTenant from ctx, for the
+// route handlers that hold an environment row and no separately-read security
+// context.
+func (r EnvironmentRoutes) placementOwnerTenantFor(ctx context.Context, environment model.Environment) string {
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		return ""
+	}
+	return placementOwnerTenant(environment, securityContext)
 }
 
 // deployEnvironmentRequest re-deploys at an explicit version; omitted, the
@@ -498,7 +543,9 @@ func (r EnvironmentRoutes) resolvePlacement(ctx context.Context, environment mod
 	if contextID == "" {
 		return r.autoSelectPlacement(ctx)
 	}
-	cloudContext, err := r.contexts.Get(ctx, contextID)
+	// Name the context's owner explicitly: a context id on its own is not a
+	// tenant boundary, because erun_operations' RLS policy is unconditional.
+	cloudContext, err := r.contexts.Get(ctx, r.placementOwnerTenantFor(ctx, environment), contextID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return resolvedPlacement{}, errPlacementContextNotFound
@@ -1076,7 +1123,7 @@ func (r EnvironmentRoutes) startProvisioning(ctx context.Context, created model.
 // already placed on at create time (resolvePlacementCoordinates), never a
 // freshly auto-selected one.
 func (r EnvironmentRoutes) startDeploy(ctx context.Context, environment model.Environment, version string) error {
-	placement, err := r.resolvePlacementCoordinates(ctx, environment.ContextID)
+	placement, err := r.resolvePlacementCoordinates(ctx, r.placementOwnerTenantFor(ctx, environment), environment.ContextID)
 	if err != nil {
 		return err
 	}
@@ -1108,7 +1155,7 @@ func (r EnvironmentRoutes) deployInput(ctx context.Context, environment model.En
 		return provision.EnvProvisionInput{}, err
 	}
 	return provision.EnvProvisionInput{
-		TenantID:                   securityContext.TenantID,
+		TenantID:                   placementOwnerTenant(environment, securityContext),
 		TenantType:                 securityContext.TenantType,
 		ErunUserID:                 securityContext.ErunUserID,
 		EnvironmentID:              environment.EnvironmentID,
