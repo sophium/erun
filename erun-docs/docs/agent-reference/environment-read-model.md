@@ -160,9 +160,29 @@ session's **own last reported turn-boundary event**, never from PTY output volum
 session waiting on the Operator produces no output at all, which is exactly what a finished session
 also looks like from outside; only a direct signal separates the two.
 
-The write side is `erun activity ai-session report`, which a tool's own hooks invoke at each turn
-boundary. There is no MCP write tool: the natural caller is the hook's own shell command running
-inside the pod. Over the hosted API the write is
+The write side is `erun activity ai-session hook`, invoked at each turn boundary by the AI tool's
+own turn-boundary hooks. The image installs those hooks into the pod's Claude settings at boot, so
+every session `erun open --ai` launches — and every in-pod Agent — reports without anything else
+having to be set up. Each hook is bound to one event and reports it:
+
+| Tool hook event | Reported as | Reads as |
+|---|---|---|
+| `UserPromptSubmit` | `turn-start` | `busy` |
+| `PreToolUse`, `PostToolUse` | `tool-use` | `busy` |
+| `Stop` | `turn-end` | `awaiting-input` |
+| `Notification` | `notify` | `awaiting-input` |
+| `SessionEnd` | `exit` | `exited` |
+
+The hook takes no per-environment arguments: it reads the session id the tool reports on stdin, and
+the environment from the pod's own `ERUN_TENANT`/`ERUN_ENVIRONMENT`, so one settings file serves
+every environment. Both `tool-use` bindings exist so a turn longer than any staleness bound renews
+itself instead of going quiet mid-turn. `oom-killed` has no hook: nothing the tool itself can report
+says the process was killed for memory, so that state is reachable only through
+`erun activity ai-session report --event exit --exit-reason oom`, from whatever observes the exit.
+
+`erun activity ai-session report` is the same write under a session id the caller already knows,
+rather than one read from a hook payload. There is no MCP write tool: the natural caller is the
+hook's own shell command running inside the pod. Over the hosted API the write is
 [`POST /v1/environments/{environment_id}/ai-sessions`](/agent-reference/api-protocol#ai-sessions-endpoint).
 
 ### `AISessionStatus`

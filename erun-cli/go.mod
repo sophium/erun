@@ -3,6 +3,7 @@ module github.com/sophium/erun
 go 1.26.0
 
 require (
+	github.com/adrg/xdg v0.5.3
 	github.com/briandowns/spinner v1.23.2
 	github.com/manifoldco/promptui v0.9.0
 	github.com/sophium/erun/erun-common v0.0.0
@@ -12,7 +13,6 @@ require (
 )
 
 require (
-	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.43.6 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.37 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.36 // indirect

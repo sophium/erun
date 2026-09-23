@@ -896,12 +896,64 @@ if (statePath && projectPath && mcpURL) {
   writeJSON(statePath, state);
 }
 
+// The AI tool's own turn-boundary hooks are the writer the structured
+// AI-session status model was missing: without them the model resolves from
+// events nothing ever reports, so "awaiting-input" -- finished a turn, waiting
+// on the human, and producing no output while it waits -- is unreachable by
+// anything. Each row is [the tool's hook event, the model event it reports];
+// erun-common's AISessionHookBindings is the definition this table mirrors, and
+// a test there reads this table back out of this file so editing one side
+// alone fails rather than silently splitting the two.
+//
+// Busy is reported on the tool calls as well as the turn's start, because a
+// report written once at the start of a turn is stale for every minute of that
+// turn after it. Awaiting-input comes from the two events that mean control
+// went back to the human. SessionStart is deliberately absent: it would have to
+// report busy for a session nobody has prompted yet. So is SubagentStop, which
+// is a subagent's boundary rather than the session's.
+const aiSessionHooks = [
+  ['UserPromptSubmit', 'turn-start'],
+  ['PreToolUse', 'tool-use'],
+  ['PostToolUse', 'tool-use'],
+  ['Stop', 'turn-end'],
+  ['Notification', 'notify'],
+  ['SessionEnd', 'exit'],
+];
+
+// aiSessionHookCommand is one installed report. The environment check is in the
+// shell rather than left to the verb so a session with no environment in scope
+// forks nothing on every turn boundary -- this settings file is the operator's,
+// and a Claude they ran themselves has no erun environment to report against.
+// Nothing it prints or exits with can reach the turn either way: a hook runs in
+// the operator's own session, and the report is state it reads, not a gate.
+function aiSessionHookCommand(modelEvent) {
+  return `if [ -n "\${ERUN_TENANT}" ] && [ -n "\${ERUN_ENVIRONMENT}" ]; then erun activity ai-session hook --event ${modelEvent} --tool claude >/dev/null 2>&1 || true; fi`;
+}
+
+// isAISessionHookBlock reports whether a settings hook block is the report this
+// script writes, so a second boot replaces its own previous block instead of
+// stacking another copy beside it, and never claims an operator's own hook that
+// happens to sit on the same event.
+function isAISessionHookBlock(block) {
+  if (!block || typeof block !== 'object' || !Array.isArray(block.hooks)) {
+    return false;
+  }
+  return block.hooks.some((entry) => entry && typeof entry.command === 'string' && entry.command.includes('activity ai-session hook'));
+}
+
 {
   const settings = readJSON(settingsPath);
   settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
   const permissions = ensureObject(settings, 'permissions');
   permissions.defaultMode = 'bypassPermissions';
   settings.skipDangerousModePermissionPrompt = true;
+  const hooks = ensureObject(settings, 'hooks');
+  for (const [toolEvent, modelEvent] of aiSessionHooks) {
+    const current = Array.isArray(hooks[toolEvent]) ? hooks[toolEvent] : [];
+    hooks[toolEvent] = current
+      .filter((block) => !isAISessionHookBlock(block))
+      .concat([{ hooks: [{ type: 'command', command: aiSessionHookCommand(modelEvent) }] }]);
+  }
   writeJSON(settingsPath, settings);
 }
 NODE

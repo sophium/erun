@@ -594,7 +594,7 @@ Resolves the env's idle policy and reports its current activity. Useful for an A
 
 Resolves the structured status of AI tool sessions in this environment — `idle`, `busy`, `awaiting-input`, `exited`, or `oom-killed` — from each session's own last reported turn-boundary event, never from PTY output volume or silence. A session that finished its turn and is waiting on the Operator produces no output at all, which is exactly what an idle or finished session also looks like from the outside; only a direct signal from the tool distinguishes the two, which is what this tool reports. Pass `session` to resolve one session; omit it to list every session recorded for the environment.
 
-The write side is the CLI verb `erun activity ai-session report`, which a tool's own hooks invoke at each turn boundary (`turn-start`, `tool-use`, `turn-end`, `notify`, `exit`) — there is no MCP write tool for this today, since the natural caller is the hook's own shell command running inside the pod, not a remote client.
+The write side is the CLI verb `erun activity ai-session hook`, which the AI tool's own turn-boundary hooks invoke (`turn-start`, `tool-use`, `turn-end`, `notify`, `exit`) — there is no MCP write tool for this today, since the natural caller is the hook's own shell command running inside the pod, not a remote client. The image installs those hooks into the pod's Claude settings at boot; see [Environment read model · AI-session status](/agent-reference/environment-read-model#ai-session-status) for the event-to-state mapping.
 
 ```jsonc
 // ai_sessions { "session": "abc123" }
