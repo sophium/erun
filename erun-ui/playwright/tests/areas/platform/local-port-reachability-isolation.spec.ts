@@ -92,13 +92,20 @@ test.describe('local port isolation from a real, unrelated listener', () => {
 
       await app.sidebar.openEnvironment(SEED_TENANT, environment);
 
-      // The AI tab starts normally: no occupancy dialog reads the unrelated
-      // listener as another job already working here.
-      await expect(app.aiOccupancyPromptDialog.locator()).toHaveCount(0);
+      // The AI tab spawning is the completion signal both negative assertions
+      // below are about, so it comes first. The occupancy check gates that
+      // spawn: until the tab is there nothing has run that could have opened
+      // the dialog, and a bare `toHaveCount(0)` asserted into that window
+      // passes on the instant before the element it names could have rendered
+      // -- and goes on passing if that element is rendered a moment later.
       await app.tabStrip.waitForTab('AI');
 
-      // No stray overlay from a wrongly-opened dialog blocks a later click:
-      // a dialog-overlay intercepting pointer events on the titlebar.
+      // With the check behind us: no occupancy dialog read the unrelated
+      // listener as another job already working here ...
+      await expect(app.aiOccupancyPromptDialog.locator()).toHaveCount(0);
+
+      // ... and no stray overlay from a wrongly-opened dialog blocks a later
+      // click: a dialog-overlay intercepting pointer events on the titlebar.
       await app.titlebar.toggleReviewPanel();
       await expect(page.getByRole('dialog')).toHaveCount(0);
     } finally {
