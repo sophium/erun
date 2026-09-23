@@ -19,6 +19,16 @@ ARG ATLAS_VERSION=v1.2.0
 # build or inside a deployed runtime pod.
 ARG PLAYWRIGHT_VERSION=1.60.0
 
+# Declared once at the top for the same reason as HELM_VERSION above: the test
+# stage's own `terraform`, which runs the published modules' `terraform test`
+# suites via `make check`'s terraform-module-tests target, and the final
+# image's `terraform`, which tenant roots apply those same modules with, stay
+# pinned to the same version instead of two independent defaults drifting
+# apart. The two installs take their arch from different args (this stage is
+# BUILDPLATFORM, the final image is the target) -- only the version is shared,
+# and it is the whole reason the default moved up here.
+ARG TERRAFORM_VERSION=1.12.2
+
 # Pulled into the test stage purely to copy a pinned Node/Yarn toolchain out
 # of — see the node COPY below. No RUN of its own, so it needs no emulation
 # even though the test stage is pinned to BUILDPLATFORM (matches the `goroot`
@@ -57,6 +67,10 @@ WORKDIR /src
 # resulting build succeeds and runs `--headless` with zero display (see root
 # AGENTS.md's Integration Test Gate section).
 #
+# unzip is for the terraform install below: hashicorp publishes terraform only
+# as a .zip, and the final image's own copy of that install gets unzip from
+# erun-ubuntu, which this stage's golang base is not.
+#
 # Cache-mounted (rather than deduplicated into a shared base image the way
 # the final stage's copy was) because this stage's base is golang:1.26.0
 # (Debian), not erun-ubuntu (Ubuntu) -- the two images don't share a base to
@@ -69,7 +83,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
     apt-get update && apt-get install -y --no-install-recommends \
-        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev unzip
 
 # GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
 # builder stage below install from, so the repo-root pin and the image's
@@ -109,6 +123,20 @@ RUN curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-lin
 ARG ATLAS_VERSION
 RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${BUILDARCH}-${ATLAS_VERSION}" && \
     chmod 0755 /usr/local/bin/atlas
+
+# `terraform` for `make check`'s terraform-module-tests target, which runs the
+# published modules' own `terraform test` behaviour suites: mocked providers,
+# no cluster and no cloud account, so a pinned binary is all this stage needs
+# to run them (the modules' providers are fetched per run -- see
+# scripts/terraform-module-tests.sh). Same version as the final image's own
+# terraform, both read from the global ARG at the top of this file; the
+# install shape matches that one too, differing only in taking its arch from
+# BUILDARCH because this stage is pinned to BUILDPLATFORM.
+ARG TERRAFORM_VERSION
+RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${BUILDARCH}.zip" && \
+    unzip -q /tmp/terraform.zip -d /tmp && \
+    install -m 0755 /tmp/terraform /usr/local/bin/terraform && \
+    rm -rf /tmp/terraform.zip /tmp/terraform
 
 # Node/Yarn for `make test-frontend` (erun-kit + erun-console). Copied out of
 # the pinned `node` stage above rather than apt/curl-installed, same pattern
@@ -248,6 +276,22 @@ COPY erun-devops/docker/erun-zitadel-login/VERSION /src/erun-devops/docker/erun-
 # the destination, which is precisely the empty discovery this copy prevents,
 # and an enumerated list would go stale the moment a wrapper is added.
 COPY erun-devops/docker /src/erun-devops/docker
+
+# terraform-module-tests (root Makefile) runs each published module's own
+# `terraform test` suite, so the tree those suites live in has to be here --
+# the COPY-or-`cd`-fails rule the LINT_MODULES note above states, applied to
+# the third erun-devops subtree this stage needs (k8s and docker are the other
+# two). The modules/ tree is copied whole rather than as a hand-listed set of
+# modules: the target discovers modules by scanning modules/*/tests, so a new
+# module's suite has to arrive with no Dockerfile edit, and an enumerated list
+# would go stale the moment one is added -- the same reasoning as the wrapper
+# Dockerfiles above. 244K of HCL, so it is not a fingerprint cost worth
+# narrowing further, and the destination is deliberately the exact directory
+# scripts/terraform-module-tests.sh cds into: erun-common's
+# TestCheckGateScriptsResolveOnlyDirectoriesTheDevopsImageProvides binds that
+# script's `${script_dir}/../...` root to a path this stage provides, and it
+# compares the two as written.
+COPY erun-devops/terraform-erun/modules /src/erun-devops/terraform-erun/modules
 # erun-backend-db-chart_test.sh cross-checks the data-retention doc's claimed
 # default and chart-value keys (retention.enabled, retention.dryRun) against
 # what this chart actually renders; only the one page is needed.
@@ -568,7 +612,9 @@ ARG KUBECTL_VERSION=v1.33.1
 # HELM_VERSION's default lives in the global ARG at the top of this file,
 # shared with the test stage's own helm install.
 ARG HELM_VERSION
-ARG TERRAFORM_VERSION=1.12.2
+# TERRAFORM_VERSION's default lives in the global ARG at the top of this file,
+# shared with the test stage's own terraform install.
+ARG TERRAFORM_VERSION
 ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1
 ARG BUILDX_VERSION=v0.18.0
