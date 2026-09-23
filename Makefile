@@ -719,7 +719,7 @@ helm-chart-tests:
 # account touched. Added because nothing in this repository ran them:
 # a module edit that dropped an invariant one of those files pins applied
 # cleanly and every gate stayed green, reading as coverage in review while
-# enforcing nothing. Two examples, both in erun-devops/terraform-erun-cluster-edge: the
+# enforcing nothing. Two examples, both in terraform-erun-cluster-edge: the
 # plaintext->https redirect and the HSTS Middleware the public front door
 # depends on, and the refusal to accept a transport policy when
 # install_ingress_controller = false leaves no controller to carry it.
