@@ -11,16 +11,31 @@ import { parseInvoke } from '../../../pages/index.js';
 // drives the same shared re-anchor path; scrollback is staged by injecting
 // terminal-output events for the selected session.
 //
-// Every convergence below is bounded by this budget, not by the 10s `expect`
-// clock nested inside it. A 30s scenario whose staging wait expires at 10s
-// reports a failure of a step that was still running, with two thirds of the
-// clock it was sized against unspent -- which is the shape a full-suite gate
-// reddened on, twice.
-const SCENARIO_BUDGET_MS = 120_000;
 // The staging wait is the longest single step here -- it covers the app parsing
 // and rendering the whole staged history, the one step that scales with the
-// machine -- so it gets the largest share of that budget.
+// machine -- so it gets the largest share of the budget below.
 const STAGING_BUDGET_MS = 30_000;
+// Every resize converges on the app's own ResizeSession request (see
+// resizeSettled), bounded by this clock; the scenario spends one per resize.
+const RESIZE_BUDGET_MS = 60_000;
+// Must match the number of resizeSettled calls in the scenario below -- bump it
+// when one is added, or the invariant in the next comment stops holding.
+const RESIZE_BOUNDS_PER_SCENARIO = 4;
+// The work between those bounds: toggles, scroll writes, the two frames each
+// resize waits out, and the final assertions.
+const SCENARIO_MARGIN_MS = 30_000;
+
+// The convergence steps this spec re-anchored -- the staging wait and each
+// resize -- take an explicit budget rather than the 10s `expect` clock nested
+// inside the scenario, and the scenario's own clock is the sum of those
+// budgets plus that margin. Both halves are one defect seen from opposite
+// ends: a 30s scenario whose staging wait expires at 10s reports a failure of
+// a step that was still running with two thirds of the clock it was sized
+// against unspent, and a scenario that expires while one of its own inner
+// bounds still had budget left reports exactly that red one bound later. A
+// full-suite gate reddened on the first shape, twice.
+const SCENARIO_BUDGET_MS =
+  STAGING_BUDGET_MS + RESIZE_BOUNDS_PER_SCENARIO * RESIZE_BUDGET_MS + SCENARIO_MARGIN_MS;
 
 // The staged history ends with this line, and the spec waits for it to be
 // rendered. A terminal that has written only the first few lines of the
@@ -30,6 +45,28 @@ const STAGING_BUDGET_MS = 30_000;
 // still changing. The last staged line can only be on screen once the whole
 // payload has landed.
 const STAGING_SENTINEL = 'scrollback sentinel';
+
+// More lines than any viewport height, so staging them leaves real scrollback.
+// The lines are wider than any plausible cols so a cols-changing resize
+// rewraps them -- the reflow that moves the viewport off the prompt.
+const STAGING_PAYLOAD =
+  Array.from({ length: 300 }, (_, i) => `scrollback line ${i + 1} ${'x'.repeat(220)}`).join(
+    '\r\n',
+  ) + `\r\n${STAGING_SENTINEL}\r\n`;
+
+// How long the held-emit case below holds the staging write. The clock it has
+// to disagree with is the pre-fix convergence's: an `expect.poll` with no
+// explicit timeout takes expect's own 10s (playwright.config.ts), and that
+// deadline is a give-up point rather than a lower bound -- the poll loop breaks
+// rather than sleeping past it -- so the hold must outlast 10s plus the head
+// start that poll's clock gets over this one. That head start is real: the emit
+// is dispatched fire-and-forget from page.evaluate, so this timer only starts
+// once the route handler sees the POST, a CDP round trip after the poll's clock
+// began. 2s covers it several times over on a contended builder, and lands 18s
+// inside the STAGING_BUDGET_MS that replaced the 10s bound, so the case still
+// passes there for the right reason. A shorter hold stops reliably disagreeing
+// with the clock it exists to disagree with; a longer one only adds wall clock.
+const EMIT_HOLD_MS = 12_000;
 
 test.describe('terminal scroll on resize (#465)', () => {
   test('panel toggle re-anchors an at-bottom viewport and preserves a scrolled-up one', async ({
@@ -54,15 +91,7 @@ test.describe('terminal scroll on resize (#465)', () => {
       'the sidebar toggle issued no ResizeSession, so the session to stage into cannot be named',
     ).toBeGreaterThan(0);
 
-    // Stage more lines than any viewport height so real scrollback exists.
-    // The lines are wider than any plausible cols so a cols-changing resize
-    // rewraps them — the reflow that moves the viewport off the prompt.
-    const lines =
-      Array.from({ length: 300 }, (_, i) => `scrollback line ${i + 1} ${'x'.repeat(220)}`).join(
-        '\r\n',
-      ) +
-      `\r\n${STAGING_SENTINEL}\r\n`;
-    await app.terminalPane.emitOutput(sessionId, lines);
+    await app.terminalPane.emitOutput(sessionId, STAGING_PAYLOAD);
     await expect
       .poll(() => renderedRowText(page), { timeout: STAGING_BUDGET_MS })
       .toContain(STAGING_SENTINEL);
@@ -84,8 +113,8 @@ test.describe('terminal scroll on resize (#465)', () => {
     const colsMid = await readTerminalCols(page);
     await watchViewportAnchor(page);
     await resizeSettled(page, () => app.titlebar.toggleReviewPanel());
-    expect(await stopWatchingViewportAnchor(page)).toBe(false);
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsMid);
+    expect(await stopWatchingViewportAnchor(page)).toBe(false);
 
     // Window resize (the gesture from the report): at the bottom, shrinking must
     // re-anchor to the prompt; scrolled up, growing must preserve the reading position.
@@ -102,8 +131,64 @@ test.describe('terminal scroll on resize (#465)', () => {
     await watchViewportAnchor(page);
     // config default
     await resizeSettled(page, () => page.setViewportSize({ width: 1440, height: 1200 }));
-    expect(await stopWatchingViewportAnchor(page)).toBe(false);
     await expect.poll(() => readTerminalCols(page)).not.toBe(colsNarrow);
+    expect(await stopWatchingViewportAnchor(page)).toBe(false);
+
+    // Leave the viewport at the prompt so later specs in the singleton
+    // backend see the usual at-bottom baseline.
+    await setViewportScrollTop(page, Number.MAX_SAFE_INTEGER);
+    await expect.poll(() => terminalAtBottom(page)).toBe(true);
+  });
+
+  // The reproduction the earlier exemption on #2459 claimed was impossible:
+  // "no RPC, no stub, no route gates the write". A route does, and the staging
+  // write goes through it. emitOutput reaches xterm via the headless shim's
+  // EventsEmit, which is a POST to /__erun_emit (headlessserver/shim.go) that
+  // the backend then re-broadcasts down the /__erun_events SSE stream to the
+  // app's own listener -- so holding that POST holds the render, and the
+  // overlap the full-suite gate produced by contention is forced on demand here
+  // instead of waited for.
+  //
+  // This isolates the budget half of the fix: the same staging step, payload
+  // and sentinel as the case above, with the emit held past the 10s `expect`
+  // clock the pre-fix convergence inherited and well inside the
+  // STAGING_BUDGET_MS that replaced it.
+  test('staging converges when the emit carrying it is held past the old bound', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    test.setTimeout(SCENARIO_BUDGET_MS);
+    const { tenant, environment } = seededEnv;
+
+    await app.sidebar.openEnvironment(tenant, environment);
+    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
+    await localTab.waitFor({ state: 'visible' });
+    await localTab.click();
+
+    const sessionId = await app.terminalPane.selectedSessionId();
+    expect(
+      sessionId,
+      'the sidebar toggle issued no ResizeSession, so the session to stage into cannot be named',
+    ).toBeGreaterThan(0);
+
+    // Routed after the toggle, so the hold covers the staging emit and nothing
+    // else; the frontend emits no events of its own, so this POST is the only
+    // page-originated traffic on the route.
+    await page.route('**/__erun_emit', async (route) => {
+      if ((route.request().postData() ?? '').includes('terminal-output')) {
+        // Deliberate stimulus, not a wait for the app: this hold *is* the
+        // contention the case exists to reproduce, so it is sized on the clock
+        // it has to disagree with (see EMIT_HOLD_MS).
+        await new Promise<void>((resolve) => setTimeout(resolve, EMIT_HOLD_MS));
+      }
+      await route.continue();
+    });
+
+    await app.terminalPane.emitOutput(sessionId, STAGING_PAYLOAD);
+    await expect
+      .poll(() => renderedRowText(page), { timeout: STAGING_BUDGET_MS })
+      .toContain(STAGING_SENTINEL);
 
     // Leave the viewport at the prompt so later specs in the singleton
     // backend see the usual at-bottom baseline.
@@ -124,7 +209,7 @@ test.describe('terminal scroll on resize (#465)', () => {
 // resize are then measuring a terminal that has finished moving.
 async function resizeSettled(page: Page, change: () => Promise<void>): Promise<void> {
   const resized = page.waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession', {
-    timeout: 60_000,
+    timeout: RESIZE_BUDGET_MS,
   });
   await change();
   await resized;
@@ -144,9 +229,11 @@ async function resizeSettled(page: Page, change: () => Promise<void>): Promise<v
 // clock on the machine rather than on the product: on a contended builder the
 // refit it was meant to cover had not finished when the window closed, and the
 // spec reported a yank that had not happened. Both ends of the observation are
-// now app events — it opens before the toggle and closes once the refit has
-// settled and rendered — so a loaded machine stretches the window with the
-// work instead of expiring ahead of it.
+// now app events — it opens before the toggle, and closes once the refit has
+// settled, rendered, and the new geometry has converged (so the trailing edge
+// is still anchored behind the same observable state the old window covered,
+// not merely behind the refit that produced it) — so a loaded machine
+// stretches the window with the work instead of expiring ahead of it.
 async function watchViewportAnchor(page: Page): Promise<void> {
   await page.evaluate(() => {
     interface AnchorWatch {
@@ -172,8 +259,9 @@ async function watchViewportAnchor(page: Page): Promise<void> {
 
 async function stopWatchingViewportAnchor(page: Page): Promise<boolean> {
   return await page.evaluate(() => {
-    const state = (window as unknown as { __anchorWatch?: { anchored: boolean; watching: boolean } })
-      .__anchorWatch;
+    const state = (
+      window as unknown as { __anchorWatch?: { anchored: boolean; watching: boolean } }
+    ).__anchorWatch;
     if (!state) {
       return false;
     }
