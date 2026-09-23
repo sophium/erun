@@ -269,35 +269,77 @@ func checkGateShellScripts(t *testing.T, root string) []string {
 }
 
 // erunDevopsProvidedSrcPaths returns every container path under /src that the
-// Dockerfile's COPY instructions provide. /src itself is dropped: a COPY whose
-// destination is the bare workdir provides no directory a script can enter.
+// Dockerfile's COPY instructions provide. A destination that is a directory
+// lands each source under it by name, so `COPY package.json yarn.lock /src/`
+// provides /src/package.json and /src/yarn.lock and not the bare workdir;
+// /src itself is never returned, because "the image provides /src" would
+// satisfy every path either half of this guard asks about and make both
+// vacuous.
+//
+// COPY --from=<stage> lines are skipped: their sources are another stage's
+// filesystem rather than this build context, so they place nothing the
+// checkout supplied. computeBuildFingerprint drops them for the same reason.
 func erunDevopsProvidedSrcPaths(t *testing.T, path string) []string {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	const srcPrefix = "/src/"
 	var provided []string
 	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if len(trimmed) < len("COPY ") || !strings.EqualFold(trimmed[:len("COPY ")], "COPY ") {
-			continue
+		provided = append(provided, dockerfileCopyProvidedSrcPaths(line)...)
+	}
+	var underSrc []string
+	for _, candidate := range provided {
+		if strings.HasPrefix(candidate, "/src/") && candidate != "/src" {
+			underSrc = append(underSrc, candidate)
 		}
-		var tokens []string
-		for _, field := range strings.Fields(trimmed)[1:] {
-			if strings.HasPrefix(field, "--") {
-				continue // --from=, --chmod= and friends are not paths
-			}
-			tokens = append(tokens, field)
+	}
+	return underSrc
+}
+
+// dockerfileCopyArgs splits one Dockerfile line into a COPY instruction's
+// sources and its destination. It reports ok=false for anything else --
+// another instruction, a copy from another stage (--from=), or a line with no
+// destination to speak of.
+func dockerfileCopyArgs(line string) (sources []string, dest string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	if len(trimmed) < len("COPY ") || !strings.EqualFold(trimmed[:len("COPY ")], "COPY ") {
+		return nil, "", false
+	}
+	var tokens []string
+	for _, field := range strings.Fields(trimmed)[1:] {
+		if strings.HasPrefix(field, "--from=") {
+			return nil, "", false
 		}
-		if len(tokens) < 2 {
-			continue
+		if strings.HasPrefix(field, "--") {
+			continue // --chmod= and friends are not paths
 		}
-		dest := strings.TrimSuffix(tokens[len(tokens)-1], "/")
-		if strings.HasPrefix(dest, srcPrefix) && dest != "/src" {
-			provided = append(provided, dest)
-		}
+		tokens = append(tokens, field)
+	}
+	if len(tokens) < 2 {
+		return nil, "", false
+	}
+	return tokens[:len(tokens)-1], tokens[len(tokens)-1], true
+}
+
+// dockerfileCopyProvidedSrcPaths returns the container paths one COPY
+// instruction provides. A destination that is a directory lands each source
+// under it by name, so `COPY package.json yarn.lock /src/` provides
+// /src/package.json and /src/yarn.lock; a single source with any other
+// destination lands at that destination, whether it is a file or a directory.
+func dockerfileCopyProvidedSrcPaths(line string) []string {
+	sources, dest, ok := dockerfileCopyArgs(line)
+	if !ok {
+		return nil
+	}
+	if !strings.HasSuffix(dest, "/") && len(sources) == 1 {
+		return []string{dest}
+	}
+	dir := strings.TrimSuffix(dest, "/")
+	var provided []string
+	for _, source := range sources {
+		provided = append(provided, dir+"/"+filepath.Base(strings.TrimSuffix(source, "/")))
 	}
 	return provided
 }
@@ -312,6 +354,38 @@ func providedSrcPathExists(provided []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+// providedSrcPathCovers reports whether the image ends up holding path -- the
+// file-read direction, the mirror of providedSrcPathExists above. A read needs
+// path itself or any directory above it: copying a directory puts everything
+// under it in the image.
+func providedSrcPathCovers(provided []string, path string) bool {
+	for _, candidate := range provided {
+		if candidate == path || strings.HasPrefix(path, candidate+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// providedSrcPathCoversRead answers the same question for a read whose path may
+// run through a glob (`erun-devops/docker/*/Dockerfile`). What such a read
+// needs is the directory the glob expands inside -- the part of the path before
+// its first glob-bearing component -- and the guard reports a path that globs
+// from its very first component rather than passing it.
+func providedSrcPathCoversRead(provided []string, path string) bool {
+	components := strings.Split(path, "/")
+	for i, component := range components {
+		if !strings.ContainsAny(component, "*?[") {
+			continue
+		}
+		if i == 0 {
+			return false
+		}
+		return providedSrcPathCovers(provided, strings.Join(components[:i], "/"))
+	}
+	return providedSrcPathCovers(provided, path)
 }
 
 // TestCheckGateScriptsResolveOnlyDirectoriesTheDevopsImageProvides extends the
@@ -332,6 +406,52 @@ func providedSrcPathExists(provided []string, wanted string) bool {
 // any erun-devops image build, which is every release build. Nothing here is
 // release-specific: this test reads the Makefile and the Dockerfile, so it
 // fails in the same run that introduces the next one.
+// TestCheckGateGoTestsReadOnlyRepoRootPathsTheDevopsImageProvides is the
+// Go-test half of the same contract. A gate test reads repo-root state through
+// a runtime.Caller-derived helper rather than through a shell script's
+// script_dir, so the shell-script half above cannot see it: that guard's scan
+// set is Makefile-named `.sh` files, and the path a Go test resolves never
+// appears in one.
+//
+// That gap is exactly how a release came to be blocked by an absent COPY:
+// erun-integration/gitignore_clean_checkout_test.go read the checkout's
+// .gitignore through repoRoot, which resolves to this stage's /src, and the
+// read is fatal rather than a skip. `make check` aborted at
+// integration-test-gate inside the Docker venue while the identical tree passed
+// in a pod checkout where the file is simply present -- and the shell-script
+// half of this guard passed on that same tree, because it never looked at a Go
+// test.
+//
+// The failure direction is closed, deliberately: a read this scan can resolve
+// must be something the test stage COPYs, and a read it cannot resolve is
+// reported rather than skipped, so a site that escapes the scan can never be
+// counted as satisfied. The cost is registration -- every unresolvable read,
+// and every resolved one the image genuinely does not provide, needs an entry
+// in goTestRepoRootReadExemptions with the reason for it, and an entry that
+// matches no site fails this test.
+//
+// Two limits are worth stating rather than leaving to be discovered. A read
+// whose root arrives as a function parameter (`filepath.Join(root, ...)` inside
+// a helper that takes `root string`) is not traced back to its callers, so a
+// new read added inside one of those helpers is outside this check. So is path
+// construction that never goes through filepath.Join -- a fmt.Sprintf, an
+// os.ReadFile of a path assembled elsewhere. Both are the same class this test
+// closes for the ordinary case; neither is covered.
+func TestCheckGateGoTestsReadOnlyRepoRootPathsTheDevopsImageProvides(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	findings, scan := gateGoTestCopyContractFindings(t, root, filepath.Join(root, "erun-devops", "docker", "erun-devops", "Dockerfile"), gateGoTestModuleDirs, goTestRepoRootReadExemptions)
+	for _, finding := range findings {
+		t.Error(finding)
+	}
+	for _, helper := range gateGoTestRepoRootHelperNames {
+		if !scan.repoRootHelpers[helper] {
+			t.Errorf("%s is not recognized as resolving the repository root -- either it was renamed or its return "+
+				"shape changed, and the scan that finds reads through it is now looking for something that is no "+
+				"longer there; update this list and the detection together", helper)
+		}
+	}
+}
+
 func TestCheckGateScriptsResolveOnlyDirectoriesTheDevopsImageProvides(t *testing.T) {
 	root := repoRootForDockerignoreTest(t)
 	provided := erunDevopsProvidedSrcPaths(t, filepath.Join(root, "erun-devops", "docker", "erun-devops", "Dockerfile"))
