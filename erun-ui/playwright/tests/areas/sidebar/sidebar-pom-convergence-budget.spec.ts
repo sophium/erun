@@ -1,7 +1,13 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
-import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
+import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import {
+  SEED_ORCHESTRATOR,
+  SEED_TENANT,
+  removeEnvironment,
+  seedEnvironment,
+  uniqueEnvironmentName,
+} from '../../../fixtures/seedRoot.js';
 
 // A POM convergence step must resolve to the deadline its calling test chose,
 // never to a second cap the step picked for itself.
@@ -23,9 +29,9 @@ import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 // `/__erun_invoke` held for a fixed window -- so it is deterministic on a quiet
 // machine rather than dependent on the node actually being contended.
 //
-// The holds are deliberately just past each cap (cap + ~1s): the smallest delay
-// that discriminates, so the suite pays seconds here rather than the tens of
-// seconds a real contended machine would.
+// The holds are deliberately just past each cap (cap + ~1-3s): the smallest
+// delay that discriminates, so the suite pays seconds here rather than the tens
+// of seconds a real contended machine would.
 
 // holdInvoke makes `method` unresponsive until the window elapses, then lets
 // every pending and subsequent call through. Every call inside the window is
@@ -44,6 +50,33 @@ async function holdInvoke(page: Page, method: string, holdMs: number): Promise<v
     await route.continue();
   });
 }
+
+test.describe('shared helper convergence budgets (#2459)', () => {
+  // waitForSeededRow (fixtures/erunApp.ts) defaulted `timeoutMs` to 30_000 --
+  // a number the calling test never chose, so a spec that seeds a large
+  // population before calling it (and declares a larger budget for it) was
+  // still cut at 30s. The RPC the reload runs is LoadState (stateApi's
+  // getInitialState), the same one sidebar-loading-state.spec.ts gates. The
+  // hold is registered before the env is seeded and seeding is synchronous, so
+  // the window opens a hair before the step starts rather than seconds --
+  // hence cap + 3s here rather than the cap + 1s the cases below use, where
+  // boot sits between the two.
+  test('a seeded row the backend reports at 33s is waited out on the test budget', async ({
+    app,
+    page,
+  }, testInfo) => {
+    test.setTimeout(60_000);
+    const environment = uniqueEnvironmentName(testInfo.title);
+    await holdInvoke(page, 'LoadState', 33_000);
+    seedEnvironment(SEED_TENANT, environment);
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await expect(app.sidebar.envRowButton(SEED_TENANT, environment)).toBeVisible();
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+});
 
 test.describe('sidebar POM convergence steps (#2459)', () => {
   // hoverOrchestratorRow carried `toPass({ timeout: 20_000 })`. A row that
