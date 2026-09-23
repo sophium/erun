@@ -800,11 +800,20 @@ func (s *ReviewService) markBuildSucceeded(ctx context.Context, review model.Rev
 	// its own gate blocking has nothing to do with whether reporting this build
 	// succeeded. The queue advanced is the built review's own repository's, so
 	// another repository's queue on the same target branch is unaffected.
+	//
+	// An ambiguous queue is the same shape of non-failure, and matters more
+	// because nothing here resolves it: the build is already recorded and the
+	// review has already gone READY, and the refusal is about which repository
+	// a promotion that named none would be for. Returning it fails a report
+	// that succeeded — a caller retrying creates a second build row for one
+	// build — while the review sits READY where an explicit promotion naming a
+	// repository can still reach it.
 	promoted, err := s.AdvanceMergeQueue(ctx, updated.Repository, updated.TargetBranch)
 	if err != nil {
 		var blocked *UnresolvedThreadsError
 		var occupied *MergeQueueOccupiedError
-		if errors.Is(err, repository.ErrNotFound) || errors.As(err, &blocked) || errors.As(err, &occupied) {
+		var ambiguous *AmbiguousMergeQueueError
+		if errors.Is(err, repository.ErrNotFound) || errors.As(err, &blocked) || errors.As(err, &occupied) || errors.As(err, &ambiguous) {
 			return model.Review{}, false, nil
 		}
 		return model.Review{}, false, err

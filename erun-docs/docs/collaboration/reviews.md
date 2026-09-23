@@ -77,6 +77,8 @@ Every review-scoped uniqueness rule and the merge queue are keyed by it. A tenan
 
 A review created before the platform recorded a repository carries none, and appears only in an unfiltered listing or queue. It adopts an identity from the `remoteUrl` of the first `MERGED` report about it, which is the only moment the remote is in hand.
 
+Carrying none is not holding a second identity: such a review is grouped with no repository rather than with a repository of its own, so one named repository's queue plus any number of these rows is one repository's queue. Only a queue holding more than one *named* repository is ambiguous.
+
 ## Issue links
 
 A review answers which issue its work belongs to through `issueRef`, and where that answer came from through `issueRefSource`. Neither is stored: the link is resolved every time a review is read, so a review is never bound to a stale guess.
@@ -189,7 +191,7 @@ The codes below are the ones this API's review/merge-queue routes can actually d
 | `REVIEW_NOT_MERGING` | `PATCH /status` to `READY` with no `buildId` — the missed-merge-window requeue — on a review that is not at `MERGE`. `details` names the `reviewId` and the `status` it actually holds. | `409` |
 | `INVALID_BODY` | Request body missing required field or fails type validation (malformed JSON), or `PATCH /status` to `READY`/`FAILED`/`MERGED` with no `buildId` (`details.field` names it: `buildId`). | `400` |
 | `INVALID_TARGET_BRANCH` | `targetBranch` is empty on `merge-queue/advance` or `override-advance`. | `400` |
-| `MERGE_QUEUE_AMBIGUOUS` | `POST /merge-queue/advance` (or `override-advance`) naming no repository while the target branch's queue holds `READY` reviews from more than one. `details` names the `targetBranch` and the `repositories`; the message says to name one. A queue holding one repository's reviews — including the queue every review created before the platform recorded a repository shares — advances normally. | `409` |
+| `MERGE_QUEUE_AMBIGUOUS` | `POST /merge-queue/advance` (or `override-advance`) naming no repository while the target branch's queue holds `READY` reviews naming more than one repository. `details` names the `targetBranch`, the `repositories`, and `unrecordedRepositoryReviewIds` — the waiting rows that record no repository, always present and empty when there are none; the message says to name a repository. A review carrying no repository is not one: a queue holding one named repository beside any number of such rows — the queue a tenant predating repository identity has — advances normally. | `409` |
 | `INVALID_REPOSITORY` | `POST /reviews` with a `repository` that names no repository — an empty value, a bare forge. | `400` |
 | `INVALID_PATH_ID` | An id in the path — `{review_id}`, `{build_id}`, `{comment_id}`, `{user_id}` — is not a UUID. The message names the parameter and the value received. Shared by every route with an id in its path, so its full contract lives once in [API protocol · Request-level validation errors](/agent-reference/api-protocol#request-level-validation-errors). | `400` |
 

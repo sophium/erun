@@ -120,7 +120,7 @@ func TestMergeQueueTreatsNoRecordedRepositoryAsUnknown(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
 	srv := startMergeQueueAPI(t, config)
 	remote := newMergeQueueRemote(t)
-	legacyQueueState(t, srv.URL, remote)
+	legacyReviewID, _ := legacyQueueState(t, srv.URL, remote)
 
 	code, body := e2eAdvanceMergeQueue(t, srv.URL, "", remote.main)
 	if code == http.StatusConflict {
@@ -128,6 +128,16 @@ func TestMergeQueueTreatsNoRecordedRepositoryAsUnknown(t *testing.T) {
 	}
 	if code != http.StatusOK {
 		t.Fatalf("advance: HTTP %d (want 200): %s", code, body)
+	}
+	// Reachability, not just non-refusal: the legacy row is the queue head, so
+	// it is the one that gets promoted rather than being skipped over.
+	var promoted struct {
+		ReviewID string `json:"reviewId"`
+	}
+	mustNoErr(t, json.Unmarshal([]byte(body), &promoted), "parse promoted review")
+	if promoted.ReviewID != legacyReviewID {
+		t.Fatalf("promoted %s, want the queued legacy review %s — a review recording no repository is still in the queue it was queued in",
+			promoted.ReviewID, legacyReviewID)
 	}
 }
 
@@ -163,12 +173,32 @@ func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 	remote.branch(t, firstBranch, "first.txt")
 	second.branch(t, secondBranch, "second.txt")
 
+	legacyBranch := uniqueBranchName(t, "legacy")
+	remote.branch(t, legacyBranch, "legacy.txt")
+
 	firstID := e2eOpenReviewInRepository(t, srv.URL, "two-repositories-e2e", remote.url, remote.main, firstBranch)
 	secondID := e2eOpenReviewInRepository(t, srv.URL, "two-repositories-e2e", second.url, second.main, secondBranch)
-	e2eReportGreenBuild(t, srv.URL, firstID)
-	e2eReportGreenBuild(t, srv.URL, secondID)
-	e2eRequeueToReady(t, srv.URL, firstID)
-	e2eRequeueToReady(t, srv.URL, secondID)
+	// A third row recording no repository, which genuinely belongs to neither
+	// of the named repositories as far as the platform can tell.
+	legacyID := e2eOpenReviewInRepository(t, srv.URL, "two-repositories-e2e", "", remote.main, legacyBranch)
+	for label, reviewID := range map[string]string{"first": firstID, "second": secondID, "legacy": legacyID} {
+		code, buildBody := e2eRequest(t, srv.URL, http.MethodPost, "/v1/reviews/"+reviewID+"/builds", map[string]any{
+			"successful": true,
+			"commitId":   fmt.Sprintf("%040x", time.Now().UnixNano()),
+			"version":    "0.0.1",
+		})
+		if code != http.StatusCreated {
+			t.Fatalf("report green build for the %s review %s: HTTP %d: %s", label, reviewID, code, buildBody)
+		}
+		// A review promoted to MERGE goes back to READY; one whose promotion
+		// was blocked by a slot already held elsewhere in the queue is
+		// already waiting where it belongs.
+		if readMergeReview(t, srv.URL, reviewID).Status == model.ReviewStatusMerge {
+			if code, body := e2eRequest(t, srv.URL, http.MethodPatch, "/v1/reviews/"+reviewID+"/status", map[string]any{"status": "READY"}); code != http.StatusOK {
+				t.Fatalf("requeue the %s review %s to READY: HTTP %d: %s", label, reviewID, code, body)
+			}
+		}
+	}
 
 	code, body := e2eAdvanceMergeQueue(t, srv.URL, "", remote.main)
 	if code != http.StatusConflict {
@@ -176,6 +206,14 @@ func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 	}
 	if !containsAll(body, "MERGE_QUEUE_AMBIGUOUS", remote.url, second.url) {
 		t.Fatalf("refusal did not name both repositories: %s", body)
+	}
+	// The row that belongs to neither is named by id, so the operator is not
+	// left to infer which waiting review is the unattributable one.
+	if !strings.Contains(body, legacyID) {
+		t.Fatalf("refusal did not name the queued review %s that records no repository: %s", legacyID, body)
+	}
+	if strings.Contains(body, `"repositories":[""`) || strings.Contains(body, `,""`) {
+		t.Fatalf("refusal still lists an empty repository as one of them: %s", body)
 	}
 }
 
