@@ -520,6 +520,20 @@ func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvCon
 	if runtimeDeployMemoUnchanged(envConfig, version, registry, mcpAuthKeyPath, runningImage, runtimeImage, runtimeChart) {
 		return nil
 	}
+	// spec.Target.EnvConfig is the environment as this deploy resolved it, before
+	// its rollout -- and the pre-rollout step writes the env config during that
+	// rollout. Saving the snapshot wholesale therefore discards those writes;
+	// here that is the platform-alias Secret name reconcilePlatformAliasSecret
+	// has just recorded, which only ever reaches the environment from the deploy
+	// itself (a retrofit discovers the name at deploy time, so unlike the MCP
+	// auth key above it cannot be rethreaded from the snapshot). The next deploy
+	// reads that field back to keep the chart's mount on an environment whose
+	// host has no alias left to give, so losing it drops the mount silently.
+	if strings.TrimSpace(envConfig.PlatformAliasSecretName) == "" {
+		if current, _, err := LoadEnvConfig(spec.Target.Tenant, spec.Target.Environment); err == nil {
+			envConfig.PlatformAliasSecretName = strings.TrimSpace(current.PlatformAliasSecretName)
+		}
+	}
 	envConfig.RuntimeVersion = version
 	envConfig.RuntimeRegistry = registry
 	envConfig.MCPAuthPublicKeyPath = mcpAuthKeyPath

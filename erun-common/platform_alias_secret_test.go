@@ -534,3 +534,88 @@ func TestReconcilePlatformAliasSecretScopesItselfToTheRuntimeRelease(t *testing.
 		t.Fatalf("a component release must not carry a platform alias, got %q", deployInput.PlatformAliasSecretName)
 	}
 }
+
+// TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence is the
+// reproduction of the reported failure. Every environment of a tenant whose
+// hosts deploys it was found recording no platformaliassecretname, and the pod
+// side of that tenant carried no platform-alias mount and no Secret at all.
+//
+// The retrofit writes the record while its own deploy is already under way --
+// reconcilePlatformAliasSecret runs inside the pre-rollout step, after the
+// deploy resolved the env config it will later persist from. That snapshot
+// predates the write, so the version persistence that closes every ordinary
+// deploy used to save it back wholesale and discard the record the deploy had
+// just written: the Secret is applied, the chart mounts it for that rollout,
+// and the environment is left naming nothing, so the next deploy reads an empty
+// field and -- when its host has no alias to give -- passes no name at all,
+// dropping the mount silently.
+//
+// This drives the two writes in the order an ordinary deploy performs them.
+func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testing.T) {
+	redirectConfigHomeForTest(t)
+	installCapturingKubectl(t)
+	signedInDefaultHostStore(t, testPlatformAliasProvider())
+	mustSaveEnvConfig(t, EnvConfig{Name: "dev"})
+
+	// The spec's own view of the environment: resolved before the rollout, so
+	// it cannot carry a name this deploy has not provisioned yet.
+	spec := DeploySpec{
+		Target: OpenResult{Tenant: "team", Environment: "dev", EnvConfig: mustLoadEnvConfig(t)},
+		Deploy: HelmDeploySpec{
+			Tenant:               "team",
+			Environment:          "dev",
+			ReleaseName:          RuntimeReleaseName("team"),
+			Namespace:            "team-dev",
+			Version:              "1.0.0",
+			ResolvedRuntimeImage: "registry.example/test/team-devops:1.0.0",
+		},
+	}
+
+	var log bytes.Buffer
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	if err := reconcilePlatformAliasSecret(ctx, &spec.Deploy); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if want := "team-devops-platform-alias"; spec.Deploy.PlatformAliasSecretName != want {
+		t.Fatalf("the retrofit did not thread a name into the upgrade: got %q, want %q", spec.Deploy.PlatformAliasSecretName, want)
+	}
+	// The state the deploy leaves behind if nothing else writes, asserted so the
+	// loss below is attributable to the persistence and not to the retrofit.
+	if got := strings.TrimSpace(mustLoadEnvConfig(t).PlatformAliasSecretName); got != "team-devops-platform-alias" {
+		t.Fatalf("the retrofit recorded nothing: got %q", got)
+	}
+
+	// The deploy then persists what it rolled out, from the snapshot it
+	// resolved -- the write that used to discard the record above.
+	if err := persistRuntimeVersionIfChanged(spec, "1.0.0", SaveEnvConfig); err != nil {
+		t.Fatalf("persist runtime version: %v", err)
+	}
+	recorded := mustLoadEnvConfig(t)
+	if got := strings.TrimSpace(recorded.PlatformAliasSecretName); got != "team-devops-platform-alias" {
+		t.Fatalf("the deploy discarded the platform-alias record it had just written: got %q, want %q", got, "team-devops-platform-alias")
+	}
+	// The persistence still does its own job: the memo exists so downstream
+	// readers see the version that actually rolled out.
+	if recorded.RuntimeVersion != "1.0.0" {
+		t.Fatalf("the runtime-version memo did not land: got %q", recorded.RuntimeVersion)
+	}
+}
+
+// mustSaveEnvConfig and mustLoadEnvConfig are the "team"/"dev" environment's
+// two config-store round trips, so a scenario that drives several writes in
+// sequence reads as the sequence rather than as error plumbing.
+func mustSaveEnvConfig(t *testing.T, config EnvConfig) {
+	t.Helper()
+	if err := SaveEnvConfig("team", config); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+}
+
+func mustLoadEnvConfig(t *testing.T) EnvConfig {
+	t.Helper()
+	config, _, err := LoadEnvConfig("team", "dev")
+	if err != nil {
+		t.Fatalf("load env config: %v", err)
+	}
+	return config
+}
