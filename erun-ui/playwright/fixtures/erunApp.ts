@@ -147,17 +147,18 @@ export const test = base.extend<{
 // fixtures above) can key its wait to the same observable precondition
 // instead of a single fixed-timeout reload+waitFor.
 //
-// timeoutMs defaults to the budget every other caller relies on. A spec that
-// seeds an unusually large population before calling this (many environments
-// and/or orchestrators in one go) makes each reload genuinely more expensive
-// to resolve and render, not just slower to observe -- titlebar-whip-panel-
-// layout.spec.ts's realistic-population case (erun#1748) widens it for that
-// reason rather than accepting a marginal budget tuned for a single-row wait.
+// timeoutMs defaults to the budget the CALLING TEST declared, not to a number
+// this helper picked: `toPass({ timeout: N })` takes `min(test deadline,
+// now + N)`, so a fixed default is a second, independent cap that a test
+// which declared more would still fail at, with its own budget unspent. A
+// spec that seeds an unusually large population before calling this (many
+// environments and/or orchestrators in one go) may still pass a larger
+// number, but the default no longer undercuts anyone.
 export async function waitForSeededRow(
   app: AppShell,
   tenant: string,
   environment: string,
-  timeoutMs = 30_000,
+  timeoutMs = withTestBudget().timeout,
 ): Promise<void> {
   await expect(async () => {
     await app.reloadEnvironments();
