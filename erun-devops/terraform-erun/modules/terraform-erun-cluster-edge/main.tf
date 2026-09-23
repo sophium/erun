@@ -124,12 +124,38 @@ locals {
   # redirectScheme Middleware, and one catch-all router on the plaintext
   # entrypoint whose rule is "every path except the challenge prefix". The
   # redirect route terminates at noop@internal, Traefik's own service that
-  # answers a middleware-only route without a backend.
+  # answers a middleware-only route without a backend. The router's priority is
+  # not optional either -- see acme_exempt_redirect_priority, immediately below,
+  # for why the default makes the whole pair inert.
   # No @kubernetescrd ref local here, unlike the HSTS Middleware: that one is
   # named by an entrypoint argument, which needs the fully-qualified form, while
   # this one is named by the router beside it, in the same namespace.
   redirect_middleware_name = "erun-edge-http-redirect"
   acme_challenge_prefix    = "/.well-known/acme-challenge/"
+
+  # Explicit, because the default is the failure. Traefik derives a router's
+  # priority from the length of its rule when none is declared, which leaves
+  # this catch-all competing on its own 43 characters against the host routers
+  # it exists to redirect. A `Host(<name>) && PathPrefix(/)` rule is 27
+  # characters longer than the hostname in it, so every one for a name of 17
+  # characters or more outranks this rule -- `console.` and `auth.` in the
+  # tenant this was reported from among them. Traefik routes a matching request
+  # to the longest rule, so the plaintext request reaches the application and
+  # this redirect never runs: with no priority the exemption is silently inert
+  # on exactly the hosts it was added for, and the plan still reports success.
+  #
+  # The entrypoint-wide form this replaces is not exposed to that, and this is
+  # what has to be reproduced by hand: Traefik builds its own redirect router at
+  # Priority = MaxInt - 1 (RedirectEntryPoint's default), above the MaxInt - 1000
+  # ceiling it enforces on every user-defined router, so nothing a caller
+  # declares can outrank it. 1000000 sits under that ceiling on 32-bit as well
+  # as 64-bit, and clear of any rule length a real hostname can produce.
+  #
+  # Raising this above every other user router is safe only because the rule is
+  # negated: a request under the challenge prefix does not match this route at
+  # all, so no priority it carries can take a solver's request away from the
+  # host router that answers it. The challenge path is unaffected either way.
+  acme_exempt_redirect_priority = 1000000
 
   acme_exempt_redirect_middleware = {
     apiVersion = "traefik.io/v1alpha1"
@@ -158,6 +184,7 @@ locals {
       routes = [{
         match       = "!PathPrefix(`${local.acme_challenge_prefix}`)"
         kind        = "Rule"
+        priority    = local.acme_exempt_redirect_priority
         middlewares = [{ name = local.redirect_middleware_name }]
         services    = [{ name = "noop@internal", kind = "TraefikService" }]
       }]

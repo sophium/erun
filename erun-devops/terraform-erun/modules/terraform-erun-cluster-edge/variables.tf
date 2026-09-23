@@ -68,7 +68,9 @@ variable "http01_acme_challenges_present" {
     has no TLS block, so renewal fails. The module cannot observe a foreign
     Issuer, so the caller states it; the module then refuses to produce a
     blanket entrypoint redirect until acme_challenge_path_exempt says how the
-    challenge path is to survive.
+    challenge path is to survive. Echoed back, as resolved, at
+    edge_transport_policy -- that output is the only channel a caller bringing
+    its own controller has for the fact the policy was resolved against.
   EOT
   type        = bool
   default     = null
@@ -84,8 +86,14 @@ variable "acme_challenge_path_exempt" {
     narrowed; this instead expresses the redirect as a Middleware plus a
     catch-all router whose rule excludes the challenge prefix, and is the only
     shape that both upgrades every other request and lets an HTTP-01 solver
-    answer. The exempted path is served in cleartext on every host the edge
-    routes -- browsers that have read the HSTS header will still refuse it --
+    answer. It upgrades every other request only because the router declares an
+    explicit priority: Traefik otherwise derives a router's priority from its
+    rule length, and this rule is shorter than the host rules it has to be
+    applied before, so the redirect would lose to them and never run. The
+    negated rule is what keeps that priority safe -- the challenge path is not
+    a candidate for the router at all. The exempted path is served in
+    cleartext on every host the edge routes -- browsers that have read the
+    HSTS header will still refuse it --
     so turn it on because a real HTTP-01 Issuer needs it, not speculatively.
     The objects are exported at edge_transport_policy for a bring-your-own
     controller.

@@ -259,6 +259,49 @@ run "the_acme_challenge_path_can_be_exempted_from_the_redirect" {
   }
 }
 
+# The blocker that made the exemption above silently ineffective, and the only
+# case in this file that fails on a render without it. Traefik derives a
+# router's priority from the length of its rule, so this catch-all competes on
+# its own 43 characters while the host routers it has to redirect are longer:
+# a Host(<name>) && PathPrefix(/) rule is 27 characters longer than the name in
+# it, so every one for a hostname of 17 characters or more outranks the
+# catch-all. Traefik routes to the longer rule, the plaintext request reaches
+# the application, and the redirect never runs -- so it is not applied on
+# exactly the hosts the exemption was added for, `console.` (20) and `auth.`
+# (17) in the reported tenant among them. The route therefore has to carry an
+# explicit priority, and one no rule length can reach. The host rule below is
+# the reported tenant's own, at its real length of 47.
+run "the_exempting_router_outranks_a_longer_host_rule" {
+  command = plan
+
+  variables {
+    acme_challenge_path_exempt = true
+  }
+
+  assert {
+    condition = alltrue([
+      for r in local.acme_exempt_redirect_router.spec.routes :
+      # The priority Traefik would actually route on: the declared one where
+      # there is one, and otherwise the rule's own length, which is the default
+      # this route was silently getting.
+      try(r.priority, length(r.match)) > length("Host(`console.erunpaas.com`) && PathPrefix(`/`)")
+    ])
+    error_message = "the ACME-exempting catch-all must declare a priority that outranks the host routers it has to redirect; on Traefik's derived default (the rule's own length, 43 here) it loses to any Host(...) rule longer than that, and the redirect silently never applies to those hosts"
+  }
+
+  # What makes it safe to put this above every other user router: the rule is
+  # negated, so the challenge path is never a candidate for this router and no
+  # priority it carries can take a solver's request away from the host router
+  # that answers it.
+  assert {
+    condition = alltrue([
+      for r in local.acme_exempt_redirect_router.spec.routes :
+      strcontains(r.match, "!PathPrefix")
+    ])
+    error_message = "a priority above every host router is only safe because the rule is negated: it must not match the challenge path"
+  }
+}
+
 # The exemption is opt-in, and the default is what erun's own estate runs today:
 # every challenge solved over DNS-01, so the challenge path needs no carve-out
 # and gets none.
@@ -273,6 +316,11 @@ run "the_blanket_redirect_carries_no_exemption_until_opted_in" {
   assert {
     condition     = output.edge_transport_policy.acme_challenge_path_exempt == false
     error_message = "the exposed policy must say the challenge path is not exempt, so a caller reading it is not told otherwise"
+  }
+
+  assert {
+    condition     = output.edge_transport_policy.http01_acme_challenges_present == false
+    error_message = "the exposed policy must echo the HTTP-01 declaration as resolved; a caller that never sees this module's resources has no other way to read back the fact the policy was built on"
   }
 
   assert {
@@ -328,6 +376,23 @@ run "the_exemption_is_exported_for_a_controller_this_module_does_not_install" {
   assert {
     condition     = length(output.edge_transport_policy.redirect_objects) == 2
     error_message = "a bring-your-own controller must be handed both halves: the Middleware and the router that narrows it"
+  }
+
+  # This caller applies the policy itself, so the module's own resources tell it
+  # nothing: the declaration it made has to reach it through the output it reads
+  # the policy from, or it cannot tell an exemption that was granted from one
+  # that was silently defaulted away.
+  assert {
+    condition     = output.edge_transport_policy.http01_acme_challenges_present == true
+    error_message = "the exposed policy must echo the HTTP-01 declaration it was resolved against, not just the objects that resulted from it"
+  }
+
+  assert {
+    condition = alltrue([
+      for o in output.edge_transport_policy.redirect_objects :
+      strcontains(jsonencode(o), "IngressRoute") ? strcontains(jsonencode(o), "1000000") : true
+    ])
+    error_message = "the exported router must carry its explicit priority into the caller's cluster -- the caller applies this object verbatim, so a priority that only exists in the release this module installs would leave bring-your-own-controller clusters with the same silently ineffective redirect"
   }
 
   assert {
