@@ -49,14 +49,20 @@ type serviceItem struct {
 	} `json:"spec"`
 }
 
+// fetchObservedServices names the read, not the operation that asked for it:
+// `erun services` and the desktop's Ports tab reach this through
+// ListEnvironmentServices as well as observe does, and an error that led with
+// "observe:" would name a command the caller never ran (root AGENTS.md's
+// diagnostic record). RunObservation prefixes its own name onto what it gets
+// back, so its output is unchanged.
 func fetchObservedServices(args []string) ([]ObservedService, error) {
 	raw, stderr, err := runObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("observe: get service: %w", kubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("get service: %w", kubectlErrorMessage(err, stderr))
 	}
 	var list serviceList
 	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, fmt.Errorf("observe: parse service: %w", err)
+		return nil, fmt.Errorf("parse service: %w", err)
 	}
 	return parseObservedServices(list), nil
 }

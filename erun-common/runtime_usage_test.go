@@ -629,15 +629,12 @@ func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 	}
 }
 
-// TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap is the regression
-// guard for this defect: a build pinned at its cap and a build merely busy at
-// it report the same utilisation percentage, so a build starved by its own
-// quota reads as a running build making no progress and nothing in the
-// reading says why. nr_throttled over nr_periods is the counter that
-// separates the two, and it has to be said out loud rather than left for an
-// operator to infer from a percentage that happens to sit at 100.
-func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
-	runtimeReading := strings.Join([]string{
+// runtimeUsageRuntimeContainerReading is the runtime container's own cgroup
+// sample for the build-throttling cases. Its CPU reading is deliberately idle,
+// so the sidecar's sample beside it is the only thing that can raise a
+// build-throttling warning.
+func runtimeUsageRuntimeContainerReading() string {
+	return strings.Join([]string{
 		"cgroup_type=cgroup2fs",
 		"memory_current=104857600",
 		"memory_max=24696061952",
@@ -650,25 +647,77 @@ func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
 		"cpu_time_after_ns=2000000000",
 		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 	}, "\n")
-	dindReading := func(cpuMax string, periods, throttled int64) string {
-		return strings.Join([]string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=2040109465",
-			"memory_max=15032385536",
-			"memory_peak=3435973836",
-			"memory_oom_kill=0",
-			"cpu_max=" + cpuMax,
-			"cpu_usage_before=1000000",
-			"cpu_usage_after=2900000",
-			"cpu_time_before_ns=1000000000",
-			"cpu_time_after_ns=2000000000",
-			fmt.Sprintf("cpu_periods=%d", periods),
-			fmt.Sprintf("cpu_throttled_periods=%d", throttled),
-			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-		}, "\n")
-	}
+}
 
-	const throttleWarning = "the build was throttled in 200 of 200 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
+// runtimeUsageDindReading is one erun-dind sidecar sample: `periods`
+// scheduling periods, of which `throttled` were throttled.
+func runtimeUsageDindReading(cpuMax string, periods, throttled int64) string {
+	return strings.Join([]string{
+		"cgroup_type=cgroup2fs",
+		"memory_current=2040109465",
+		"memory_max=15032385536",
+		"memory_peak=3435973836",
+		"memory_oom_kill=0",
+		"cpu_max=" + cpuMax,
+		"cpu_usage_before=1000000",
+		"cpu_usage_after=2900000",
+		"cpu_time_before_ns=1000000000",
+		"cpu_time_after_ns=2000000000",
+		fmt.Sprintf("cpu_periods=%d", periods),
+		fmt.Sprintf("cpu_throttled_periods=%d", throttled),
+		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+	}, "\n")
+}
+
+// assertRuntimeUsageThrottleWarning runs one reading over those two samples
+// and asserts the build-throttling warning is present (want non-empty, matched
+// exactly) or absent (want empty). The absence check matches on the warning's
+// own words rather than on the slice being empty, so a reading that picks up
+// some unrelated warning cannot pass as silent about throttling.
+func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
+	t.Helper()
+	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+		if container == runtimeDindContainerName {
+			return RemoteCommandResult{Stdout: dindReading}, nil
+		}
+		return RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
+	}
+	usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+	if err != nil {
+		t.Fatalf("RunRuntimeUsage: %v", err)
+	}
+	if want == "" {
+		for _, warning := range usage.Warnings {
+			if strings.Contains(warning, "throttled in") {
+				t.Fatalf("expected no build-throttling warning, got %q", warning)
+			}
+		}
+		return
+	}
+	for _, warning := range usage.Warnings {
+		if warning == want {
+			return
+		}
+	}
+	t.Fatalf("expected the build-throttling warning\n  %q\ngot warnings %q", want, usage.Warnings)
+}
+
+// TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap is the regression
+// guard for this defect: a build pinned at its cap and a build merely busy at
+// it report the same utilisation percentage, so a build starved by its own
+// quota reads as a running build making no progress and nothing in the
+// reading says why. nr_throttled over nr_periods is the counter that
+// separates the two, and it has to be said out loud rather than left for an
+// operator to infer from a percentage that happens to sit at 100.
+//
+// Its sibling below pins the other half of the same verdict, which is what
+// keeps this one honest: the counter that carries good news also carries
+// noise.
+func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
+	const throttleWarning = "the build was throttled in 20000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
+	const partialThrottleWarning = "the build was throttled in 2000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
+	const youngSidecarThrottleWarning = "the build was throttled in 9999 of 9999 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
 
 	cases := []struct {
 		name        string
@@ -676,20 +725,41 @@ func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
 		wantWarning string
 	}{
 		{
-			// The reported failure: every period the cap granted was throttled,
-			// and the reading carried no warning saying so.
+			// The failure this guard was written for: every period the cap
+			// granted was throttled, and the reading carried no warning
+			// saying so.
 			name:        "a build throttled in every period",
-			dindReading: dindReading("400000 100000", 200, 200),
+			dindReading: runtimeUsageDindReading("400000 100000", 20000, 20000),
 			wantWarning: throttleWarning,
 		},
 		{
+			// The same pinned build read one period short of sizing's bar.
+			// The ratio is total, not marginal: the sidecar has been throttled
+			// in every period it has ever had, which is what a rebuild pinned
+			// at its cap looks like for its first ~17 minutes -- the whole
+			// window that build occupies. A floor sized for a 24-hour
+			// recommendation must not hold this reading silent, or the warning
+			// arrives only once the build it describes is over.
+			name:        "a build throttled in every period under the sizing floor",
+			dindReading: runtimeUsageDindReading("400000 100000", 9999, 9999),
+			wantWarning: youngSidecarThrottleWarning,
+		},
+		{
+			// Materially throttled without being pinned at the cap: a tenth
+			// of the sidecar's periods. Starvation does not have to be total
+			// to be worth naming.
+			name:        "a build throttled in a material share of its periods",
+			dindReading: runtimeUsageDindReading("400000 100000", 20000, 2000),
+			wantWarning: partialThrottleWarning,
+		},
+		{
 			name:        "a build working at its cap without being throttled",
-			dindReading: dindReading("400000 100000", 200, 0),
+			dindReading: runtimeUsageDindReading("400000 100000", 20000, 0),
 			wantWarning: "",
 		},
 		{
 			name:        "no scheduling periods observed",
-			dindReading: dindReading("400000 100000", 0, 0),
+			dindReading: runtimeUsageDindReading("400000 100000", 0, 0),
 			wantWarning: "",
 		},
 		{
@@ -697,39 +767,71 @@ func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
 			// unavailable CPU reading must not warn off numbers it could not
 			// interpret.
 			name:        "an unreadable quota with throttled periods behind it",
-			dindReading: dindReading("max 100000", 200, 200),
+			dindReading: runtimeUsageDindReading("max 100000", 200, 200),
 			wantWarning: "",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
-			runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
-				if container == runtimeDindContainerName {
-					return RemoteCommandResult{Stdout: tc.dindReading}, nil
-				}
-				return RemoteCommandResult{Stdout: runtimeReading}, nil
-			}
+			assertRuntimeUsageThrottleWarning(t, tc.dindReading, tc.wantWarning)
+		})
+	}
+}
 
-			usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
-			if err != nil {
-				t.Fatalf("RunRuntimeUsage: %v", err)
-			}
-			if tc.wantWarning == "" {
-				for _, warning := range usage.Warnings {
-					if strings.Contains(warning, "throttled in") {
-						t.Fatalf("expected no build-throttling warning, got %q", warning)
-					}
-				}
-				return
-			}
-			for _, warning := range usage.Warnings {
-				if warning == tc.wantWarning {
-					return
-				}
-			}
-			t.Fatalf("expected the build-throttling warning\n  %q\ngot warnings %q", tc.wantWarning, usage.Warnings)
+// TestRunRuntimeUsageStaysSilentWhenTheSidecarsThrottlingIsImmaterial pins the
+// quieter half of the verdict, and the defect that made it a defect: reading
+// any throttle at all as starvation.
+//
+// nr_periods and nr_throttled are cumulative for the sidecar's whole lifetime,
+// so a bare ThrottledPeriods > 0 is a lifetime residue rather than a reading
+// of the build in front of you. A live environment reported 3 throttled
+// periods out of 51,123 -- 0.006% -- and `erun usage` answered "the build ...
+// is CPU-starved by its own cap", sending the reader after a CPU problem that
+// did not exist while the sizing line beside it read the same counters as
+// insufficient evidence. Those ratios must stay silent.
+func TestRunRuntimeUsageStaysSilentWhenTheSidecarsThrottlingIsImmaterial(t *testing.T) {
+	cases := []struct {
+		name        string
+		dindReading string
+	}{
+		{
+			// The reported failure, at the counters it was reported with.
+			name:        "a build throttled in an immaterial share of its periods",
+			dindReading: runtimeUsageDindReading("400000 100000", 51123, 3),
+		},
+		{
+			// The same defect at the second environment's own counters:
+			// 6 of 17,479 is 0.03%.
+			name:        "an immaterial throttle ratio on a second environment",
+			dindReading: runtimeUsageDindReading("400000 100000", 17479, 6),
+		},
+		{
+			// Bracketing the materiality bar from below: 4.99% of the periods.
+			name:        "a build throttled just under the material ratio",
+			dindReading: runtimeUsageDindReading("400000 100000", 20000, 998),
+		},
+		{
+			// Bracketing the build path's own period floor from below, the
+			// same way the case above brackets the ratio: 599 of 599 is a
+			// total ratio carried by too few periods to read. The sibling
+			// test's 9,999-of-9,999 case is the same ratio past that floor,
+			// and must warn.
+			name:        "a total ratio one period under the build floor",
+			dindReading: runtimeUsageDindReading("400000 100000", 599, 599),
+		},
+		{
+			// The other half of the bar. A ratio this extreme carried by too
+			// few periods to read is exactly what the floor keeps out: a
+			// sidecar seconds old, pinned because it is still starting up.
+			name:        "every period throttled but too few periods to read",
+			dindReading: runtimeUsageDindReading("400000 100000", 200, 200),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertRuntimeUsageThrottleWarning(t, tc.dindReading, "")
 		})
 	}
 }

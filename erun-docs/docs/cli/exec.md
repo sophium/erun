@@ -59,6 +59,8 @@ Pushes the project working tree's current branch to a remote (`origin` by defaul
 
 `--dry-run` verifies the branch and traces the push without running it. Reports the branch, remote, and pushed commit id; add `--output json` for a structured result.
 
+When GitHub admits the push by **bypassing** the target branch's ruleset — the credential in use holds a bypass grant, which is how the merge queue's own pushes land on a protected branch — `push` says so in its own output and names the rules that were stepped over. A bypass is not a failure and never fails the push; it is reported because GitHub attributes a bypass to a credential's grant rather than to a person, so erun's own output is the one place an operator sees at the time that a protected branch was written through rather than around. `erun exec reconcile-bypass` is what resolves it afterwards, against the gate run that accounts for the push.
+
 ### `exec merge` {#exec-merge}
 
 Fetches TARGET_BRANCH from a remote (`origin` by default; override with `--remote`) and merges it into the project working tree's current branch with an explicit merge commit — **never a rebase**: review comments anchor to a commit id, and a rewrite would orphan every thread on an open review.

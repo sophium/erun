@@ -1,0 +1,47 @@
+{
+  "tenant": "team",
+  "environment": "dev",
+  "namespace": "team-dev",
+  "services": [
+    {
+      "name": "pw-api",
+      "type": "ClusterIP",
+      "ports": [
+        {
+          "name": "http",
+          "port": 80,
+          "protocol": "TCP"
+        }
+      ],
+      "exposure": {
+        "label": "api",
+        "hostname": "api.team-dev.services.erunpaas.com",
+        "scheme": "https"
+      }
+    },
+    {
+      "name": "pw-web",
+      "type": "ClusterIP",
+      "ports": [
+        {
+          "name": "http",
+          "port": 80,
+          "protocol": "TCP"
+        }
+      ]
+    },
+    {
+      "name": "team-mcp",
+      "type": "ClusterIP",
+      "ports": [
+        {
+          "name": "mcp",
+          "port": 80,
+          "protocol": "TCP"
+        }
+      ]
+    }
+  ]
+}
+audit: erun services --output json
+services: each Service is matched to an erun-expose Ingress by the Ingress's own backend, not by re-deriving the <tenant>-<service> naming convention

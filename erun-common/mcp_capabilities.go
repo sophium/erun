@@ -67,12 +67,16 @@ var mcpReadOnlyTools = map[string]struct{}{
 	"cloud_list":          {},
 	"exec_diff":           {},
 	"observe":             {},
-	"usage":               {},
-	"outputs_list":        {},
-	"outputs_download":    {},
-	"exec_job_status":     {},
-	"exec_job_output":     {},
-	"exec_job_await":      {},
+	// services reads what the namespace runs and which of it is published; it
+	// has no write path, and it is deliberately not grouped with
+	// expose/unexpose, whose publish and withdraw are admin.
+	"services":         {},
+	"usage":            {},
+	"outputs_list":     {},
+	"outputs_download": {},
+	"exec_job_status":  {},
+	"exec_job_output":  {},
+	"exec_job_await":   {},
 	// jobs_list/jobs_show only observe the queue; the jobs_start/jobs_finish
 	// pair writes and is deliberately not here.
 	"jobs_list":         {},

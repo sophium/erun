@@ -690,6 +690,48 @@ A console serving the wrong document instead prints:
 
 ---
 
+## `erun services` {#erun-services}
+
+Lists the Services an environment's namespace runs, with each one's exposure. Read-only: two `kubectl [--context <ctx>] --namespace <ns> get <resource> -o json` calls, never anything that mutates. Same operation as the MCP `services` tool (see [MCP overview § `services`](/mcp/overview#inspection--read-only)) and the same read model the desktop's Ports tab renders as its Service picker (`eruncommon.ListEnvironmentServices`).
+
+### Flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--tenant <t>` | string | current scope | Target tenant. |
+| `--environment <e>` | string | current scope | Target environment; requires `--tenant`. |
+
+### Resolution and output shape
+
+Resolves tenant/environment/namespace the same way every other typed command does (`ResolveOpen`), then issues `get service` and `get ingress`, in that order. `--output json` emits:
+
+```jsonc
+{
+  "tenant": "team", "environment": "dev", "namespace": "team-dev",
+  "services": [
+    { "name": "team-api", "type": "ClusterIP", "ports": [ { "name": "http", "port": 80, "protocol": "TCP" } ],
+      "exposure": { "label": "api", "hostname": "api.team-dev.services.example.com", "scheme": "https" } },
+    { "name": "pw-api", "type": "ClusterIP", "ports": [ { "name": "http", "port": 80, "protocol": "TCP" } ] }
+  ]
+}
+```
+
+`services` is sorted by name; a Service with no `erun expose` Ingress omits `exposure` entirely.
+
+Each Service is matched to an Ingress by the Ingress's own backend (`spec.rules[].http.paths[].backend.service.name`), never by re-deriving `<tenant>-<service>` — a repo-native chart names its own Service, and the derivation would report the wrong one. Only Ingresses named with the `expose-` prefix and carrying at least one host are considered; a Service reached by several is attributed to the first, and its `label` is the Ingress name's suffix, which is a public label and not necessarily the Service's own name. `scheme` is `https` when the Ingress carries a `tls:` block for that host, else `http`.
+
+In a preview the two `kubectl` calls are traced rather than run and nothing is read from the cluster, but the two surfaces report that differently: the MCP tool returns `services: null` alongside the `tenant`/`environment`/`namespace` it resolved, while `erun services --dry-run` writes nothing to stdout at all — including with `--output json`, which emits no JSON document rather than an empty listing, because the command returns before it renders one.
+
+### Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant/environment can't be resolved. | Errors before any `kubectl` call. |
+| The namespace or cluster is unreachable. | Errors naming the failed call. |
+| The credentials cannot list Services or Ingresses (`forbidden`). | Errors, distinguishable from a namespace that is genuinely empty. |
+
+---
+
 ## `erun observe` {#erun-observe}
 
 Reports an environment's Kubernetes state, read-only: every underlying call is `kubectl [--context <ctx>] --namespace <ns> get <resource> [name] -o json`, never anything that mutates. Same operation as the MCP `observe` tool (see [MCP overview § `observe`](/mcp/overview#observe)).
@@ -848,6 +890,7 @@ A reading nobody acts on is decoration, so `warnings` fires a plain-language ent
 | `memory.oomKills` > 0. | Always reported: a kill already happened. |
 | the environment's *retained* peak ÷ `memory.limitBytes` ≥ 95%, when it exceeds the live `memory.peak`. | `memory.peak` is a per-container counter, so a restart resets it — and a restart is often how an OOM manifests. The retained high-water mark keeps a pre-restart near-limit peak visible. Scored against the current limit, so raising `runtimepod` clears it. |
 | the environment's *retained* OOM-kill total exceeds the live `memory.oomKills`. | `memory.events` resets with the container, so a kill that already happened stays reported after a restart the current container cannot account for. |
+| the `erun-dind` sidecar was throttled in ≥ 5% of its scheduling periods, over at least 600 periods. | Every image build runs in the sidecar rather than the runtime container, and a build held at its cap reports the same utilisation percentage as one merely busy at it — so this duty cycle is the only reading that can say a build is starved by its own cap, and the text names it as starvation rather than leaving it to be inferred from a percentage sitting at 100. Both counters are cumulative for the sidecar's lifetime, so the ratio is a lifetime average: a small one is leftover throttling, not starvation (0.006% appeared in the field and sent a reader after a CPU problem that was not there). The 600-period floor — a minute at cgroup v2's 100 ms default — is deliberately far below the floor on the sizing verdict's own raise, because sizing recommends a pod size over a 24-hour window while this names a build that is running now, and a rebuild occupies 10–20 minutes. Unlike every memory entry above it, this warning has **no** `sizing` verdict behind it: `sizing` scores the runtime container's counters under `knob=runtimepod`, never the sidecar's. Below that bar — the ratio *and* the 600-period floor, so a sidecar throttled in 4,000 of 20,000 periods is named and one throttled in 998 of 20,000 is not — the sidecar's throttled share is named by this warning alone; the raw `periods`/`throttledPeriods` counters stay in the reading at every ratio (`--output json`), and the sidecar's line in the text output reports utilisation only. |
 
 Every memory entry above is answered by the `sizing` recommendation in the same result, and the 85% memory threshold is deliberately the same figure the memory raise is decided at — see [§ Raised by an alarm](#usage-warning-remedy).
 

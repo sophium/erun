@@ -54,7 +54,12 @@ for (const width of [480, 640, 900, 1440]) {
       await expect.poll(() => hasHorizontalOverflow(page)).toBe(false);
 
       const dismiss = page.getByRole('button', { name: 'Dismiss status' });
-      await expect(dismiss).toBeVisible();
+      // waitFor, not expect(...).toBeVisible(): this is a state transition, and
+      // the assertion's own 10s budget is a second, much tighter clock than the
+      // test's. On a contended builder the pill's dismiss control had not
+      // rendered inside it, and the spec failed on the clock rather than on the
+      // overflow contract it exists to hold.
+      await dismiss.waitFor({ state: 'visible' });
       const box = await boundingBoxOf(dismiss, `Dismiss status button at ${width}px`);
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);

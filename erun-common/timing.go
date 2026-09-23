@@ -272,7 +272,16 @@ func attachProgressPhase(parent *stepTiming, phase buildProgressPhase) {
 func reportStepTiming(ctx Context, command string, root *stepTiming) {
 	ctx.Info("step timing (ordered by duration):")
 	for _, row := range renderStepTimingRows(root, 0) {
-		ctx.Info("  " + row)
+		// Every line of the row gets the block's indent, not just the first.
+		// A failed step's message can be several lines long, and prefixing
+		// only the first emitted the rest at column zero -- indistinguishable,
+		// to a reader and to the integration suite's canonicalizer, from
+		// unrelated output a concurrent child wrote between two rows. The
+		// canonicalizer sorts sibling rows by name so the table does not
+		// depend on measured wall-clock order, and it has to know which lines
+		// belong to a row to move them with it; indentation is that signal,
+		// so a row's own message has to carry it.
+		ctx.Info("  " + strings.ReplaceAll(row, "\n", "\n  "))
 	}
 	path, err := writeTimingRecord(command, root)
 	if err != nil {

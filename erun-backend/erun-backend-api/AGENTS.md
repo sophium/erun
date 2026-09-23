@@ -251,9 +251,12 @@ is still an unresolved verification design, not implied by batch support.
 
 Ruleset identity migration and its approval/verification sequence belong in
 `erun-skills/skills/erun-merge-queue-drive/SKILL.md`, not the API engineering guide.
-`reconcile-bypass` and `plan-ruleset-bypass` are implemented; live credential and
-ruleset changes remain explicit operations work. Gate-run records provide
-evidence, not a substitute for GitHub-side enforcement.
+`reconcile-bypass` and `plan-ruleset-bypass` are implemented, and so is the
+push-side half: a push GitHub admits by bypassing a ruleset reports that in
+erun's own output, naming the rules stepped over, because the successful-push
+path used to discard the remote line carrying it. Live credential and ruleset
+changes remain explicit operations work. Gate-run records provide evidence, not
+a substitute for GitHub-side enforcement.
 
 ### An agent environment cannot sign itself in to a platform alias (#1969)
 

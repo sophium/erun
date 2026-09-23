@@ -464,7 +464,22 @@ func runReleaseCommand(ctx Context, spec ReleaseSpec, stage ReleaseStage, comman
 	if branchPush {
 		return runReleaseBranchPush(ctx, spec, command, runGit)
 	}
-	return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
+	return runReleaseStageCommand(ctx, command, runGit)
+}
+
+// runReleaseStageCommand runs one of a stage's git commands. A push captures
+// its own stderr, because that is the only stream GitHub's bypass notice ever
+// appears on; every other stage command streams straight through.
+func runReleaseStageCommand(ctx Context, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
+	if !isGitPushArgs(command.Args) {
+		return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
+	}
+	// The tag push that publishes the version is the release's other push, and
+	// it is a stage command rather than the branch push -- so it takes the same
+	// bypass report from the same capture rather than the plain runner, which
+	// would leave the tag path silent.
+	var pushOutput strings.Builder
+	return runReleasePush(ctx, command.Dir, runGit, &pushOutput, command.Args...)
 }
 
 func shouldSkipExistingReleaseTag(args []string) bool {
@@ -688,7 +703,8 @@ func deleteExistingReleaseTag(ctx Context, projectRoot, tag string, runGit GitCo
 	if remoteExists {
 		ctx.TraceCommand(projectRoot, "git", "push", "--delete", "origin", tag)
 		if !ctx.DryRun {
-			if err := runGit(projectRoot, ctx.Stdout, ctx.Stderr, "push", "--delete", "origin", tag); err != nil {
+			var pushOutput strings.Builder
+			if err := runReleasePush(ctx, projectRoot, runGit, &pushOutput, "push", "--delete", "origin", tag); err != nil {
 				return err
 			}
 		}

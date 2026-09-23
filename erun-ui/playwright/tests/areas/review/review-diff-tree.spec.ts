@@ -188,7 +188,16 @@ test.describe('review diff/tree consistency', () => {
     // starts (root AGENTS.md's "no flaky tests" gate needs this to be a real
     // budget increase, not a race against the whole-test clock the bounded
     // retries below would still lose).
-    test.setTimeout(120_000);
+    //
+    // The two bounds are related, not independent: the auto-scroll poll below
+    // must not be the thing that expires first. It carried a fixed 40s while
+    // the test's own budget was 120s, so under a contended builder the poll
+    // gave up 80s before the clock the scenario was actually sized against --
+    // observed as this spec failing on the full suite's own load while its
+    // assertions were still being satisfied. The poll is widened to sit inside
+    // this budget, and the budget itself raised because the gate's concurrency
+    // is far past the "approach the default" case the 120s was chosen for.
+    test.setTimeout(240_000);
     // Enough tall files that the tree overflows its container and the active
     // node would otherwise scroll out of view.
     const big = Array.from({ length: 30 }, (_, i) => `pkg/f${String(i).padStart(2, '0')}.ts`);
@@ -247,7 +256,7 @@ test.describe('review diff/tree consistency', () => {
           }
           return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
         },
-        { timeout: 40_000 },
+        { timeout: 120_000 },
       )
       .toBe(true);
   });

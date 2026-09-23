@@ -1,0 +1,13 @@
+CPU: 0.0% of a 12.00-core quota (sampled over 1.0s)
+Memory: 100.0MiB / 23.0GiB (0.4%), peak 100.0MiB, OOM kills 0
+erun-dind sidecar (where builds run):
+  CPU: 47.5% of a 4.00-core quota (sampled over 1.0s)
+  Memory: 1.9GiB / 14.0GiB (13.6%), peak 3.2GiB, OOM kills 0
+Disk (node, shared): <HOME> 84.9GiB / 189.1GiB (44.9%)
+  this environment's own usage: 42.0GiB
+Warnings (1):
+  the build was throttled in 4000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment
+Sizing recommendation:
+  sizing: memory insufficient-evidence from 23552Mi (peak 100Mi of 23552Mi (0%), but only 0m observed of the 24h0m a shrink needs); cpu insufficient-evidence from 12 (0.11% of scheduling periods throttled (425 of 376556), but only 0m observed of the 24h0m a shrink needs)
+  sizing-evidence: 0m observed, 1 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
+audit: erun usage

@@ -144,6 +144,11 @@ COPY .dockerignore /src/.dockerignore
 # .dockerignore carves it out of the ".erun/*" exclusion for exactly this
 # reason.
 COPY .erun/config.yaml /src/.erun/config.yaml
+# TestGeneratedPinHistoryDoesNotDirtyACleanCheckout reads the checkout's own
+# .gitignore -- repoRoot resolves to this stage's /src -- and treats a missing
+# file as fatal rather than skipping, so it needs its own line here for the
+# same reason as the two above: this stage's COPYs are all by explicit path.
+COPY .gitignore /src/.gitignore
 COPY Makefile /src/Makefile
 COPY scripts /src/scripts
 COPY package.json yarn.lock /src/

@@ -1,0 +1,8 @@
+Namespace: team-dev
+Services (3):
+  pw-api (ClusterIP): ports http:80
+    exposed as api at https://api.team-dev.services.erunpaas.com
+  pw-web (ClusterIP): ports http:80
+  team-mcp (ClusterIP): ports mcp:80
+audit: erun services
+services: each Service is matched to an erun-expose Ingress by the Ingress's own backend, not by re-deriving the <tenant>-<service> naming convention

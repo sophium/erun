@@ -1,0 +1,32 @@
+Report every Service in the environment's namespace with its type, its
+ports, and the public hostname it already has when an erun-expose Ingress
+fronts it.
+
+This answers the question that precedes `erun expose`: what is this
+environment running, and which of those is already published. The exposure
+is read from the Ingress's own backend rather than re-derived from the
+`<tenant>-<service>` convention, so a repo-native chart that names its
+Service something else still reports the Service its Ingress actually routes
+to.
+
+Both reads are plain `kubectl get`s: nothing here can mutate the cluster,
+which is what makes it safe to grant to an orchestrator that must never
+reach for `exec raw`.
+
+Usage:
+  erun services [flags]
+
+Examples:
+  erun services --tenant team --environment dev
+  erun services --tenant team --environment dev --output json
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Target a specific environment; requires --tenant
+  -h, --help                 help for services
+      --tenant string        Target a specific tenant (default: the current scope)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

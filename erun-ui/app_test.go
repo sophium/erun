@@ -1871,7 +1871,7 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 // half — proving an AWS-only configuration cannot reach this path at all.
 func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T) {
 	var requests []string
-	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests))
+	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests, "frs"))
 	defer server.Close()
 
 	app := testERunPlatformAliasApp(t, server.URL)
@@ -1882,13 +1882,49 @@ func TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias(t *testing.T)
 	assertERunPlatformDashboard(t, dashboard, requests)
 }
 
+// TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo is the
+// regression for the self-contradicting dashboard surface: a local tenant is
+// bound to a platform tenant only by whichever alias its credential reaches,
+// so the rows every panel renders can belong to a tenant that is not the one
+// the dashboard was opened from — an `frs` dashboard listing `erun`'s reviews
+// and queue. The desktop read the platform's own tenant name off whoami and
+// dropped it, so nothing on the surface said whose rows those were; the
+// heading named the local tenant and the panels rendered another tenant's
+// data underneath it.
+//
+// The fixture's local tenant is "frs" (testERunPlatformAliasApp) and the
+// platform answers "erun", which is the disagreement, not the agreement:
+// assertERunPlatformDashboard covers the case where the two names match.
+func TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests, "erun"))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if dashboard.User == nil {
+		t.Fatal("expected the dashboard to carry the caller's own identity")
+	}
+	if dashboard.User.TenantName != "erun" {
+		t.Fatalf("expected the dashboard to name the platform tenant its rows belong to, got %q", dashboard.User.TenantName)
+	}
+}
+
 // erunPlatformDashboardFixtures is erunPlatformDashboardHandler's fixture
 // body for every path, keyed by path rather than a switch — a switch here
 // once tripped golangci-lint's cyclomatic-complexity cap the moment a gate-run
 // case joined the rest.
-func erunPlatformDashboardFixtures() map[string]string {
+// platformTenantName is the name the fixture's whoami reports for the tenant
+// behind the bearer. It is the caller's choice rather than a constant because
+// the local tenant a dashboard is opened from and the platform tenant its
+// credential reaches are separate namespaces; a caller stages the state it
+// means to exercise by naming whether they agree.
+func erunPlatformDashboardFixtures(platformTenantName string) map[string]string {
 	return map[string]string{
-		"/v1/whoami":                  `{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"` + testERunIssuer + `","subject":"` + testERunSubject + `"}`,
+		"/v1/whoami":                  `{"tenantId":"tenant-1","tenantName":"` + platformTenantName + `","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"` + testERunIssuer + `","subject":"` + testERunSubject + `"}`,
 		"/v1/reviews":                 `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
 		"/v1/reviews/merge-queue":     `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
 		"/v1/reviews/review-1/builds": `[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`,
@@ -1899,10 +1935,10 @@ func erunPlatformDashboardFixtures() map[string]string {
 	}
 }
 
-func erunPlatformDashboardHandler(t *testing.T, requests *[]string) http.HandlerFunc {
+func erunPlatformDashboardHandler(t *testing.T, requests *[]string, platformTenantName string) http.HandlerFunc {
 	t.Helper()
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
-	fixtures := erunPlatformDashboardFixtures()
+	fixtures := erunPlatformDashboardFixtures(platformTenantName)
 
 	return func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Authorization") != "Bearer "+jwt {
@@ -1925,7 +1961,8 @@ func erunPlatformDashboardHandler(t *testing.T, requests *[]string) http.Handler
 func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requests []string) {
 	t.Helper()
 
-	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.GateRuns) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
+	assertERunPlatformDashboardUser(t, dashboard)
+	if len(dashboard.MergeQueue) != 1 || len(dashboard.GateRuns) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
 	if dashboard.PlatformAlias != testERunAlias {
@@ -1935,6 +1972,21 @@ func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/gate-runs,/v1/reviews/review-1/builds,/v1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
 	if strings.Join(requests, ",") != want {
 		t.Fatalf("unexpected API requests: %+v, want %q", requests, want)
+	}
+}
+
+// assertERunPlatformDashboardUser pins the caller's own identity row, which is
+// the one row whoami answers for. Its platform tenant name is asserted even
+// where it agrees with the local tenant's: the header line is rendered
+// whenever the platform reported one, so its absence is never the signal that
+// the two names matched.
+func assertERunPlatformDashboardUser(t *testing.T, dashboard uiTenantDashboard) {
+	t.Helper()
+	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 {
+		t.Fatalf("unexpected dashboard user: %+v", dashboard.User)
+	}
+	if dashboard.User.TenantName != "frs" {
+		t.Fatalf("expected the dashboard to name the platform tenant, got %q", dashboard.User.TenantName)
 	}
 }
 

@@ -70,6 +70,18 @@ const (
 	// an ordinary week of work sat at 0.14% throttled — present but harmless —
 	// so a threshold anywhere near zero would recommend growing every
 	// environment in the fleet forever.
+	//
+	// It is the package's one bar for what a throttled *ratio* means, read by
+	// every surface that would otherwise act on a bare nr_throttled count:
+	// sizing's raise verdict, and the build-starvation warning
+	// (runtimeBuildThrottleWarnings). Two readers of the same counter must not
+	// disagree about whether a ratio means anything.
+	//
+	// The period floor under that ratio is not shared, because the two
+	// verdicts are not the same question asked over the same window. Sizing
+	// reads runtimeSizingThrottlePeriods; the build-starvation warning reads
+	// the much lower runtimeBuildThrottleMinPeriods, since it answers about
+	// the build running now rather than about a pod size to hold for a day.
 	runtimeSizingThrottleRatio = 0.05
 
 	// runtimeSizingShrinkWindow is how long an environment must have been
@@ -93,6 +105,31 @@ const (
 	// evidence does not have; rounding up also keeps the headroom guarantee.
 	runtimeSizingMemoryGraduationMi = 256
 )
+
+// runtimeThrottleIsMaterial reports whether a throttled-of-periods ratio
+// supports acting on it over a sizing horizon, and is sizing's whole bar:
+// its raise verdict reads this rather than deciding for itself what a
+// meaningful ratio is. The build-starvation warning
+// (runtimeBuildThrottleIsStarvation) reads the same ratio constant, because
+// the two must agree on what a ratio means, but over its own much lower floor
+// -- "grow this pod" and "this build is starved right now" are different
+// claims about different windows.
+//
+// The ratio is the substance; nr_throttled climbing at all is not. Both
+// counters only ever climb, and a caller reading cpu.stat directly carries
+// the container's whole lifetime behind them -- a sidecar up for an hour
+// still reports periods it was throttled in long ago. A bare
+// ThrottledPeriods > 0 is therefore a lifetime residue rather than a reading
+// of what is running now, and calling one "CPU-starved by its own cap" sends
+// the reader after a CPU problem that is not there.
+//
+// The period floor is the other half, and sizing's is the high one: a
+// container seconds old has a few hundred periods and a ratio that swings
+// wildly, and a recommendation to change a pod's size is a steady-state
+// judgement that can wait for the sampling noise to settle out.
+func runtimeThrottleIsMaterial(throttled, periods int64) bool {
+	return periods >= runtimeSizingThrottlePeriods && float64(throttled) >= float64(periods)*runtimeSizingThrottleRatio
+}
 
 // RuntimeSizingAction is the direction a recommendation points.
 type RuntimeSizingAction string
@@ -363,7 +400,7 @@ func recommendRuntimeCPU(history RuntimeUsageHistory, latest RuntimeUsage, obser
 	}
 	verdict.Current = FormatKubernetesCPUFromMilli(quota)
 
-	if observedPeriods >= runtimeSizingThrottlePeriods && float64(observedThrottled) >= float64(observedPeriods)*runtimeSizingThrottleRatio {
+	if runtimeThrottleIsMaterial(observedThrottled, observedPeriods) {
 		verdict.Action = RuntimeSizingRaise
 		verdict.Confidence = RuntimeSizingConfidenceHigh
 		verdict.Suggested = FormatKubernetesCPUFromMilli(scaleMilliToWholeCores(quota, runtimeSizingCPURaiseMultiple))
