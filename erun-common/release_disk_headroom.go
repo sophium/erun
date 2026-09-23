@@ -118,24 +118,23 @@ type diskHeadroomMeasurement struct {
 // that knows which can say so.
 type diskHeadroomFreeSpaceFunc func(limits diskHeadroomTimeouts) (diskHeadroomMeasurement, error)
 
-// dockerReclaimable is what docker's own stores could still free, from a
-// single `docker system df` reading. Two figures, two questions, one reading,
-// so the remedy a message names can never contradict the prune decision that
-// preceded it: buildCache is what the bounded `docker buildx prune` this file
-// runs can reach, and total is what the wider remedy that message names —
-// `docker system prune` plus removing unused images — could reach.
-type dockerReclaimable struct {
-	buildCache uint64
-	total      uint64
-}
+// diskHeadroomReclaimableFunc reports what a prune of docker's own stores has
+// to free, so the remedy a message names can match what was measured. The
+// reported figure is a lower bound, not a size estimate — see
+// dockerReclaimableBytes — so it is only trusted to say "nothing at all",
+// never to say "not enough". An error is treated as "docker's stores may
+// still hold something" rather than "they hold nothing": an unknown is not
+// evidence that a remedy is inert.
+type diskHeadroomReclaimableFunc func(limit time.Duration) (uint64, error)
 
-// diskHeadroomReclaimableFunc reports what a docker-store prune has to free,
-// so the caller can decline a prune that would be a pure no-op. The reported
-// figures are lower bounds, not size estimates — see dockerReclaimableBytes —
-// so they are only trusted to say "nothing at all", never to say "not enough".
-// An error is treated as "prune anyway" rather than "never prune": an unknown
-// is not a reason to skip the remedy.
-type diskHeadroomReclaimableFunc func(limit time.Duration) (dockerReclaimable, error)
+// diskHeadroomCacheReclaimableFunc reports what BuildKit's own build cache
+// could still free. It is a separate reading from the one above because the
+// two cannot see the same bytes: docker attributes a build's layers to Images
+// for as long as the image holding them exists, so `docker system df`'s Build
+// Cache column reads 0B on exactly the store this check exists for — one full
+// of previously-built images — while BuildKit itself reports the tens of
+// gigabytes it can still free. See dockerBuildCacheReclaimable.
+type diskHeadroomCacheReclaimableFunc func(limit time.Duration) (uint64, error)
 
 // diskHeadroomPruneFunc bounds a build-cache prune to leave at least floor
 // bytes free. Injectable for the same reason as diskHeadroomFreeSpaceFunc.
@@ -174,7 +173,7 @@ func ensureReleaseDiskHeadroom(ctx Context) error {
 	// free space happens to be short this time. Reaching it also frees room,
 	// which is why it runs before the floor is measured rather than after.
 	ensureBuildCacheRetention(ctx, releaseDiskHeadroomPolicy)
-	return ensureDiskHeadroomWith(ctx, releaseDiskHeadroomPolicy, dockerRootDiskBytes, dockerReclaimableBytes, runDiskHeadroomPrune)
+	return ensureDiskHeadroomWith(ctx, releaseDiskHeadroomPolicy, dockerRootDiskBytes, dockerReclaimableBytes, dockerBuildCacheReclaimable, runDiskHeadroomPrune)
 }
 
 // ensureBuildDiskHeadroom is the same preflight for an ordinary build, which
@@ -182,18 +181,18 @@ func ensureReleaseDiskHeadroom(ctx Context) error {
 // where the cache growth that fills a node happens.
 func ensureBuildDiskHeadroom(ctx Context) error {
 	ensureBuildCacheRetention(ctx, buildDiskHeadroomPolicy)
-	return ensureDiskHeadroomWith(ctx, buildDiskHeadroomPolicy, dockerRootDiskBytes, dockerReclaimableBytes, runDiskHeadroomPrune)
+	return ensureDiskHeadroomWith(ctx, buildDiskHeadroomPolicy, dockerRootDiskBytes, dockerReclaimableBytes, dockerBuildCacheReclaimable, runDiskHeadroomPrune)
 }
 
-// ensureDiskHeadroomWith holds the decision logic: read first, prune only when
-// below the floor, then re-check before refusing. The docker daemon a build
-// runs against often lives in a separate container (the erun-dind sidecar)
-// with its own filesystem, so readFree makes its own attempt to reach that
-// daemon's filesystem before giving up; when it still cannot, that
+// ensureDiskHeadroomWith holds the decision logic: read first, prune whenever
+// the disk is below the floor, then re-check before refusing. The docker daemon
+// a build runs against often lives in a separate container (the erun-dind
+// sidecar) with its own filesystem, so readFree makes its own attempt to reach
+// that daemon's filesystem before giving up; when it still cannot, that
 // inconclusive read is not an answer — the same "known failure over invented
 // behavior" posture as ensureReleaseBaseBranchUnmoved — so it lets the run
 // proceed exactly as it does today, with no prune at all.
-func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree diskHeadroomFreeSpaceFunc, readReclaimable diskHeadroomReclaimableFunc, prune diskHeadroomPruneFunc) error {
+func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree diskHeadroomFreeSpaceFunc, readReclaimable diskHeadroomReclaimableFunc, readCacheReclaimable diskHeadroomCacheReclaimableFunc, prune diskHeadroomPruneFunc) error {
 	ctx.TraceCommand("", "docker", "info", "-f", "{{.DockerRootDir}}")
 	if ctx.DryRun {
 		return nil
@@ -215,21 +214,26 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 	// accounting for build cache has understated what a real prune frees by
 	// several times over on a real node, and declining on a figure that
 	// understates in that direction refuses releases a prune would have
-	// rescued. That is a worse failure than the one the opposite bound
-	// guards against — a prune that destroys a real, sizeable cache and still
-	// leaves the release below the floor (the floor is node-wide; this prune
-	// only reaches this environment's own cache) ends in the same refusal it
-	// would have ended in anyway, just after spending the cache. So skip the
-	// prune only when it is confidently a no-op.
+	// rescued. What they cannot be trusted for at all is deciding whether to
+	// prune: that is a question this reading is structurally unable to answer,
+	// and is why the prune below no longer asks it.
 	reclaimable, reclaimErr := readReclaimable(policy.limits.read)
 	known := reclaimErr == nil
-	if known && reclaimable.buildCache == 0 {
-		ctx.Trace(fmt.Sprintf(
-			"%s: a build-cache prune has nothing reclaimable; skipping it rather than running a no-op",
-			policy.label))
-		return diskHeadroomVerdict(ctx, policy, newDiskHeadroomShortfall(measured, floor, reclaimable, known))
-	}
 
+	// The prune is attempted on every disk below the floor, not only when a
+	// figure says there is something to reclaim. `docker system df` cannot
+	// answer that question: a layer a build produced is attributed to Images
+	// for as long as the image holding it exists, and becomes Build Cache only
+	// once that image is removed — so on the store this check exists for, one
+	// full of previously-built images, the Build Cache column reads 0B while
+	// the cache holds tens of gigabytes a prune would free. Gating the prune on
+	// that column skipped the one act that would have closed the gap, and
+	// refused a release over space the guard was itself holding.
+	//
+	// An unbounded prune is not what this risks: --min-free-space is exactly
+	// the bound that makes "prune, in case there is something" safe, leaving it
+	// a genuine no-op when the cache is already empty. The daemon knows what it
+	// holds; a size column that cannot see the bytes does not.
 	ctx.Trace(fmt.Sprintf("%s: docker root free disk is below the %s floor; pruning reclaimable build cache down to it", policy.label, formatGiB(floor)))
 	ctx.TraceCommand("", "docker", diskHeadroomPruneArgs(floor)...)
 	if err := prune(floor, policy.limits.prune); err != nil {
@@ -246,7 +250,19 @@ func ensureDiskHeadroomWith(ctx Context, policy diskHeadroomPolicy, readFree dis
 		ctx.Trace(fmt.Sprintf("%s: the docker root's free space could not be re-read after the prune (%s); the shortfall is unmeasured and the run continues unrefused", policy.label, readErr))
 		return nil
 	}
-	return diskHeadroomVerdict(ctx, policy, newDiskHeadroomShortfall(measured, floor, reclaimable, known))
+	if measured.free >= floor {
+		return nil
+	}
+
+	// Still short with the prune already spent: only now is the cache asked
+	// what it is still holding, because that answer decides the remedy and
+	// nothing else can supply it. It costs a walk of the cache, so it is taken
+	// only on the path that is about to tell an operator what to do.
+	cacheReclaimable, cacheErr := readCacheReclaimable(policy.limits.prune)
+	if cacheErr != nil {
+		ctx.Trace(fmt.Sprintf("%s: what the build cache could still reclaim is not observable from this process (%s); the refusal below reports the shortfall without it", policy.label, cacheErr))
+	}
+	return diskHeadroomVerdict(ctx, policy, newDiskHeadroomShortfall(measured, floor, reclaimable, known, cacheReclaimable))
 }
 
 // diskHeadroomShortfall is one failing headroom check's measured state: the
@@ -263,19 +279,37 @@ type diskHeadroomShortfall struct {
 	// when that reading failed, because an unreadable figure is not evidence
 	// that the remedy is inert.
 	dockerReclaimExhausted bool
+	// buildCacheStillReclaimable is what BuildKit's own build cache reported it
+	// could still free once the prune had already been spent, or 0 when that
+	// reading reported nothing or could not be taken. A non-zero figure is the
+	// one piece of evidence that says where the shortfall actually sits, so it
+	// decides the remedy; see remedy.
+	buildCacheStillReclaimable uint64
 }
 
-func newDiskHeadroomShortfall(measured diskHeadroomMeasurement, floor uint64, reclaimable dockerReclaimable, known bool) diskHeadroomShortfall {
+func newDiskHeadroomShortfall(measured diskHeadroomMeasurement, floor uint64, reclaimable uint64, known bool, buildCacheStillReclaimable uint64) diskHeadroomShortfall {
 	return diskHeadroomShortfall{
-		free:                   measured.free,
-		floor:                  floor,
-		path:                   measured.path,
-		sharedPaths:            measured.sharedPaths,
-		dockerReclaimExhausted: known && reclaimable.total == 0,
+		free:                       measured.free,
+		floor:                      floor,
+		path:                       measured.path,
+		sharedPaths:                measured.sharedPaths,
+		dockerReclaimExhausted:     known && reclaimable == 0,
+		buildCacheStillReclaimable: buildCacheStillReclaimable,
 	}
 }
 
 // remedy names the remediation that matches the space that was measured.
+//
+// A shortfall the build cache is itself still holding is named as that and
+// nothing else. `docker system df` attributes a build's layers to Images for as
+// long as the images holding them exist, so on a store full of previously-built
+// images it advertises tens of gigabytes of reclaimable images that removing
+// those images does not free — measured as 74 unreferenced erun images deleted
+// with not one byte off /var/lib/docker/overlay2, the whole of it reappearing
+// under Build Cache and none of it reachable by `docker rmi`. Sending an
+// operator down that route costs them a real attempt and teaches them the
+// diagnosis is unreliable, so where BuildKit's own cache reports it can still
+// free space, that is what the message names.
 //
 // A shortfall docker's own stores can still reach is docker's to close, and
 // the message says so. A shortfall on a filesystem whose docker stores were
@@ -286,6 +320,11 @@ func newDiskHeadroomShortfall(measured diskHeadroomMeasurement, floor uint64, re
 // says the docker remedy is spent and names the space it measured, rather than
 // leaving the operator to rediscover the real cause.
 func (s diskHeadroomShortfall) remedy() string {
+	if s.buildCacheStillReclaimable > 0 {
+		return fmt.Sprintf("docker's build cache still holds %s a prune can reclaim, so what is short is the "+
+			"cache rather than docker's own images: reclaim it with docker buildx prune -a, or grow the volume",
+			formatGiB(s.buildCacheStillReclaimable))
+	}
 	if !s.dockerReclaimExhausted {
 		return "free up space (docker system prune, remove unused images) or grow the volume"
 	}
@@ -316,33 +355,32 @@ func diskHeadroomVerdict(ctx Context, policy diskHeadroomPolicy, shortfall diskH
 		formatGiB(shortfall.free), shortfall.path, formatGiB(shortfall.floor), shortfall.remedy())
 }
 
-// dockerReclaimableBytes reads what docker's own stores could still free, one
-// reading serving both the prune decision and the remedy a message names.
-// Local volumes are excluded: `docker system prune` and unused-image removal
-// do not reclaim them, so counting them would let the message name a docker
-// remedy for space docker cannot actually reach — the same defect, in the
-// other direction.
+// dockerReclaimableBytes reads what a prune of docker's own stores could still
+// free. Local volumes are excluded: `docker system prune` and unused-image
+// removal do not reclaim them, so counting them would let the message name a
+// docker remedy for space docker cannot actually reach — the same defect, in
+// the other direction.
 //
-// Treat every returned figure as a lower bound only, never an estimate of the
+// Treat the returned figure as a lower bound only, never an estimate of the
 // true yield: measured on a real node, `docker system df`'s reclaimable figure
 // for build cache undercounted what `docker builder prune -a` actually freed
 // by 4.4x (22.57GB reported, 98.27GB freed). The exact accounting gap behind
 // that understatement is not confirmed, so callers must not assume a
 // particular cause — only that the number can be short.
-func dockerReclaimableBytes(limit time.Duration) (dockerReclaimable, error) {
+//
+// It is not a reading of what a build-cache prune can reach, and must not drive
+// that decision: see dockerBuildCacheReclaimable for why the Build Cache column
+// of this same output cannot answer it.
+func dockerReclaimableBytes(limit time.Duration) (uint64, error) {
 	out, err := diskHeadroomOutput(limit, "docker", "system", "df", "--format", "{{.Type}}|{{.Reclaimable}}")
 	if err != nil {
-		return dockerReclaimable{}, diskHeadroomReadFailure(limit, "docker system df", err)
+		return 0, diskHeadroomReadFailure(limit, "docker system df", err)
 	}
-	var reclaimable dockerReclaimable
+	var total uint64
 	recognized := false
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		name, value, found := strings.Cut(strings.TrimSpace(line), "|")
-		if !found {
-			continue
-		}
-		name = strings.TrimSpace(name)
-		if strings.EqualFold(name, "local volumes") {
+		if !found || strings.EqualFold(strings.TrimSpace(name), "local volumes") {
 			continue
 		}
 		bytes, ok := parseDockerSize(value)
@@ -350,15 +388,62 @@ func dockerReclaimableBytes(limit time.Duration) (dockerReclaimable, error) {
 			continue
 		}
 		recognized = true
-		reclaimable.total += bytes
-		if strings.EqualFold(name, "build cache") {
-			reclaimable.buildCache = bytes
-		}
+		total += bytes
 	}
 	if !recognized {
-		return dockerReclaimable{}, errors.New("docker system df reported no recognisable size")
+		return 0, errors.New("docker system df reported no recognisable size")
 	}
-	return reclaimable, nil
+	return total, nil
+}
+
+// dockerBuildCacheReclaimable reads how much BuildKit's own build cache could
+// still free, from `docker buildx du`.
+//
+// This, not `docker system df`, is the reading that can answer "is there build
+// cache to reclaim", because docker's own accounting cannot: a layer a build
+// produced is attributed to Images for as long as the image holding it exists,
+// and becomes Build Cache only once that image is removed. A store full of
+// previously-built images therefore reports Build Cache 0B while the cache
+// holds tens of gigabytes a prune would free — measured as 0B reported against
+// 43.37GB of reclaimable cache, the whole of it surfacing under Build Cache
+// only after 74 unreferenced images were removed, freeing none of it.
+//
+// Bounded like every other subprocess here, but on the prune's bound rather
+// than the short one the plain CLI reads get: it walks the same BuildKit cache
+// the prune walks, which is not a milliseconds-long read on a node this check
+// exists for.
+func dockerBuildCacheReclaimable(limit time.Duration) (uint64, error) {
+	out, err := diskHeadroomOutput(limit, "docker", "buildx", "du")
+	if err != nil {
+		return 0, diskHeadroomReadFailure(limit, "docker buildx du", err)
+	}
+	bytes, ok := parseBuildxDuReclaimable(string(out))
+	if !ok {
+		return 0, errors.New("docker buildx du reported no reclaimable total")
+	}
+	return bytes, nil
+}
+
+// parseBuildxDuReclaimable reads the Reclaimable figure out of `docker buildx
+// du`'s summary block, which closes the per-record listing:
+//
+//	Shared:		24.17GB
+//	Private:	19.2GB
+//	Reclaimable:	43.37GB
+//	Total:		43.37GB
+//
+// The record rows above it carry no colon-separated key, and the timestamps
+// some of them end with do, so the summary is located by name rather than by
+// position or by format.
+func parseBuildxDuReclaimable(output string) (uint64, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		name, value, found := strings.Cut(strings.TrimSpace(line), ":")
+		if !found || !strings.EqualFold(strings.TrimSpace(name), "reclaimable") {
+			continue
+		}
+		return parseDockerSize(value)
+	}
+	return 0, false
 }
 
 // dockerSizeUnits are the suffixes docker renders sizes with, longest first so
@@ -405,6 +490,14 @@ func parseDockerSize(value string) (uint64, bool) {
 // also what expresses this check's actual invariant — prune until free space
 // reaches the floor — rather than capping how much cache is retained and
 // leaving the free space it was meant to recover unaddressed.
+//
+// What it removes is build cache and nothing else — the command's own contract,
+// and the only thing this file needs from it. It cannot touch images, so an
+// unconditional attempt cannot delete the environment's own running image, and
+// there is no store state that attempting it puts at risk. That is what makes
+// attempting it always, rather than only on a figure that says there is
+// something to reclaim, a safe way to ask the question docker's size columns
+// cannot answer.
 func diskHeadroomPruneArgs(floor uint64) []string {
 	return []string{"buildx", "prune", "-f", "--min-free-space", strconv.FormatUint(floor, 10)}
 }
