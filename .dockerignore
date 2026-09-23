@@ -25,6 +25,16 @@
 # real build context without moving the fingerprint unless mirrored here.
 **/.DS_Store
 
+# Same asymmetry, for the two things `terraform init` writes into the module
+# tree it initializes: the terraform-module-tests gate target runs it against
+# every module under erun-devops/terraform-erun (and the module guides tell a
+# developer to run it by hand). Root .gitignore excludes both unanchored at any
+# depth, so the fingerprint already ignores them; without these rules the real
+# build context would still carry ~105MB of provider binaries per initialized
+# module for a file the fingerprint never sees.
+**/.terraform/
+**/.terraform.lock.hcl
+
 # Go build artifacts and test output
 *.exe
 *.exe~

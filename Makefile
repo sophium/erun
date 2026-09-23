@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -713,6 +713,32 @@ helm-chart-tests:
 		printf '%s\t%s\t%s\n' "$$t" "$$t" "sh $$t"; \
 	done | ./scripts/parallel-gate.sh $(HELM_CHART_TEST_PARALLELISM) helm-chart-tests
 
+# Every published Terraform module's own behaviour suite, run with
+# `terraform test` against mocked providers -- no cluster, no cloud account, no
+# state. erun-devops/terraform-erun/modules/*/tests pin invariants the modules
+# are consumed for: edge_transport_policy.tftest.hcl holds the plaintext->https
+# redirect and the HSTS Middleware, and the refusal to accept a transport
+# policy for an ingress controller the module is not installing -- a refusal
+# that is the difference between a plan failing loudly and every public host
+# serving cleartext. Nothing in this repository ran any of them before this
+# target existed, so a module edit that dropped one applied cleanly with every
+# suite green beside it, which is the shape this closes (see helm-chart-tests
+# above and test-atlas-validate below for the same job on the charts and the
+# migration checksums).
+#
+# The loop lives in scripts/terraform-module-tests.sh rather than in this
+# recipe for two reasons: it discovers modules by scanning for suites (so a new
+# module is gated with no Makefile edit), and naming a script here brings the
+# tree it resolves under the copy-contract guard in erun-common -- that guard
+# reads the scripts check-gate's targets run for `${script_dir}/../...` roots
+# and fails when the erun-devops image test stage COPYs nothing that provides
+# them, which is the difference between a gate that runs here and one that
+# cannot run inside any image build. `terraform` itself is installed there too;
+# no binary the gate needs is visible to that guard, so the Dockerfile's own
+# install is what has to stay in step.
+terraform-module-tests:
+	sh scripts/terraform-module-tests.sh
+
 # End-to-end proof that a postgres restart cannot destroy committed data,
 # against a real postgres and the real atlas migrations. Deliberately NOT part
 # of `check`: it needs a real docker daemon and the atlas CLI, and the image
@@ -819,9 +845,9 @@ integration-test-gate:
 # small, bounded number of calls. See scripts/agent-gate.sh for why this is
 # the fix and not just documentation.
 #
-# check-gate's own twelve prerequisites (below) used to run back-to-back: on a
+# check-gate's own thirteen prerequisites (below) used to run back-to-back: on a
 # real release, the first seven alone (everything before test-playwright)
-# cost ~14.5 minutes, and test-playwright is the single largest of the twelve by
+# cost ~14.5 minutes, and test-playwright is the single largest of the thirteen by
 # itself (measured standalone at ~16.4 minutes -- more than every other
 # target combined). `-j` is what actually parallelizes them: check-gate's own
 # prerequisite line has to keep every target listed in plain, literal text
@@ -838,24 +864,24 @@ integration-test-gate:
 # bookkeeping system -- and `make`'s own job server is a true event-driven
 # scheduler (a slot is reused the instant any job frees it), which is a
 # strictly better fit here than replaying scripts/parallel-gate.sh's
-# fixed-batch model would be for twelve wildly uneven-duration jobs.
+# fixed-batch model would be for thirteen wildly uneven-duration jobs.
 # CHECK_GATE_PARALLELISM deliberately passes no mem-per-job-mib: unlike
 # lint/test-frontend/helm-chart-tests (each a uniform fan-out of near-
-# identical jobs with a real measured per-job cost), these twelve targets are
+# identical jobs with a real measured per-job cost), these thirteen targets are
 # wildly heterogeneous -- some are flat single processes, three are
 # themselves internally parallel fan-outs, and none has a comparable
 # measured per-job memory figure, so a number here would be fabricated
 # rather than measured (the same "measure, don't fabricate a slope" standard
 # HELM_CHART_TEST_JOB_MEMORY_MIB's own comment holds to). CPU/job-count alone
 # deciding the width matches that target's own precedent for the identical
-# reason. What this width does NOT bound: three of these twelve
+# reason. What this width does NOT bound: three of these thirteen
 # (lint/test-frontend/helm-chart-tests) each already run their own internal
 # fan-out sized against the full memory ceiling -- CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
 # (see lint's own comment above) is what stops those three from
 # double-booking memory against *each other* when `-j` runs them side by
-# side. It does not bound the other nine (in particular test-erun-ui's
+# side. It does not bound the other ten (in particular test-erun-ui's
 # race-enabled test process) against any of the
-# twelve running concurrently -- verify actual peak memory on a real
+# thirteen running concurrently -- verify actual peak memory on a real
 # `make check-gate` run before trusting this width in a memory-constrained
 # environment, and narrow it with real numbers if that run shows a problem.
 #
@@ -867,7 +893,7 @@ integration-test-gate:
 # two targets joined the list while this still read 10, which resolved -j10
 # for twelve targets because the CPU term (the in-pod DIND_CPU_LIMIT of 12)
 # was the larger one. Derive it, do not re-count it by eye.
-CHECK_GATE_TARGET_COUNT := 12
+CHECK_GATE_TARGET_COUNT := 13
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
 check:
@@ -894,12 +920,12 @@ check:
 # it to bypass failures; diagnose against comparable state and fix them under
 # root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
-# These twelve run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# These thirteen run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
 # rather than scripts/parallel-gate.sh is what drives it here, and where the
 # two real ordering dependencies -- test-playwright and
 # test-erun-ui-windows-build each needing test-frontend -- are declared).
-# Do not drop any of the twelve from this line to move the fan-out elsewhere:
+# Do not drop any of the thirteen from this line to move the fan-out elsewhere:
 # erun-integration/build_check_coverage_test.go and
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
@@ -915,12 +941,16 @@ check:
 # the six lint/module targets ahead of it began to drain, and at the reference
 # 4-CPU build container those are the longest jobs in the gate. Listing the
 # critical-path targets first lets the chain head take a slot in the first
-# dispatch batch. This is a no-op when the width already covers every target
-# (the in-pod gate resolves -j12 and dispatches all twelve within 0.32s), which is
-# why it is a scheduling fix and not on its own a wall-time reduction.
+# dispatch batch. While the width covered every target this was a no-op (the
+# in-pod gate resolved -j12 and dispatched all twelve within 0.32s); with a
+# thirteenth target the list is one longer than that CPU-quota term, so the
+# last-listed one now takes the first slot to free rather than one in the first
+# dispatch batch. That wait is seconds, not minutes -- several of the targets
+# ahead of it finish in well under a minute -- but it is why a short addition
+# belongs after the long jobs rather than ahead of them.
 # Reordering this line is safe (nothing keys on the order); DROPPING a name is
 # not -- see the coverage-test note directly above.
-check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests test-atlas-validate integration-test-gate
+check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests terraform-module-tests test-atlas-validate integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the
