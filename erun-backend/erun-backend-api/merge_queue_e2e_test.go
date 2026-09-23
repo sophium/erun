@@ -178,6 +178,7 @@ type mergeReviewResponse struct {
 	ReviewID          string             `json:"reviewId"`
 	Status            model.ReviewStatus `json:"status"`
 	TargetBranch      string             `json:"targetBranch"`
+	Repository        string             `json:"repository"`
 	LastMergedBuildID string             `json:"lastMergedBuildId"`
 	LastFailedBuildID string             `json:"lastFailedBuildId"`
 }

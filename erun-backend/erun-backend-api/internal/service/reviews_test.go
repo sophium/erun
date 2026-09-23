@@ -1076,3 +1076,34 @@ func TestAcceptMergedRecordsTheRepositoryAnUnrecordedReviewWasReportedUnder(t *t
 		t.Fatalf("repository = %q, want the reported remote recorded as the review's identity", updated.Repository)
 	}
 }
+
+// A review that records no repository is anchored on the repository its report
+// names — the one it adopts — and never on whichever repository happened to
+// merge onto a same-named target branch most recently. The repository layer
+// reads an empty repository filter as "every repository", so asking the
+// review's own column would answer with a stranger's merge commit here; this
+// verifier reports that stranger's tip is not an ancestor, which is exactly
+// the refusal such an anchor produces.
+func TestAcceptMergedDoesNotAnchorAnUnrecordedReviewOnAnotherRepositorysMerge(t *testing.T) {
+	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	// The only prior merge on this branch belongs to a different repository,
+	// and is the target tip this review was never gated against.
+	otherRepoMerge := model.Review{ReviewID: "review-other", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-other", Repository: "file:///other"}
+	reviews.reviews["review-other"] = &otherRepoMerge
+	builds.builds["gate-other"] = model.Build{BuildID: "gate-other", ReviewID: "review-other", Kind: model.BuildKindGate, Successful: true, CommitID: "other-repository-tip"}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: false}, nil)
+
+	// The report names file:///remote, whose queue has never merged onto this
+	// branch, so there is nothing to descend from and the merge is accepted.
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED) error = %v, want the merge accepted: the other repository's tip is not this review's gated base", err)
+	}
+	if updated.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", updated.Status)
+	}
+	if updated.Repository != testRepository {
+		t.Fatalf("repository = %q, want the reported remote recorded as the review's identity", updated.Repository)
+	}
+}
