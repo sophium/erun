@@ -88,6 +88,29 @@ func e2eMergeAndReportGate(t *testing.T, baseURL string, remote mergeQueueRemote
 	return mergeCommit, code, body, review
 }
 
+// forkRemote stands up a second bare remote that carries the first one's
+// history, the shape two repositories of one tenant share when one was forked
+// from the other — or when both descend from a common one.
+func forkRemote(t *testing.T, origin mergeQueueRemote) mergeQueueRemote {
+	t.Helper()
+	bare := t.TempDir()
+	runGit(t, bare, "init", "--bare", "--initial-branch="+origin.main)
+	mirror := t.TempDir()
+	runGit(t, mirror, "clone", "--mirror", origin.url, ".")
+	runGit(t, mirror, "push", "--mirror", "file://"+bare)
+	return mergeQueueRemote{url: "file://" + bare, main: origin.main}
+}
+
+// forceTargetInto replaces to's target branch with from's, discarding
+// whatever to had there — the force-push a buggy or malicious reporter stands
+// in for, since no well-behaved push can manufacture a replaced history.
+func forceTargetInto(t *testing.T, from, to mergeQueueRemote) {
+	t.Helper()
+	dir := t.TempDir()
+	runGit(t, dir, "clone", from.url, ".")
+	runGit(t, dir, "push", "--force", to.url, from.main+":"+to.main)
+}
+
 // commitPresentIn reports whether commit exists anywhere in remote's fetched
 // history. It is how these gates establish that the repositories they stand up
 // really are disjoint: an anchor naming a commit absent from one of them can
@@ -221,5 +244,74 @@ func TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly(t *testi
 	mustNoErr(t, err, "canonicalize repository A")
 	if merged.Repository != wantRepository {
 		t.Fatalf("repository = %q, want the review's own %q", merged.Repository, wantRepository)
+	}
+}
+
+// TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck is the
+// other half of the same defect, and the reason it is not merely a false
+// refusal.
+//
+// Two repositories share history. Repository B merges once through the queue,
+// so the platform records B's own gated tip. Repository A then merges, more
+// recently, and A's target is force-pushed over B's — replacing B's history, so
+// the tip B was gated against is gone. A second, legacy review in B is gated
+// against the replaced history and reports.
+//
+// Its reported commit descends from A's merge commit and not from B's own
+// gated tip, which is exactly the rewrite condition 2 exists to refuse. Anchored
+// on "every repository" it finds A's commit, an ancestor of the report, and
+// accepts the rewrite; anchored on the repository the report names it finds
+// B's own replaced tip and refuses.
+func TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+
+	target := uniqueBranchName(t, "shared-target")
+	repoA := newRemoteSharingBranch(t, target)
+	repoB := forkRemote(t, repoA)
+
+	// Repository B merges once through the queue: this is B's own gated tip.
+	branchB1 := uniqueBranchName(t, "repo-b-first")
+	repoB.branch(t, branchB1, "b1.txt")
+	reviewB1 := e2eOpenReviewInRepository(t, srv.URL, "fork-b-first", repoB.url, target, branchB1)
+	e2eReportGreenBuild(t, srv.URL, reviewB1)
+	mergeB1, code, body, merged := e2eMergeAndReportGate(t, srv.URL, repoB, reviewB1, branchB1, "merge "+branchB1)
+	if code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("repository B's first merge did not land: HTTP %d status=%s: %s", code, merged.Status, body)
+	}
+
+	// Repository A merges on its own target — more recently than B's, so a
+	// cross-repository lookup would answer with A's commit.
+	branchA := uniqueBranchName(t, "repo-a-feature")
+	repoA.branch(t, branchA, "a.txt")
+	reviewA := e2eOpenReviewInRepository(t, srv.URL, "fork-a", repoA.url, target, branchA)
+	e2eReportGreenBuild(t, srv.URL, reviewA)
+	if _, code, body, merged := e2eMergeAndReportGate(t, srv.URL, repoA, reviewA, branchA, "merge "+branchA); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("repository A's merge did not land: HTTP %d status=%s: %s", code, merged.Status, body)
+	}
+
+	// A's target replaces B's: the tip B was gated against is gone.
+	forceTargetInto(t, repoA, repoB)
+	if commitPresentIn(t, repoB, mergeB1) {
+		t.Fatalf("repository B's gated tip %s survived the force-push; the replaced history this test needs was not created", mergeB1)
+	}
+
+	// Repository B's next review is gated against the replaced history, and
+	// reports a commit that descends from A's merge but not from B's own gated
+	// tip. It carries no repository, so nothing but the report names B.
+	branchB2 := uniqueBranchName(t, "repo-b-second")
+	repoB.branch(t, branchB2, "b2.txt")
+	reviewB2 := e2eOpenReview(t, srv.URL, "fork-b-second", target, branchB2)
+	e2eReportGreenBuild(t, srv.URL, reviewB2)
+	if status := readMergeReview(t, srv.URL, reviewB2).Status; status != model.ReviewStatusMerge {
+		t.Fatalf("review B2 status = %s, want MERGE", status)
+	}
+
+	_, code, body, merged = e2eMergeAndReportGate(t, srv.URL, repoB, reviewB2, branchB2, "merge "+branchB2)
+	if code != http.StatusConflict {
+		t.Fatalf("a merge gated against a repository-rewritten target was accepted: HTTP %d status=%s: %s; repository B's own gated tip %s is not in its history any more, and another repository's commit is not evidence that it is", code, merged.Status, body, mergeB1)
+	}
+	if status := readMergeReview(t, srv.URL, reviewB2).Status; status != model.ReviewStatusMerge {
+		t.Fatalf("status after the refusal = %s, want the review left at MERGE", status)
 	}
 }
