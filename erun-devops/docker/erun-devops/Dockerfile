@@ -696,6 +696,11 @@ COPY --chmod=0755 erun-devops/docker/erun-devops/release-link.sh /usr/local/bin/
 # dtach server behind them, so a replaced pod never presents a leftover socket
 # as a running session.
 COPY --chmod=0755 erun-devops/docker/erun-devops/session-prune.sh /usr/local/bin/erun-prune-sessions
+# erun-trim-cache bounds the go build cache under ~/.cache by size, evicting its
+# least recently used entries. The entrypoint runs it in the background; the
+# chart carries the cap, because the pod cannot read a node-local volume's size
+# from the mounted filesystem.
+COPY --chmod=0755 erun-devops/docker/erun-devops/cache-trim.sh /usr/local/bin/erun-trim-cache
 # erun-adopt-worktree runs in the chart's init container, where the home volume
 # and the worktree claim are staged side by side, so an environment whose
 # checkout predates the claim is moved onto it instead of being masked by it.
