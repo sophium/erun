@@ -88,10 +88,11 @@ func (f *fakeReviewRepo) FindLastMergedReview(_ context.Context, repositoryFilte
 }
 
 // QueuedRepositories mirrors the real query: the distinct repositories of the
-// READY reviews this fake has queued for targetBranch.
-func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch string) ([]string, error) {
+// READY reviews this fake has queued for targetBranch, and the queued reviews
+// that record none, in queue order.
+func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch string) (repository.MergeQueueRepositories, error) {
 	seen := map[string]bool{}
-	var out []string
+	queued := repository.MergeQueueRepositories{}
 	for _, entry := range f.queue {
 		if entry.TargetBranch != targetBranch {
 			continue
@@ -100,12 +101,16 @@ func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch stri
 		if !ok || review.Status != model.ReviewStatusReady {
 			continue
 		}
+		if strings.TrimSpace(review.Repository) == "" {
+			queued.Unrecorded = append(queued.Unrecorded, review.ReviewID)
+			continue
+		}
 		if !seen[review.Repository] {
 			seen[review.Repository] = true
-			out = append(out, review.Repository)
+			queued.Named = append(queued.Named, review.Repository)
 		}
 	}
-	return out, nil
+	return queued, nil
 }
 
 func (f *fakeReviewRepo) CreateMergeQueueEntry(_ context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error) {

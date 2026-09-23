@@ -23,11 +23,16 @@ CREATE TABLE reviews (
   CONSTRAINT reviews_target_branch_check CHECK (length(trim(target_branch)) > 0),
   CONSTRAINT reviews_source_branch_check CHECK (length(trim(source_branch)) > 0),
   CONSTRAINT reviews_repository_check CHECK (repository IS NULL OR length(trim(repository)) > 0),
+  -- MERGED is deliberately not in this list. A review reconciled against the
+  -- target branch's own history after landing outside the queue has no build to
+  -- name, and recording none is what keeps gatedTargetTip anchored on a real
+  -- build instead of an empty id; the build a MERGED report does have to name
+  -- when the queue drove it is checked where it can be read, in
+  -- ReviewService.acceptMerged.
   CONSTRAINT reviews_status_build_link_check CHECK (
     (status <> 'FAILED' OR last_failed_build_id IS NOT NULL)
     AND (status <> 'READY' OR last_ready_build_id IS NOT NULL)
     AND (status <> 'MERGE' OR last_ready_build_id IS NOT NULL)
-    AND (status <> 'MERGED' OR last_merged_build_id IS NOT NULL)
   ),
   CONSTRAINT reviews_tenant_review_key UNIQUE (tenant_id, review_id),
   CONSTRAINT reviews_tenant_target_review_key UNIQUE (tenant_id, target_branch, review_id)

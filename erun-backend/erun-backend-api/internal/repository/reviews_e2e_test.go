@@ -796,9 +796,12 @@ func TestReviewMergeQueueIsPerRepository(t *testing.T) {
 		t.Fatalf("the other repository reports a merging review: err = %v, want ErrNotFound", err)
 	}
 
-	repositories, err := reviews.QueuedRepositories(ctx, "main")
+	queued, err := reviews.QueuedRepositories(ctx, "main")
 	mustNoErr(t, err, "read the branch's queued repositories")
-	if len(repositories) != 2 {
-		t.Fatalf("QueuedRepositories(main) = %v, want both repositories — an unfiltered promotion over these is the ambiguity the platform must refuse", repositories)
+	if len(queued.Named) != 2 {
+		t.Fatalf("QueuedRepositories(main).Named = %v, want both repositories — an unfiltered promotion over these is the ambiguity the platform must refuse", queued.Named)
+	}
+	if len(queued.Unrecorded) != 0 {
+		t.Fatalf("QueuedRepositories(main).Unrecorded = %v, want none — both reviews recorded a repository", queued.Unrecorded)
 	}
 }
