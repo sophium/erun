@@ -121,37 +121,61 @@ export function stepDiffFile(
   return targetIndex < 0 ? null : (hunks[targetIndex] ?? null);
 }
 
-export function visibleDiffPath(
+// VisibleDiffFile is the diff section the review viewport is anchored on: the
+// bare path the DOM carries (`data-path`) and the environment section that
+// holds it (`data-env-key`). Both, because the two callers need different
+// halves -- the selection is stored env-keyed (diffPathKey) while every DOM
+// lookup selects on the bare path.
+export interface VisibleDiffFile {
+  envKey: string;
+  path: string;
+}
+
+// diffSectionTarget reads the two things a diff section is addressed by: the
+// bare path it renders (data-path) and the environment section holding it
+// (data-env-key). A section missing either is not a candidate at all -- with
+// no env key there is nothing for the env-keyed selection to compare against,
+// so it is no more selectable than a section with no path.
+function diffSectionTarget(section: HTMLElement): VisibleDiffFile | null {
+  const path = section.dataset.path ?? '';
+  const envKey = section.dataset.envKey ?? '';
+  if (!path || !envKey) {
+    return null;
+  }
+  return { envKey, path };
+}
+
+export function visibleDiffFile(
   diffList: HTMLDivElement | null,
   reviewMain: HTMLDivElement | null,
-): string {
+): VisibleDiffFile | null {
   if (!diffList || !reviewMain) {
-    return '';
+    return null;
   }
   const sections = Array.from(diffList.querySelectorAll<HTMLElement>('.diff-file[data-path]'));
   if (sections.length === 0) {
-    return '';
+    return null;
   }
 
   const containerRect = reviewMain.getBoundingClientRect();
   const anchor = containerRect.top + 72;
-  let closestPath = '';
+  let closest: VisibleDiffFile | null = null;
   let closestDistance = Number.POSITIVE_INFINITY;
 
   for (const section of sections) {
-    const rect = section.getBoundingClientRect();
-    const path = section.dataset.path ?? '';
-    if (!path) {
+    const target = diffSectionTarget(section);
+    if (!target) {
       continue;
     }
+    const rect = section.getBoundingClientRect();
     if (rect.top <= anchor && rect.bottom > anchor) {
-      return path;
+      return target;
     }
     const distance = Math.abs(rect.top - anchor);
     if (distance < closestDistance) {
       closestDistance = distance;
-      closestPath = path;
+      closest = target;
     }
   }
-  return closestPath;
+  return closest;
 }

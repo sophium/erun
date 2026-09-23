@@ -49,6 +49,21 @@ export function visibleDiffFilePaths(
   return new Set(visible.filter((node) => node.type === 'file').map((node) => node.path));
 }
 
+// chooseSelectedDiffPath picks which file a freshly loaded diff leaves
+// selected: the caller's current file while it is still in the diff, and this
+// environment's first file otherwise. currentPath is the bare path because
+// that is what the diff's own `files` carry; the caller owns keying (see
+// diffPathWithinEnv).
+//
+// Preserving the current file is load-bearing, not a nicety. The panel
+// reloads every environment's diff on a 5s timer (scheduleReviewDiffRefresh),
+// so a loader that always re-selected files[0] would reset the selection on
+// every tick -- and since the changed-files tree renders aria-current only for
+// the selected file, each reset cleared the tree's active node. The active
+// node is what the diff->tree scrollspy's own work is expressed in, so the
+// tree's highlight and its scroll position were both discarded five seconds
+// after the user (or a scroll) put them there, with nothing left to restore
+// them once the diff stopped scrolling.
 export function chooseSelectedDiffPath(diff: DiffResult | null, currentPath: string): string {
   const files = diff?.files ?? [];
   if (files.some((file) => file.path === currentPath)) {
