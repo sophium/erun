@@ -75,3 +75,10 @@ __debug_bin*
 
 # Yarn workspaces hoist shared frontend deps into the repo-root node_modules.
 /node_modules/
+
+# Pin history a re-pin writes beside the project config: local workspace state,
+# never an input to a build. Ignored file-by-file rather than as `.erun/`,
+# because config.yaml in that directory is the per-project layer and stays
+# tracked -- a directory-wide ignore would silently void an onboarding on every
+# machine but the one that wrote it (erun-common/project_config_gitignore.go).
+.erun/pin-history.json

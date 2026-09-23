@@ -760,8 +760,9 @@ helm-chart-tests:
 # at ~556MiB of RSS in total, so a few hundred MiB per job is comfortably above
 # anything this fan-out reaches. The point of the number is only to keep the
 # memory term from deciding the width: it must not bind below the CPU term
-# (the in-pod DIND_CPU_LIMIT of 12), or adding this target would silently
-# narrow the fan-out the other twelve already run at.
+# (DIND_CPU_LIMIT, the sidecar's node-derived limit -- see the check-gate
+# comment below for why it is not a constant), or adding this target would
+# silently narrow the fan-out the other twelve already run at.
 #
 # The job list is the module count plus two: the tree-wide fmt pass and the
 # runner's own self-test. That self-test is the part that makes this target's
@@ -991,20 +992,22 @@ check:
 # resolved a width equal to the target list and dispatched every target in the
 # first batch.
 #
-# It is no longer a no-op there. The width is
-# `min(job-count, CPUs, memory-term)` (scripts/parallel-gate.sh width) and the
-# in-pod CPU term is DIND_CPU_LIMIT=12, so a thirteen-target list with 13 as
-# its job count still resolves -j12: the first twelve targets listed start in
-# the first batch and the thirteenth waits for the first free slot, which is
-# what `make -j12` against a thirteen-prerequisite target was measured to do.
-# Which target waits is therefore decided by this line, and it is placed
-# deliberately rather than by accident: `terraform-module-tests` is last
-# because it is the cheapest and most self-contained job in the gate -- two
-# module suites, one tree-wide `terraform fmt` pass and the runner's own
-# self-test, all against a baked provider mirror with no cluster, no daemon and
-# no network -- while the target now ahead of it, integration-test-gate, is the
-# longest chain. Putting the new target before that one would have queued the
-# gate's long pole behind a job chosen only because it was added last.
+# It is not always a no-op. The width is
+# `min(job-count, CPUs, memory-term)` (scripts/parallel-gate.sh width): the
+# job-count term is this target list, and the CPU term is DIND_CPU_LIMIT --
+# `RuntimeDindCPULimit`'s node-derived sizing, not a constant. So this
+# thirteen-target list resolves -j12 on a 12-CPU sidecar, where the first
+# twelve listed start in the first batch and the thirteenth waits for the first
+# free slot (which is what `make -j12` against a thirteen-prerequisite target
+# was measured to do), and -j13 on a 22-CPU one, where every target dispatches
+# at once and the ordering below cannot matter. The placement is chosen for the
+# narrow case: `terraform-module-tests` is last because it is the cheapest and
+# most self-contained job in the gate -- two module suites, one tree-wide
+# `terraform fmt` pass and the runner's own self-test, all against a baked
+# provider mirror with no cluster, no daemon and no network -- while the target
+# now ahead of it, integration-test-gate, is the longest chain. Putting the new
+# target before that one would have queued the gate's long pole behind a job
+# chosen only because it was added last.
 #
 # Reordering this line is safe (nothing keys on the order); DROPPING a name is
 # not -- see the coverage-test note directly above.

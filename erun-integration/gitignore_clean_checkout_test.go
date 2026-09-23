@@ -72,6 +72,40 @@ func TestGeneratedPinHistoryDoesNotDirtyACleanCheckout(t *testing.T) {
 	}
 }
 
+// TestDevopsTestStageCopiesTheRepoGitignore guards the other half of the test
+// above: that the stage running it can read the file at all.
+//
+// TestGeneratedPinHistoryDoesNotDirtyACleanCheckout resolves repoRoot from its
+// own compiled location, so inside the erun-devops image's `make check` it reads
+// `<stage>/src/.gitignore` -- a directory holding only what that Dockerfile
+// COPYd by explicit path. Both a tree that lost the pin-history rule and a stage
+// that lost the `COPY .gitignore` red that test, but only the first is reachable
+// from a pod: the second turns a green local suite into a ~4-minute failure deep
+// inside `integration-test-gate` in every image build, which is how the COPY was
+// silently dropped from this file once already while the pod-side run stayed
+// green. Reading the Dockerfile as text is the same approach the neighbouring
+// Dockerfile guards in this package take.
+func TestDevopsTestStageCopiesTheRepoGitignore(t *testing.T) {
+	t.Parallel()
+	root, ok := findFullCheckoutRoot()
+	if !ok {
+		t.Skip("full source tree not present (partial in-build build context); this Dockerfile-content guard runs on a full checkout")
+	}
+
+	const dockerfilePath = "erun-devops/docker/erun-devops/Dockerfile"
+	dockerfile := mustReadRepoFile(t, root, dockerfilePath)
+
+	// Matched with its destination, and through indexOfCommandLine so a comment
+	// describing the COPY cannot satisfy it -- this line is exactly what a
+	// `COPY .dockerignore` next to it must not be mistaken for.
+	if indexOfCommandLine(dockerfile, "COPY .gitignore /src/.gitignore") < 0 {
+		t.Fatalf("%s never COPYs the repo's .gitignore into the test stage's /src. "+
+			"TestGeneratedPinHistoryDoesNotDirtyACleanCheckout reads that path inside `make check` and treats a "+
+			"missing file as fatal rather than skipping, so every image build fails in integration-test-gate while "+
+			"the same suite passes in a pod. Add the COPY line back; do not make the test skip instead.", dockerfilePath)
+	}
+}
+
 // git runs one git command in dir and returns whether it exited 0 along with its
 // combined output. The ambient git configuration is neutralized so that a
 // contributor's own ~/.gitconfig — a core.excludesFile, or
