@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -27,6 +28,20 @@ import (
 // resolve must be provided by the image, and a read it cannot resolve is
 // reported rather than skipped, so a site this scan cannot see is never quietly
 // counted as satisfied.
+//
+// What it sees, so a reader can tell what it does not:
+//
+//   - a filepath.Join rooted at a runtime.Caller-derived helper, called
+//     directly or through one assigned local variable;
+//   - a filepath.Join whose first argument is a literal that climbs out of the
+//     file's own package directory (filepath.Join("..", "Formula", "erun.rb")),
+//     which is what `go test`'s working directory makes a repository-root read;
+//   - either shape inside a function body or in a package-level declaration.
+//
+// What it does not see is enumerated in the limits recorded on
+// TestCheckGateGoTestsReadOnlyRepoRootPathsTheDevopsImageProvides, and the shape
+// it most commonly misses -- a path that arrives as a function parameter -- is
+// pinned by a test so the boundary is checked rather than asserted.
 
 // gateGoTestModuleDirs lists the modules whose `go test` runs inside the
 // erun-devops image test stage -- the Go half of what `make check-gate`
@@ -85,10 +100,13 @@ type gateGoTestReadExemptionKey struct {
 var goTestRepoRootReadExemptions = map[gateGoTestReadExemptionKey]string{
 	// script is a token checkGateShellScripts already resolved against the
 	// checkout, so the paths are the Makefile's own, and the sibling half of
-	// this guard asserts what the image provides for each of them.
+	// this guard checks both things a script needs from the image: that the
+	// stage COPYs the script file the recipe invokes, and that it COPYs the
+	// directory the script resolves its repository root through.
 	{"erun-common/dockerfile_copy_contract_test.go", "script"}: "script ranges over the shell scripts the Makefile's check-gate targets name, " +
 		"each already confirmed to exist in the checkout by checkGateShellScripts; the shell-script half of this guard " +
-		"checks what the erun-devops image provides for every one of them",
+		"reads each one and checks the erun-devops test stage provides both the script file itself and every directory " +
+		"it resolves its repository root through",
 
 	// mirror.path is the path column of a two-row table in the same file
 	// (chartServicePath, devopsDockerfile); both rows are COPYd by the test
@@ -313,6 +331,12 @@ func gateRepoRelativePath(root, path string) string {
 // a helper one level up from a file directly under a module resolves to that
 // module and is deliberately not treated as a repo root -- tracing it would
 // read a temp directory or a module directory as if it were the checkout.
+//
+// The returned expression may reach the caller's file variable through an
+// assigned local (`dir := filepath.Dir(file)`, then `return dir`), which
+// gateGoTestLocalAssignments follows. Only a returned *path* is resolved: a
+// helper that returns the file's contents or a concatenation is not a path
+// resolver under either shape.
 func collectGateGoTestPathHelpers(file *ast.File, fileDepth int, helpers map[string]int) {
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -364,6 +388,7 @@ func gateGoTestCallerFileVar(body *ast.BlockStmt) string {
 // that returns something else built from that variable (a file's contents, a
 // concatenation) is not a path resolver and reports found=false.
 func gateGoTestReturnedDirDepth(body *ast.BlockStmt, callerVar string) (int, bool) {
+	locals := gateGoTestLocalAssignments(body)
 	depth, found := 0, false
 	ast.Inspect(body, func(n ast.Node) bool {
 		ret, ok := n.(*ast.ReturnStmt)
@@ -371,7 +396,7 @@ func gateGoTestReturnedDirDepth(body *ast.BlockStmt, callerVar string) (int, boo
 			return true
 		}
 		for _, result := range ret.Results {
-			if ok, d := gateGoTestDirNesting(result, callerVar); ok {
+			if ok, d := gateGoTestDirNesting(result, callerVar, locals, map[string]bool{}); ok {
 				found = true
 				if d > depth {
 					depth = d
@@ -383,16 +408,52 @@ func gateGoTestReturnedDirDepth(body *ast.BlockStmt, callerVar string) (int, boo
 	return depth, found
 }
 
-func gateGoTestDirNesting(expr ast.Expr, callerVar string) (bool, int) {
+// gateGoTestLocalAssignments records a function's single-name local
+// assignments, so a helper that computes its directory into a variable and
+// returns that variable is resolved like the inline form. Returning a named
+// intermediate is ordinary Go, and a helper this scan failed to recognize is
+// every read through it going unchecked — which is the whole failure the
+// canary in gateGoTestRepoRootHelperNames exists to catch, one shape narrower.
+func gateGoTestLocalAssignments(body *ast.BlockStmt) map[string]ast.Expr {
+	locals := map[string]ast.Expr{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+			return true
+		}
+		if id, ok := assign.Lhs[0].(*ast.Ident); ok {
+			if _, seen := locals[id.Name]; !seen {
+				locals[id.Name] = assign.Rhs[0]
+			}
+		}
+		return true
+	})
+	return locals
+}
+
+// gateGoTestDirNesting reports how many filepath.Dir calls separate an
+// expression from the runtime.Caller file variable, following local variables
+// to the expression they were assigned. seen bounds that following: a
+// self-referential or cyclic pair of assignments resolves to not-a-resolver
+// rather than recursing forever.
+func gateGoTestDirNesting(expr ast.Expr, callerVar string, locals map[string]ast.Expr, seen map[string]bool) (bool, int) {
 	switch v := expr.(type) {
 	case *ast.Ident:
-		return v.Name == callerVar, 0
+		if v.Name == callerVar {
+			return true, 0
+		}
+		inner, ok := locals[v.Name]
+		if !ok || seen[v.Name] {
+			return false, 0
+		}
+		seen[v.Name] = true
+		return gateGoTestDirNesting(inner, callerVar, locals, seen)
 	case *ast.CallExpr:
 		sel, ok := v.Fun.(*ast.SelectorExpr)
 		if !ok || sel.Sel.Name != "Dir" || len(v.Args) != 1 {
 			return false, 0
 		}
-		inner, depth := gateGoTestDirNesting(v.Args[0], callerVar)
+		inner, depth := gateGoTestDirNesting(v.Args[0], callerVar, locals, seen)
 		if !inner {
 			return false, 0
 		}
@@ -402,10 +463,18 @@ func gateGoTestDirNesting(expr ast.Expr, callerVar string) (bool, int) {
 }
 
 // collectGateGoTestReadsInFile finds the filepath.Join calls rooted at the
-// repository root. Root variables are scoped to the function that binds them:
-// `root` is a name tests use for temp directories too, and treating every
-// one of those as the repository root would report temp paths as repo-root
-// reads.
+// repository root, and the ones written relative to the file's own package
+// directory -- `filepath.Join("..", "Formula", "erun.rb")` -- which reaches
+// repository-root state without a helper to say so. Root variables are scoped to
+// the function that binds them: `root` is a name tests use for temp directories
+// too, and treating every one of those as the repository root would report temp
+// paths as repo-root reads.
+//
+// Package-level declarations are walked as well as function bodies. A table of
+// paths is as often a package var as a function local -- the Formula and bucket
+// reads this file's CWD-relative half exists for are both in one -- and a read
+// there is the same read. A package var has no local scope, so it is resolved
+// against package constants alone.
 func collectGateGoTestReadsInFile(
 	root, path string,
 	fset *token.FileSet,
@@ -414,24 +483,34 @@ func collectGateGoTestReadsInFile(
 	helpers map[string]int,
 ) []gateGoTestRead {
 	rel := gateRepoRelativePath(root, path)
+	pkgDir := filepath.ToSlash(filepath.Dir(rel))
 	var reads []gateGoTestRead
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Body == nil {
-			continue
+	record := func(n ast.Node, consts map[string]string, rootVars map[string]bool) {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return
 		}
-		consts := gateGoTestConsts(pkgConsts, fn)
-		rootVars := gateGoTestRootVars(fn, helpers)
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
+		if read, ok := gateGoTestJoinRead(call, fset, rel, pkgDir, consts, rootVars, helpers); ok {
+			reads = append(reads, read)
+		}
+	}
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d.Body == nil {
+				continue
+			}
+			consts, rootVars := gateGoTestConsts(pkgConsts, d), gateGoTestRootVars(d, helpers)
+			ast.Inspect(d.Body, func(n ast.Node) bool {
+				record(n, consts, rootVars)
 				return true
-			}
-			if read, ok := gateGoTestJoinRead(call, fset, rel, consts, rootVars, helpers); ok {
-				reads = append(reads, read)
-			}
-			return true
-		})
+			})
+		case *ast.GenDecl:
+			ast.Inspect(d, func(n ast.Node) bool {
+				record(n, pkgConsts, nil)
+				return true
+			})
+		}
 	}
 	return reads
 }
@@ -481,11 +560,12 @@ func gateGoTestRootVars(fn *ast.FuncDecl, helpers map[string]int) map[string]boo
 }
 
 // gateGoTestJoinRead resolves one filepath.Join call to a repo-root read, when
-// it is rooted at one.
+// it is one: either rooted at the repository root, or climbing to it from the
+// file's own package directory.
 func gateGoTestJoinRead(
 	call *ast.CallExpr,
 	fset *token.FileSet,
-	file string,
+	file, pkgDir string,
 	consts map[string]string,
 	rootVars map[string]bool,
 	helpers map[string]int,
@@ -498,17 +578,51 @@ func gateGoTestJoinRead(
 	if !ok || pkg.Name != "filepath" {
 		return gateGoTestRead{}, false
 	}
-	if !gateGoTestIsRepoRoot(call.Args[0], rootVars, helpers) {
+	line := fset.Position(call.Pos()).Line
+	if gateGoTestIsRepoRoot(call.Args[0], rootVars, helpers) {
+		path, expr, literal := gateGoTestJoinArgs(call.Args[1:], consts)
+		return gateGoTestRead{file: file, line: line, expr: expr, path: path, literal: literal}, true
+	}
+	return gateGoTestCwdRelativeRead(call, file, pkgDir, line, consts)
+}
+
+// gateGoTestCwdRelativeRead resolves a filepath.Join whose first argument is a
+// literal that climbs out of the package directory, as in
+// filepath.Join("..", "Formula", "erun.rb") from erun-ui. `go test` runs a
+// package's test binary with its working directory set to that package's own
+// source directory, so the path is relative to the file's directory and reaches
+// repository-root state — a repo-root read wearing no repoRoot helper, which the
+// helper-rooted half above cannot see however it is shaped.
+//
+// Only a ".."-leading first argument counts. One that does not climb
+// (filepath.Join("relative", "repo")) names a path inside the package's own
+// directory, and an absolute one (filepath.Join("/tmp", tenant)) names a
+// location outside the checkout; neither can read state this stage would have to
+// COPY, and reporting them would turn test table values into findings about
+// paths nothing opens.
+func gateGoTestCwdRelativeRead(call *ast.CallExpr, file, pkgDir string, line int, consts map[string]string) (gateGoTestRead, bool) {
+	head, ok := gateGoTestStringValue(call.Args[0], consts)
+	if !ok || gateGoTestFirstPathComponent(head) != ".." {
 		return gateGoTestRead{}, false
 	}
-	path, expr, literal := gateGoTestJoinArgs(call.Args[1:], consts)
-	return gateGoTestRead{
-		file:    file,
-		line:    fset.Position(call.Pos()).Line,
-		expr:    expr,
-		path:    path,
-		literal: literal,
-	}, true
+	rel, expr, literal := gateGoTestJoinArgs(call.Args, consts)
+	if !literal {
+		return gateGoTestRead{file: file, line: line, expr: expr, literal: false}, true
+	}
+	joined := filepath.ToSlash(path.Join(pkgDir, rel))
+	if joined == ".." || strings.HasPrefix(joined, "../") {
+		// Climbs past the checkout, so it names nothing this stage could COPY and
+		// nothing the repository root holds.
+		return gateGoTestRead{}, false
+	}
+	return gateGoTestRead{file: file, line: line, expr: expr, path: joined, literal: true}, true
+}
+
+func gateGoTestFirstPathComponent(value string) string {
+	if i := strings.IndexByte(value, '/'); i >= 0 {
+		return value[:i]
+	}
+	return value
 }
 
 // gateGoTestJoinArgs resolves a filepath.Join's remaining arguments to one
@@ -662,7 +776,7 @@ func gateGoTestCopyContractFindings(
 	exemptions map[gateGoTestReadExemptionKey]string,
 ) ([]string, gateGoTestReadScan) {
 	t.Helper()
-	provided := erunDevopsProvidedSrcPaths(t, dockerfile)
+	provided := erunDevopsProvidedSrcPaths(t, root, dockerfile)
 	findings := gateGoTestModuleFindings(t, root, moduleDirs)
 
 	scan := scanGateGoTestRepoRootReads(t, root, moduleDirs)
@@ -830,9 +944,42 @@ func TestTempDirRootedReadsAreNotRepoRootReads(t *testing.T) {
 }
 
 // helperTakingRoot reads under a root its caller supplies, which this scan does
-// not trace back to that caller.
+// not trace back to that caller. This shape is deliberately uncovered, and
+// TestScanLeavesParameterRootedAndNonJoinReadsUnseen pins it as such.
 func helperTakingRoot(t testing.TB, root, workspace string) {
 	_, _ = os.ReadFile(filepath.Join(root, workspace, "package.json"))
+}
+
+// repoRootViaLocal resolves the same root through an assigned local. Returning a
+// named intermediate is ordinary Go, and a helper the scan does not recognize is
+// every read through it going unchecked.
+func repoRootViaLocal(t testing.TB) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller could not resolve this test file's path")
+	}
+	dir := filepath.Dir(filepath.Dir(file))
+	return dir
+}
+
+// buildStampSources is a package-level table, which is where the CWD-relative
+// read this scan was extended for actually lives: paths to files the build
+// scripts are checked against are almost always a var rather than a local.
+var buildStampSources = []string{
+	filepath.Join("..", "Formula", "erun.rb"),
+}
+
+func TestCwdRelativeReads(t *testing.T) {
+	_, _ = os.ReadFile(filepath.Join("..", "bucket", "erun.json"))
+	_, _ = os.ReadFile(filepath.Join(repoRootViaLocal(t), "go.work"))
+
+	// Neither of these reaches repository-root state and neither is a read this
+	// scan reports: one names a path inside the package's own directory, the
+	// other a location outside the checkout entirely. Reporting them is how a
+	// test table value becomes a finding about a path nothing opens.
+	_, _ = os.ReadFile(filepath.Join("relative", "repo"))
+	_, _ = os.ReadFile(filepath.Join("/tmp", "config.yaml"))
 }
 `
 
@@ -866,14 +1013,23 @@ func TestScanGateGoTestRepoRootReadsResolvesTheShapesItClaims(t *testing.T) {
 		{path: "erun-integration/scripts/integration-test.sh", literal: true, expr: "scriptPath"},
 		{path: "erun-devops/docker/*/Dockerfile", literal: true, expr: `"erun-devops", "docker", "*", "Dockerfile"`},
 		{path: "", literal: false, expr: "filepath.FromSlash(...)"},
+		// The package-level table, resolved against the file's own directory:
+		// this is the shape erun-ui/buildstamp_test.go's Formula and bucket reads
+		// have, and both halves of it — the var rather than a local, and the
+		// climbing literal rather than a repoRoot helper — used to make the read
+		// invisible.
+		{path: "Formula/erun.rb", literal: true, expr: `"..", "Formula", "erun.rb"`},
+		{path: "bucket/erun.json", literal: true, expr: `"..", "bucket", "erun.json"`},
+		// Through the helper that assigns before it returns.
+		{path: "go.work", literal: true, expr: `"go.work"`},
 	}
 	if len(scan.reads) != len(wants) {
 		for _, read := range scan.reads {
 			t.Logf("read: %s:%d literal=%v path=%q expr=%s", read.file, read.line, read.literal, read.path, read.expr)
 		}
 		t.Fatalf("found %d reads, want %d -- a read the scan misses is a read the guard cannot check, and a read "+
-			"it invents (a temp directory, a module-scoped helper, a helper's root parameter) is a demand no COPY "+
-			"can satisfy", len(scan.reads), len(wants))
+			"it invents (a temp directory, a module-scoped helper, a helper's root parameter, a path inside the "+
+			"package or outside the checkout) is a demand no COPY can satisfy", len(scan.reads), len(wants))
 	}
 	for i, got := range scan.reads {
 		if got.path != wants[i].path || got.literal != wants[i].literal || got.expr != wants[i].expr {
@@ -884,9 +1040,51 @@ func TestScanGateGoTestRepoRootReadsResolvesTheShapesItClaims(t *testing.T) {
 	if !scan.repoRootHelpers["repoRoot"] {
 		t.Errorf("repoRoot was not recognized as a repository-root helper, so no read through it resolved")
 	}
+	if !scan.repoRootHelpers["repoRootViaLocal"] {
+		t.Errorf("repoRootViaLocal returns its directory through an assigned local and was not recognized as a " +
+			"repository-root helper, so every read through it went unchecked")
+	}
 	if scan.repoRootHelpers["harnessModuleRoot"] {
 		t.Errorf("harnessModuleRoot resolves this module's directory, one level below the repository root, and was " +
 			"wrongly classified as a repository-root helper: reads through it would be checked against the wrong path")
+	}
+}
+
+// TestScanLeavesParameterRootedAndNonJoinReadsUnseen pins the limits this scan
+// states in its documentation, so the boundary is checked rather than asserted.
+// These shapes are *not* reported, deliberately: resolving them needs the
+// intra-procedural analysis neither half of this guard does, and a change that
+// closes one of them should fail here and reconcile the prose rather than
+// quietly widen what the guard claims.
+func TestScanLeavesParameterRootedAndNonJoinReadsUnseen(t *testing.T) {
+	scan := writeGateGoTestFixture(t)
+	resolved := map[string]bool{}
+	for _, read := range scan.reads {
+		resolved[read.expr] = true
+	}
+	// helperTakingRoot joins under a parameter its caller supplies; the scan does
+	// not bind arguments into helpers, so nothing inside it is a candidate.
+	for expr := range resolved {
+		if strings.Contains(expr, "workspace") || strings.Contains(expr, "package.json") {
+			t.Errorf("a read under helperTakingRoot's parameter was reported as %q: either the scan grew "+
+				"parameter-bound resolution — in which case the limits recorded on "+
+				"TestCheckGateGoTestsReadOnlyRepoRootPathsTheDevopsImageProvides must say so — or it is reporting a "+
+				"path it never resolved", expr)
+		}
+	}
+	// A literal first argument that does not climb names a path inside the
+	// package's own directory, and an absolute one names a location outside the
+	// checkout. Neither reaches repository-root state, and reporting them is how
+	// a test table value becomes a finding about a path nothing opens.
+	for _, path := range []string{"erun-integration/relative/repo", "tmp/config.yaml"} {
+		if _, err := os.Stat(filepath.Join(t.TempDir(), path)); err == nil {
+			t.Fatalf("fixture path %q unexpectedly exists", path)
+		}
+		for _, read := range scan.reads {
+			if read.path == path {
+				t.Errorf("%q was resolved as a repository-root read, but it names nothing this stage could COPY", path)
+			}
+		}
 	}
 }
 
@@ -916,26 +1114,141 @@ func TestProvidedSrcPathCoversReadHandlesGlobs(t *testing.T) {
 	}
 }
 
-func TestErunDevopsProvidedSrcPathsExpandsDirectoryCopies(t *testing.T) {
-	dir := t.TempDir()
-	dockerfile := filepath.Join(dir, "Dockerfile")
+// TestErunDevopsProvidedSrcPathsTreatsDirectorySourcesAsDockerDoes pins the
+// model against what a real docker build does with each COPY shape, because the
+// two directions of getting it wrong are both defects: too little and the guard
+// passes a read the release venue fails, too much and it reds a change that is
+// correct.
+//
+// The shapes here were each verified against a real build. The one that matters
+// is the directory source with a slash-terminated destination: `COPY some-dir
+// /src/some-dir/` lands the *contents* of some-dir at /src/some-dir, not at
+// /src/some-dir/some-dir, because the basename level is a file source's rule.
+// Reading it as a file is what reported a genuinely provided path as absent.
+func TestErunDevopsProvidedSrcPathsTreatsDirectorySourcesAsDockerDoes(t *testing.T) {
+	context := t.TempDir()
+	for _, dir := range []string{"erun-cli", "some-dir", "dir-two"} {
+		if err := os.MkdirAll(filepath.Join(context, dir), 0o755); err != nil {
+			t.Fatalf("create context dir %s: %v", dir, err)
+		}
+	}
+	dockerfile := filepath.Join(context, "Dockerfile")
 	body := strings.Join([]string{
+		"FROM alpine:3.20 AS test",
+		"WORKDIR /src",
 		"COPY .dockerignore /src/.dockerignore",
 		"COPY package.json yarn.lock /src/",
 		"COPY erun-cli /src/erun-cli",
+		"COPY some-dir /src/some-dir/",
+		"COPY a.txt dir-two /src/three/",
 		"COPY --from=node /usr/local/bin/node /usr/local/bin/node",
 		"COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint",
 		`# COPY /src/mentioned-in-a-comment`,
+		"RUN make check && touch /test-ok",
+		"",
+		"FROM alpine:3.20 AS builder",
+		"COPY erun-devops/VERSION /src/erun-devops/VERSION",
 	}, "\n")
 	if err := os.WriteFile(dockerfile, []byte(body), 0o644); err != nil {
 		t.Fatalf("write Dockerfile fixture: %v", err)
 	}
-	provided := erunDevopsProvidedSrcPaths(t, dockerfile)
-	want := []string{"/src/.dockerignore", "/src/package.json", "/src/yarn.lock", "/src/erun-cli"}
+	provided := erunDevopsProvidedSrcPaths(t, context, dockerfile)
+	want := []string{
+		"/src/.dockerignore",
+		"/src/package.json",
+		"/src/yarn.lock",
+		"/src/erun-cli",
+		"/src/some-dir",
+		"/src/three/a.txt",
+		"/src/three",
+	}
 	if !slices.Equal(provided, want) {
-		t.Errorf("provided = %v, want %v -- a COPY with a directory destination lands each source under it by name, "+
-			"and /src itself must never be reported, because it would satisfy every path this guard asks about",
+		t.Errorf("provided = %v, want %v — a directory destination lands each file source under it by name and each "+
+			"directory source's contents at it; a COPY outside the gate stage places nothing the gate can read, and "+
+			"/src itself must never be reported, because it would satisfy every path this guard asks about",
 			provided, want)
+	}
+}
+
+// TestGateStageCopyModelIgnoresCopiesOutsideTheGateStage is the regression for
+// the stage scoping this model needs. It builds the exact disagreement the real
+// Dockerfile has: the builder stage COPYs a path the gate stage does not, so a
+// guard that unions every stage's COPYs reports that path as provided while
+// `make check` inside the image cannot read it.
+func TestGateStageCopyModelIgnoresCopiesOutsideTheGateStage(t *testing.T) {
+	context := t.TempDir()
+	dockerfile := filepath.Join(context, "Dockerfile")
+	body := strings.Join([]string{
+		"FROM alpine:3.20 AS test",
+		"WORKDIR /src",
+		"COPY Makefile /src/Makefile",
+		"RUN make check && touch /test-ok",
+		"",
+		"FROM alpine:3.20 AS builder",
+		"COPY erun-devops/VERSION /src/erun-devops/VERSION",
+	}, "\n")
+	if err := os.WriteFile(dockerfile, []byte(body), 0o644); err != nil {
+		t.Fatalf("write Dockerfile fixture: %v", err)
+	}
+	provided := erunDevopsProvidedSrcPaths(t, context, dockerfile)
+	if !slices.Equal(provided, []string{"/src/Makefile"}) {
+		t.Errorf("provided = %v, want only the gate stage's own COPY — a path another stage COPYs is not one the gate "+
+			"can read, so modelling it as provided passes a gate test that dies in the image", provided)
+	}
+	if providedSrcPathCovers(provided, "/src/erun-devops/VERSION") {
+		t.Error("the builder stage's COPY was modelled as provided to the gate stage, which is the union-of-all-stages " +
+			"defect this scoping exists to prevent")
+	}
+}
+
+// TestGateStageCopyModelRequiresExactlyOneGateStage pins the fail-closed
+// direction of that scoping. A Dockerfile with no stage naming the gate command
+// has no stage to model, and one with two is ambiguous; both must be a reported
+// error rather than a fallback to the whole file, which is the union defect
+// wearing a fixture that lacks FROM lines.
+func TestGateStageCopyModelRequiresExactlyOneGateStage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "no FROM lines at all",
+			body: "COPY Makefile /src/Makefile\nCOPY erun-devops/VERSION /src/erun-devops/VERSION\n",
+		},
+		{
+			name: "stages but none running the gate",
+			body: "FROM alpine:3.20 AS test\nCOPY Makefile /src/Makefile\n\nFROM alpine:3.20 AS builder\nCOPY x /src/x\n",
+		},
+		{
+			name: "two stages running the gate",
+			body: "FROM alpine:3.20 AS one\nRUN make check\n\nFROM alpine:3.20 AS two\nRUN make check\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := dockerfileGateStage(tc.body); err == nil {
+				t.Fatal("dockerfileGateStage accepted a Dockerfile with no single gate stage — a model that cannot " +
+					"name the stage the gate runs in cannot say which COPYs the gate sees")
+			} else if !strings.Contains(err.Error(), devopsGateStageCommand) {
+				t.Errorf("error %q does not name %q, so a reader cannot tell what the model failed to find", err, devopsGateStageCommand)
+			}
+		})
+	}
+
+	// The canary the two halves of this guard both lean on: the real Dockerfile
+	// must still resolve to exactly one stage. If this stops being true the
+	// scans above are modelling some other stage's COPYs.
+	root := repoRootForDockerignoreTest(t)
+	real := filepath.Join(root, "erun-devops", "docker", "erun-devops", "Dockerfile")
+	data, err := os.ReadFile(real)
+	if err != nil {
+		t.Fatalf("read %s: %v", real, err)
+	}
+	stage, err := dockerfileGateStage(string(data))
+	if err != nil {
+		t.Fatalf("the erun-devops Dockerfile no longer names exactly one gate stage: %v", err)
+	}
+	if !strings.Contains(stage.base, "golang:") {
+		t.Errorf("the resolved gate stage is based on %q, which is not the golang test stage this guard models", stage.base)
 	}
 }
 
@@ -974,11 +1287,33 @@ func TestGateGoTestModuleDirsInMakefile(t *testing.T) {
 	}
 }
 
+// gateGoTestFixtureRepoRootHelper is the runtime.Caller-derived repoRoot every
+// fixture test file declares, in the shape this scan recognizes: it sits
+// directly under the module directory, so the grandparent of its own file is the
+// repository root.
+const gateGoTestFixtureRepoRootHelper = `package fixture
+
+func repoRoot(t testing.TB) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Dir(filepath.Dir(file))
+}
+`
+
 // gateGoTestCopyContractFixtureTree writes a miniature repository that has
 // everything the contract reads -- a Makefile naming a Go test module, that
-// module's test file, and a Dockerfile whose COPY set provides exactly the
-// files named here -- and returns its root and the Dockerfile path.
-func gateGoTestCopyContractFixtureTree(t *testing.T, dockerfileCopyLines []string) (root, dockerfile string) {
+// module's test file, and a Dockerfile whose gate stage COPYs exactly the files
+// named here -- and returns its root, which is also the Dockerfile's build
+// context, and the Dockerfile path.
+//
+// The Dockerfile carries two stages on purpose: the gate stage that runs
+// `make check`, and a second stage whose COPYs the gate never sees. A one-stage
+// fixture could not tell a stage-scoped model from one that unions the whole
+// file, which is the defect the scoping closes.
+func gateGoTestCopyContractFixtureTree(t *testing.T, testFileBody string, gateStageCopyLines, otherStageCopyLines []string) (root, dockerfile string) {
 	t.Helper()
 	root = t.TempDir()
 	makefile := strings.Join([]string{
@@ -994,19 +1329,26 @@ func gateGoTestCopyContractFixtureTree(t *testing.T, dockerfileCopyLines []strin
 	if err := os.MkdirAll(module, 0o755); err != nil {
 		t.Fatalf("create fixture module: %v", err)
 	}
-	// A module-directory file's grandparent is the repository root, which is
-	// the shape repoRoot has in every module this scan reads.
-	testFile := `package fixture
-
-func repoRoot(t testing.TB) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	testFile := gateGoTestFixtureRepoRootHelper + testFileBody
+	if err := os.WriteFile(filepath.Join(module, "gitignore_clean_checkout_test.go"), []byte(testFile), 0o644); err != nil {
+		t.Fatalf("write fixture test file: %v", err)
 	}
-	return filepath.Dir(filepath.Dir(file))
+	dockerfile = filepath.Join(root, "Dockerfile")
+	lines := []string{"FROM alpine:3.20 AS test", "WORKDIR /src"}
+	lines = append(lines, gateStageCopyLines...)
+	lines = append(lines, "RUN make check && touch /test-ok", "", "FROM alpine:3.20 AS builder")
+	lines = append(lines, otherStageCopyLines...)
+	lines = append(lines, "")
+	if err := os.WriteFile(dockerfile, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write fixture Dockerfile: %v", err)
+	}
+	return root, dockerfile
 }
 
+// gateGoTestFixtureReadsGitignore is the fixture test body every case below
+// starts from: the read the shell-script half of this guard structurally could
+// not see, which is what the Go-test half exists for.
+const gateGoTestFixtureReadsGitignore = `
 func TestGeneratedPinHistoryDoesNotDirtyACleanCheckout(t *testing.T) {
 	root := repoRoot(t)
 	if _, err := os.ReadFile(filepath.Join(root, ".gitignore")); err != nil {
@@ -1014,16 +1356,6 @@ func TestGeneratedPinHistoryDoesNotDirtyACleanCheckout(t *testing.T) {
 	}
 }
 `
-	if err := os.WriteFile(filepath.Join(module, "gitignore_clean_checkout_test.go"), []byte(testFile), 0o644); err != nil {
-		t.Fatalf("write fixture test file: %v", err)
-	}
-	dockerfile = filepath.Join(root, "Dockerfile")
-	body := strings.Join(append(append([]string{}, dockerfileCopyLines...), ""), "\n")
-	if err := os.WriteFile(dockerfile, []byte(body), 0o644); err != nil {
-		t.Fatalf("write fixture Dockerfile: %v", err)
-	}
-	return root, dockerfile
-}
 
 // TestGateGoTestCopyContractFindingsReportsAMissingRepoRootCopy is the
 // reproduction for the class this file closes: the guard that reads the
@@ -1038,10 +1370,10 @@ func TestGeneratedPinHistoryDoesNotDirtyACleanCheckout(t *testing.T) {
 // treated an unprovided path as satisfied, passes the first case and fails the
 // second.
 func TestGateGoTestCopyContractFindingsReportsAMissingRepoRootCopy(t *testing.T) {
-	brokenRoot, brokenDockerfile := gateGoTestCopyContractFixtureTree(t, []string{
+	brokenRoot, brokenDockerfile := gateGoTestCopyContractFixtureTree(t, gateGoTestFixtureReadsGitignore, []string{
 		"COPY .dockerignore /src/.dockerignore",
 		"COPY Makefile /src/Makefile",
-	})
+	}, nil)
 	findings, scan := gateGoTestCopyContractFindings(t, brokenRoot, brokenDockerfile, []string{"erun-common"}, nil)
 	if len(scan.reads) != 1 || scan.reads[0].path != ".gitignore" {
 		t.Fatalf("fixture scan = %v, want the one .gitignore read the fixture makes", scan.reads)
@@ -1053,12 +1385,98 @@ func TestGateGoTestCopyContractFindingsReportsAMissingRepoRootCopy(t *testing.T)
 		t.Errorf("finding %q does not name the read it is about", findings[0])
 	}
 
-	fixedRoot, fixedDockerfile := gateGoTestCopyContractFixtureTree(t, []string{
+	fixedRoot, fixedDockerfile := gateGoTestCopyContractFixtureTree(t, gateGoTestFixtureReadsGitignore, []string{
 		"COPY .dockerignore /src/.dockerignore",
 		"COPY Makefile /src/Makefile",
 		"COPY .gitignore /src/.gitignore",
-	})
+	}, nil)
 	if findings, _ := gateGoTestCopyContractFindings(t, fixedRoot, fixedDockerfile, []string{"erun-common"}, nil); len(findings) != 0 {
 		t.Errorf("findings = %q, want none once the Dockerfile COPYs the file the read names", findings)
+	}
+
+	// The decoy stage is the stage-scoping regression: the *other* stage COPYs
+	// the very file the read names, and that must not count. A model that unions
+	// every stage's COPYs reports this tree as satisfied while `make check`
+	// inside the image still cannot read .gitignore.
+	decoyRoot, decoyDockerfile := gateGoTestCopyContractFixtureTree(t, gateGoTestFixtureReadsGitignore, []string{
+		"COPY Makefile /src/Makefile",
+	}, []string{
+		"COPY .gitignore /src/.gitignore",
+	})
+	decoyFindings, _ := gateGoTestCopyContractFindings(t, decoyRoot, decoyDockerfile, []string{"erun-common"}, nil)
+	if len(decoyFindings) != 1 || !strings.Contains(decoyFindings[0], ".gitignore") {
+		t.Errorf("findings = %q, want the .gitignore read reported even though the other stage COPYs it — only the "+
+			"gate stage's own COPYs are ones the gate can read", decoyFindings)
+	}
+}
+
+// TestGateGoTestCopyContractFindingsReportsACwdRelativeMissingCopy is the
+// regression for the read that names no repoRoot at all. A test that opens
+// filepath.Join("..", "Formula", "erun.rb") reads repository-root state through
+// `go test`'s working directory, not through a helper, so the helper-rooted scan
+// above never saw it — however fatally it read, and whatever the Dockerfile had
+// to COPY to keep it working. The two Dockerfiles differ in the one COPY line
+// the read needs, as above.
+func TestGateGoTestCopyContractFindingsReportsACwdRelativeMissingCopy(t *testing.T) {
+	body := `
+func TestBuildScriptsStampSymbols(t *testing.T) {
+	if _, err := os.ReadFile(filepath.Join("..", "Formula", "erun.rb")); err != nil {
+		t.Fatalf("read the formula: %v", err)
+	}
+}
+`
+	brokenRoot, brokenDockerfile := gateGoTestCopyContractFixtureTree(t, body, []string{
+		"COPY Makefile /src/Makefile",
+	}, nil)
+	findings, scan := gateGoTestCopyContractFindings(t, brokenRoot, brokenDockerfile, []string{"erun-common"}, nil)
+	if len(scan.reads) != 1 || scan.reads[0].path != "Formula/erun.rb" || !scan.reads[0].literal {
+		t.Fatalf("fixture scan = %v, want the one CWD-relative Formula/erun.rb read resolved to a repository-root path", scan.reads)
+	}
+	if len(findings) != 1 || !strings.Contains(findings[0], "Formula/erun.rb") {
+		t.Fatalf("findings = %q, want the CWD-relative read reported by the path it names", findings)
+	}
+
+	fixedRoot, fixedDockerfile := gateGoTestCopyContractFixtureTree(t, body, []string{
+		"COPY Makefile /src/Makefile",
+		"COPY Formula /src/Formula",
+	}, nil)
+	if findings, _ := gateGoTestCopyContractFindings(t, fixedRoot, fixedDockerfile, []string{"erun-common"}, nil); len(findings) != 0 {
+		t.Errorf("findings = %q, want none once the gate stage COPYs the directory the read resolves into", findings)
+	}
+}
+
+// TestGateGoTestCopyContractFindingsReportsAnAssignedLocalHelper is the
+// regression for the same read written through a helper that assigns before it
+// returns. That shape is ordinary Go, and a helper the scan fails to recognize
+// is every read through it going unchecked — silently, because the guard's only
+// signal for it is the canary list, which a new helper is not on.
+func TestGateGoTestCopyContractFindingsReportsAnAssignedLocalHelper(t *testing.T) {
+	body := `
+func repoRootViaLocal(t testing.TB) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	dir := filepath.Dir(filepath.Dir(file))
+	return dir
+}
+
+func TestReadsThroughAnAssignedLocal(t *testing.T) {
+	if _, err := os.ReadFile(filepath.Join(repoRootViaLocal(t), ".gitignore")); err != nil {
+		t.Fatalf("read the checkout's .gitignore: %v", err)
+	}
+}
+`
+	root, dockerfile := gateGoTestCopyContractFixtureTree(t, body, []string{
+		"COPY Makefile /src/Makefile",
+	}, nil)
+	findings, scan := gateGoTestCopyContractFindings(t, root, dockerfile, []string{"erun-common"}, nil)
+	if !scan.repoRootHelpers["repoRootViaLocal"] {
+		t.Fatal("repoRootViaLocal was not recognized as a repository-root helper, so the read through it resolved to " +
+			"nothing and the guard reports the tree as satisfied")
+	}
+	if len(findings) != 1 || !strings.Contains(findings[0], ".gitignore") {
+		t.Fatalf("findings = %q, want the .gitignore read through the assigned-local helper reported", findings)
 	}
 }

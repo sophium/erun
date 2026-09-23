@@ -225,9 +225,13 @@ composition and release invariants belong to root/shared logic, not chart policy
   all Go test/lint modules, all Yarn workspace members, generated Wails bindings,
   Helm chart tests, Wails/webkit dependencies, and Playwright Chromium dependencies.
   Keep the root Makefile and Docker COPY set aligned as members/gates change.
-  `erun-common/dockerfile_copy_contract_test.go` is the static check: one half reads
-  the scripts the Makefile names, the other the repo-root paths the gate's Go tests
-  read, and each fails in the run that introduces a path this stage does not COPY.
+  `erun-common/dockerfile_copy_contract_test.go` is the static check, and both its
+  halves compare against the COPYs of the stage that runs `make check` — not the
+  whole file, since another stage's COPYs are ones the gate cannot read. One half
+  reads the scripts the Makefile names and checks both the script file and the
+  directory it resolves its root through; the other reads the repository-root paths
+  the gate's Go tests open, including those written relative to a test's own package
+  directory. Each fails in the run that introduces a path this stage does not COPY.
   Windows cross-compilation needs no Windows SDK here; it does not prove native UI.
 - Use sequential per-platform plain `docker build`, local arch tags, and fingerprint
   tags. Push assembles the per-arch images into a manifest list; preserve

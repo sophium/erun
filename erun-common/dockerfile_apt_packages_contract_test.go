@@ -31,17 +31,22 @@ func aptInstallTokens(line string) (packages []string, continues bool) {
 	return packages, continues
 }
 
-// dockerfileStage is one FROM in a Dockerfile, with every package its body
-// installs through apt-get install.
+// dockerfileStage is one FROM in a Dockerfile: its base image reference, the
+// raw lines of its body, and every package it installs through apt-get install.
+// The lines are what a caller asking "which stage does X?" reads; the package
+// set is what the apt contract reads.
 type dockerfileStage struct {
 	base     string
+	lines    []string
 	packages []string
 }
 
 // dockerfileStages splits a Dockerfile into one entry per FROM, in file order,
-// carrying the base image reference and the packages that stage apt-get
-// installs. Comment lines are skipped so prose in the file cannot be mistaken
-// for a package list, which is the failure mode a bare substring scan has.
+// carrying the base image reference, the stage's own lines, and the packages
+// that stage apt-get installs. Comment lines are skipped when reading packages
+// so prose in the file cannot be mistaken for a package list, which is the
+// failure mode a bare substring scan has; they stay in the stage's lines, which
+// are the stage's text as written.
 func dockerfileStages(text string) []dockerfileStage {
 	var stages []dockerfileStage
 	inInstall := false
@@ -54,6 +59,8 @@ func dockerfileStages(text string) []dockerfileStage {
 		if len(stages) == 0 {
 			continue
 		}
+		last := len(stages) - 1
+		stages[last].lines = append(stages[last].lines, raw)
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -67,7 +74,6 @@ func dockerfileStages(text string) []dockerfileStage {
 			continue
 		}
 		packages, continues := aptInstallTokens(rest)
-		last := len(stages) - 1
 		stages[last].packages = append(stages[last].packages, packages...)
 		inInstall = continues
 	}
