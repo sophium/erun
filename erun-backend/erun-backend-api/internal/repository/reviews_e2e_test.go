@@ -802,3 +802,64 @@ func TestReviewMergeQueueIsPerRepository(t *testing.T) {
 		t.Fatalf("QueuedRepositories(main) = %v, want both repositories — an unfiltered promotion over these is the ambiguity the platform must refuse", repositories)
 	}
 }
+
+// TestReviewSharedBranchPairInTwoRepositoriesReadsBackScoped is the reported
+// defect in its exact shape: one tenant serving two repositories, each with a
+// live review proposing the *same* source branch onto the same target.
+//
+// The two tests around this one each hold half of that constant and vary the
+// other — TestReviewRepositoryScopesNameUniquenessToTheRepository uses the
+// shared branch pair but never reads a queue back, and
+// TestReviewMergeQueueIsPerRepository reads each repository's own queue back
+// but gives the two repositories different source branches. Neither crosses
+// the two halves, so neither fails if the branch pair alone still collides or
+// if a repository-scoped read quietly falls back to the whole tenant. This
+// case crosses them: the two creates prove the pair no longer collides across
+// repositories, and the two reads prove each queue answers with only its own
+// review rather than both.
+//
+// Against the pre-repository-identity index the second create is refused as a
+// conflict, which is exactly the failure the report described: a tenant's
+// second repository could not open a review whose branch names its first
+// repository had already used.
+func TestReviewSharedBranchPairInTwoRepositoriesReadsBackScoped(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	ctx := reviewsContext(tenantID, author)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
+
+	const sourceBranch = "feature/x"
+	const targetBranch = "main"
+
+	queue := func(repository string) model.Review {
+		review, err := reviews.Create(ctx, model.Review{
+			Repository: repository, Name: "Land " + repository,
+			TargetBranch: targetBranch, SourceBranch: sourceBranch, Status: model.ReviewStatusOpen,
+		})
+		mustNoErr(t, err, "create the shared branch pair in "+repository)
+		build, err := builds.Create(ctx, model.Build{
+			ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: repository + "-sha", Version: "1.0.0",
+		})
+		mustNoErr(t, err, "create build for "+repository)
+		review.Status = model.ReviewStatusReady
+		review.LastReadyBuildID = build.BuildID
+		review, err = reviews.Update(ctx, review)
+		mustNoErr(t, err, "mark "+repository+" READY")
+		_, err = reviews.CreateMergeQueueEntry(ctx, model.ReviewMergeQueueEntry{TargetBranch: review.TargetBranch, ReviewID: review.ReviewID})
+		mustNoErr(t, err, "queue "+repository)
+		return review
+	}
+
+	ours := queue("https://github.com/sophium/erun")
+	theirs := queue("https://github.com/sophium/other")
+
+	for _, want := range []model.Review{ours, theirs} {
+		listed, err := reviews.ListMergeQueue(ctx, want.Repository, targetBranch)
+		mustNoErr(t, err, "list "+want.Repository+"'s queue")
+		if len(listed) != 1 || listed[0].ReviewID != want.ReviewID {
+			t.Fatalf("ListMergeQueue(%s) = %+v, want exactly %s — the other repository proposes the same branch pair, and that must not put its review in this queue",
+				want.Repository, listed, want.ReviewID)
+		}
+	}
+}
