@@ -2,11 +2,9 @@ package backendapi
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os/exec"
 	"testing"
-	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -39,24 +37,9 @@ func newRemoteSharingBranch(t *testing.T, branch string) mergeQueueRemote {
 	return mergeQueueRemote{url: "file://" + bare, main: branch}
 }
 
-// e2eOpenReviewInRepository opens a review that records the repository its
-// branches belong to, the shape every review created since the platform
-// started recording one has.
-func e2eOpenReviewInRepository(t *testing.T, baseURL, name, repository, targetBranch, sourceBranch string) string {
-	t.Helper()
-	code, body := e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews", map[string]any{
-		"name":         fmt.Sprintf("%s %d", name, time.Now().UnixNano()),
-		"repository":   repository,
-		"targetBranch": targetBranch,
-		"sourceBranch": sourceBranch,
-	})
-	if code != http.StatusCreated {
-		t.Fatalf("create review: HTTP %d (want 201): %s", code, body)
-	}
-	var review mergeReviewResponse
-	mustNoErr(t, json.Unmarshal([]byte(body), &review), "parse review response")
-	return review.ReviewID
-}
+// e2eOpenReviewInRepository is shared with legacy_repository_queue_e2e_test.go,
+// which also needs its empty-repository form to recreate a row created before
+// the platform recorded one. Every call here names a real repository.
 
 // e2eReportMergedKeepingBody is e2eReportMerged with the response body kept,
 // so a refusal can be reported in the platform's own words — which repository
