@@ -607,6 +607,17 @@ source_hook
 # installed but does not reach the verb is the same inertness in a new place.
 prepare_run ai_session_hooks
 run_dir="${work_root}/ai_session_hooks"
+# A settings file an Operator already had, with their own hook on an event this
+# change installs ours on. This file is theirs: the boot merges beside their
+# block rather than replacing the event, exactly as the MCP and permission
+# wiring beside it does.
+mkdir -p "${run_dir}/home/.claude"
+cat >"${run_dir}/home/.claude/settings.json" <<'EOF'
+{
+  "permissions": {"defaultMode": "bypassPermissions"},
+  "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "printf 'operator hook\n'"}]}]}
+}
+EOF
 env -i \
     HOME="${run_dir}/home" \
     PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
@@ -620,6 +631,8 @@ run_pid=$!
 wait_for booted || fail "the devops path should reach its idle foreground"
 settings_file="${run_dir}/home/.claude/settings.json"
 [ -r "${settings_file}" ] || fail "the boot should write ${settings_file}"
+grep -q "operator hook" "${settings_file}" ||
+    fail "the boot must merge beside an Operator's own hook, not replace the event: $(cat "${settings_file}")"
 
 while read -r tool_event model_event; do
     [ -n "${tool_event}" ] || continue
