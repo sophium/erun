@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -713,6 +713,75 @@ helm-chart-tests:
 		printf '%s\t%s\t%s\n' "$$t" "$$t" "sh $$t"; \
 	done | ./scripts/parallel-gate.sh $(HELM_CHART_TEST_PARALLELISM) helm-chart-tests
 
+# Behaviour tests for the published Terraform modules: every module under
+# erun-devops/terraform-erun/modules that carries its own tests/*.tftest.hcl,
+# run with `terraform test` against mocked providers -- no cluster and no cloud
+# account touched. Added because nothing in this repository ran them:
+# a module edit that dropped an invariant one of those files pins applied
+# cleanly and every gate stayed green, reading as coverage in review while
+# enforcing nothing. Two examples, both in erun-devops/terraform-erun-cluster-edge: the
+# plaintext->https redirect and the HSTS Middleware the public front door
+# depends on, and the refusal to accept a transport policy when
+# install_ingress_controller = false leaves no controller to carry it.
+#
+# The module list comes from scripts/terraform-test-modules.sh rather than a
+# wildcard here, so this target, the image's provider-mirror bake and the
+# structural test in erun-integration all read one rule; two copies of "which
+# modules have tests" is how a module's tests end up reached by one caller and
+# skipped by the other. That script exits non-zero when it matches nothing, and
+# the `|| exit 1` below propagates it rather than letting an empty scan render
+# an empty -- and therefore green -- job list.
+#
+# The runner (scripts/terraform-module-test.sh) refuses a tested module with no
+# committed .terraform.lock.hcl and then initializes with -lockfile=readonly,
+# so the provider set under test is a tree-pinned fact and a constraint that no
+# longer matches it fails here instead of being silently re-resolved.
+#
+# No terraform network path at gate time, by construction rather than by hope:
+# the erun-devops image test stage bakes a provider mirror at image build from
+# these same committed lock files and points TF_CLI_CONFIG_FILE at it, with
+# `direct` excluded for registry.terraform.io providers -- so a provider the
+# mirror lacks fails here instead of silently reaching the registry. That is
+# the whole reason for the mirror: `terraform init` against
+# registry.terraform.io is a live third-party dependency inside `make
+# check-gate`, and a gate that reds every branch because a registry was slow or
+# unreachable is a false-red gate, the same failure mode a whole change was
+# spent removing from lint's timeout. scripts/terraform-providers-mirror.sh
+# holds the bake and the generated CLI config.
+#
+# The `terraform fmt -check -recursive` job alongside the module runs is not
+# part of the issue's own ask, but the target is the only thing in this
+# repository that reads the module tree at all, so it is the only place
+# formatting of it can be checked. It is one tree-wide pass, not per module.
+#
+# TERRAFORM_TEST_JOB_MEMORY_MIB is measured, not guessed: running every
+# terraform process concurrently -- the tested modules plus this target's own
+# self-test, each a terraform tree with its provider plugin children -- peaks
+# at ~556MiB of RSS in total, so a few hundred MiB per job is comfortably above
+# anything this fan-out reaches. The point of the number is only to keep the
+# memory term from deciding the width: it must not bind below the CPU term
+# (the in-pod DIND_CPU_LIMIT of 12), or adding this target would silently
+# narrow the fan-out the other twelve already run at.
+#
+# The job list is the module count plus two: the tree-wide fmt pass and the
+# runner's own self-test. That self-test is the part that makes this target's
+# success mean something -- it drives the runner over a module copy whose
+# pinned invariant has been removed and requires a non-zero verdict, so a
+# runner that swallowed terraform's exit status, or ran in the wrong directory,
+# fails the gate here instead of reporting a green run over an untested tree.
+TERRAFORM_TEST_JOB_MEMORY_MIB := 128
+
+terraform-module-tests:
+	@modules="$$(./scripts/terraform-test-modules.sh)" || exit 1; \
+	count=$$(printf '%s\n' "$$modules" | wc -l); \
+	width=$$(./scripts/parallel-gate.sh width $$((count + 2)) $(TERRAFORM_TEST_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB)); \
+	{ for m in $$modules; do \
+		printf '%s\t%s\t%s\n' "$${m##*/}" "$$m" "sh ./scripts/terraform-module-test.sh $$m"; \
+	done; \
+	printf '%s\t%s\t%s\n' "terraform-fmt" "erun-devops/terraform-erun (terraform fmt -check -recursive)" "terraform fmt -check -recursive erun-devops/terraform-erun"; \
+	printf '%s\t%s\t%s\n' "runner-self-test" "runner-self-test (a broken module test must fail this target)" "sh ./scripts/terraform-module-tests_test.sh"; \
+	} | ./scripts/parallel-gate.sh $$width terraform-module-tests
+
 # End-to-end proof that a postgres restart cannot destroy committed data,
 # against a real postgres and the real atlas migrations. Deliberately NOT part
 # of `check`: it needs a real docker daemon and the atlas CLI, and the image
@@ -819,9 +888,9 @@ integration-test-gate:
 # small, bounded number of calls. See scripts/agent-gate.sh for why this is
 # the fix and not just documentation.
 #
-# check-gate's own twelve prerequisites (below) used to run back-to-back: on a
+# check-gate's own thirteen prerequisites (below) used to run back-to-back: on a
 # real release, the first seven alone (everything before test-playwright)
-# cost ~14.5 minutes, and test-playwright is the single largest of the twelve by
+# cost ~14.5 minutes, and test-playwright is the single largest of the thirteen by
 # itself (measured standalone at ~16.4 minutes -- more than every other
 # target combined). `-j` is what actually parallelizes them: check-gate's own
 # prerequisite line has to keep every target listed in plain, literal text
@@ -838,24 +907,25 @@ integration-test-gate:
 # bookkeeping system -- and `make`'s own job server is a true event-driven
 # scheduler (a slot is reused the instant any job frees it), which is a
 # strictly better fit here than replaying scripts/parallel-gate.sh's
-# fixed-batch model would be for twelve wildly uneven-duration jobs.
+# fixed-batch model would be for thirteen wildly uneven-duration jobs.
 # CHECK_GATE_PARALLELISM deliberately passes no mem-per-job-mib: unlike
 # lint/test-frontend/helm-chart-tests (each a uniform fan-out of near-
-# identical jobs with a real measured per-job cost), these twelve targets are
-# wildly heterogeneous -- some are flat single processes, three are
+# identical jobs with a real measured per-job cost), these thirteen targets are
+# wildly heterogeneous -- some are flat single processes, four are
 # themselves internally parallel fan-outs, and none has a comparable
 # measured per-job memory figure, so a number here would be fabricated
 # rather than measured (the same "measure, don't fabricate a slope" standard
 # HELM_CHART_TEST_JOB_MEMORY_MIB's own comment holds to). CPU/job-count alone
 # deciding the width matches that target's own precedent for the identical
-# reason. What this width does NOT bound: three of these twelve
-# (lint/test-frontend/helm-chart-tests) each already run their own internal
-# fan-out sized against the full memory ceiling -- CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
-# (see lint's own comment above) is what stops those three from
+# reason. What this width does NOT bound: four of these thirteen
+# (lint/test-frontend/helm-chart-tests/terraform-module-tests) each already run
+# their own internal fan-out sized against the full memory ceiling --
+# CHECK_GATE_FANOUT_PEAK_MEMORY_MIB
+# (see lint's own comment above) is what stops those four from
 # double-booking memory against *each other* when `-j` runs them side by
-# side. It does not bound the other nine (in particular test-erun-ui's
+# side. It does not bound the other ten (in particular test-erun-ui's
 # race-enabled test process) against any of the
-# twelve running concurrently -- verify actual peak memory on a real
+# thirteen running concurrently -- verify actual peak memory on a real
 # `make check-gate` run before trusting this width in a memory-constrained
 # environment, and narrow it with real numbers if that run shows a problem.
 #
@@ -867,7 +937,7 @@ integration-test-gate:
 # two targets joined the list while this still read 10, which resolved -j10
 # for twelve targets because the CPU term (the in-pod DIND_CPU_LIMIT of 12)
 # was the larger one. Derive it, do not re-count it by eye.
-CHECK_GATE_TARGET_COUNT := 12
+CHECK_GATE_TARGET_COUNT := 13
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
 check:
@@ -885,7 +955,8 @@ check:
 # erun-devops/dns01-webhook's own Go tests, the frontend kit + desktop
 # frontend + console gates, the erun-ui Windows cross-compile check, the
 # erun-ui/playwright desktop e2e suite, the
-# erun-devops/k8s chart tests, then the integration suite + coverage. The
+# erun-devops/k8s chart tests, the terraform modules' own behaviour tests,
+# then the integration suite + coverage. The
 # erun-devops image test stage runs this (via `check`, which is inert outside
 # an agent pod); a failure tags no image. test-postgres-restart is
 # deliberately excluded -- see its own comment above for why.
@@ -894,12 +965,12 @@ check:
 # it to bypass failures; diagnose against comparable state and fix them under
 # root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
-# These twelve run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# These thirteen run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
 # rather than scripts/parallel-gate.sh is what drives it here, and where the
 # two real ordering dependencies -- test-playwright and
 # test-erun-ui-windows-build each needing test-frontend -- are declared).
-# Do not drop any of the twelve from this line to move the fan-out elsewhere:
+# Do not drop any of the thirteen from this line to move the fan-out elsewhere:
 # erun-integration/build_check_coverage_test.go and
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
@@ -915,12 +986,29 @@ check:
 # the six lint/module targets ahead of it began to drain, and at the reference
 # 4-CPU build container those are the longest jobs in the gate. Listing the
 # critical-path targets first lets the chain head take a slot in the first
-# dispatch batch. This is a no-op when the width already covers every target
-# (the in-pod gate resolves -j12 and dispatches all twelve within 0.32s), which is
-# why it is a scheduling fix and not on its own a wall-time reduction.
+# dispatch batch. It is a no-op whenever the resolved width already covers
+# every target, which is how it read when it was written: the in-pod gate then
+# resolved a width equal to the target list and dispatched every target in the
+# first batch.
+#
+# It is no longer a no-op there. The width is
+# `min(job-count, CPUs, memory-term)` (scripts/parallel-gate.sh width) and the
+# in-pod CPU term is DIND_CPU_LIMIT=12, so a thirteen-target list with 13 as
+# its job count still resolves -j12: the first twelve targets listed start in
+# the first batch and the thirteenth waits for the first free slot, which is
+# what `make -j12` against a thirteen-prerequisite target was measured to do.
+# Which target waits is therefore decided by this line, and it is placed
+# deliberately rather than by accident: `terraform-module-tests` is last
+# because it is the cheapest and most self-contained job in the gate -- two
+# module suites, one tree-wide `terraform fmt` pass and the runner's own
+# self-test, all against a baked provider mirror with no cluster, no daemon and
+# no network -- while the target now ahead of it, integration-test-gate, is the
+# longest chain. Putting the new target before that one would have queued the
+# gate's long pole behind a job chosen only because it was added last.
+#
 # Reordering this line is safe (nothing keys on the order); DROPPING a name is
 # not -- see the coverage-test note directly above.
-check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests test-atlas-validate integration-test-gate
+check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests test-atlas-validate integration-test-gate terraform-module-tests
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the

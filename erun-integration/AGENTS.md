@@ -247,6 +247,29 @@ with synthetic inputs independently of the repository wiring.
   Console's real-stack suites remain explicit,
   separate runs. Windows cross-compilation does not prove native desktop behavior.
 
+## Terraform-module gate
+
+- The published modules under `erun-devops/terraform-erun/modules` carry their own
+  `terraform test` behaviour suites; `terraform-module-tests` runs them and
+  `terraform_module_tests_wired_test.go` keeps that wiring from being dropped by
+  omission -- a target missing from `check-gate`'s prerequisites, a recipe that
+  stops invoking terraform, or an image test stage that stops carrying the
+  binary, the module tree or the provider mirror.
+- The gate's real coverage claim is the runner's own self-test
+  (`scripts/terraform-module-tests_test.sh`), which drives it over a module copy
+  whose pinned invariant has been removed and requires a non-zero verdict. A
+  runner that swallowed terraform's exit status passes every other check here.
+- The gate carries no terraform network path: the image test stage bakes a
+  provider mirror at build time from the modules' committed
+  `.terraform.lock.hcl` files and points `TF_CLI_CONFIG_FILE` at it with
+  `direct` excluded. Do not "fix" a missing provider by re-enabling `direct` --
+  that reintroduces the third-party outage dependency the design removes; add
+  the provider to the lock file and rebuild the image instead.
+- Do not add a second discovery rule for "which modules have tests": the Makefile,
+  the image's mirror bake and this test all read
+  `scripts/terraform-test-modules.sh`, which exits non-zero rather than printing
+  an empty list.
+
 ## Doc-drift gate
 
 - Cross-check a high-risk, mechanically comparable claim against its owning code

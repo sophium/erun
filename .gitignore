@@ -54,20 +54,24 @@ __debug_bin*
 **/.cache-landing-layout/
 
 
-# Terraform init artifacts (provider binaries + module lock) written by local
-# `terraform init`/`validate`, never shipped from the reusable modules.
+# Terraform init artifacts written by a local `terraform init`/`validate`,
+# never shipped from the reusable modules.
 **/.terraform/
-**/.terraform.lock.hcl
+# `.terraform.lock.hcl` is deliberately NOT ignored. It used to be, on the
+# reading that a lock file is init output; but a module's `tests/*.tftest.hcl`
+# is run by `terraform test` *in that module directory*, which makes the module
+# its own root for that run, and `make check-gate`'s terraform-module-tests
+# target runs those tests -- so the lock file is the pin that decides which
+# provider versions the gate tested, and an unpinned gate would test whatever
+# the registry published that morning. Committing it changes nothing for a
+# consumer: terraform reads the lock file of the root module it is invoked in,
+# never a child module's. scripts/terraform-module-test.sh refuses to run a
+# tested module without one, and runs init with -lockfile=readonly so a
+# constraint that no longer matches the recorded selection fails the gate
+# instead of silently rewriting the pin.
 
 # Compiled DNS-01 webhook binary from a local `go build` in the module dir.
 /erun-devops/dns01-webhook/dns01-webhook
 
 # Yarn workspaces hoist shared frontend deps into the repo-root node_modules.
 /node_modules/
-
-# Pin history a re-pin writes beside the project config: local workspace state,
-# never an input to a build. Ignored file-by-file rather than as `.erun/`,
-# because config.yaml in that directory is the per-project layer and stays
-# tracked -- a directory-wide ignore would silently void an onboarding on every
-# machine but the one that wrote it (erun-common/project_config_gitignore.go).
-.erun/pin-history.json

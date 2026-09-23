@@ -113,8 +113,8 @@ composition and release invariants belong to root/shared logic, not chart policy
   Under embedded BuildKit, build steps can escape the sidecar's memory cgroup:
   its configured memory remains capacity guidance, not a proven aggregate ceiling.
 - Size the runtime container's own default for the gate it runs, not for a serving
-  app: agents run `make check-gate` in it — the same ten-target gate the sidecar
-  runs during an image build. `DefaultRuntimePodMemory` and the chart's
+  app: agents run `make check-gate` in it — the same thirteen-target gate the
+  sidecar runs during an image build. `DefaultRuntimePodMemory` and the chart's
   `runtime.resources.limits.memory` fallback move together, and a lowered limit
   re-creates the OOM kills that destroy an in-pod agent run and its unpushed work.
   A cold full gate has been measured pinning a 6Gi limit (peak equal to the limit,
@@ -223,9 +223,19 @@ composition and release invariants belong to root/shared logic, not chart policy
   binaries. Copy target toolchains from an unpinned, copy-only stage when needed.
 - The test stage must carry the inputs and pinned toolchains for every wired gate:
   all Go test/lint modules, all Yarn workspace members, generated Wails bindings,
-  Helm chart tests, Wails/webkit dependencies, and Playwright Chromium dependencies.
+  Helm chart tests, the Terraform module tree and a `terraform` binary, Wails/webkit
+  dependencies, and Playwright Chromium dependencies.
   Keep the root Makefile and Docker COPY set aligned as members/gates change.
   Windows cross-compilation needs no Windows SDK here; it does not prove native UI.
+- Gate-time network fetches are false-red risks: `terraform-module-tests` runs
+  against a provider mirror baked into the test stage at image build, not against
+  `registry.terraform.io` during the gate, so the gate carries no terraform network
+  path at all. The mirror is built from the modules' own committed
+  `.terraform.lock.hcl` files by `scripts/terraform-providers-mirror.sh`, which also
+  writes the CLI config that points init at the mirror and excludes `direct` for
+  registry providers -- so a provider the mirror lacks fails loudly rather than
+  silently fetching. A provider bump is therefore one reviewed edit (the module's
+  `versions.tf` plus its regenerated lock file); the next image build mirrors it.
 - Use sequential per-platform plain `docker build`, local arch tags, and fingerprint
   tags. Push assembles the per-arch images into a manifest list; preserve
   `--provenance=false`. Validate required binfmt support before building.
@@ -328,7 +338,12 @@ composition and release invariants belong to root/shared logic, not chart policy
 - Test Docker dependency/cache/version contracts and shared plus tenant chart
   behavior. Keep release-sensitive common, CLI, and MCP suites aligned.
 - `helm-chart-tests` uses render-only tests without a cluster; new tests under
-  `k8s` are discovered automatically. Keep real-daemon tests separate and explicit:
+  `k8s` are discovered automatically. `terraform-module-tests` is the same shape
+  one level down: the modules under `terraform-erun/modules` carrying a
+  `tests/*.tftest.hcl` are discovered by `scripts/terraform-test-modules.sh` and
+  run with `terraform test` against mocked providers, with no cluster and no cloud
+  account. A module with tests but no committed `.terraform.lock.hcl` fails the
+  runner rather than resolving newest-satisfying. Keep real-daemon tests separate and explicit:
   `test-postgres-restart` for reset/migration/recovery and `test-console-nginx`
   for shipped nginx behavior. Run affected entrypoint/helper script tests too.
 - Live RBAC, resource isolation, and restart guarantees need corresponding real

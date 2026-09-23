@@ -48,6 +48,27 @@ __debug_bin*
 # COPYd into a build context, mirrored here only for hygiene
 /.cache/
 
+# Terraform provider binaries a local `terraform init` unpacks into the module
+# directory. The erun-devops test stage COPYs erun-devops/terraform-erun
+# wholesale (terraform-module-tests runs the modules' own behaviour tests
+# there), so a host that initialized a module would otherwise ship its
+# platform's provider binary into the build context. The root .gitignore already
+# drops these, which means computeBuildFingerprint drops them too, while a real
+# `docker build` honours only this file -- the same context/fingerprint
+# divergence the erun-docs entries above document.
+#
+# Written WITHOUT the trailing slash the .gitignore rule uses. A trailing slash
+# makes the pattern directory-only, and erun's own matcher then matches the
+# directory but never the files beneath it (build_incremental.go: `if p.dirOnly
+# && !isDir { continue }`), so the providers would still enter the context.
+# `erun-common/dockerignore_build_context_test.go` pins that a file beneath the
+# init dir is excluded, which is what keeps this slash off.
+#
+# `.terraform.lock.hcl` is deliberately NOT excluded here: it is committed
+# source now (see .gitignore), it is small, and the image bakes its provider
+# mirror from exactly those pins.
+**/.terraform
+
 # Local packaging / release artifacts
 /packaging/apt/dist
 /erun-devops/linux/*/dist
