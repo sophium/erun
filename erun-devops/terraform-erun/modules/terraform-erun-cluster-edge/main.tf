@@ -42,6 +42,8 @@ locals {
   arg_coredns_forward_upstreams        = var.coredns_forward_upstreams == null ? ["1.1.1.1", "1.0.0.1", "8.8.8.8"] : var.coredns_forward_upstreams
   arg_manage_transport_policy          = var.manage_transport_policy == null ? true : var.manage_transport_policy
   arg_http_redirect_enabled            = var.http_redirect_enabled == null ? true : var.http_redirect_enabled
+  arg_http01_acme_challenges_present   = var.http01_acme_challenges_present == null ? false : var.http01_acme_challenges_present
+  arg_acme_challenge_path_exempt       = var.acme_challenge_path_exempt == null ? false : var.acme_challenge_path_exempt
   arg_hsts_enabled                     = var.hsts_enabled == null ? true : var.hsts_enabled
   arg_hsts_max_age_seconds             = var.hsts_max_age_seconds == null ? 86400 : var.hsts_max_age_seconds
   arg_hsts_include_subdomains          = var.hsts_include_subdomains == null ? false : var.hsts_include_subdomains
@@ -57,10 +59,20 @@ locals {
 locals {
   # permanent=true renders 301 rather than Traefik's default 302: this is a
   # standing policy, not a momentary move, and 301 is what an already-correct
-  # host in the same estate answers with. Every ACME challenge in this estate
-  # is solved over DNS-01 (chart-issuer), so redirecting the plaintext
-  # entrypoint starves no HTTP-01 challenge.
-  traefik_redirect_args = local.arg_http_redirect_enabled ? [
+  # host in the same estate answers with.
+  #
+  # The entrypoint-wide form has no path predicate. Traefik evaluates it for
+  # every request entering the plaintext entrypoint, /.well-known/acme-challenge/
+  # included, so it is safe exactly where every certificate for every host the
+  # edge fronts is solved over DNS-01. This module's own Issuer always is
+  # (chart-issuer is DNS-01 on every dns01_provider). An Issuer the *caller*
+  # brings need not be, and that is not observable here: an HTTP-01 solver
+  # answers on the plaintext entrypoint, Let's Encrypt follows this 301 to
+  # https, and the solver's Ingress has no TLS block to answer on -- renewals
+  # fail. http01_acme_challenges_present is how a caller states that fact, and
+  # the refusal on edge_transport_policy is what keeps it from being assumed
+  # away; acme_challenge_path_exempt is the shape that keeps the path reachable.
+  traefik_redirect_args = local.arg_http_redirect_enabled && !local.arg_acme_challenge_path_exempt ? [
     "--entryPoints.web.http.redirections.entryPoint.to=websecure",
     "--entryPoints.web.http.redirections.entryPoint.scheme=https",
     "--entryPoints.web.http.redirections.entryPoint.permanent=true",
@@ -105,11 +117,79 @@ locals {
     }
   }
 
+  # The redirect as a per-request object rather than a per-entrypoint argument,
+  # so the ACME challenge path can be carved out of it. A Middleware carries no
+  # rule of its own -- it is inert until a router names it, and the router's
+  # rule is the only place a path exclusion can live. Hence the pair: one
+  # redirectScheme Middleware, and one catch-all router on the plaintext
+  # entrypoint whose rule is "every path except the challenge prefix". The
+  # redirect route terminates at noop@internal, Traefik's own service that
+  # answers a middleware-only route without a backend.
+  # No @kubernetescrd ref local here, unlike the HSTS Middleware: that one is
+  # named by an entrypoint argument, which needs the fully-qualified form, while
+  # this one is named by the router beside it, in the same namespace.
+  redirect_middleware_name = "erun-edge-http-redirect"
+  acme_challenge_prefix    = "/.well-known/acme-challenge/"
+
+  acme_exempt_redirect_middleware = {
+    apiVersion = "traefik.io/v1alpha1"
+    kind       = "Middleware"
+    metadata = {
+      name      = local.redirect_middleware_name
+      namespace = local.arg_ingress_namespace
+    }
+    spec = {
+      redirectScheme = {
+        scheme    = "https"
+        permanent = true
+      }
+    }
+  }
+
+  acme_exempt_redirect_router = {
+    apiVersion = "traefik.io/v1alpha1"
+    kind       = "IngressRoute"
+    metadata = {
+      name      = local.redirect_middleware_name
+      namespace = local.arg_ingress_namespace
+    }
+    spec = {
+      entryPoints = ["web"]
+      routes = [{
+        match       = "!PathPrefix(`${local.acme_challenge_prefix}`)"
+        kind        = "Rule"
+        middlewares = [{ name = local.redirect_middleware_name }]
+        services    = [{ name = "noop@internal", kind = "TraefikService" }]
+      }]
+    }
+  }
+
+  acme_exempt_redirect_enabled = local.arg_http_redirect_enabled && local.arg_acme_challenge_path_exempt
+
+  # Assembled with concat rather than as one conditional over the pair:
+  # Terraform unifies a conditional's two result types, and a Middleware and an
+  # IngressRoute share no common type, so `cond ? [middleware, router] : []` is
+  # refused as an inconsistent conditional rather than rendering empty.
+  acme_exempt_redirect_objects = concat(
+    local.acme_exempt_redirect_enabled ? [local.acme_exempt_redirect_middleware] : [],
+    local.acme_exempt_redirect_enabled ? [local.acme_exempt_redirect_router] : [],
+  )
+
   # What rides on the controller this module installs. Empty when it manages no
   # policy: the switches above still describe the policy -- edge_transport_policy
   # hands it to whatever controller is already there -- but the module claims
   # none of it, so it neither configures a controller nor reports a failure.
   traefik_args = local.arg_manage_transport_policy ? concat(local.traefik_redirect_args, local.traefik_hsts_args) : []
+
+  # The object half of the policy, carried the same way as the HSTS Middleware
+  # and for the same reason: extraObjects rides in the release that installs
+  # Traefik's own CRDs, so neither CR is applied before its type exists. Gated
+  # one object per conditional for the same typing reason as above.
+  traefik_transport_objects = concat(
+    local.arg_manage_transport_policy && local.arg_hsts_enabled ? [local.hsts_middleware] : [],
+    local.arg_manage_transport_policy && local.acme_exempt_redirect_enabled ? [local.acme_exempt_redirect_middleware] : [],
+    local.arg_manage_transport_policy && local.acme_exempt_redirect_enabled ? [local.acme_exempt_redirect_router] : [],
+  )
 }
 
 locals {
@@ -301,7 +381,7 @@ resource "helm_release" "traefik" {
     }
   }
 
-  values = local.arg_manage_transport_policy && local.arg_hsts_enabled ? [yamlencode({ extraObjects = [local.hsts_middleware] })] : []
+  values = length(local.traefik_transport_objects) > 0 ? [yamlencode({ extraObjects = local.traefik_transport_objects })] : []
 }
 
 # cert-manager (with its CRDs). Optional: skip when the cluster already runs it.

@@ -55,6 +55,45 @@ variable "manage_transport_policy" {
   default     = null
 }
 
+variable "http01_acme_challenges_present" {
+  description = <<-EOT
+    State that some certificate for a host this edge fronts is solved over
+    HTTP-01, by an Issuer this module does not create. Default false.
+
+    This module's own Issuer is always DNS-01, so its challenges never touch
+    the plaintext entrypoint. An Issuer the caller brings -- a plain
+    letsencrypt-http01 Issuer, say -- does: its solver answers on
+    /.well-known/acme-challenge/ over http, and the entrypoint-wide redirect
+    carries Let's Encrypt off that path onto https, where the solver's Ingress
+    has no TLS block, so renewal fails. The module cannot observe a foreign
+    Issuer, so the caller states it; the module then refuses to produce a
+    blanket entrypoint redirect until acme_challenge_path_exempt says how the
+    challenge path is to survive.
+  EOT
+  type        = bool
+  default     = null
+}
+
+variable "acme_challenge_path_exempt" {
+  description = <<-EOT
+    Carry the plaintext redirect in the form that leaves
+    /.well-known/acme-challenge/ reachable over http. Default false, which is
+    the entrypoint-wide redirect.
+
+    Traefik's entrypoint redirect has no path predicate, so it cannot be
+    narrowed; this instead expresses the redirect as a Middleware plus a
+    catch-all router whose rule excludes the challenge prefix, and is the only
+    shape that both upgrades every other request and lets an HTTP-01 solver
+    answer. The exempted path is served in cleartext on every host the edge
+    routes -- browsers that have read the HSTS header will still refuse it --
+    so turn it on because a real HTTP-01 Issuer needs it, not speculatively.
+    The objects are exported at edge_transport_policy for a bring-your-own
+    controller.
+  EOT
+  type        = bool
+  default     = null
+}
+
 variable "install_cert_manager" {
   description = "Install cert-manager (and its CRDs). Set false on a cluster that already runs it; the Issuer is still created."
   type        = bool
