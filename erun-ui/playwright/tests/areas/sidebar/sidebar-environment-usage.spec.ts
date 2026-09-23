@@ -366,6 +366,13 @@ test.describe('environment usage on the hover cards', () => {
       await page.mouse.move(0, 0);
     }
 
+    // Converge on the card having gone before reading the counter. "No call
+    // happened" is only meaningful once the gesture that could have caused one
+    // has settled; read in the same tick the last hover returned, it samples
+    // the route handler before a late LoadRuntimeUsage could reach it, and this
+    // is the one assertion the whole spec exists to make
+    // (erun-ui/playwright/AGENTS.md, "assert nothing happened").
+    await app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA).waitFor({ state: 'hidden' });
     expect(calls).toBe(0);
   });
 });
