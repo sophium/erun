@@ -38,6 +38,10 @@ type EnvironmentRowDeleter interface {
 // the same coordinates a deploy Job uses, without a target version — stop and
 // delete act on whatever the environment is already running.
 type EnvLifecycleInput struct {
+	// TenantID owns this environment. It is what the placement's admin-token
+	// credential is fetched for — the Job's own tenant name (Tenant, below)
+	// is a display/namespace value and cannot scope a credential read.
+	TenantID      string
 	Tenant        string
 	Environment   string
 	EnvironmentID string
@@ -97,11 +101,12 @@ func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, conf
 // cluster (empty ContextID resolves to the zero PlacementParams, the
 // platform's own cluster).
 func (l *EnvLifecycle) placement(ctx context.Context, input EnvLifecycleInput) (deployexec.PlacementParams, error) {
-	token, err := deployexec.ResolvePlacementToken(ctx, l.credentials, input.ContextID)
+	token, err := deployexec.ResolvePlacementToken(ctx, l.credentials, input.TenantID, input.ContextID)
 	if err != nil {
 		return deployexec.PlacementParams{}, err
 	}
 	return deployexec.PlacementParams{
+		TenantID:          input.TenantID,
 		ContextID:         input.ContextID,
 		KubernetesContext: input.PlacementKubernetesContext,
 		ServerURL:         input.PlacementServerURL,

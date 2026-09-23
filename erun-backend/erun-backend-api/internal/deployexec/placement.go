@@ -24,8 +24,13 @@ import (
 // run, including a resumed one, so it is never part of a checkpointed DBOS
 // workflow input and a rotated token reaches the very next Job with no
 // separate sync step.
+//
+// The owning tenant is an explicit argument rather than something the
+// implementation reads off a security context: erun_operations' RLS policy is
+// unconditional, so a caller that only names a context id would be handed
+// whichever tenant's context that id happened to name.
 type PlacementCredentialResolver interface {
-	Get(ctx context.Context, contextID string) (string, error)
+	Get(ctx context.Context, tenantID, contextID string) (string, error)
 }
 
 // ResolvePlacementToken fetches the admin token for a remote placement and
@@ -34,14 +39,21 @@ type PlacementCredentialResolver interface {
 // (resolver nil, e.g. no cipher configured) must not silently deploy without
 // authenticating, which would surface only as an opaque kubectl failure deep
 // inside the Job.
-func ResolvePlacementToken(ctx context.Context, resolver PlacementCredentialResolver, contextID string) (string, error) {
+//
+// An empty tenantID alongside a non-empty contextID is refused rather than
+// passed down: the credential belongs to the tenant that owns the context, so
+// a caller that cannot name that tenant has nothing to fetch with.
+func ResolvePlacementToken(ctx context.Context, resolver PlacementCredentialResolver, tenantID, contextID string) (string, error) {
 	if contextID == "" {
 		return "", nil
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return "", fmt.Errorf("no owning tenant named for context %q: a placement credential is fetched for the tenant that owns the context", contextID)
 	}
 	if resolver == nil {
 		return "", fmt.Errorf("no placement credential resolver is configured for context %q", contextID)
 	}
-	return resolver.Get(ctx, contextID)
+	return resolver.Get(ctx, tenantID, contextID)
 }
 
 // PlacementParams names the cluster a lifecycle Job's `erun` command targets.
@@ -49,6 +61,11 @@ func ResolvePlacementToken(ctx context.Context, resolver PlacementCredentialReso
 // ServiceAccount token, unchanged from before multi-cluster placement
 // existed (#1112).
 type PlacementParams struct {
+	// TenantID is the tenant that owns ContextID. It is never interpolated
+	// into a script: it is the owner the admin-token credential is fetched
+	// for, so a placement resolved for one tenant cannot release a context
+	// credential that belongs to another.
+	TenantID string
 	// ContextID is the context row's id, used only to name the Secret that
 	// custodies its admin token (PlacementSecretName) — never interpolated
 	// into a script.

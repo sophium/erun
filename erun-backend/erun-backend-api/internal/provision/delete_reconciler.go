@@ -40,7 +40,10 @@ type EnvDeleteReconcilerTenants interface {
 // id — the reconciler only reads back where an already-placed environment
 // lives, never auto-selects or capacity-checks.
 type EnvDeleteReconcilerContexts interface {
-	Get(ctx context.Context, contextID string) (model.Context, error)
+	// Get names the owning tenant explicitly, because this reconciler runs
+	// with no tenant in its security context: the owner is the environment
+	// row's own tenant_id, never the (empty) caller identity.
+	Get(ctx context.Context, tenantID, contextID string) (model.Context, error)
 }
 
 // EnvDeleteStarter kicks off one delete attempt asynchronously — satisfied by
@@ -240,7 +243,7 @@ func (r *EnvDeleteReconciler) reconcileOne(ctx context.Context, environment mode
 	if !ok {
 		return false, r.unclaim(ctx, environment.EnvironmentID, fmt.Errorf("tenant %q not found", environment.TenantID))
 	}
-	placement, err := r.resolvePlacement(ctx, environment.ContextID)
+	placement, err := r.resolvePlacement(ctx, environment.TenantID, environment.ContextID)
 	if err != nil {
 		return false, r.unclaim(ctx, environment.EnvironmentID, fmt.Errorf("resolve placement: %w", err))
 	}
@@ -297,14 +300,19 @@ type reconcilerPlacement struct {
 }
 
 // resolvePlacement reads back an already-placed environment's target-cluster
-// coordinates. Empty contextID (the platform's own cluster) resolves to the
-// zero reconcilerPlacement with no repository read, mirroring
+// coordinates, for the tenant that owns the environment it was found on.
+// Empty contextID (the platform's own cluster) resolves to the zero
+// reconcilerPlacement with no repository read, mirroring
 // routes.EnvironmentRoutes.resolvePlacementCoordinates.
-func (r *EnvDeleteReconciler) resolvePlacement(ctx context.Context, contextID string) (reconcilerPlacement, error) {
+//
+// tenantID is the environment row's own tenant_id and is passed explicitly
+// because this reconciler's security context carries no tenant at all: the
+// owner is the row, never the caller.
+func (r *EnvDeleteReconciler) resolvePlacement(ctx context.Context, tenantID, contextID string) (reconcilerPlacement, error) {
 	if contextID == "" {
 		return reconcilerPlacement{}, nil
 	}
-	cloudContext, err := r.contexts.Get(ctx, contextID)
+	cloudContext, err := r.contexts.Get(ctx, tenantID, contextID)
 	if err != nil {
 		return reconcilerPlacement{}, err
 	}

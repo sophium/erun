@@ -69,7 +69,7 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	}); err != nil {
 		return fmt.Errorf("mark provisioning: %w", err)
 	}
-	token, err := deployexec.ResolvePlacementToken(ctx, p.credentials, params.Placement.ContextID)
+	token, err := deployexec.ResolvePlacementToken(ctx, p.credentials, params.Placement.TenantID, params.Placement.ContextID)
 	if err != nil {
 		return p.fail(ctx, environmentID, err.Error(), err)
 	}
