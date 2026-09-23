@@ -58,7 +58,14 @@ func classifyGateRunError(err error) error {
 	}
 }
 
-func (r *GateRunRepository) Get(ctx context.Context, gateRunID string) (model.GateRun, error) {
+// Get returns a gate run owned by tenantID. The LEFT JOIN onto reviews is on
+// tenant and review together — it decorates the row with a review name, it
+// does not scope the read, and for an OPERATIONS caller an id-only lookup
+// answered with any tenant's gate run through GET /v1/gate-runs/{gate_run_id}.
+// tenantID is an explicit predicate for that reason, taken from the caller's
+// security context because every reader of a gate run is the caller that
+// named it.
+func (r *GateRunRepository) Get(ctx context.Context, tenantID, gateRunID string) (model.GateRun, error) {
 	var run model.GateRun
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
@@ -70,7 +77,8 @@ func (r *GateRunRepository) Get(ctx context.Context, gateRunID string) (model.Ga
 			    ON r.tenant_id = g.tenant_id
 			   AND r.review_id = g.review_id
 			 WHERE g.gate_run_id = ?
-		`, gateRunID).Scan(ctx, &run)
+			   AND g.tenant_id = ?
+		`, gateRunID, tenantID).Scan(ctx, &run)
 		return normalizeNoRows(err)
 	})
 	return run, err
@@ -121,13 +129,18 @@ func (r *GateRunRepository) List(ctx context.Context, filter GateRunFilter) ([]m
 // log_ref, and merge_commit (set here rather than at Create when the caller
 // only learns it once the squash-merge succeeds). Every other field is
 // immutable after creation.
-func (r *GateRunRepository) Update(ctx context.Context, run model.GateRun) (model.GateRun, error) {
+// Update writes tenantID's own gate run, carrying the same explicit tenant
+// predicate Get does — stated here rather than inherited from the read the
+// service happens to perform first, so a future caller that skipped that read
+// could not silently write across tenants.
+func (r *GateRunRepository) Update(ctx context.Context, tenantID string, run model.GateRun) (model.GateRun, error) {
 	updated := run
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewUpdate().
 			Model(&updated).
 			Column("status", "failing_step", "log_ref", "merge_commit").
 			Where("gate_run_id = ?", updated.GateRunID).
+			Where("tenant_id = ?", tenantID).
 			Returning("*").
 			Scan(ctx)
 		return classifyGateRunError(normalizeNoRows(err))

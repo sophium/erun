@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
@@ -23,7 +24,7 @@ type stubJobRepository struct {
 	openByScopeErr error
 }
 
-func (s *stubJobRepository) Get(_ context.Context, jobID string) (model.Job, error) {
+func (s *stubJobRepository) Get(_ context.Context, _ string, jobID string) (model.Job, error) {
 	return model.Job{JobID: jobID, Status: model.JobStatusRunning}, nil
 }
 
@@ -45,6 +46,9 @@ type stubJobService struct {
 	claimed model.Job
 	updated model.Job
 	err     error
+	// updatedTenantID records the tenant the route named, so a test can hold
+	// the handler to passing the caller's own rather than merely passing one.
+	updatedTenantID string
 }
 
 func (s *stubJobService) Claim(_ context.Context, job model.Job) (model.Job, error) {
@@ -56,7 +60,8 @@ func (s *stubJobService) Claim(_ context.Context, job model.Job) (model.Job, err
 	return job, nil
 }
 
-func (s *stubJobService) Update(_ context.Context, jobID string, status model.JobStatus, summary, localJobID string) (model.Job, error) {
+func (s *stubJobService) Update(_ context.Context, tenantID, jobID string, status model.JobStatus, summary, localJobID string) (model.Job, error) {
+	s.updatedTenantID = tenantID
 	if s.err != nil {
 		return model.Job{}, s.err
 	}
@@ -248,12 +253,18 @@ func TestUpdateJobRejectsAnUpdateToAFinishedJob(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/v1/jobs/job-1",
 		bytes.NewBufferString(`{"status":"FAILED"}`))
 	req.SetPathValue("job_id", "job-1")
+	// The write names the caller's tenant, so the handler needs the scoped
+	// security context the auth middleware would have installed.
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "tenant-1", TenantType: string(model.TenantTypeCompany)}))
 	rec := httptest.NewRecorder()
 
 	routes.updateJob(rec, req)
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	if svc.updatedTenantID != "tenant-1" {
+		t.Fatalf("service received tenant %q, want the caller's own tenant-1", svc.updatedTenantID)
 	}
 	var body struct {
 		Code string `json:"code"`

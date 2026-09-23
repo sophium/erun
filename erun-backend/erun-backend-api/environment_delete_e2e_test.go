@@ -68,7 +68,7 @@ func seedDeleteTestEnvironment(t *testing.T, ctx context.Context, repo *reposito
 	created, err := repo.Create(ctx, model.Environment{Name: name, Type: model.EnvironmentTypeRuntime, RuntimeVersion: "1.0.0"})
 	mustNoErr(t, err, "create environment")
 	if status != model.EnvironmentStatusRegistered {
-		mustNoErr(t, repo.UpdateProvisioningStatus(ctx, created.EnvironmentID, repository.EnvironmentStatusUpdate{Status: string(status)}), "seed status")
+		mustNoErr(t, repo.UpdateProvisioningStatus(ctx, created.TenantID, created.EnvironmentID, repository.EnvironmentStatusUpdate{Status: string(status)}), "seed status")
 	}
 	return created
 }
@@ -81,7 +81,7 @@ func TestClaimDeleteTakesExclusiveOwnership(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
 
-	claimed, err := repo.ClaimDelete(ctx, env.EnvironmentID, time.Hour)
+	claimed, err := repo.ClaimDelete(ctx, env.TenantID, env.EnvironmentID, time.Hour)
 	mustNoErr(t, err, "first claim")
 	if !claimed {
 		t.Fatal("first ClaimDelete on a running environment should succeed")
@@ -93,7 +93,7 @@ func TestClaimDeleteTakesExclusiveOwnership(t *testing.T) {
 		t.Fatalf("status after claim = %q, want %q", got.Status, model.EnvironmentStatusDeleting)
 	}
 
-	claimedAgain, err := repo.ClaimDelete(ctx, env.EnvironmentID, time.Hour)
+	claimedAgain, err := repo.ClaimDelete(ctx, env.TenantID, env.EnvironmentID, time.Hour)
 	mustNoErr(t, err, "second claim")
 	if claimedAgain {
 		t.Fatal("a fresh in-flight delete must not be reclaimable")
@@ -112,13 +112,13 @@ func TestClaimDeleteReclaimsAStaleAttempt(t *testing.T) {
 	repo, ctx, _ := environmentDeleteDatabase(t)
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
 
-	claimed, err := repo.ClaimDelete(ctx, env.EnvironmentID, time.Hour)
+	claimed, err := repo.ClaimDelete(ctx, env.TenantID, env.EnvironmentID, time.Hour)
 	mustNoErr(t, err, "first claim")
 	if !claimed {
 		t.Fatal("first claim should succeed")
 	}
 
-	reclaimed, err := repo.ClaimDelete(ctx, env.EnvironmentID, -time.Hour)
+	reclaimed, err := repo.ClaimDelete(ctx, env.TenantID, env.EnvironmentID, -time.Hour)
 	mustNoErr(t, err, "reclaim")
 	if !reclaimed {
 		t.Fatal("a claim stale past staleAfter must be reclaimable")
@@ -138,9 +138,9 @@ func TestClaimDeleteAlwaysReclaimsABlockedAttempt(t *testing.T) {
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
 
 	const blockedReason = "namespace stuck terminating"
-	mustNoErr(t, repo.MarkDeleteBlocked(ctx, env.EnvironmentID, blockedReason), "mark blocked")
+	mustNoErr(t, repo.MarkDeleteBlocked(ctx, env.TenantID, env.EnvironmentID, blockedReason), "mark blocked")
 
-	claimed, err := repo.ClaimDelete(ctx, env.EnvironmentID, time.Hour)
+	claimed, err := repo.ClaimDelete(ctx, env.TenantID, env.EnvironmentID, time.Hour)
 	mustNoErr(t, err, "claim after blocked")
 	if !claimed {
 		t.Fatal("a deletion-blocked environment must always be reclaimable")
@@ -163,7 +163,7 @@ func TestMarkDeleteBlockedRecordsTheReason(t *testing.T) {
 	env := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
 
 	reason := "NamespaceContentRemaining=True     challenges.acme.cert-manager.io has 1 resource instances"
-	mustNoErr(t, repo.MarkDeleteBlocked(ctx, env.EnvironmentID, reason), "mark blocked")
+	mustNoErr(t, repo.MarkDeleteBlocked(ctx, env.TenantID, env.EnvironmentID, reason), "mark blocked")
 
 	got, err := repo.Get(ctx, env.EnvironmentID)
 	mustNoErr(t, err, "get")
@@ -190,12 +190,12 @@ func TestCountExcludesEnvironmentsMidTeardown(t *testing.T) {
 		t.Fatalf("count = %d, want 3 before any teardown", count)
 	}
 
-	claimed, err := repo.ClaimDelete(ctx, deleting.EnvironmentID, time.Hour)
+	claimed, err := repo.ClaimDelete(ctx, deleting.TenantID, deleting.EnvironmentID, time.Hour)
 	mustNoErr(t, err, "claim delete")
 	if !claimed {
 		t.Fatal("claim should succeed")
 	}
-	mustNoErr(t, repo.MarkDeleteBlocked(ctx, blocked.EnvironmentID, "namespace stuck"), "mark blocked")
+	mustNoErr(t, repo.MarkDeleteBlocked(ctx, blocked.TenantID, blocked.EnvironmentID, "namespace stuck"), "mark blocked")
 
 	count, err = repo.Count(ctx)
 	mustNoErr(t, err, "count after teardown requested")
@@ -214,12 +214,12 @@ func TestListByStatusesFindsMidTeardownEnvironments(t *testing.T) {
 	blocked := seedDeleteTestEnvironment(t, ctx, repo, model.EnvironmentStatusRunning)
 	_ = running
 
-	claimed, err := repo.ClaimDelete(ctx, deleting.EnvironmentID, time.Hour)
+	claimed, err := repo.ClaimDelete(ctx, deleting.TenantID, deleting.EnvironmentID, time.Hour)
 	mustNoErr(t, err, "claim delete")
 	if !claimed {
 		t.Fatal("claim should succeed")
 	}
-	mustNoErr(t, repo.MarkDeleteBlocked(ctx, blocked.EnvironmentID, "namespace stuck"), "mark blocked")
+	mustNoErr(t, repo.MarkDeleteBlocked(ctx, blocked.TenantID, blocked.EnvironmentID, "namespace stuck"), "mark blocked")
 
 	found, err := repo.ListByStatuses(ctx, []model.EnvironmentStatus{model.EnvironmentStatusDeleting, model.EnvironmentStatusDeletionBlocked})
 	mustNoErr(t, err, "list by statuses")

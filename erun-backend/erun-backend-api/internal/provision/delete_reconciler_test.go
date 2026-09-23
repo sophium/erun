@@ -29,7 +29,7 @@ type fakeReconcilerEnvironments struct {
 	blockedErr error
 }
 
-func (f *fakeReconcilerEnvironments) MarkDeleteBlocked(_ context.Context, environmentID, reason string) error {
+func (f *fakeReconcilerEnvironments) MarkDeleteBlocked(_ context.Context, _ string, environmentID, reason string) error {
 	if f.blocked == nil {
 		f.blocked = map[string]string{}
 	}
@@ -41,7 +41,7 @@ func (f *fakeReconcilerEnvironments) ListByStatuses(_ context.Context, _ []model
 	return f.environments, f.listErr
 }
 
-func (f *fakeReconcilerEnvironments) ClaimDelete(_ context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
+func (f *fakeReconcilerEnvironments) ClaimDelete(_ context.Context, _ string, environmentID string, staleAfter time.Duration) (bool, error) {
 	f.claims = append(f.claims, claimCall{environmentID: environmentID, staleAfter: staleAfter})
 	if f.claimErr != nil {
 		return false, f.claimErr

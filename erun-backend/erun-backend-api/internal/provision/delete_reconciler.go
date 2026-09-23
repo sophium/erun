@@ -19,12 +19,15 @@ import (
 // delete attempt the same way a fresh operator request would.
 type EnvDeleteReconcilerEnvironments interface {
 	ListByStatuses(ctx context.Context, statuses []model.EnvironmentStatus) ([]model.Environment, error)
-	ClaimDelete(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
+	// The owning tenant travels explicitly: this reconciler reads and claims
+	// rows across tenants off a context that names none (see tick), so the
+	// row's own tenant_id is the only thing that can scope the write.
+	ClaimDelete(ctx context.Context, tenantID, environmentID string, staleAfter time.Duration) (bool, error)
 	// MarkDeleteBlocked is what keeps a claim from stranding a row: the claim
 	// has already moved it to `deleting`, so any failure between the claim and
 	// the workflow actually starting must record why, or the row is left
 	// claiming an in-flight delete that does not exist (#1166).
-	MarkDeleteBlocked(ctx context.Context, environmentID, reason string) error
+	MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error
 }
 
 // EnvDeleteReconcilerTenants resolves tenant identity for the reconciler's
@@ -227,7 +230,7 @@ func firstLine(s string) string {
 // a legitimate no-op (err == nil, restarted == false), and must not inflate
 // reconcile's count of attempts it took over.
 func (r *EnvDeleteReconciler) reconcileOne(ctx context.Context, environment model.Environment, tenantsByID map[string]model.Tenant) (bool, error) {
-	claimed, err := r.environments.ClaimDelete(ctx, environment.EnvironmentID, DeleteClaimStaleAfter)
+	claimed, err := r.environments.ClaimDelete(ctx, environment.TenantID, environment.EnvironmentID, DeleteClaimStaleAfter)
 	if err != nil {
 		return false, err
 	}
@@ -241,11 +244,11 @@ func (r *EnvDeleteReconciler) reconcileOne(ctx context.Context, environment mode
 	// must either start a workflow or record why it could not (#1166).
 	tenant, ok := tenantsByID[environment.TenantID]
 	if !ok {
-		return false, r.unclaim(ctx, environment.EnvironmentID, fmt.Errorf("tenant %q not found", environment.TenantID))
+		return false, r.unclaim(ctx, environment.TenantID, environment.EnvironmentID, fmt.Errorf("tenant %q not found", environment.TenantID))
 	}
 	placement, err := r.resolvePlacement(ctx, environment.TenantID, environment.ContextID)
 	if err != nil {
-		return false, r.unclaim(ctx, environment.EnvironmentID, fmt.Errorf("resolve placement: %w", err))
+		return false, r.unclaim(ctx, environment.TenantID, environment.EnvironmentID, fmt.Errorf("resolve placement: %w", err))
 	}
 
 	if err := r.deleter.Start(EnvDeleteInput{
@@ -260,7 +263,7 @@ func (r *EnvDeleteReconciler) reconcileOne(ctx context.Context, environment mode
 		PlacementServerURL:         placement.ServerURL,
 		DeleteID:                   uuid.NewString(),
 	}); err != nil {
-		return false, r.unclaim(ctx, environment.EnvironmentID, fmt.Errorf("start delete workflow: %w", err))
+		return false, r.unclaim(ctx, environment.TenantID, environment.EnvironmentID, fmt.Errorf("start delete workflow: %w", err))
 	}
 	return true, nil
 }
@@ -271,8 +274,8 @@ func (r *EnvDeleteReconciler) reconcileOne(ctx context.Context, environment mode
 // worse than not having ticked at all, and exactly the misreporting #1140 was
 // about. Returns the original cause so the caller still logs it; a failure to
 // record is folded in rather than replacing it.
-func (r *EnvDeleteReconciler) unclaim(ctx context.Context, environmentID string, cause error) error {
-	if err := r.environments.MarkDeleteBlocked(ctx, environmentID, cause.Error()); err != nil {
+func (r *EnvDeleteReconciler) unclaim(ctx context.Context, tenantID, environmentID string, cause error) error {
+	if err := r.environments.MarkDeleteBlocked(ctx, tenantID, environmentID, cause.Error()); err != nil {
 		return fmt.Errorf("%w (and recording it did not persist: %v)", cause, err)
 	}
 	return cause

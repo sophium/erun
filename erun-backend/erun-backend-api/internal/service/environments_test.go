@@ -30,7 +30,7 @@ type recordingStatusWriter struct {
 	calls     int
 }
 
-func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ string, update repository.EnvironmentStatusUpdate) error {
+func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ string, _ string, update repository.EnvironmentStatusUpdate) error {
 	w.calls++
 	if w.calls <= w.failFirst {
 		return errors.New("database unavailable")

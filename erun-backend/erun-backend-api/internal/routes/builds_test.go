@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
@@ -50,15 +51,21 @@ func (s ownEnvironments) Get(_ context.Context, environmentID string) (model.Env
 type stubBuildRepository struct {
 	build model.Build
 	err   error
+	// gotTenantID records the tenant the route named, so a test can hold the
+	// handler to passing the caller's own rather than merely passing one.
+	gotTenantID string
 }
 
-func (s stubBuildRepository) Get(context.Context, string) (model.Build, error) { return s.build, s.err }
+func (s *stubBuildRepository) Get(_ context.Context, tenantID, _ string) (model.Build, error) {
+	s.gotTenantID = tenantID
+	return s.build, s.err
+}
 
-func (s stubBuildRepository) List(context.Context, apirepository.BuildFilter) ([]model.Build, error) {
+func (s *stubBuildRepository) List(context.Context, apirepository.BuildFilter) ([]model.Build, error) {
 	return nil, s.err
 }
 
-func (s stubBuildRepository) ListPage(context.Context, apirepository.BuildListFilter) (apirepository.BuildPage, error) {
+func (s *stubBuildRepository) ListPage(context.Context, apirepository.BuildListFilter) (apirepository.BuildPage, error) {
 	if s.err != nil {
 		return apirepository.BuildPage{}, s.err
 	}
@@ -144,15 +151,22 @@ func TestCreateBuildInvalidVersionReportsItsCode(t *testing.T) {
 }
 
 func TestGetBuildReturnsTheRepositoryResult(t *testing.T) {
-	routes := BuildRoutes{builds: stubBuildRepository{build: model.Build{BuildID: "build-1", Kind: model.BuildKindGate}}}
+	builds := &stubBuildRepository{build: model.Build{BuildID: "build-1", Kind: model.BuildKindGate}}
+	routes := BuildRoutes{builds: builds}
 	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/review-1/builds/build-1", nil)
 	req.SetPathValue("build_id", "build-1")
+	// The read names the caller's tenant, so the handler needs the scoped
+	// security context the auth middleware would have installed.
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{TenantID: "tenant-1", TenantType: string(model.TenantTypeCompany)}))
 	rec := httptest.NewRecorder()
 
 	routes.getBuild(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if builds.gotTenantID != "tenant-1" {
+		t.Fatalf("repository read for tenant %q, want the caller's own tenant-1", builds.gotTenantID)
 	}
 }
 
@@ -240,7 +254,7 @@ func TestCreateUnattachedBuildReportsMissingEnvironmentCode(t *testing.T) {
 // {builds, nextCursor}, not a bare array -- distinct from the review-nested
 // list, which stays a bare array since it never paginates.
 func TestListAllBuildsReturnsAPagedEnvelope(t *testing.T) {
-	routes := BuildRoutes{builds: stubBuildRepository{build: model.Build{BuildID: "build-1"}}}
+	routes := BuildRoutes{builds: &stubBuildRepository{build: model.Build{BuildID: "build-1"}}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/builds", nil)
 	rec := httptest.NewRecorder()
 
@@ -257,7 +271,7 @@ func TestListAllBuildsReturnsAPagedEnvelope(t *testing.T) {
 // TestListAllBuildsRejectsAMalformedSuccessfulFilter: a query filter with the
 // wrong shape is a 400, not a repository error.
 func TestListAllBuildsRejectsAMalformedSuccessfulFilter(t *testing.T) {
-	routes := BuildRoutes{builds: stubBuildRepository{}}
+	routes := BuildRoutes{builds: &stubBuildRepository{}}
 	req := httptest.NewRequest(http.MethodGet, "/v1/builds?successful=maybe", nil)
 	rec := httptest.NewRecorder()
 

@@ -173,15 +173,6 @@ func TestResolvePlacementTokenRefusesAContextWithNoOwningTenant(t *testing.T) {
 	}
 }
 
-type stubCredentialResolver struct {
-	token string
-	err   error
-}
-
-func (s stubCredentialResolver) Get(context.Context, string, string) (string, error) {
-	return s.token, s.err
-}
-
 // recordingCredentialResolver remembers which (tenant, context) pair it was
 // asked for, so a test can assert on the owner rather than only the token.
 type recordingCredentialResolver struct {

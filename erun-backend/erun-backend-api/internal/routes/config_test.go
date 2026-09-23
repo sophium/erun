@@ -68,7 +68,7 @@ type stubEnvironmentRepository struct {
 	lastListTenantID string
 }
 
-func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Duration) (bool, error) {
+func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, string, time.Duration) (bool, error) {
 	r.claimCalls++
 	if r.claimErr != nil {
 		return false, r.claimErr
@@ -76,13 +76,13 @@ func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Du
 	return !r.claimTaken, nil
 }
 
-func (r *stubEnvironmentRepository) MarkDeployFailed(_ context.Context, _ string, reason string) error {
+func (r *stubEnvironmentRepository) MarkDeployFailed(_ context.Context, _ string, _ string, reason string) error {
 	r.markFailedCalls++
 	r.markFailedReason = reason
 	return nil
 }
 
-func (r *stubEnvironmentRepository) ClaimDelete(context.Context, string, time.Duration) (bool, error) {
+func (r *stubEnvironmentRepository) ClaimDelete(context.Context, string, string, time.Duration) (bool, error) {
 	r.claimDeleteCalls++
 	if r.claimDeleteErr != nil {
 		return false, r.claimDeleteErr
@@ -90,7 +90,7 @@ func (r *stubEnvironmentRepository) ClaimDelete(context.Context, string, time.Du
 	return !r.claimDeleteTaken, nil
 }
 
-func (r *stubEnvironmentRepository) MarkDeleteBlocked(_ context.Context, _ string, reason string) error {
+func (r *stubEnvironmentRepository) MarkDeleteBlocked(_ context.Context, _ string, _ string, reason string) error {
 	r.markDeleteBlockedCalls++
 	r.markDeleteBlockedReason = reason
 	return nil

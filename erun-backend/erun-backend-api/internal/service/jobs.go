@@ -59,9 +59,11 @@ func (e *JobAlreadyFinishedError) Unwrap() error { return repository.ErrConflict
 
 type JobRepository interface {
 	Create(ctx context.Context, job model.Job) (model.Job, error)
-	Get(ctx context.Context, jobID string) (model.Job, error)
+	// Get and Update take the owning tenant explicitly; see
+	// repository.JobRepository.Get for why an id alone is not a scope.
+	Get(ctx context.Context, tenantID, jobID string) (model.Job, error)
 	FindOpenByScope(ctx context.Context, scope string) (model.Job, error)
-	Update(ctx context.Context, job model.Job) (model.Job, error)
+	Update(ctx context.Context, tenantID string, job model.Job) (model.Job, error)
 	AbandonStale(ctx context.Context, staleBefore time.Time) ([]model.Job, error)
 }
 
@@ -177,8 +179,8 @@ func (s *JobService) Claim(ctx context.Context, job model.Job) (model.Job, error
 // summary, or the local job id it mirrors. A finished job accepts none of
 // these — see JobAlreadyFinishedError — since its outcome is the record that
 // coordination and reporting both read.
-func (s *JobService) Update(ctx context.Context, jobID string, status model.JobStatus, summary, localJobID string) (model.Job, error) {
-	existing, err := s.jobs.Get(ctx, jobID)
+func (s *JobService) Update(ctx context.Context, tenantID, jobID string, status model.JobStatus, summary, localJobID string) (model.Job, error) {
+	existing, err := s.jobs.Get(ctx, tenantID, jobID)
 	if err != nil {
 		return model.Job{}, err
 	}
@@ -208,7 +210,7 @@ func (s *JobService) Update(ctx context.Context, jobID string, status model.JobS
 	if err := validateJobSummary(updated.Summary); err != nil {
 		return model.Job{}, err
 	}
-	return s.jobs.Update(ctx, updated)
+	return s.jobs.Update(ctx, tenantID, updated)
 }
 
 // DefaultJobAbandonTTL is how long a RUNNING job may go without an update

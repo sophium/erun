@@ -36,7 +36,10 @@ type ReviewRepository interface {
 }
 
 type ReviewBuildRepository interface {
-	Get(ctx context.Context, buildID string) (model.Build, error)
+	// Get takes the tenant that owns the read: the caller's own on the build
+	// route, the review's own here, where every read is for a review this
+	// service already holds. See repository.BuildRepository.Get.
+	Get(ctx context.Context, tenantID, buildID string) (model.Build, error)
 }
 
 // MergeVerifier confirms a reported merge commit is really on the target
@@ -559,7 +562,7 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 	if buildID == "" {
 		return model.Review{}, &MissingBuildIDError{Status: model.ReviewStatusMerged}
 	}
-	build, err := s.builds.Get(ctx, buildID)
+	build, err := s.builds.Get(ctx, review.TenantID, buildID)
 	if err != nil {
 		return model.Review{}, err
 	}
@@ -709,7 +712,7 @@ func (s *ReviewService) gatedTargetTip(ctx context.Context, review model.Review)
 	if err != nil {
 		return "", err
 	}
-	build, err := s.builds.Get(ctx, last.LastMergedBuildID)
+	build, err := s.builds.Get(ctx, last.TenantID, last.LastMergedBuildID)
 	if err != nil {
 		return "", err
 	}
@@ -843,7 +846,7 @@ func (s *ReviewService) updateBuildStatus(ctx context.Context, review model.Revi
 	if column == "" {
 		return model.Review{}, repository.ErrInvalidInput
 	}
-	build, err := s.builds.Get(ctx, buildID)
+	build, err := s.builds.Get(ctx, review.TenantID, buildID)
 	if err != nil {
 		return model.Review{}, err
 	}

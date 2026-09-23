@@ -54,12 +54,12 @@ type stubRowDeleter struct {
 	err     error
 }
 
-func (s *stubRowDeleter) Delete(_ context.Context, environmentID string) error {
+func (s *stubRowDeleter) Delete(_ context.Context, _ string, environmentID string) error {
 	s.deleted = append(s.deleted, environmentID)
 	return s.err
 }
 
-func (s *stubRowDeleter) MarkDeleteBlocked(_ context.Context, environmentID, reason string) error {
+func (s *stubRowDeleter) MarkDeleteBlocked(_ context.Context, _ string, environmentID, reason string) error {
 	s.blocked = append(s.blocked, blockedDeleteCall{environmentID: environmentID, reason: reason})
 	return nil
 }

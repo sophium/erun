@@ -30,18 +30,24 @@ type EnvironmentRepository interface {
 	// CountByType reports how many of the caller's tenant's environments are
 	// of the given type, for the aggregate resource-budget check (#1113).
 	CountByType(ctx context.Context, envType model.EnvironmentType) (int, error)
-	ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
+	// The mutating methods below take the owning tenant explicitly, alongside
+	// the environment id. They are reached both from here — where the row was
+	// just read back under the caller's own tenant — and from the delete
+	// reconciler and lifecycle, whose contexts carry no tenant at all, so the
+	// owner has to travel as an argument rather than be inferred from ctx.
+	// See repository.EnvironmentRepository.UpdateProvisioningStatus.
+	ClaimDeploy(ctx context.Context, tenantID, environmentID string, staleAfter time.Duration) (bool, error)
 	// MarkDeployFailed records a deploy claim that never reached the durable
 	// workflow (see writeStartProvisioningError), so the environment does not
 	// stay stranded in provisioning.
-	MarkDeployFailed(ctx context.Context, environmentID, reason string) error
+	MarkDeployFailed(ctx context.Context, tenantID, environmentID, reason string) error
 	// ClaimDelete takes exclusive ownership of a delete attempt (#1140),
 	// mirroring ClaimDeploy: false means another delete already holds it.
-	ClaimDelete(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error)
+	ClaimDelete(ctx context.Context, tenantID, environmentID string, staleAfter time.Duration) (bool, error)
 	// MarkDeleteBlocked records a delete claim that never reached the durable
 	// workflow (see writeStartDeleteError), so the environment does not stay
 	// stranded in `deleting`.
-	MarkDeleteBlocked(ctx context.Context, environmentID, reason string) error
+	MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error
 }
 
 // PlacementContextRepository is the read access placement (#1112) needs: list
@@ -222,7 +228,7 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 	// from launching two delete Jobs against the same namespace, and reclaims
 	// a stale or already-blocked attempt so a retry never needs an operator
 	// to notice and wait it out by hand.
-	claimed, err := r.environments.ClaimDelete(ctx, environment.EnvironmentID, deleteClaimStaleAfter)
+	claimed, err := r.environments.ClaimDelete(ctx, environment.TenantID, environment.EnvironmentID, deleteClaimStaleAfter)
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -232,7 +238,7 @@ func (r EnvironmentRoutes) deleteEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if err := r.startDelete(ctx, environment); err != nil {
-		r.writeStartDeleteError(w, ctx, environment.EnvironmentID, err)
+		r.writeStartDeleteError(w, ctx, environment, err)
 		return
 	}
 	environment.Status = model.EnvironmentStatusDeleting
@@ -314,8 +320,8 @@ func deleteClaimRefusal(status model.EnvironmentStatus) string {
 // 500: ClaimDelete already moved the row to `deleting` before startDelete
 // ran, so any failure to even enqueue the durable workflow would otherwise
 // strand the environment there with no workflow run left to move it out.
-func (r EnvironmentRoutes) writeStartDeleteError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
-	_ = r.environments.MarkDeleteBlocked(ctx, environmentID, err.Error())
+func (r EnvironmentRoutes) writeStartDeleteError(w http.ResponseWriter, ctx context.Context, environment model.Environment, err error) {
+	_ = r.environments.MarkDeleteBlocked(ctx, environment.TenantID, environment.EnvironmentID, err.Error())
 	logServerErrorForRoute(ctx, "DELETE /v1/environments/{environment_id}", err)
 	writeError(w, http.StatusInternalServerError, "failed to start delete")
 }
@@ -445,7 +451,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 	}
 	// Claiming before starting the workflow is what keeps a double-submit from
 	// running two rollouts into the same release.
-	claimed, err := r.environments.ClaimDeploy(ctx, environment.EnvironmentID, deployClaimStaleAfter)
+	claimed, err := r.environments.ClaimDeploy(ctx, environment.TenantID, environment.EnvironmentID, deployClaimStaleAfter)
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -455,7 +461,7 @@ func (r EnvironmentRoutes) deployEnvironment(w http.ResponseWriter, req *http.Re
 		return
 	}
 	if err := r.startDeploy(ctx, environment, version); err != nil {
-		r.writeStartDeployError(w, ctx, environment.EnvironmentID, err)
+		r.writeStartDeployError(w, ctx, environment, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, environment)
@@ -1058,8 +1064,8 @@ func writeStartProvisioningError(w http.ResponseWriter, ctx context.Context, err
 // ClaimDeploy already moved the row to provisioning before startDeploy ran, so
 // any failure to even enqueue the durable workflow would otherwise strand the
 // environment there with no workflow run left to move it out.
-func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx context.Context, environmentID string, err error) {
-	_ = r.environments.MarkDeployFailed(ctx, environmentID, err.Error())
+func (r EnvironmentRoutes) writeStartDeployError(w http.ResponseWriter, ctx context.Context, environment model.Environment, err error) {
+	_ = r.environments.MarkDeployFailed(ctx, environment.TenantID, environment.EnvironmentID, err.Error())
 	logServerErrorForRoute(ctx, "POST /v1/environments/{environment_id}/deploy", err)
 	writeError(w, http.StatusInternalServerError, "failed to start deploy")
 }

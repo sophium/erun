@@ -29,9 +29,13 @@ type EnvLifecycleRunner interface {
 // reach that point (#1140). `running` must never survive a call to Delete:
 // every path through it ends in either the row being gone or MarkDeleteBlocked
 // naming the blocker.
+// Both methods take the owning tenant explicitly: this lifecycle runs behind
+// a durable workflow whose context carries no tenant identity, so the row's
+// own tenant_id is the only thing that can scope the write. See
+// repository.EnvironmentRepository.Delete.
 type EnvironmentRowDeleter interface {
-	Delete(ctx context.Context, environmentID string) error
-	MarkDeleteBlocked(ctx context.Context, environmentID, reason string) error
+	Delete(ctx context.Context, tenantID, environmentID string) error
+	MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error
 }
 
 // EnvLifecycleInput is the non-secret placement a stop or delete Job needs:
@@ -175,7 +179,7 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 	if strings.TrimSpace(input.RunningVersion) != "" {
 		placement, err := l.placement(ctx, input)
 		if err != nil {
-			return l.blockDelete(ctx, input.EnvironmentID, err)
+			return l.blockDelete(ctx, input, err)
 		}
 		result, err := l.runner.RunDelete(ctx, deployexec.DeleteJobParams{
 			Tenant:                  input.Tenant,
@@ -189,10 +193,10 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 			Placement:               placement,
 		})
 		if err != nil {
-			return l.blockDelete(ctx, input.EnvironmentID, err)
+			return l.blockDelete(ctx, input, err)
 		}
 		if result.Outcome != deployexec.OutcomeSucceeded {
-			return l.blockDelete(ctx, input.EnvironmentID, fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result)))
+			return l.blockDelete(ctx, input, fmt.Errorf("delete job %s: %s", result.Outcome, lifecycleFailureDetail(result)))
 		}
 		// The Job's own exit code is not the whole story: `erun delete` treats
 		// a namespace-teardown failure as non-fatal for itself (its local
@@ -200,7 +204,7 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 		// succeeded can still have left the namespace stuck. This is the only
 		// place that failure is visible.
 		if blocker := deployexec.NamespaceDeleteFailureFromOutput(result.Output); blocker != "" {
-			return l.blockDelete(ctx, input.EnvironmentID, errors.New(blocker))
+			return l.blockDelete(ctx, input, errors.New(blocker))
 		}
 		// The environment row is about to be removed, so a failed best-effort
 		// DNS cleanup has nowhere to be recorded once this returns —
@@ -216,8 +220,8 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 	// a retry has something to act on -- the namespace teardown is already
 	// done, so the retry's own delete is a no-op and only the row removal is
 	// re-attempted.
-	if err := l.rows.Delete(ctx, input.EnvironmentID); err != nil {
-		return l.blockDelete(ctx, input.EnvironmentID, fmt.Errorf("namespace torn down but removing the environment row failed: %w", err))
+	if err := l.rows.Delete(ctx, input.TenantID, input.EnvironmentID); err != nil {
+		return l.blockDelete(ctx, input, fmt.Errorf("namespace torn down but removing the environment row failed: %w", err))
 	}
 	return nil
 }
@@ -226,9 +230,9 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 // and returns the same error to the caller. A failure to even record it
 // (best-effort: the environment row still exists to retry against) is
 // logged rather than compounding the original error.
-func (l *EnvLifecycle) blockDelete(ctx context.Context, environmentID string, cause error) error {
-	if err := l.rows.MarkDeleteBlocked(ctx, environmentID, cause.Error()); err != nil {
-		log.Printf("erun api env lifecycle: recording delete-blocked for environment=%q did not persist: %v", environmentID, err)
+func (l *EnvLifecycle) blockDelete(ctx context.Context, input EnvLifecycleInput, cause error) error {
+	if err := l.rows.MarkDeleteBlocked(ctx, input.TenantID, input.EnvironmentID, cause.Error()); err != nil {
+		log.Printf("erun api env lifecycle: recording delete-blocked for environment=%q did not persist: %v", input.EnvironmentID, err)
 	}
 	return cause
 }

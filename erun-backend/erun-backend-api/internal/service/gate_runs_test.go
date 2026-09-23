@@ -26,7 +26,7 @@ func (f *fakeGateRunRepo) Create(_ context.Context, run model.GateRun) (model.Ga
 	return created, nil
 }
 
-func (f *fakeGateRunRepo) Get(_ context.Context, gateRunID string) (model.GateRun, error) {
+func (f *fakeGateRunRepo) Get(_ context.Context, _ string, gateRunID string) (model.GateRun, error) {
 	r, ok := f.runs[gateRunID]
 	if !ok {
 		return model.GateRun{}, repository.ErrNotFound
@@ -34,7 +34,7 @@ func (f *fakeGateRunRepo) Get(_ context.Context, gateRunID string) (model.GateRu
 	return *r, nil
 }
 
-func (f *fakeGateRunRepo) Update(_ context.Context, run model.GateRun) (model.GateRun, error) {
+func (f *fakeGateRunRepo) Update(_ context.Context, _ string, run model.GateRun) (model.GateRun, error) {
 	if _, ok := f.runs[run.GateRunID]; !ok {
 		return model.GateRun{}, repository.ErrNotFound
 	}
@@ -86,7 +86,7 @@ func TestGateRunServiceReportOutcomeRefusesFailedWithNoFailingStep(t *testing.T)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	_, err = svc.ReportOutcome(context.Background(), started.GateRunID, model.GateRunStatusFailed, "", "", "")
+	_, err = svc.ReportOutcome(context.Background(), started.TenantID, started.GateRunID, model.GateRunStatusFailed, "", "", "")
 	var invalid *InvalidGateRunInputError
 	if !errors.As(err, &invalid) || invalid.Field != "failingStep" {
 		t.Fatalf("expected InvalidGateRunInputError on failingStep, got %v", err)
@@ -105,7 +105,7 @@ func TestGateRunServiceReportOutcomeAcceptsInconclusiveWithNoFailingStep(t *test
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	reported, err := svc.ReportOutcome(context.Background(), started.GateRunID, model.GateRunStatusInconclusive, "", "wrapper hit its own timeout cap", "")
+	reported, err := svc.ReportOutcome(context.Background(), started.TenantID, started.GateRunID, model.GateRunStatusInconclusive, "", "wrapper hit its own timeout cap", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -125,10 +125,10 @@ func TestGateRunServiceReportOutcomeRefusesAlreadyDecided(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if _, err := svc.ReportOutcome(context.Background(), started.GateRunID, model.GateRunStatusPassed, "", "", ""); err != nil {
+	if _, err := svc.ReportOutcome(context.Background(), started.TenantID, started.GateRunID, model.GateRunStatusPassed, "", "", ""); err != nil {
 		t.Fatalf("first report: %v", err)
 	}
-	_, err = svc.ReportOutcome(context.Background(), started.GateRunID, model.GateRunStatusFailed, "erun build", "", "")
+	_, err = svc.ReportOutcome(context.Background(), started.TenantID, started.GateRunID, model.GateRunStatusFailed, "erun build", "", "")
 	var alreadyDecided *GateRunAlreadyDecidedError
 	if !errors.As(err, &alreadyDecided) {
 		t.Fatalf("expected GateRunAlreadyDecidedError, got %v", err)

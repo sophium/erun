@@ -115,7 +115,7 @@ func TestJobsSweepAbandonsOnlyStaleRunningJobs(t *testing.T) {
 	stale := claimJobsTestJob(t, svc, ctx, "scope:stale", "erun/code4", "a job whose actor went quiet")
 	fresh := claimJobsTestJob(t, svc, ctx, "scope:fresh", "erun/code4", "a job still being worked")
 	finished := claimJobsTestJob(t, svc, ctx, "scope:finished", "erun/code4", "a job that already ended")
-	if _, err := svc.Update(ctx, finished.JobID, model.JobStatusSucceeded, "", ""); err != nil {
+	if _, err := svc.Update(ctx, tenantID, finished.JobID, model.JobStatusSucceeded, "", ""); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 
@@ -136,13 +136,13 @@ func TestJobsSweepAbandonsOnlyStaleRunningJobs(t *testing.T) {
 		t.Error("endedAt = nil on an abandoned job")
 	}
 
-	stillRunning, err := repo.Get(ctx, fresh.JobID)
+	stillRunning, err := repo.Get(ctx, tenantID, fresh.JobID)
 	mustNoErr(t, err, "get fresh job")
 	if stillRunning.Status != model.JobStatusRunning {
 		t.Errorf("fresh job status = %q, want RUNNING", stillRunning.Status)
 	}
 
-	stillFinished, err := repo.Get(ctx, finished.JobID)
+	stillFinished, err := repo.Get(ctx, tenantID, finished.JobID)
 	mustNoErr(t, err, "get finished job")
 	if stillFinished.Status != model.JobStatusSucceeded {
 		t.Errorf("finished job status = %q, want SUCCEEDED preserved", stillFinished.Status)
@@ -184,10 +184,13 @@ func TestJobsAreTenantIsolated(t *testing.T) {
 
 	theirs := claimJobsTestJob(t, svc, otherCtx, "scope:theirs", "erun/code9", "work in the other tenant")
 
-	// By id: RLS makes another tenant's job invisible, so it resolves to the
-	// same not-found a genuinely missing row does.
-	if _, err := repo.Get(ownCtx, theirs.JobID); err == nil {
-		t.Fatal("Get() of another tenant's job succeeded; the jobs RLS policy is not isolating")
+	// By id: another tenant's job resolves to the same not-found a genuinely
+	// missing row does. This holds for a COMPANY caller through RLS and for an
+	// OPERATIONS caller, whose policy is unconditional, through the explicit
+	// tenant predicate Get now carries — so the caller's own tenant is what is
+	// named here, not the row's.
+	if _, err := repo.Get(ownCtx, tenantID, theirs.JobID); err == nil {
+		t.Fatal("Get() of another tenant's job succeeded; tenant isolation is not holding")
 	}
 
 	listed, err := repo.List(ownCtx, repository.JobFilter{})

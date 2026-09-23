@@ -8,18 +8,22 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type GateRunRepository interface {
-	Get(ctx context.Context, gateRunID string) (model.GateRun, error)
+	// Get takes the caller's tenant alongside the gate run id: gate_runs is
+	// tenant-owned and erun_operations' RLS policy is unconditional, so an
+	// id-only lookup would answer an OPERATIONS caller with a stranger's run.
+	Get(ctx context.Context, tenantID, gateRunID string) (model.GateRun, error)
 	List(ctx context.Context, filter apirepository.GateRunFilter) ([]model.GateRun, error)
 }
 
 type GateRunService interface {
 	Start(ctx context.Context, run model.GateRun) (model.GateRun, error)
-	ReportOutcome(ctx context.Context, gateRunID string, status model.GateRunStatus, failingStep, logRef, mergeCommit string) (model.GateRun, error)
+	ReportOutcome(ctx context.Context, tenantID, gateRunID string, status model.GateRunStatus, failingStep, logRef, mergeCommit string) (model.GateRun, error)
 }
 
 type GateRunRoutes struct {
@@ -70,7 +74,14 @@ func (r GateRunRoutes) listGateRuns(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r GateRunRoutes) getGateRun(w http.ResponseWriter, req *http.Request) {
-	run, err := r.gateRuns.Get(req.Context(), req.PathValue("gate_run_id"))
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	// A gate run read through this route is always the caller's own, so a
+	// cross-tenant id answers 404 exactly as an id that names nothing does.
+	run, err := r.gateRuns.Get(req.Context(), securityContext.TenantID, req.PathValue("gate_run_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -106,8 +117,16 @@ func (r GateRunRoutes) reportGateRunOutcome(w http.ResponseWriter, req *http.Req
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
 	input.Status = model.GateRunStatus(strings.ToUpper(strings.TrimSpace(string(input.Status))))
-	run, err := r.service.ReportOutcome(req.Context(), req.PathValue("gate_run_id"), input.Status, input.FailingStep, input.LogRef, input.MergeCommit)
+	// Only the caller's own gate run can be decided: a verdict for a
+	// cross-tenant id fails the same not-found lookup the read makes, so it
+	// answers 404 rather than confirming the run exists.
+	run, err := r.service.ReportOutcome(req.Context(), securityContext.TenantID, req.PathValue("gate_run_id"), input.Status, input.FailingStep, input.LogRef, input.MergeCommit)
 	if err != nil {
 		writeGateRunError(w, req, err)
 		return
