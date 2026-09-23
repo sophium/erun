@@ -808,7 +808,7 @@ Pass `controlPlanes: true` to additionally check every configured erun-hosted co
 
 The environment read model: one call composing what `list`, `idle`, and `doctor` already report into a single resolved answer. `state` is the field the other three cannot give you on their own — `running`, `idle`, `deploy-failed`, `stopped`, or `unknown` — derived from the environment's cloud-context power state (when observed), its deploy health, and its idle-policy eligibility.
 
-`state` is `unknown` whenever a signal it depends on was never observed, rather than a guessed `stopped` or `idle`. This matters most for a managed-cloud environment: its cloud-context power state is a live AWS reading this package never persists to disk, and no AWS credential reaches inside this pod to refresh it — so unless something else already refreshed it in the same process, `cloudContext` carries the environment's cloud-context config with no `status`, and `state` reads `unknown`. Pass `preview: true` to skip the live `helm`/`kubectl` deploy diagnosis (the only part of this call that touches the cluster) and get `health: null` back instead of running it.
+`state` is `unknown` whenever a signal it depends on was never observed, rather than a guessed `stopped` or `idle`. This matters most for a managed-cloud environment: its cloud-context power state is a live AWS reading this package never persists to disk, and no AWS credential reaches inside this pod to refresh it — so unless something else already refreshed it in the same process, `cloudContext` carries the environment's cloud-context config with no `status`, and `state` reads `unknown`. Pass `preview: true` to skip the live `helm`/`kubectl` deploy diagnosis (the only part of this call that touches the cluster) and get no `health` key back at all instead of running it — the signal was never observed, so the field is omitted rather than reported as `null`, which a client would otherwise have to read as "doctor found nothing wrong".
 
 ```jsonc
 {
@@ -817,21 +817,22 @@ The environment read model: one call composing what `list`, `idle`, and `doctor`
     "name": "local",
     "type": "local-agent",
     "runtimeVersion": "1.0.308",
-    "managedCloud": false,
     "isDefault": true,
     "isEffective": true
   },
   "state": "running",
   "idle": {
-    "policy": { "timeout": "5m0s", "workingHours": "09:00-19:00" },
+    "policy": { "timeout": 300000000000, "workingHours": "09:00-19:00" },
     "stopEligible": false
   },
   "health": {
     "rootConfig": { "configStatus": "ok" },
-    "deploy": { "helmStatus": "STATUS: deployed" }
+    "deploy": { "HelmStatus": "STATUS: deployed" }
   }
 }
 ```
+
+Two details the excerpt above cannot show on its own, both of which a hand-written client has to get right: `idle.policy.timeout` is a count of **nanoseconds**, not a duration string (`5m0s` is `300000000000`), and `health.deploy`'s fields are capitalized because `DeployDiagnosisResult` carries no JSON tags — `HelmStatus`, `HelmReadError`, `Pods`, `ClusterUnreachable`, `AgentCredentials`. Fields the model omits when zero (`environment.managedCloud`, and the `idle`/`health` objects themselves when that signal was never observed) are absent from the response rather than present as `false` or `null`. The full field-by-field contract, including every nullable and omitted case, is in [Agent reference · Environment read model](/agent-reference/environment-read-model).
 
 ### `version`
 
