@@ -76,39 +76,49 @@ func claimJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Context
 	return job
 }
 
-// backdateJob moves a job's last-update stamp into the past, the way an actor
-// going quiet would. It writes through the same connection pool as the
-// repository, so the sweep's own transaction sees it.
+// sweepPastEveryStamp closes every RUNNING job in the caller's tenant, by
+// asking the sweep for everything older than a threshold an hour from now.
 //
-// The timestamp trigger owns updated_at on UPDATE -- erun_set_timestamps sets
-// it to NOW() unconditionally, discarding whatever the statement supplied --
-// so a plain backdating UPDATE is overwritten before the sweep can read it and
-// the stale job the sweep is supposed to abandon is never stale. The trigger
-// is disabled for this one write, because the state being set up is the one
-// production reaches by an actor simply not writing again, which no UPDATE of
-// this test's can imitate while the trigger owns the column. DISABLE TRIGGER
-// is catalog-level, so it applies to the pool's connection for the UPDATE
-// whichever one that turns out to be.
-func backdateJob(t *testing.T, db *sql.DB, jobID string, ago time.Duration) {
+// The threshold is what moves, never the row. jobs_set_timestamps
+// (erun-backend-db/schema/triggers/timestamps.sql) stamps updated_at = NOW()
+// on every UPDATE, so a job cannot be aged by writing to it — the write that
+// would age it is the same write that refreshes it. This test used to
+// back-date the row directly, which against a real migrated PostgreSQL set
+// updated_at to NOW() and left the sweep with nothing to find.
+func sweepPastEveryStamp(t *testing.T, repo *repository.JobRepository, ctx context.Context) []model.Job {
 	t.Helper()
-	_, err := db.Exec(`ALTER TABLE jobs DISABLE TRIGGER jobs_set_timestamps`)
-	mustNoErr(t, err, "disable the jobs timestamp trigger")
-	defer func() {
-		if _, err := db.Exec(`ALTER TABLE jobs ENABLE TRIGGER jobs_set_timestamps`); err != nil {
-			t.Fatalf("re-enable the jobs timestamp trigger: %v", err)
-		}
-	}()
+	abandoned, err := repo.AbandonStale(ctx, time.Now().UTC().Add(time.Hour))
+	mustNoErr(t, err, "sweep past every stamp")
+	return abandoned
+}
 
-	_, err = db.Exec(`UPDATE jobs SET updated_at = NOW() - $2::interval WHERE job_id = $1`, jobID, ago.String())
-	mustNoErr(t, err, "backdate job")
+// assertAbandoned holds one swept row to what the sweep promises about it.
+func assertAbandoned(t *testing.T, closed map[string]model.Job, jobID string) {
+	t.Helper()
+	job, ok := closed[jobID]
+	if !ok {
+		t.Fatalf("abandoned = %+v, want job %s closed", closed, jobID)
+	}
+	if job.Status != model.JobStatusAbandoned {
+		t.Errorf("job %s status = %q, want %q", jobID, job.Status, model.JobStatusAbandoned)
+	}
+	// The table's CHECK enforces the pairing, so a row that came back without
+	// an ended_at could not have been written at all.
+	if job.EndedAt == nil {
+		t.Errorf("endedAt = nil on abandoned job %s", jobID)
+	}
 }
 
 // TestJobsSweepAbandonsOnlyStaleRunningJobs is the sweep's SQL contract: it
-// closes a RUNNING job nobody has updated inside the TTL, pairs it with the
-// ended_at the table's CHECK requires, and touches neither a job still inside
-// its TTL nor one that already reached an outcome.
+// closes a RUNNING job whose last update predates the threshold, pairs it with
+// the ended_at the table's CHECK requires, and touches neither a job inside the
+// threshold nor one that already reached an outcome.
+//
+// Both sides of that boundary are pinned by moving the threshold, because the
+// row cannot be moved: the first sweep runs at the production TTL every claim
+// is inside, and the second runs past every stamp there is.
 func TestJobsSweepAbandonsOnlyStaleRunningJobs(t *testing.T) {
-	repo, db, tenantID := jobsDatabase(t)
+	repo, _, tenantID := jobsDatabase(t)
 	ctx := jobsTenantContext(tenantID)
 	svc := service.NewJobService(repo)
 
@@ -119,27 +129,29 @@ func TestJobsSweepAbandonsOnlyStaleRunningJobs(t *testing.T) {
 		t.Fatalf("Update() error = %v", err)
 	}
 
-	backdateJob(t, db, stale.JobID, 2*service.DefaultJobAbandonTTL)
-	backdateJob(t, db, finished.JobID, 2*service.DefaultJobAbandonTTL)
-
+	// Every claim is well inside the TTL, so the production sweep closes
+	// nothing: being young enough is what protects a job, not its status.
 	abandoned, err := svc.SweepAbandoned(ctx, service.DefaultJobAbandonTTL)
-	if err != nil {
-		t.Fatalf("SweepAbandoned() error = %v", err)
+	mustNoErr(t, err, "sweep inside the TTL")
+	if len(abandoned) != 0 {
+		t.Fatalf("abandoned = %+v, want nothing: every claim here is inside the TTL", abandoned)
 	}
 
-	if len(abandoned) != 1 || abandoned[0].JobID != stale.JobID {
-		t.Fatalf("abandoned = %+v, want exactly job %s", abandoned, stale.JobID)
+	// Past every stamp, both RUNNING jobs are stale. The finished one is not
+	// RUNNING, so the same sweep must leave it alone — which is the "only" in
+	// this test's name, observable in one call.
+	closed := map[string]model.Job{}
+	for _, job := range sweepPastEveryStamp(t, repo, ctx) {
+		closed[job.JobID] = job
 	}
-	// The table's CHECK enforces the pairing, so a row that came back without
-	// an ended_at could not have been written at all.
-	if abandoned[0].EndedAt == nil {
-		t.Error("endedAt = nil on an abandoned job")
+	if len(closed) != 2 {
+		t.Fatalf("abandoned = %+v, want exactly %s and %s", closed, stale.JobID, fresh.JobID)
 	}
-
-	stillRunning, err := repo.Get(ctx, tenantID, fresh.JobID)
-	mustNoErr(t, err, "get fresh job")
-	if stillRunning.Status != model.JobStatusRunning {
-		t.Errorf("fresh job status = %q, want RUNNING", stillRunning.Status)
+	for _, want := range []string{stale.JobID, fresh.JobID} {
+		assertAbandoned(t, closed, want)
+	}
+	if job, ok := closed[finished.JobID]; ok {
+		t.Fatalf("the sweep closed a job that already reached an outcome: %+v", job)
 	}
 
 	stillFinished, err := repo.Get(ctx, tenantID, finished.JobID)
@@ -154,15 +166,15 @@ func TestJobsSweepAbandonsOnlyStaleRunningJobs(t *testing.T) {
 // issue forever. Everything here is real SQL — the partial read the claim
 // makes, the status the sweep writes, and the read that follows it.
 func TestJobsSweepReleasesTheAbandonedScope(t *testing.T) {
-	repo, db, tenantID := jobsDatabase(t)
+	repo, _, tenantID := jobsDatabase(t)
 	ctx := jobsTenantContext(tenantID)
 	svc := service.NewJobService(repo)
 
 	first := claimJobsTestJob(t, svc, ctx, "sophium/erun#2109", "erun/code4", "fixing the jobs claim race")
-	backdateJob(t, db, first.JobID, 2*service.DefaultJobAbandonTTL)
 
-	if _, err := svc.SweepAbandoned(ctx, service.DefaultJobAbandonTTL); err != nil {
-		t.Fatalf("SweepAbandoned() error = %v", err)
+	abandoned := sweepPastEveryStamp(t, repo, ctx)
+	if len(abandoned) != 1 || abandoned[0].JobID != first.JobID {
+		t.Fatalf("abandoned = %+v, want exactly job %s", abandoned, first.JobID)
 	}
 
 	second := claimJobsTestJob(t, svc, ctx, "sophium/erun#2109", "erun/code5", "picking the issue up after the sweep")
@@ -208,18 +220,16 @@ func TestJobsAreTenantIsolated(t *testing.T) {
 // record the design exists to prevent would simply outlive its tenant's
 // attention.
 func TestJobsSweepIsCrossTenant(t *testing.T) {
-	repo, db, tenantID := jobsDatabase(t)
+	repo, _, tenantID := jobsDatabase(t)
 	ownCtx := jobsTenantContext(tenantID)
 	svc := service.NewJobService(repo)
 
 	job := claimJobsTestJob(t, svc, ownCtx, "scope:cross-tenant", "erun/code4", "work in a tenant that never sweeps")
-	backdateJob(t, db, job.JobID, 2*service.DefaultJobAbandonTTL)
 
+	// The sweep itself runs under the operations role, which is the thing
+	// under test: with no tenant of its own it still reaches this one's rows.
 	opsCtx := security.WithContext(context.Background(), security.Context{TenantID: tenantID, TenantType: "OPERATIONS"})
-	abandoned, err := svc.SweepAbandoned(opsCtx, service.DefaultJobAbandonTTL)
-	if err != nil {
-		t.Fatalf("SweepAbandoned() as operations error = %v", err)
-	}
+	abandoned := sweepPastEveryStamp(t, repo, opsCtx)
 
 	var found bool
 	for _, candidate := range abandoned {
