@@ -248,6 +248,7 @@ func deployJobParams(config EnvDeployConfig, input EnvProvisionInput) deployexec
 		// EnvironmentProvisioner.Provision resolves the live credential and
 		// sets it on this Placement immediately before the Job runs.
 		Placement: deployexec.PlacementParams{
+			TenantID:          input.TenantID,
 			ContextID:         input.ContextID,
 			KubernetesContext: input.PlacementKubernetesContext,
 			ServerURL:         input.PlacementServerURL,

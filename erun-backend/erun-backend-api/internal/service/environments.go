@@ -15,7 +15,12 @@ import (
 // EnvironmentStatusWriter persists an environment's provisioning-lifecycle
 // transitions (the repository).
 type EnvironmentStatusWriter interface {
-	UpdateProvisioningStatus(ctx context.Context, environmentID string, update repository.EnvironmentStatusUpdate) error
+	// The owning tenant travels explicitly: the provisioner runs behind a
+	// durable workflow, so the environment row's own tenant_id — carried on
+	// the deploy params — is what scopes the write rather than whatever
+	// tenant the workflow's context happens to name. See
+	// repository.EnvironmentRepository.UpdateProvisioningStatus.
+	UpdateProvisioningStatus(ctx context.Context, tenantID, environmentID string, update repository.EnvironmentStatusUpdate) error
 }
 
 // DeployRunner runs a hosted-env deploy to a terminal result — satisfied by the
@@ -64,22 +69,22 @@ func NewEnvironmentProvisioner(runner DeployRunner, status EnvironmentStatusWrit
 // non-succeeded deploy Job both land it in failed with the reason; only a
 // succeeded Job marks it running, recording the version that actually deployed.
 func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID string, params deployexec.DeployJobParams) error {
-	if err := p.write(ctx, environmentID, repository.EnvironmentStatusUpdate{
+	if err := p.write(ctx, params.Placement.TenantID, environmentID, repository.EnvironmentStatusUpdate{
 		Status: string(model.EnvironmentStatusProvisioning),
 	}); err != nil {
 		return fmt.Errorf("mark provisioning: %w", err)
 	}
-	token, err := deployexec.ResolvePlacementToken(ctx, p.credentials, params.Placement.ContextID)
+	token, err := deployexec.ResolvePlacementToken(ctx, p.credentials, params.Placement.TenantID, params.Placement.ContextID)
 	if err != nil {
-		return p.fail(ctx, environmentID, err.Error(), err)
+		return p.fail(ctx, params.Placement.TenantID, environmentID, err.Error(), err)
 	}
 	params.Placement.AdminToken = token
 	result, runErr := p.runner.Run(ctx, params)
 	if runErr != nil {
-		return p.fail(ctx, environmentID, runErr.Error(), runErr)
+		return p.fail(ctx, params.Placement.TenantID, environmentID, runErr.Error(), runErr)
 	}
 	if result.Outcome != deployexec.OutcomeSucceeded {
-		return p.fail(ctx, environmentID, deployFailureReason(params, result), fmt.Errorf("deploy job outcome %q", result.Outcome))
+		return p.fail(ctx, params.Placement.TenantID, environmentID, deployFailureReason(params, result), fmt.Errorf("deploy job outcome %q", result.Outcome))
 	}
 	// The env is now running this version, so record it here rather than after
 	// any later step: a run that fails past this point still leaves the cluster
@@ -94,7 +99,7 @@ func (p *EnvironmentProvisioner) Provision(ctx context.Context, environmentID st
 	if exposeError == "" {
 		exposedHostname = deployexec.ExposeHostnameFromParams(params)
 	}
-	if err := p.write(ctx, environmentID, repository.EnvironmentStatusUpdate{
+	if err := p.write(ctx, params.Placement.TenantID, environmentID, repository.EnvironmentStatusUpdate{
 		Status:          string(model.EnvironmentStatusRunning),
 		DeployedVersion: params.Version,
 		ExposeError:     exposeError,
@@ -141,12 +146,12 @@ func deployFailureReason(params deployexec.DeployJobParams, result deployexec.Re
 // so a status-write hiccup never masks the real provisioning failure. The write
 // error is logged rather than dropped, because a lost failure write is what
 // leaves an env stranded in `provisioning`.
-func (p *EnvironmentProvisioner) fail(ctx context.Context, environmentID, reason string, cause error) error {
+func (p *EnvironmentProvisioner) fail(ctx context.Context, tenantID, environmentID, reason string, cause error) error {
 	update := repository.EnvironmentStatusUpdate{
 		Status:         string(model.EnvironmentStatusFailed),
 		ProvisionError: reason,
 	}
-	if err := p.write(ctx, environmentID, update); err != nil {
+	if err := p.write(ctx, tenantID, environmentID, update); err != nil {
 		log.Printf("erun api env deploy: recording failed status for environment=%q did not persist: %v (deploy failure: %v)", environmentID, err, cause)
 	}
 	return cause
@@ -154,10 +159,10 @@ func (p *EnvironmentProvisioner) fail(ctx context.Context, environmentID, reason
 
 // write applies one lifecycle transition, retrying a transient failure a bounded
 // number of times.
-func (p *EnvironmentProvisioner) write(ctx context.Context, environmentID string, update repository.EnvironmentStatusUpdate) error {
+func (p *EnvironmentProvisioner) write(ctx context.Context, tenantID, environmentID string, update repository.EnvironmentStatusUpdate) error {
 	var err error
 	for attempt := range statusWriteAttempts {
-		if err = p.status.UpdateProvisioningStatus(ctx, environmentID, update); err == nil {
+		if err = p.status.UpdateProvisioningStatus(ctx, tenantID, environmentID, update); err == nil {
 			return nil
 		}
 		if attempt == statusWriteAttempts-1 {

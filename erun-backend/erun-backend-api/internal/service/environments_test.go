@@ -30,7 +30,7 @@ type recordingStatusWriter struct {
 	calls     int
 }
 
-func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ string, update repository.EnvironmentStatusUpdate) error {
+func (w *recordingStatusWriter) UpdateProvisioningStatus(_ context.Context, _ string, _ string, update repository.EnvironmentStatusUpdate) error {
 	w.calls++
 	if w.calls <= w.failFirst {
 		return errors.New("database unavailable")
@@ -353,7 +353,7 @@ func TestProvisionRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	runner := fakeRunner{outcome: deployexec.OutcomeSucceeded}
 	provisioner := NewEnvironmentProvisioner(runner, status, nil, nil)
 	provisioner.backoff = 0
-	params := deployexec.DeployJobParams{Version: "1.2.3", Placement: deployexec.PlacementParams{ContextID: "ctx-1"}}
+	params := deployexec.DeployJobParams{Version: "1.2.3", Placement: deployexec.PlacementParams{TenantID: "tenant-1", ContextID: "ctx-1"}}
 	err := provisioner.Provision(context.Background(), "env-1", params)
 	if err == nil {
 		t.Fatal("expected an error when no placement credential resolver is configured")
@@ -376,7 +376,7 @@ func TestProvisionResolvesThePlacementTokenFreshOnEveryRun(t *testing.T) {
 	credentials := stubPlacementCredentials{token: "live-token"}
 	provisioner := NewEnvironmentProvisioner(runner, status, nil, credentials)
 	provisioner.backoff = 0
-	params := deployexec.DeployJobParams{Version: "1.2.3", Placement: deployexec.PlacementParams{ContextID: "ctx-1"}}
+	params := deployexec.DeployJobParams{Version: "1.2.3", Placement: deployexec.PlacementParams{TenantID: "tenant-1", ContextID: "ctx-1"}}
 	if err := provisioner.Provision(context.Background(), "env-1", params); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
@@ -390,7 +390,7 @@ type stubPlacementCredentials struct {
 	err   error
 }
 
-func (s stubPlacementCredentials) Get(context.Context, string) (string, error) {
+func (s stubPlacementCredentials) Get(context.Context, string, string) (string, error) {
 	return s.token, s.err
 }
 

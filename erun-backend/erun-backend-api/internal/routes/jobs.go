@@ -9,13 +9,17 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
 // JobRepository is the persistence access job routes need: the claim
 // primitive's lookup, the follow-up reads, and the status/summary writes.
 type JobRepository interface {
-	Get(ctx context.Context, jobID string) (model.Job, error)
+	// Get takes the caller's tenant alongside the job id: erun_operations'
+	// unconditional RLS policy means an id-only lookup answers an OPERATIONS
+	// caller with any tenant's job.
+	Get(ctx context.Context, tenantID, jobID string) (model.Job, error)
 	List(ctx context.Context, filter apirepository.JobFilter) ([]model.Job, error)
 	ListByEnvironment(ctx context.Context, environmentID string) ([]model.Job, error)
 	FindOpenByScope(ctx context.Context, scope string) (model.Job, error)
@@ -25,7 +29,7 @@ type JobRepository interface {
 // check) and moving a job forward.
 type JobService interface {
 	Claim(ctx context.Context, job model.Job) (model.Job, error)
-	Update(ctx context.Context, jobID string, status model.JobStatus, summary, localJobID string) (model.Job, error)
+	Update(ctx context.Context, tenantID, jobID string, status model.JobStatus, summary, localJobID string) (model.Job, error)
 }
 
 type JobRoutes struct {
@@ -65,7 +69,15 @@ func (r JobRoutes) listJobs(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r JobRoutes) getJob(w http.ResponseWriter, req *http.Request) {
-	job, err := r.jobs.Get(req.Context(), req.PathValue("job_id"))
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	// A job read through this route is always the caller's own: an
+	// OPERATIONS caller naming a stranger tenant's job id gets the same 404 a
+	// genuinely absent id does, rather than the stranger's row.
+	job, err := r.jobs.Get(req.Context(), securityContext.TenantID, req.PathValue("job_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -125,8 +137,17 @@ func (r JobRoutes) updateJob(w http.ResponseWriter, req *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	// Only the caller's own job can be moved forward: a cross-tenant id fails
+	// the same not-found lookup Get makes, so the write answers 404 for it
+	// exactly as it does for an id that names nothing.
 	job, err := r.service.Update(
 		req.Context(),
+		securityContext.TenantID,
 		req.PathValue("job_id"),
 		model.JobStatus(strings.ToUpper(strings.TrimSpace(string(body.Status)))),
 		body.Summary,

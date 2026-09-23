@@ -16,7 +16,10 @@ import (
 
 type ContextRepository interface {
 	List(ctx context.Context) ([]model.Context, error)
-	Get(ctx context.Context, contextID string) (model.Context, error)
+	// Get takes the owning tenant alongside the context id: contexts is
+	// tenant-owned and erun_operations' RLS policy is unconditional, so an
+	// id-only lookup would hand an OPERATIONS caller a stranger's context.
+	Get(ctx context.Context, tenantID, contextID string) (model.Context, error)
 	Create(ctx context.Context, cloudContext model.Context) (model.Context, error)
 }
 
@@ -122,7 +125,16 @@ func (r ContextRoutes) listContexts(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r ContextRoutes) getContext(w http.ResponseWriter, req *http.Request) {
-	cloudContext, err := r.contexts.Get(req.Context(), req.PathValue("context_id"))
+	securityContext, ok := security.FromContext(req.Context())
+	if !ok {
+		writeInternalError(w, req, http.StatusText(http.StatusInternalServerError), errors.New("security context not found in request"))
+		return
+	}
+	// A context read through this route is always the caller's own: this route
+	// exposes no cross-tenant context administration, and naming the caller's
+	// tenant explicitly is what keeps an OPERATIONS caller from reading a
+	// stranger's context by id.
+	cloudContext, err := r.contexts.Get(req.Context(), securityContext.TenantID, req.PathValue("context_id"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return

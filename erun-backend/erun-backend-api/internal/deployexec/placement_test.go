@@ -143,34 +143,58 @@ func TestEnsurePlacementSecretCreatesThenUpdates(t *testing.T) {
 }
 
 func TestResolvePlacementTokenEmptyContextIsNoop(t *testing.T) {
-	token, err := ResolvePlacementToken(context.Background(), nil, "")
+	token, err := ResolvePlacementToken(context.Background(), nil, "", "")
 	if err != nil || token != "" {
 		t.Fatalf("ResolvePlacementToken(empty) = (%q, %v), want (\"\", nil)", token, err)
 	}
 }
 
 func TestResolvePlacementTokenFailsClearlyWithNoResolver(t *testing.T) {
-	_, err := ResolvePlacementToken(context.Background(), nil, "ctx-1")
+	_, err := ResolvePlacementToken(context.Background(), nil, "tenant-1", "ctx-1")
 	if err == nil {
 		t.Fatal("expected an error when a context is named but no resolver is configured")
 	}
 }
 
-type stubCredentialResolver struct {
-	token string
-	err   error
+// TestResolvePlacementTokenRefusesAContextWithNoOwningTenant: a placement
+// credential belongs to the tenant that owns the context, so a caller that
+// names only a context id has nothing that scopes the read — erun_operations'
+// unconditional RLS policy would hand it whichever tenant's context that id
+// names. Refusing before the resolver is reached is what keeps the id from
+// being the only thing the read is keyed on.
+func TestResolvePlacementTokenRefusesAContextWithNoOwningTenant(t *testing.T) {
+	resolver := &recordingCredentialResolver{token: "secret-token"}
+	_, err := ResolvePlacementToken(context.Background(), resolver, "  ", "ctx-1")
+	if err == nil {
+		t.Fatal("expected an error when a context is named with no owning tenant")
+	}
+	if len(resolver.asked) != 0 {
+		t.Fatalf("resolver was asked for %v, want no lookup at all", resolver.asked)
+	}
 }
 
-func (s stubCredentialResolver) Get(context.Context, string) (string, error) {
-	return s.token, s.err
+// recordingCredentialResolver remembers which (tenant, context) pair it was
+// asked for, so a test can assert on the owner rather than only the token.
+type recordingCredentialResolver struct {
+	token string
+	asked []string
+}
+
+func (r *recordingCredentialResolver) Get(_ context.Context, tenantID, contextID string) (string, error) {
+	r.asked = append(r.asked, tenantID+"/"+contextID)
+	return r.token, nil
 }
 
 func TestResolvePlacementTokenUsesTheResolver(t *testing.T) {
-	token, err := ResolvePlacementToken(context.Background(), stubCredentialResolver{token: "secret-token"}, "ctx-1")
+	resolver := &recordingCredentialResolver{token: "secret-token"}
+	token, err := ResolvePlacementToken(context.Background(), resolver, "tenant-1", "ctx-1")
 	if err != nil {
 		t.Fatalf("ResolvePlacementToken: %v", err)
 	}
 	if token != "secret-token" {
 		t.Fatalf("token = %q, want secret-token", token)
+	}
+	if len(resolver.asked) != 1 || resolver.asked[0] != "tenant-1/ctx-1" {
+		t.Fatalf("resolver asked for %v, want [tenant-1/ctx-1]", resolver.asked)
 	}
 }

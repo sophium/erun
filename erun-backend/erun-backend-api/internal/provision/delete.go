@@ -40,6 +40,7 @@ type EnvDeleteInput struct {
 
 func (input EnvDeleteInput) lifecycleInput() EnvLifecycleInput {
 	return EnvLifecycleInput{
+		TenantID:                   input.TenantID,
 		Tenant:                     input.Tenant,
 		Environment:                input.Environment,
 		EnvironmentID:              input.EnvironmentID,

@@ -65,14 +65,21 @@ func classifyJobError(err error) error {
 	}
 }
 
-func (r *JobRepository) Get(ctx context.Context, jobID string) (model.Job, error) {
+// Get returns a job owned by tenantID, or ErrNotFound for an id that names
+// another tenant's job. The tenant is an explicit predicate and not left to
+// RLS, the same reason EnvironmentRepository.Get states it: erun_operations'
+// RLS policy is unconditional (USING (true)), so for an OPERATIONS caller an
+// id-only lookup would answer with a stranger's row — here on the job routes,
+// where Get's result is what PATCH /v1/jobs/{job_id} then moves forward.
+func (r *JobRepository) Get(ctx context.Context, tenantID, jobID string) (model.Job, error) {
 	var job model.Job
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
 			SELECT `+jobColumns+`
 			  FROM jobs
 			 WHERE job_id = ?
-		`, jobID).Scan(ctx, &job)
+			   AND tenant_id = ?
+		`, jobID, tenantID).Scan(ctx, &job)
 		return normalizeNoRows(err)
 	})
 	return job, err
@@ -204,13 +211,19 @@ func (r *JobRepository) AbandonStale(ctx context.Context, staleBefore time.Time)
 // plus the ended_at the status change implies. Every other field — what the
 // job claims, who holds it, when it started — is immutable after creation,
 // so a job cannot be reassigned to another actor by a later write.
-func (r *JobRepository) Update(ctx context.Context, job model.Job) (model.Job, error) {
+// Update writes tenantID's own job, carrying the same explicit tenant
+// predicate Get does. The service reaches this only with a job it read back
+// through Get under the same tenant, so the predicate states a scope that was
+// already true rather than newly narrowing the write — which is the point: it
+// is stated here, not inherited from whichever read happened to precede it.
+func (r *JobRepository) Update(ctx context.Context, tenantID string, job model.Job) (model.Job, error) {
 	updated := job
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewUpdate().
 			Model(&updated).
 			Column("status", "summary", "local_job_id", "ended_at").
 			Where("job_id = ?", updated.JobID).
+			Where("tenant_id = ?", tenantID).
 			Returning("*").
 			Scan(ctx)
 		return classifyJobError(normalizeNoRows(err))

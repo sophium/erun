@@ -137,7 +137,7 @@ type fakeReviewBuilds struct {
 	builds map[string]model.Build
 }
 
-func (f *fakeReviewBuilds) Get(_ context.Context, buildID string) (model.Build, error) {
+func (f *fakeReviewBuilds) Get(_ context.Context, _ string, buildID string) (model.Build, error) {
 	b, ok := f.builds[buildID]
 	if !ok {
 		return model.Build{}, repository.ErrNotFound

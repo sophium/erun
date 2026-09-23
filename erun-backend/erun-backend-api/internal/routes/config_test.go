@@ -68,7 +68,7 @@ type stubEnvironmentRepository struct {
 	lastListTenantID string
 }
 
-func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Duration) (bool, error) {
+func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, string, time.Duration) (bool, error) {
 	r.claimCalls++
 	if r.claimErr != nil {
 		return false, r.claimErr
@@ -76,13 +76,13 @@ func (r *stubEnvironmentRepository) ClaimDeploy(context.Context, string, time.Du
 	return !r.claimTaken, nil
 }
 
-func (r *stubEnvironmentRepository) MarkDeployFailed(_ context.Context, _ string, reason string) error {
+func (r *stubEnvironmentRepository) MarkDeployFailed(_ context.Context, _ string, _ string, reason string) error {
 	r.markFailedCalls++
 	r.markFailedReason = reason
 	return nil
 }
 
-func (r *stubEnvironmentRepository) ClaimDelete(context.Context, string, time.Duration) (bool, error) {
+func (r *stubEnvironmentRepository) ClaimDelete(context.Context, string, string, time.Duration) (bool, error) {
 	r.claimDeleteCalls++
 	if r.claimDeleteErr != nil {
 		return false, r.claimDeleteErr
@@ -90,7 +90,7 @@ func (r *stubEnvironmentRepository) ClaimDelete(context.Context, string, time.Du
 	return !r.claimDeleteTaken, nil
 }
 
-func (r *stubEnvironmentRepository) MarkDeleteBlocked(_ context.Context, _ string, reason string) error {
+func (r *stubEnvironmentRepository) MarkDeleteBlocked(_ context.Context, _ string, _ string, reason string) error {
 	r.markDeleteBlockedCalls++
 	r.markDeleteBlockedReason = reason
 	return nil
@@ -202,13 +202,17 @@ type stubContextRepository struct {
 	createCalls  int
 	createInput  model.Context
 	err          error
+	// getTenantID records the owning tenant the last Get was asked for, so a
+	// test can assert the caller named one rather than relying on RLS.
+	getTenantID string
 }
 
 func (r *stubContextRepository) List(context.Context) ([]model.Context, error) {
 	return r.contexts, r.err
 }
 
-func (r *stubContextRepository) Get(context.Context, string) (model.Context, error) {
+func (r *stubContextRepository) Get(_ context.Context, tenantID, _ string) (model.Context, error) {
+	r.getTenantID = tenantID
 	return r.cloudContext, r.err
 }
 
@@ -295,11 +299,20 @@ func TestGetContextNotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/contexts/missing", nil)
 	req.SetPathValue("context_id", "missing")
+	req = req.WithContext(security.WithContext(req.Context(), security.Context{
+		TenantID: "tenant-1", ErunUserID: "user-1",
+	}))
 	rec := httptest.NewRecorder()
 
 	ContextRoutes{contexts: contexts}.getContext(rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+	// The read is keyed on the caller's own tenant, never on the id alone: an
+	// id-only context read is what erun_operations' unconditional RLS policy
+	// would answer with another tenant's row.
+	if contexts.getTenantID != "tenant-1" {
+		t.Fatalf("context read asked for tenant %q, want tenant-1", contexts.getTenantID)
 	}
 }

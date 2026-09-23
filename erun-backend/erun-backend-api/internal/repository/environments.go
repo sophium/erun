@@ -172,8 +172,17 @@ type EnvironmentStatusUpdate struct {
 
 // UpdateProvisioningStatus persists an environment's provisioning-lifecycle
 // transition (registered → provisioning → running/failed). Mirrors the contexts
-// provisioning-result update; RLS keeps the write scoped to the caller's tenant.
-func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, environmentID string, update EnvironmentStatusUpdate) error {
+// provisioning-result update.
+//
+// The owning tenant is an explicit argument and an explicit predicate rather
+// than the security context's tenant, because this method's callers include
+// the delete reconciler, whose context carries OPERATIONS as its type and no
+// tenant id at all — reading the tenant back from ctx would scope every write
+// to the empty string and silently stop it recording anything. Every caller
+// already holds the row's own tenant_id: the routes read it off the
+// environment they just loaded, and the reconciler off the row it found
+// mid-teardown.
+func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, tenantID, environmentID string, update EnvironmentStatusUpdate) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewRaw(`
 			UPDATE environments
@@ -183,7 +192,8 @@ func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, en
 			       expose_error = NULLIF(?, ''),
 			       exposed_hostname = COALESCE(NULLIF(?, ''), exposed_hostname)
 			 WHERE environment_id = ?
-		`, update.Status, update.ProvisionError, update.DeployedVersion, update.ExposeError, update.ExposedHostname, environmentID).Exec(ctx)
+			   AND tenant_id = ?
+		`, update.Status, update.ProvisionError, update.DeployedVersion, update.ExposeError, update.ExposedHostname, environmentID, tenantID).Exec(ctx)
 		return err
 	})
 }
@@ -193,8 +203,8 @@ func (r *EnvironmentRepository) UpdateProvisioningStatus(ctx context.Context, en
 // confirmed missing) refused it after ClaimDeploy already moved the row to
 // provisioning. Without this the environment would be stranded in
 // provisioning forever, since no workflow run exists to mark it failed.
-func (r *EnvironmentRepository) MarkDeployFailed(ctx context.Context, environmentID, reason string) error {
-	return r.UpdateProvisioningStatus(ctx, environmentID, EnvironmentStatusUpdate{
+func (r *EnvironmentRepository) MarkDeployFailed(ctx context.Context, tenantID, environmentID, reason string) error {
+	return r.UpdateProvisioningStatus(ctx, tenantID, environmentID, EnvironmentStatusUpdate{
 		Status:         string(model.EnvironmentStatusFailed),
 		ProvisionError: reason,
 	})
@@ -215,7 +225,11 @@ func (r *EnvironmentRepository) MarkDeployFailed(ctx context.Context, environmen
 // against a namespace Kubernetes is already terminating, and writes its own
 // `failed` over the teardown state — losing the outstanding delete and
 // stranding a row that no longer matches any namespace.
-func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
+//
+// tenantID owns the row being claimed and is an explicit predicate, for the
+// reason UpdateProvisioningStatus states: the caller's security context is
+// not where the owner lives.
+func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, tenantID, environmentID string, staleAfter time.Duration) (bool, error) {
 	claimed := false
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		result, err := tx.NewRaw(`
@@ -224,9 +238,10 @@ func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID s
 			       provision_error = NULL,
 			       delete_error = NULL
 			 WHERE environment_id = ?
+			   AND tenant_id = ?
 			   AND status NOT IN (?)
 			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
-		`, string(model.EnvironmentStatusProvisioning), environmentID, bun.List(environmentsMidTeardownStatuses), string(model.EnvironmentStatusProvisioning), staleAfter.Seconds()).Exec(ctx)
+		`, string(model.EnvironmentStatusProvisioning), environmentID, tenantID, bun.List(environmentsMidTeardownStatuses), string(model.EnvironmentStatusProvisioning), staleAfter.Seconds()).Exec(ctx)
 		if err != nil {
 			return err
 		}
@@ -241,10 +256,13 @@ func (r *EnvironmentRepository) ClaimDeploy(ctx context.Context, environmentID s
 }
 
 // Delete hard-deletes an environment row, once its namespace (if any) has
-// been torn down. RLS keeps the delete scoped to the caller's tenant.
-func (r *EnvironmentRepository) Delete(ctx context.Context, environmentID string) error {
+// been torn down. tenantID owns it and is an explicit predicate: this runs
+// from the delete lifecycle, whose context carries no tenant at all, so
+// leaving the row's ownership to RLS would leave a hard delete unscoped for
+// an OPERATIONS caller.
+func (r *EnvironmentRepository) Delete(ctx context.Context, tenantID, environmentID string) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		_, err := tx.NewRaw(`DELETE FROM environments WHERE environment_id = ?`, environmentID).Exec(ctx)
+		_, err := tx.NewRaw(`DELETE FROM environments WHERE environment_id = ? AND tenant_id = ?`, environmentID, tenantID).Exec(ctx)
 		return err
 	})
 }
@@ -277,7 +295,9 @@ func (r *EnvironmentRepository) Delete(ctx context.Context, environmentID string
 // It does increment delete_attempts, which is what lets the reconciler back off
 // per attempt and eventually stop, rather than re-attempting a teardown that
 // cannot succeed for as long as the row exists.
-func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, environmentID string, staleAfter time.Duration) (bool, error) {
+// tenantID owns the row being claimed and is an explicit predicate; the
+// reconciler claims rows across tenants off a context that names none.
+func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, tenantID, environmentID string, staleAfter time.Duration) (bool, error) {
 	claimed := false
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		result, err := tx.NewRaw(`
@@ -285,9 +305,10 @@ func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, environmentID s
 			   SET status = ?,
 			       delete_attempts = delete_attempts + 1
 			 WHERE environment_id = ?
+			   AND tenant_id = ?
 			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
 			   AND (status <> ? OR updated_at < NOW() - MAKE_INTERVAL(secs => ?))
-		`, string(model.EnvironmentStatusDeleting), environmentID, string(model.EnvironmentStatusDeleting), staleAfter.Seconds(), string(model.EnvironmentStatusProvisioning), staleAfter.Seconds()).Exec(ctx)
+		`, string(model.EnvironmentStatusDeleting), environmentID, tenantID, string(model.EnvironmentStatusDeleting), staleAfter.Seconds(), string(model.EnvironmentStatusProvisioning), staleAfter.Seconds()).Exec(ctx)
 		if err != nil {
 			return err
 		}
@@ -305,14 +326,17 @@ func (r *EnvironmentRepository) ClaimDelete(ctx context.Context, environmentID s
 // down, naming why. `running` must not survive a delete attempt (#1140): this
 // is the write that keeps a failed or blocked teardown from leaving the row
 // exactly where it was, silently claiming to still be up.
-func (r *EnvironmentRepository) MarkDeleteBlocked(ctx context.Context, environmentID, reason string) error {
+// tenantID owns the row being marked and is an explicit predicate, for the
+// same reason ClaimDelete states: the reconciler marks across tenants.
+func (r *EnvironmentRepository) MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error {
 	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		_, err := tx.NewRaw(`
 			UPDATE environments
 			   SET status = ?,
 			       delete_error = NULLIF(?, '')
 			 WHERE environment_id = ?
-		`, string(model.EnvironmentStatusDeletionBlocked), reason, environmentID).Exec(ctx)
+			   AND tenant_id = ?
+		`, string(model.EnvironmentStatusDeletionBlocked), reason, environmentID, tenantID).Exec(ctx)
 		return err
 	})
 }

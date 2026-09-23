@@ -443,7 +443,7 @@ func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
 		t.Fatal("Create did not return the profile it was given")
 	}
 
-	fetched, err := builds.Get(ctx, created.BuildID)
+	fetched, err := builds.Get(ctx, created.TenantID, created.BuildID)
 	mustNoErr(t, err, "get the build back")
 	if fetched.Profile == nil {
 		t.Fatal("Get did not read back a profile")
@@ -500,7 +500,7 @@ func TestBuildTenantIsolation(t *testing.T) {
 		}
 	}
 
-	if _, err := builds.Get(ctxB, buildA.BuildID); !errors.Is(err, ErrNotFound) {
+	if _, err := builds.Get(ctxB, tenantB, buildA.BuildID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("tenant B fetching tenant A's build by ID: err = %v, want ErrNotFound", err)
 	}
 }

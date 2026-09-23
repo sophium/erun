@@ -60,14 +60,21 @@ func (r *ContextRepository) List(ctx context.Context) ([]model.Context, error) {
 	return contexts, err
 }
 
-func (r *ContextRepository) Get(ctx context.Context, contextID string) (model.Context, error) {
+// Get returns the context owned by tenantID. The owning tenant is an explicit
+// argument and an explicit predicate, not something read back from the
+// security context: the delete reconciler reads a context on behalf of the
+// tenant that owns the environment it found, while running with no tenant in
+// context at all, and erun_operations' unconditional RLS policy means nothing
+// but this WHERE clause scopes the row.
+func (r *ContextRepository) Get(ctx context.Context, tenantID, contextID string) (model.Context, error) {
 	var cloudContext model.Context
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewRaw(`
 			SELECT `+contextColumns+`
 			  FROM contexts
 			 WHERE context_id = ?
-		`, contextID).Scan(ctx, &cloudContext)
+			   AND tenant_id = ?
+		`, contextID, tenantID).Scan(ctx, &cloudContext)
 		return normalizeNoRows(err)
 	})
 	return cloudContext, err
