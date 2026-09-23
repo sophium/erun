@@ -44,6 +44,17 @@
 // claim in the commit message that a reviewer reads, not an omission nobody
 // sees.
 //
+// A gate also has to distinguish "checked and clean" from "not checked at
+// all", and this one answers the scope question -- whether it is looking at a
+// defect fix in the first place -- before it looks at anything else. Scope is
+// decided by a convention (the branch prefix) that a landing squash erases
+// along with the message, so a scope decision taken on that convention alone is
+// reported as what it is: nothing in the range was examined. Root AGENTS.md
+// requires that of a gate (§ "Regression-suite gating strategy"): "ran and
+// passed", "skipped" and "promoted without rebuilding" have to stay visibly
+// distinct, because collapsing any two is how a gate reports success without
+// having verified anything.
+//
 // Why this is not in check-gate: it reads git history, and check-gate runs
 // inside the erun-devops image test stage's Docker build context, which has
 // no `.git`. It runs in `make fast-check` instead -- which root AGENTS.md
@@ -175,17 +186,24 @@ export function parseTrailers(commits) {
   return trailers;
 }
 
-// isDefectFix decides whether this change is in scope. The branch-name
-// prefix is the repo's own documented convention (root AGENTS.md § "Branching
-// Strategy": `bug/<issue>-...` for a fix), so it needs no network and no
-// issue-tracker read. `Defect-Fix: yes` is the opt-in for a change that fixes
-// a reported defect from a branch not named that way.
-export function isDefectFix(change) {
-  if (typeof change.forceDefectFix === 'boolean') return change.forceDefectFix;
-  const trailers = parseTrailers(change.commits);
-  if ((trailers['Defect-Fix'] || []).some((v) => /^(yes|true)$/i.test(v))) return true;
-  if ((trailers['Defect-Fix'] || []).some((v) => /^(no|false)$/i.test(v))) return false;
-  return /^bug\//.test(change.branchName || '');
+// defectFixScope decides whether this change is in scope and, just as
+// importantly, what decided it: 'forced' (the caller said so), 'trailer' (a
+// "Defect-Fix:" trailer in the range said so) or 'branch-name' (the branch
+// convention -- root AGENTS.md § "Branching Strategy": `bug/<issue>-...` for a
+// fix, which needs no network and no issue-tracker read).
+//
+// The first two are statements about this change. The third is a statement
+// about the branch it was built on, and it is the only one that leaves the
+// range unexamined: a squash that replaces the source branch's message and
+// lands on an integration branch destroys the declaration without destroying
+// the fix. Callers have to be able to report that as "nothing was examined"
+// rather than let it read as a verdict -- see evaluateRegressionCoverage.
+export function defectFixScope(change) {
+  if (typeof change.forceDefectFix === 'boolean') return { defectFix: change.forceDefectFix, source: 'forced' };
+  const declared = parseTrailers(change.commits)['Defect-Fix'] || [];
+  if (declared.some((v) => /^(yes|true)$/i.test(v))) return { defectFix: true, source: 'trailer' };
+  if (declared.some((v) => /^(no|false)$/i.test(v))) return { defectFix: false, source: 'trailer' };
+  return { defectFix: /^bug\//.test(change.branchName || ''), source: 'branch-name' };
 }
 
 function resolveNamedCase(spec, change, io, { requireInDiff }) {
@@ -222,43 +240,70 @@ function resolveNamedCase(spec, change, io, { requireInDiff }) {
 export function evaluateRegressionCoverage(change, io) {
   const failures = [];
   const notes = [];
-  const defectFix = isDefectFix(change);
+  const scope = defectFixScope(change);
+  const defectFix = scope.defectFix;
   const touchedTests = change.changedFiles.filter((f) => isTestFile(f.path) && (f.status === 'A' || f.status === 'M'));
 
-  if (!defectFix) {
-    return {
-      defectFix: false,
-      classification: 'not-a-defect-fix',
-      failures: [],
-      notes: [
-        'Not a defect fix (branch is not bug/… and no "Defect-Fix: yes" trailer), so no reproduction is required. Add "Defect-Fix: yes" to a commit if this change does fix a reported defect.',
-      ],
-    };
-  }
-
+  // An empty range is settled before scope is: there is nothing here to have
+  // examined or to have left unexamined, whichever branch it was taken from.
   if (change.commits.length === 0) {
     return {
-      defectFix: true,
+      defectFix,
       classification: 'empty',
       failures: [],
       notes: ['No commits in the range yet -- nothing to check.'],
     };
   }
 
+  // Audit mode is not gated on scope: it asks a diff-derived question -- does
+  // this change carry any test at all -- that a branch name cannot answer, and
+  // it exists for history, where the checkout is detached as often as not.
+  // Letting scope short-circuit it first is how `--audit` over a range with no
+  // "Defect-Fix:" trailer reported "not a defect fix" without auditing
+  // anything at all.
+  if (!defectFix && !change.auditOnly) {
+    if (scope.source !== 'branch-name') {
+      const why = scope.source === 'forced' ? '--not-defect-fix' : 'a "Defect-Fix: no" trailer in this range';
+      return {
+        defectFix: false,
+        classification: 'not-a-defect-fix',
+        failures: [],
+        notes: [`Not a defect fix (${why}), so no reproduction is required.`],
+      };
+    }
+    // The branch-name fallback is the one answer that says nothing about this
+    // change, and it is reached without reading a single trailer. A range that
+    // arrives here has not been checked, and cannot be reported as checked.
+    const where = change.branchName
+      ? `scope came from the branch name ("${change.branchName}") and this range carries no "Defect-Fix:" trailer`
+      : 'neither the graded ref nor the checkout names a branch and this range carries no "Defect-Fix:" trailer';
+    return {
+      defectFix: false,
+      classification: 'not-a-defect-fix',
+      failures: [],
+      notes: [
+        `UNCHECKED: ${where}, so no "Regression-Test:" or "Reproduces:" trailer was read. Nothing in this range was verified.`,
+        'If this change does fix a reported defect, commit that declaration into the range -- "Defect-Fix: yes" plus "Reproduces:" and "Regression-Test:". A squash that replaced the source branch\'s message is exactly the shape that loses it.',
+      ],
+    };
+  }
+
   // Audit mode answers only the question a pre-convention commit can answer:
   // does the change carry any test at all? It exists so this gate can be run
-  // against real history, where no declaration trailer could possibly exist.
+  // against real history, where no declaration trailer could possibly exist --
+  // and a range of history is usually not a defect fix by convention either,
+  // which is why it is not gated on scope (see the block above).
   if (change.auditOnly) {
     if (touchedTests.length === 0) {
       return {
-        defectFix: true,
+        defectFix,
         classification: 'uncovered',
-        failures: ['This defect fix adds or modifies no test file at all.'],
+        failures: ['This change adds or modifies no test file at all, so nothing in the range can be the reproduction.'],
         notes: [],
       };
     }
     return {
-      defectFix: true,
+      defectFix,
       classification: 'covered-undeclared',
       failures: [],
       notes: [
@@ -373,11 +418,11 @@ function git(args) {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
 
-function resolveBase(explicit) {
+function resolveBase(explicit, run = git) {
   if (explicit) return explicit;
   for (const ref of ['origin/main', 'main']) {
     try {
-      return git(['merge-base', ref, 'HEAD']).trim();
+      return run(['merge-base', ref, 'HEAD']).trim();
     } catch {
       /* try the next candidate */
     }
@@ -385,13 +430,46 @@ function resolveBase(explicit) {
   throw new Error('cannot resolve a base commit: neither origin/main nor main is reachable. Pass --base <ref>.');
 }
 
-export function readChangeFromGit({ base, head = 'HEAD', forceDefectFix, auditOnly }) {
-  const baseRef = resolveBase(base);
+// branchNameForRef reads the branch name of the ref this run is grading, which
+// is not the same question as "what is checked out". The log and the diff are
+// read from `head`, so scope has to be read from `head` too: asking the
+// checkout instead graded a range taken from a `bug/…` branch against whatever
+// branch the shell happened to be standing on, and the same change that exits 1
+// on its own branch passed when graded from anywhere else.
+//
+// `--symbolic-full-name` answers what kind of ref this is rather than guessing
+// from the string the caller passed, so it needs no heuristics for the shapes
+// that have no branch: a bare commit (no output), a tag (refs/tags/…), and a
+// detached HEAD (the literal "HEAD") all return no branch name here, leaving
+// the checkout as the only signal there is (see readChangeFromGit).
+export function branchNameForRef(ref, run = git) {
+  let full = '';
+  try {
+    full = run(['rev-parse', '--symbolic-full-name', ref]).trim();
+  } catch {
+    return '';
+  }
+  if (full.startsWith('refs/heads/')) return full.slice('refs/heads/'.length);
+  if (full.startsWith('refs/remotes/')) {
+    // refs/remotes/<remote>/<branch>: the convention is about the branch, so a
+    // remote-tracking ref for a bug/… branch is still in scope.
+    const rest = full.slice('refs/remotes/'.length);
+    const slash = rest.indexOf('/');
+    return slash < 0 ? rest : rest.slice(slash + 1);
+  }
+  return '';
+}
+
+// `run` is the git invocation, injected so the unit tests can drive this
+// against synthetic refs -- the same split the classifier uses for its
+// filesystem reads.
+export function readChangeFromGit({ base, head = 'HEAD', forceDefectFix, auditOnly }, run = git) {
+  const baseRef = resolveBase(base, run);
   // ASCII unit/record separators: a commit body is arbitrary multi-line text,
   // so no printable delimiter is safe to split on.
   const FS = '\x1f';
   const RS = '\x1e';
-  const log = git(['log', '--no-merges', `--format=%H${FS}%s${FS}%b${RS}`, `${baseRef}..${head}`]);
+  const log = run(['log', '--no-merges', `--format=%H${FS}%s${FS}%b${RS}`, `${baseRef}..${head}`]);
   const commits = log
     .split(RS)
     .map((chunk) => chunk.trim())
@@ -400,7 +478,7 @@ export function readChangeFromGit({ base, head = 'HEAD', forceDefectFix, auditOn
       const [sha, subject, ...rest] = chunk.split(FS);
       return { sha, subject: subject || '', body: rest.join(FS) || '' };
     });
-  const nameStatus = git(['diff', '--name-status', '--find-renames', `${baseRef}`, head]);
+  const nameStatus = run(['diff', '--name-status', '--find-renames', `${baseRef}`, head]);
   const changedFiles = nameStatus
     .split('\n')
     .map((line) => line.trim())
@@ -412,12 +490,13 @@ export function readChangeFromGit({ base, head = 'HEAD', forceDefectFix, auditOn
       const status = parts[0].startsWith('R') ? 'M' : parts[0][0];
       return { status, path: parts[parts.length - 1] };
     });
-  let branchName = '';
-  try {
-    branchName = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-  } catch {
-    /* detached HEAD: fall through to the trailer-based signal */
-  }
+  // A ref that is a branch speaks for itself, whatever the checkout is. A ref
+  // that names no branch at all (a commit graded by SHA, a tag, a detached
+  // HEAD) leaves the checkout as the only signal there is, and that is the
+  // answer this gate gave for every ref before: keeping it means grading one
+  // commit by SHA from the branch it belongs to still works, while the branch
+  // actually being graded can no longer be overridden by standing elsewhere.
+  const branchName = branchNameForRef(head, run) || branchNameForRef('HEAD', run);
   return { base: baseRef, head, branchName, commits, changedFiles, forceDefectFix, auditOnly };
 }
 
@@ -439,7 +518,8 @@ function usage() {
     'usage: node scripts/check-regression-coverage.mjs [options]',
     '',
     '  --base <ref>     base of the range (default: merge-base with origin/main)',
-    '  --head <ref>     head of the range (default: HEAD)',
+    '  --head <ref>     head of the range (default: HEAD); the branch-name scope',
+    '                   signal is read from this ref whenever it names a branch',
     '  --defect-fix     treat the range as a defect fix regardless of branch name',
     '  --not-defect-fix treat the range as not a defect fix',
     '  --audit          diff-derived classification only (does the change carry any test?);',
@@ -481,7 +561,18 @@ function main(argv) {
   } else {
     const scope = `${change.base.slice(0, 12)}..${change.head}${change.branchName ? ` (${change.branchName})` : ''}`;
     console.log(`regression-coverage gate: ${result.classification} [${scope}]`);
-    for (const note of result.notes) console.log(`  note: ${note}`);
+    // A note saying the gate examined nothing is the caveat on the verdict
+    // itself rather than a footnote to it, so it is set apart and unlabelled:
+    // an exit-0 run has to be readable as "not checked" and not as "clean".
+    for (const note of result.notes) {
+      if (note.startsWith('UNCHECKED:')) {
+        console.log('');
+        console.log(`  ${note}`);
+        console.log('');
+      } else {
+        console.log(`  note: ${note}`);
+      }
+    }
     // The declaration lives in a commit message, so uncommitted work cannot
     // carry one and is not evaluated. Say so rather than let a clean run read
     // as a verdict on a change that is not in the range yet.
