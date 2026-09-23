@@ -95,8 +95,16 @@ func TestCheckGateRunsTerraformModuleTests(t *testing.T) {
 	// The existence check is the other half and is not redundant with the flag:
 	// terraform only refuses to *change* an existing lock file, so a module
 	// with none initializes happily and writes one.
-	if !strings.Contains(code, ".terraform.lock.hcl") {
-		t.Error("scripts/terraform-module-test.sh no longer requires a committed .terraform.lock.hcl: without that check a module initializes unpinned, and -lockfile=readonly alone does not refuse a missing lock file")
+	//
+	// Asserted as the test expression itself rather than as the bare filename,
+	// which the script also names in its refusal messages -- matching those
+	// would keep passing after the check they describe was removed, which is
+	// exactly how this assertion first read. This pins the check is *wired to
+	// the module being tested*; that removing the lock file really makes the
+	// gate red is the self-test's job, not a claim static text can make.
+	if !strings.Contains(code, `[ -f "${module}/.terraform.lock.hcl" ]`) {
+		t.Error("scripts/terraform-module-test.sh no longer gates on the module's own committed .terraform.lock.hcl: " +
+			"without that check a module with no lock file initializes happily and writes one, and -lockfile=readonly alone does not refuse it")
 	}
 
 	// The runner's own self-test is what makes this target's green mean
