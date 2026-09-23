@@ -213,6 +213,225 @@ run "the_policy_is_exposed_for_a_controller_this_module_does_not_install" {
   }
 }
 
+# The trap the entrypoint-wide redirect sets for an HTTP-01 tenant. Traefik
+# evaluates that redirect for every request on the plaintext entrypoint, so it
+# covers /.well-known/acme-challenge/ as well: Let's Encrypt follows the 301 to
+# https, the solver's Ingress has no TLS block there, and the certificate fails
+# to renew -- weeks later, as an expiry rather than as a plan error. This module
+# cannot see a foreign Issuer, so the caller states the fact, and the module
+# stops producing the shape that starves it.
+run "the_acme_challenge_path_can_be_exempted_from_the_redirect" {
+  command = plan
+
+  variables {
+    acme_challenge_path_exempt = true
+  }
+
+  # Both forms at once would race, and the blanket one is the one that cannot
+  # be narrowed, so it has to be absent -- not merely outnumbered.
+  assert {
+    condition     = alltrue([for s in helm_release.traefik[0].set : !strcontains(s.value, "redirections.entryPoint")])
+    error_message = "the exempting form must drop the entrypoint-wide redirect entirely, not emit both"
+  }
+
+  assert {
+    condition = anytrue([
+      for v in helm_release.traefik[0].values :
+      strcontains(v, "IngressRoute") && strcontains(v, "!PathPrefix(`/.well-known/acme-challenge/`)")
+    ])
+    error_message = "the redirect must ride on a router whose rule excludes the ACME challenge prefix; a Middleware alone carries no rule and would still catch the solver"
+  }
+
+  # The router is only as good as the Middleware it names, and an entrypoint
+  # naming one that does not exist is reported by Traefik while the request is
+  # served anyway -- the same silent no-op this policy exists to remove.
+  assert {
+    condition = anytrue([
+      for v in helm_release.traefik[0].values :
+      strcontains(v, "redirectScheme") && strcontains(v, "erun-edge-http-redirect")
+    ])
+    error_message = "the exempting router must name a redirect Middleware that exists in the same release"
+  }
+
+  assert {
+    condition     = anytrue([for s in helm_release.traefik[0].set : strcontains(s.value, "websecure.http.middlewares")])
+    error_message = "exempting the challenge path from the redirect must not also drop HSTS"
+  }
+}
+
+# The blocker that made the exemption above silently ineffective, and the only
+# case in this file that fails on a render without it. Traefik derives a
+# router's priority from the length of its rule, so this catch-all competes on
+# its own 43 characters while the host routers it has to redirect are longer:
+# a Host(<name>) && PathPrefix(/) rule is 27 characters longer than the name in
+# it, so every one for a hostname of 17 characters or more outranks the
+# catch-all. Traefik routes to the longer rule, the plaintext request reaches
+# the application, and the redirect never runs -- so it is not applied on
+# exactly the hosts the exemption was added for, `console.` (20) and `auth.`
+# (17) in the reported tenant among them. The route therefore has to carry an
+# explicit priority, and one no rule length can reach. The host rule below is
+# the reported tenant's own, at its real length of 47.
+run "the_exempting_router_outranks_a_longer_host_rule" {
+  command = plan
+
+  variables {
+    acme_challenge_path_exempt = true
+  }
+
+  assert {
+    condition = alltrue([
+      for r in local.acme_exempt_redirect_router.spec.routes :
+      # The priority Traefik would actually route on: the declared one where
+      # there is one, and otherwise the rule's own length, which is the default
+      # this route was silently getting.
+      try(r.priority, length(r.match)) > length("Host(`console.erunpaas.com`) && PathPrefix(`/`)")
+    ])
+    error_message = "the ACME-exempting catch-all must declare a priority that outranks the host routers it has to redirect; on Traefik's derived default (the rule's own length, 43 here) it loses to any Host(...) rule longer than that, and the redirect silently never applies to those hosts"
+  }
+
+  # What makes it safe to put this above every other user router: the rule is
+  # negated, so the challenge path is never a candidate for this router and no
+  # priority it carries can take a solver's request away from the host router
+  # that answers it.
+  assert {
+    condition = alltrue([
+      for r in local.acme_exempt_redirect_router.spec.routes :
+      strcontains(r.match, "!PathPrefix")
+    ])
+    error_message = "a priority above every host router is only safe because the rule is negated: it must not match the challenge path"
+  }
+}
+
+# The exemption is opt-in, and the default is what erun's own estate runs today:
+# every challenge solved over DNS-01, so the challenge path needs no carve-out
+# and gets none.
+run "the_blanket_redirect_carries_no_exemption_until_opted_in" {
+  command = plan
+
+  assert {
+    condition     = length(output.edge_transport_policy.redirect_objects) == 0
+    error_message = "the default must render no ACME exemption"
+  }
+
+  assert {
+    condition     = output.edge_transport_policy.acme_challenge_path_exempt == false
+    error_message = "the exposed policy must say the challenge path is not exempt, so a caller reading it is not told otherwise"
+  }
+
+  assert {
+    condition     = output.edge_transport_policy.http01_acme_challenges_present == false
+    error_message = "the exposed policy must echo the HTTP-01 declaration as resolved; a caller that never sees this module's resources has no other way to read back the fact the policy was built on"
+  }
+
+  assert {
+    condition     = length([for s in helm_release.traefik[0].set : s.value if strcontains(s.value, "redirections.entryPoint.to=websecure")]) == 1
+    error_message = "the default must stay the entrypoint-wide redirect that already covers /.well-known/acme-challenge/"
+  }
+}
+
+# The reported configuration, and a DELIBERATE failure: this run fails without
+# the output's precondition. Declaring the HTTP-01 fact while still holding the
+# blanket redirect is a contradiction, not a default -- the module refuses it
+# instead of applying cleanly and letting the certificates lapse.
+run "an_http01_issuer_without_the_exemption_is_refused" {
+  command = plan
+
+  variables {
+    http01_acme_challenges_present = true
+  }
+
+  expect_failures = [output.edge_transport_policy]
+}
+
+# The precondition is about the redirect, not about HTTP-01: with nothing
+# redirected there is no path for a solver to be starved on.
+run "an_http01_issuer_with_no_redirect_at_all_is_not_refused" {
+  command = plan
+
+  variables {
+    http01_acme_challenges_present = true
+    http_redirect_enabled          = false
+  }
+
+  assert {
+    condition     = length(output.edge_transport_policy.redirect_objects) == 0
+    error_message = "with the redirect off there is no redirect for the challenge path to be exempt from"
+  }
+}
+
+# The bring-your-own-controller case this exists for: the cluster that cannot
+# take the blanket redirect is exactly the one that installs no controller here,
+# so the exempting objects have to survive into the output rather than only into
+# a release this module does not create.
+run "the_exemption_is_exported_for_a_controller_this_module_does_not_install" {
+  command = plan
+
+  variables {
+    install_ingress_controller     = false
+    manage_transport_policy        = false
+    http01_acme_challenges_present = true
+    acme_challenge_path_exempt     = true
+  }
+
+  assert {
+    condition     = length(output.edge_transport_policy.redirect_objects) == 2
+    error_message = "a bring-your-own controller must be handed both halves: the Middleware and the router that narrows it"
+  }
+
+  # This caller applies the policy itself, so the module's own resources tell it
+  # nothing: the declaration it made has to reach it through the output it reads
+  # the policy from, or it cannot tell an exemption that was granted from one
+  # that was silently defaulted away.
+  assert {
+    condition     = output.edge_transport_policy.http01_acme_challenges_present == true
+    error_message = "the exposed policy must echo the HTTP-01 declaration it was resolved against, not just the objects that resulted from it"
+  }
+
+  assert {
+    condition = alltrue([
+      for o in output.edge_transport_policy.redirect_objects :
+      strcontains(jsonencode(o), "IngressRoute") ? strcontains(jsonencode(o), "1000000") : true
+    ])
+    error_message = "the exported router must carry its explicit priority into the caller's cluster -- the caller applies this object verbatim, so a priority that only exists in the release this module installs would leave bring-your-own-controller clusters with the same silently ineffective redirect"
+  }
+
+  assert {
+    condition     = length([for a in output.edge_transport_policy.traefik_additional_arguments : a if strcontains(a, "redirections.entryPoint")]) == 0
+    error_message = "the exported policy must not still carry the entrypoint-wide redirect once the challenge path is exempt"
+  }
+
+  assert {
+    condition     = anytrue([for o in output.edge_transport_policy.redirect_objects : strcontains(jsonencode(o), "acme-challenge")])
+    error_message = "the exported router must carry the challenge prefix exclusion, not just a scheme redirect"
+  }
+
+  assert {
+    condition     = output.edge_transport_policy.hsts_middleware.spec.headers.stsSeconds == 86400
+    error_message = "exempting the challenge path from the redirect must not cost the caller HSTS"
+  }
+}
+
+# The object half of the policy is assembled independently of HSTS: the redirect
+# is still an object even when the header is switched off.
+run "the_exempting_objects_survive_hsts_being_turned_off" {
+  command = plan
+
+  variables {
+    acme_challenge_path_exempt = true
+    hsts_enabled               = false
+  }
+
+  assert {
+    condition     = length(helm_release.traefik[0].values) == 1
+    error_message = "turning HSTS off must not take the exempting redirect objects with it"
+  }
+
+  assert {
+    condition     = anytrue([for v in helm_release.traefik[0].values : strcontains(v, "IngressRoute")])
+    error_message = "the exempting router must still ride in the release when no HSTS Middleware does"
+  }
+}
+
 # The switch is about who applies the policy, not about the controller: a
 # platform that wants Traefik installed but keeps its transport policy (and the
 # HSTS commitment a browser cannot be talked out of) in its own hands gets a
