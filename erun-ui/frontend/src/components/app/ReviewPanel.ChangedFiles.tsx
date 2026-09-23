@@ -169,7 +169,12 @@ function ChangedFileNode({
     );
   }
 
-  const selected = node.path === selectedDiffPath;
+  // selectedDiffPath is env-keyed (diffPathKey), exactly as the diff panel's
+  // own DiffFileView compares it: two linked environments can both have
+  // AGENTS.md, and comparing the bare path would highlight both of them and,
+  // worse, never match the keyed value every writer stores -- leaving the
+  // tree with no active node at all.
+  const selected = diffPathKey(envKey, node.path) === selectedDiffPath;
   return (
     <div className="flex flex-col">
       <button
@@ -182,7 +187,7 @@ function ChangedFileNode({
         data-path={node.path}
         aria-current={selected ? 'true' : undefined}
         onClick={() => {
-          dispatch(selectDiffPath(nodeKey));
+          dispatch(selectDiffPath(envKey, node.path));
         }}
       >
         <FileIcon filePath={node.path} />

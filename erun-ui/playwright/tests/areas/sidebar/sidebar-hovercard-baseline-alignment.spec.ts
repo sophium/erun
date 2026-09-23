@@ -179,6 +179,12 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     // Hover and measure inside ONE re-drivable block; see the comment on the
     // preceding test for why.
+    //
+    // The toPass below is bare, deliberately: `toPass({ timeout: N })` takes
+    // min(the test's own deadline, now + N), so an N here would be a second
+    // fixed cap inside the 60s this test declares — the same defect the poll
+    // fix in fixtures/erunApp.ts closes. Bare, the block converges for as long
+    // as the test itself says it may.
     await expect(async () => {
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(card).toBeVisible({ timeout: 1_000 });
@@ -196,7 +202,7 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
       const geometry = await rowGeometry(card, 'Version');
       expect(geometry.dtBottom).toBeGreaterThan(geometry.ddTop - 1);
       expect(Math.abs(geometry.dtBaseline - geometry.ddBaseline)).toBeLessThan(1.5);
-    }).toPass({ timeout: 25_000 });
+    }).toPass();
   });
 
   test('the orchestrator card aligns a single-line label and value to one baseline', async ({

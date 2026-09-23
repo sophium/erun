@@ -1,5 +1,5 @@
 import { Button, Checkbox, EditableComboField, IconTooltip, Label } from 'erun-kit';
-import { Boxes, Plus, Trash2 } from 'lucide-react';
+import { Boxes, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import type { UIContainerRegistryEntry } from '@/types';
@@ -83,8 +83,16 @@ export function ContainerRegistriesField({
         </div>
       )}
       {hint ? (
-        <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">
-          {hint}
+        // An amber line alone is the same failure as a red one alone: the
+        // colour is the whole signal for an operator who cannot see it, and a
+        // hint naming a marker rule gives no other cue that the save is
+        // blocked until the entries change (WCAG 1.4.1).
+        <p
+          role="alert"
+          className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-700 dark:text-amber-400 [overflow-wrap:anywhere]"
+        >
+          <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
+          <span className="min-w-0">{hint}</span>
         </p>
       ) : null}
     </div>

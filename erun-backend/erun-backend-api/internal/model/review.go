@@ -47,4 +47,16 @@ type Review struct {
 	LastMergedBuildID string       `json:"lastMergedBuildId,omitempty" bun:"last_merged_build_id,nullzero"`
 	CreatedAt         time.Time    `json:"createdAt" bun:"created_at,scanonly"`
 	UpdatedAt         time.Time    `json:"updatedAt" bun:"updated_at,scanonly"`
+	// IssueRef and IssueRefSource are derived on read, never stored: a review
+	// records no issue of its own yet, so the only link available is the one
+	// its source branch names under the documented convention. Both are
+	// omitted together when neither applies, which is an unlinked review
+	// rather than a review linked to a guess.
+	//
+	// IssueRefSource is not decoration. A reference parsed out of a branch
+	// name is a guess that the branch was named honestly, and a client that
+	// renders it as a link the author declared claims a provenance the
+	// platform does not have; the source is what makes the two tellable apart.
+	IssueRef       string                          `json:"issueRef,omitempty" bun:"-"`
+	IssueRefSource eruncommon.IssueReferenceSource `json:"issueRefSource,omitempty" bun:"-"`
 }

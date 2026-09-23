@@ -183,4 +183,21 @@ export const {
 export function diffPathKey(envKey: string, path: string): string {
   return envKey + ':' + path;
 }
+
+// diffPathWithinEnv is diffPathKey's inverse for one known environment: the
+// bare path a keyed selection carries, or '' when the key names some other
+// environment (or no environment at all). Matched by the env key's own prefix
+// rather than by splitting on the first colon -- collapsedDiffDirs is matched
+// the same way -- because a directory target's env key is `directory:<abs
+// path>` and the path beside it can contain a colon too, so splitting on ':'
+// is ambiguous.
+//
+// Only a reader that must decide *which* environment a keyed selection belongs
+// to needs this. Everything that already holds the env key compares or builds
+// with diffPathKey directly.
+export function diffPathWithinEnv(envKey: string, keyedPath: string): string {
+  const prefix = `${envKey}:`;
+  return keyedPath.startsWith(prefix) ? keyedPath.slice(prefix.length) : '';
+}
+
 export default reviewSlice.reducer;

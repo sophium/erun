@@ -110,11 +110,40 @@ refuses that combination while `manage_transport_policy` is left at its default
 `hsts_enabled` and the HSTS settings do nothing and every public host serves
 cleartext. Set `manage_transport_policy=false` and the module declares none of
 it, but hands you what it would have carried at the **`edge_transport_policy`**
-output: the redirect and HSTS entrypoint arguments, and the HSTS `Middleware`
-object. Apply that to the controller that is already there instead of
-hand-rolling an overlay that duplicates these defaults and then drifts from
-them — on k3s that is a `HelmChartConfig`; the output is the policy rather than
-the mechanism, so it fits whatever your controller takes.
+output: the redirect and HSTS entrypoint arguments, the HSTS `Middleware`
+object, and — when the ACME exemption below is on — `redirect_objects`. Since
+none of this module's resources are yours to inspect, that output also echoes
+the resolved `http01_acme_challenges_present`, the one fact the module cannot
+observe and has to be told; read it back there rather than assuming the
+declaration reached the module. Apply
+that to the controller that is already there instead of hand-rolling an overlay
+that duplicates these defaults and then drifts from them — on k3s that is a
+`HelmChartConfig`; the output is the policy rather than the mechanism, so it
+fits whatever your controller takes.
+
+**If any certificate here is solved over HTTP-01, the blanket redirect will
+starve it.** This module's own Issuer is always DNS-01, but an Issuer *you*
+bring need not be, and the entrypoint-wide redirect has no path predicate:
+Traefik applies it to `/.well-known/acme-challenge/` too, Let's Encrypt follows
+the 301 to https, and the solver's Ingress has no TLS block there — so the
+certificate fails to renew, weeks later, as an expiry rather than as a plan
+error. The module cannot see your Issuer, so say so: set
+`-var http01_acme_challenges_present=true`, and the module refuses to produce
+the blanket redirect until you set `-var acme_challenge_path_exempt=true`,
+which carries the redirect as a `Middleware` plus a catch-all router whose rule
+excludes the challenge prefix instead. That keeps the solver reachable and
+still upgrades every other request — because that router declares an explicit
+priority. Traefik otherwise derives a priority from a rule's length, and the
+catch-all's own rule is shorter than the `Host(...) && PathPrefix` rules it has
+to be applied before, so without the declared priority it loses to them and the
+redirect silently does not run on those hosts. The negated rule is what
+makes the priority safe: the challenge path does not match the router at all,
+so no priority it carries can take a solver's request away from the router that
+answers it. The exempted path is then served in
+cleartext on every host the edge routes — browsers that have read the HSTS
+header still refuse it — so turn it on because a real HTTP-01 Issuer needs it,
+not speculatively. Moving those hosts to a DNS-01 Issuer removes the need
+entirely.
 
 `hsts_max_age_seconds` defaults to `86400` (one day), with
 `hsts_include_subdomains` and `hsts_preload` off. HSTS cannot be recalled early:

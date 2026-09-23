@@ -117,6 +117,92 @@ test.describe('tenant dashboard — Registration tab', () => {
     }
   });
 
+  // A failed row's reason is the whole payload of that row, and the row used
+  // to render it as a bare destructive line -- role, but no glyph, so the
+  // failure was stated in colour and nothing else (WCAG 1.4.1). The vitest
+  // suite pins the rendered markup; this pins it in the real webview, where
+  // the glyph is what an operator actually gets.
+  test('a failed row states its reason with a glyph, not colour alone', async ({ app, page }) => {
+    const environment = seedDashboardEnvironment('registration-failed-reason');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      await routeInvoke(page, {
+        LoadTenantDashboard: () =>
+          registrationDashboardData(environment, {
+            environments: [
+              {
+                environmentId: 'env-1',
+                name: 'prod-env',
+                type: 'runtime',
+                status: 'failed',
+                provisionError: 'deploy job did not succeed',
+              },
+            ],
+          }),
+      });
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Registration');
+
+      const reason = app.tenantDashboard.environmentRowAlert('prod-env');
+      await expect(reason).toHaveCount(1);
+      await expect(reason).toContainText('deploy job did not succeed');
+      await expect(reason.locator('svg')).toHaveCount(1);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  // The other half of the same contract, and the one this cell is likeliest to
+  // lose: DataCell renders a `truncate` <td>, whose nowrap inherits into the
+  // reason, so a long one is ellipsised out of the row -- taking with it the
+  // URL or identifier that names the way out. Asserted on the computed style,
+  // because a class that never applies is exactly the failure being guarded
+  // against.
+  test('a failed row wraps a long reason instead of losing it to the cell', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('registration-failed-wrap');
+    const reason =
+      'run-instances: InsufficientInstanceCapacity - https://console.aws.amazon.com/ec2/home#LaunchInstanceWizard';
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      await routeInvoke(page, {
+        LoadTenantDashboard: () =>
+          registrationDashboardData(environment, {
+            environments: [
+              {
+                environmentId: 'env-1',
+                name: 'prod-env',
+                type: 'runtime',
+                status: 'failed',
+                provisionError: reason,
+              },
+            ],
+          }),
+      });
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await app.tenantDashboard.waitForOpen();
+      await app.tenantDashboard.selectTab('Registration');
+
+      const alert = app.tenantDashboard.environmentRowAlert('prod-env');
+      await expect(alert).toContainText('InsufficientInstanceCapacity');
+      const computed = await alert.evaluate((node) => {
+        const style = window.getComputedStyle(node);
+        return { overflowWrap: style.overflowWrap, whiteSpace: style.whiteSpace };
+      });
+      expect(computed.overflowWrap).toBe('anywhere');
+      expect(computed.whiteSpace).toBe('normal');
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
   // A caller with neither list readable nor either write grantable has
   // nothing this tab could show, so — exactly like every other panel whose
   // read is restricted — the tab itself does not render; the missing access

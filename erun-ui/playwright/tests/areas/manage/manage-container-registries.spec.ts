@@ -41,6 +41,50 @@ test.describe('manage dialog container registries', () => {
     await app.manageDialog.waitForClosed();
   });
 
+  // The blocking hint is the field's whole inline surface, and it used to state
+  // its objection in amber and nothing else -- role and tone, no glyph, so the
+  // signal that the save is blocked reached only a reader who can see the
+  // colour (WCAG 1.4.1). The vitest suite pins the rendered markup; this pins
+  // it in the real webview, on the two properties a stylesheet decides and a
+  // string scanner cannot: the glyph an operator actually gets, and the wrap
+  // that keeps a long hint inside the dialog instead of widening it.
+  test('states a blocked save with a glyph and a hint that wraps', async ({ app }) => {
+    // No save — the seeded baseline stays untouched.
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+
+    // A new row defaults to build+deploy and the seeded row is already build,
+    // so giving the new one a host makes two build-marked registries: blocked.
+    await app.manageDialog.addRegistryButton().click();
+    await app.manageDialog.registryInput(1).fill('registry.internal/pw');
+    await app.page.keyboard.press('Escape');
+
+    const hint = app.manageDialog.locator().getByRole('alert');
+    await expect(hint).toHaveCount(1);
+    await expect(hint).toContainText('Only one registry can be marked build.');
+    await expect(hint.locator('svg')).toHaveCount(1);
+
+    // Asserted on the computed style, because a class that never applies is
+    // exactly the failure being guarded against: laying the glyph beside the
+    // text makes the hint a flex row, and a flex item's initial
+    // `min-width: auto` is its min-content width, so without the shrink the
+    // text cannot wrap at all.
+    const layout = await hint.evaluate((node) => {
+      const text = node.querySelector('span');
+      return {
+        display: window.getComputedStyle(node).display,
+        overflowWrap: window.getComputedStyle(node).overflowWrap,
+        textMinWidth: text ? window.getComputedStyle(text).minWidth : '',
+      };
+    });
+    expect(layout.display).toBe('flex');
+    expect(layout.overflowWrap).toBe('anywhere');
+    expect(layout.textMinWidth).toBe('0px');
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
   test('saves a build/from/to/deploy list and reloads it', async ({ app, seededEnv }) => {
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();

@@ -64,6 +64,8 @@ run "null_for_every_optional_input_resolves_the_documented_defaults" {
     per_env_certificate_enabled      = null
     install_ingress_controller       = null
     manage_transport_policy          = null
+    http01_acme_challenges_present   = null
+    acme_challenge_path_exempt       = null
     install_cert_manager             = null
     wildcard_certificate_enabled     = null
     coredns_configmap_name           = null
@@ -106,6 +108,19 @@ run "null_for_every_optional_input_resolves_the_documented_defaults" {
   assert {
     condition     = output.ingress_class == "traefik"
     error_message = "install_ingress_controller = null must resolve to the default true, not a null condition"
+  }
+
+  # Both default false, and a null must select that branch rather than leak into
+  # the `&&` the redirect and the precondition are built on -- where a null
+  # operand would abort the plan instead of resolving to "not declared".
+  assert {
+    condition     = output.edge_transport_policy.acme_challenge_path_exempt == false && length(output.edge_transport_policy.redirect_objects) == 0
+    error_message = "acme_challenge_path_exempt = null must resolve to the default false"
+  }
+
+  assert {
+    condition     = length(local.acme_exempt_redirect_objects) == 0
+    error_message = "a null HTTP-01 declaration must leave the entrypoint-wide redirect in place"
   }
 }
 

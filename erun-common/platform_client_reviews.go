@@ -38,6 +38,13 @@ type PlatformReview struct {
 	LastMergedBuildID string    `json:"lastMergedBuildId,omitempty"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
+	// IssueRef and IssueRefSource mirror the review's derived issue link: the
+	// issue the review's work belongs to, and whether that link was declared
+	// or inferred from the source branch. They are resolved for the response
+	// and never stored, and they are absent together when the review is linked
+	// to no issue at all.
+	IssueRef       string               `json:"issueRef,omitempty"`
+	IssueRefSource IssueReferenceSource `json:"issueRefSource,omitempty"`
 }
 
 // PlatformComment mirrors model.Comment's JSON shape.

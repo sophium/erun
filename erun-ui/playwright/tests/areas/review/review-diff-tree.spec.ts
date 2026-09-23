@@ -99,6 +99,22 @@ async function nextDiffRefresh(page: Page): Promise<void> {
   });
 }
 
+// scrollDiffToLastFile scrolls the diff panel to its last file without going
+// through Playwright's actionability gate. scrollIntoViewIfNeeded additionally
+// waits for the element to be stable — the same box across two consecutive
+// animation frames — which a starved page cannot promise inside any per-attempt
+// bound (see the scroll spec's own comment for the measurement). Waiting for
+// the element to be attached is what this step actually needs; the retry that
+// re-resolves a detached node is still the caller's toPass, and the bounded
+// waitFor keeps that attempt from consuming the whole retry budget.
+async function scrollDiffToLastFile(page: Page): Promise<void> {
+  const last = page.locator('.diff-file[data-path]').last();
+  await last.waitFor({ state: 'attached', timeout: 2_000 });
+  await last.evaluate((el) => {
+    el.scrollIntoView({ block: 'nearest' });
+  });
+}
+
 // diff.files is in tree pre-order — the ordering contract the desktop relies on.
 const SMALL_FILES = [diffFile('src/a.ts', 2), diffFile('src/b.ts', 2), diffFile('docs/c.md', 2)];
 const SMALL_TREE = [
@@ -226,13 +242,19 @@ test.describe('review diff/tree consistency', () => {
     // it settles (30 tall files), so the last node may detach between resolving
     // it and scrolling on a loaded host — retry so the locator re-resolves
     // against the current DOM rather than scrolling a stale, detached node.
-    // scrollIntoViewIfNeeded has no timeout of its own (it waits for as long as
-    // the caller allows), so bound each attempt and let toPass supply the
-    // retries — an unbounded attempt racing the same re-render can otherwise
-    // spend the whole retry budget waiting out one detach instead of costing
-    // one retry.
+    //
+    // The scroll itself is scrollDiffToLastFile, not scrollIntoViewIfNeeded.
+    // Scrolling is not an action that needs Playwright's actionability gate:
+    // that gate additionally requires the element's box to be unchanged across
+    // two consecutive animation frames, and this page is expensive enough that
+    // a loaded host can be a second or more from its next frame -- measured on
+    // the contended venue, 5-15 frames per 4s with gaps up to 1.4s, while the
+    // diff section's own box never moved. The element resolved and was visible
+    // and the call still timed out every attempt, for the whole retry budget.
+    // Attached is the one property this step depends on, and toPass still
+    // supplies the re-resolve.
     await expect(async () => {
-      await page.locator('.diff-file[data-path]').last().scrollIntoViewIfNeeded({ timeout: 2_000 });
+      await scrollDiffToLastFile(page);
     }).toPass({ timeout: 30_000 });
 
     const node = review.currentTreeNode();
@@ -257,6 +279,91 @@ test.describe('review diff/tree consistency', () => {
           return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
         },
         { timeout: 120_000 },
+      )
+      .toBe(true);
+  });
+
+  // The scroll spec above converges on one predicate: the tree's active node
+  // has a box inside the tree container's box. That predicate can only ever
+  // become true while the tree is still marking a file `aria-current`, and the
+  // panel reloads its diff on a 5s timer (nextDiffRefresh's own comment). This
+  // spec pins the invariant that makes the predicate reachable at all: the
+  // active file the diff scrollspy selected must survive one of those reloads.
+  //
+  // It is the deterministic rendering of the contended red the scroll spec
+  // produces, which is otherwise a coin flip on whether a predicate evaluation
+  // lands before or after the next reload: the reload used to clear the tree's
+  // active node outright and nothing ever put it back, because the only writer
+  // that could was the scrollspy, and the diff is no longer scrolling. A run
+  // that loses that race then reports "Timeout 120000ms exceeded while waiting
+  // on the predicate" -- not a slow convergence, a state that never exists
+  // again.
+  test('the tree keeps the file the diff scrolled to active across a diff reload', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    test.setTimeout(120_000);
+    // One line per file: enough sections that the diff panel scrolls, without
+    // the scroll spec's 18-line files. This spec asserts the selection's
+    // lifetime, not the render's, and the panel re-renders the whole list on
+    // every periodic reload -- carrying the sibling spec's 540 rendered lines
+    // here too just adds load to the sub-suite both specs share.
+    const big = Array.from({ length: 30 }, (_, i) => `pkg/f${String(i).padStart(2, '0')}.ts`);
+    const files = big.map((path) => diffFile(path, 2));
+    const tree = [
+      dirNode('pkg', 'pkg', 0),
+      ...big.map((path) => fileNode(path, path.slice('pkg/'.length), 'pkg', 1)),
+    ];
+    await stubDiff(page, diffResult(files, tree));
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+    const review = app.reviewPanel;
+    await expect.poll(() => review.diffSectionPaths().then((paths) => paths.length)).toBe(30);
+
+    await nextDiffRefresh(page);
+    await expect(async () => {
+      await scrollDiffToLastFile(page);
+    }).toPass({ timeout: 30_000 });
+
+    // What the scrollspy picked, read off the tree rather than assumed: which
+    // file spans the diff viewport's anchor depends on the rendered heights.
+    const node = review.currentTreeNode();
+    await expect(node).toBeVisible();
+    // evaluate, not getAttribute: this one has to be carried forward as a
+    // value to compare against after the reload, which is a read rather than
+    // an assertion about the node as it stands now.
+    const active = await node.evaluate((el) => el.getAttribute('data-path'));
+    expect(active).toBeTruthy();
+
+    // One periodic reload lands. Nothing scrolls the diff after this, so the
+    // scrollspy does not run again -- whatever the reload leaves the tree
+    // marking is the last word.
+    await nextDiffRefresh(page);
+
+    await expect(review.currentTreeNode()).toHaveAttribute('data-path', active ?? '');
+
+    // And the guarantee that node being current encodes still holds -- the
+    // same predicate the scroll spec asserts, read the same bounded way so a
+    // reload landing mid-measurement costs one retry rather than the read.
+    await expect
+      .poll(
+        async () => {
+          const nb = await review
+            .currentTreeNode()
+            .boundingBox({ timeout: 2_000 })
+            .catch(() => null);
+          const cb = await review
+            .changedFilesTree()
+            .boundingBox({ timeout: 2_000 })
+            .catch(() => null);
+          if (!nb || !cb) {
+            return false;
+          }
+          return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
+        },
+        { timeout: 20_000 },
       )
       .toBe(true);
   });

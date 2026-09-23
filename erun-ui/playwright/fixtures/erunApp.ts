@@ -189,4 +189,24 @@ export async function captureHoverCard(card: Locator, filePath: string): Promise
   await card.screenshot({ path: filePath, timeout: 8_000 });
 }
 
+// withTestBudget is the timeout option a convergence step should carry when it
+// is waiting for the app to reach a state: the budget the test itself declared.
+//
+// Playwright bounds the two idioms differently, and the difference is the whole
+// of the contention class this exists to close. `waitFor({ state })` and a bare
+// `toPass()` resolve to the enclosing test's own deadline, so a step inside a
+// 60s test may take 60s. `expect(...)` and `expect.poll(...)` do not: with no
+// explicit timeout they resolve to `expect.timeout` (playwright.config.ts sets
+// 10s on POSIX), which is independent of `test.setTimeout(...)`. A step that is
+// merely slow -- not wrong -- therefore reds a test that declared it could take
+// 60s, at 10s, with 50s unused; and removing that explicit timeout changes
+// nothing, because it only lands back on the same 10s default.
+//
+// So the fix is not to widen a number but to point the assertion at the budget
+// the test already declared. A step that never converges still fails, now at
+// the deadline the test chose rather than at a default it never chose.
+export function withTestBudget(): { timeout: number } {
+  return { timeout: test.info().timeout };
+}
+
 export { expect };

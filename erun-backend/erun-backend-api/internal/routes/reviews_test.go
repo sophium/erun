@@ -18,6 +18,9 @@ type stubReviewRepository struct {
 	reviews   []model.Review
 	err       error
 	gotFilter apirepository.ReviewFilter
+	// gotCreated records the review Create was handed, so a test can pin which
+	// values a request body was able to put into a new review.
+	gotCreated model.Review
 	// gotMergeQueue* record what ListMergeQueue was addressed with, so a test
 	// can prove the repository query parameter reaches the repository rather
 	// than being dropped on the way through the route.
@@ -25,12 +28,32 @@ type stubReviewRepository struct {
 	gotMergeQueueTargetBranch string
 }
 
-func (s *stubReviewRepository) Create(context.Context, model.Review) (model.Review, error) {
-	return model.Review{}, s.err
+// Create echoes the review it was handed, mirroring ReviewRepository.Create:
+// `created := review`, then `Returning("*")`, which fills the DB-backed columns
+// and leaves a field with no column (bun:"-") exactly as the caller left it. A
+// stub returning a zero review instead would hide that, and the issue
+// provenance the route tests below pin depends on seeing it.
+func (s *stubReviewRepository) Create(_ context.Context, review model.Review) (model.Review, error) {
+	s.gotCreated = review
+	if s.err != nil {
+		return model.Review{}, s.err
+	}
+	created := review
+	created.ReviewID = "review-1"
+	return created, nil
 }
 
 func (s *stubReviewRepository) Get(context.Context, string) (model.Review, error) {
-	return model.Review{}, s.err
+	if s.err != nil {
+		return model.Review{}, s.err
+	}
+	// The stub has one review-or-none, the same way List does, so a test that
+	// exercises a single-review surface stubs the review rather than needing a
+	// second place to put it.
+	if len(s.reviews) > 0 {
+		return s.reviews[0], nil
+	}
+	return model.Review{}, nil
 }
 
 func (s *stubReviewRepository) List(_ context.Context, filter apirepository.ReviewFilter) ([]model.Review, error) {
@@ -84,10 +107,17 @@ type stubReviewService struct {
 	prepareErr           error
 }
 
+// PrepareCreate mirrors ReviewService.PrepareCreate's own contract, the OPEN
+// default included: a test that pins whether a request body can reach the
+// status of a new review has to see the status the platform actually stores,
+// not the stub's indifference to it.
 func (s *stubReviewService) PrepareCreate(review model.Review) (model.Review, error) {
 	s.preparedReview = review
 	if s.prepareErr != nil {
 		return model.Review{}, s.prepareErr
+	}
+	if review.Status == "" {
+		review.Status = model.ReviewStatusOpen
 	}
 	return review, nil
 }
@@ -615,5 +645,240 @@ func TestCreateReviewRefusesAnUnusableRepository(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"code":"INVALID_REPOSITORY"`) {
 		t.Fatalf("body = %q, want the INVALID_REPOSITORY code", rec.Body.String())
+	}
+}
+
+// TestCreateReviewRefusesACallerSuppliedIssueProvenance is the reproduction of
+// the forgery POST /v1/reviews allowed. The route decoded its body straight
+// into model.Review -- the same struct it returns -- so the two derived issue
+// fields were reachable from request input, and because nothing persists them
+// the `Returning("*")` that overwrites every stored column with the database's
+// own value could not overwrite these. A body asserting a declared reference
+// came back in the 201 as though the platform had established it, which is
+// exactly the claim the INFERRED marking exists to refuse.
+//
+// The source branch here deliberately follows no convention: that is the state
+// where the resolver has nothing of its own to replace a forged value with, so
+// the caller's value would have been the whole answer.
+func TestCreateReviewRefusesACallerSuppliedIssueProvenance(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewBufferString(
+		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"my-branch","issueRef":"9999","issueRefSource":"DECLARED"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("body %q is not a review object: %v", rec.Body.String(), err)
+	}
+	for _, field := range []string{"issueRef", "issueRefSource"} {
+		if value, ok := created[field]; ok {
+			t.Fatalf("%s = %v in the response, want it absent: a review's issue link and its provenance are the platform's to resolve, and a caller must not be able to assert either", field, value)
+		}
+	}
+	// The forgery has to be stopped at the boundary rather than scrubbed off
+	// the response afterwards: what the repository is handed is what the route
+	// built, and that value carries no issue link either. The resolver is the
+	// only writer of these two fields on the way out.
+	if reviews.gotCreated.IssueRef != "" || reviews.gotCreated.IssueRefSource != "" {
+		t.Fatalf("the repository was handed issueRef=%q issueRefSource=%q, want neither",
+			reviews.gotCreated.IssueRef, reviews.gotCreated.IssueRefSource)
+	}
+}
+
+// TestCreateReviewRefusesACallerSuppliedStatus: the same decode also reached
+// the stored status column, which belongs to the merge queue rather than to the
+// caller -- AdvanceMergeQueue is the only thing permitted to promote a review
+// to MERGE, and it refuses while the head has unresolved threads or while
+// another merge holds the branch. A caller could step past all of that by
+// creating the review there. A new review opens OPEN.
+func TestCreateReviewRefusesACallerSuppliedStatus(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewBufferString(
+		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"feature/widget","status":"MERGE"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	if reviews.gotCreated.Status != model.ReviewStatusOpen {
+		t.Fatalf("the repository was handed status %q, want %q: a caller cannot open a review at a status the merge queue owns",
+			reviews.gotCreated.Status, model.ReviewStatusOpen)
+	}
+}
+
+// TestCreateReviewCarriesTheBodyFieldsItDoesAccept guards the other direction
+// from the two refusals above: separating the request from the model must not
+// quietly drop the fields a create body is documented to carry.
+func TestCreateReviewCarriesTheBodyFieldsItDoesAccept(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewBufferString(
+		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"feature/widget"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	want := model.Review{
+		Repository:   "https://github.com/sophium/erun",
+		Name:         "Add widget",
+		TargetBranch: "main",
+		SourceBranch: "feature/widget",
+		Status:       model.ReviewStatusOpen,
+	}
+	if got := reviews.gotCreated; got.Repository != want.Repository || got.Name != want.Name ||
+		got.TargetBranch != want.TargetBranch || got.SourceBranch != want.SourceBranch || got.Status != want.Status {
+		t.Fatalf("the repository was handed %+v, want %+v", got, want)
+	}
+}
+
+// reviewIssueFields decodes a review-returning route's body into the raw field
+// maps, so a test can tell "the field is absent from the wire" apart from "the
+// field is present and empty". For a review's issue link those are different
+// answers: absent is a review the platform has no issue for, and a client that
+// reads an empty string as a link would route an operator to an issue named by
+// nothing.
+func reviewIssueFields(t *testing.T, rec *httptest.ResponseRecorder) []map[string]any {
+	t.Helper()
+	var reviews []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &reviews); err != nil {
+		t.Fatalf("body %q is not a JSON array of reviews: %v", rec.Body.String(), err)
+	}
+	return reviews
+}
+
+// TestListReviewsMarksAnIssueDerivedFromTheSourceBranchAsInferred is the
+// reproduction of the state this route could not answer. A review created
+// without an issue recorded is linked by the branch it proposes, and the link
+// travels with its provenance, because an inferred link presented as a
+// declared one claims something the platform does not know.
+//
+// Before this, a listing carried no issue reference at all for a branch that
+// names one, so every review read as unlinked and a board pivoting on the
+// issue had nothing to pivot on.
+func TestListReviewsMarksAnIssueDerivedFromTheSourceBranchAsInferred(t *testing.T) {
+	reviews := &stubReviewRepository{reviews: []model.Review{{
+		ReviewID:     "review-1",
+		SourceBranch: "bug/2212-issue-ref-from-branch",
+		Status:       model.ReviewStatusOpen,
+	}}}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listReviews(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	listed := reviewIssueFields(t, rec)
+	if len(listed) != 1 {
+		t.Fatalf("listing = %v, want one review", listed)
+	}
+	if listed[0]["issueRef"] != "2212" {
+		t.Fatalf("issueRef = %v, want the number the source branch names", listed[0]["issueRef"])
+	}
+	if listed[0]["issueRefSource"] != "INFERRED" {
+		t.Fatalf("issueRefSource = %v, want INFERRED: a reference parsed out of a branch name is a guess, and the caller has to be able to see that", listed[0]["issueRefSource"])
+	}
+}
+
+// TestListReviewsLeavesABranchOutsideTheConventionUnlinked: the derivation is
+// best-effort, so a branch that does not follow the documented convention is
+// unlinked rather than guessed at. A branch merely containing a number is not
+// a link to it.
+func TestListReviewsLeavesABranchOutsideTheConventionUnlinked(t *testing.T) {
+	reviews := &stubReviewRepository{reviews: []model.Review{{
+		ReviewID:     "review-1",
+		SourceBranch: "bugfix/2212nottheconvention",
+		Status:       model.ReviewStatusOpen,
+	}}}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listReviews(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	listed := reviewIssueFields(t, rec)
+	if len(listed) != 1 {
+		t.Fatalf("listing = %v, want one review", listed)
+	}
+	if value, ok := listed[0]["issueRef"]; ok {
+		t.Fatalf("issueRef = %v, want no issue reference at all for a branch outside the convention", value)
+	}
+	if value, ok := listed[0]["issueRefSource"]; ok {
+		t.Fatalf("issueRefSource = %v, want it omitted alongside an absent issueRef rather than claiming a provenance for nothing", value)
+	}
+}
+
+// TestGetReviewCarriesTheDerivedIssueRefToo: one review is the same resource
+// the listing returns, so it answers the same question the same way. A single
+// review reached by id is how a client checks one link, and a shape that
+// varied between the two surfaces would make the derived field look like
+// something only a listing produces.
+func TestGetReviewCarriesTheDerivedIssueRefToo(t *testing.T) {
+	reviews := &stubReviewRepository{reviews: []model.Review{{
+		ReviewID:     "review-1",
+		SourceBranch: "feature/2212-issue-ref-from-branch",
+		Status:       model.ReviewStatusOpen,
+	}}}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/review-1", nil)
+	req.SetPathValue("review_id", "review-1")
+	rec := httptest.NewRecorder()
+
+	routes.getReview(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("body %q is not a review object: %v", rec.Body.String(), err)
+	}
+	if got["issueRef"] != "2212" || got["issueRefSource"] != "INFERRED" {
+		t.Fatalf("body = %q, want the branch's issue marked inferred on the single-review surface too", rec.Body.String())
+	}
+}
+
+// TestListMergeQueueCarriesTheDerivedIssueRef: the queue is a listing of the
+// same resource, and it is the surface that answers what state an issue's
+// review has reached. A review carrying its issue link in one listing and not
+// in the other is the inconsistency that makes a client join on nothing.
+func TestListMergeQueueCarriesTheDerivedIssueRef(t *testing.T) {
+	reviews := &stubReviewRepository{reviews: []model.Review{{
+		ReviewID:     "review-1",
+		SourceBranch: "bug/2212-issue-ref-from-branch",
+		Status:       model.ReviewStatusReady,
+	}}}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/merge-queue?targetBranch=main", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listMergeQueue(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	listed := reviewIssueFields(t, rec)
+	if len(listed) != 1 {
+		t.Fatalf("listing = %v, want one review", listed)
+	}
+	if listed[0]["issueRef"] != "2212" || listed[0]["issueRefSource"] != "INFERRED" {
+		t.Fatalf("listing = %v, want the branch's issue marked inferred", listed)
 	}
 }

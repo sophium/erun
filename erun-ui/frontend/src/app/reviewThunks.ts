@@ -18,6 +18,7 @@ import { bumpReviewDiff } from './slices/requestCountersSlice';
 import type { ReviewScope } from './slices/reviewSlice';
 import {
   diffPathKey,
+  diffPathWithinEnv,
   emptyEnvDiffState,
   pruneEnvDiffs,
   setDiffFilter as setDiffFilterAction,
@@ -51,11 +52,16 @@ export const toggleDiffDirectory =
     dispatch(toggleDiffDirCollapsed(path));
   };
 
+// selectDiffPath takes the file the tree's node names -- its environment and
+// its bare path, the two things the DOM actually carries. It keys the first
+// with the second for the store, the one representation every reader of
+// selectedDiffPath agrees on, and hands the bare path to the scroll, which
+// looks the section up by `data-path`.
 export const selectDiffPath =
-  (path: string): AppThunk =>
+  (envKey: string, path: string): AppThunk =>
   (dispatch, _getState, extra) => {
     const controller = requireController(extra);
-    dispatch(setSelectedDiffPath(path));
+    dispatch(setSelectedDiffPath(diffPathKey(envKey, path)));
     window.setTimeout(() => {
       scrollSelectedDiffIntoView(controller.diffList, path);
     }, 0);
@@ -86,7 +92,11 @@ function applyReviewDiffSuccess(
   dispatch(setEnvDiffError({ envKey, error: '', reconnectable: false }));
   dispatch(setEnvReviewScope({ envKey, scope: diff.scope ?? 'current' }));
   dispatch(setEnvReviewCommit({ envKey, commit: diff.selectedCommit ?? '' }));
-  const chosen = chooseSelectedDiffPath(diff, getState().review.selectedDiffPath);
+  // selectedDiffPath is stored env-keyed, so both halves of the round trip
+  // through chooseSelectedDiffPath (which speaks the bare path the diff's own
+  // `files` carry) happen here: strip this env's prefix in, re-key out.
+  const current = diffPathWithinEnv(envKey, getState().review.selectedDiffPath);
+  const chosen = chooseSelectedDiffPath(diff, current);
   if (chosen) {
     dispatch(setSelectedDiffPath(diffPathKey(envKey, chosen)));
   }

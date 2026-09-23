@@ -23,6 +23,49 @@ interface StubbedResponse {
   error?: string;
 }
 
+// 12 contexts is far more than fits in an 85vh frame at any viewport this
+// suite uses, so the body region must be what scrolls, not the dialog growing
+// past its cap. Used by both the bounded-height case and the case that pins the
+// frame it is measured against.
+function overflowingCloudConfig(): Record<string, unknown> {
+  return {
+    defaultTenant: SEED_TENANT,
+    cloudProviders: [
+      {
+        alias: 'me+aws@aws',
+        provider: 'aws',
+        status: 'active',
+        username: 'me',
+        accountId: '111111111111',
+      },
+      {
+        alias: 'me+cloudflare@cloudflare',
+        provider: 'cloudflare',
+        status: 'active',
+        username: 'me',
+      },
+      {
+        alias: 'erun+api.acme.test@erun',
+        provider: 'erun',
+        status: 'active',
+        username: 'erun',
+        accountId: 'api.acme.test',
+      },
+    ],
+    cloudContexts: manyCloudContexts(12),
+  };
+}
+
+// A frame member that is absent is a missing element, not a skipped assertion;
+// this fails the spec by name the way boundingBoxOf does. A helper rather than
+// an inline branch, which is what keeps the missing case out of the test body.
+function requireFrame<T>(member: T | null, label: string): T {
+  if (member === null) {
+    throw new Error(`${label} is missing from the settings dialog frame`);
+  }
+  return member;
+}
+
 // stubRPC intercepts every named method on /__erun_invoke, returning
 // whatever the caller's map holds for it — used below to exercise the cloud
 // aliases empty state and the erun provider without depending on the seeded
@@ -290,73 +333,127 @@ test.describe('global config dialog — bounded height and scroll', () => {
     // 12 contexts is far more than fits in an 85vh frame at any viewport this
     // suite uses, so the body region must be what scrolls, not the dialog
     // growing past its cap -- the regression this guards.
-    stubRPC(page, {
-      LoadERunConfig: {
-        data: {
-          defaultTenant: SEED_TENANT,
-          cloudProviders: [
-            {
-              alias: 'me+aws@aws',
-              provider: 'aws',
-              status: 'active',
-              username: 'me',
-              accountId: '111111111111',
-            },
-            {
-              alias: 'me+cloudflare@cloudflare',
-              provider: 'cloudflare',
-              status: 'active',
-              username: 'me',
-            },
-            {
-              alias: 'erun+api.acme.test@erun',
-              provider: 'erun',
-              status: 'active',
-              username: 'erun',
-              accountId: 'api.acme.test',
-            },
-          ],
-          cloudContexts: manyCloudContexts(12),
-        },
-      },
-    });
+    stubRPC(page, { LoadERunConfig: { data: overflowingCloudConfig() } });
 
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
+    // Converge on the loaded frame before measuring anything inside it.
+    // `waitForOpen` resolves on the ~195px `configLoading` shell, and every
+    // assertion below is about the 85vh-capped card the config produces; the
+    // geometry of one is not the geometry of the other (see the case below).
+    await app.globalConfigDialog.waitForLoadedFrame();
+
+    // One layout snapshot for the frame and everything asserted inside it.
+    // Read as separate round trips these are separate layout moments, and a
+    // transition landing between two of them is what reddened the gate: the
+    // frame from one state and the footer from the next.
+    const frame = await app.globalConfigDialog.frameGeometry();
+
     // The dialog's own frame (DialogContent's max-h-[85vh]) caps the whole
     // surface regardless of how much is configured. The suite's config
     // viewport is 1440x1200 and this test never changes it.
-    const dialog = app.globalConfigDialog.locator();
-    const dialogBox = await boundingBoxOf(dialog, 'ERun settings dialog');
+    const dialogBox = requireFrame(frame.dialog, 'ERun settings dialog');
     expect(dialogBox.height).toBeLessThanOrEqual(1200 * 0.85 + 2);
 
     // The title and the footer buttons must both land inside that bounded
     // frame -- cut off above and cut off below is exactly the failure mode
     // being guarded against.
-    const titleBox = await boundingBoxOf(
-      dialog.getByText('ERun settings', { exact: true }),
-      'ERun settings title',
-    );
+    const titleBox = requireFrame(frame.title, 'ERun settings title');
     expect(titleBox.y).toBeGreaterThanOrEqual(dialogBox.y - 1);
-    const cancelBox = await boundingBoxOf(
-      dialog.getByRole('button', { name: 'Cancel', exact: true }),
-      'Cancel button',
-    );
+    const cancelBox = requireFrame(frame.cancel, 'Cancel button');
     expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1);
-    const saveBox = await boundingBoxOf(
-      dialog.getByRole('button', { name: /Save settings|Saving/ }),
-      'Save settings button',
-    );
+    const saveBox = requireFrame(frame.save, 'Save settings button');
     expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1);
 
     // The body region -- not the dialog itself -- is what scrolls.
-    const bodyScroll = dialog.locator('.overflow-y-auto').first();
-    const { scrollHeight, clientHeight } = await bodyScroll.evaluate((el) => ({
-      scrollHeight: el.scrollHeight,
-      clientHeight: el.clientHeight,
-    }));
-    expect(scrollHeight).toBeGreaterThan(clientHeight);
+    const body = requireFrame(frame.body, 'the settings dialog body scroller');
+    expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
+
+    await app.globalConfigDialog.cancel();
+    await app.globalConfigDialog.waitForClosed();
+  });
+
+  // The gate's own numbers. Its red measured this dialog's frame at 702.19 --
+  // the bottom edge of the `configLoading` shell -- and the Save button at 1085,
+  // the loaded frame's footer: 382px apart, on one dialog in one open state.
+  // Neither measurement is wrong for the layout it was taken in. What separates
+  // them is the config load, and on the gate it landed between two of the spec's
+  // five reads. The landing point is decided by load, so this decides it
+  // instead: the route handler parks on a promise the test releases, which makes
+  // the shell provably the layout on screen for as long as it holds.
+  //
+  // The two reads below sit where the gate's own two landed: the frame while
+  // the shell is up, the footer once the load has cleared it. Read as per-box
+  // round trips at those same sites -- which is what the pre-fix case did, and
+  // what this case pins against -- the pair is the one the gate measured 382px
+  // apart: Expected <= 699.29, Received 1085.
+  test('the frame and the footer inside it are read from one layout, not across the config load', async ({
+    app,
+    page,
+  }) => {
+    let releaseConfig!: () => void;
+    const configHeld = new Promise<void>((resolve) => {
+      releaseConfig = resolve;
+    });
+    let configArrived = 0;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method !== 'LoadERunConfig') {
+        await route.continue();
+        return;
+      }
+      configArrived++;
+      await configHeld;
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ data: overflowingCloudConfig() }),
+      });
+    });
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+
+    // Read 1, at the site the gate's frame read landed: the route is parked, so
+    // this is the loading shell and nothing else can be. Its body has nothing
+    // to scroll, which is what makes measuring it a vacuous pass rather than a
+    // failure for every assertion the case above makes.
+    await expect.poll(() => configArrived).toBe(1);
+    const whileLoading = await app.globalConfigDialog.frameGeometry();
+    const shellBody = requireFrame(whileLoading.body, 'the loading shell body scroller');
+    expect(shellBody.scrollHeight).toBe(shellBody.clientHeight);
+
+    // Read 2, at the site the gate's Save-button read landed. Converging on the
+    // frame the load produces is what keeps this read off whatever happens to be
+    // on screen when its round trip arrives -- and it is the read the loaded
+    // assertions below are about.
+    releaseConfig();
+    await app.globalConfigDialog.waitForLoadedFrame();
+    const loaded = await app.globalConfigDialog.frameGeometry();
+
+    // Each read is one layout, so each frame contains its own footer. Split back
+    // into per-box reads, these are the two boxes the gate measured 382px apart.
+    for (const [label, frame] of [
+      ['the loading shell', whileLoading],
+      ['the loaded frame', loaded],
+    ] as const) {
+      const dialogBox = requireFrame(frame.dialog, `${label}: ERun settings dialog`);
+      const saveBox = requireFrame(frame.save, `${label}: Save settings button`);
+      expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1);
+    }
+
+    // ... and the loaded one is the frame the case above is about: capped,
+    // titled, and scrolled.
+    const shellBox = requireFrame(whileLoading.dialog, 'the loading shell dialog');
+    const dialogBox = requireFrame(loaded.dialog, 'the loaded dialog');
+    expect(dialogBox.height).toBeGreaterThan(shellBox.height);
+    expect(requireFrame(loaded.title, 'ERun settings title').y).toBeGreaterThanOrEqual(
+      dialogBox.y - 1,
+    );
+    const cancelBox = requireFrame(loaded.cancel, 'Cancel button');
+    expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height + 1);
+    const body = requireFrame(loaded.body, 'the loaded frame body scroller');
+    expect(body.scrollHeight).toBeGreaterThan(body.clientHeight);
 
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
@@ -371,19 +468,18 @@ test.describe('global config dialog — bounded height and scroll', () => {
     await app.sidebar.openSettings();
     await app.globalConfigDialog.waitForOpen();
 
-    const dialog = app.globalConfigDialog.locator();
-    const dialogBox = await boundingBoxOf(dialog, 'ERun settings dialog');
+    // Same convergence and one-snapshot read as the case above: a 500px
+    // viewport makes the shell's 195px frame *look* like it satisfies every
+    // bound here, so measuring it is how this case passes while asserting
+    // nothing.
+    await app.globalConfigDialog.waitForLoadedFrame();
+    const frame = await app.globalConfigDialog.frameGeometry();
+    const dialogBox = requireFrame(frame.dialog, 'ERun settings dialog');
     expect(dialogBox.height).toBeLessThanOrEqual(500 * 0.85 + 2);
 
-    const titleBox = await boundingBoxOf(
-      dialog.getByText('ERun settings', { exact: true }),
-      'ERun settings title',
-    );
+    const titleBox = requireFrame(frame.title, 'ERun settings title');
     expect(titleBox.y).toBeGreaterThanOrEqual(0);
-    const cancelBox = await boundingBoxOf(
-      dialog.getByRole('button', { name: 'Cancel', exact: true }),
-      'Cancel button',
-    );
+    const cancelBox = requireFrame(frame.cancel, 'Cancel button');
     expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(500);
 
     await app.globalConfigDialog.cancel();

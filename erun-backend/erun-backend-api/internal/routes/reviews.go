@@ -107,6 +107,32 @@ type addReviewerRequest struct {
 	UserID string `json:"userId"`
 }
 
+// createReviewRequest is the whole of what a caller may state about a new
+// review, and deliberately not model.Review, which also carries fields the
+// platform owns.
+//
+// IssueRef and IssueRefSource are the reason the two are separate. They are
+// derived on read and nothing persists them, so `Returning("*")` cannot
+// overwrite a caller-supplied value the way it does for a stored column: a
+// body carrying `issueRefSource: "DECLARED"` was echoed back verbatim as
+// though the platform had established it, and on a branch outside the
+// convention nothing even overwrote it. That is precisely the claim the whole
+// derivation is built to keep honest -- an inferred link is marked inferred,
+// and never written back as if it were declared. A request struct cannot hold
+// either field, so a forged one has nowhere on the wire to arrive from at all,
+// rather than merely nowhere to be read from after decoding.
+//
+// Status is absent for the same reason one step removed: it belongs to the
+// platform (PrepareCreate opens a review OPEN), and accepting it let a caller
+// create a review already at MERGE, past the merge queue that is the only
+// thing permitted to promote one there.
+type createReviewRequest struct {
+	Repository   string `json:"repository"`
+	Name         string `json:"name"`
+	TargetBranch string `json:"targetBranch"`
+	SourceBranch string `json:"sourceBranch"`
+}
+
 // listReviews answers GET /v1/reviews. The `?status=` filter is normalized and
 // then validated before it reaches the repository: an unrecognised value
 // matches no row, so passing one through answered `200` with an empty list a
@@ -135,7 +161,7 @@ func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, reviews)
+	writeJSON(w, http.StatusOK, withReviewsIssueRef(reviews))
 }
 
 func (r ReviewRoutes) listReviewers(w http.ResponseWriter, req *http.Request) {
@@ -173,23 +199,30 @@ func (r ReviewRoutes) removeReviewer(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
-	var review model.Review
-	if err := decodeJSON(req, &review); err != nil {
+	var input createReviewRequest
+	if err := decodeJSON(req, &input); err != nil {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	prepared, err := r.service.PrepareCreate(review)
+	// Assembled field by field from createReviewRequest: these four are the
+	// only values a caller can put into a review, and the fields it has no
+	// request-side counterpart for start zeroed rather than caller-set.
+	prepared, err := r.service.PrepareCreate(model.Review{
+		Repository:   input.Repository,
+		Name:         input.Name,
+		TargetBranch: input.TargetBranch,
+		SourceBranch: input.SourceBranch,
+	})
 	if err != nil {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
 		return
 	}
-	review = prepared
-	review, err = r.reviews.Create(req.Context(), review)
+	review, err := r.reviews.Create(req.Context(), prepared)
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, review)
+	writeJSON(w, http.StatusCreated, withReviewIssueRef(review))
 }
 
 func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
@@ -198,7 +231,7 @@ func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, reviews)
+	writeJSON(w, http.StatusOK, withReviewsIssueRef(reviews))
 }
 
 func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request) {
@@ -212,7 +245,7 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 		writeAdvanceMergeQueueError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
 func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http.Request) {
@@ -226,7 +259,7 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 		writeAdvanceMergeQueueError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
 // writeAdvanceMergeQueueError reports an unresolved-thread block as a 409 with
@@ -284,7 +317,7 @@ func (r ReviewRoutes) getReview(w http.ResponseWriter, req *http.Request) {
 		writeRepositoryError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
 func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Request) {
@@ -298,7 +331,7 @@ func (r ReviewRoutes) updateReviewStatus(w http.ResponseWriter, req *http.Reques
 		writeUpdateStatusError(w, req, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, review)
+	writeJSON(w, http.StatusOK, withReviewIssueRef(review))
 }
 
 // writeUpdateStatusError gives PATCH .../status's documented business codes

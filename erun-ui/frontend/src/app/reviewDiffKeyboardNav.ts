@@ -7,12 +7,27 @@ import {
   stepDiffHunk,
 } from './reviewDiffNavigation';
 import { hasShortcutModifier, isTypingTarget } from './reviewKeyboardShortcuts';
-import { setSelectedDiffPath } from './slices/reviewSlice';
+import { diffPathKey, setSelectedDiffPath } from './slices/reviewSlice';
 import { store } from './store';
 
 export interface ReviewDiffKeyboardNavDeps {
   getDiffList: () => HTMLDivElement | null;
   getTreeContainer: () => HTMLDivElement | null;
+}
+
+// hunkSelectionKey is the env-keyed identity of the file a hunk belongs to --
+// the same value selectedDiffPath stores, so a keyboard step compares and
+// writes it the way the scrollspy (TerminalController) does. The hunk's own
+// `data-path` is bare and its section carries the environment
+// (DiffFileView's data-env-key), so the two halves come from the DOM rather
+// than from a split of the stored key.
+function hunkSelectionKey(hunk: HTMLElement): string {
+  const envKey = hunk.closest<HTMLElement>('[data-env-key]')?.dataset.envKey ?? '';
+  const path = diffHunkFilePath(hunk);
+  if (!envKey || !path) {
+    return '';
+  }
+  return diffPathKey(envKey, path);
 }
 
 // ReviewDiffKeyboardNav owns the diff panel's keyboard model
@@ -39,7 +54,7 @@ export class ReviewDiffKeyboardNav {
     if (!selectedPath) {
       return null;
     }
-    return hunks.find((hunk) => diffHunkFilePath(hunk) === selectedPath) ?? null;
+    return hunks.find((hunk) => hunkSelectionKey(hunk) === selectedPath) ?? null;
   }
 
   // Moving focus by keyboard must leave a visible trail: the target hunk is
@@ -50,10 +65,10 @@ export class ReviewDiffKeyboardNav {
   private focusHunk(hunk: HTMLElement): void {
     hunk.focus();
     hunk.scrollIntoView({ block: 'nearest' });
-    const path = diffHunkFilePath(hunk);
-    if (path && path !== store.getState().review.selectedDiffPath) {
-      store.dispatch(setSelectedDiffPath(path));
-      scrollSelectedTreeNodeIntoView(this.deps.getTreeContainer(), path);
+    const keyed = hunkSelectionKey(hunk);
+    if (keyed && keyed !== store.getState().review.selectedDiffPath) {
+      store.dispatch(setSelectedDiffPath(keyed));
+      scrollSelectedTreeNodeIntoView(this.deps.getTreeContainer(), diffHunkFilePath(hunk));
     }
   }
 

@@ -140,14 +140,17 @@ function RuntimeUsageWarnings({
     return null;
   }
   return (
-    <ul className="grid gap-1" role="alert">
+    // Each row already carries its own glyph, so what is missing is the wrap:
+    // `overflow-wrap` inherits from the list down to the warning text, which is
+    // where a threshold crossing names its number and its limit.
+    <ul className="grid gap-1 [overflow-wrap:anywhere]" role="alert">
       {warnings.map((warning) => (
         <li
           key={warning}
           className="flex items-start gap-1.5 text-xs leading-[1.35] text-amber-700 dark:text-amber-400"
         >
           <TriangleAlert aria-hidden="true" className="mt-px size-3 shrink-0" />
-          <span>{warning}</span>
+          <span className="min-w-0">{warning}</span>
         </li>
       ))}
     </ul>

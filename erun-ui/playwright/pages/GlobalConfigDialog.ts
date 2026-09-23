@@ -1,5 +1,23 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+export interface DialogFrameBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// The dialog frame and its contents as one layout snapshot; a member is null
+// only when its element is absent from that snapshot, which a spec asserts on
+// rather than silently skipping (see boundingBoxOf's note on the same rule).
+export interface DialogFrameGeometry {
+  dialog: DialogFrameBox | null;
+  title: DialogFrameBox | null;
+  cancel: DialogFrameBox | null;
+  save: DialogFrameBox | null;
+  body: { scrollHeight: number; clientHeight: number } | null;
+}
+
 export class GlobalConfigDialog {
   constructor(public readonly page: Page) {}
 
@@ -27,6 +45,56 @@ export class GlobalConfigDialog {
 
   async waitForClosed(): Promise<void> {
     await this.locator().waitFor({ state: 'hidden' });
+  }
+
+  // Converge on the frame this dialog settles into once its config has landed.
+  //
+  // `waitForOpen` resolves the moment the content mounts, which is the
+  // `configLoading` shell: the header and the footer are already there, the body
+  // is one placeholder line, and the whole card is ~195px tall inside a viewport
+  // whose loaded frame is capped at 85vh (~1020px). Geometry read before the
+  // config lands is therefore geometry of a different card than the one the
+  // assertions are about. The body's own first field is the observable signal
+  // that the load landed -- `GlobalConfigBody` renders the placeholder instead
+  // of it for as long as `configLoading` is set -- and the enter animation
+  // (DialogContent's `zoom-in-95`, 200ms) is waited out so a measurement is not
+  // taken part-way through a scale transform.
+  async waitForLoadedFrame(): Promise<void> {
+    await this.locator().locator('#global-config-defaulttenant').waitFor({ state: 'visible' });
+    await this.locator().evaluate(async (root) => {
+      await Promise.all(root.getAnimations().map((a) => a.finished.catch(() => undefined)));
+    });
+  }
+
+  // The dialog frame and everything asserted inside it, read from ONE layout.
+  //
+  // As separate locator round trips these are separate layout moments, and this
+  // card's height changes by ~815px between its loading shell and its loaded
+  // body: a frame read before the config lands and a footer read after it are
+  // ~382px apart, so a containment assertion across the two fails on the loading
+  // shell's own bottom while the footer is legitimately inside the loaded one.
+  // This dialog is the one that measured it -- see the spec's own note. One
+  // evaluation, one layout: no transition can land between two reads that are
+  // not two reads.
+  async frameGeometry(): Promise<DialogFrameGeometry> {
+    return this.locator().evaluate((root) => {
+      const box = (el: Element | null): DialogFrameBox | null => {
+        if (!(el instanceof HTMLElement)) return null;
+        const rect = el.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      };
+      const label = (el: Element): string => (el.textContent ?? '').trim();
+      const footer = root.querySelector('[data-slot="dialog-footer"]');
+      const buttons = footer ? Array.from(footer.querySelectorAll('button')) : [];
+      const body = root.querySelector('.overflow-y-auto');
+      return {
+        dialog: box(root),
+        title: box(root.querySelector('[data-slot="dialog-title"]')),
+        cancel: box(buttons.find((b) => label(b) === 'Cancel') ?? null),
+        save: box(buttons.find((b) => /^(Save settings|Saving\.\.\.)$/.test(label(b))) ?? null),
+        body: body ? { scrollHeight: body.scrollHeight, clientHeight: body.clientHeight } : null,
+      };
+    });
   }
 
   defaultTenantTrigger(): Locator {
