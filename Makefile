@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-test test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -713,6 +713,66 @@ helm-chart-tests:
 		printf '%s\t%s\t%s\n' "$$t" "$$t" "sh $$t"; \
 	done | ./scripts/parallel-gate.sh $(HELM_CHART_TEST_PARALLELISM) helm-chart-tests
 
+# The published modules' own behaviour tests: `terraform test` over
+# erun-devops/terraform-erun/modules/*/tests/*.tftest.hcl. Each suite mocks
+# every provider it declares (mock_provider "helm"/"kubernetes"/"cloudflare"),
+# so no cloud credentials, no cluster and no kubeconfig are involved; the only
+# network this needs is `terraform init`'s provider download from
+# registry.terraform.io, which each module's own init performs. Iterates the
+# module directory rather than naming each module so a new module's tests are
+# picked up with no Makefile edit, the same reasoning helm-chart-tests'
+# directory iteration gives.
+#
+# `terraform init -backend=false` is load-bearing, not ceremony: without it
+# `terraform test` does not auto-initialise, and fails in ~0.2s with
+# "0 passed, 4 failed, 26 skipped" rather than running the suite.
+#
+# Only modules that actually declare tests/*.tftest.hcl are initialised and
+# tested. `terraform test` exits 0 with "Success! 0 passed, 0 failed" for a
+# module with no test files -- the same green as a module whose suite passes,
+# and indistinguishable from one whose suite was deleted. That is precisely
+# the "a test that never runs still reads as coverage in review" failure this
+# target exists to close, so modules with no tests are named explicitly in the
+# log instead of being reported as a pass. Whether such a module should fail
+# the gate outright is an open policy question, not a decision made here.
+#
+# Provider delivery is gate-time egress to registry.terraform.io (measured
+# ~8-11s per module cold, ~40MB of providers; the whole target is ~35s and
+# runs inside check-gate's existing fan-out, so it adds no gate latency). The
+# alternative, if that egress is ever unwanted, is to bake a provider cache
+# into the image and point TF_PLUGIN_CACHE_DIR or init's -plugin-dir at it:
+# that removes the network dependency at a cost of ~350MB of image weight for
+# both provider sets, and of having to refresh the cache when a module's
+# version constraint moves. Egress is what is implemented; the cache is not.
+#
+# TERRAFORM_TEST_JOB_MEMORY_MIB is the measured peak resident set of one cold
+# `init -backend=false && test` against the heaviest current suite
+# (cluster-edge, 30 runs): ~103 MiB including the provider download, with a
+# little headroom. Each job is one terraform process tree, so unlike lint
+# there is no per-job slope to derive; the memory term is expected to stay
+# non-binding next to CPU. Reserved against the lint fan-out peak for the same
+# reason HELM_CHART_TEST_PARALLELISM reserves it -- see
+# CHECK_GATE_FANOUT_PEAK_MEMORY_MIB's own comment.
+TERRAFORM_TEST_JOB_MEMORY_MIB := 110
+# Modules that really carry tests, used both to size the fan-out and to keep
+# the "no tests" notice below honest about which modules ran nothing.
+TERRAFORM_TEST_MODULES := $(shell for d in erun-devops/terraform-erun/modules/*/; do \
+	ls "$$d"tests/*.tftest.hcl >/dev/null 2>&1 && echo "$${d%/}"; done)
+# The +1 is the tree-wide `terraform fmt` job that shares this fan-out, the
+# same "cap at the actual job count" helm-chart-tests sizes on.
+TERRAFORM_TEST_JOB_COUNT := $(shell echo $$(( $(words $(TERRAFORM_TEST_MODULES)) + 1 )))
+TERRAFORM_TEST_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(TERRAFORM_TEST_JOB_COUNT) $(TERRAFORM_TEST_JOB_MEMORY_MIB) $(CHECK_GATE_FANOUT_PEAK_MEMORY_MIB))
+terraform-test:
+	@untested='$(filter-out $(TERRAFORM_TEST_MODULES),$(wildcard erun-devops/terraform-erun/modules/*))'; \
+	if [ -n "$$untested" ]; then \
+		echo ">> terraform-test: no tests/*.tftest.hcl in:$$untested"; \
+		echo ">> terraform-test: nothing was executed for those modules -- reported rather than quietly passing, because 'terraform test' also exits 0 on an empty test set"; \
+	fi; \
+	{ printf '%s\t%s\t%s\n' "terraform-fmt" "terraform fmt -check -recursive" "terraform fmt -check -recursive erun-devops/terraform-erun"; \
+	for m in $(TERRAFORM_TEST_MODULES); do \
+		printf '%s\t%s\t%s\n' "$$m" "$$m" "terraform -chdir=$$m init -backend=false && terraform -chdir=$$m test"; \
+	done; } | ./scripts/parallel-gate.sh $(TERRAFORM_TEST_PARALLELISM) terraform-test
+
 # End-to-end proof that a postgres restart cannot destroy committed data,
 # against a real postgres and the real atlas migrations. Deliberately NOT part
 # of `check`: it needs a real docker daemon and the atlas CLI, and the image
@@ -867,7 +927,7 @@ integration-test-gate:
 # two targets joined the list while this still read 10, which resolved -j10
 # for twelve targets because the CPU term (the in-pod DIND_CPU_LIMIT of 12)
 # was the larger one. Derive it, do not re-count it by eye.
-CHECK_GATE_TARGET_COUNT := 12
+CHECK_GATE_TARGET_COUNT := 13
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
 check:
@@ -885,7 +945,8 @@ check:
 # erun-devops/dns01-webhook's own Go tests, the frontend kit + desktop
 # frontend + console gates, the erun-ui Windows cross-compile check, the
 # erun-ui/playwright desktop e2e suite, the
-# erun-devops/k8s chart tests, then the integration suite + coverage. The
+# erun-devops/k8s chart tests, the terraform-erun modules' own `terraform test`
+# suites, then the integration suite + coverage. The
 # erun-devops image test stage runs this (via `check`, which is inert outside
 # an agent pod); a failure tags no image. test-postgres-restart is
 # deliberately excluded -- see its own comment above for why.
@@ -894,12 +955,12 @@ check:
 # it to bypass failures; diagnose against comparable state and fix them under
 # root Working Rules. Fixture-isolation requirements live in the Playwright guide.
 #
-# These twelve run concurrently, bounded by CHECK_GATE_PARALLELISM (see
+# These thirteen run concurrently, bounded by CHECK_GATE_PARALLELISM (see
 # `check`'s own comment above for the measured cost this replaced, why `-j`
 # rather than scripts/parallel-gate.sh is what drives it here, and where the
 # two real ordering dependencies -- test-playwright and
 # test-erun-ui-windows-build each needing test-frontend -- are declared).
-# Do not drop any of the twelve from this line to move the fan-out elsewhere:
+# Do not drop any of the thirteen from this line to move the fan-out elsewhere:
 # erun-integration/build_check_coverage_test.go and
 # erun_ui_windows_cross_compile_test.go both parse this exact line's text to
 # confirm every module's tests are really wired into `make check`, and fail
@@ -916,11 +977,11 @@ check:
 # 4-CPU build container those are the longest jobs in the gate. Listing the
 # critical-path targets first lets the chain head take a slot in the first
 # dispatch batch. This is a no-op when the width already covers every target
-# (the in-pod gate resolves -j12 and dispatches all twelve within 0.32s), which is
+# (the in-pod gate resolves -j13 and dispatches all thirteen within 0.32s), which is
 # why it is a scheduling fix and not on its own a wall-time reduction.
 # Reordering this line is safe (nothing keys on the order); DROPPING a name is
 # not -- see the coverage-test note directly above.
-check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests test-atlas-validate integration-test-gate
+check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests test-atlas-validate integration-test-gate terraform-test
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the

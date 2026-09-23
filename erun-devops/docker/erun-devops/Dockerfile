@@ -19,6 +19,12 @@ ARG ATLAS_VERSION=v1.2.0
 # build or inside a deployed runtime pod.
 ARG PLAYWRIGHT_VERSION=1.60.0
 
+# Declared once at the top for the same reason as HELM_VERSION above: the test
+# stage's own `terraform` (needed so `make check`'s terraform-test target can
+# run the published erun-devops/terraform-erun modules' `terraform test`
+# suites) and the final image's `terraform` stay pinned to the same version.
+ARG TERRAFORM_VERSION=1.12.2
+
 # Pulled into the test stage purely to copy a pinned Node/Yarn toolchain out
 # of — see the node COPY below. No RUN of its own, so it needs no emulation
 # even though the test stage is pinned to BUILDPLATFORM (matches the `goroot`
@@ -64,12 +70,16 @@ WORKDIR /src
 # into "every build whose apt state was evicted"; removing the docker-clean
 # hook and setting Keep-Downloaded-Packages is what makes that retention
 # actually happen (see erun-ubuntu/Dockerfile's identical comment).
+# unzip is for the terraform install below: HashiCorp publishes only a .zip,
+# and this stage's base is buildpack-deps:trixie-scm, whose apt set is
+# git/mercurial/openssh/subversion only -- the final image gets unzip from
+# erun-ubuntu (see that Dockerfile), which this stage does not inherit.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
     echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
     apt-get update && apt-get install -y --no-install-recommends \
-        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev unzip
 
 # GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
 # builder stage below install from, so the repo-root pin and the image's
@@ -109,6 +119,29 @@ RUN curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-lin
 ARG ATLAS_VERSION
 RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${BUILDARCH}-${ATLAS_VERSION}" && \
     chmod 0755 /usr/local/bin/atlas
+
+# `terraform` for `make check`'s terraform-test target: the published
+# erun-devops/terraform-erun modules carry `terraform test` suites that mock
+# every provider they use, so -- exactly like helm and atlas above -- this is a
+# pinned binary plus the module tree, with no cloud credentials, no cluster and
+# no kubeconfig involved. Same URL form, same install method and the same
+# single global TERRAFORM_VERSION pin as the final image's copy below, so the
+# two cannot drift.
+#
+# Build-time egress to registry.terraform.io is how those suites get their
+# providers: each module's own `terraform init -backend=false` fetches helm,
+# kubernetes and cloudflare (~40MB, ~8-11s per module). Egress is deliberate --
+# the alternative is baking a provider cache into this image and pointing
+# TF_PLUGIN_CACHE_DIR or init's -plugin-dir at it, which removes the network
+# dependency at the cost of ~350MB of image weight for both provider sets and a
+# second thing to refresh whenever a module's version constraint moves. See the
+# root Makefile's terraform-test comment, which records the same trade-off
+# where a reader changing the target will meet it.
+ARG TERRAFORM_VERSION
+RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${BUILDARCH}.zip" && \
+    unzip -q /tmp/terraform.zip -d /tmp && \
+    install -m 0755 /tmp/terraform /usr/local/bin/terraform && \
+    rm -rf /tmp/terraform.zip /tmp/terraform
 
 # Node/Yarn for `make test-frontend` (erun-kit + erun-console). Copied out of
 # the pinned `node` stage above rather than apt/curl-installed, same pattern
@@ -212,9 +245,14 @@ COPY Formula /src/Formula
 COPY bucket /src/bucket
 # helm-chart-tests renders every erun-devops/k8s chart with `helm template`.
 # The charts and their *_test.sh scripts are the bulk of what is needed here --
-# not the rest of erun-devops (terraform-erun/, most of docker/) -- but see the
-# VERSION pins immediately below: the k8s tests are NOT render-only.
+# not the rest of erun-devops (most of docker/) -- but see the VERSION pins
+# immediately below: the k8s tests are NOT render-only.
 COPY erun-devops/k8s /src/erun-devops/k8s
+# terraform-test (root Makefile) runs each published module's own
+# `terraform test` suites and `terraform fmt -check -recursive` over the whole
+# tree, so unlike helm-chart-tests this target consumes the module sources
+# themselves rather than only rendered output.
+COPY erun-devops/terraform-erun /src/erun-devops/terraform-erun
 # image-version_test.sh (under k8s/) compares each chart's image default against
 # the `docker/<image>/VERSION` pin the build publishes, so those pins must be
 # present even though nothing in this stage builds those images. It reads them
@@ -563,7 +601,9 @@ ARG KUBECTL_VERSION=v1.33.1
 # HELM_VERSION's default lives in the global ARG at the top of this file,
 # shared with the test stage's own helm install.
 ARG HELM_VERSION
-ARG TERRAFORM_VERSION=1.12.2
+# Default lives in the global ARG at the top of this file, shared with the
+# test stage's own terraform install.
+ARG TERRAFORM_VERSION
 ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1
 ARG BUILDX_VERSION=v0.18.0
