@@ -97,6 +97,32 @@ emitted; type is the single source of truth.
        and none of them can tell what it is actually sized for. Defaults to the
        50Gi the claim has always requested. */ -}}
 {{- $dockerVolumeGi := int (default 50 .Values.dockerVolumeGi) -}}
+{{- $cacheTrim := default dict .Values.cacheTrim -}}
+{{- /* The cap the runtime container bounds the go build cache by. It travels as
+       a rendered byte count for the same reason the docker volume's does: the
+       cache lives under ~/.cache on the home claim, that claim lands on the
+       same node-local, quota-less storage class, and df from inside the pod
+       reports the node rather than the claim -- so the size has to come from the
+       deployment that declared it.
+
+       It is not derived from the home claim's own request. That request is 2Gi
+       and always has been, while the caches living under it grew to tens of
+       gigabytes; taking a share of a number nothing has ever enforced would
+       bound the cache to well under the working set of a single branch's build
+       and make every build cold, which is the cost this bound exists to avoid
+       paying. Defaults to 16GiB. The value is per environment, so an environment
+       whose builds justify more says so here rather than raising it for every
+       other environment on the node. */ -}}
+{{- $goBuildCacheMaxGi := int (default 16 $cacheTrim.goBuildMaxGi) -}}
+{{- /* The home claim's own request. Nothing enforces it: the storage class these
+       claims land on is node-local and carries no quota, so this number is a
+       scheduling statement rather than a ceiling, and raising it is what the
+       parameter is for -- an environment that wants to declare honestly what
+       home holds must be created with a storage class that can honour it, since
+       a request raised on an existing claim is a resize the node-local class
+       cannot perform. What actually keeps home from filling a node is the go
+       build cache bound above. */ -}}
+{{- $homeVolumeGi := int (default 2 .Values.homeVolumeGi) -}}
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
 {{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
@@ -260,7 +286,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 2Gi
+      storage: {{ $homeVolumeGi }}Gi
 {{- if $dindEnabled }}
 ---
 apiVersion: v1
@@ -673,6 +699,8 @@ spec:
               value: {{ $repoPath | quote }}
             - name: ERUN_OUTPUTS_DIR
               value: /home/erun/.erun/outputs
+            - name: ERUN_GO_BUILD_CACHE_MAX_BYTES
+              value: {{ mul $goBuildCacheMaxGi 1073741824 | quote }}
             - name: ERUN_REPO_REMOTE
               value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
             {{- if .Values.repoUrl }}
