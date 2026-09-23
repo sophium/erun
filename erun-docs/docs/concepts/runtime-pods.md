@@ -28,7 +28,7 @@ One pod with two containers:
 
 Because the MCP edge runs in this container, an MCP tool call executes with exactly the toolchain the env is built with. Add Java or a compose plugin to the runtime image and MCP-driven `raw` and `build` see it, the same as an `erun open` shell does.
 
-Both share two persistent volume claims: `/home/erun` (workspace + config) and `/var/lib/docker` (the daemon's image store, so builds stay cache-warm across pod restarts). The home PVC also holds the **agent outputs directory** (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`) — where agents and skills drop deliverables you pull out with [`erun outputs`](/cli/outputs); because it's on the PVC, those files survive pod restarts.
+Both share two persistent volume claims: `/home/erun` (workspace + config, and the go build cache, which is bounded — see [below](#what-is-holding-the-environments-resources)) and `/var/lib/docker` (the daemon's image store, so builds stay cache-warm across pod restarts). The home PVC also holds the **agent outputs directory** (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`) — where agents and skills drop deliverables you pull out with [`erun outputs`](/cli/outputs); because it's on the PVC, those files survive pod restarts.
 
 This pod is the **shared surface** for Operator and Agent. Two endpoints on the same pod, both accepting any client:
 
@@ -197,6 +197,27 @@ The bound is per environment on purpose. Each environment's docker sidecar owns 
 share of that volume is a limit no single environment can exceed on the others' behalf. An unbounded
 cache is exactly what that costs: the disk-headroom guard that prunes when the node runs low frees
 *the node's* space, so every other environment's next build repays its layers from cold.
+
+The **go build cache** is the other half of that, and it lives on the home volume rather than the
+docker one. It has a bound of its own because the go command's own rule is not one: go evicts entries
+nothing has touched in five days, which is a rule about *recency* with no ceiling, and the five-day
+working set of a multi-module repository built per GOARCH, with and without `-race`, reaches tens of
+gigabytes — enough that four environments sharing a node held about 45 GB each and filled it.
+
+Each environment's is capped at 16 GiB. Reaching the cap evicts the **least recently used** entries
+down to it rather than clearing the cache: what goes is the bulk nothing has touched since it was
+written, and what stays is the working set the next build asks for. Clearing it would bound it too,
+and would make every build afterwards cold — on this repository a warm build of one module takes
+about half a second against about fifty seconds from an empty cache. The cap is checked when the pod
+starts and every half hour after, so an environment already over it comes back under it without
+waiting for the next build.
+
+Set it per environment with `cacheTrim.goBuildMaxGi` in the runtime chart's values; `0` leaves the
+cache unbounded. Size it above what your builds actually reuse rather than at what looks tidy: a cap
+below the working set turns every build cold, which is the cost the bound exists to avoid. The home
+claim's own `storage:` request is not part of this — the storage class these claims land on is
+node-local and enforces no quota, so that number is a declaration rather than a ceiling, and the go
+build cache's cap is what actually keeps home from filling a node.
 
 A session's running state is **observed in the pod** — its socket exists *and* a live program sits
 behind it — rather than inferred from how recently it printed something. An Agent waiting on a

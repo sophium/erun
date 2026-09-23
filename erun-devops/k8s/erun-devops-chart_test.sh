@@ -755,4 +755,67 @@ rendered=$(render --set worktreeStorage=none)
 [ -z "$(cache_bound_bytes "${rendered}")" ] ||
     fail "no cache bound should render for an env with no docker volume"
 
+# --- 16. The cap on the go build cache is the chart's number, and the image's
+#        fallback is the same number ---
+# The same hazard the docker volume's bound above carries, one layer further
+# out: the cap is rendered by the chart and also has a fallback baked into the
+# entrypoint for a pod whose chart predates the value. Two independently written
+# numbers drift, and the drift is silent in both directions — an operator who
+# lowers the cap and gets the baked one instead, or a pod that keeps bounding
+# the old size after the image's default moved.
+go_build_cache_cap_bytes() {
+    grep -A1 '^            - name: ERUN_GO_BUILD_CACHE_MAX_BYTES$' "$1" |
+        sed -n 's/^              value: "\([0-9]*\)"$/\1/p'
+}
+
+home_claim_gi() {
+    awk '/^  name: test-home$/{found=1}
+         found && /^      storage: /{sub(/^      storage: /,""); sub(/Gi$/,""); print; exit}' "$1"
+}
+
+rendered=$(render)
+default_cap=$(go_build_cache_cap_bytes "${rendered}")
+[ -n "${default_cap}" ] ||
+    fail "the runtime container should carry the go build cache cap"
+[ "${default_cap}" = "17179869184" ] ||
+    fail "the go build cache cap should default to 16GiB (17179869184 bytes), got '${default_cap}'"
+
+rendered=$(render --set cacheTrim.goBuildMaxGi=4)
+[ "$(go_build_cache_cap_bytes "${rendered}")" = "4294967296" ] ||
+    fail "the go build cache cap should follow cacheTrim.goBuildMaxGi, got '$(go_build_cache_cap_bytes "${rendered}")'"
+
+# Zero is how a deployment asks for no bound. It has to reach the pod AS zero:
+# the entrypoint reads an absent variable as its own default, so a chart that
+# resolved 0 back to the default on the way out would leave a pod that asked for
+# no bound applying one anyway.
+rendered=$(render --set cacheTrim.goBuildMaxGi=0)
+[ "$(go_build_cache_cap_bytes "${rendered}")" = "0" ] ||
+    fail "cacheTrim.goBuildMaxGi=0 should render a zero cap rather than fall back to the default, got '$(go_build_cache_cap_bytes "${rendered}")'"
+
+# The fallback itself, read out of the image's own script rather than restated,
+# so a change to either side that the other does not follow fails here.
+entrypoint_fallback() {
+    sed -n 's/.*ERUN_GO_BUILD_CACHE_MAX_BYTES:-\([0-9]*\)}.*/\1/p' \
+        "${script_dir}/../docker/erun-devops/entrypoint.sh" | head -n 1
+}
+fallback=$(entrypoint_fallback)
+[ -n "${fallback}" ] || fail "the entrypoint should carry a fallback cap for older charts"
+[ "${fallback}" = "17179869184" ] ||
+    fail "the entrypoint's fallback cap should be the chart's default (17179869184), got '${fallback}'"
+
+# --- 17. The home claim's request is a parameter, and its default is unchanged ---
+# Nothing enforces this request — the class these claims land on is node-local and
+# carries no quota — so it is a declaration, not a ceiling, and the parameter is
+# what lets an environment declare honestly. The rendered default must stay
+# exactly what it has always been: a request raised on an existing claim is a
+# resize the node-local class cannot perform, so a changed default would be an
+# upgrade that fails to apply rather than a volume that gets bigger.
+rendered=$(render)
+[ "$(home_claim_gi "${rendered}")" = "2" ] ||
+    fail "the home claim should still request 2Gi by default, got '$(home_claim_gi "${rendered}")'"
+
+rendered=$(render --set homeVolumeGi=32)
+[ "$(home_claim_gi "${rendered}")" = "32" ] ||
+    fail "the home claim should follow homeVolumeGi, got '$(home_claim_gi "${rendered}")'"
+
 echo "PASS: erun-devops chart pod shape"
