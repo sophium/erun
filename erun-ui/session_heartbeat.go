@@ -52,6 +52,10 @@ func (a *App) runSessionHeartbeatPoller(stop <-chan struct{}) {
 			return
 		case <-ticker.C:
 			a.reconcileSessionHeartbeatsOnce()
+			// After the heartbeats, so this tick's own view of what the pod is
+			// running is already in hand when the tool's report is weighed
+			// against it. See ai_session_status.go.
+			a.reconcileAISessionStatusesOnce()
 			// Mirrors are re-enumerated here, not only at boot. An env linked
 			// while the app is already running — the usual case, since linking is
 			// done from the running app — never got a sync worker, so its mirror
@@ -205,8 +209,7 @@ func (a *App) releaseUnobservedAIActivity() {
 		if managed == nil || managed.closed || !aiActivityKind(managed.kind) || !managed.aiBusyEmitted {
 			continue
 		}
-		heartbeat, ok := a.sessionHeartbeats[selectionKey(managed.selection)]
-		if ok && time.Since(heartbeat.observedAt) <= sessionHeartbeatTTL {
+		if a.aiLatchStillSupportedLocked(managed) {
 			continue
 		}
 		candidates = append(candidates, managed)
@@ -215,6 +218,27 @@ func (a *App) releaseUnobservedAIActivity() {
 	for _, managed := range candidates {
 		a.releaseAIActivityIfQuiet(managed)
 	}
+}
+
+// aiLatchStillSupportedLocked answers whether something the desktop still
+// believes is holding this session's latch open. Caller holds a.mu.
+func (a *App) aiLatchStillSupportedLocked(managed *managedTerminal) bool {
+	if _, reported := a.aiSessionEvidenceForTabLocked(managed); reported {
+		// The tool's own report is fresh, so the poller owns this latch in both
+		// directions (reconcileAISessionStatusesOnce). Releasing it here as well
+		// would only race the tick that re-asserts it.
+		return true
+	}
+	if managed.aiModelLatch {
+		// A latch the tool raised has nothing left to re-assert it once its
+		// report stops arriving: pod liveness cannot hold it, because a process
+		// blocked on the human is alive too, and holding it there is the exact
+		// false "working" this replaced. So it goes on the silence rule, like
+		// any other latch whose observations have stopped.
+		return false
+	}
+	heartbeat, ok := a.sessionHeartbeats[selectionKey(managed.selection)]
+	return ok && time.Since(heartbeat.observedAt) <= sessionHeartbeatTTL
 }
 
 func (a *App) selectionsWithPodSessions() []uiSelection {

@@ -1445,9 +1445,13 @@ type terminalExitPayload struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// aiActivityPayload carries the debounced AI-session "busy" signal the sidebar
-// uses to spin env rows whose AI tab is actively producing output. Busy flips
-// true after ~5 s of sustained output and back to false after ~3 s of silence.
+// aiActivityPayload carries the AI-session "busy" signal the sidebar uses to
+// spin env rows whose AI tab is working. It has two sources, and the tool's own
+// report wins where it exists: the AI tool's turn-boundary events (busy while a
+// turn is in flight, released when it reports the turn ended or that it is
+// waiting on the operator — see ai_session_status.go), and, only for a session
+// that has never reported one, the debounced output-volume fallback (true after
+// ~5 s of sustained output, false after ~3 s of silence).
 type aiActivityPayload struct {
 	SessionID   int    `json:"sessionId"`
 	Tenant      string `json:"tenant"`

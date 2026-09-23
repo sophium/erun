@@ -144,6 +144,11 @@ type App struct {
 	// makes the rendered session count and the running state one observation
 	// rather than two guesses. See session_heartbeat.go.
 	sessionHeartbeats map[string]sessionHeartbeat
+	// aiSessionReadings holds the most recent structured AI-session status per
+	// environment, as the environment's own AI tool reported it. It is what
+	// keeps the sidebar badge from reading a session blocked on the human as
+	// working. See ai_session_status.go.
+	aiSessionReadings map[string]aiSessionReading
 	// envActivity is the last observation published per environment, so the
 	// sweep announces transitions rather than restating a quiet environment
 	// every tick. See environment_activity.go.
