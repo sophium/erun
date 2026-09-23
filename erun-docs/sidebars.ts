@@ -165,6 +165,7 @@ const sidebars: SidebarsConfig = {
           link: { type: 'generated-index' },
           items: [
             'agent-reference/api-protocol',
+            'agent-reference/environment-read-model',
             'agent-reference/audit-log',
             'agent-reference/identity-administration',
             'collaboration/reviews',
