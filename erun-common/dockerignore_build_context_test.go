@@ -74,6 +74,59 @@ func TestRootDockerignoreExcludesDocsBuildArtifacts(t *testing.T) {
 	}
 }
 
+// TestRootDockerignoreExcludesTerraformInitArtifacts is the same asymmetry as
+// TestRootDockerignoreExcludesDocsBuildArtifacts above, for the terraform
+// module tree the erun-devops test stage COPYs so `make check`'s terraform-test
+// target can run the published modules' `terraform test` suites.
+//
+// `terraform init` writes `.terraform/` (provider binaries, tens of MB) and
+// `.terraform.lock.hcl` beside the module it initialises, and the new target
+// runs init in-tree -- so a developer who ran it on the host has both. The
+// root .gitignore already drops them, which means computeBuildFingerprint drops
+// them too, while the real `docker build` honours only this root .dockerignore.
+// Without the exclusions below that is the erun-docs shape again: the context
+// ships what the fingerprint says is not there.
+func TestRootDockerignoreExcludesTerraformInitArtifacts(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	data, err := os.ReadFile(filepath.Join(root, ".dockerignore"))
+	if err != nil {
+		t.Fatalf("read root .dockerignore: %v", err)
+	}
+	set := parseIgnoreData(data, "")
+
+	const module = "erun-devops/terraform-erun/modules/terraform-erun-cluster-edge"
+	excluded := []struct {
+		path  string
+		isDir bool
+	}{
+		{module + "/.terraform", true},
+		// A file beneath the init dir: docker walks the tree, so excluding the
+		// directory has to drop its contents too.
+		{module + "/.terraform/providers/registry.terraform.io/hashicorp/helm/2.17.0/linux_amd64/terraform-provider-helm_v2.17.0", false},
+		{module + "/.terraform.lock.hcl", false},
+	}
+	for _, e := range excluded {
+		if !set.matches(e.path, e.isDir) {
+			t.Errorf("root .dockerignore must exclude %q (written by a local `terraform init`; the test stage COPYs erun-devops/terraform-erun)", e.path)
+		}
+	}
+
+	// The modules themselves are the target's input, so the exclusion must not
+	// swallow them -- a pattern loose enough to drop `.terraform` must still
+	// keep the sources and the suites beside it.
+	kept := []string{
+		module + "/main.tf",
+		module + "/versions.tf",
+		module + "/tests/edge_transport_policy.tftest.hcl",
+		"erun-devops/terraform-erun/modules/terraform-erun-cloudflare-apex/tests/apex_records.tftest.hcl",
+	}
+	for _, path := range kept {
+		if set.matches(path, false) {
+			t.Errorf("root .dockerignore must NOT exclude %q (the terraform-test target reads it)", path)
+		}
+	}
+}
+
 // TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules is the same
 // asymmetry as TestRootDockerignoreExcludesDocsBuildArtifacts above, found by
 // diffing every nested .gitignore under a module the erun-devops test stage
