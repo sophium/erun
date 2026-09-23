@@ -19,10 +19,10 @@ release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
 publishing image: ghcr.io/sophium/api:<VERSION>
 release: worktree clean = true
+release: docker root free disk space is not observable from this process (docker info failed: exit status 1); skipping the headroom check
 stage: sync-remote
 stage: release
 release: origin/main has not moved since sync-remote
-release: docker root free disk space is not observable from this process (docker info failed: exit status 1); skipping the headroom check
 simulated docker failure
 simulated docker failure
 stage: publish
