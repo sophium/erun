@@ -16,6 +16,7 @@ work_root="$(mktemp -d 2>/dev/null || mktemp -d -t entrypoint-test)"
 run_pid=""
 session_dir_override=""
 agent_config_dir_override=""
+cache_trim_max_bytes=""
 trap 'stop_run; rm -rf "${work_root}"' EXIT INT TERM
 
 fail() {
@@ -64,7 +65,15 @@ EOF
 printf '%s\n' "\$*" >>"${run_dir}/erun-argv"
 exit 0
 EOF
-    chmod +x "${run_dir}/bin/emcp" "${run_dir}/bin/erun"
+    # The cache bound is a real helper with its own test (cache-trim_test.sh);
+    # what this file owns is that the devops path starts it, with which
+    # arguments, and how often.
+    cat >"${run_dir}/bin/erun-trim-cache" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >>"${run_dir}/trim-argv"
+exit 0
+EOF
+    chmod +x "${run_dir}/bin/emcp" "${run_dir}/bin/erun" "${run_dir}/bin/erun-trim-cache"
     log="${run_dir}/log"
     : >"${log}"
 }
@@ -82,6 +91,7 @@ start_run() {
         ERUN_MCP_PORT=17000 \
         ERUN_MCP_ENABLED="${_enabled}" \
         ERUN_APP_SESSION_DIR="${session_dir_override:-}" \
+        ERUN_GO_BUILD_CACHE_MAX_BYTES="${cache_trim_max_bytes:-17179869184}" \
         ERUN_AGENT_CONFIG_STATE_DIR="${agent_config_dir_override:-${run_dir}/agent-config}" \
         ANTHROPIC_BASE_URL="${anthropic_base_url_override:-}" \
         ANTHROPIC_MODEL="${anthropic_model_override:-}" \
@@ -545,6 +555,7 @@ boot_shell() {
         ERUN_TENANT=team \
         ERUN_ENVIRONMENT=dev \
         ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+        ERUN_GO_BUILD_CACHE_MAX_BYTES="${cache_trim_max_bytes:-17179869184}" \
         sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 || true
 }
 
@@ -623,4 +634,38 @@ imds_calls=$(count_lines "${run_dir}/curl-argv")
 grep -q -- '--connect-timeout' "${run_dir}/curl-argv" ||
     fail "the IMDS probe should bound its connect phase: $(cat "${run_dir}/curl-argv")"
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, cloud-context default parity with the Go normalizer, and once-per-boot agent configuration"
+# --- 13. The go build cache is bounded once per boot, on the devops path ---
+# Nothing else bounds it: it lives under the home volume, whose declared size is
+# not a quota on a node-local storage class, and the go command's own trim is by
+# age with no ceiling. An environment that kept building grew it into tens of
+# gigabytes and, sharing a node with the others doing the same, put that node
+# under DiskPressure. Started at boot so an environment already over its cap
+# comes back under it without waiting for the next build, and on the devops path
+# only, so a shell in a live container never starts a second bound behind the
+# pod that is already running one.
+prepare_run cachetrim
+start_run true devops
+wait_for '[ -s "${run_dir}/trim-argv" ]' ||
+    fail "the devops boot path should bound the go build cache"
+[ "$(wc -l <"${run_dir}/trim-argv")" -eq 1 ] ||
+    fail "the cache bound should be started once per boot, got $(wc -l <"${run_dir}/trim-argv")"
+[ "$(cat "${run_dir}/trim-argv")" = "${run_dir}/home/.cache/go-build 17179869184" ] ||
+    fail "the bound should target the go build cache under HOME against the cap the chart renders, got: $(cat "${run_dir}/trim-argv")"
+boot_shell
+[ "$(wc -l <"${run_dir}/trim-argv")" -eq 1 ] ||
+    fail "an in-container shell must not start a second cache bound"
+stop_run
+
+# A cap of zero is how a deployment says it wants no bound. Read as a bound of
+# zero it would clear the cache instead, which is the cost the bound exists to
+# avoid, so it has to read as "start nothing".
+prepare_run cachetrimoff
+cache_trim_max_bytes=0
+start_run true devops
+wait_for 'booted'
+[ -e "${run_dir}/trim-argv" ] &&
+    fail "a cap of zero should start no cache bound, got: $(cat "${run_dir}/trim-argv")"
+stop_run
+cache_trim_max_bytes=""
+
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, cloud-context default parity with the Go normalizer, once-per-boot agent configuration, and the bounded go build cache"

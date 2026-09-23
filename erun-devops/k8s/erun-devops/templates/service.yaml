@@ -113,7 +113,10 @@ emitted; type is the single source of truth.
        paying. Defaults to 16GiB. The value is per environment, so an environment
        whose builds justify more says so here rather than raising it for every
        other environment on the node. */ -}}
-{{- $goBuildCacheMaxGi := int (default 16 $cacheTrim.goBuildMaxGi) -}}
+{{- $goBuildCacheMaxGi := 16 -}}
+{{- if hasKey $cacheTrim "goBuildMaxGi" -}}
+  {{- $goBuildCacheMaxGi = int $cacheTrim.goBuildMaxGi -}}
+{{- end -}}
 {{- /* The home claim's own request. Nothing enforces it: the storage class these
        claims land on is node-local and carries no quota, so this number is a
        scheduling statement rather than a ceiling, and raising it is what the
