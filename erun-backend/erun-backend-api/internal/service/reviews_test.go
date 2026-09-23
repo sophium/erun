@@ -332,10 +332,18 @@ func TestReconcileMergedRefusesAClosedReview(t *testing.T) {
 	}
 }
 
+// testRepository is the identity every acceptMerged report names, canonical
+// spelling included, so the repository a fixture records and the one the
+// report carries are the same string — which is what makes these fixtures
+// exercise a merge inside one repository rather than across two.
+const testRepository = "file:///remote"
+
 // mergingReviewWithGateBuild sets up a review sitting at MERGE with a
 // successful GATE build already recorded against it — the state every
 // acceptMerged test starts from, so each one only has to vary the one
-// condition it means to exercise.
+// condition it means to exercise. The review records no repository, the
+// legacy-row shape the adoption tests need; tests about the gated tip add a
+// prior merge that does record one (mergingReviewGatedAgainst).
 func mergingReviewWithGateBuild(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
 	builds := &fakeReviewBuilds{builds: map[string]model.Build{
@@ -368,11 +376,15 @@ func TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch(t *testing.T) {
 }
 
 // mergingReviewGatedAgainst wires up mergingReviewWithGateBuild plus a prior
-// MERGED review on the same branch at commit "real-tip" — the target tip
-// this review's gate build has to descend from.
+// MERGED review on the same branch of the repository these tests report
+// against, at commit "real-tip" — the target tip this review's gate build has
+// to descend from. What makes it *this* review's gated tip rather than a
+// stranger's is the repository it records: the review under test records none,
+// so it is anchored on the repository its report adopts (testRepository), and
+// a prior merge belonging to any other repository must not answer for it.
 func mergingReviewGatedAgainst(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
 	reviews, builds := mergingReviewWithGateBuild(commit)
-	priorMerge := model.Review{ReviewID: "review-0", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-0"}
+	priorMerge := model.Review{ReviewID: "review-0", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-0", Repository: testRepository}
 	reviews.reviews["review-0"] = &priorMerge
 	builds.builds["gate-0"] = model.Build{BuildID: "gate-0", ReviewID: "review-0", Kind: model.BuildKindGate, Successful: true, CommitID: "real-tip"}
 	return reviews, builds
