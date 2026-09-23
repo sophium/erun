@@ -339,14 +339,31 @@ func (r *EnvironmentRepository) ListByStatuses(ctx context.Context, statuses []m
 	return environments, err
 }
 
+// Get returns one of the caller's tenant's environments by public ID, or
+// ErrNotFound for an id that names another tenant's row. Scoped explicitly by
+// tenant_id from the security context rather than left to RLS, the same
+// reason List/Count/CountByContext are: erun_operations' RLS policy is
+// unconditional (USING (true)), so an OPERATIONS caller naming a stranger
+// tenant's environment id would otherwise read that row. That matters more
+// here than anywhere else in this repository, because Get is the first call
+// every operate route makes — deploy, stop, and delete all take the row it
+// returns as authority to mutate, so an unscoped read is an unscoped write.
+// Nothing else refuses it: those routes carry no tenant input of their own,
+// so a caller cannot even deliberately scope them the way
+// scopedContextForTenant lets create/list target another tenant.
 func (r *EnvironmentRepository) Get(ctx context.Context, environmentID string) (model.Environment, error) {
 	var environment model.Environment
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
-		err := tx.NewRaw(`
+		securityContext, err := security.RequiredFromContext(ctx)
+		if err != nil {
+			return ErrMissingSecurityContext
+		}
+		err = tx.NewRaw(`
 			SELECT `+environmentColumns+`
 			  FROM environments
-			 WHERE environment_id = ?
-		`, environmentID).Scan(ctx, &environment)
+			 WHERE tenant_id = ?
+			   AND environment_id = ?
+		`, securityContext.TenantID, environmentID).Scan(ctx, &environment)
 		return normalizeNoRows(err)
 	})
 	return environment, err
