@@ -626,6 +626,42 @@ func TestAdvanceMergeQueueAmbiguousQueueReportsItsCode(t *testing.T) {
 			t.Fatalf("body = %q, want it to carry %s", body, want)
 		}
 	}
+	// The field is present even with nothing to report. "None record no
+	// repository" and "the platform cannot say" are different answers, and a
+	// client iterating the field must not have to guard the empty case.
+	if !strings.Contains(body, `"unrecordedRepositoryReviewIds":[]`) {
+		t.Fatalf("body = %q, want an empty unrecordedRepositoryReviewIds rather than an absent one", body)
+	}
+}
+
+// TestAdvanceMergeQueueAmbiguousQueueNamesUnattributableRows: the rows a
+// genuinely mixed queue cannot attribute are named in the refusal, by id, so
+// the caller is not left to infer which of the waiting reviews belongs to
+// neither repository.
+func TestAdvanceMergeQueueAmbiguousQueueNamesUnattributableRows(t *testing.T) {
+	svc := &stubReviewService{err: &service.AmbiguousMergeQueueError{
+		TargetBranch:        "main",
+		Repositories:        []string{"https://github.com/sophium/erun", "https://github.com/sophium/other"},
+		UnrecordedReviewIDs: []string{"01a0cdc9-1dcc-7eea-9233-3b564acd3849"},
+	}}
+	routes := ReviewRoutes{service: svc}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance", bytes.NewBufferString(`{"targetBranch":"main"}`))
+	rec := httptest.NewRecorder()
+
+	routes.advanceMergeQueue(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"unrecordedRepositoryReviewIds":["01a0cdc9-1dcc-7eea-9233-3b564acd3849"]`,
+		"01a0cdc9-1dcc-7eea-9233-3b564acd3849",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body = %q, want it to carry %s", body, want)
+		}
+	}
 }
 
 // TestCreateReviewRefusesAnUnusableRepository: a repository the platform

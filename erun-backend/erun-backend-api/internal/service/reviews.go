@@ -20,10 +20,11 @@ type ReviewRepository interface {
 	Update(ctx context.Context, review model.Review) (model.Review, error)
 	FindNextMergeQueueReview(ctx context.Context, repository, targetBranch string) (model.Review, error)
 	FindActiveMergeReview(ctx context.Context, repository, targetBranch string) (model.Review, error)
-	// QueuedRepositories reports the distinct repositories with a review
-	// waiting in a target branch's queue, so a promotion that names none can
-	// refuse when that queue is really several.
-	QueuedRepositories(ctx context.Context, targetBranch string) ([]string, error)
+	// QueuedRepositories reports what a target branch's queue is made of — the
+	// repositories its waiting reviews name, and the waiting reviews that name
+	// none — so a promotion that names none can refuse when that queue is
+	// really several repositories'. See repository.MergeQueueRepositories.
+	QueuedRepositories(ctx context.Context, targetBranch string) (repository.MergeQueueRepositories, error)
 	// FindLastMergedReview is the platform's own record of what targetBranch's
 	// tip was the last time a queue-driven merge landed on it — condition 2 of
 	// accepting a MERGED report confirms a reported commit descends from it.
@@ -138,22 +139,28 @@ func (e *MergeQueueOccupiedError) Unwrap() error { return repository.ErrConflict
 // waiting, promoting "the head" would gate whichever repository's review
 // happened to sort first — a branch that need not exist in the checkout the
 // gate runs in. It names the repositories so the caller can name one.
+//
+// It names the waiting reviews that record no repository too, and says what
+// they are. Those rows do not make the queue ambiguous — an unrecorded
+// repository is the absence of an answer, not a second one — but in a queue
+// that is genuinely several repositories' they can be attributed to none of
+// them, so a caller told only the repositories would be left to work out for
+// itself which rows are stuck.
 type AmbiguousMergeQueueError struct {
 	TargetBranch string
 	Repositories []string
+	// UnrecordedReviewIDs are the queued reviews that record no repository.
+	UnrecordedReviewIDs []string
 }
 
 func (e *AmbiguousMergeQueueError) Error() string {
-	named := make([]string, 0, len(e.Repositories))
-	for _, repository := range e.Repositories {
-		if strings.TrimSpace(repository) == "" {
-			named = append(named, "(no repository recorded)")
-			continue
-		}
-		named = append(named, repository)
+	message := fmt.Sprintf("the merge queue for %s holds reviews from more than one repository (%s); name the one to advance",
+		e.TargetBranch, strings.Join(e.Repositories, ", "))
+	if len(e.UnrecordedReviewIDs) > 0 {
+		message += fmt.Sprintf("; %d review(s) in that queue record no repository and can be attributed to none of them (%s)",
+			len(e.UnrecordedReviewIDs), strings.Join(e.UnrecordedReviewIDs, ", "))
 	}
-	return fmt.Sprintf("the merge queue for %s holds reviews from more than one repository (%s); name the one to advance",
-		e.TargetBranch, strings.Join(named, ", "))
+	return message
 }
 
 func (e *AmbiguousMergeQueueError) Unwrap() error { return repository.ErrConflict }
@@ -386,15 +393,27 @@ func (s *ReviewService) headOfMergeQueue(ctx context.Context, repositoryIdentity
 // platform recorded a repository shares — still promotes exactly as it always
 // has; only a genuinely mixed one, where "the head" names no single
 // repository, is refused.
+//
+// Only the repositories the queued reviews actually name are counted. A review
+// that records none names no repository to be one of several, so it neither
+// makes a queue ambiguous nor resolves one: one named repository beside any
+// number of unrecorded rows is still one repository's queue, which is what a
+// tenant that predates repository identity has. Counting the absence as a
+// second repository refused that tenant's queue outright, and the rows it
+// refused to advance were the tenant's own.
 func (s *ReviewService) refuseAmbiguousQueue(ctx context.Context, targetBranch string) error {
-	repositories, err := s.reviews.QueuedRepositories(ctx, targetBranch)
+	queued, err := s.reviews.QueuedRepositories(ctx, targetBranch)
 	if err != nil {
 		return err
 	}
-	if len(repositories) < 2 {
+	if len(queued.Named) < 2 {
 		return nil
 	}
-	return &AmbiguousMergeQueueError{TargetBranch: targetBranch, Repositories: repositories}
+	return &AmbiguousMergeQueueError{
+		TargetBranch:        targetBranch,
+		Repositories:        queued.Named,
+		UnrecordedReviewIDs: queued.Unrecorded,
+	}
 }
 
 // promoteToMerge moves review from the queue to MERGE. Both AdvanceMergeQueue
@@ -638,7 +657,7 @@ func (s *ReviewService) verifyGateBuild(review model.Review, build model.Build) 
 // Queue") — is still really its ancestor. This is a reachability check, not
 // a strict parent-equality one: the release flow pushes its own
 // `[skip ci]` commits directly to the target branch between one review
-// landing and the next being reported (erun#2250), and requiring the
+// landing and the next being reported, and requiring the
 // reported commit's immediate parent to equal the gated tip made every
 // review report unverifiable forever after the first release. Ancestry
 // tolerates any number of unrelated commits landing in between while still
@@ -781,11 +800,20 @@ func (s *ReviewService) markBuildSucceeded(ctx context.Context, review model.Rev
 	// its own gate blocking has nothing to do with whether reporting this build
 	// succeeded. The queue advanced is the built review's own repository's, so
 	// another repository's queue on the same target branch is unaffected.
+	//
+	// An ambiguous queue is the same shape of non-failure, and matters more
+	// because nothing here resolves it: the build is already recorded and the
+	// review has already gone READY, and the refusal is about which repository
+	// a promotion that named none would be for. Returning it fails a report
+	// that succeeded — a caller retrying creates a second build row for one
+	// build — while the review sits READY where an explicit promotion naming a
+	// repository can still reach it.
 	promoted, err := s.AdvanceMergeQueue(ctx, updated.Repository, updated.TargetBranch)
 	if err != nil {
 		var blocked *UnresolvedThreadsError
 		var occupied *MergeQueueOccupiedError
-		if errors.Is(err, repository.ErrNotFound) || errors.As(err, &blocked) || errors.As(err, &occupied) {
+		var ambiguous *AmbiguousMergeQueueError
+		if errors.Is(err, repository.ErrNotFound) || errors.As(err, &blocked) || errors.As(err, &occupied) || errors.As(err, &ambiguous) {
 			return model.Review{}, false, nil
 		}
 		return model.Review{}, false, err

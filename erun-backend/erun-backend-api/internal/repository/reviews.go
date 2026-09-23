@@ -264,22 +264,44 @@ func (r *ReviewRepository) FindLastMergedReview(ctx context.Context, repository,
 	return review, err
 }
 
-// QueuedRepositories returns the distinct repositories with a review waiting
-// in targetBranch's queue. An unfiltered queue spanning more than one is not
-// one queue, and promoting its head would gate a branch in a repository the
-// caller never named; the service reads this before such a promotion.
+// MergeQueueRepositories is what a target branch's waiting queue is made of,
+// read before an unfiltered promotion. Named is the distinct repositories its
+// READY reviews record; Unrecorded is the reviews that record none — created
+// before the platform recorded a repository — in queue order.
+//
+// The two are reported apart because a review with no repository recorded is
+// not a repository of its own: it is the absence of an answer, and a queue
+// holding one named repository beside several of them is one repository's
+// queue, not several (see AGENTS.md "Merge Queue"). They are still named
+// individually, though, because a queue that is genuinely several repositories'
+// has no place to put them and an operator has to be told which rows they are.
+type MergeQueueRepositories struct {
+	Named []string
+	// Unrecorded holds the review ids, in queue order, of the waiting reviews
+	// that record no repository.
+	Unrecorded []string
+}
+
+// QueuedRepositories describes what targetBranch's queue is made of, in queue
+// order for the unrecorded rows. An unfiltered queue holding more than one
+// named repository is not one queue, and promoting its head would gate a branch
+// in a repository the caller never named; the service reads this before such a
+// promotion.
 //
 // It is scoped to the caller's tenant explicitly, like ListMergeQueue and for
 // the same reason: erun_operations' policy is unconditional.
-func (r *ReviewRepository) QueuedRepositories(ctx context.Context, targetBranch string) ([]string, error) {
-	var repositories []string
+func (r *ReviewRepository) QueuedRepositories(ctx context.Context, targetBranch string) (MergeQueueRepositories, error) {
+	var rows []struct {
+		Repository string `bun:"repository"`
+		ReviewID   string `bun:"review_id"`
+	}
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		securityContext, err := security.RequiredFromContext(ctx)
 		if err != nil {
 			return ErrMissingSecurityContext
 		}
 		return tx.NewRaw(`
-			SELECT DISTINCT COALESCE(r.repository, '')
+			SELECT COALESCE(r.repository, '') AS repository, r.review_id
 			  FROM review_merge_queue q
 			  JOIN reviews r
 			    ON r.tenant_id = q.tenant_id
@@ -288,9 +310,23 @@ func (r *ReviewRepository) QueuedRepositories(ctx context.Context, targetBranch 
 			 WHERE q.tenant_id = ?
 			   AND q.target_branch = ?
 			   AND r.status = 'READY'
-		`, securityContext.TenantID, targetBranch).Scan(ctx, &repositories)
+			 ORDER BY q.review_merge_queue_id ASC
+		`, securityContext.TenantID, targetBranch).Scan(ctx, &rows)
 	})
-	return repositories, err
+	queued := MergeQueueRepositories{}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		repository := strings.TrimSpace(row.Repository)
+		if repository == "" {
+			queued.Unrecorded = append(queued.Unrecorded, row.ReviewID)
+			continue
+		}
+		if !seen[repository] {
+			seen[repository] = true
+			queued.Named = append(queued.Named, repository)
+		}
+	}
+	return queued, err
 }
 
 func (r *ReviewRepository) CreateMergeQueueEntry(ctx context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error) {

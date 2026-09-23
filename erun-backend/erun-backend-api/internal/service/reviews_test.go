@@ -88,10 +88,11 @@ func (f *fakeReviewRepo) FindLastMergedReview(_ context.Context, repositoryFilte
 }
 
 // QueuedRepositories mirrors the real query: the distinct repositories of the
-// READY reviews this fake has queued for targetBranch.
-func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch string) ([]string, error) {
+// READY reviews this fake has queued for targetBranch, and the queued reviews
+// that record none, in queue order.
+func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch string) (repository.MergeQueueRepositories, error) {
 	seen := map[string]bool{}
-	var out []string
+	queued := repository.MergeQueueRepositories{}
 	for _, entry := range f.queue {
 		if entry.TargetBranch != targetBranch {
 			continue
@@ -100,12 +101,16 @@ func (f *fakeReviewRepo) QueuedRepositories(_ context.Context, targetBranch stri
 		if !ok || review.Status != model.ReviewStatusReady {
 			continue
 		}
+		if strings.TrimSpace(review.Repository) == "" {
+			queued.Unrecorded = append(queued.Unrecorded, review.ReviewID)
+			continue
+		}
 		if !seen[review.Repository] {
 			seen[review.Repository] = true
-			out = append(out, review.Repository)
+			queued.Named = append(queued.Named, review.Repository)
 		}
 	}
-	return out, nil
+	return queued, nil
 }
 
 func (f *fakeReviewRepo) CreateMergeQueueEntry(_ context.Context, entry model.ReviewMergeQueueEntry) (model.ReviewMergeQueueEntry, error) {
@@ -696,6 +701,36 @@ func TestMarkBuildResultToleratesAnotherReviewMerging(t *testing.T) {
 	}
 }
 
+// TestMarkBuildResultToleratesAnAmbiguousQueue is the same shape of
+// non-failure for the refusal that names no repository: the build is already
+// recorded and its review already READY by the time the promotion is
+// attempted, and the ambiguity is about which repository's queue an
+// unfiltered promotion would be for. Failing the report would tell a caller
+// their build did not land when it did, and a retry would record a second one.
+func TestMarkBuildResultToleratesAnAmbiguousQueue(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-other", Repository: "https://github.com/sophium/other", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-built", TargetBranch: "main", Status: model.ReviewStatusOpen},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-erun"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-other"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, ok, err := svc.MarkBuildResult(context.Background(), "review-built", "build-1", true)
+	if err != nil {
+		t.Fatalf("MarkBuildResult: %v, want no error even though the queue is several repositories'", err)
+	}
+	if ok {
+		t.Fatal("MarkBuildResult reported a promotion from a queue no repository was named for")
+	}
+	if reviews.reviews["review-built"].Status != model.ReviewStatusReady {
+		t.Fatalf("review-built status = %s, want READY (its own build succeeded and it queued normally)", reviews.reviews["review-built"].Status)
+	}
+}
+
 // TestRequeueRefusesAReviewThatIsNotMerging: the missed-merge-window requeue
 // only recovers a review holding the queue's slot. The review was resolved by
 // id, so it exists and the caller can see it — the refusal names the status it
@@ -908,6 +943,64 @@ func TestAdvanceMergeQueuePromotesAnUnrecordedQueueThatIsStillOneRepository(t *t
 	}
 	if promoted.ReviewID != "review-1" {
 		t.Fatalf("promoted %s, want the queue head review-1", promoted.ReviewID)
+	}
+}
+
+// One named repository beside reviews created before the platform
+// recorded a repository is one repository's queue, not two. Counting the
+// absence as a repository refused a tenant's own queue, and the rows it
+// refused to promote were the legacy ones — which are reachable here, in
+// queue order, exactly as if they had recorded a repository.
+func TestAdvanceMergeQueuePromotesAQueueOfOneRepositoryPlusUnrecordedRows(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-legacy", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-legacy"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-erun"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	promoted, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
+	if err != nil {
+		t.Fatalf("AdvanceMergeQueue over one repository plus unrecorded rows: %v", err)
+	}
+	if promoted.ReviewID != "review-legacy" {
+		t.Fatalf("promoted %s, want the queue head review-legacy: an unrecorded row is still in the queue it was queued in", promoted.ReviewID)
+	}
+}
+
+// A queue that really is several repositories' still refuses, and now names
+// the rows it cannot attribute: they belong to none of the named
+// repositories, so a caller told only the repositories would have to work out
+// for itself which rows are stuck.
+func TestAdvanceMergeQueueNamesTheRowsItCannotAttribute(t *testing.T) {
+	reviews := newFakeReviewRepo(
+		model.Review{ReviewID: "review-erun", Repository: "https://github.com/sophium/erun", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-other", Repository: "https://github.com/sophium/other", TargetBranch: "main", Status: model.ReviewStatusReady},
+		model.Review{ReviewID: "review-legacy", TargetBranch: "main", Status: model.ReviewStatusReady},
+	)
+	reviews.queue = []model.ReviewMergeQueueEntry{
+		{ReviewMergeQueueID: 1, TargetBranch: "main", ReviewID: "review-erun"},
+		{ReviewMergeQueueID: 2, TargetBranch: "main", ReviewID: "review-other"},
+		{ReviewMergeQueueID: 3, TargetBranch: "main", ReviewID: "review-legacy"},
+	}
+	svc, _ := newTestReviewService(reviews, &fakeReviewBuilds{})
+
+	_, err := svc.AdvanceMergeQueue(context.Background(), "", "main")
+	var ambiguous *AmbiguousMergeQueueError
+	if !errors.As(err, &ambiguous) {
+		t.Fatalf("AdvanceMergeQueue: error = %v, want *AmbiguousMergeQueueError", err)
+	}
+	if len(ambiguous.Repositories) != 2 {
+		t.Fatalf("Repositories = %v, want the two named repositories and only those", ambiguous.Repositories)
+	}
+	if len(ambiguous.UnrecordedReviewIDs) != 1 || ambiguous.UnrecordedReviewIDs[0] != "review-legacy" {
+		t.Fatalf("UnrecordedReviewIDs = %v, want review-legacy", ambiguous.UnrecordedReviewIDs)
+	}
+	if !strings.Contains(ambiguous.Error(), "review-legacy") {
+		t.Fatalf("refusal = %q, want it to name the row it cannot attribute", ambiguous.Error())
 	}
 }
 
