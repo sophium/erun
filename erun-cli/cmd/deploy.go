@@ -12,6 +12,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	target := common.DeployTarget{}
 	var components []string
 	var useCurrent bool
+	var erunAlias string
 	cmd := &cobra.Command{
 		Use:   "deploy [TENANT] [ENVIRONMENT]",
 		Short: "Install a published version into an environment",
@@ -34,13 +35,18 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			"pull of the runtime image, which the rollout has to wait out with the previous pod already " +
 			"torn down; raise it if a genuinely cold pull of a bigger image needs longer. " +
 			"Pass --max-cpu/--max-memory/--max-storage together to cap the environment's namespace with a " +
-			"Kubernetes ResourceQuota+LimitRange for this deploy; omit to use the env's saved namespace quota, if any.",
-		Example:       "  erun deploy team prod --version 1.2.3\n  erun deploy team dev --current\n  erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops\n  erun deploy team prod --version 1.2.3 --rollout-timeout 10m\n  erun deploy team prod --version 1.2.3 --max-cpu 4 --max-memory 8Gi --max-storage 80Gi",
+			"Kubernetes ResourceQuota+LimitRange for this deploy; omit to use the env's saved namespace quota, if any.\n\n" +
+			"A runtime deploy also hands the pod this host's own signed-in erun platform identity — the " +
+			"credential its `erun review` and `erun gate` calls act as — for an environment that records " +
+			"none yet; pass --erun-alias to say which alias that delegates when this host has several " +
+			"configured, since erun cannot guess. An environment that already records one keeps it.",
+		Example:       "  erun deploy team prod --version 1.2.3\n  erun deploy team dev --current\n  erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops\n  erun deploy team prod --version 1.2.3 --rollout-timeout 10m\n  erun deploy team prod --version 1.2.3 --max-cpu 4 --max-memory 8Gi --max-storage 80Gi\n  erun deploy team prod --version 1.2.3 --erun-alias erun+api.acme.services.erunpaas.com@erun",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := withCloudContextPreflight(commandContext(cmd), store)
+			ctx.PlatformAlias = strings.TrimSpace(erunAlias)
 			deployTarget, err := resolveDeployTargetArgs(cmd.CommandPath(), args, target)
 			if err != nil {
 				return err
@@ -77,6 +83,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	cmd.Flags().StringVar(&target.RuntimeImageOverride, "runtime-image", "", "Install the runtime running this image via the published erun-devops chart (imageOverrides.erun-devops), pinned to --version, even when the env has a repo-local runtime chart; mirrors `erun open --runtime-image`")
 	cmd.Flags().StringVar(&target.RuntimeChartOverride, "runtime-chart", "", "Install this runtime chart, as an OCI reference that may carry its own version (oci://registry/charts/erun-devops:1.0.178). States the chart as its own coordinate instead of deriving it from --version and the registry a previous deploy recorded, which is what lets the runtime image be versioned on a different release line than the chart")
 	cmd.Flags().BoolVar(&useCurrent, "current", false, "Redeploy the version this environment already runs (its persisted runtime version) instead of passing --version")
+	cmd.Flags().StringVar(&erunAlias, "erun-alias", "", "erun platform cloud alias to hand the environment's runtime as its platform identity when it records none (defaults to the sole configured erun-type alias; only needed to disambiguate when more than one is configured)")
 	cmd.Flags().StringSliceVar(&components, "components", nil, "Deploy exactly these charts this run — chart directory names under <tenant>-devops/k8s/, or the runtime release name (<tenant>-devops); overrides the env's saved selection and the k8s.deployments plan. Empty falls back to the saved selection, then the plan, then the runtime chart alone")
 	return cmd
 }

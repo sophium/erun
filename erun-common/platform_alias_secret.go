@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -86,30 +87,64 @@ func renderPlatformAliasEntry(provider CloudProviderConfig) (string, error) {
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
-// resolveHostPlatformAlias resolves the invoking host's sole erun platform
-// alias together with the refresh token the host is signed in with. ok is false
-// whenever this host has nothing to give -- no erun alias, several (which alias
-// to give the pod is then the operator's call, not a guess), one with no
-// stored session, or no readable secret store -- and every such case is a
-// no-op rather than an error, matching provisionRegistryCredentialSecret.
-func resolveHostPlatformAlias(store CloudReadStore, deps CloudDependencies) (CloudProviderConfig, string, bool) {
+// resolveHostPlatformAlias resolves which erun platform alias this run should
+// delegate to the pod, together with the refresh token the invoking host is
+// signed in with.
+//
+// alias is the operator's own explicit selection, empty when they made none.
+// Given one, it is resolved directly -- the same resolution `erun
+// platform --erun-alias` and the desktop's own alias override use -- which is
+// what lets a host carrying several configured erun aliases say which one an
+// environment should act as. Given none, the host's *sole* erun alias is
+// resolved: an ambiguous or absent one is then the operator's call rather than
+// a guess, so it stays "nothing to give".
+//
+// ok is false whenever this host has nothing to give -- no erun alias, several,
+// one with no stored session, or no readable secret store -- and each of those
+// is a no-op rather than an error, matching provisionRegistryCredentialSecret.
+//
+// An explicit selection that cannot be honoured is the one case that is not a
+// no-op. The operator named it, so declining silently would leave them with a
+// deploy that reported success and an environment that still cannot call the
+// platform, with nothing anywhere saying why; the error names the alias and the
+// next step instead.
+func resolveHostPlatformAlias(store CloudReadStore, deps CloudDependencies, alias string) (CloudProviderConfig, string, bool, error) {
+	explicit := strings.TrimSpace(alias) != ""
 	if store == nil || deps.CloudSecretStore == nil {
-		return CloudProviderConfig{}, "", false
+		return CloudProviderConfig{}, "", false, hostAliasUnusable(
+			explicit, alias, errors.New("this host has no readable cloud secret store, so the alias's signed-in session cannot be delivered to the environment"))
 	}
-	// The empty selection means "the operator's sole erun alias"; an ambiguous
-	// or absent one is an error here, and both resolve to "nothing to give".
-	provider, err := ResolveERunPlatformAlias(store, "")
+	provider, err := ResolveERunPlatformAlias(store, alias)
 	if err != nil {
-		return CloudProviderConfig{}, "", false
+		return CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, err)
 	}
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.RefreshTokenRef) == "" {
-		return CloudProviderConfig{}, "", false
+		return CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
 	}
 	token, err := deps.CloudSecretStore.LoadCloudSecret(provider.ERun.RefreshTokenRef)
 	if err != nil || strings.TrimSpace(token) == "" {
-		return CloudProviderConfig{}, "", false
+		return CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
 	}
-	return provider, token, true
+	return provider, token, true, nil
+}
+
+// hostAliasUnusable is the pair of answers an alias this host cannot deliver
+// has. An operator who named it gets a failure carrying the selection, the
+// offending alias, and the cause; one who named none gets the silent "this host
+// has nothing to give" that every caller of resolveHostPlatformAlias has always
+// treated as a no-op, since nothing they said is being ignored.
+func hostAliasUnusable(explicit bool, alias string, cause error) error {
+	if !explicit {
+		return nil
+	}
+	return fmt.Errorf("--erun-alias %q: %w", alias, cause)
+}
+
+// noStoredSessionError names the alias and the command that would sign this host
+// in to it, since "no session" on its own leaves the operator to work out which
+// of their configured aliases is missing one and how to give it one.
+func noStoredSessionError(alias string) error {
+	return fmt.Errorf("this host holds no session for it; run `erun cloud login %s` first", alias)
 }
 
 // renderPlatformAliasSecret wraps the entry and token in an Opaque Secret.
@@ -145,7 +180,10 @@ stringData:
 // plus the secret store), so it still runs under dry-run: the decision it makes
 // belongs in the trace either way.
 func provisionPlatformAliasSecret(ctx Context, store CloudReadStore, tenant, namespace, kubernetesContext string, deps CloudDependencies) (string, error) {
-	provider, token, ok := resolveHostPlatformAlias(store, deps)
+	provider, token, ok, err := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
+	if err != nil {
+		return "", err
+	}
 	if !ok {
 		ctx.Trace("platform alias: no signed-in erun cloud provider alias on this host; leaving the pod's own alias state untouched")
 		return "", nil
@@ -191,6 +229,14 @@ func provisionPlatformAliasSecret(ctx Context, store CloudReadStore, tenant, nam
 // change of identity. The remedy for a rotated or deleted Secret stays the one
 // that already exists: re-run init.
 //
+// A host carrying several configured erun aliases has no unambiguous answer to
+// "whose identity", so the sole-alias default declines there rather than picking
+// one. Context.PlatformAlias -- `erun deploy --erun-alias` -- is how the
+// operator supplies that answer: the named alias is then resolved directly, and
+// one that cannot be honoured is reported rather than declined, since the
+// operator asked for it by name. It selects which identity a *due* provisioning
+// delegates, so an environment already recording one is still left alone.
+//
 // A host with no signed-in alias to give is a silent no-op rather than a traced
 // one, the same rule the sibling pre-rollout helpers follow (applyMCPAuthSecret,
 // refreshImagePullSecrets, recordMCPAuthKeyOnEnv): a deploy that has nothing to
@@ -201,14 +247,27 @@ func reconcilePlatformAliasSecret(ctx Context, deployInput *HelmDeploySpec) erro
 		return nil
 	}
 	if strings.TrimSpace(deployInput.PlatformAliasSecretName) != "" {
+		// Only the operator's own selection earns a line here. They named an
+		// alias, this deploy will not act on it, and the reason is a decision
+		// they already made once -- saying so is the difference between a flag
+		// that was deliberately not applied and one that silently did nothing.
+		if strings.TrimSpace(ctx.PlatformAlias) != "" {
+			ctx.Trace("platform alias: this environment already records " + deployInput.PlatformAliasSecretName +
+				", so --erun-alias " + ctx.PlatformAlias + " is unused; re-run `erun init` to re-provision it")
+		}
 		return nil
 	}
 	store, deps := ConfigStore{}, DefaultCloudDependencies()
 	// Resolved before provisioning so "this host has nothing to give" is
 	// distinguishable from "there was nothing to do" without either case
 	// leaving a trace. The provisioning below re-resolves the same local,
-	// read-only state through the one implementation that already owns it.
-	if _, _, ok := resolveHostPlatformAlias(store, deps); !ok {
+	// read-only state through the one implementation that already owns it. An
+	// alias the operator named explicitly is the exception at both steps: it is
+	// reported rather than swallowed, because a decline they did not ask for is
+	// indistinguishable from the retrofit never having run.
+	if _, _, ok, err := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias); err != nil {
+		return err
+	} else if !ok {
 		return nil
 	}
 	name, err := provisionPlatformAliasSecret(ctx, store, deployInput.Tenant, deployInput.Namespace, deployInput.KubernetesContext, deps)
