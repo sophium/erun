@@ -3,8 +3,10 @@ package backendapi
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
@@ -87,54 +90,89 @@ func TestContextReadIsScopedToTheOwningTenant(t *testing.T) {
 	got, err := contexts.Get(opsCtx, strangerTenantID, strangerContext.ContextID)
 	mustNoErr(t, err, "read the context on behalf of its owner")
 	if got.ContextID != strangerContext.ContextID || got.PublicIP != "203.0.113.10" {
-		t.Fatalf("context = %+v, want the stranger's own row", got)
+		t.Fatalf("context = %+v, want the tenant's own row", got)
 	}
 }
 
 // seedOperatePathRows creates one row of each operate-path class for the
 // tenant ctx names, so the scoping below is proven per class against real rows
 // rather than one id reused across them.
-func seedOperatePathRows(t *testing.T, ctx context.Context, txs *repository.TxManager) (model.Job, model.Review, model.Build, model.GateRun) {
+func seedOperatePathRows(t *testing.T, db *sql.DB, ctx context.Context, txs *repository.TxManager) (model.Job, model.Review, model.Build, model.GateRun) {
 	t.Helper()
 	jobs := repository.NewJobRepository(txs)
 	reviews := repository.NewReviewRepository(txs)
 	builds := repository.NewBuildRepository(txs)
 	gateRuns := repository.NewGateRunRepository(txs)
 
+	// A review's author_user_id is NOT NULL and database-defaulted from
+	// erun_current_user_id(), which reads the erun.user_id the transaction
+	// wiring sets from the security context. A context naming a tenant but no
+	// user therefore cannot create a review at all, so the seeder plants one
+	// author per tenant and carries it — the same shape reviews_e2e_test.go
+	// uses.
+	authorCtx := operatePathAuthorContext(t, db, ctx)
+
 	job, err := service.NewJobService(jobs).Claim(ctx, model.Job{
 		JobType:   model.JobTypeFix,
-		Summary:   "the stranger tenant's in-flight work",
+		Summary:   "the tenant's in-flight work",
 		ActorKind: model.ActorKindAgent,
-		ActorID:   "stranger-coder",
+		ActorID:   "operate-path-coder",
 	})
-	mustNoErr(t, err, "claim a job in the stranger tenant")
+	mustNoErr(t, err, "claim a job for the tenant")
 
-	review, err := reviews.Create(ctx, model.Review{
-		Name:         "the stranger tenant's proposal",
+	review, err := reviews.Create(authorCtx, model.Review{
+		Name:         "the tenant's proposal",
 		TargetBranch: "main",
-		SourceBranch: "feature/stranger",
+		SourceBranch: "feature/operate-path",
 		Status:       model.ReviewStatusOpen,
 	})
-	mustNoErr(t, err, "create the stranger tenant's review")
+	mustNoErr(t, err, "create the tenant's review")
 
 	build, err := builds.Create(ctx, model.Build{
 		ReviewID:   review.ReviewID,
 		Kind:       model.BuildKindRecorded,
 		Successful: true,
-		CommitID:   "stranger-commit",
+		CommitID:   "operate-path-commit",
 		Version:    "1.0.0",
 	})
-	mustNoErr(t, err, "create the stranger tenant's build")
+	mustNoErr(t, err, "create the tenant's build")
 
 	gateRun, err := gateRuns.Create(ctx, model.GateRun{
-		SourceBranch: "feature/stranger",
+		SourceBranch: "feature/operate-path",
 		TargetBranch: "main",
-		SourceCommit: "stranger-source-sha",
-		Status:       model.GateRunStatusRunning,
+		SourceCommit: "operate-path-source-sha",
+		// gate_runs_merge_commit_required_check: only a FAILED or
+		// INCONCLUSIVE run may carry no merge commit.
+		MergeCommit: "operate-path-merge-sha",
+		Status:      model.GateRunStatusRunning,
 	})
-	mustNoErr(t, err, "create the stranger tenant's gate run")
+	mustNoErr(t, err, "create the tenant's gate run")
 
 	return job, review, build, gateRun
+}
+
+// operatePathAuthorSeq makes each seeded author's username unique: users is
+// unique per (tenant, username), and several tests seed more than one tenant.
+var operatePathAuthorSeq int
+
+// operatePathAuthorContext plants a user in ctx's tenant and returns ctx
+// carrying it, so a write whose column defaults to erun_current_user_id() has
+// an author to record.
+func operatePathAuthorContext(t *testing.T, db *sql.DB, ctx context.Context) context.Context {
+	t.Helper()
+	securityContext, ok := security.FromContext(ctx)
+	if !ok {
+		t.Fatal("operatePathAuthorContext needs a tenant-scoped context")
+	}
+	operatePathAuthorSeq++
+	var userID string
+	mustNoErr(t, db.QueryRow(
+		`INSERT INTO users (tenant_id, username) VALUES ($1, $2) RETURNING user_id`,
+		securityContext.TenantID, fmt.Sprintf("operate-path-author-%d", operatePathAuthorSeq),
+	).Scan(&userID), "seed operate-path author")
+
+	securityContext.ErunUserID = userID
+	return security.WithContext(ctx, securityContext)
 }
 
 // TestJobReadAndUpdateAreScopedToTheOwningTenant covers the job routes' own
@@ -144,7 +182,7 @@ func seedOperatePathRows(t *testing.T, ctx context.Context, txs *repository.TxMa
 func TestJobReadAndUpdateAreScopedToTheOwningTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	jobs := repository.NewJobRepository(repository.NewTxManager(db, repository.DialectPostgres))
-	strangerJob, _, _, _ := seedOperatePathRows(t, strangerCtx, repository.NewTxManager(db, repository.DialectPostgres))
+	strangerJob, _, _, _ := seedOperatePathRows(t, db, strangerCtx, repository.NewTxManager(db, repository.DialectPostgres))
 
 	if _, err := jobs.Get(opsCtx, opsTenantID, strangerJob.JobID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("job read for a tenant that does not own it = %v, want ErrNotFound", err)
@@ -184,7 +222,7 @@ func TestBuildReadIsScopedToTheOwningTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	txs := repository.NewTxManager(db, repository.DialectPostgres)
 	builds := repository.NewBuildRepository(txs)
-	_, _, strangerBuild, _ := seedOperatePathRows(t, strangerCtx, txs)
+	_, _, strangerBuild, _ := seedOperatePathRows(t, db, strangerCtx, txs)
 
 	if _, err := builds.Get(opsCtx, opsTenantID, strangerBuild.BuildID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("build read for a tenant that does not own it = %v, want ErrNotFound", err)
@@ -192,8 +230,8 @@ func TestBuildReadIsScopedToTheOwningTenant(t *testing.T) {
 
 	owned, err := builds.Get(strangerCtx, strangerTenantID, strangerBuild.BuildID)
 	mustNoErr(t, err, "read the stranger's build on behalf of its owner")
-	if owned.BuildID != strangerBuild.BuildID || owned.CommitID != "stranger-commit" {
-		t.Fatalf("build read on behalf of its owner = %+v, want the stranger's own row", owned)
+	if owned.BuildID != strangerBuild.BuildID || owned.CommitID != "operate-path-commit" {
+		t.Fatalf("build read on behalf of its owner = %+v, want the tenant's own row", owned)
 	}
 }
 
@@ -203,7 +241,7 @@ func TestBuildReadIsScopedToTheOwningTenant(t *testing.T) {
 func TestGateRunReadAndUpdateAreScopedToTheOwningTenant(t *testing.T) {
 	opsCtx, strangerCtx, opsTenantID, strangerTenantID, db := operationsScopeDatabase(t)
 	gateRuns := repository.NewGateRunRepository(repository.NewTxManager(db, repository.DialectPostgres))
-	_, _, _, strangerRun := seedOperatePathRows(t, strangerCtx, repository.NewTxManager(db, repository.DialectPostgres))
+	_, _, _, strangerRun := seedOperatePathRows(t, db, strangerCtx, repository.NewTxManager(db, repository.DialectPostgres))
 
 	if _, err := gateRuns.Get(opsCtx, opsTenantID, strangerRun.GateRunID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("gate run read for a tenant that does not own it = %v, want ErrNotFound", err)
@@ -301,7 +339,7 @@ func TestEnvironmentMutatorsAreScopedToTheOwningTenant(t *testing.T) {
 func TestOperateReadsResolveTheCallersOwnRows(t *testing.T) {
 	opsCtx, _, opsTenantID, _, db := operationsScopeDatabase(t)
 	txs := repository.NewTxManager(db, repository.DialectPostgres)
-	ownJob, ownReview, ownBuild, ownRun := seedOperatePathRows(t, opsCtx, txs)
+	ownJob, ownReview, ownBuild, ownRun := seedOperatePathRows(t, db, opsCtx, txs)
 
 	opsUserID := seedScopeTestUser(t, db, opsTenantID, "ops-caller")
 	opsServer := startEnvironmentsAPIServer(t, db, opsTenantID, model.TenantTypeOperations, opsUserID)
@@ -336,7 +374,7 @@ func TestOperateReadsResolveTheCallersOwnRows(t *testing.T) {
 func TestCrossTenantOperateReadsAreIndistinguishableFromMissingOnes(t *testing.T) {
 	_, strangerCtx, opsTenantID, _, db := operationsScopeDatabase(t)
 	txs := repository.NewTxManager(db, repository.DialectPostgres)
-	strangerJob, strangerReview, strangerBuild, strangerRun := seedOperatePathRows(t, strangerCtx, txs)
+	strangerJob, strangerReview, strangerBuild, strangerRun := seedOperatePathRows(t, db, strangerCtx, txs)
 
 	opsUserID := seedScopeTestUser(t, db, opsTenantID, "ops-caller")
 	opsServer := startEnvironmentsAPIServer(t, db, opsTenantID, model.TenantTypeOperations, opsUserID)

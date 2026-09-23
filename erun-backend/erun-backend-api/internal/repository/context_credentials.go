@@ -55,7 +55,8 @@ func (r *ContextCredentialRepository) Get(ctx context.Context, tenantID, context
 			SELECT k3s_admin_token_encrypted
 			  FROM context_credentials
 			 WHERE context_id = ?
-		`, contextID).Scan(ctx, &encrypted)
+			   AND tenant_id = ?
+		`, contextID, tenantID).Scan(ctx, &encrypted)
 		return normalizeNoRows(scanErr)
 	})
 	if err != nil {

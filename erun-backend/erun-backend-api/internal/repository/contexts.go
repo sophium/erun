@@ -73,7 +73,8 @@ func (r *ContextRepository) Get(ctx context.Context, tenantID, contextID string)
 			SELECT `+contextColumns+`
 			  FROM contexts
 			 WHERE context_id = ?
-		`, contextID).Scan(ctx, &cloudContext)
+			   AND tenant_id = ?
+		`, contextID, tenantID).Scan(ctx, &cloudContext)
 		return normalizeNoRows(err)
 	})
 	return cloudContext, err
