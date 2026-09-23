@@ -5,7 +5,8 @@ Module-specific guidance for `erun-ui/playwright`. Follow the repository root `A
 ## Module Role
 
 - `erun-ui/playwright` is a separate Yarn project that runs end-to-end UI tests for the desktop frontend.
-- Tests drive `erun-app --headless` over the HTTP+SSE bridge instead of opening a Wails window. The same React bundle the desktop renders is served at `http://127.0.0.1:34123/`; method calls go through `/__erun_invoke`, events stream from `/__erun_events`, and `window.runtime` / `window.go.main.App` are shimmed at the document root.
+- Tests drive `erun-app --headless` over the HTTP+SSE bridge instead of opening a Wails window. The same React bundle the desktop renders is served over loopback (each backend announces the address it bound; the default requested port is `34123`); method calls go through `/__erun_invoke`, events stream from `/__erun_events`, and `window.runtime` / `window.go.main.App` are shimmed at the document root.
+- **The port a backend was asked for is never assumed to be the port it serves on.** `erun-app --headless --port N` treats `N` as a preference: a port another process already holds falls back to an OS-assigned one, and the backend announces the address it actually bound (`erun-ui/main.go` `listenHeadless`) on startup. Every caller reads that announcement — `fixtures/workerBackend.ts` resolves its `baseURL` from it, never from the port it requested. Do not reintroduce a probe-then-bind port check anywhere in the harness: a port free at probe time can be taken before the backend binds it, which is a race no probe can close and the only failure mode the announcement contract exists to absorb.
 - The backend runs against an isolated, suite-owned config root with a deterministic seeded baseline — never against the developer's real `~/.erun` / `~/.config/erun`. See "Isolated config root and seeded baseline" below.
 - Use this suite for cross-component flows that depend on rendered DOM and round-trip backend calls — sidebar toggles, dialog interactions, layout panels, status banners, activity drawer state. It does not replace `go test ./...`: Go tests cover backend logic, Playwright covers the React frontend behaviour after a real boot sequence.
 
@@ -14,7 +15,7 @@ Module-specific guidance for `erun-ui/playwright`. Follow the repository root `A
 The suite owns its config root. `fixtures/seedRoot.ts` owns layout, names, and seeding:
 
 - `run.sh` creates a throwaway root (`mktemp -d …/erun-playwright-home.XXXXXX`), exports it as `ERUN_PLAYWRIGHT_HOME`, and removes it again via an EXIT trap. When `playwright test` is invoked directly, `playwright.config.ts` creates the root itself at config-load time.
-- Default: one backend and isolated root per worker (`fixtures/workerBackend.ts`), beneath `ERUN_PLAYWRIGHT_HOME`, on base-port + parallel index. Seed at worker setup; global teardown removes the parent as a cleanup backstop. Do not add a shared `webServer` in this mode.
+- Default: one backend and isolated root per worker (`fixtures/workerBackend.ts`), beneath `ERUN_PLAYWRIGHT_HOME`, preferring base-port + parallel index. The worker serves the address its own backend announced, so a preferred port another process holds costs it a different port, never the run. Seed at worker setup; global teardown removes the parent as a cleanup backstop. Do not add a shared `webServer` in this mode.
 - k3d mode is the explicit exception: one worker, real cluster, shared backend and flat root. Worker fixtures reuse that backend instead of spawning another.
 - Baseline: tenant `pw`, inert local-agent envs `alpha`/`beta`, alias `pw-aws`, and `aitool: sh`. Keep config fields aligned with integration fixtures; never launch real AI tools from inert tests.
 - **Artifacts have one root, and a run can be told to keep them out of its tree.** `fixtures/artifacts.ts` owns it: Playwright's `outputDir`, the HTML report, and every frame a spec captures resolve through `artifactPath()`, so `ERUN_PLAYWRIGHT_ARTIFACTS_DIR` moves all three together. Unset it and they stay in the suite directory, which is what lets a reviewing orchestrator read a pod's frames out of the synced worktree — so the default stays. Both in-container gate paths set it to a container-local directory (the `erun-devops` Dockerfile's test stage, and `scripts/repro-gate-contention.sh`, which bind-mounts the worktree over `/src` and runs as root): artifacts a root container writes into an environment's own tree cannot be removed there, and every later run in that environment fails with a bare `EACCES` inside whichever spec writes first — for every branch, not just the one that poisoned it. New capture sites go through `artifactPath()`, never a bare repository-relative path.
@@ -36,7 +37,7 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
   ```sh
   ./run.sh
   ```
-  Defaults: headless browser, port `34123`. Uses the existing `../bin/erun-app` if present; builds it only when missing. Packaging pipelines that produced the binary in an earlier step skip the build cost.
+  Defaults: headless browser, preferred port `34123` (each worker prefers base + its index and serves the address its backend announced). Uses the existing `../bin/erun-app` if present; builds it only when missing. Packaging pipelines that produced the binary in an earlier step skip the build cost.
 - Equivalent through Yarn (every script delegates to `run.sh`):
   ```sh
   yarn test         # default headless
@@ -56,7 +57,7 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
 - `--build` force a desktop-binary rebuild even when `../bin/erun-app` exists. Use this after editing Go code.
 - `--skip-build` deprecated no-op kept for older callers; the default behaviour already avoids building when the binary is present.
 - `--skip-lint` skip typecheck/lint/format:check for this invocation only, forwarding the same skip to `build.sh` when a rebuild runs. Per-invocation only — it cannot arrive from an environment variable, and a skipped run always prints `>> SKIPPING ...` so the skip is never silent. Use only when iterating locally; never in CI.
-- `--port N` override the backend port. Defaults to `34123` to avoid clashing with `wails dev`'s `34115`. Exported as `ERUN_PLAYWRIGHT_PORT` so `playwright.config.ts` stays in sync.
+- `--port N` override the preferred backend port. Defaults to `34123` to avoid clashing with `wails dev`'s `34115`. Exported as `ERUN_PLAYWRIGHT_PORT` so `playwright.config.ts` stays in sync. It is a preference only: each worker's real port is the one its backend announced.
 - `--headed` run the browser with a visible window. Otherwise headless.
 - `--` everything after this is forwarded to `playwright test` (e.g. `./run.sh -- --grep sidebar`).
 - Any unrecognised flag is also forwarded to `playwright test`, so `yarn test --grep sidebar` works even though Yarn 1 strips its own `--` separator before reaching the script.

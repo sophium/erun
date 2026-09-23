@@ -11,9 +11,11 @@ import {
 import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js';
 
 // run.sh and this config share ERUN_PLAYWRIGHT_PORT so an overridden port
-// reaches both; the default stays clear of wails dev's 34115. Each worker in
-// the default mode claims BASE_PORT + its own parallelIndex (see
-// fixtures/workerBackend.ts) instead of every spec sharing this one port.
+// reaches both; the default stays clear of wails dev's 34115. It is the port
+// the one shared e2e-k3d backend is asked for; each worker in the default mode
+// prefers BASE_PORT + its own parallelIndex (see fixtures/workerBackend.ts)
+// instead of every spec sharing this one port, and serves whatever address its
+// own backend announced rather than the one it asked for.
 const HEADLESS_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 
 const E2E_K3D = e2eK3dEnabled();
