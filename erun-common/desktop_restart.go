@@ -209,9 +209,9 @@ func DefaultDesktopRestartDeps() DesktopRestartDeps {
 // BEFORE it restarts: which orchestrators it would reopen, and which of them
 // would not come back to the conversation their own session was working in. The
 // answer is the outcome's Preview, and it comes from the desktop rather than
-// from this caller reading state back for the same reason the restart does --
-// the resolution is the desktop's, and a second implementation of it here would
-// be one more thing that can disagree with what the restart then does. Not
+// from this caller reading state back for the same reason the restart does: the
+// resolution is the desktop's, and a second implementation of it here would be
+// one more thing that can disagree with what the restart then does. Not
 // being able to read it is reported (see PreviewUnavailable) rather than
 // rendered as an empty plan, and it is never fallen back on to a restart: the
 // question travels a path of its own so that a desktop too old to answer it
@@ -257,9 +257,9 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 		outcome := DesktopRestartOutcome{Status: DesktopRestartWouldRestart, PID: marker.PID, ControlPort: marker.ControlPort}
 		switch {
 		case err != nil:
-			outcome.PreviewUnavailable = fmt.Sprintf("could not ask the running desktop app which orchestrators it would reopen: %v", err)
+			outcome.PreviewUnavailable = restartPlanUnavailable(err.Error())
 		case !response.OK:
-			outcome.PreviewUnavailable = fmt.Sprintf("could not ask the running desktop app which orchestrators it would reopen: %s", response.Error)
+			outcome.PreviewUnavailable = restartPlanUnavailable(response.Error)
 		default:
 			outcome.Preview = response.Preview
 		}
@@ -278,6 +278,14 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 		return DesktopRestartOutcome{Status: DesktopRestartFailed, Reason: response.Error, PID: marker.PID, ControlPort: marker.ControlPort}
 	}
 	return DesktopRestartOutcome{Status: DesktopRestartRestarted, PID: marker.PID, ControlPort: marker.ControlPort}
+}
+
+// restartPlanUnavailable states, once, that a dry run could not read the plan —
+// the headline naming what could not be read, the cause after it. One wording
+// for both ways the question can go unanswered, because an operator reading it
+// needs to know which half is missing, not which side of the wire dropped it.
+func restartPlanUnavailable(cause string) string {
+	return "could not ask the running desktop app which orchestrators it would reopen: " + cause
 }
 
 // postDesktopRestart is the real Post: one POST to the desktop's own loopback
