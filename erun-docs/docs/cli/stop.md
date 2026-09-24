@@ -4,7 +4,7 @@ title: erun stop
 
 # `erun stop`
 
-Stop an environment so its cluster capacity goes back to the environments you are actually using. Opening the environment again starts it.
+Stop an environment's runtime so the capacity it was holding goes back to the environments you are actually using. Opening the environment again starts it.
 
 Most environments are idle most of the time, but an idle environment still reserves everything it was given: the runtime container's CPU and memory limits, plus whatever its Docker daemon sidecar is really consuming — and that sidecar has no limit at all, so a Testcontainers run or a warm buildkit cache can hold gigabytes the cluster cannot see coming. Stack four environments on one machine and the node is over-committed on behalf of environments nobody is using. `erun stop` is how you get that back.
 
@@ -24,6 +24,22 @@ Arguments resolve the same way as [`erun open`](/cli/open): from working directo
 | `--environment <name>` | Stop a specific environment. |
 | `--dry-run` | Show every action that would be performed without executing. |
 | `--output json` | Emit the structured result on stdout for orchestrators. |
+
+## What a stop does not touch
+
+`erun stop` scales **the environment's runtime Deployment**, and nothing else. The application
+services you deployed into that environment — the components in `.erun/config.yaml`'s deploy plan,
+rolled out with [`erun deploy --components`](/cli/deploy) — run in the same namespace and are not
+part of the runtime, so they keep running and keep holding their capacity.
+
+That is deliberate. On the environment hosting your platform — its API, its database, its ingress
+and DNS pieces — those components *are* the platform, and scaling them away to reclaim a node's
+headroom would take it down for everyone.
+
+Because this is easy to mistake for a stop that failed, `erun stop` names the components it left
+running in its output, on the already-stopped no-op as well as on a real stop, and the desktop's
+Runtime tab names them before you click. The pods still standing after a stop are those components;
+the runtime pod is gone.
 
 ## What survives a stop
 
