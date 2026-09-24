@@ -67,7 +67,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 	// their builds stay sequential, so offering the knob there would advertise a
 	// control that does nothing.
 	cmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "Build this many images at once (0 resolves from the machine, 1 is sequential). Independent images build concurrently; a FROM dependency still waits for its base.")
-	cmd.Flags().BoolVar(&target.Gate, "gate", false, "Declare this the merge queue's gate build: refuse to report success if the resolved plan would execute nothing (every image promoted from the fingerprint cache), instead of certifying a tree nothing was built against")
+	cmd.Flags().BoolVar(&target.Gate, "gate", false, "Declare this the merge queue's gate build: execute the Dockerfile's test stage rather than replay it from BuildKit's layer cache, and refuse to report success if the resolved plan would execute nothing (every image promoted from the fingerprint cache), instead of certifying a tree nothing was built against")
 	cmd.AddCommand(newBuildProfileCmd())
 	return cmd
 }
