@@ -121,12 +121,14 @@ That reading also carries the other half of the same question, because a **limit
 ceiling reserves nothing**. What the scheduler admits a pod on is its `resources.requests`: a pod
 whose sum of limits is tens of CPU-cores and hundreds of GiB may still reserve a single core and a
 couple of GiB, and an environment with a large limit and a small request is both the easiest to
-place and — since kubelet derives each container's OOM score from the request-to-limit ratio — among
-the first evicted under node pressure. Requests are not in any cgroup file, so the reading takes
-them from the live pod spec and reports them separately from the limits: the card states each row's
-own request beside its limit, and [`erun usage`](/cli/usage) prints the pod's effective reservation
-(the larger of the init containers' peak and the sum of the containers') with each container's own
-beneath it.
+place and among the first evicted under node pressure — because eviction is reclaimed from the pods
+using more than they requested, and every environment requests the same small fixed value at
+priority 0. The limit does not set a container's OOM score; see [Resources and usage · What an
+environment's memory limit does under contention](/desktop/resources-and-usage#memory-limit-contention).
+Requests are not in any cgroup file, so the reading takes them from the live pod spec and reports
+them separately from the limits: the card states each row's own request beside its limit, and
+[`erun usage`](/cli/usage) prints the pod's effective reservation (the larger of the init containers'
+peak and the sum of the containers') with each container's own beneath it.
 
 **On an agent env, that reading excludes the environment's own builds.** An agent env's runtime pod
 carries a second container, `erun-dind`, and every `erun build`/`erun release` actually runs there —
