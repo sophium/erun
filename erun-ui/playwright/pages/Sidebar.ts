@@ -65,17 +65,9 @@ export class Sidebar {
     await this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first().click();
   }
 
-  // Delegates to the keyboard path rather than clicking. A mouse click here
-  // hovers the row first, which opens its IconTooltip, and that popper
-  // intercepts the click that was meant for the edit button:
-  //
-  //   <div data-slot="popover-anchor" ...> intercepts pointer events
-  //   Error: locator.click: Test timeout of 30000ms exceeded
-  //
-  // Whether the popper wins the race depends on how loaded the box is, so this
-  // passed alone and failed in the gate (erun#2399). Every caller here asserts
-  // what the dialog contains, not that a mouse specifically opened it, so the
-  // click bought nothing that the race did not cost back.
+  // The name every caller should use; see openManageDialogViaKeyboard for why
+  // the interaction is not a real mouse click. Every caller asserts what the
+  // dialog contains, never which input opened it.
   async openManageDialogFor(tenant: string, env: string): Promise<void> {
     await this.openManageDialogViaKeyboard(tenant, env);
   }
@@ -86,18 +78,33 @@ export class Sidebar {
     await this.page.getByRole('button', { name: `Outputs for ${tenant} / ${env}` }).click();
   }
 
-  // Drive the edit button by keyboard, not mouse: a hover opens the row's
-  // IconTooltip whose popper would intercept the click. Focusing the row makes
-  // the pointer-events-none button interactive; Enter fires it without a hover.
+  // Activate the edit button directly, with neither a mouse nor a key. The
+  // name is historical -- this drove the button by key until the focus
+  // dependency below was removed; openManageDialogFor is the name to call.
   //
-  // Retry the Enter as one retryable unit, the same shape hoverEnvironmentRow
-  // and readEnvHoverCard below use: a boot-reattached env restores its
-  // terminal, which steals focus asynchronously and can swallow the keydown
-  // before the dialog opens. The inner probe stays short so a swallowed
-  // keydown is retried quickly, but the fixed 4-attempt loop this replaced
-  // capped the whole wait at 4x2s regardless of the test's real 30s budget --
-  // under contention a merely slow (not swallowed) render blew that cap and
-  // failed the step with over 20s of budget still unused.
+  // A mouse press is what this cannot use: pressing hovers the row first,
+  // which opens its IconTooltip, and that popper then intercepts the click
+  // meant for the button ("<div data-slot="popover-anchor" ...> intercepts
+  // pointer events"). Driving the button by key instead settled that pointer
+  // race and left a focus race in its place: a boot-reattached env restores its
+  // terminal, which takes focus asynchronously, so the keydown lands on
+  // whatever took it. Re-focusing on every retry makes that a lingering failure
+  // rather than a quick one -- a thief that keeps winning spends the calling
+  // test's whole budget. Neither input is required: the button's own onClick is
+  // the whole of the interaction, and a dispatched click reaches it whether or
+  // not the row is focused or hovered. The button is pointer-events-none
+  // opacity-0 until group-hover/group-focus-within applies, and dispatchEvent
+  // consults neither.
+  //
+  // Retry the activation as one retryable unit, the same shape
+  // hoverEnvironmentRow and readEnvHoverCard below use: the dialog mounts a
+  // render after the click (the store dispatch, then the dialog's own load),
+  // so one probe can still lose to a slow render. The inner probe stays short
+  // so a click that reached nothing is retried quickly, but the fixed
+  // 4-attempt loop this replaced capped the whole wait at 4x2s regardless of
+  // the test's real 30s budget -- under contention a merely slow (not failed)
+  // render blew that cap and failed the step with over 20s of budget still
+  // unused.
   //
   // A bare toPass() is what gives the probe that property, and it is why this
   // one must stay bare: `toPass({ timeout: N })` takes `min(test deadline,
@@ -110,7 +117,7 @@ export class Sidebar {
       .filter({ has: this.page.getByRole('tab', { name: /^General/ }) })
       .first();
     await expect(async () => {
-      await this.environmentRow(tenant, env).press('Enter');
+      await this.environmentRow(tenant, env).dispatchEvent('click');
       await dialog.waitFor({ state: 'visible', timeout: 2_000 });
     }).toPass();
   }
