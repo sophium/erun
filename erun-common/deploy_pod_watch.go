@@ -120,7 +120,8 @@ type podStatusItem struct {
 		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
-		Containers []specContainerEntry `json:"containers"`
+		Containers     []specContainerEntry `json:"containers"`
+		InitContainers []specContainerEntry `json:"initContainers"`
 	} `json:"spec"`
 	Status struct {
 		Phase                 string                 `json:"phase"`
@@ -130,12 +131,15 @@ type podStatusItem struct {
 	} `json:"status"`
 }
 
-// specContainerEntry is `spec.containers[]`: the declared resource limits a
-// container asked for, which status.containerStatuses does not carry.
+// specContainerEntry is `spec.containers[]`: the declared resource limits and
+// requests a container asked for, which status.containerStatuses carries
+// neither of. Requests is what the scheduler admits the pod on, and no cgroup
+// file records it (see runtime_pod_requests.go).
 type specContainerEntry struct {
 	Name      string `json:"name"`
 	Resources struct {
-		Limits map[string]string `json:"limits"`
+		Limits   map[string]string `json:"limits"`
+		Requests map[string]string `json:"requests"`
 	} `json:"resources"`
 }
 

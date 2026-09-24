@@ -170,7 +170,7 @@ test('a joined usage reading renders its compact headline on the line', () => {
       },
     }),
   );
-  assert.equal(line.usage, 'CPU 12.0% · Mem 25% of 2048Mi');
+  assert.equal(line.usage, 'CPU 12.0% · Mem 25% of 2048Mi limit');
   assert.equal(line.usageStale, false);
 });
 

@@ -124,8 +124,8 @@ export function summarizeEnvironmentUsageMetrics(
   const ageLabel = formatElapsed(new Date(observedAtUnix * 1000).toISOString(), nowMs).trim();
   return {
     kind: 'reading',
-    cpu: cpuMetric(usage.cpu),
-    memory: memoryMetric(usage.memory),
+    cpu: cpuMetric(usage.cpu, usage.requests),
+    memory: memoryMetric(usage.memory, usage.requests),
     builds: buildsMetric(usage.dind),
     ageLabel,
     stale,
@@ -194,19 +194,30 @@ function dindCaption(memory: UIEnvironmentUsageSnapshot['usage']['memory']): str
   return `${sidecar} · ${figure}`;
 }
 
-function cpuMetric(usage: UIEnvironmentUsageSnapshot['usage']['cpu']): UsageMetricSummary {
+function cpuMetric(
+  usage: UIEnvironmentUsageSnapshot['usage']['cpu'],
+  requests: UIEnvironmentUsageSnapshot['usage']['requests'],
+): UsageMetricSummary {
   if (!usage.available) {
     return { label: 'CPU', value: '—', suffix: '' };
   }
   return {
     label: 'CPU',
     value: usage.utilization ?? percentLabel(usage.utilizationPercent),
-    suffix: '',
+    suffix: requestSuffix(requests?.runtime.cpu),
     percent: measuredPercent(usage.utilizationPercent),
   };
 }
 
-function memoryMetric(usage: UIEnvironmentUsageSnapshot['usage']['memory']): UsageMetricSummary {
+// memoryMetric names its denominator a *limit* and states the reservation
+// beside it. Unqualified, `82% of 23.0 GiB` reads as an environment holding
+// 23.0 GiB: a cgroup ceiling is what the container may grow to under pressure
+// and reserves nothing, so an operator sizing a node against it is reading a
+// ceiling as provisioning. The request is the figure that reserves.
+function memoryMetric(
+  usage: UIEnvironmentUsageSnapshot['usage']['memory'],
+  requests: UIEnvironmentUsageSnapshot['usage']['requests'],
+): UsageMetricSummary {
   if (!usage.available) {
     return { label: 'Memory', value: '—', suffix: '' };
   }
@@ -216,12 +227,22 @@ function memoryMetric(usage: UIEnvironmentUsageSnapshot['usage']['memory']): Usa
     return { label: 'Memory', value: usage.current ?? '—', suffix: 'no limit' };
   }
   const percent = measuredPercent(usage.percentOfLimit);
+  const limit = usage.limit ? `of ${usage.limit} limit` : '';
+  const requested = requestSuffix(requests?.runtime.memory);
   return {
     label: 'Memory',
     value: percentLabel(percent),
-    suffix: usage.limit ? `of ${usage.limit}` : '',
+    suffix: [limit, requested].filter(Boolean).join(' · '),
     percent,
   };
+}
+
+// requestSuffix states one resource's reservation, in the Kubernetes
+// vocabulary ("1024Mi requested"). A resource the container declares nothing
+// for contributes nothing rather than "0 requested": an undeclared request is
+// the absence of a reservation, not a reservation of zero.
+function requestSuffix(requested: string | undefined): string {
+  return requested ? `${requested} requested` : '';
 }
 
 // measuredPercent resolves a metric's share of its ceiling to a number whenever
@@ -289,7 +310,7 @@ function usageFigureParts(usage: UIEnvironmentUsageSnapshot['usage']): string[] 
     parts.push(
       usage.memory.unlimited
         ? `Mem ${usage.memory.current ?? '—'} (no limit)`
-        : `Mem ${percentLabel(usage.memory.percentOfLimit)} of ${usage.memory.limit ?? '—'}`,
+        : `Mem ${percentLabel(usage.memory.percentOfLimit)} of ${usage.memory.limit ?? '—'} limit`,
     );
   }
   return parts;

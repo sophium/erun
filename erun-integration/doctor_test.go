@@ -2432,6 +2432,15 @@ func stubDoctorHelmStatusUnreachable(t *testing.T, stubsDir string) {
 // failures), the pending-helm lock delete, the namespace probe the
 // failure diagnostic runs, and the dind exec scripts for inspection and
 // the three prune actions (matched on their distinctive docker lines).
+// stubDoctorPodRequestsArm answers the reservation reading's `-o json` pod read
+// from the same list the usage scenarios use (stubUsagePodRequestsList), while
+// the table answer it precedes keeps serving the pod listing that parses a
+// table. Ordered first because both match " get pods ": the table arm must
+// never win the JSON read.
+func stubDoctorPodRequestsArm() string {
+	return `  *" get pods "*"-o json"*) printf '%s\n' '` + stubUsagePodRequestsList + `' ;;`
+}
+
 func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 	t.Helper()
 	if waitArm == "" {
@@ -2439,6 +2448,7 @@ func stubDoctorKubectl(t *testing.T, stubsDir, waitArm string) {
 	}
 	script := strings.Join([]string{
 		`case "$*" in`,
+		stubDoctorPodRequestsArm(),
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`  *" wait "*) ` + waitArm + ` ;;`,
@@ -2514,6 +2524,7 @@ func stubDoctorKubectlWithUsage(t *testing.T, stubsDir string) {
 	script = append(script,
 		`    ;;`,
 		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
+		stubDoctorPodRequestsArm(),
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`esac`,
@@ -2530,6 +2541,7 @@ func stubDoctorKubectlFailsOnDindExec(t *testing.T, stubsDir string) {
 	script := strings.Join([]string{
 		`case "$*" in`,
 		`  *"docker system df"*|*"df -h /var/lib/docker"*|*"docker image prune"*|*"docker builder prune"*|*"docker container prune"*) printf '%s\n' 'dispatched a dind exec anyway' >&2; exit 1 ;;`,
+		stubDoctorPodRequestsArm(),
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`  *" exec "*) printf '%s\n' 'git push access: no credential found' ;;`,
@@ -2622,6 +2634,7 @@ func stubDoctorKubectlPruneReclaimsNothing(t *testing.T, stubsDir string) {
 	t.Helper()
 	script := strings.Join([]string{
 		`case "$*" in`,
+		stubDoctorPodRequestsArm(),
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`  *" wait "*) : ;;`,
@@ -2656,6 +2669,7 @@ func stubDoctorKubectlWithGitPushAccess(t *testing.T, stubsDir, remote, fetchOK,
 	script := strings.Join([]string{
 		`case "$*" in`,
 		`  *"push_credential="*) printf 'remote=` + remote + `\nfetch_ok=` + fetchOK + `\ngh_authenticated=` + ghAuthenticated + `\npush_credential=` + pushCredential + `\n' ;;`,
+		stubDoctorPodRequestsArm(),
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
@@ -2675,6 +2689,7 @@ func stubDoctorKubectlWithHostCredentials(t *testing.T, stubsDir, presence, expi
 	script := strings.Join([]string{
 		`case "$*" in`,
 		`  *"x_erun_expiration"*) printf 'profile=` + presence + `\nexpiration=` + expiration + `\n' ;;`,
+		stubDoctorPodRequestsArm(),
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   2/2     Running   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,
@@ -2699,6 +2714,7 @@ func stubDoctorKubectlHostCredentialsExecFails(t *testing.T, stubsDir string) {
 		`    echo 'error: Internal error occurred: unable to upgrade connection: container not found ("erun-devops")' >&2`,
 		`    exit 1`,
 		`    ;;`,
+		stubDoctorPodRequestsArm(),
 		`  *" get pods "*) printf '%s\n' 'NAME                READY   STATUS    RESTARTS' 'team-devops-pod-1   0/2     Error   0' ;;`,
 		`  *" get namespaces "*) printf 'namespace/team-dev\n' ;;`,
 		`  *"df -h /var/lib/docker"*) printf '%s\n' 'Filesystem  Size  Used  Avail  Mounted on' 'overlay     100G  20G   80G    /var/lib/docker' ;;`,

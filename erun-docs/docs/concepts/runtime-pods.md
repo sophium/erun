@@ -117,6 +117,17 @@ node reading above falls back to declared limits. **This environment's usage**, 
 resource sliders on the Runtime tab, is the direct route to it; [`erun usage`](/cli/usage) gives the
 same reading from a terminal or an MCP-connected orchestrator.
 
+That reading also carries the other half of the same question, because a **limit is a ceiling and a
+ceiling reserves nothing**. What the scheduler admits a pod on is its `resources.requests`: a pod
+whose sum of limits is tens of CPU-cores and hundreds of GiB may still reserve a single core and a
+couple of GiB, and an environment with a large limit and a small request is both the easiest to
+place and — since kubelet derives each container's OOM score from the request-to-limit ratio — among
+the first evicted under node pressure. Requests are not in any cgroup file, so the reading takes
+them from the live pod spec and reports them separately from the limits: the card states each row's
+own request beside its limit, and [`erun usage`](/cli/usage) prints the pod's effective reservation
+(the larger of the init containers' peak and the sum of the containers') with each container's own
+beneath it.
+
 **On an agent env, that reading excludes the environment's own builds.** An agent env's runtime pod
 carries a second container, `erun-dind`, and every `erun build`/`erun release` actually runs there —
 not in the `erun-devops` container the reading above measures. `erun-dind`'s build containers are a

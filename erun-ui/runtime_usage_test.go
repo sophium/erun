@@ -270,3 +270,53 @@ func TestRuntimeUsageCarriesTheSidecarCumulativeCPUWithNoQuota(t *testing.T) {
 		t.Fatalf("an environment with no sidecar reading must not carry one, got %+v", withoutSidecar.Dind)
 	}
 }
+
+// TestRuntimeUsageCarriesTheRuntimeContainersOwnRequest is the desktop half of
+// the reservation reading: the card's CPU and Memory rows are measured against
+// the runtime container's limit, so the request those rows must state beside it
+// is that same container's own -- resolved here rather than in the component,
+// so no frontend code has to know the chart's container name.
+func TestRuntimeUsageCarriesTheRuntimeContainersOwnRequest(t *testing.T) {
+	usage := uiRuntimeUsageFromReading(eruncommon.RuntimeUsage{
+		Tenant:      "erun",
+		Environment: "code1",
+		Requests: &eruncommon.RuntimeUsageRequests{
+			Containers: map[string]eruncommon.KubernetesRequests{
+				eruncommon.DevopsComponentName: {CPUMilli: 250, MemoryBytes: 1024 * (1 << 20)},
+				"erun-dind":                    {CPUMilli: 250, MemoryBytes: 1024 * (1 << 20)},
+			},
+			Pod: eruncommon.KubernetesRequests{CPUMilli: 500, MemoryBytes: 2048 * (1 << 20)},
+		},
+	})
+	if usage.Requests == nil {
+		t.Fatalf("expected the reservation reading to reach the UI model, got nil")
+	}
+	if usage.Requests.Runtime.CPU != "0.25 CPU" || usage.Requests.Runtime.Memory == "" {
+		t.Fatalf("expected the runtime container's own rendered request, got %+v", usage.Requests.Runtime)
+	}
+	if usage.Requests.Runtime.MemoryBytes != 1024*(1<<20) {
+		t.Fatalf("expected the runtime container's own 1GiB request, got %+v", usage.Requests.Runtime)
+	}
+}
+
+// TestRuntimeUsageDistinguishesAnUnreadReservationFromNone covers the pair that
+// must not collapse: no reading at all (a caller that never asked) stays nil,
+// while a pod spec that could not be read carries its reason -- so the card
+// renders "not read" and never a reservation of nothing.
+func TestRuntimeUsageDistinguishesAnUnreadReservationFromNone(t *testing.T) {
+	absent := uiRuntimeUsageFromReading(eruncommon.RuntimeUsage{Tenant: "erun", Environment: "code1"})
+	if absent.Requests != nil {
+		t.Fatalf("expected no Requests when the shared reading carries none, got %+v", absent.Requests)
+	}
+	unread := uiRuntimeUsageFromReading(eruncommon.RuntimeUsage{
+		Tenant:      "erun",
+		Environment: "code1",
+		Requests:    &eruncommon.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"},
+	})
+	if unread.Requests == nil || unread.Requests.Unavailable == "" {
+		t.Fatalf("expected the unread reservation to state its reason, got %+v", unread.Requests)
+	}
+	if unread.Requests.Runtime.CPU != "" || unread.Requests.Runtime.Memory != "" {
+		t.Fatalf("an unread reservation must not render a zero request, got %+v", unread.Requests.Runtime)
+	}
+}
