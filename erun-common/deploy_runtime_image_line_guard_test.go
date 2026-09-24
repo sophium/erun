@@ -95,6 +95,86 @@ func TestGuardRuntimeImageLineSwitchWarnsOnUnclassifiablePriorImage(t *testing.T
 	}
 }
 
+func TestGuardRuntimeChartLineSwitch(t *testing.T) {
+	cases := []struct {
+		name            string
+		runningImage    string
+		resolvedChart   string
+		explicitChange  bool
+		wantRefusal     bool
+		wantErrContains []string
+	}{
+		{
+			// The reported shape: an frs environment, running
+			// frs's own line, whose deploy resolved erun's shared chart because
+			// the requested version is an erun release and frs publishes no
+			// chart at it. The image half agrees with itself (both frs-devops),
+			// so only the chart's line catches it.
+			name:            "refuses the shared chart on a tenant-line environment",
+			runningImage:    "ghcr.io/sophium/frs-devops:1.0.138",
+			resolvedChart:   "erun-devops",
+			wantRefusal:     true,
+			wantErrContains: []string{"frs", "erun-devops", "1.0.138", "--version", "--runtime-chart"},
+		},
+		{
+			// The umbrella and the image are the same line: nothing to refuse.
+			name:          "proceeds when the chart is on the environment's own line",
+			runningImage:  "ghcr.io/sophium/frs-devops:1.0.138",
+			resolvedChart: "frs-devops",
+		},
+		{
+			// The erun product's own environments resolve the stock chart on
+			// the line they run.
+			name:          "proceeds for the stock chart on a stock-image environment",
+			runningImage:  "ghcr.io/sophium/erun-devops:1.0.304",
+			resolvedChart: "erun-devops",
+		},
+		{
+			// Moving release lines on purpose is what --runtime-chart is for.
+			name:           "an explicit line change is never refused",
+			runningImage:   "ghcr.io/sophium/frs-devops:1.0.138",
+			resolvedChart:  "erun-devops",
+			explicitChange: true,
+		},
+		{
+			// No prior deploy to disagree with.
+			name:          "proceeds with no prior deploy recorded",
+			resolvedChart: "erun-devops",
+		},
+		{
+			// An observed baseline this guard cannot parse into a component
+			// name is undetermined, not wrong.
+			name:          "proceeds when the prior image cannot be classified",
+			runningImage:  "ghcr.io/sophium/",
+			resolvedChart: "erun-devops",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := OpenResult{
+				Tenant:      "frs",
+				Environment: "build",
+				EnvConfig:   EnvConfig{RuntimeRunningImage: tc.runningImage},
+			}
+			err := guardRuntimeChartLineSwitch(Context{}, target, tc.resolvedChart, tc.explicitChange)
+			if tc.wantRefusal {
+				if err == nil {
+					t.Fatal("expected a refusal: the chart is on a different release line than this environment runs")
+				}
+				for _, want := range tc.wantErrContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("refusal must name %q, got: %v", want, err)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected refusal: %v", err)
+			}
+		})
+	}
+}
+
 func TestRuntimeImageComponentName(t *testing.T) {
 	cases := map[string]string{
 		"":                                    "",

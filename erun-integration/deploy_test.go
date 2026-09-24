@@ -2740,6 +2740,46 @@ esac
 		golden.Equal(t, "deploy/dry_run_unclassifiable_prior_runtime_image_warns_but_proceeds", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_refuses_a_deploy_version_from_another_products_release_line", func(t *testing.T) {
+		// The reported mistake: frs is a separate product on its own version line --
+		// environments run ghcr.io/sophium/frs-devops -- but `erun deploy frs
+		// build --version 1.0.304` was accepted, because the runtime chart
+		// ladder falls through to the shared erun-devops chart when the
+		// tenant's own umbrella is not published at that version. The chart is
+		// then an erun coordinate while the image the same deploy derives
+		// (frs-devops:1.0.304, a tag frs's line never published) is a frs one:
+		// the pod sat in Init:ImagePullBackOff and the environment was down ~11
+		// minutes before helm's "Progress deadline exceeded" -- a rollout
+		// timeout naming anything but the cause. This env's last confirmed
+		// deploy ran the frs line, so the mismatch is classifiable and the
+		// deploy must refuse before any cluster interaction, naming both lines
+		// and the version. No kubectl/helm stub is declared: a refusal that did
+		// not fire before the rollout would show up in the golden as the
+		// command it wrongly planned.
+		//
+		// Only a chart the search produced is checked. A tenant that states the
+		// stock erun-devops chart in its own config while running its own image
+		// line is naming erun's line on purpose, and that coordinate keeps
+		// deploying as stated -- TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone
+		// (erun-common) is that half, and is what this guard has to stay clear
+		// of.
+		setup := env.New(t)
+		fixture.SeedRuntimeTenantEnvNoRepoPath(t, setup, "frs", "build")
+		appendEnvConfig(t, setup, "frs", "build",
+			"runtimeimage: frs-devops\n"+
+				"runtimerunningimage: ghcr.io/sophium/frs-devops:1.0.138\n",
+		)
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=erun-devops:1.0.304")
+		result := erun.Run(t, []string{"deploy", "frs", "build", "--version", "1.0.304", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a refusal for a version from another product's release line, got exit 0:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "helm upgrade") {
+			t.Fatalf("refusal must fire before any cluster interaction: %s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_refuses_a_deploy_version_from_another_products_release_line", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
 		// A published-chart deploy has no chart directory to host the
 		// operator's values.<env>.yaml overlay; the env config dir's
@@ -3747,7 +3787,12 @@ esac
 		}
 		out := normalize.Apply(result.Combined)
 		for _, want := range []string{
-			"team-devops-7d4b4c/erun-dind was still pulling its image",
+			// The image, not only the container: the wait ending mid-pull is
+			// answered by a longer deploy.timeout when the image is genuinely
+			// still downloading, and by deploying the right image when the tag
+			// was never published -- and the container name alone cannot tell
+			// those apart.
+			"team-devops-7d4b4c/erun-dind (ghcr.io/sophium/erun-dind:<VERSION>) was still pulling its image",
 			"this is the deploy's own timeout ending the rollout, not a container failure",
 			"the previous pod was already torn down and this environment is running no pod",
 		} {
@@ -4937,6 +4982,7 @@ const imagePullBackOffPodJSON = `{
         "containerStatuses": [
           {
             "name": "erun-dind",
+            "image": "ghcr.io/sophium/erun-dind:1.0.0",
             "ready": false,
             "restartCount": 0,
             "state": {"waiting": {"reason": "ImagePullBackOff", "message": "Back-off pulling image \"ghcr.io/sophium/erun-dind:1.0.0\""}}

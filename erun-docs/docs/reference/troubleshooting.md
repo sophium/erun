@@ -229,6 +229,28 @@ If you don't — the pairing just drifted — realign the persisted `runtimeimag
 erun doctor <tenant> <env>
 ```
 
+## `erun deploy` refuses: runtime chart release line mismatch {#runtime-chart-line-mismatch}
+
+**Symptoms:** `erun deploy` exits non-zero immediately, before any `helm upgrade` or `kubectl` line appears in its output, with an error like:
+
+```
+deploy: frs/build's last confirmed deploy ran ghcr.io/sophium/frs-devops:1.0.138, so this environment is on the frs release line, but this deploy resolved the erun-devops chart, which is versioned on erun's own release line -- a version from erun's line does not name anything frs publishes, so the pod would wait on an image tag that does not exist; pass --version from frs's line, or --runtime-chart to install this chart on purpose
+```
+
+**Cause:** the environment's last confirmed deploy ran its own product's line (`<tenant>-devops`), but the runtime **chart** this deploy resolved came from the chart search falling through to the shared `erun-devops` chart — which happens exactly when `--version` is a version from *another product's* release line. A released version number from the wrong product is a reachable mistake, not a typo: every environment in the org publishes version numbers, `erun-devops` genuinely exists at ERun's version, and the search finds it. The image half does not catch this, because the image is still derived from the tenant (`<registry>/<tenant>-devops:<version>`) and so agrees with itself — the two halves of one coordinate are being read against two different products, and only one of them can be right. Left alone, it installs ERun's chart onto your release and the pod waits on an image tag your product never published, which surfaces minutes later as helm's `Progress deadline exceeded` — a rollout timeout naming anything but the cause — with the previous pod already torn down by the `Recreate` strategy. `erun deploy` refuses before touching the cluster instead. See the image half at [runtime image release line mismatch](#runtime-image-line-mismatch).
+
+**Fix:** pass a version from the environment's own release line:
+
+```bash
+erun deploy <tenant> <env> --version <version-from-that-products-line>
+```
+
+If you *do* mean to install a chart from another line, say so explicitly with `--runtime-chart <chart-reference>`, or state it once on the environment with [`runtimechart`](/reference/configuration#envconfig) — a chart stated there is your own coordinate and is never second-guessed. `erun list` reports which release line each environment's recorded version belongs to, so the number to deploy is readable from config alone:
+
+```bash
+erun list
+```
+
 ## An agent environment can fetch but can't push a branch or use `gh` {#git-push-access}
 
 **Symptoms:** a remote-agent (or runtime) environment clones, builds, and tests fine — `make check` or the equivalent gate goes green — but the very last step of the work fails:
