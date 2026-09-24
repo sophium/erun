@@ -148,7 +148,8 @@ demonstrated:
   `--gate`** (`ensureGateTestStageExecuted`): both documented gate flows — the
   merge queue's `gate-merge` → build → `record-build --gate`, and the erun-merge
   skill's READY rung — run plain builds, so a guard the flag arms never covered
-  the run it was written for. Do not re-key that refusal on a flag. `gateTestStagePlanLines` announces the
+  the run it was written for. Do not re-key that refusal on a flag.
+  `gateTestStagePlanLines` announces the
   plan and must not use the outcome vocabulary; `gateTestStageProvenanceLines`
   reports the outcome — LIVE, CACHED or REPLAYED — read from the builder's own
   captured `--progress=plain` stream, which is the one report a warm cache cannot

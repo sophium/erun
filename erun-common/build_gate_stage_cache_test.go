@@ -51,20 +51,13 @@ func gateStageCacheArgv(t *testing.T, forceGateTestStage bool) []string {
 // only evidence the builder can give that `make check` ran in this run.
 func TestGateBuildInvalidatesItsTestStageLayers(t *testing.T) {
 	argv := gateStageCacheArgv(t, true)
-	want := []string{"--no-cache-filter", gateStageName}
-	if !slices.Contains(argv, want[0]) {
+	at := slices.Index(argv, "--no-cache-filter")
+	if at < 0 {
 		t.Fatalf("expected a declared gate build to invalidate its test stage's layers, got %v", argv)
 	}
-	for i := 0; i+1 < len(argv); i++ {
-		if argv[i] != want[0] {
-			continue
-		}
-		if argv[i+1] != want[1] {
-			t.Fatalf("expected %q to name the stage the Dockerfile declares and erun watches (%q), got %q in %v", want[0], want[1], argv[i+1], argv)
-		}
-		return
+	if at+1 >= len(argv) || argv[at+1] != gateStageName {
+		t.Fatalf("expected --no-cache-filter to name the stage the Dockerfile declares and erun watches (%q), got %v", gateStageName, argv)
 	}
-	t.Fatalf("expected %q to carry a stage name, got %v", want[0], argv)
 }
 
 // The contrast that keeps this a scoped change rather than a blanket one: an
