@@ -680,6 +680,72 @@ func (a *App) restartHandoffFromOpenState(state orchestratorRestoreState) orches
 	return state
 }
 
+// orchestratorRestartPreview answers what a restart triggered right now would
+// reopen, per orchestrator, WITHOUT restarting anything: no hand-off is written,
+// nothing is launched, nothing quits. It reads the same state the launch that
+// follows will read, and resolves each orchestrator the same way that launch
+// resolves it, so the warning it produces and the notice the next launch raises
+// cannot disagree about which conversation was left behind.
+//
+// It exists because of WHEN the next launch says anything. By the time the
+// post-restart notice renders, the restart has happened: the orchestrator is
+// already on its anchor and the only remedy left is to attach the stranded
+// conversation and restart again. Asked before the restart, the same answer is
+// actionable — attach first, then restart once.
+//
+// One orchestration is answered by the hand-off rather than by a resolution:
+// the orchestrator the restart is resuming gets its own live conversation back
+// (see restartHandoff), so it is reported coming back to that, and a hand-off
+// that cannot be delivered falls back onto the same attached-or-derived
+// resolution every other orchestrator gets.
+func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []eruncommon.DesktopRestartReopen {
+	entries := readOpenOrchestrators(a.deps.orchestratorOpenPath)
+	handoff := a.restartHandoff(returnToOrchestratorID)
+	// The same predicate the launch itself applies to the hand-off it finds on
+	// disk, reused rather than re-derived: a hand-off that would be withheld on
+	// the way back is not what this orchestrator comes back on either.
+	delivered := handoff.ConversationID != "" && a.resumeRefusal(handoff).Text == ""
+
+	ids := make([]string, 0, len(entries)+1)
+	for _, entry := range entries {
+		ids = append(ids, entry.OrchestratorID)
+	}
+	// A restart naming an orchestrator that is not in the open set still reopens
+	// it — the hand-off makes it the pane owner on its own — so leaving it out of
+	// the plan would be the one silence this is meant to end.
+	if handoff.OrchestratorID != "" && !containsOrchestratorID(ids, handoff.OrchestratorID) {
+		ids = append(ids, handoff.OrchestratorID)
+	}
+
+	out := make([]eruncommon.DesktopRestartReopen, 0, len(ids))
+	for _, id := range ids {
+		if delivered && id == handoff.OrchestratorID {
+			out = append(out, eruncommon.DesktopRestartReopen{
+				OrchestratorID: id,
+				ConversationID: handoff.ConversationID,
+			})
+			continue
+		}
+		choice := a.resolveOrchestratorConversation(orchestratorEntryOrEmpty(entries, id))
+		out = append(out, eruncommon.DesktopRestartReopen{
+			OrchestratorID: id,
+			ConversationID: choice.ConversationID,
+			Notice:         choice.Notice,
+		})
+	}
+	return out
+}
+
+// containsOrchestratorID reports whether ids already names id.
+func containsOrchestratorID(ids []string, id string) bool {
+	for _, existing := range ids {
+		if existing == id {
+			return true
+		}
+	}
+	return false
+}
+
 // relaunchDesktopAppDetached spawns a fresh copy of this desktop binary/bundle,
 // detached so it survives this process exiting. It reuses the shared
 // eruncommon.DesktopAppCommand so the launch matches `erun app`.

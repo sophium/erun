@@ -74,7 +74,11 @@ func newAppRestartCmd() *cobra.Command {
 			"half-killed. It resolves the running desktop from a marker that process wrote at startup and " +
 			"verifies that process is still alive before doing anything — a stale marker (the desktop already " +
 			"exited) or no marker at all (nothing running) is refused outright rather than guessed at, since a " +
-			"relaunch armed against a dead target would silently do nothing.",
+			"relaunch armed against a dead target would silently do nothing. A --dry-run asks that same process " +
+			"what a restart triggered now would reopen, naming every orchestrator that would not come back to " +
+			"the conversation its last session was working in — a restart reopens an orchestrator on the " +
+			"conversation attached to it or on the one derived from its id — so those conversations can be " +
+			"attached before the restart instead of reported after it.",
 		Example:       "  erun app restart\n  erun app restart --orchestrator my-orchestrator\n  erun app restart --dry-run",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
@@ -108,8 +112,12 @@ func runAppRestartCommand(ctx eruncommon.Context, orchestratorID string) error {
 		_ = ctx.WriteResult(outcome)
 		return fmt.Errorf("restart %s: %s", outcome.Status, outcome.Reason)
 	}
-	if !ctx.DryRun && ctx.Output != eruncommon.OutputJSON {
-		_, _ = fmt.Fprintln(ctx.Stdout, appRestartSummary(outcome))
+	if ctx.Output != eruncommon.OutputJSON {
+		if ctx.DryRun {
+			appRestartDryRunReport(ctx, outcome)
+		} else {
+			_, _ = fmt.Fprintln(ctx.Stdout, appRestartSummary(outcome))
+		}
 	}
 	return ctx.WriteResult(outcome)
 }
@@ -119,6 +127,59 @@ func runAppRestartCommand(ctx eruncommon.Context, orchestratorID string) error {
 // ever prints for a successful restart.
 func appRestartSummary(outcome eruncommon.DesktopRestartOutcome) string {
 	return fmt.Sprintf("restarted the running desktop app (pid %d)", outcome.PID)
+}
+
+// appRestartDryRunReport renders what a restart would reopen. A dry run is the
+// only moment any of it is still actionable: an orchestrator that would come
+// back on a conversation other than the one its own session was working in can
+// be attached BEFORE the restart, where the notice the next launch raises can
+// only be acted on by attaching and restarting a second time.
+//
+// Its counterweight is the case where the plan could not be read at all. That is
+// reported as itself and never rendered as an empty plan: "nothing would be
+// stranded" is precisely what an answer nobody received must not be mistaken
+// for, and the outcome is still would-restart either way, because the marker and
+// the liveness probe already established that a real target is there.
+func appRestartDryRunReport(ctx eruncommon.Context, outcome eruncommon.DesktopRestartOutcome) {
+	if ctx.Stdout == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(ctx.Stdout, "would restart the running desktop app (pid %d)\n", outcome.PID)
+	if outcome.PreviewUnavailable != "" {
+		_, _ = fmt.Fprintln(ctx.Stdout, outcome.PreviewUnavailable)
+		return
+	}
+	if len(outcome.Preview) == 0 {
+		_, _ = fmt.Fprintln(ctx.Stdout, "it has no orchestrator to reopen")
+		return
+	}
+	stranded := make([]eruncommon.DesktopRestartReopen, 0, len(outcome.Preview))
+	for _, reopen := range outcome.Preview {
+		if reopen.Notice != "" {
+			stranded = append(stranded, reopen)
+		}
+	}
+	if len(stranded) == 0 {
+		_, _ = fmt.Fprintf(ctx.Stdout, "it would reopen %s, each on the conversation it was working in\n",
+			describeOrchestratorCount(len(outcome.Preview)))
+		return
+	}
+	_, _ = fmt.Fprintf(ctx.Stdout, "it would reopen %s, and %d of them will NOT come back to the conversation their last session was working in:\n",
+		describeOrchestratorCount(len(outcome.Preview)), len(stranded))
+	for _, reopen := range stranded {
+		_, _ = fmt.Fprintf(ctx.Stdout, "  %s\n", reopen.Notice)
+	}
+	_, _ = fmt.Fprintln(ctx.Stdout,
+		"Attach each one in the desktop's Manage → Conversation before restarting, and the restart reopens it there.")
+}
+
+// describeOrchestratorCount renders a reopened-orchestrator count for an
+// operator-facing line.
+func describeOrchestratorCount(count int) string {
+	if count == 1 {
+		return "1 orchestrator"
+	}
+	return fmt.Sprintf("%d orchestrators", count)
 }
 
 // buildAppLaunchArgs returns the argv tail passed to erun-app. Only the

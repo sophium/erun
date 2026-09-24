@@ -1,0 +1,8 @@
+would restart the running desktop app (pid <PID>)
+it would reopen 2 orchestrators, and 1 of them will NOT come back to the conversation their last session was working in:
+  Reopened petios-ops on the conversation derived from its id (<UUID>), not the one its last session was working in (<UUID>). That conversation is still there; manage the orchestrator to attach it.
+Attach each one in the desktop's Manage → Conversation before restarting, and the restart reopens it there.
+audit: erun app restart --dry-run --orchestrator erun
+app restart: orchestrator="erun"
+app restart: resolving the running desktop app from <TMP>
+app restart: status=would-restart pid=<PID> controlPort=26150

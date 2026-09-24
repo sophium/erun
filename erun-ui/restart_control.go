@@ -34,20 +34,6 @@ type restartControlServer struct {
 	server   *http.Server
 }
 
-// restartControlRequest/restartControlResponse mirror
-// eruncommon.desktopRestartRequest/desktopRestartResponse; kept as unexported
-// local types (rather than exported shared ones) because erun-common must not
-// depend on this package and the wire shape has exactly two callers, one on
-// each side of the loopback call.
-type restartControlRequest struct {
-	OrchestratorID string `json:"orchestratorId"`
-}
-
-type restartControlResponse struct {
-	OK    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
-}
-
 // startRestartControlServer binds a loopback listener on an OS-assigned port
 // and serves RestartApp behind it. Returns a nil server and port 0 when the
 // bind fails (e.g. no loopback interface in a sandboxed test), which the
@@ -62,6 +48,7 @@ func startRestartControlServer(app *App) (*restartControlServer, int) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(eruncommon.DesktopControlPath, handleRestartControl(app))
+	mux.HandleFunc(eruncommon.DesktopControlPlanPath, handleRestartPlanControl(app))
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
@@ -78,22 +65,57 @@ func startRestartControlServer(app *App) (*restartControlServer, int) {
 // indistinguishable from one that did.
 func handleRestartControl(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		req, ok := decodeRestartControlRequest(w, r)
+		if !ok {
 			return
 		}
-		var req restartControlRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		resp := restartControlResponse{OK: true}
+		resp := eruncommon.DesktopRestartResponse{OK: true}
 		if err := app.RestartApp(req.OrchestratorID); err != nil {
-			resp = restartControlResponse{OK: false, Error: err.Error()}
+			resp = eruncommon.DesktopRestartResponse{OK: false, Error: err.Error()}
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		writeRestartControlResponse(w, resp)
 	}
+}
+
+// handleRestartPlanControl answers what a restart triggered now would reopen,
+// and does nothing else: no hand-off is written, nothing is launched, nothing
+// quits. It is a read of the same state the restart reads, which is why the
+// plan it produces and the notices the launch after the restart raises agree.
+//
+// It sits on its own path rather than behind a flag on the restart path so a
+// desktop that predates it cannot read the question as a command. See
+// eruncommon.DesktopControlPlanPath.
+func handleRestartPlanControl(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, ok := decodeRestartControlRequest(w, r)
+		if !ok {
+			return
+		}
+		writeRestartControlResponse(w, eruncommon.DesktopRestartResponse{
+			OK:      true,
+			Preview: app.orchestratorRestartPreview(req.OrchestratorID),
+		})
+	}
+}
+
+// decodeRestartControlRequest reads the one request shape both control paths
+// take, answering the client itself when it cannot.
+func decodeRestartControlRequest(w http.ResponseWriter, r *http.Request) (eruncommon.DesktopRestartRequest, bool) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return eruncommon.DesktopRestartRequest{}, false
+	}
+	var req eruncommon.DesktopRestartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return eruncommon.DesktopRestartRequest{}, false
+	}
+	return req, true
+}
+
+func writeRestartControlResponse(w http.ResponseWriter, resp eruncommon.DesktopRestartResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // Close shuts the listener down. Safe to call on a nil server (no control

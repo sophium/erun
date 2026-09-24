@@ -1,0 +1,6 @@
+would restart the running desktop app (pid <PID>)
+could not ask the running desktop app which orchestrators it would reopen: the running desktop app does not serve /__erun_restart/plan, so it is older than this command
+audit: erun app restart --dry-run
+app restart: orchestrator=""
+app restart: resolving the running desktop app from <TMP>
+app restart: status=would-restart pid=<PID> controlPort=26150
