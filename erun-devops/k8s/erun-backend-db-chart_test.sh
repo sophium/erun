@@ -51,6 +51,22 @@ document_named() {
         'BEGIN{RS="\n---\n"} $0 ~ ("(^|\n)" want "(\n|$)") && $0 ~ ("(^|\n)" name "(\n|$)") {print}' "$1"
 }
 
+# One line per CronJob document rendered from $1: its metadata.name and the
+# value of its ttlSecondsAfterFinished, or NONE when it sets none. Split out
+# from the per-Job assertions so the same sweep covers a CronJob added later --
+# the omission this locks is per-Job, not per-chart.
+cronjob_ttls() {
+    awk 'BEGIN{RS="\n---\n"; FS="\n"}
+         $0 !~ ("(^|\n)kind: CronJob(\n|$)") { next }
+         { name="?"; ttl="NONE"
+           for (i=1; i<=NF; i++) {
+               if ($i ~ /^  name: /) { name=substr($i, 9) }
+               if ($i ~ /^[ \t]*ttlSecondsAfterFinished:[ \t]*[0-9]+$/) {
+                   ttl=$i; sub(/^[ \t]*ttlSecondsAfterFinished:[ \t]*/, "", ttl) }
+           }
+           print name " " ttl }' "$1"
+}
+
 rendered="$(render default)"
 
 # --- 1. The existing hook Job still renders on every install/upgrade ---
@@ -129,5 +145,21 @@ grep -q 'retention\.enabled' "${retention_doc}" || fail "the data-retention doc 
 grep -q 'retention\.dryRun' "${retention_doc}" || fail "the data-retention doc must reference the real retention.dryRun chart value"
 grep -qi 'suspend' "${retention_doc}" &&
     fail "the data-retention doc must not recommend the kubectl CronJob 'suspend' workaround -- retention.enabled is the real, persistent off switch"
+
+# --- 9. Both CronJobs bound failure *age*, not only failure count.
+#        failedJobsHistoryLimit bounds how many of the most recent failures are
+#        kept and never expires them on age, so three failures from one bad
+#        afternoon sat in `kubectl get pods` as `Error` for weeks and made a
+#        healthy environment read as permanently broken. Each Job needs a
+#        ttlSecondsAfterFinished of its own, and these assert the real value --
+#        a bare presence check would pass a template that rendered an empty or
+#        zero TTL, which expires nothing.
+ttls="$(cronjob_ttls "${enabled_rendered}")"
+printf '%s\n' "${ttls}" | grep -q '^team-backend-db-migrate-repair 3600$' ||
+    fail "the repair CronJob must set ttlSecondsAfterFinished: 3600 (twelve 5-minute scheduling intervals) -- without it a weeks-old failure stays visible as an Error pod on a healthy database"
+printf '%s\n' "${ttls}" | grep -q '^team-backend-db-retention 259200$' ||
+    fail "the retention CronJob must set ttlSecondsAfterFinished: 259200 (three days) -- it runs daily, so its next piece of evidence is 24h away and a shorter TTL would delete a failed sweep's log before anyone could read it"
+[ "$(printf '%s\n' "${ttls}" | grep -c ' NONE$' || true)" -eq 0 ] ||
+    fail "every CronJob this chart renders must bound failure age with ttlSecondsAfterFinished, or old failures never age out and a healthy environment reports Error pods forever: $(printf '%s\n' "${ttls}" | grep ' NONE$' | cut -d' ' -f1 | tr '\n' ' ')"
 
 echo "OK"

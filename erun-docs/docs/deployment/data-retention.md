@@ -114,7 +114,7 @@ The CronJob fires daily at 03:00 UTC; overlapping runs are forbidden, so two day
 kubectl -n <tenant>-prod get cronjob <tenant>-backend-db-retention
 ```
 
-`LAST SCHEDULE` shows when it last fired. The last three successful and three failed Job objects are kept:
+`LAST SCHEDULE` shows when it last fired. The last three successful and three failed Job objects are kept, and each Job is also deleted three days after it finishes — so a failed sweep stays readable across the next two runs, and then ages out instead of lingering indefinitely as an `Error` pod:
 
 ```bash
 kubectl -n <tenant>-prod get jobs -l app=<tenant>-backend-db-retention
@@ -123,7 +123,7 @@ kubectl -n <tenant>-prod logs job/<tenant>-backend-db-retention-<timestamp>
 
 Every policy file reports before it deletes, so the log is a per-run audit trail: a line naming the file it's about to run, then a `table_name` / `eligible_for_deletion` count for every table-and-predicate combination in that file — the same count the delete then acts on. There's no separate report of exactly *which* rows were removed, only how many, per table, per run.
 
-Pod logs are capped (only the last three successful and three failed Jobs are kept) and need cluster access to read. The `retention_runs` table is the durable, queryable record of the same information — one row per `(policy_name, table_name)` per run, recording `dry_run`, `eligible_count`, and `deleted_count` (always `0` for a dry run). Only `erun_operations` can read it (`SET ROLE erun_operations` before querying), and it's platform-wide rather than tenant-scoped — a sweep runs once for every tenant `erun-backend-db` serves, not per tenant:
+Pod logs are capped — only the last three successful and three failed Jobs are kept, and a Job of either outcome is deleted three days after it finishes — and need cluster access to read. The `retention_runs` table is the durable, queryable record of the same information — one row per `(policy_name, table_name)` per run, recording `dry_run`, `eligible_count`, and `deleted_count` (always `0` for a dry run). Only `erun_operations` can read it (`SET ROLE erun_operations` before querying), and it's platform-wide rather than tenant-scoped — a sweep runs once for every tenant `erun-backend-db` serves, not per tenant:
 
 ```sql
 SET ROLE erun_operations;
