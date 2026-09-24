@@ -39,11 +39,20 @@ async function stubLoadTenantDashboard(
 // readyDashboard is a loaded dashboard for SEED_TENANT, with the caller's own
 // identity row as whoami reports it. tenantName is what the platform calls the
 // tenant the bearer resolves to; '' stages a platform that names none.
+//
+// A name that is not SEED_TENANT's is the mismatch, which the backend answers
+// with platformState 'tenant-mismatch' and no rows at all — so the payload
+// says so here too. The rows below a mismatched credential are the other
+// tenant's by construction, and the card that replaces them is
+// tenant-dashboard-platform-state.spec.ts's subject; this file's claim is the
+// header line, which is rendered whichever state the body is in.
 function readyDashboard(environment: string, tenantName: string): Record<string, unknown> {
+  const mismatched = Boolean(tenantName) && tenantName !== SEED_TENANT;
   return {
     tenant: SEED_TENANT,
     environment,
     apiUrl: 'http://127.0.0.1:1/unreachable',
+    ...(mismatched ? { platformState: 'tenant-mismatch' } : {}),
     user: {
       tenantId: 'tenant-1',
       ...(tenantName ? { tenantName } : {}),
@@ -70,9 +79,11 @@ test.describe('tenant dashboard — the header names the platform tenant', () =>
       await stubLoadTenantDashboard(page, readyDashboard(environment, 'erun'));
 
       await app.sidebar.openTenantDashboard(SEED_TENANT);
-      await app.tenantDashboard.waitForOpen();
 
+      // No waitForOpen: this state's body replaces the tab strip, so the
+      // header line is asserted directly rather than after a tab appears.
       await expect(app.tenantDashboard.platformTenantLine()).toContainText('erun');
+      await expect(app.tenantDashboard.tabs()).toHaveCount(0);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

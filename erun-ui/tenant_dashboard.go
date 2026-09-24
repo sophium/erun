@@ -53,6 +53,12 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	defer cancel()
 	capabilities := loadTenantDashboardData(requestCtx, resolution.client, &dashboard, input)
+	if dashboard.PlatformState == tenantPlatformStateTenantMismatch {
+		// Every remaining read would be a read of the other tenant's rows —
+		// including the invite-request status below, which is the caller's own
+		// status on *that* tenant. The mismatch is terminal for this load.
+		return dashboard, nil
+	}
 	// The caller's own invite-request status needs only the bearer this
 	// resolution already minted, never tenant membership — read it even when
 	// loadTenantDashboardData above downgraded PlatformState to not-enrolled/
@@ -140,6 +146,19 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 		Issuer:     whoami.Issuer,
 		Subject:    whoami.Subject,
 	}
+	// A local tenant is bound to a platform tenant only by whichever cloud
+	// alias its credential reaches, so the name the platform reports is the
+	// one thing that can say whether the two correspond. When it names a
+	// different tenant, this dashboard would render that tenant's reviews,
+	// queue, users and audit under the local tenant's own name — behind the
+	// write controls (create a review, advance a merge queue, approve an
+	// invitation) that would act on them. Refuse before reading any of it. A
+	// platform that reports no name leaves nothing to compare, and is read
+	// exactly as it was before.
+	if mismatched := tenantDashboardTenantMismatch(dashboard.Tenant, whoami.TenantName); mismatched != "" {
+		dashboard.PlatformState = tenantPlatformStateTenantMismatch
+		return nil
+	}
 	capabilities := whoami.Capabilities
 	// The Users tab shows the tenant's roster, not the caller's own identity:
 	// whoami above answered "who am I", and this read answers "who else is
@@ -169,6 +188,29 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	dashboard.CanApproveInviteRequests = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteApproveInvite) == ""
 	dashboard.CanDeclineInviteRequests = restrictedTenantDashboardRead(capabilities, tenantDashboardWriteDeclineInvite) == ""
 	return capabilities
+}
+
+// tenantDashboardTenantMismatch reports the platform tenant name that does not
+// correspond to localTenant, or "" when there is nothing to compare — the
+// platform reported no name, or the local tenant is unnamed — and when the two
+// correspond. A platform that reports no name is read exactly as it was
+// before.
+//
+// It is the correspondence check the two namespaces otherwise do not have: the
+// platform's own name for the tenant behind the bearer is the only value that
+// can say whether the rows a dashboard is about to render are the local
+// tenant's. Names are compared case-insensitively, because a tenant name is a
+// DNS-safe label that both sides normalise on their own.
+func tenantDashboardTenantMismatch(localTenant, platformTenantName string) string {
+	platformTenantName = strings.TrimSpace(platformTenantName)
+	localTenant = strings.TrimSpace(localTenant)
+	if platformTenantName == "" || localTenant == "" {
+		return ""
+	}
+	if strings.EqualFold(localTenant, platformTenantName) {
+		return ""
+	}
+	return platformTenantName
 }
 
 // loadTenantDashboardInviteRequests loads the operator/admin queue: every

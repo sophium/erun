@@ -1913,6 +1913,103 @@ func TestLoadTenantDashboardNamesThePlatformTenantItsRowsBelongTo(t *testing.T) 
 	}
 }
 
+// TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne is the
+// regression for a local tenant presenting another platform tenant's rows as
+// its own. Attaching an erun-type alias to a local tenant's
+// cloudprovideraliases gives that tenant's dashboard a route to the platform,
+// resolved through the alias — so a tenant named `frs` renders `erun`'s
+// reviews, queue, users and audit under its own name, behind the write
+// controls (create a review, advance a merge queue, approve an invitation)
+// that act on them. Nothing in either config links the two namespaces; the
+// platform's own name for the tenant behind the bearer is the only thing that
+// can say whether the rows are this local tenant's, and nothing compared it.
+//
+// The fixture's local tenant is "frs" (testERunPlatformAliasApp) and the
+// platform answers "erun", so the two do not correspond. This drives the real
+// path — the alias resolution, the real refresh-token bearer mint, and a real
+// HTTP platform — and pins that the dashboard stops at the identity read:
+// whoami is the last request the platform sees, so no panel ever renders the
+// other tenant's rows.
+// TestLoadTenantDashboardResolvesThePlatformThroughTheERunAlias is the
+// agreeing control: the same path with the platform answering "frs" loads
+// every panel exactly as it did before.
+func TestLoadTenantDashboardRefusesAPlatformTenantThatIsNotTheLocalOne(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(erunPlatformDashboardHandler(t, &requests, "erun"))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if dashboard.PlatformState != tenantPlatformStateTenantMismatch {
+		t.Fatalf("expected the dashboard to refuse a platform tenant that is not the local one, got platformState %q", dashboard.PlatformState)
+	}
+	// The platform's own name is still carried, so the header can say whose
+	// rows these are rather than only that they are not this tenant's.
+	user := dashboard.User
+	if user == nil {
+		t.Fatal("expected the dashboard to carry the caller's own identity")
+	}
+	if user.TenantName != "erun" {
+		t.Fatalf("expected the caller row to name the platform tenant, got %q", user.TenantName)
+	}
+	if !reflect.DeepEqual(requests, []string{"/v1/whoami"}) {
+		t.Fatalf("expected the identity read to be the last read behind a mismatched platform tenant, got %v", requests)
+	}
+	assertTenantDashboardRowsAreEmpty(t, &dashboard)
+}
+
+// assertTenantDashboardRowsAreEmpty holds the mismatched-platform dashboard to
+// "none of the other tenant's rows", panel by panel: each is a different read
+// against the same wrong tenant, so one of them left populated is the whole
+// defect back again.
+func assertTenantDashboardRowsAreEmpty(t *testing.T, dashboard *uiTenantDashboard) {
+	t.Helper()
+	for _, rows := range []struct {
+		name string
+		len  int
+	}{
+		{"reviews", len(dashboard.Reviews)},
+		{"merge queue", len(dashboard.MergeQueue)},
+		{"users", len(dashboard.Users)},
+		{"audit events", len(dashboard.AuditEvents)},
+		{"panels", len(dashboard.Panels)},
+	} {
+		if rows.len != 0 {
+			t.Fatalf("expected no %s behind a mismatched platform tenant, got %d", rows.name, rows.len)
+		}
+	}
+}
+
+// TestTenantDashboardTenantMismatchOnlyNamesATenantThatDoesNotCorrespond pins
+// the two halves of the correspondence check that are not "the names differ":
+// a platform that reports no name leaves nothing to compare, so its dashboard
+// is read exactly as it was before this check existed, and an unnamed local
+// tenant is never refused on a comparison that was never made.
+func TestTenantDashboardTenantMismatchOnlyNamesATenantThatDoesNotCorrespond(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		localTenant        string
+		platformTenantName string
+		want               string
+	}{
+		{name: "a nameless platform leaves nothing to compare", localTenant: "frs", platformTenantName: "", want: ""},
+		{name: "an unnamed local tenant is never refused", localTenant: "", platformTenantName: "erun", want: ""},
+		{name: "the same name corresponds", localTenant: "frs", platformTenantName: "frs", want: ""},
+		{name: "the same name in another case still corresponds", localTenant: "frs", platformTenantName: "FRS", want: ""},
+		{name: "surrounding whitespace does not make a mismatch", localTenant: " frs ", platformTenantName: "frs", want: ""},
+		{name: "a different tenant is named", localTenant: "frs", platformTenantName: "erun", want: "erun"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tenantDashboardTenantMismatch(tc.localTenant, tc.platformTenantName); got != tc.want {
+				t.Fatalf("tenantDashboardTenantMismatch(%q, %q) = %q, want %q", tc.localTenant, tc.platformTenantName, got, tc.want)
+			}
+		})
+	}
+}
+
 // erunPlatformDashboardFixtures is erunPlatformDashboardHandler's fixture
 // body for every path, keyed by path rather than a switch — a switch here
 // once tripped golangci-lint's cyclomatic-complexity cap the moment a gate-run

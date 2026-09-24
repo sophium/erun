@@ -27,6 +27,15 @@ const (
 	tenantPlatformStateNotSignedIn  = "not-signed-in"
 	tenantPlatformStateNotEnrolled  = "not-enrolled"
 	tenantPlatformStateNoPermission = "no-permission"
+	// tenantPlatformStateTenantMismatch means the identity resolved and the
+	// platform answered — with a tenant that is not the local tenant the
+	// dashboard was opened from. The two namespaces are joined only by the
+	// alias the credential belongs to, so the platform's own name for the
+	// tenant behind the bearer is the only value that can establish
+	// correspondence; when it names a different one, every panel below would
+	// render that tenant's reviews, queue, users and audit under this local
+	// tenant's name, behind write controls that would act on them.
+	tenantPlatformStateTenantMismatch = "tenant-mismatch"
 )
 
 // tenantPlatformResolution is what resolveTenantPlatform found: either a
