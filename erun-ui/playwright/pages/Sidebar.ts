@@ -206,10 +206,34 @@ export class Sidebar {
   // it picked for itself.
   async closeEnvironment(tenant: string, env: string): Promise<void> {
     const dot = this.envOpenDot(tenant, env);
+    // The indicator renders under this one testid in two shapes: the close
+    // control while the row reports the env as opened here
+    // (data-env-opened="true"), and a passive status light when it does not
+    // (Sidebar.EnvironmentRow.tsx's EnvStatusIndicator). "No dot" is therefore
+    // ambiguous, and a caller lands in it by accident: openEnvironment above is
+    // a bare click with no convergence of its own, and the selection it sets is
+    // visible to the caller before the row's own isOpen follows -- that reads
+    // the desktop's tabs for the env, created once openSelection's StartSession
+    // resolves. A close issued in that window matched zero on its first pass and
+    // declared itself done without pressing anything, leaving the env open; the
+    // caller's next assertion then watched a state that could not arrive.
+    //
+    // So press the control, and accept a quiet row as a finished close only
+    // once this step has actually seen the control it was asked to press.
+    const control = this.envRowButton(tenant, env)
+      .locator('..')
+      .locator('[data-testid="env-open-dot"][data-env-opened="true"]');
+    let sawControl = false;
     await expect(async () => {
-      if ((await dot.count()) > 0) {
-        await dot.focus();
-        await dot.press('Enter');
+      if ((await control.count()) > 0) {
+        sawControl = true;
+        await control.focus();
+        await control.press('Enter');
+      }
+      if (!sawControl) {
+        throw new Error(
+          `${tenant} / ${env} is not reported open here, so this close would press nothing`,
+        );
       }
       await expect(dot).toHaveCount(0, { timeout: 2_000 });
     }).toPass();

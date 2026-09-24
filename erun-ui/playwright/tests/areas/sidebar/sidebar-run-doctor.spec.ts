@@ -60,6 +60,48 @@ test.describe('sidebar Run Doctor reachability (#1217)', () => {
     await expect(doctorButton).toHaveAccessibleName('Run doctor');
   });
 
+  // The contended red on the case above, forced on demand instead of waited
+  // for.
+  //
+  // `selection.selected` -- what the line above asserts on -- is set at the top
+  // of openSelection's thunk, while the row's own "opened here" state reads the
+  // desktop's tabs for the env, which only exist once that thunk's StartSession
+  // has resolved. A close issued in between used to find no close control,
+  // match zero dots, and declare itself done without pressing anything, so the
+  // env stayed open and the disabled assertion watched a state that could never
+  // arrive; under contention that window is wide enough to lose, which is how
+  // this spec reddened a full-suite gate (the Run doctor button polled enabled
+  // for the whole 10s the assertion waited).
+  //
+  // Holding the session open widens that window from a few milliseconds to a
+  // named, deterministic one. The close must still close: it converges on the
+  // control appearing rather than accepting the row's silence as a finished
+  // close.
+  test('a close issued before the row reports the env opened still closes it', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const method = (JSON.parse(request.postData() ?? '{}') as { method?: string }).method ?? '';
+      if (/^Start(Local)?Session$/.test(method)) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 12_000));
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(tenant, environment);
+    // The only precondition the line it reproduces has: the selection is set,
+    // so the caller has every reason to believe the env is open.
+    await expect(app.sidebar.runDoctorButton()).toBeEnabled();
+
+    await app.sidebar.closeEnvironment(tenant, environment);
+
+    await expect(app.sidebar.envOpenDot(tenant, environment)).toHaveCount(0);
+    await expect(app.sidebar.runDoctorButton()).toBeDisabled();
+  });
+
   // erun#1217: the result was never recorded — trackDoctorSession's only
   // reachable call site was unreachable (StartDoctorSession always returns
   // kind "local"), and its consumer was wired to the same terminal-exit
