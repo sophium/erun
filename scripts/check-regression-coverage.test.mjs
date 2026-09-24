@@ -28,10 +28,14 @@ import {
 } from './check-regression-coverage.mjs';
 
 // A filesystem double: `files` maps a repo-relative path to its contents.
-function io(files) {
+// `env` is the environment double, empty by default -- which is the state
+// every gate target actually runs in, and therefore the default the opt-in
+// gating cases below are about.
+function io(files, env = {}) {
   return {
     fileExists: (path) => Object.hasOwn(files, path),
     readFile: (path) => files[path],
+    getEnv: (name) => env[name] || '',
   };
 }
 
@@ -617,4 +621,240 @@ test('an empty range is not a failure, and is settled before scope is', () => {
   );
   assert.equal(fromFeature.classification, 'empty');
   assert.ok(!fromFeature.notes.some((note) => note.startsWith('UNCHECKED:')));
+});
+
+
+// --- a declared reproduction that never ran ---------------------------
+//
+// The declaration gate can be satisfied perfectly by a case that no gate ever
+// executes. erun-backend-api's opt-in end-to-end suites read an ERUN_E2E_*
+// variable and skip when it is unset; no gate target sets one; and
+// `go test ./...` prints no SKIP line at all without -v, so `make check-gate`
+// reports a clean `ok` for a package whose entire database contract went
+// unexercised. A fix for a database-only defect can therefore declare an
+// honest reproduction, name it correctly, and ship green against a fake
+// repository while the real database rejects the row.
+//
+// These cases pin that the gate names the hole -- and, just as hard, that
+// naming it is all it does. The suites are opt-in by design, so nothing here
+// may fail a build, and a case that is not gated must not be accused of being.
+
+// The shape these suites actually take: the case calls a same-file helper,
+// and the helper is where the environment check and the skip live.
+const reviewsE2ESource = `package repository
+
+import (
+	"database/sql"
+	"os"
+	"testing"
+)
+
+func reviewsDatabase(t *testing.T) (*sql.DB, string) {
+	t.Helper()
+	databaseURL := os.Getenv("ERUN_E2E_REVIEWS_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("opt-in: set ERUN_E2E_REVIEWS_DATABASE_URL to a migrated PostgreSQL")
+	}
+	db, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	return db, "tenant"
+}
+
+func seedReviewsUser(t *testing.T, db *sql.DB, tenantID, username string) string { return username }
+
+func TestReviewMergeQueueIsPerRepository(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	if author == "" {
+		t.Fatal("no author")
+	}
+}
+`;
+
+const reviewsE2EPath = 'erun-backend/erun-backend-api/internal/repository/reviews_e2e_test.go';
+
+function optInChange(trailers, extraFiles = []) {
+  return change({
+    branchName: 'bug/9999-a-build-less-merged-report',
+    commits: [
+      {
+        sha: 'abc1234',
+        subject: 'Record a review report that carries no build',
+        body: [
+          'Reproduces: reconcileMerged wrote no row at all for a build-less MERGED report, because every',
+          'such write violated reviews_status_build_link_check and surfaced as a bare 500 INTERNAL_SERVER_ERROR',
+          ...trailers,
+        ].join('\n'),
+      },
+    ],
+    changedFiles: [
+      { status: 'M', path: 'erun-backend/erun-backend-api/internal/repository/reviews.go' },
+      ...extraFiles,
+    ],
+  });
+}
+
+const reviewsE2ETrailer = `Regression-Test: ${reviewsE2EPath}::TestReviewMergeQueueIsPerRepository`;
+
+test('a declared reproduction the opt-in gate skips is named, not left silent', () => {
+  // The reproduction of the reported hole: the declaration resolves and the
+  // gate exits 0, so before this the run said nothing at all about the case
+  // it had just blessed. The case and its gate helper are the real shapes.
+  const result = evaluateRegressionCoverage(
+    optInChange([reviewsE2ETrailer], [{ status: 'M', path: reviewsE2EPath }]),
+    io({ [reviewsE2EPath]: reviewsE2ESource }),
+  );
+
+  assert.equal(result.classification, 'declared');
+  const caveat = result.notes.find((note) => note.startsWith('NOT RUN:'));
+  assert.ok(caveat, `expected a "NOT RUN:" caveat, got notes: ${JSON.stringify(result.notes)}`);
+  assert.match(caveat, /TestReviewMergeQueueIsPerRepository/);
+  assert.match(caveat, /ERUN_E2E_REVIEWS_DATABASE_URL/);
+});
+
+test('naming a skipped reproduction never fails the gate', () => {
+  // Visibility only. These suites are opt-in on purpose, and requiring a
+  // PostgreSQL to run them is not this gate's decision to make.
+  const result = evaluateRegressionCoverage(
+    optInChange([reviewsE2ETrailer], [{ status: 'M', path: reviewsE2EPath }]),
+    io({ [reviewsE2EPath]: reviewsE2ESource }),
+  );
+  assert.deepEqual(result.failures, []);
+  assert.equal(result.classification, 'declared');
+});
+
+test('a gate reached through a second level of helper is still named', () => {
+  const source = `package repository
+
+import (
+	"os"
+	"testing"
+)
+
+func optInDatabase(t *testing.T) string {
+	t.Helper()
+	// Indirectly reached: the case calls fixtures, which calls this.
+	if os.Getenv("ERUN_E2E_TENANTS_DATABASE_URL") == "" {
+		t.Skip("opt-in: set ERUN_E2E_TENANTS_DATABASE_URL to a migrated PostgreSQL")
+	}
+	return "postgres://localhost/erun"
+}
+
+func fixtures(t *testing.T) string { return optInDatabase(t) }
+
+func TestTenantRenamePersists(t *testing.T) {
+	url := fixtures(t)
+	_ = url
+}
+`;
+  const path = 'erun-backend/erun-backend-api/tenants_e2e_test.go';
+  const result = evaluateRegressionCoverage(
+    optInChange([`Regression-Test: ${path}::TestTenantRenamePersists`], [{ status: 'M', path }]),
+    io({ [path]: source }),
+  );
+  const caveat = result.notes.find((note) => note.startsWith('NOT RUN:'));
+  assert.ok(caveat, `expected a "NOT RUN:" caveat, got notes: ${JSON.stringify(result.notes)}`);
+  assert.match(caveat, /ERUN_E2E_TENANTS_DATABASE_URL/);
+});
+
+test('an opt-in suite whose variable is set is not reported as skipped', () => {
+  // If the variable is set the suite really does run, so the caveat would be
+  // a lie -- and a gate that cries wolf is one nobody reads.
+  const result = evaluateRegressionCoverage(
+    optInChange([reviewsE2ETrailer], [{ status: 'M', path: reviewsE2EPath }]),
+    io({ [reviewsE2EPath]: reviewsE2ESource }, { ERUN_E2E_REVIEWS_DATABASE_URL: 'postgres://localhost/erun' }),
+  );
+  assert.equal(result.classification, 'declared');
+  assert.ok(!result.notes.some((note) => note.startsWith('NOT RUN:')), 'a configured suite was reported as skipped');
+});
+
+test('an ordinary unit test is not accused of being opt-in gated', () => {
+  const source = `package repository
+
+import "testing"
+
+func reviewName(t *testing.T, name string) string {
+	t.Helper()
+	if name == "" {
+		t.Skip("a review is named at creation")
+	}
+	return name
+}
+
+func TestReviewNameRoundTrips(t *testing.T) {
+	if reviewName(t, "widget") != "widget" {
+		t.Fatal("name did not round-trip")
+	}
+}
+`;
+  const path = 'erun-backend/erun-backend-api/internal/repository/reviews_name_test.go';
+  const result = evaluateRegressionCoverage(
+    optInChange([`Regression-Test: ${path}::TestReviewNameRoundTrips`], [{ status: 'M', path }]),
+    io({ [path]: source }),
+  );
+  assert.equal(result.classification, 'declared');
+  assert.ok(!result.notes.some((note) => note.startsWith('NOT RUN:')), 'an ungated test was reported as skipped');
+});
+
+test('braces inside a string or a comment do not hide the gate', () => {
+  // A case body that ends early reads as ungated, which is the silent
+  // direction this whole change exists to remove -- so the scanner has to
+  // ignore braces that are only text.
+  const source = `package repository
+
+import (
+	"os"
+	"testing"
+)
+
+func thingsDatabase(t *testing.T) string {
+	t.Helper()
+	if os.Getenv("ERUN_E2E_THINGS_DATABASE_URL") == "" {
+		t.Skip("opt-in: set ERUN_E2E_THINGS_DATABASE_URL to a migrated PostgreSQL")
+	}
+	return "postgres://localhost/erun"
+}
+
+func TestThingRoundTrips(t *testing.T) {
+	label := "a } brace in a string"
+	// } a brace in a line comment
+	/* } and one in a block comment */
+	want := struct{ Name string }{Name: label}
+	url := thingsDatabase(t)
+	_ = url
+	_ = want
+}
+`;
+  const path = 'erun-backend/erun-backend-api/things_e2e_test.go';
+  const result = evaluateRegressionCoverage(
+    optInChange([`Regression-Test: ${path}::TestThingRoundTrips`], [{ status: 'M', path }]),
+    io({ [path]: source }),
+  );
+  const caveat = result.notes.find((note) => note.startsWith('NOT RUN:'));
+  assert.ok(caveat, `the gate was hidden by a brace in text: ${JSON.stringify(result.notes)}`);
+  assert.match(caveat, /ERUN_E2E_THINGS_DATABASE_URL/);
+});
+
+test('an existence-based exemption that points at a skipped case is named too', () => {
+  // "covered-by-existing" is the same hole wearing a different trailer: the
+  // case it defers to covers nothing if the gate never runs it.
+  const path = 'erun-backend/erun-backend-api/internal/repository/reviews_e2e_test.go';
+  const result = evaluateRegressionCoverage(
+    optInChange(
+      [
+        'Regression-Test: none',
+        'Regression-Test-Exemption: covered-by-existing: the same merge-queue write through a real PostgreSQL',
+        `Regression-Test-Existing: ${path}::TestReviewMergeQueueIsPerRepository`,
+      ],
+      [{ status: 'M', path: 'erun-backend/erun-backend-api/internal/repository/reviews.go' }],
+    ),
+    io({ [path]: reviewsE2ESource }),
+  );
+  assert.equal(result.classification, 'exempt');
+  const caveat = result.notes.find((note) => note.startsWith('NOT RUN:'));
+  assert.ok(caveat, `expected a "NOT RUN:" caveat, got notes: ${JSON.stringify(result.notes)}`);
+  assert.match(caveat, /Regression-Test-Existing/);
+  assert.match(caveat, /ERUN_E2E_REVIEWS_DATABASE_URL/);
 });
